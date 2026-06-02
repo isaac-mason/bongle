@@ -5,6 +5,7 @@ import {
     cloneModel,
     ContactsTrait,
     createVoxelRaycastResult,
+    destroyNode,
     env,
     ENVIRONMENT_OVERWORLD,
     findByName,
@@ -20,6 +21,7 @@ import {
     onFrame,
     onInit,
     onJoin,
+    onLeave,
     onTick,
     onUpdate,
     pack,
@@ -257,7 +259,18 @@ script(GameplayTrait, 'session', (ctx) => {
 
         // ── controller ──
         // adds the input + camera + visual-follow trait to the player.
-        addTrait(playerNode, BallControllerTrait);
+        // stash the ball ref here so onLeave can destroy it without a
+        // name-based lookup. `_ball` is also (independently) populated
+        // on each client by `ensureBall`.
+        const controller = addTrait(playerNode, BallControllerTrait);
+        controller._ball = ball;
+    });
+
+    // engine destroys the player node on leave, but the ball is a
+    // sibling we created — own its teardown here.
+    onLeave(ctx, ({ playerNode }) => {
+        const controller = getTrait(playerNode, BallControllerTrait);
+        if (controller?._ball) destroyNode(controller._ball);
     });
 });
 
