@@ -90,7 +90,7 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelMaxSections: 2048,
         voxelArenaMaxAllocs: 16384,   // 2048 × 3 × 2 ≈ 12288 → 16384
         voxelMainThreadRemeshBudget: 1,
-        voxelWorkerCount: typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? Math.max(navigator.hardwareConcurrency, 4) : 4,
+        voxelWorkerCount: typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 4,
         voxelWorkerQueueDepth: 3,
     },
 };
