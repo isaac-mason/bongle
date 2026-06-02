@@ -1,25 +1,114 @@
 {
-    "name": "bongle-engine",
-    "private": true,
-    "packageManager": "pnpm@10.30.3",
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+    "name": "bongle",
+    "version": "0.0.0-alpha.1",
+    "type": "module",
+    "sideEffects": [
+        "src/index.ts",
+        "src/engine-client.ts",
+        "src/engine-server.ts",
+        "src/engine-editor.ts",
+        "src/internal.ts",
+        "src/builtins/**",
+        "src/core/physics/crashcat.ts"
+    ],
+    "bin": {
+        "bongle": "./kit/bin.mjs"
     },
-    "devDependencies": {
-        "@tailwindcss/vite": "^4.2.2",
-        "happy-dom": "^20.8.9",
-        "tailwindcss": "^4.2.2"
+    "exports": {
+        ".": {
+            "import": "./src/index.ts"
+        },
+        "./engine-client": {
+            "import": "./src/engine-client.ts"
+        },
+        "./engine-server": {
+            "import": "./src/engine-server.ts"
+        },
+        "./engine-editor": {
+            "import": "./src/engine-editor.ts"
+        },
+        "./offline-renderer": {
+            "import": "./src/offline-renderer/index.ts"
+        },
+        "./internal": {
+            "import": "./src/internal.ts"
+        },
+        "./interface": {
+            "import": "./interface/index.ts"
+        },
+        "./kit": {
+            "import": "./kit/index.ts"
+        },
+        "./kit/runtime/*": {
+            "import": "./kit/runtime/*.ts"
+        },
+        "./avatar/rig": {
+            "import": "./src/core/avatar/rig.ts"
+        },
+        "./starter": {
+            "import": "./src/starter/index.ts"
+        }
+    },
+    "files": [
+        "src",
+        "kit",
+        "assets",
+        "templates",
+        "LICENSE",
+        "README.md"
+    ],
+    "scripts": {
+        "test": "vitest run",
+        "bench": "vitest bench --run"
     },
     "dependencies": {
+        "@dnd-kit/abstract": "^0.3.2",
+        "@dnd-kit/dom": "^0.3.2",
+        "@dnd-kit/helpers": "^0.3.2",
+        "@dnd-kit/react": "^0.3.2",
+        "@dnd-kit/state": "^0.3.2",
+        "@ffmpeg-installer/ffmpeg": "^1.1.0",
+        "@ffprobe-installer/ffprobe": "^2.1.2",
+        "@gltf-transform/core": "^4.3.0",
+        "@gltf-transform/functions": "^4.3.0",
+        "@radix-ui/react-collapsible": "^1.1.12",
+        "@radix-ui/react-context-menu": "^2.2.15",
+        "@radix-ui/react-dropdown-menu": "^2.1.15",
+        "@radix-ui/react-popover": "^1.1.15",
+        "@tailwindcss/vite": "^4.2.2",
+        "@tanstack/react-virtual": "^3.13.24",
+        "archiver": "^7.0.1",
+        "canvas": "^3.2.3",
+        "crashcat": "github:isaac-mason/crashcat#dev",
+        "fflate": "^0.8.2",
+        "gpucat": "github:isaac-mason/gpucat#main",
+        "lucide-react": "^1.7.0",
+        "magic-string": "^0.30.21",
+        "mathcat": "github:isaac-mason/mathcat#dev",
+        "meshoptimizer": "^0.25.0",
+        "packcat": "0.3.0",
+        "puppeteer": "^24.40.0",
+        "react": "^19.2.4",
+        "react-dom": "^19.2.4",
+        "sharp": "^0.34.5",
+        "skia-canvas": "^3.0.0",
+        "tsx": "^4.20.6",
+        "vite": "^8.0.2",
+        "ws": "^8.18.0",
+        "zustand": "^5.0.12"
+    },
+    "devDependencies": {
         "@biomejs/biome": "^2.3.13",
         "@rollup/plugin-node-resolve": "^16.0.1",
         "@rollup/plugin-typescript": "^12.1.4",
-        "crashcat": "link:~/Development/crashcat",
-        "gatho": "link:~/Development/gatho",
-        "gpucat": "link:~/Development/gpucat",
-        "mathcat": "link:~/Development/mathcat",
-        "navcat": "link:~/Development/navcat",
-        "packcat": "link:~/Development/packcat",
+        "@types/archiver": "^6.0.3",
+        "@types/estree": "^1.0.8",
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "@types/ws": "^8.5.13",
+        "@tailwindcss/vite": "^4.2.2",
+        "happy-dom": "^20.8.9",
+        "tailwindcss": "^4.2.2",
         "rollup": "^4.46.2",
         "rollup-plugin-copy": "^3.5.0",
         "rollup-plugin-filesize": "^10.0.0",
@@ -27,20 +116,16 @@
         "typescript": "^5.9.2",
         "vitest": "^3.2.4"
     },
-    "pnpm": {
-        "overrides": {
-            "mathcat": "git+https://github.com/isaac-mason/mathcat.git#dev"
-        },
-        "onlyBuiltDependencies": [
-            "@ffmpeg-installer/*",
-            "@ffmpeg-installer/darwin-arm64",
-            "@ffprobe-installer/*",
-            "@ffprobe-installer/darwin-arm64",
-            "canvas",
-            "esbuild",
-            "puppeteer",
-            "sharp",
-            "skia-canvas"
-        ]
-    }
+    "packageManager": "pnpm@10.30.3",
+    "onlyBuiltDependencies": [
+        "@ffmpeg-installer/*",
+        "@ffmpeg-installer/darwin-arm64",
+        "@ffprobe-installer/*",
+        "@ffprobe-installer/darwin-arm64",
+        "canvas",
+        "esbuild",
+        "puppeteer",
+        "sharp",
+        "skia-canvas"
+    ]
 }

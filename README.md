@@ -11,13 +11,13 @@ it powers [bongle.io](https://bongle.io), and is available here as free open sou
 - 🌍 an opinionated voxel world, with APIs that give large creative freedom within it
 - 🌐 server-authorative multiplayer with distributed entity ownership
 - 🔗 "share" functionality powered by cloudflared, so you can playtest with anyone in the world
-- 🧱 flexible block types API supporting complex quad-based models
-- 🌳 replicated scene tree for expressing "node" hierarchies
 
 ## Getting Started
 
+> NOTE: bongle is in early development and is not yet published to npm. Install directly from this repo:
+
 ```sh
-npx bongle new my-game
+npx github:isaac-mason/bongle new my-game
 cd my-game
 npm run edit
 ```
@@ -25,6 +25,8 @@ npm run edit
 Running the above will scaffold a minimal project and start the editor on `http://localhost:3002`.
 
 From there, you can edit the game code in `src/`, and see your changes live in the editor.
+
+If you'd rather poke around without scaffolding, clone this repo and run any of the projects in [`./examples/`](./examples).
 
 ## CLI Reference
 

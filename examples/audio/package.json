@@ -6,7 +6,6 @@
         "build": "bongle build"
     },
     "dependencies": {
-        "@bongle/interface": "workspace:*",
         "bongle": "workspace:*"
     }
 }

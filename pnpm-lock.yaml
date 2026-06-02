@@ -4,74 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  mathcat: git+https://github.com/isaac-mason/mathcat.git#dev
-
 importers:
 
   .:
     dependencies:
-      '@biomejs/biome':
-        specifier: ^2.3.13
-        version: 2.4.10
-      '@rollup/plugin-node-resolve':
-        specifier: ^16.0.1
-        version: 16.0.3(rollup@4.60.1)
-      '@rollup/plugin-typescript':
-        specifier: ^12.1.4
-        version: 12.3.0(rollup@4.60.1)(tslib@2.8.1)(typescript@5.9.3)
-      crashcat:
-        specifier: link:~/Development/crashcat
-        version: link:../../crashcat
-      gatho:
-        specifier: link:~/Development/gatho
-        version: link:../../gatho
-      gpucat:
-        specifier: link:~/Development/gpucat
-        version: link:../../gpucat
-      mathcat:
-        specifier: git+https://github.com/isaac-mason/mathcat.git#dev
-        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4f2648d77737fdb7f9b73a8dde341e21c2c38e82
-      navcat:
-        specifier: link:~/Development/navcat
-        version: link:../../navcat
-      packcat:
-        specifier: link:~/Development/packcat
-        version: link:../../packcat
-      rollup:
-        specifier: ^4.46.2
-        version: 4.60.1
-      rollup-plugin-copy:
-        specifier: ^3.5.0
-        version: 3.5.0
-      rollup-plugin-filesize:
-        specifier: ^10.0.0
-        version: 10.0.0
-      tslib:
-        specifier: ^2.8.1
-        version: 2.8.1
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/node@25.5.0)(happy-dom@20.8.9)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.22.3)
-    devDependencies:
-      '@tailwindcss/vite':
-        specifier: ^4.2.2
-        version: 4.2.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.22.3))
-      happy-dom:
-        specifier: ^20.8.9
-        version: 20.8.9
-      tailwindcss:
-        specifier: ^4.2.2
-        version: 4.2.2
-
-  engine:
-    dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../interface
       '@dnd-kit/abstract':
         specifier: ^0.3.2
         version: 0.3.2
@@ -124,14 +60,14 @@ importers:
         specifier: ^3.2.3
         version: 3.2.3
       crashcat:
-        specifier: link:~/Development/crashcat
-        version: link:../../../crashcat
+        specifier: github:isaac-mason/crashcat#dev
+        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/c5d358583fc3ed9ecedb01f6618fbb1c755220af
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: link:~/Development/gpucat
-        version: link:../../../gpucat
+        specifier: github:isaac-mason/gpucat#main
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/780dd63cd2322497cfea493c49e8db17300f183e
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -139,14 +75,14 @@ importers:
         specifier: ^0.30.21
         version: 0.30.21
       mathcat:
-        specifier: git+https://github.com/isaac-mason/mathcat.git#dev
-        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4f2648d77737fdb7f9b73a8dde341e21c2c38e82
+        specifier: github:isaac-mason/mathcat#dev
+        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a
       meshoptimizer:
         specifier: ^0.25.0
         version: 0.25.0
       packcat:
-        specifier: link:~/Development/packcat
-        version: link:../../../packcat
+        specifier: 0.3.0
+        version: 0.3.0
       puppeteer:
         specifier: ^24.40.0
         version: 24.40.0(typescript@5.9.3)
@@ -175,6 +111,15 @@ importers:
         specifier: ^5.0.12
         version: 5.0.12(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
+      '@biomejs/biome':
+        specifier: ^2.3.13
+        version: 2.4.10
+      '@rollup/plugin-node-resolve':
+        specifier: ^16.0.1
+        version: 16.0.3(rollup@4.60.1)
+      '@rollup/plugin-typescript':
+        specifier: ^12.1.4
+        version: 12.3.0(rollup@4.60.1)(tslib@2.8.1)(typescript@5.9.3)
       '@types/archiver':
         specifier: ^6.0.3
         version: 6.0.4
@@ -190,152 +135,126 @@ importers:
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
+      happy-dom:
+        specifier: ^20.8.9
+        version: 20.8.9
+      rollup:
+        specifier: ^4.46.2
+        version: 4.60.1
+      rollup-plugin-copy:
+        specifier: ^3.5.0
+        version: 3.5.0
+      rollup-plugin-filesize:
+        specifier: ^10.0.0
+        version: 10.0.0
+      tailwindcss:
+        specifier: ^4.2.2
+        version: 4.2.2
+      tslib:
+        specifier: ^2.8.1
+        version: 2.8.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@25.5.0)(happy-dom@20.8.9)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.22.3)
 
   examples/audio:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/blocks:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/dom-ui:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/game-circus-obby:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-animated-meshes:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-chunks:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-lighting:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-meshes:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-physics-aabb-body:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-physics-rigid-body:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/performance-terrain:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/persistent-data:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/rooms:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/sprites:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/terrain:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
+        version: link:../..
 
   examples/voxel-model:
     dependencies:
-      '@bongle/interface':
-        specifier: workspace:*
-        version: link:../../interface
       bongle:
         specifier: workspace:*
-        version: link:../../engine
-
-  interface: {}
+        version: link:../..
 
 packages:
 
@@ -2191,6 +2110,15 @@ packages:
       typescript:
         optional: true
 
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/c5d358583fc3ed9ecedb01f6618fbb1c755220af:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/c5d358583fc3ed9ecedb01f6618fbb1c755220af}
+    version: 0.0.4
+    peerDependencies:
+      three: '>=0.182.0'
+    peerDependenciesMeta:
+      three:
+        optional: true
+
   crc-32@1.2.2:
     resolution: {integrity: sha512-ROmzCKrTnOwybPcJApAA6WBWij23HVfGVNKqqrZpuyZOHqK2CwHSvpGuyt/UNNvaIjEd8X5IFGp4Mh+Ie1IHJQ==}
     engines: {node: '>=0.8'}
@@ -2485,6 +2413,10 @@ packages:
     resolution: {integrity: sha512-sSs4inE1FB2YQiymcmTv6NWENryABjUNPeWhOvmn4SjtKybglsyPZxFB3U1/+L1bYi0rNZDqCLlHyLYDl1Pq5A==}
     engines: {node: '>=8'}
 
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/780dd63cd2322497cfea493c49e8db17300f183e:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/780dd63cd2322497cfea493c49e8db17300f183e}
+    version: 0.0.0-alpha.1
+
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
@@ -2770,8 +2702,11 @@ packages:
     resolution: {integrity: sha512-rLWS7GCSTcEujjVBs2YqG7Y4643u8ucvCJeSRqiLYhesrDuzeuFIk37xREzAsfQaqzl8b9rNCE4m6J8tvX4Q8w==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4f2648d77737fdb7f9b73a8dde341e21c2c38e82:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4f2648d77737fdb7f9b73a8dde341e21c2c38e82}
+  mathcat@0.0.12:
+    resolution: {integrity: sha512-gUBe1U/sh7JQ+aSMJDiLG++B3t5rSGAYdEIqPBSEEFUHK9mAcC7yE0f7RZ1SjXI57bDLSYJyrA74XQPT1tJxoA==}
+
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a}
     version: 0.0.12
 
   merge2@1.4.1:
@@ -2967,6 +2902,9 @@ packages:
 
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
+
+  packcat@0.3.0:
+    resolution: {integrity: sha512-5LfyKTxoyCIFuRIjF9+sr0JtJtLYviQj1NbBlz+EsZli+t12dY1Dx18hHwDM3/9ry39F4lIhUlfuSncPNYQ8Ig==}
 
   pacote@15.2.0:
     resolution: {integrity: sha512-rJVZeIwHTUta23sIZgEIM62WYwbmGbThdbnkt81ravBplQv+HjyroqnLRNH2+sLJHcGZmLRmhPwACqhfTcOmnA==}
@@ -5267,6 +5205,10 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/c5d358583fc3ed9ecedb01f6618fbb1c755220af:
+    dependencies:
+      mathcat: 0.0.12
+
   crc-32@1.2.2: {}
 
   crc32-stream@6.0.0:
@@ -5592,6 +5534,10 @@ snapshots:
       merge2: 1.4.1
       slash: 3.0.0
 
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/780dd63cd2322497cfea493c49e8db17300f183e:
+    dependencies:
+      mathcat: 0.0.12
+
   graceful-fs@4.2.11: {}
 
   gzip-size@6.0.0:
@@ -5865,7 +5811,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4f2648d77737fdb7f9b73a8dde341e21c2c38e82: {}
+  mathcat@0.0.12: {}
+
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a: {}
 
   merge2@1.4.1: {}
 
@@ -6093,6 +6041,8 @@ snapshots:
       netmask: 2.1.1
 
   package-json-from-dist@1.0.1: {}
+
+  packcat@0.3.0: {}
 
   pacote@15.2.0:
     dependencies:

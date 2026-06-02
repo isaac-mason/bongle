@@ -7,7 +7,6 @@ import {
     block,
     blockTexture,
     CharacterControllerTrait,
-    CharacterTrait,
     CullType,
     cloneModel,
     cloneNode,
@@ -36,10 +35,10 @@ import {
     TransformTrait,
     trait,
     VoxelMeshTrait,
+    ENVIRONMENT_OVERWORLD,
 } from 'bongle';
 import { blocks, models } from 'bongle/starter';
 import { quat } from 'mathcat';
-import { ENVIRONMENT_OVERWORLD } from '../../../engine/src/api/environment';
 
 // ── matchmaking ─────────────────────────────────────────────────────
 
