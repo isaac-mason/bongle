@@ -41,7 +41,7 @@ export { addSkylineLevel, emptySkyline, findBestFit } from './core/atlas/skyline
 // __kit — runtime namespace called by kit-generated code (Vite transform
 // prelude/postlude, model + scene codegen barrels, kit boot entries).
 // See engine/src/__kit.ts for the full surface + injection sites.
-export { __kit } from './__kit';
+export { __kit } from './kit';
 
 export type { ScenePayload } from './core/content/scene-store';
 export type { SceneHandle } from './core/scene/scene-handle';
