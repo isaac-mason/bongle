@@ -1,0 +1,164 @@
+{
+  "root": {
+    "uuid": "00000000-0000-0000-0000-000000000001",
+    "name": "Root",
+    "persist": true,
+    "builtin": true,
+    "traits": [],
+    "scripts": [
+      "terrain",
+      "gameplay"
+    ],
+    "children": [
+      {
+        "uuid": "5a56ca22-0323-42dd-afa3-d2b3a0b432f8",
+        "name": "parent",
+        "persist": true,
+        "builtin": false,
+        "traits": [
+          {
+            "id": "transform",
+            "props": {
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "quaternion": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "scale": [
+                1,
+                1,
+                1
+              ]
+            },
+            "builtin": false
+          }
+        ],
+        "scripts": [],
+        "children": [
+          {
+            "uuid": "23b0ed7b-402e-48ca-aeb8-e414e2bddd64",
+            "name": "New Node",
+            "persist": true,
+            "builtin": false,
+            "traits": [
+              {
+                "id": "transform",
+                "props": {
+                  "position": [
+                    10,
+                    15,
+                    6
+                  ],
+                  "quaternion": [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  "scale": [
+                    1,
+                    1,
+                    1
+                  ]
+                },
+                "builtin": false
+              },
+              {
+                "id": "model",
+                "props": {
+                  "modelId": "penguin"
+                },
+                "builtin": false
+              },
+              {
+                "id": "rigidbody",
+                "props": {
+                  "shape": {
+                    "position": [
+                      0,
+                      0.2,
+                      0
+                    ],
+                    "quaternion": [
+                      0,
+                      0,
+                      0,
+                      0
+                    ],
+                    "shape": {
+                      "radius": 0.2,
+                      "type": "sphere"
+                    },
+                    "type": "transformed"
+                  },
+                  "motionType": 2,
+                  "prediction": true
+                },
+                "builtin": false
+              }
+            ],
+            "scripts": [],
+            "children": []
+          }
+        ]
+      },
+      {
+        "uuid": "c0d9482c-de02-4af3-b7a0-f43a61f6caab",
+        "name": "Model",
+        "persist": true,
+        "builtin": false,
+        "traits": [
+          {
+            "id": "transform",
+            "props": {
+              "position": [
+                10,
+                22,
+                6
+              ],
+              "quaternion": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "scale": [
+                1,
+                1,
+                1
+              ]
+            },
+            "builtin": false
+          },
+          {
+            "id": "model",
+            "props": {
+              "modelId": "testmodel"
+            },
+            "builtin": false
+          },
+          {
+            "id": "rigidbody",
+            "props": {
+              "shape": {
+                "type": "auto",
+                "shape": "sphere"
+              },
+              "motionType": 2,
+              "prediction": true
+            },
+            "builtin": false
+          }
+        ],
+        "scripts": [],
+        "children": []
+      }
+    ]
+  }
+}

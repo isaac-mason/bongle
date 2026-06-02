@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "5dbb7e21-12f5-43d3-a71d-8d9070662e05",
+      "name": "Root",
+      "traits": [],
+      "children": []
+    }
+  },
+  "chunks": {
+    "0,0,0": {
+      "palette": [
+        "air",
+        "starter:grass"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3QoREAAAgDMdh/aSQGge1dUln3XbtL+s+XfgAAAAAAAADJBr0s1jcAIAAA",
+      "light": "H4sIAAAAAAAAA+3QoREAAAgDMfaflhGwCAS2d2lk3ddeH9J/vvQDAAAAAAAACDYIpAH4ACAAAA=="
+    }
+  }
+}

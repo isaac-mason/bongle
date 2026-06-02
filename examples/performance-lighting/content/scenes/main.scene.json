@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "8a4c7e21-9b35-4d68-a517-2f9d6c8b3041",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "lighting",
+          "controls": {
+            "emitterInterval": 6,
+            "ceilingInterval": 12
+          }
+        },
+        {
+          "id": "gameplay"
+        }
+      ],
+      "children": []
+    }
+  }
+}

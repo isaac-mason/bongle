@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "b3e9c1d2-7a4f-4b6e-9d28-1c5f7e3a8b40",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "terrain"
+        },
+        {
+          "id": "example",
+          "controls": {
+            "n": 100,
+            "respawnIntervalTicks": 4
+          }
+        },
+        {
+          "id": "gameplay"
+        }
+      ],
+      "children": []
+    }
+  }
+}

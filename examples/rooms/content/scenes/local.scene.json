@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "00000000-0000-0000-0000-000000000003",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "nav"
+        },
+        {
+          "id": "seed"
+        }
+      ],
+      "children": []
+    }
+  },
+  "chunks": {
+    "0,0,0": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3JsQ0AAAjDMPj/aR5gYESqnTEFAMTpJf/+AQAAAADgowGaGaZBACAAAA==",
+      "light": ""
+    }
+  }
+}

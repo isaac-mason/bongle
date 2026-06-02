@@ -1,0 +1,45 @@
+// ModelTrait — the shared voxel-light home for everything rendered under
+// this node. Sampled once per frame by `ModelLighting` at the world-space
+// centroid of the sibling `BoundsTrait.aabbLocal`, and read by every
+// MeshTrait in the subtree via `findModelAncestor`.
+//
+// Sampling per-model (rather than per-mesh) keeps lighting consistent
+// across a rig's limbs — bones whose own world position clips into a
+// solid voxel mid-animation don't pop dark, because the AABB centroid
+// is by construction inside the model body.
+//
+// Sits on the model-instance root (rig root for animated models, model
+// root for static multi-mesh, or the mesh node itself for single-mesh
+// things). Meshes walk parents from their own node to find the nearest
+// ancestor ModelTrait. No ancestor ⇒ fallback per-mesh sampling at the
+// mesh world position (dev-warned in mesh-visuals).
+//
+// Lifecycle:
+//   - `cloneModel` installs ModelTrait alongside BoundsTrait on the clone
+//     root. ModelTrait carries only `light`; bounds + visible bit live on
+//     BoundsTrait.
+//   - The Animator (when present) auto-installs ModelTrait + BoundsTrait
+//     on its node so meshes under the rig share one light value.
+//
+// Standalone visuals (sprite, extruded-sprite, shadow) do NOT install a
+// ModelTrait. They sample light themselves (sprite/extruded) or don't
+// need it (shadow). Only the mesh batched renderer reads from ModelTrait.
+
+import { type TraitType, trait } from '../core/scene/traits';
+import type { Vec4 } from 'mathcat';
+
+export const ModelTrait = trait('model', {
+    /**
+     * Voxel light contribution [sky, r, g, b] sampled by `ModelLighting.update`
+     * once per frame at the world-space centroid of the sibling BoundsTrait's
+     * `aabbLocal`. Meshes under this ModelTrait read this directly instead
+     * of sampling at their own world position — keeps lighting consistent
+     * across a rig's limbs and stops individual bone meshes from popping
+     * dark when their world position clips into a solid voxel. Defaults to
+     * full-bright so the first frame before sampling doesn't render the
+     * model black.
+     */
+    light: (() => [1, 1, 1, 1] as Vec4) as () => Vec4,
+});
+
+export type ModelTrait = TraitType<typeof ModelTrait>;

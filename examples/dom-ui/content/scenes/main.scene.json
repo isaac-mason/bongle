@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "dom-ui-demo"
+        },
+        {
+          "id": "seed"
+        }
+      ],
+      "children": []
+    }
+  },
+  "chunks": {
+    "-1,-1,-1": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3VsQ0AMAgEsWT/pdmABiGQsCkpr/gHAAAAAAAM+OnV/+ym323636Z/r+593b3fAWjyRl8AIAAA",
+      "light": "H4sIAHdmEmoAA+3ROw2AQBQFUaQjAQlIQAISkIAEJBBCCBD2U7xmycye8mabN92GtxYd+1Jw7nPWtU8Z9z4mPfch4b33H/X/dPZnsz+b/dnsz2Z/Nvuz2Z/N/mz2Z7M/W+v9yy++0/29v2Lsz2Z/ttp9W99Ddgy//cQAIAAA"
+    },
+    "-1,-1,0": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3JsQkAAAjEQN1/aTewEoTnLmUKAAAAAIBQvfb/AQC4NHeaXNUAIAAA",
+      "light": "H4sIAHdmEmoAA+3RMQ2AMABE0fOvAglIQAISkFAJhBDC0nZq0+H/e+ONPyVXzhzZs1X9f933t7x/2/P3FE1mfzb7s9mfzf5s9mezP5v92ezPZn82+7P1t/6XJEnSQDd3f5c7ACAAAA=="
+    },
+    "0,-1,-1": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3VwQ0AMAgDsXb/pRkCBSFhZ4R75AEAAAAAAON+eOym323636Z/Vvpf0+sqJLUOBAAgAAA=",
+      "light": "H4sIAHdmEmoAA+3RQRGAMBAEQaQjAQlIQAISkIAEJCBhH6nU5Wrm+p1HdrYP7g2e4A6u4AyOYA/S++r9q9mfzf5s9mezP5v92ezPZn82+7PZn83+bKv3n33V+1fr3r96v+7sz2Z/tu43+P8fbGLiPwAgAAA="
+    },
+    "0,-1,0": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3BMQ0AAAgDMPBvGhMcy9J2AAAAAACotOEBAPh1S9K3bQAgAAA=",
+      "light": "H4sIAHdmEmoAA+3RURVAABQEUf1TiCCCCCKIIIII78vhmLu3wc6yDrbBPjgG5+DiUfq36d+mf5v+bfq36d+mf5v+bfq36d/29b39DwDAz9zKsYp+ACAAAA=="
+    },
+    "-1,0,-1": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3RMREAIBDAMPBvGgdMDNw3qYQuPrevMZ3/bf63+d/mf5v/bf63+d/mf5v/AADAGwe79hDyACAAAA==",
+      "light": "H4sIAHdmEmoAA+3RQQkAIAAEQfunNYINfCkKOzcFDnZMPrff63fcpn+b/m36t+nfpn+b/m36t+nfpj8AAHDEAvHSVjsAIAAA"
+    },
+    "0,0,-1": {
+      "palette": [
+        "air",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAHdmEmoAA+3RMREAIBDAMPBvGgksDNw3qYQuvrYvMZv/bf63+d/mf5v/bf63+d/mf5v/AADAKwc6hhvjACAAAA==",
+      "light": "H4sIAHdmEmoAA+3RQQkAIAAEQfunNYIR/CgKOzcFDnZMvrbb63/cpX+b/m36t+nfpn+b/m36t+nfpj8AAHDIAiQwPMYAIAAA"
+    }
+  }
+}

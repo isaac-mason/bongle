@@ -1,0 +1,27 @@
+The .ogg audio files in this directory were lifted from the Minetest
+Game "default" mod (the stock content pack shipped with the Minetest
+engine) — footsteps, dig/dug, place, break, chest, furnace, lava,
+tool-break, item-smoke, and player-damage sounds.
+
+Source:
+  https://github.com/minetest/minetest_game/tree/master/mods/default/sounds
+
+Upstream license file (covers the whole "default" mod):
+  https://github.com/minetest/minetest_game/blob/master/mods/default/license.txt
+
+Upstream lists sounds in this mod under a mix of:
+  - CC BY-SA 3.0  https://creativecommons.org/licenses/by-sa/3.0/
+  - CC BY 3.0     https://creativecommons.org/licenses/by/3.0/
+  - CC0 1.0       https://creativecommons.org/publicdomain/zero/1.0/
+
+Per-file attribution is not provided upstream, so to stay on the safe
+side we redistribute every file in this directory under the most
+restrictive of those terms:
+
+  CC BY-SA 3.0 — https://creativecommons.org/licenses/by-sa/3.0/
+
+Attribution: "Minetest Game contributors", see the upstream license
+file linked above for the full author list.
+
+The CC BY-SA 3.0 obligation (attribution + share-alike) applies ONLY to
+these audio files, not to the surrounding engine source code.

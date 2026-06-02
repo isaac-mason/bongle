@@ -1,0 +1,336 @@
+/**
+ * per-room interpolation pipeline for smooth rendering. two paths,
+ * routed per-frame by ownership:
+ *
+ *   owner-driven (fixed-step): position changes at tick cadence via
+ *     local scripts / physics. `snapshot()` at the top of each fixed
+ *     tick captures `position` → `prev`; `interpolate()` per-frame
+ *     lerps `prev` → `position` with the fixed-step alpha. classic
+ *     prev→cur interpolation — godot-style.
+ *
+ *   remote (non-owner): position changes whenever a `pose` sync lands
+ *     (jittery, not tick-aligned). `interpolate()` chase-lerps
+ *     `interpolatedWorld*` toward `world*` with a frame-rate-
+ *     independent rate. teleport edge (counter changed since last
+ *     frame) snaps instead of lerping so a discontinuity doesn't
+ *     smear visually.
+ *
+ *   predicted physics (owner with prediction): separate path —
+ *     world-space correction-blend against an authoritative pose with
+ *     stateful frame-carry. opt-in via RigidBody.prediction.
+ *
+ * each written node marks its descendants' visual chain dirty so they
+ * lazily recompose against the freshly-written ancestor on next read.
+ *
+ * participation is explicit: callers opt nodes in via `setInterpolation`
+ * (mirrors godot's `set_physics_interpolated`). this also seeds prev =
+ * current immediately, mirroring godot's `reset_physics_interpolation`
+ * — which avoids the "interpolating from (0,0,0)" failure that occurs
+ * when prev is filled on the first snapshot tick but the node's first
+ * render fires before that.
+ *
+ * client-only: interpolation is a rendering-smoothing concern.
+ */
+
+import { mat4, type Mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { RigidBodyTrait } from '../builtins/rigid-body';
+import { TransformTrait } from '../builtins/transform';
+import { getTrait, type Nodes } from '../core/scene/nodes';
+import {
+    getWorldMatrix,
+    hasTransformedParent,
+    markInterpolatedDescendantsDirty,
+    TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
+    TRANSFORM_DIRTY_INTERPOLATED_TRS,
+    updateInterpolatedWorldTransform,
+} from '../builtins/transform';
+import type { PlayerId } from '../core/client';
+
+export { resetInterpolation, setInterpolation } from '../builtins/transform';
+
+// ── constants ───────────────────────────────────────────────────────────
+
+/** errors smaller than this are an exact match — no blend needed. */
+const CORRECTION_SNAP_THRESHOLD = 0.01;
+/** errors larger than this are a desync — hard-snap immediately. */
+const CORRECTION_HARD_SNAP_THRESHOLD = 2.0;
+/** frames over which to blend a small correction */
+const CORRECTION_BLEND_FRAMES = 6;
+
+/** chase-lerp catch-up rate (1/s). visual position reaches ~95% of
+ *  target in ~3/rate seconds. higher = snappier, more packet-jitter
+ *  visible; lower = smoother, more visible lag. */
+const REMOTE_CHASE_RATE = 30;
+
+// ── scratch (reused to avoid allocation) ────────────────────────────────
+
+const _interpLocalMat: Mat4 = mat4.create();
+const _interpLocalPos: Vec3 = vec3.create();
+const _interpLocalQuat: Quat = quat.create();
+const _authWorldMat: Mat4 = mat4.create();
+const _authWorldPos: Vec3 = vec3.create();
+const _authWorldQuat: Quat = quat.create();
+const _authWorldScale: Vec3 = vec3.create();
+
+// ── state ───────────────────────────────────────────────────────────────
+
+export type Interpolation = {
+    _nodes: Nodes;
+    /** room player id — used per-frame to route owner vs remote path
+     *  for each enrolled transform. fixed for the room's lifetime. */
+    _playerId: PlayerId;
+};
+
+export function init(nodes: Nodes, playerId: PlayerId): Interpolation {
+    return { _nodes: nodes, _playerId: playerId };
+}
+
+/* ── snapshot ── */
+
+/**
+ * snapshot current local transform values into TransformTrait's prev
+ * fields. call at the top of each fixed tick so the owner-driven
+ * (prev→cur) path has a stable "from" state. remote-driven transforms
+ * don't read prev, so they're left out of the drain even when present
+ * in `_transformDirty` — their `markWorldDirty` lights up the dirty
+ * bits but doesn't enroll them in the snapshot set.
+ */
+export function snapshot(state: Interpolation): void {
+    const dirty = state._nodes._transformDirty;
+    for (const t of dirty) {
+        if (!t.interpolate) continue;
+        t.prevPosition[0] = t.position[0];
+        t.prevPosition[1] = t.position[1];
+        t.prevPosition[2] = t.position[2];
+        t.prevQuaternion[0] = t.quaternion[0];
+        t.prevQuaternion[1] = t.quaternion[1];
+        t.prevQuaternion[2] = t.quaternion[2];
+        t.prevQuaternion[3] = t.quaternion[3];
+    }
+    dirty.clear();
+}
+
+/* ── interpolate ── */
+
+/**
+ * produce per-frame world-space interpolated values for smooth rendering.
+ *
+ * iterates `_interpolating` (populated by `setInterpolation`). writes into
+ * `interpolatedWorld*` fields — the rendering chain that descendants
+ * compose against. each written node also marks its descendants'
+ * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
+ * ancestor on next read.
+ *
+ * per-frame routing pivot:
+ *   - predicted physics → world-space correction-blend (stateful)
+ *   - owner (node.owner === this room's playerId) → fixed-step
+ *     prev→cur lerp at `alpha`
+ *   - remote (non-owner) → chase-lerp `interpolatedWorld*` toward
+ *     `world*` with frame-rate-independent rate; teleport edge snaps
+ */
+export function interpolate(state: Interpolation, alpha: number, dt: number): void {
+    const chaseK = 1 - Math.exp(-REMOTE_CHASE_RATE * dt);
+    const playerId = state._playerId;
+
+    for (const transform of state._nodes._interpolating) {
+        const node = transform._node!;
+
+        transform._version++;
+        transform._interpolated = 1;
+
+        const rb = getTrait(node, RigidBodyTrait);
+        if (rb?.prediction) {
+            applyPredictionInterpolation(transform);
+        } else if (node.owner === playerId) {
+            sampleFixedStepPose(transform, alpha, _interpLocalPos, _interpLocalQuat);
+            writeInterpolated(transform, _interpLocalPos, _interpLocalQuat);
+        } else {
+            applyChaseInterpolation(transform, chaseK);
+        }
+
+        if (node.children.length > 0) markInterpolatedDescendantsDirty(node);
+    }
+}
+
+/**
+ * owner-driven fixed-step path. snapshot() filled prev at the top of
+ * the tick; lerp prev → current with the fixed-step alpha. teleport
+ * edge snaps to current.
+ */
+function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, outQuat: Quat): void {
+    if (t.teleport !== t.lastTeleport) {
+        t.lastTeleport = t.teleport;
+        vec3.copy(outPos, t.position);
+        quat.copy(outQuat, t.quaternion);
+    } else {
+        vec3.lerp(outPos, t.prevPosition, t.position, alpha);
+        quat.slerp(outQuat, t.prevQuaternion, t.quaternion, alpha);
+    }
+}
+
+/**
+ * remote chase path. position is the authoritative latest target
+ * (refreshed whenever a pose sync lands). visual lerps toward it with
+ * a frame-rate-independent rate. teleport edge snaps instead of
+ * smearing across the discontinuity.
+ *
+ * works directly in world space — top-level nodes have world === local
+ * so the chase target is `position`; nested nodes resolve their world
+ * target via `getWorldMatrix`'s lazy recompute (already invalidated by
+ * pose unpack's `markWorldDirty`), decomposed for slerp.
+ */
+function applyChaseInterpolation(t: TransformTrait, k: number): void {
+    if (t.teleport !== t.lastTeleport) {
+        t.lastTeleport = t.teleport;
+        sampleWorldPose(t, _authWorldPos, _authWorldQuat, _authWorldScale);
+        vec3.copy(t.interpolatedWorldPosition, _authWorldPos);
+        quat.copy(t.interpolatedWorldQuaternion, _authWorldQuat);
+        vec3.copy(t.interpolatedWorldScale, _authWorldScale);
+    } else {
+        sampleWorldPose(t, _authWorldPos, _authWorldQuat, _authWorldScale);
+        vec3.lerp(t.interpolatedWorldPosition, t.interpolatedWorldPosition, _authWorldPos, k);
+        quat.slerp(t.interpolatedWorldQuaternion, t.interpolatedWorldQuaternion, _authWorldQuat, k);
+        vec3.copy(t.interpolatedWorldScale, _authWorldScale);
+    }
+    mat4.fromRotationTranslationScale(
+        t.interpolatedWorldMatrix,
+        t.interpolatedWorldQuaternion,
+        t.interpolatedWorldPosition,
+        t.interpolatedWorldScale,
+    );
+    t._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
+}
+
+/** read the transform's current world pose (lazy-recompute via the
+ *  world chain) into the provided scratch outputs. */
+function sampleWorldPose(t: TransformTrait, outPos: Vec3, outQuat: Quat, outScale: Vec3): void {
+    if (!hasTransformedParent(t)) {
+        vec3.copy(outPos, t.position);
+        quat.copy(outQuat, t.quaternion);
+        vec3.copy(outScale, t.scale);
+    } else {
+        mat4.decompose(outQuat, outPos, outScale, getWorldMatrix(t));
+    }
+}
+
+/**
+ * predicted physics path: blend in world space toward an authoritative
+ * pose. top-level uses position/quaternion directly (local === world);
+ * nested composes through the parent's world matrix and decomposes the
+ * result to get the auth world TRS, then rebuilds interpolatedWorldMatrix
+ * post-blend (without re-multiplying parent — the blend output is already
+ * world-space TRS).
+ *
+ * separate from the prev→cur sample-and-write path because the blend is
+ * stateful (carries _correctionFrames across frames) and operates in
+ * world space rather than local.
+ */
+function applyPredictionInterpolation(transform: TransformTrait): void {
+    if (!hasTransformedParent(transform)) {
+        applyPredictionBlend(transform, transform.position, transform.quaternion);
+        vec3.copy(transform.interpolatedWorldScale, transform.scale);
+    } else {
+        const parent = transform._parent as TransformTrait;
+        const parentMat = parent._interpolated
+            ? (updateInterpolatedWorldTransform(parent), parent.interpolatedWorldMatrix)
+            : getWorldMatrix(parent);
+        mat4.fromRotationTranslationScale(_interpLocalMat, transform.quaternion, transform.position, transform.scale);
+        mat4.multiply(_authWorldMat, parentMat, _interpLocalMat);
+        mat4.decompose(_authWorldQuat, _authWorldPos, _authWorldScale, _authWorldMat);
+        applyPredictionBlend(transform, _authWorldPos, _authWorldQuat);
+        vec3.copy(transform.interpolatedWorldScale, _authWorldScale);
+    }
+    mat4.fromRotationTranslationScale(
+        transform.interpolatedWorldMatrix,
+        transform.interpolatedWorldQuaternion,
+        transform.interpolatedWorldPosition,
+        transform.interpolatedWorldScale,
+    );
+    transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
+}
+
+/**
+ * blend interpolatedWorldPosition/Quaternion toward an authoritative
+ * world-space pose. detects a correction by measuring error between the
+ * visual position and the auth position. small errors blend smoothly;
+ * large errors snap immediately.
+ */
+function applyPredictionBlend(transform: TransformTrait, authPos: Vec3, authQuat: Quat): void {
+    if (transform._correctionFrames > 0) {
+        const blendFactor = 1.0 / transform._correctionFrames;
+        vec3.lerp(
+            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldPosition,
+            transform._correctionTarget,
+            blendFactor,
+        );
+        quat.slerp(
+            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldQuaternion,
+            transform._correctionTargetQuat,
+            blendFactor,
+        );
+        transform._correctionFrames--;
+    } else {
+        const error = vec3.distance(transform.interpolatedWorldPosition, authPos);
+
+        if (error < CORRECTION_SNAP_THRESHOLD) {
+            vec3.copy(transform.interpolatedWorldPosition, authPos);
+            quat.copy(transform.interpolatedWorldQuaternion, authQuat);
+        } else if (error >= CORRECTION_HARD_SNAP_THRESHOLD) {
+            vec3.copy(transform.interpolatedWorldPosition, authPos);
+            quat.copy(transform.interpolatedWorldQuaternion, authQuat);
+        } else {
+            vec3.copy(transform._correctionTarget, authPos);
+            quat.copy(transform._correctionTargetQuat, authQuat);
+            transform._correctionFrames = CORRECTION_BLEND_FRAMES;
+
+            const blendFactor = 1.0 / transform._correctionFrames;
+            vec3.lerp(
+                transform.interpolatedWorldPosition,
+                transform.interpolatedWorldPosition,
+                transform._correctionTarget,
+                blendFactor,
+            );
+            quat.slerp(
+                transform.interpolatedWorldQuaternion,
+                transform.interpolatedWorldQuaternion,
+                transform._correctionTargetQuat,
+                blendFactor,
+            );
+            transform._correctionFrames--;
+        }
+    }
+}
+
+/**
+ * write a sampled local-space pose into the transform's interpolated
+ * world chain. branches on nested vs top-level: top-level local ===
+ * world, nested composes with the parent's visual matrix.
+ */
+function writeInterpolated(transform: TransformTrait, localPos: Vec3, localQuat: Quat): void {
+    if (!hasTransformedParent(transform)) {
+        vec3.copy(transform.interpolatedWorldPosition, localPos);
+        quat.copy(transform.interpolatedWorldQuaternion, localQuat);
+        vec3.copy(transform.interpolatedWorldScale, transform.scale);
+        mat4.fromRotationTranslationScale(
+            transform.interpolatedWorldMatrix,
+            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldScale,
+        );
+        transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
+    } else {
+        const parent = transform._parent as TransformTrait;
+        let parentMat: Mat4;
+        if (parent._interpolated) {
+            updateInterpolatedWorldTransform(parent);
+            parentMat = parent.interpolatedWorldMatrix;
+        } else {
+            parentMat = getWorldMatrix(parent);
+        }
+        mat4.fromRotationTranslationScale(_interpLocalMat, localQuat, localPos, transform.scale);
+        mat4.multiply(transform.interpolatedWorldMatrix, parentMat, _interpLocalMat);
+        transform._dirty = (transform._dirty | TRANSFORM_DIRTY_INTERPOLATED_TRS) & ~TRANSFORM_DIRTY_INTERPOLATED_MATRIX;
+    }
+}

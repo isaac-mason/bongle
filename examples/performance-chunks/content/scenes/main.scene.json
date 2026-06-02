@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "1d5f8c92-3b47-4a6e-92f0-7c4e8a1d6053",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "ground"
+        },
+        {
+          "id": "storm",
+          "controls": {
+            "togglesPerTick": 200,
+            "half": 64,
+            "height": 16
+          }
+        },
+        {
+          "id": "gameplay"
+        }
+      ],
+      "children": []
+    }
+  }
+}

@@ -1,0 +1,62 @@
+![cover](./cover.png)
+```sh
+> npx bongle new my-cool-game
+```
+
+# bongle
+
+bongle is a multiplayer voxel game engine built for the web.
+
+it powers [bongle.io](https://bongle.io), and is available here as free open source software.
+
+
+- 🛠️ built-in editor with client and server hot-module-reload, powered by the vite environments API
+- 🎨 asset pipeline for blocks, textures, models, sounds, and sprites
+- ⛏️ voxel editing features that should excite WorldEdit fans
+- 🌍 an opinionated voxel world, with APIs that give large creative freedom within it
+- 🌐 server-authorative multiplayer with distributed entity ownership
+- 🔗 "share" functionality powered by cloudflared, so you can playtest with anyone in the world
+- 🧱 flexible block types API supporting complex quad-based models
+- 🌳 replicated scene tree for expressing "node" hierarchies
+
+## Getting Started
+
+```sh
+npx bongle new my-game
+cd my-game
+npm run edit
+```
+
+Running the above will scaffold a minimal project and start the editor on `http://localhost:3002`.
+
+From there, you can edit the game code in `src/`, and see your changes live in the editor.
+
+## CLI Reference
+
+```sh
+# scaffold a new project in `./[dir]/`
+bongle new [dir]
+
+# start the editor for the current project
+bongle edit
+
+# build the project into a `dist/bundle.zip`
+bongle build
+
+# serve a built dist/ locally
+bongle start
+
+# bump the `bongle` dep, install, run migrate
+bongle upgrade
+
+# migrates editor-managed content in ./content/* to the latest version
+bongle migrate [--check]
+```
+
+All commands except `new` operate on the current working directory.
+
+## Documentation
+
+API documentation is sparse while the engine is in early development, but the [examples](./examples) are a good place to start for brave explorers.
+
+More to come soon!

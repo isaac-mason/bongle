@@ -1,0 +1,17 @@
+packages:
+  - engine
+  - interface
+  - examples/*
+
+onlyBuiltDependencies:
+  - '@ffmpeg-installer/*'
+  - '@ffprobe-installer/*'
+  - canvas
+  - esbuild
+  - puppeteer
+  - sharp
+  - skia-canvas
+
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - '@bongle/*'

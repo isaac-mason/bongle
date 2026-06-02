@@ -1,0 +1,128 @@
+/**
+ * kit/runtime/edit-client.ts — browser entry for the editor in dev mode.
+ *
+ * Loaded by the `<script>` tag in `<project>/.bongle/index.html` via the
+ * `virtual:bongle/edit-client` virtual module (served by
+ * `kit/vite/virtual-entries.ts`). The virtual passes a `userEntry` thunk
+ * that dynamic-imports `virtual:bongle/user-src` — which itself side-effect
+ * imports the project's `src/generated` + `src/index`.
+ *
+ * Flow:
+ *  1. Set env flags BEFORE awaiting user-entry. Top-level user-code
+ *     declarations may branch on env.
+ *  2. Await `opts.userEntry()`.
+ *  3. EngineClient.init.
+ *  4. EngineEditor.setup — runs BEFORE load so EditorScript + commands
+ *     land in the registry before load()'s clearPendingChanges sweep.
+ *  5. Ready-poll loader. The bongle:pipeline plugin runs the Node-side
+ *     asset pipeline lazily on first HMR cascade, so a cold dev server
+ *     can hand the editor a missing voxels-atlas.json and break load().
+ *     Poll /__bongle/ready and show a minimal loader until first pass
+ *     settles. Edit-only — prod / play don't ship this.
+ *  6. EngineClient.load, mount domElement, register flush handler.
+ *  7. scene-HMR + atlas-update + sprite-atlas-update listeners.
+ *  8. WS to /game on same origin (works over cloudflared too).
+ *  9. RAF frame loop.
+ */
+
+import { env } from 'bongle';
+import { EngineClient } from 'bongle/engine-client';
+import * as EngineEditor from 'bongle/engine-editor';
+import { __kit } from 'bongle/internal';
+
+export type StartOptions = {
+    userEntry: () => Promise<unknown>;
+};
+
+export async function start(opts: StartOptions) {
+    env.client = true;
+    env.server = false;
+    env.editor = true;
+
+    await opts.userEntry();
+
+    const state = EngineClient.init({ mode: 'edit', driver: { matchmake() {} } });
+
+    // EditorScript + commands land in the registry before load()'s
+    // clearPendingChanges sweep.
+    await EngineEditor.setup(state);
+
+    // Editor-dev pipeline gate. Wait for the first Node-side asset
+    // pipeline pass before calling load() — otherwise voxels-atlas.json
+    // may not exist yet and load() fails.
+    {
+        const loader = document.createElement('div');
+        loader.style.cssText = 'position:fixed;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;font-family:system-ui;font-size:13px;color:#000;z-index:99999';
+        loader.innerHTML = '<div style="border:1px solid #000;padding:0.75rem 1rem"><div data-status>Starting…</div></div>';
+        document.body.appendChild(loader);
+        const statusEl = loader.querySelector('[data-status]');
+        while (true) {
+            try {
+                const r = await fetch('/__bongle/ready');
+                const j = await r.json() as { ready: boolean; status: string | null };
+                if (j.ready) break;
+                if (statusEl && j.status) statusEl.textContent = j.status;
+            } catch {}
+            await new Promise((r) => setTimeout(r, 200));
+        }
+        loader.remove();
+    }
+
+    await EngineClient.load(state);
+
+    document.body.appendChild(state.domElement);
+
+    __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
+
+    if (import.meta.hot) {
+        import.meta.hot.on('bongle:scene-update', (msg: { id: string; scene: string }) => {
+            const file = JSON.parse(msg.scene);
+            const voxels = file.chunks ? { chunks: file.chunks } : null;
+            EngineClient.applyScenePayload(state, msg.id, { nodes: file.nodes, voxels });
+        });
+        import.meta.hot.on('bongle:scene-clear', (msg: { id: string }) => {
+            EngineClient.clearScene(state, msg.id);
+        });
+        // Plugin emits after a Node-side atlas pass writes fresh
+        // voxels-atlas.{png,json}. No registry change rides on a PNG edit,
+        // so the regular applyRegistryChanges block branch never fires —
+        // this listener is the only path that propagates image edits into
+        // the live client.
+        import.meta.hot.on('bongle:block-texture-atlas-updated', () => {
+            EngineClient.refreshBlockResources(state).catch((err) => {
+                console.error('[bongle] refreshBlockResources failed:', err);
+            });
+        });
+        // Sibling of the voxel-atlas event for the sprite atlas.
+        import.meta.hot.on('bongle:sprite-atlas-updated', () => {
+            EngineClient.refreshSpriteResources(state).catch((err) => {
+                console.error('[bongle] refreshSpriteResources failed:', err);
+            });
+        });
+    }
+
+    // Same origin as the page; the bongle:pipeline plugin in the same
+    // process only claims /game upgrades, so other paths still hit Vite's
+    // HMR ws. Using location.host (not a hardcoded port) lets this work
+    // over a cloudflared tunnel too.
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/game';
+    const ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') return;
+        state.net.inbox.push(new Uint8Array(ev.data as ArrayBuffer));
+    };
+
+    let last = performance.now();
+    const frame = (now: number) => {
+        const dt = (now - last) / 1000;
+        last = now;
+        EngineClient.update(state, dt);
+        for (const msg of state.net.outbox) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+        }
+        state.net.outbox.length = 0;
+        requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "afbe53a8-dd18-447e-becb-9111c396b529",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "animated-meshes"
+        }
+      ],
+      "children": []
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "sprites-demo"
+        }
+      ],
+      "children": []
+    }
+  }
+}

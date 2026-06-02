@@ -1,0 +1,197 @@
+// ── voxel texture array ─────────────────────────────────────────────
+//
+// builds a gpucat ArrayTexture for the block registry's texture list.
+// each texture name becomes one layer in the array texture.
+//
+// two-phase approach:
+//   1. createVoxelTextureArray(layerCount) — sync, immediate. creates an
+//      array texture with magenta placeholder layers. the world renders
+//      instantly (with magenta blocks) while real textures load.
+//   2. loadBlockTextureAtlasIntoTextureArray(atlas, textureNames) — async. fetches
+//      the server-built atlas PNG, extracts each tile, and writes it
+//      into the corresponding layer. progressive enhancement.
+//
+// nearest-neighbor filtering for pixel art. all layers are TILE_SIZE².
+
+import { ArrayTexture } from 'gpucat';
+import { assetUrl } from '../asset-url';
+
+// ── constants ───────────────────────────────────────────────────────
+
+/** tile resolution in pixels. all textures are square. */
+const TILE_SIZE = 16;
+
+/** bytes per pixel (rgba8unorm). */
+const BPP = 4;
+
+/** bytes per tile layer. */
+const TILE_BYTES = TILE_SIZE * TILE_SIZE * BPP;
+
+// ── atlas metadata (must match server format) ───────────────────────
+
+export type BlockTextureAtlasMetadata = {
+    tileSize: number;
+    columns: number;
+    rows: number;
+    atlasWidth: number;
+    atlasHeight: number;
+    textures: string[];
+    /** content hash from the kit asset pipeline (sources + tile size). */
+    hash: string;
+};
+
+/** Fetch + parse voxels-atlas.json. Returns null on any failure (404,
+ *  parse error, or content-type mismatch — Vite's SPA fallback returns
+ *  index.html for missing files, so we explicitly check the type). */
+export async function fetchBlockTextureAtlasMetadata(): Promise<BlockTextureAtlasMetadata | null> {
+    try {
+        const resp = await fetch(assetUrl('voxels-atlas.json'), { cache: 'no-store' });
+        if (!resp.ok) return null;
+        const ct = resp.headers.get('content-type') ?? '';
+        if (!ct.includes('json')) return null;
+        return (await resp.json()) as BlockTextureAtlasMetadata;
+    } catch {
+        return null;
+    }
+}
+
+// ── create the array texture (sync, white placeholder) ──────────────
+
+/**
+ * create a gpucat ArrayTexture with the given number of layers.
+ * all layers are filled with white so the world reads neutral while
+ * loadBlockTextureAtlasIntoTextureArray() streams in real textures.
+ *
+ * @param layerCount - number of layers (one per texture in the registry)
+ * @returns the ArrayTexture, ready to use in a material
+ */
+export function createVoxelTextureArray(layerCount: number): ArrayTexture {
+    const count = Math.max(layerCount, 1); // at least 1 layer
+    const totalBytes = count * TILE_BYTES;
+    const data = new Uint8Array(totalBytes).fill(255);
+
+    return new ArrayTexture(data, TILE_SIZE, TILE_SIZE, count, {
+        format: 'rgba8unorm-srgb',
+        magFilter: 'nearest',
+        minFilter: 'nearest',
+        wrapS: 'repeat',
+        wrapT: 'repeat',
+        generateMipmaps: false,
+    });
+}
+
+// ── async atlas loading ─────────────────────────────────────────────
+
+/**
+ * fetch the atlas PNG and write each tile into the corresponding layer
+ * of the existing ArrayTexture. Caller passes pre-fetched metadata so
+ * the hash can be reused for cache decisions upstream.
+ *
+ * layers that fail to load keep their magenta placeholder. progressive
+ * enhancement — the world renders immediately with placeholders, then
+ * upgrades to real textures when the PNG arrives.
+ *
+ * @param atlas - the existing ArrayTexture (created by createVoxelTextureArray)
+ * @param textureNames - registry.textures (string[])
+ * @param meta - pre-fetched atlas metadata from fetchBlockTextureAtlasMetadata()
+ */
+export async function loadBlockTextureAtlasIntoTextureArray(
+    atlas: ArrayTexture,
+    textureNames: string[],
+    meta: BlockTextureAtlasMetadata,
+): Promise<void> {
+    let img: HTMLImageElement;
+    try {
+        img = await loadImage(assetUrl('voxels-atlas.png'));
+    } catch {
+        return;
+    }
+
+    // draw atlas to a canvas for pixel extraction
+    const canvas = document.createElement('canvas');
+    canvas.width = meta.atlasWidth;
+    canvas.height = meta.atlasHeight;
+    const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx2d.imageSmoothingEnabled = false;
+    ctx2d.drawImage(img, 0, 0);
+    const fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
+    writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, new Uint8Array(fullPixels.buffer, fullPixels.byteOffset, fullPixels.byteLength));
+}
+
+/**
+ * Pure (no DOM) variant of `loadBlockTextureAtlasIntoTextureArray` for offline / Node
+ * callers — atlas pixels are passed in as a tightly-packed RGBA8
+ * buffer of size `meta.atlasWidth * meta.atlasHeight * 4`. Same tile
+ * extraction + layer-write logic, just sourced from the supplied buffer
+ * instead of a canvas readback.
+ */
+export function writeBlockTextureAtlasIntoTextureArray(
+    atlas: ArrayTexture,
+    textureNames: string[],
+    meta: BlockTextureAtlasMetadata,
+    pixels: Uint8Array,
+): void {
+    const metaIndexByName = new Map<string, number>();
+    for (let i = 0; i < meta.textures.length; i++) {
+        metaIndexByName.set(meta.textures[i]!, i);
+    }
+
+    const sourceData = atlas.image?.data;
+    if (!sourceData || !(sourceData instanceof Uint8Array)) return;
+
+    const atlasStride = meta.atlasWidth * BPP;
+
+    for (let layerIdx = 0; layerIdx < textureNames.length; layerIdx++) {
+        const name = textureNames[layerIdx]!;
+        const gridIdx = metaIndexByName.get(name);
+        if (gridIdx === undefined) continue;
+
+        const col = gridIdx % meta.columns;
+        const row = Math.floor(gridIdx / meta.columns);
+        const u = col * meta.tileSize;
+        const v = row * meta.tileSize;
+
+        const layerOffset = layerIdx * TILE_BYTES;
+        if (meta.tileSize === TILE_SIZE) {
+            // fast path — row-by-row copy out of the atlas buffer
+            for (let y = 0; y < TILE_SIZE; y++) {
+                const srcRow = (v + y) * atlasStride + u * BPP;
+                const dstRow = layerOffset + y * TILE_SIZE * BPP;
+                for (let i = 0; i < TILE_SIZE * BPP; i++) {
+                    sourceData[dstRow + i] = pixels[srcRow + i]!;
+                }
+            }
+        } else {
+            // slow path — nearest-neighbor resample
+            for (let y = 0; y < TILE_SIZE; y++) {
+                for (let x = 0; x < TILE_SIZE; x++) {
+                    const srcX = Math.floor((x / TILE_SIZE) * meta.tileSize);
+                    const srcY = Math.floor((y / TILE_SIZE) * meta.tileSize);
+                    const srcOffset = (v + srcY) * atlasStride + (u + srcX) * BPP;
+                    const dstOffset = layerOffset + (y * TILE_SIZE + x) * BPP;
+                    sourceData[dstOffset] = pixels[srcOffset]!;
+                    sourceData[dstOffset + 1] = pixels[srcOffset + 1]!;
+                    sourceData[dstOffset + 2] = pixels[srcOffset + 2]!;
+                    sourceData[dstOffset + 3] = pixels[srcOffset + 3]!;
+                }
+            }
+        }
+
+        atlas.addLayerUpdate(layerIdx);
+    }
+
+    atlas.needsUpdate = true;
+}
+
+// ── helpers ─────────────────────────────────────────────────────────
+
+/** load an image from a URL, returns a promise that resolves when loaded */
+function loadImage(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.crossOrigin = 'anonymous';
+        img.src = url;
+    });
+}

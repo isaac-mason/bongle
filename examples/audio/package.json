@@ -1,0 +1,12 @@
+{
+    "name": "@bongle/example-audio",
+    "private": true,
+    "version": "0.0.0",
+    "scripts": {
+        "build": "bongle build"
+    },
+    "dependencies": {
+        "@bongle/interface": "workspace:*",
+        "bongle": "workspace:*"
+    }
+}

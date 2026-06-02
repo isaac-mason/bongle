@@ -1,0 +1,8 @@
+dist
+node_modules
+llm
+AGENTS.md
+.bongle
+tmp
+generated
+resources
