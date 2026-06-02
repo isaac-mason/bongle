@@ -37,6 +37,8 @@ From there, you can edit the game code in `src/`, and see your changes live in t
 # scaffold a new project in `./[dir]/`
 bongle new [dir]
 
+# the below commands run in an existing project:
+
 # start the editor for the current project
 bongle edit
 
@@ -52,8 +54,6 @@ bongle upgrade
 # migrates editor-managed content in ./content/* to the latest version
 bongle migrate [--check]
 ```
-
-All commands except `new` operate on the current working directory.
 
 ## Documentation
 
