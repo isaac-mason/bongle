@@ -193,14 +193,19 @@ describe('gltfUnpack — happy path', () => {
 });
 
 describe('gltfUnpack — error paths', () => {
-    it('rejects a truncated buffer', () => {
-        expect(() => gltfUnpack('t', new Uint8Array(10))).toThrow(/truncated/);
+    it('rejects a truncated .glb (magic present, header incomplete)', () => {
+        const bad = new Uint8Array(10);
+        new DataView(bad.buffer).setUint32(0, GLB_MAGIC, true);
+        expect(() => gltfUnpack('t', bad)).toThrow(/truncated/);
     });
 
-    it('rejects a wrong magic', () => {
+    it('rejects a non-glb, non-json buffer as invalid JSON', () => {
+        // looksLikeGlb dispatch routes anything without GLB_MAGIC to the
+        // .gltf JSON parser, so a random binary blob surfaces as a JSON
+        // parse error rather than the (now unreachable) "bad magic" path.
         const bad = new Uint8Array(20);
         new DataView(bad.buffer).setUint32(0, 0xdeadbeef, true);
-        expect(() => gltfUnpack('t', bad)).toThrow(/bad magic/);
+        expect(() => gltfUnpack('t', bad)).toThrow(/not valid JSON/);
     });
 
     it('rejects glb version != 2', () => {

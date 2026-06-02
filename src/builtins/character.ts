@@ -305,48 +305,52 @@ export const modelIdSync = sync(CharacterTrait, 'model-id', {
 
 // ── per-frame character systems (world-script) ──────────────────────
 //
-// One onFrame, one pass over `q.matches` per character. Four concerns
-// hosted here because they all share the same query and have no ordering
-// hazard between them:
+// One onFrame, two queries. The split lets the rig load and present
+// for ANY character holding a CharacterTrait (NPCs, ball-controllers,
+// ragdolls), while controller-driven concerns stay gated on having a
+// CharacterControllerTrait.
 //
-//   1. rig reconciler — convergence of `def.modelId` (intent) toward
+// Pass 1 — [CharacterTrait, TransformTrait]:
+//   1. rig reconciler — converges `def.modelId` (intent) toward
 //      `state.modelId` (fact). Runs on BOTH sides. First pass per
-//      character mounts the baseAvatar placeholder so subsequent frames
-//      have bones to write to; once the target `def.modelId` is in
-//      Resources, unmounts and re-mounts the real rig. Loading state
-//      is `def.modelId !== state.modelId` for any consumer that needs it.
-//
-//   2. locomotion — procedural head/limb pose. Writes bone TRS each
-//      frame (no clips, no animator state). Inputs (`cc.velocity`,
-//      `cc.bobPhase`, `cc.look`, player yaw) are synced/locally-
-//      integrated on both sides, so running client-only still produces
-//      the same pose every client sees.
-//
+//      character mounts the baseAvatar placeholder so subsequent
+//      frames have bones to write to; once the target `def.modelId`
+//      is in Resources, unmounts and re-mounts the real rig. Loading
+//      state is `def.modelId !== state.modelId`.
+//   2. loading-state pulse — pulsing dither while the target rig
+//      hasn't resolved; decays off once it lands. max()'d with the
+//      proximity dither below so a loading character near camera
+//      still reads as loading, not as faded.
 //   3. POV visibility / proximity dither — hide own body in
 //      first-person / orbit / fly POV; screen-door fade other
 //      characters the active camera is standing inside of.
 //
-//   4. footstep + landing thud sfx + dust/droplet vfx — bob-phase
+// Pass 2 — [CharacterTrait, CharacterControllerTrait, TransformTrait]:
+//   4. locomotion — procedural head/limb pose. Writes bone TRS each
+//      frame (no clips, no animator state). Inputs (`cc.input.look`,
+//      `cc.state.bobPhase`, player yaw) are synced or locally-
+//      integrated on both sides, so running client-only still
+//      produces the same pose every client sees.
+//   5. footstep + landing thud sfx + dust/droplet vfx — bob-phase
 //      bucket crossings drive cadence, edge detectors drive landings
 //      and liquid entry.
 //
-// (1) runs on every side. (2)–(4) are client-only and skip when
+// (1) runs on every side. The rest is client-only and skips when
 // `state.modelId` is null (no bones yet — first reconciler tick).
-// AnimatorTrait scripts tick after this onFrame and overwrite any bone
-// whose currently-playing clip channels target it — that's the emote /
-// upper-body-mask path. To opt out of engine-driven limb swing, set
-// `t.config.animation = false` and own the bones yourself.
-//
-// Characters without a CharacterControllerTrait (e.g. idle NPCs) drop
-// out of the query naturally.
+// AnimatorTrait scripts tick after this onFrame and overwrite any
+// bone whose currently-playing clip channels target it — that's the
+// emote / upper-body-mask path. To opt out of engine-driven limb
+// swing, set `t.config.animation = false` and own the bones yourself.
 script(WorldTrait, 'character', (ctx) => {
-    const q = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
+    const qChars = query(ctx, [CharacterTrait, TransformTrait]);
+    const qLocomotion = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
 
     onFrame(ctx, ({ delta }) => {
         const controlNode = getControlNode(ctx);
         const camera = getControlCamera(ctx);
 
-        for (const [t, cc, transform] of q.matches) {
+        // ── pass 1: every character ─────────────────────────────
+        for (const [t, transform] of qChars.matches) {
             const node = t._node;
 
             // ── rig reconciler ─────────────────────────────────────
@@ -384,22 +388,7 @@ script(WorldTrait, 'character', (ctx) => {
             // next call. Skip presentation work for this character.
             if (t.state.modelId === null) continue;
 
-            // ── locomotion ──────────────────────────────────────────
-            // head bone follow: every side derives head local rotation
-            // from the synced `cc.look` + the synced player transform
-            // yaw. independent of `t.config.animation`; head tracking
-            // is a controller affordance, not a swing clip.
-            updateHeadOrientation(node, cc, transform);
-
-            // arm/leg swing. per-character opt-out via `t.config.animation`.
-            if (t.config.animation) driveProceduralLocomotion(node, t, cc, delta);
-
             // ── loading-state pulse ────────────────────────────────
-            // Drive a pulsing dither while the intent modelId hasn't
-            // resolved (placeholder mounted), decay it off once the
-            // target lands. Combined with proximity dither below via
-            // max() so a loading character close to camera still reads
-            // as loading, not as faded.
             const loading = t.state.modelId !== t.modelId;
             if (loading) {
                 const pulse = 0.5 + 0.5 * Math.sin(performance.now() * (TAU * LOAD_PULSE_RATE_HZ) / 1000);
@@ -445,6 +434,27 @@ script(WorldTrait, 'character', (ctx) => {
                 setCharacterSubtreeDither(node, finalDither);
                 t.state.appliedDither = finalDither;
             }
+        }
+
+        // ── pass 2: controller-driven characters ────────────────
+        // Locomotion + footstep sfx are client-only and depend on the
+        // rig being mounted (pass 1 above). Servers skip this pass
+        // entirely.
+        if (!env.client) return;
+
+        for (const [t, cc, transform] of qLocomotion.matches) {
+            if (t.state.modelId === null) continue;
+            const node = t._node;
+
+            // ── locomotion ──────────────────────────────────────────
+            // head bone follow: every side derives head local rotation
+            // from the synced `cc.input.look` + the synced player
+            // transform yaw. independent of `t.config.animation`; head
+            // tracking is a controller affordance, not a swing clip.
+            updateHeadOrientation(node, cc, transform);
+
+            // arm/leg swing. per-character opt-out via `t.config.animation`.
+            if (t.config.animation) driveProceduralLocomotion(node, t, cc, delta);
 
             // ── footstep sfx + dust vfx ────────────────────────────
             if (t.state.landingCooldownRemaining > 0) {

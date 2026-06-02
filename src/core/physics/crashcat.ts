@@ -17,6 +17,7 @@ import { voxelPhysicsShapeDef } from '../voxels/voxel-physics-shape';
 
 registerShapes([...ALL_SHAPE_DEFS, voxelPhysicsShapeDef]);
 export const settings = createWorldSettings();
+settings.gravity[1] = -9.81;
 
 export const BROADPHASE_LAYER_MOVING = addBroadphaseLayer(settings);
 export const BROADPHASE_LAYER_NOT_MOVING = addBroadphaseLayer(settings);

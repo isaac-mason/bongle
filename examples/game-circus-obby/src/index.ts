@@ -65,7 +65,7 @@ const ROLL_TORQUE = 1000;
 // instead of getting shoved. tuning floor: heavy enough that you feel the
 // ball's inertia rather than puppet-string movement.
 const LINEAR_NUDGE = 100;
-const JUMP_IMPULSE_Y = 200;
+const JUMP_IMPULSE_Y = 4200;
 const MAX_HSPEED = 14;
 
 const THIRD_PERSON_DISTANCE = 4.5;
@@ -247,8 +247,8 @@ script(GameplayTrait, 'session', (ctx) => {
                 shape: { type: 'sphere', radius: BALL_RADIUS },
                 restitution: 0.2,
                 friction: 1,
-                maxLinearVelocity: 15,
-                maxAngularVelocity: 6,
+                maxLinearVelocity: 30,
+                maxAngularVelocity: 12,
             },
             prediction: false,
         });
@@ -283,12 +283,8 @@ script(BallControllerTrait, 'respawn', (ctx) => {
 });
 
 // ── client (owner only): poll input → write to synced look/move/jump ──
-function foo () {
-    return 2;
-}
 script(BallControllerTrait, 'input', (ctx) => {
     if (!env.client) return;
-    console.log(foo());
 
     const onCanvasClick = (): void => {
         if (!document.pointerLockElement) {

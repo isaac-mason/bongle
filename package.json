@@ -16,38 +16,50 @@
     },
     "exports": {
         ".": {
-            "import": "./src/index.ts"
+            "import": "./src/index.ts",
+            "default": "./src/index.ts"
         },
         "./engine-client": {
-            "import": "./src/engine-client.ts"
+            "import": "./src/engine-client.ts",
+            "default": "./src/engine-client.ts"
         },
         "./engine-server": {
-            "import": "./src/engine-server.ts"
+            "import": "./src/engine-server.ts",
+            "default": "./src/engine-server.ts"
         },
         "./engine-editor": {
-            "import": "./src/engine-editor.ts"
+            "import": "./src/engine-editor.ts",
+            "default": "./src/engine-editor.ts"
         },
         "./offline-renderer": {
-            "import": "./src/offline-renderer/index.ts"
+            "import": "./src/offline-renderer/index.ts",
+            "default": "./src/offline-renderer/index.ts"
         },
         "./internal": {
-            "import": "./src/internal.ts"
+            "import": "./src/internal.ts",
+            "default": "./src/internal.ts"
         },
         "./interface": {
-            "import": "./interface/index.ts"
+            "import": "./interface/index.ts",
+            "default": "./interface/index.ts"
         },
         "./kit": {
-            "import": "./kit/index.ts"
+            "import": "./kit/index.ts",
+            "default": "./kit/index.ts"
         },
         "./kit/runtime/*": {
-            "import": "./kit/runtime/*.ts"
+            "import": "./kit/runtime/*.ts",
+            "default": "./kit/runtime/*.ts"
         },
         "./avatar/rig": {
-            "import": "./src/core/avatar/rig.ts"
+            "import": "./src/core/avatar/rig.ts",
+            "default": "./src/core/avatar/rig.ts"
         },
         "./starter": {
-            "import": "./src/starter/index.ts"
-        }
+            "import": "./src/starter/index.ts",
+            "default": "./src/starter/index.ts"
+        },
+        "./package.json": "./package.json"
     },
     "files": [
         "src",

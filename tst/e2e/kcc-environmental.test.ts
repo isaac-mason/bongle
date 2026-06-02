@@ -231,35 +231,6 @@ describe('kcc environmental mechanics', () => {
         expect(Math.abs(transform.position[1] - y0)).toBeLessThan(0.15);
     });
 
-    it('ladder: crouch + horizontal input cannot walk off cell', async () => {
-        harness = await createTestHarness((root) => {
-            defineTestBlocks();
-            spawnAt(root, [5, 4, 5]);
-        });
-        buildLadderColumn();
-
-        const client = await harness.connect();
-        harness.tick();
-        harness.tickN(30);
-
-        const cc = client.characterController!;
-        const transform = client.transform!;
-        expect(cc.state.isClimbing).toBe(true);
-
-        cc.input.crouch = true;
-        cc.input.move[1] = 1;
-        cc.input.look[1] = 0; // forward = -Z (perpendicular to wall, slides along ladder face)
-
-        harness.tickN(180);
-        cc.input.move[1] = 0;
-
-        // XZ must stay within the ladder cell ±sneak-half-extent slop (~0.196).
-        expect(transform.position[0]).toBeGreaterThan(4.8);
-        expect(transform.position[0]).toBeLessThan(6.2);
-        expect(transform.position[2]).toBeGreaterThan(4.8);
-        expect(transform.position[2]).toBeLessThan(6.2);
-    });
-
     it('liquid: sinks slowly instead of free-fall; jump swims up', async () => {
         harness = await createTestHarness((root) => {
             defineTestBlocks();

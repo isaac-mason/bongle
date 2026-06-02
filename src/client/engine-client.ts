@@ -50,7 +50,6 @@ import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
 import * as VoxelResources from './voxels/voxel-resources';
 import { voxelArenaBudgetForTier, type VoxelArenaBudget } from './voxels/voxel-resources';
-import * as VoxelTextureArray from './voxels/voxel-texture-array';
 import * as VoxelVisuals from './voxels/voxel-visuals';
 
 export type InitOptions = {
@@ -331,42 +330,36 @@ export async function load(state: EngineClient) {
     state.modelResources = ModelResources.init();
     state.shadowResources = ShadowResources.init();
 
-    // voxel chain shares one atlas-meta fetch: voxel-mesh needs the
-    // resolved voxelResources.atlas + texAnimBuffer, so the sync init
-    // can't happen until the meta fetch resolves.
-    const voxelsPromise = (async () => {
-        const atlasMeta = await VoxelTextureArray.fetchBlockTextureAtlasMetadata();
-        const voxelResources = await VoxelResources.init(
-            registry.blockRegistry,
-            atlasMeta,
-            state.renderer.environmentResources,
-            voxelBudget,
-            settings.voxelWorkerCount,
-            settings.voxelWorkerQueueDepth,
-            state.renderer.renderer,
-        );
-        const voxelMeshResources = VoxelMeshResources.init(
-            voxelResources.atlas,
-            voxelResources.texAnimBuffer,
-        );
-        return [voxelResources, voxelMeshResources] as const;
-    })();
+    state.voxelResources = VoxelResources.init(
+        registry.blockRegistry,
+        state.renderer.environmentResources,
+        voxelBudget,
+    );
+    state.voxelMeshResources = VoxelMeshResources.init(
+        state.voxelResources.atlas,
+        state.voxelResources.texAnimBuffer,
+    );
 
     // async load pass — pre-warms compile pipelines, fetches atlases. All
     // resources race in parallel; the placeholder atlas keeps materials
     // valid until SpriteResources.load() swaps the real atlas in.
     const audioPromise = Audio.loadResources();
     const spriteLoadPromise = SpriteResources.load(state.spriteResources);
+    const voxelLoadPromise = VoxelResources.load(
+        state.voxelResources,
+        registry.blockRegistry,
+        settings.voxelWorkerCount,
+        settings.voxelWorkerQueueDepth,
+        state.renderer.renderer,
+    );
 
-    const [audioResources, [voxelResources, voxelMeshResources]] = await Promise.all([
+    const [audioResources] = await Promise.all([
         audioPromise,
-        voxelsPromise,
         spriteLoadPromise,
+        voxelLoadPromise,
     ]);
 
     state.audioResources = audioResources;
-    state.voxelResources = voxelResources;
-    state.voxelMeshResources = voxelMeshResources;
 
     // Both extruded-sprite and particle materials captured a TextureNode
     // against `state.spriteResources.atlas` *as it was during init()* —

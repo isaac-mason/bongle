@@ -928,6 +928,8 @@ export type VoxelResources = {
     geometries: Record<VoxelPass, Geometry>;
     /** resolves when the texture atlas has been fully loaded into the array texture */
     atlasReady: Promise<void>;
+    /** @internal — settled by VoxelResources.load() once atlas pixels finish uploading. */
+    _resolveAtlasReady: () => void;
     /** atlas manifest hash this struct was built against (null if the
      *  manifest fetch failed). */
     atlasHash: string | null;
@@ -950,15 +952,11 @@ export type VoxelResources = {
     meshOutput: MeshOutput;
 };
 
-export async function init(
+export function init(
     registry: BlockRegistry,
-    meta: BlockTextureAtlasMetadata | null,
     env: EnvironmentResources,
     budget: VoxelArenaBudget,
-    workerCount: number,
-    workerQueueDepth: number,
-    renderer?: WebGPURenderer,
-): Promise<VoxelResources> {
+): VoxelResources {
     console.log(
         `[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`,
     );
@@ -967,11 +965,7 @@ export async function init(
 
     const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
 
-    const atlasReady = meta
-        ? loadBlockTextureAtlasIntoTextureArray(atlas, registry.textures, meta)
-              .then(() => console.log('[voxel-resources] atlas loaded successfully'))
-              .catch((e) => console.warn('[voxel-resources] atlas load failed:', e)) as Promise<void>
-        : Promise.resolve();
+    const { promise: atlasReady, resolve: _resolveAtlasReady } = Promise.withResolvers<void>();
 
     const quadMaterials: Record<VoxelPass, Material> = {
         opaque: createQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque' }),
@@ -980,34 +974,10 @@ export async function init(
     };
 
     const expandSlices = createExpandSlicesCompute();
-    if (renderer) {
-        // pre-warm — non-blocking from the caller's POV (compileCompute is a
-        // gpucat pre-warm; the node is usable immediately, this just primes
-        // the pipeline cache).
-        void renderer.compileCompute(expandSlices);
-    }
 
     const arenas = createVoxelArenaResources(budget);
     const passRender = createPassRender(arenas, budget);
     const geometries = createGeometries(arenas, passRender, env);
-
-    const pendingMeshResults: MeshDispatcherResult[] = [];
-    const pendingLostChunkKeys: string[] = [];
-    let meshDispatcher: MeshDispatcher | null = null;
-    if (workerCount > 0) {
-        // Dynamic import so Bun's TS loader (kit asset pipeline) never
-        // walks into the `?worker&inline` query suffix that lives inside
-        // mesh-worker-spawn.ts. Vite resolves it at bundle time.
-        const { spawnMeshWorker } = await import('./mesh-worker-spawn');
-        meshDispatcher = createMeshDispatcher({
-            workerFactory: spawnMeshWorker,
-            workerCount,
-            queueDepth: workerQueueDepth,
-            onResult: (r) => pendingMeshResults.push(r),
-            onLost: (key) => pendingLostChunkKeys.push(key),
-        });
-        setMeshRegistry(meshDispatcher, registry);
-    }
 
     return {
         atlas,
@@ -1018,13 +988,69 @@ export async function init(
         passRender,
         geometries,
         atlasReady,
-        atlasHash: meta?.hash ?? null,
+        _resolveAtlasReady,
+        atlasHash: null,
         texAnimData: registry.texAnimData,
-        meshDispatcher,
-        pendingMeshResults,
-        pendingLostChunkKeys,
+        meshDispatcher: null,
+        pendingMeshResults: [],
+        pendingLostChunkKeys: [],
         meshOutput: createMeshOutput(),
     };
+}
+
+/** Async side of construction: pre-warms the expansion compute pipeline,
+ *  fetches the atlas manifest, kicks off the atlas pixel upload (settles
+ *  `res.atlasReady`), and spawns the mesh worker pool. `meta` may be passed
+ *  in by `refresh` (which already fetched it to compare hashes); otherwise
+ *  `load` fetches it itself. Mutates `res` in place. */
+export async function load(
+    res: VoxelResources,
+    registry: BlockRegistry,
+    workerCount: number,
+    workerQueueDepth: number,
+    renderer?: WebGPURenderer,
+    meta?: BlockTextureAtlasMetadata | null,
+): Promise<void> {
+    if (renderer) {
+        // pre-warm — non-blocking from the caller's POV (compileCompute is a
+        // gpucat pre-warm; the node is usable immediately, this just primes
+        // the pipeline cache).
+        void renderer.compileCompute(res.expandSlices);
+    }
+
+    const resolvedMeta = meta !== undefined ? meta : await fetchBlockTextureAtlasMetadata();
+    res.atlasHash = resolvedMeta?.hash ?? null;
+    if (resolvedMeta) {
+        loadBlockTextureAtlasIntoTextureArray(res.atlas, registry.textures, resolvedMeta)
+            .then(() => {
+                console.log('[voxel-resources] atlas loaded successfully');
+                res._resolveAtlasReady();
+            })
+            .catch((e) => {
+                console.warn('[voxel-resources] atlas load failed:', e);
+                res._resolveAtlasReady();
+            });
+    } else {
+        res._resolveAtlasReady();
+    }
+
+    if (workerCount > 0 && typeof Worker !== 'undefined') {
+        // Dynamic import so environments that don't support workers
+        // don't reach the `?worker&inline` query suffix that lives inside
+        // mesh-worker-spawn.ts. Vite resolves it at bundle time.
+        // The Worker guard lets node/happy-dom test harnesses run without
+        // a worker shim — they fall through to inline meshing.
+        const { spawnMeshWorker } = await import('./mesh-worker-spawn');
+        const meshDispatcher = createMeshDispatcher({
+            workerFactory: spawnMeshWorker,
+            workerCount,
+            queueDepth: workerQueueDepth,
+            onResult: (r) => res.pendingMeshResults.push(r),
+            onLost: (key) => res.pendingLostChunkKeys.push(key),
+        });
+        setMeshRegistry(meshDispatcher, registry);
+        res.meshDispatcher = meshDispatcher;
+    }
 }
 
 /** Build new resources, or reuse `prev` if the atlas + animation metadata
@@ -1054,10 +1080,9 @@ export async function refresh(
         return { resources: prev, changed: false };
     }
     if (prev) dispose(prev);
-    return {
-        resources: await init(registry, meta, env, budget, workerCount, workerQueueDepth, renderer),
-        changed: true,
-    };
+    const resources = init(registry, env, budget);
+    await load(resources, registry, workerCount, workerQueueDepth, renderer, meta);
+    return { resources, changed: true };
 }
 
 function f32Equal(a: Float32Array, b: Float32Array): boolean {

@@ -1075,12 +1075,16 @@ describe('interpolate', () => {
         });
         setInterpolation(node, true); // seeds prev = (0,0,0)
 
+        // prime: consume the setInterpolation cold-start teleport snap so
+        // the next interpolate() actually exercises the lerp path.
+        interpolate(initInterpolation(sg, 1), 0, 1);
+
         // move to (10, 0, 0)
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0.5, 1);
+        interpolate(initInterpolation(sg, 1), 0.5, 1);
 
         // at alpha=0.5, should be halfway: (5, 0, 0)
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(5, 0, 0));
@@ -1096,11 +1100,14 @@ describe('interpolate', () => {
         });
         setInterpolation(node, true);
 
+        // prime: consume the cold-start teleport snap.
+        interpolate(initInterpolation(sg, 1), 0, 1);
+
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0, 1);
+        interpolate(initInterpolation(sg, 1), 0, 1);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(0, 0, 0));
     });
@@ -1162,13 +1169,17 @@ describe('interpolate', () => {
 
         computeWorldTransforms(sg);
 
+        // prime: consume the cold-start teleport snap on parent so the
+        // next interpolate() exercises the lerp path.
+        interpolate(initInterpolation(sg, 1), 0, 1);
+
         // now move parent (the "current" pose) — interpolate at alpha=0.5
         // should produce parent.visualPos = (5,0,0), so child world =
         // (5,0,0) + (1,0,0) = (6,0,0).
         const pt = getTrait(parent, TransformTrait)!;
         pt.position[0] = 10;
         markTransformDirty(pt);
-        interpolate(initInterpolation(sg), 0.5, 1);
+        interpolate(initInterpolation(sg, 1), 0.5, 1);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(ct), vec3.fromValues(6, 0, 0));
