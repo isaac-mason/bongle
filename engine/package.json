@@ -13,7 +13,7 @@
         "src/core/physics/crashcat.ts"
     ],
     "bin": {
-        "bongle": "./kit/index.ts"
+        "bongle": "./kit/bin.mjs"
     },
     "exports": {
         ".": {
@@ -91,6 +91,7 @@
         "react-dom": "^19.2.4",
         "sharp": "^0.34.5",
         "skia-canvas": "^3.0.0",
+        "tsx": "^4.20.6",
         "vite": "^8.0.2",
         "ws": "^8.18.0",
         "zustand": "^5.0.12"

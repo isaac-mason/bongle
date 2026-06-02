@@ -1,9 +1,4 @@
 ![cover](./cover.png)
-```sh
-> npx bongle new my-cool-game
-```
-
-# bongle
 
 bongle is a multiplayer voxel game engine built for the web.
 

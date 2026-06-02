@@ -1,5 +1,3 @@
-#!/usr/bin/env bun
-
 import { parseArgs } from 'node:util';
 import { build } from './build';
 import { buildStatic } from './build-static';
