@@ -13,8 +13,6 @@ export type ClientApp<S = any> = {
     update: (state: S, dt: number) => void;
     dispose?: (state: S) => void;
 
-    getDomElement: (state: S) => HTMLElement;
-
     getInbox: (state: S) => Uint8Array[];
     getOutbox: (state: S) => Uint8Array[];
     clearOutbox: (state: S) => void;

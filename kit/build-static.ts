@@ -34,7 +34,6 @@ env.server = false
 env.editor = false
 
 const state = EngineClient.init({ mode: 'play', driver: { matchmake() {} } })
-document.body.appendChild(state.domElement)
 // Mount the play-mode UI shell before load() — the React Viewport
 // component owns the canvas, and the resize callback in load() needs
 // viewportElement to be set before it can size the renderer.

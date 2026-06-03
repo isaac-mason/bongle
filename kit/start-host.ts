@@ -124,7 +124,6 @@ ${hasCss ? '    <link rel="stylesheet" href="/index.css" />\n' : ''}    <style>b
 import app from '/index.js'
 const state = app.init()
 await app.load(state)
-document.body.appendChild(app.getDomElement(state))
 const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/game'
 const ws = new WebSocket(wsUrl); ws.binaryType = 'arraybuffer'
 ws.onmessage = (ev) => { if (typeof ev.data !== 'string') app.getInbox(state).push(new Uint8Array(ev.data)) }

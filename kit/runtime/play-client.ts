@@ -25,14 +25,13 @@ export default client({
         // Mount the play-mode React UI shell before load() — the
         // Viewport component owns the canvas, and load()'s resize
         // callback needs viewportElement set to size the renderer.
-        // start-client.ts appends state.domElement before calling load,
+        // EngineClient.init appends state.domElement to document.body,
         // so the container is in the document by this point.
         EngineClient.mountPlayUI(state.domElement);
         await EngineClient.load(state);
     },
     update: (state, dt) => EngineClient.update(state, dt),
     dispose: (state) => EngineClient.dispose(state),
-    getDomElement: (state) => state.domElement,
     getInbox: (state) => state.net.inbox,
     getOutbox: (state) => state.net.outbox,
     clearOutbox: (state) => { state.net.outbox.length = 0; },

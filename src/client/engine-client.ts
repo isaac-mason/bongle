@@ -78,7 +78,10 @@ export function init(opts: InitOptions) {
     const mode = opts.mode;
 
     // domElement hosts the React UI root and is mounted in `load()`.
+    // We attach it to document.body here so the host doesn't have to;
+    // dispose() detaches it.
     const domElement: HTMLDivElement = document.createElement('div');
+    document.body.appendChild(domElement);
 
     const renderer = Renderer.init();
     const net = Net.init();
@@ -1338,4 +1341,5 @@ export function dispose(state: EngineClient): void {
     if (state.extrudedSpriteResources) ExtrudedSpriteResources.dispose(state.extrudedSpriteResources);
     if (state.spriteResources) SpriteResources.dispose(state.spriteResources);
     Renderer.dispose(state.renderer);
+    state.domElement.remove();
 }

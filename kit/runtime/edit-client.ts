@@ -70,8 +70,6 @@ export async function start(opts: StartOptions) {
 
     await EngineClient.load(state);
 
-    document.body.appendChild(state.domElement);
-
     __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
 
     if (import.meta.hot) {
