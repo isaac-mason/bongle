@@ -592,6 +592,90 @@ export function BrushOptions() {
     );
 }
 
+// ── brush select ───────────────────────────────────────────────────
+
+export function BrushSelectOptions() {
+    const brushSelectOptions = useEditRoom((s) => s.brushSelectOptions);
+    const setBrushSelectOptions = useEditRoom((s) => s.setBrushSelectOptions);
+    const selectionBehavior = useEditRoom((s) => s.selectionBehavior);
+    const setSelectionBehavior = useEditRoom((s) => s.setSelectionBehavior);
+    const { shape, size, height, maskText, maskError } = brushSelectOptions;
+
+    function commitMask(text: string) {
+        const trimmed = text.trim();
+        if (!trimmed) {
+            setBrushSelectOptions({ maskText: text, mask: null, maskError: null });
+            return;
+        }
+        try {
+            setBrushSelectOptions({ maskText: text, mask: parseMask(trimmed), maskError: null });
+        } catch (e) {
+            setBrushSelectOptions({ maskText: text, maskError: e instanceof Error ? e.message : String(e) });
+        }
+    }
+
+    function behaviorBtn(mode: SelectionBehavior, label: string) {
+        return (
+            <ToggleBtn active={selectionBehavior === mode} onClick={() => setSelectionBehavior(mode)}>
+                {label}
+            </ToggleBtn>
+        );
+    }
+
+    return (
+        <div className="flex flex-col gap-1 px-2 py-1.5">
+            <SelectionSummary idle="drag to stamp a shape and select voxels" />
+            <Row label="behavior">
+                {behaviorBtn('replace', 'replace')}
+                {behaviorBtn('add', 'add')}
+            </Row>
+            <Row label="shape">
+                {BRUSH_SHAPES.map((s) => (
+                    <ToggleBtn
+                        key={s.id}
+                        active={shape === s.id}
+                        onClick={() => setBrushSelectOptions({ shape: s.id })}
+                    >
+                        {s.label}
+                    </ToggleBtn>
+                ))}
+            </Row>
+            <Row label="size">
+                <NumberInput
+                    value={size}
+                    onChange={(size) => setBrushSelectOptions({ size })}
+                    min={0}
+                />
+                <Range
+                    value={size}
+                    onChange={(size) => setBrushSelectOptions({ size })}
+                    min={0}
+                    max={32}
+                />
+            </Row>
+            {shape === 'cylinder' && (
+                <Row label="height">
+                    <NumberInput
+                        value={height}
+                        onChange={(height) => setBrushSelectOptions({ height })}
+                        min={1}
+                        max={64}
+                    />
+                </Row>
+            )}
+            <Row label="mask">
+                <ExprInput
+                    value={maskText}
+                    placeholder="(none)"
+                    suggest={suggestMask}
+                    onChange={commitMask}
+                    error={maskError}
+                />
+            </Row>
+        </div>
+    );
+}
+
 // ── smooth ─────────────────────────────────────────────────────────
 
 export function SmoothOptions() {
@@ -1122,6 +1206,7 @@ export function ToolOptions() {
             {activeTool === 'box-select' && <BoxSelectOptions />}
             {activeTool === 'magic-select' && <MagicSelectOptions />}
             {activeTool === 'lasso-select' && <LassoSelectOptions />}
+            {activeTool === 'brush-select' && <BrushSelectOptions />}
             {activeTool === 'paint' && <PaintOptions />}
             {activeTool === 'brush' && <BrushOptions />}
             {activeTool === 'smooth' && <SmoothOptions />}

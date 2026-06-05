@@ -52,9 +52,18 @@ const KERNEL = new Float32Array([
 
 // ── stroke state (brush variant) ───────────────────────────────────
 
-let _strokeActive = false;
-let _lastCenter: [number, number, number] | null = null;
-let _previewKey = '';
+/** per-room smooth stroke state. created once per edit room in EditorScript
+ *  onInit and threaded into `updateSmooth` — never module-scoped, so two
+ *  joined rooms can't share one stroke flag. */
+export type SmoothState = {
+    active: boolean;
+    lastCenter: [number, number, number] | null;
+    previewKey: string;
+};
+
+export function createSmoothState(): SmoothState {
+    return { active: false, lastCenter: null, previewKey: '' };
+}
 
 const STAMP_SCRATCH: Selection.Selection = Selection.create();
 
@@ -70,6 +79,7 @@ function previewKeyFor(
 // ── per-frame update ───────────────────────────────────────────────
 
 export function updateSmooth(
+    state: SmoothState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     pointer: PointerState,
@@ -86,38 +96,38 @@ export function updateSmooth(
 
     // ── right-click cancel ──
     // discard the accumulated stamp Selection without committing; the
-    // release branch is gated on _strokeActive so it won't fire when LMB
+    // release branch is gated on state.active so it won't fire when LMB
     // eventually releases.
-    if (_strokeActive && cancel) {
-        _strokeActive = false;
-        _lastCenter = null;
-        _previewKey = '';
+    if (state.active && cancel) {
+        state.active = false;
+        state.lastCenter = null;
+        state.previewKey = '';
         store.setState({ brush: null });
         return;
     }
 
     // ── stroke start ──
-    if (justDown && !_strokeActive) {
-        _strokeActive = true;
-        _lastCenter = null;
+    if (justDown && !state.active) {
+        state.active = true;
+        state.lastCenter = null;
         const sel = Selection.create();
         if (hv) {
             buildShape(sel, shape, hv[0], hv[1], hv[2], size, height);
-            _lastCenter = [hv[0], hv[1], hv[2]];
+            state.lastCenter = [hv[0], hv[1], hv[2]];
         }
         store.setState({ brush: sel });
-        _previewKey = '';
+        state.previewKey = '';
     }
 
     // ── drag: OR each new centre's stamp into the accumulator ──
-    if (_strokeActive && held && hv) {
+    if (state.active && held && hv) {
         const sameAsLast =
-            _lastCenter !== null &&
-            _lastCenter[0] === hv[0] &&
-            _lastCenter[1] === hv[1] &&
-            _lastCenter[2] === hv[2];
+            state.lastCenter !== null &&
+            state.lastCenter[0] === hv[0] &&
+            state.lastCenter[1] === hv[1] &&
+            state.lastCenter[2] === hv[2];
         if (!sameAsLast) {
-            _lastCenter = [hv[0], hv[1], hv[2]];
+            state.lastCenter = [hv[0], hv[1], hv[2]];
             const prev = store.getState().brush;
             const next = prev ? Selection.clone(prev) : Selection.create();
             STAMP_SCRATCH.chunks.clear();
@@ -129,7 +139,7 @@ export function updateSmooth(
     }
 
     // ── release: commit ──
-    if (_strokeActive && (justUp || !held)) {
+    if (state.active && (justUp || !held)) {
         const accumulated = store.getState().brush;
         if (accumulated && !Selection.isEmpty(accumulated)) {
             const { forward, reverse } = runSmooth(voxels, accumulated, iterations, heightmapMask);
@@ -145,23 +155,23 @@ export function updateSmooth(
                 });
             }
         }
-        _strokeActive = false;
-        _lastCenter = null;
-        _previewKey = '';
+        state.active = false;
+        state.lastCenter = null;
+        state.previewKey = '';
     }
 
     // ── idle: shape-at-hover preview ──
-    if (!_strokeActive) {
+    if (!state.active) {
         if (hv) {
             const key = previewKeyFor(hv, shape, size, height);
-            if (key !== _previewKey) {
-                _previewKey = key;
+            if (key !== state.previewKey) {
+                state.previewKey = key;
                 const sel = Selection.create();
                 buildShape(sel, shape, hv[0], hv[1], hv[2], size, height);
                 store.setState({ brush: sel });
             }
-        } else if (_previewKey !== '') {
-            _previewKey = '';
+        } else if (state.previewKey !== '') {
+            state.previewKey = '';
             store.setState({ brush: null });
         }
     }

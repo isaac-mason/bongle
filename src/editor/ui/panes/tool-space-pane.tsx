@@ -4,6 +4,7 @@ import { InspectorPanel } from '../inspector';
 import {
     BoxSelectOptions,
     BrushOptions,
+    BrushSelectOptions,
     BuildOptions,
     ElevationOptions,
     InspectOptions,
@@ -20,6 +21,7 @@ const TOOL_LABELS: Record<EditorTool, string> = {
     'box-select': 'box select',
     'magic-select': 'magic select',
     'lasso-select': 'lasso select',
+    'brush-select': 'brush select',
     build: 'build',
     paint: 'paint',
     brush: 'brush',
@@ -66,6 +68,8 @@ export function ToolSpacePane() {
             return <MagicSelectOptions />;
         case 'lasso-select':
             return <LassoSelectOptions />;
+        case 'brush-select':
+            return <BrushSelectOptions />;
         case 'build':
             return <BuildOptions />;
         case 'paint':

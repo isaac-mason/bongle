@@ -37,21 +37,38 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
 
 // ── stroke state ───────────────────────────────────────────────────
 
-let _strokeActive = false;
-let _strokeForward: VoxelOp[] = [];
-let _strokeReverse: VoxelOp[] = [];
-/** cells already touched this stroke — prevents re-painting on re-crossing. */
-const _strokeVisited = new Set<string>();
-/** last cursor centre — skip the stamp rebuild when the cursor sits still. */
-let _lastCenter: [number, number, number] | null = null;
-/** idle-preview cache key (content-eq dirty check, matches brush.ts). */
-let _previewKey = '';
+/** per-room painter stroke state. created once per edit room in EditorScript
+ *  onInit and threaded into `updatePainter` — never module-scoped, so two
+ *  joined rooms can't share one stroke. */
+export type PainterState = {
+    active: boolean;
+    forward: VoxelOp[];
+    reverse: VoxelOp[];
+    /** cells already touched this stroke — prevents re-painting on re-crossing. */
+    visited: Set<string>;
+    /** last cursor centre — skip the stamp rebuild when the cursor sits still. */
+    lastCenter: [number, number, number] | null;
+    /** idle-preview cache key (content-eq dirty check, matches brush.ts). */
+    previewKey: string;
+};
+
+export function createPainterState(): PainterState {
+    return {
+        active: false,
+        forward: [],
+        reverse: [],
+        visited: new Set(),
+        lastCenter: null,
+        previewKey: '',
+    };
+}
 
 const STAMP_SCRATCH: Selection.Selection = Selection.create();
 
 // ── per-frame update ───────────────────────────────────────────────
 
 export function updatePainter(
+    state: PainterState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     pointer: PointerState,
@@ -70,33 +87,33 @@ export function updatePainter(
     // ops already sent live cannot be unsent without an undo round-trip,
     // so cancel means "stop accumulating + don't push an undo action".
     // the painted blocks stay; the user can undo via ctrl-z if they want.
-    if (_strokeActive && cancel) {
-        _strokeActive = false;
-        _strokeForward = [];
-        _strokeReverse = [];
-        _strokeVisited.clear();
-        _lastCenter = null;
+    if (state.active && cancel) {
+        state.active = false;
+        state.forward = [];
+        state.reverse = [];
+        state.visited.clear();
+        state.lastCenter = null;
         return;
     }
 
     // ── stroke start ──
-    if (justDown && !_strokeActive) {
-        _strokeActive = true;
-        _strokeForward = [];
-        _strokeReverse = [];
-        _strokeVisited.clear();
-        _lastCenter = null;
+    if (justDown && !state.active) {
+        state.active = true;
+        state.forward = [];
+        state.reverse = [];
+        state.visited.clear();
+        state.lastCenter = null;
     }
 
     // ── apply while held ──
-    if (_strokeActive && held && hv) {
+    if (state.active && held && hv) {
         const sameAsLast =
-            _lastCenter !== null &&
-            _lastCenter[0] === hv[0] &&
-            _lastCenter[1] === hv[1] &&
-            _lastCenter[2] === hv[2];
+            state.lastCenter !== null &&
+            state.lastCenter[0] === hv[0] &&
+            state.lastCenter[1] === hv[1] &&
+            state.lastCenter[2] === hv[2];
         if (!sameAsLast) {
-            _lastCenter = [hv[0], hv[1], hv[2]];
+            state.lastCenter = [hv[0], hv[1], hv[2]];
             const active = activeBlockKeyOf(
                 useEditor.getState().hotbar,
                 store.getState().activeSlotIndex,
@@ -110,8 +127,8 @@ export function updatePainter(
             const fresh = Selection.create();
             Selection.forEach(STAMP_SCRATCH, (wx, wy, wz) => {
                 const k = `${wx},${wy},${wz}`;
-                if (_strokeVisited.has(k)) return;
-                _strokeVisited.add(k);
+                if (state.visited.has(k)) return;
+                state.visited.add(k);
                 // paint is "recolour existing blocks" — air is not a block.
                 // skipping air here (rather than via a default mask) keeps the
                 // rule built-in: the user's mask field is purely additive
@@ -125,8 +142,8 @@ export function updatePainter(
             if (frameForward.length > 0) {
                 // send live so the user sees the paint stream.
                 sendOps(ctx, frameForward);
-                for (const op of frameForward) _strokeForward.push(op);
-                for (const op of frameReverse) _strokeReverse.push(op);
+                for (const op of frameForward) state.forward.push(op);
+                for (const op of frameReverse) state.reverse.push(op);
             }
         }
     }
@@ -134,10 +151,10 @@ export function updatePainter(
     // ── release: wrap the stroke in a single undoable action ──
     // do() is a no-op on first call (ops already applied live); undo/redo
     // round-trips replay correctly via the captured arrays.
-    if (_strokeActive && (justUp || !held)) {
-        if (_strokeForward.length > 0) {
-            const forward = _strokeForward;
-            const reverse = _strokeReverse;
+    if (state.active && (justUp || !held)) {
+        if (state.forward.length > 0) {
+            const forward = state.forward;
+            const reverse = state.reverse;
             store.getState().action({
                 label: 'paint',
                 do() {
@@ -148,11 +165,11 @@ export function updatePainter(
                 },
             });
         }
-        _strokeActive = false;
-        _strokeForward = [];
-        _strokeReverse = [];
-        _strokeVisited.clear();
-        _lastCenter = null;
+        state.active = false;
+        state.forward = [];
+        state.reverse = [];
+        state.visited.clear();
+        state.lastCenter = null;
     }
 
     // ── footprint preview ──
@@ -161,8 +178,8 @@ export function updatePainter(
     // will land so the user can aim.
     if (hv) {
         const key = `${hv[0]},${hv[1]},${hv[2]}|${opts.shape}|${opts.size}|${opts.height}`;
-        if (key !== _previewKey) {
-            _previewKey = key;
+        if (key !== state.previewKey) {
+            state.previewKey = key;
             const sel = Selection.create();
             buildShape(sel, opts.shape, hv[0], hv[1], hv[2], opts.size, opts.height);
             store.setState({
@@ -171,8 +188,8 @@ export function updatePainter(
                 brushEdges: BRUSH_TINTS.cyan.edges,
             });
         }
-    } else if (_previewKey !== '') {
-        _previewKey = '';
+    } else if (state.previewKey !== '') {
+        state.previewKey = '';
         store.setState({ brush: null, brushFill: null, brushEdges: null });
     }
 }

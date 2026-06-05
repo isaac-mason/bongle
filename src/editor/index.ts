@@ -104,10 +104,11 @@ import { updateBuild } from './tools/build';
 import { openViewportContextMenu, updateInspect } from './tools/inspect';
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
-import { updatePainter } from './tools/painter';
-import { updateBrush } from './tools/brush';
-import { updateElevation } from './tools/elevation';
-import { updateSmooth } from './tools/smooth';
+import { createPainterState, updatePainter } from './tools/painter';
+import { createBrushState, updateBrush } from './tools/brush';
+import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
+import { createElevationState, updateElevation } from './tools/elevation';
+import { createSmoothState, updateSmooth } from './tools/smooth';
 import * as TransformTool from './tools/transform';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';
 import * as DebugVisuals from './visuals/debug-visuals';
@@ -485,6 +486,15 @@ script(
         transformToolState.store = store;
         const nodeBodies = NodeBodies.init(store);
         useEditor.getState().registerEditRoomStore(room, store);
+
+        // per-room stroke state for the brush-family tools (active flag,
+        // last centre, accumulating ops, preview keys). lives here rather
+        // than module scope so two joined edit rooms keep independent strokes.
+        const brushState = createBrushState();
+        const brushSelectState = createBrushSelectState();
+        const painterState = createPainterState();
+        const smoothState = createSmoothState();
+        const elevationState = createElevationState();
 
         const pivotPoint = PivotPoint.create(client.scene);
         const debugVisualsState = DebugVisuals.init(client.scene);
@@ -949,17 +959,20 @@ script(
                         camera,
                     );
                 }
+                if (activeTool === 'brush-select') {
+                    updateBrushSelect(brushSelectState, store, ctx, pointer, client.input, ctx.voxels);
+                }
                 if (activeTool === 'paint') {
-                    updatePainter(store, ctx, pointer, client.input, ctx.voxels);
+                    updatePainter(painterState, store, ctx, pointer, client.input, ctx.voxels);
                 }
                 if (activeTool === 'brush') {
-                    updateBrush(store, ctx, pointer, client.input, ctx.voxels);
+                    updateBrush(brushState, store, ctx, pointer, client.input, ctx.voxels);
                 }
                 if (activeTool === 'smooth') {
-                    updateSmooth(store, ctx, pointer, client.input, ctx.voxels);
+                    updateSmooth(smoothState, store, ctx, pointer, client.input, ctx.voxels);
                 }
                 if (activeTool === 'elevation') {
-                    updateElevation(store, ctx, pointer, client.input, ctx.voxels);
+                    updateElevation(elevationState, store, ctx, pointer, client.input, ctx.voxels);
                 }
 
                 pointerFlush(pointer);
@@ -1057,6 +1070,7 @@ script(
                 // stroke during drag) — skip the single-voxel / box logic below.
                 if (
                     activeTool === 'brush'
+                    || activeTool === 'brush-select'
                     || activeTool === 'paint'
                     || activeTool === 'smooth'
                     || activeTool === 'elevation'

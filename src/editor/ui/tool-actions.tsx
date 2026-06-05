@@ -50,7 +50,11 @@ export function ToolActions() {
         if (activeBlockKey) replace(parsePattern(activeBlockKey));
     }, [activeBlockKey, replace]);
 
-    const isSelectionTool = activeTool === 'box-select' || activeTool === 'magic-select' || activeTool === 'lasso-select';
+    const isSelectionTool =
+        activeTool === 'box-select'
+        || activeTool === 'magic-select'
+        || activeTool === 'lasso-select'
+        || activeTool === 'brush-select';
     const isBuildOrPaint = activeTool === 'build' || activeTool === 'paint' || activeTool === 'brush';
     const isInspect = activeTool === 'inspect';
     const isTransform = activeTool === 'transform';

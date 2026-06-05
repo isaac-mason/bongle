@@ -47,6 +47,7 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
             { id: 'box-select', icon: Icons.BoxSelect, label: 'box select', hint: 'drag to select voxels' },
             { id: 'magic-select', icon: Icons.WandSparkles, label: 'magic select', hint: 'flood-fill select voxels' },
             { id: 'lasso-select', icon: Icons.Lasso, label: 'lasso select', hint: 'draw a freeform region to select' },
+            { id: 'brush-select', icon: Icons.Paintbrush, label: 'brush select', hint: 'stamp a shape to select voxels' },
         ],
     },
     {

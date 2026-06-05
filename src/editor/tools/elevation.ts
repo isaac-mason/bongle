@@ -16,7 +16,7 @@
 // only during a stroke (y stays at click level — the y-limit pivot).
 //
 // crucial: the live voxel grid is NEVER mutated mid-stroke. ops accumulate
-// into _strokeForward/Reverse and are committed atomically on release via
+// into state.forward/reverse and are committed atomically on release via
 // the action.do callback. mid-stroke, the projected delta cells are drawn
 // as cyan highlights via the brush selection — same render path as the
 // disc footprint. this keeps the raycast surface frozen for the whole
@@ -112,7 +112,7 @@ type ColumnAccum = {
     baselineKey: string;
     /** fractional blocks-of-change since first contact (always ≥ 0). */
     accum: number;
-    /** integer blocks already projected into _strokeForward/Reverse. */
+    /** integer blocks already projected into state.forward/reverse. */
     applied: number;
     /** +1 = raise/flatten-up, -1 = lower/flatten-down. fixed once on creation. */
     sign: 1 | -1;
@@ -120,24 +120,50 @@ type ColumnAccum = {
     done: boolean;
 };
 
-let _strokeActive = false;
-let _strokeMode: 'single' | 'continuous' = 'single';
-let _strokeStartY = 0;
-let _strokeYLimit = 0;
-let _strokeOpts: ElevationOptions | null = null;
-let _strokeFlattenTargetY = 0;
-let _strokeForward: VoxelOp[] = [];
-let _strokeReverse: VoxelOp[] = [];
-const _accumMap = new Map<string, ColumnAccum>();
-let _lastFrameMs = 0;
-let _previewKey = '';
-/** bumps whenever new ops are projected into _strokeForward — folded into the
- *  preview key so the brush mesh rebuilds as the delta grows. */
-let _strokeVersion = 0;
+/** per-room elevation stroke state. created once per edit room in
+ *  EditorScript onInit and threaded into `updateElevation` — never
+ *  module-scoped, so two joined rooms can't share one stroke. */
+export type ElevationState = {
+    active: boolean;
+    mode: 'single' | 'continuous';
+    startY: number;
+    yLimit: number;
+    /** options snapshotted at stroke-start — the stroke is mode-locked to
+     *  whatever was active on click. null when no stroke is in progress. */
+    opts: ElevationOptions | null;
+    flattenTargetY: number;
+    forward: VoxelOp[];
+    reverse: VoxelOp[];
+    /** per-column continuous-mode accumulators, keyed "wx,wz". */
+    accum: Map<string, ColumnAccum>;
+    lastFrameMs: number;
+    previewKey: string;
+    /** bumps whenever new ops are projected into `forward` — folded into the
+     *  preview key so the brush mesh rebuilds as the delta grows. */
+    version: number;
+};
+
+export function createElevationState(): ElevationState {
+    return {
+        active: false,
+        mode: 'single',
+        startY: 0,
+        yLimit: 0,
+        opts: null,
+        flattenTargetY: 0,
+        forward: [],
+        reverse: [],
+        accum: new Map(),
+        lastFrameMs: 0,
+        previewKey: '',
+        version: 0,
+    };
+}
 
 // ── per-frame update ──────────────────────────────────────────────
 
 export function updateElevation(
+    state: ElevationState,
     store: EditRoomStoreApi,
     ctx: ScriptContext,
     pointer: PointerState,
@@ -155,35 +181,35 @@ export function updateElevation(
 
     // ── right-click cancel ──
     // drop the projected delta + accumulators and clear the preview. the
-    // release branch below is gated on _strokeActive so it won't commit
+    // release branch below is gated on state.active so it won't commit
     // when LMB eventually releases. mode-locked stroke opts also reset.
-    if (_strokeActive && cancel) {
-        _strokeActive = false;
-        _strokeOpts = null;
-        _strokeForward = [];
-        _strokeReverse = [];
-        _accumMap.clear();
-        _previewKey = '';
+    if (state.active && cancel) {
+        state.active = false;
+        state.opts = null;
+        state.forward = [];
+        state.reverse = [];
+        state.accum.clear();
+        state.previewKey = '';
         store.setState({ brush: null, brushFill: null, brushEdges: null });
         return;
     }
 
     // ── stroke start ──
-    if (justDown && !_strokeActive && hv) {
-        _strokeActive = true;
-        _strokeMode = opts.applyMode;
-        _strokeStartY = hv[1];
-        _strokeYLimit = Math.max(1, Math.floor(opts.yLimit));
-        _strokeOpts = opts;
-        _strokeFlattenTargetY = hv[1];
-        _strokeForward = [];
-        _strokeReverse = [];
-        _accumMap.clear();
-        _lastFrameMs = now;
-        _strokeVersion++;
+    if (justDown && !state.active && hv) {
+        state.active = true;
+        state.mode = opts.applyMode;
+        state.startY = hv[1];
+        state.yLimit = Math.max(1, Math.floor(opts.yLimit));
+        state.opts = opts;
+        state.flattenTargetY = hv[1];
+        state.forward = [];
+        state.reverse = [];
+        state.accum.clear();
+        state.lastFrameMs = now;
+        state.version++;
 
-        if (_strokeMode === 'single') {
-            // project the stamp into _strokeForward/Reverse only — nothing
+        if (state.mode === 'single') {
+            // project the stamp into state.forward/reverse only — nothing
             // hits the voxel grid until release. the cyan preview shows the
             // affected cells via the brush selection below.
             const active = activeBlockKeyOf(
@@ -198,37 +224,37 @@ export function updateElevation(
                 opts,
                 hv[1],
                 active,
-                _strokeForward,
-                _strokeReverse,
+                state.forward,
+                state.reverse,
             );
-            if (_strokeForward.length > 0) _strokeVersion++;
+            if (state.forward.length > 0) state.version++;
         }
     }
 
     // ── continuous integration ──
-    if (_strokeActive && _strokeMode === 'continuous' && _strokeOpts) {
+    if (state.active && state.mode === 'continuous' && state.opts) {
         if (held && hv) {
-            const dt = Math.min(0.05, Math.max(0, (now - _lastFrameMs) / 1000));
-            _lastFrameMs = now;
+            const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
+            state.lastFrameMs = now;
             if (dt > 0) {
                 const active = activeBlockKeyOf(
                     useEditor.getState().hotbar,
                     store.getState().activeSlotIndex,
                 );
-                const added = integrateContinuous(voxels, hv[0], hv[2], dt, _strokeOpts, active);
-                if (added > 0) _strokeVersion++;
+                const added = integrateContinuous(state, voxels, hv[0], hv[2], dt, state.opts, active);
+                if (added > 0) state.version++;
             }
         } else {
             // off-surface — don't accumulate, but advance the clock so re-entry
             // doesn't dump a giant delta.
-            _lastFrameMs = now;
+            state.lastFrameMs = now;
         }
     }
 
     // ── release: one action for the whole stroke ──
-    if (_strokeActive && (justUp || !held)) {
-        const forward = _strokeForward;
-        const reverse = _strokeReverse;
+    if (state.active && (justUp || !held)) {
+        const forward = state.forward;
+        const reverse = state.reverse;
         if (forward.length > 0) {
             store.getState().action({
                 label: 'elevation',
@@ -240,11 +266,11 @@ export function updateElevation(
                 },
             });
         }
-        _strokeActive = false;
-        _strokeOpts = null;
-        _accumMap.clear();
-        _strokeForward = [];
-        _strokeReverse = [];
+        state.active = false;
+        state.opts = null;
+        state.accum.clear();
+        state.forward = [];
+        state.reverse = [];
     }
 
     // ── preview ──
@@ -268,15 +294,15 @@ export function updateElevation(
     // origin. doesn't need a live hover voxel (the cursor can wander off the
     // terrain during a stroke without nuking the visual feedback).
     // idle → needs hv to know where to draw the disc footprint.
-    const showStroke = _strokeActive;
-    const showIdle = !_strokeActive && !!hv;
+    const showStroke = state.active;
+    const showIdle = !state.active && !!hv;
     if (showStroke || showIdle) {
         const size = Math.max(1, Math.floor(opts.size));
         const yLimit = Math.max(1, Math.floor(opts.yLimit));
         // during a stroke the mode is locked to whatever was active at click;
         // idle reads from the live UI setting so the tint previews the next
         // click's behavior.
-        const activeMode = _strokeActive && _strokeOpts ? _strokeOpts.mode : opts.mode;
+        const activeMode = state.active && state.opts ? state.opts.mode : opts.mode;
         const tint =
             activeMode === 'lower'
                 ? BRUSH_TINTS.red
@@ -294,13 +320,13 @@ export function updateElevation(
         const showUpCap = activeMode === 'raise' || activeMode === 'flatten';
         const showDownCap = activeMode === 'lower' || activeMode === 'flatten';
         const key = showStroke
-            ? `stroke|${_strokeVersion}`
+            ? `stroke|${state.version}`
             : `idle|${hv![0]},${hv![1]},${hv![2]}|${size}|${yLimit}|${activeMode}`;
-        if (key !== _previewKey) {
-            _previewKey = key;
+        if (key !== state.previewKey) {
+            state.previewKey = key;
             const sel = Selection.create();
             if (showStroke) {
-                for (const op of _strokeForward) {
+                for (const op of state.forward) {
                     Selection.set(sel, op.wx, op.wy, op.wz);
                 }
             } else {
@@ -330,8 +356,8 @@ export function updateElevation(
             // tint refs anyway so the materials update.
             store.setState({ brushFill: tint.fill, brushEdges: tint.edges });
         }
-    } else if (_previewKey !== '') {
-        _previewKey = '';
+    } else if (state.previewKey !== '') {
+        state.previewKey = '';
         store.setState({ brush: null, brushFill: null, brushEdges: null });
     }
 }
@@ -426,6 +452,7 @@ function applyElevationStamp(
 // ── continuous integration ─────────────────────────────────────────
 
 function integrateContinuous(
+    state: ElevationState,
     voxels: Voxels,
     cx: number,
     cz: number,
@@ -434,8 +461,8 @@ function integrateContinuous(
     active: string,
 ): number {
     const size = Math.max(1, Math.floor(opts.size));
-    const cy = _strokeStartY;
-    const yLimit = _strokeYLimit;
+    const cy = state.startY;
+    const yLimit = state.yLimit;
     const rsq = size * size + size;
     const yMin = cy - yLimit;
     const yMax = cy + yLimit;
@@ -456,7 +483,7 @@ function integrateContinuous(
             const wx = cx + dx;
             const wz = cz + dz;
             const k = `${wx},${wz}`;
-            let col = _accumMap.get(k);
+            let col = state.accum.get(k);
             if (!col) {
                 // baseline reads always hit the *original* grid — we never
                 // mutate during the stroke. that's the whole point: the
@@ -472,7 +499,7 @@ function integrateContinuous(
                 if (opts.mode === 'raise') sign = 1;
                 else if (opts.mode === 'lower') sign = -1;
                 else {
-                    const s = Math.sign(_strokeFlattenTargetY - top.h);
+                    const s = Math.sign(state.flattenTargetY - top.h);
                     if (s === 0) continue; // column already at flatten target
                     sign = s > 0 ? 1 : -1;
                 }
@@ -484,7 +511,7 @@ function integrateContinuous(
                     sign,
                     done: false,
                 };
-                _accumMap.set(k, col);
+                state.accum.set(k, col);
             }
             if (col.done) continue;
 
@@ -496,7 +523,7 @@ function integrateContinuous(
                 // raise / flatten-up: fill with pattern (default: baselineKey).
                 const ceil =
                     opts.mode === 'flatten'
-                        ? Math.min(yMax, _strokeFlattenTargetY) - col.baselineH
+                        ? Math.min(yMax, state.flattenTargetY) - col.baselineH
                         : yMax - col.baselineH;
                 const capped = Math.min(newApplied, ceil);
                 for (let i = col.applied + 1; i <= capped; i++) {
@@ -505,8 +532,8 @@ function integrateContinuous(
                     const key = opts.pattern
                         ? samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng)
                         : col.baselineKey;
-                    _strokeForward.push({ wx, wy, wz, key });
-                    _strokeReverse.push({ wx, wy, wz, key: cur });
+                    state.forward.push({ wx, wy, wz, key });
+                    state.reverse.push({ wx, wy, wz, key: cur });
                     added++;
                 }
                 col.applied = capped;
@@ -515,14 +542,14 @@ function integrateContinuous(
                 // lower / flatten-down: clear from the top downward.
                 const floor =
                     opts.mode === 'flatten'
-                        ? col.baselineH - Math.max(yMin, _strokeFlattenTargetY)
+                        ? col.baselineH - Math.max(yMin, state.flattenTargetY)
                         : col.baselineH - yMin;
                 const capped = Math.min(newApplied, floor);
                 for (let i = col.applied + 1; i <= capped; i++) {
                     const wy = col.baselineH - (i - 1);
                     const cur = getBlockKey(voxels, wx, wy, wz);
-                    _strokeForward.push({ wx, wy, wz, key: BLOCK_AIR });
-                    _strokeReverse.push({ wx, wy, wz, key: cur });
+                    state.forward.push({ wx, wy, wz, key: BLOCK_AIR });
+                    state.reverse.push({ wx, wy, wz, key: cur });
                     added++;
                 }
                 col.applied = capped;

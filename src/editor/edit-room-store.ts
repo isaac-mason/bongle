@@ -50,6 +50,7 @@ export type EditorTool =
     | 'box-select'
     | 'magic-select'
     | 'lasso-select'
+    | 'brush-select'
     | 'build'
     | 'paint'
     | 'brush'
@@ -184,6 +185,23 @@ export type BrushOptions = {
     maskError: string | null;
 };
 
+/** brush-select tool config. mirrors the brush rasteriser (shape / size /
+ *  height) but selects voxels instead of placing them, so it carries no
+ *  pattern — just an optional `mask` narrowing which cells in the stroke
+ *  footprint get added to the selection. `maskText` / `maskError` follow the
+ *  same raw-string-plus-last-good-AST scheme as BrushOptions. */
+export type BrushSelectOptions = {
+    shape: BrushShape;
+    /** voxel radius from the centre cell (0 = single voxel). */
+    size: number;
+    /** total vertical extent for cylinder; ignored for other shapes. */
+    height: number;
+    /** null = no mask filtering (whole footprint selected). */
+    mask: Mask | null;
+    maskText: string;
+    maskError: string | null;
+};
+
 /** paint shares the brush config shape exactly — same rasteriser, same
  *  pattern/mask AST. the only behavioural divergence (live-during-drag vs
  *  commit-on-release) is in the tool's stroke loop, not the options. kept
@@ -262,6 +280,7 @@ export type EditRoomState = {
     airDistance: number;
     magicSelectOptions: MagicSelectOptions;
     lassoOptions: LassoSelectOptions;
+    brushSelectOptions: BrushSelectOptions;
 
     /* ── brush tool config ── */
     brushOptions: BrushOptions;
@@ -393,6 +412,7 @@ export type EditRoomState = {
     setAirDistance: (d: number) => void;
     setMagicSelectOptions: (opts: Partial<MagicSelectOptions>) => void;
     setLassoOptions: (opts: Partial<LassoSelectOptions>) => void;
+    setBrushSelectOptions: (opts: Partial<BrushSelectOptions>) => void;
     setBrushOptions: (opts: Partial<BrushOptions>) => void;
     setPaintOptions: (opts: Partial<PaintOptions>) => void;
     setSmoothOptions: (opts: Partial<SmoothOptions>) => void;
@@ -462,6 +482,14 @@ function initialFields() {
             corners: false,
         },
         lassoOptions: { depth: 1, maxDistance: 256 } as LassoSelectOptions,
+        brushSelectOptions: {
+            shape: 'sphere',
+            size: 3,
+            height: 1,
+            mask: null,
+            maskText: '',
+            maskError: null,
+        } as BrushSelectOptions,
         brushOptions: {
             shape: 'sphere',
             size: 3,
@@ -768,6 +796,8 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setAirDistance: (d) => set({ airDistance: d }),
         setMagicSelectOptions: (opts) => set((s) => ({ magicSelectOptions: { ...s.magicSelectOptions, ...opts } })),
         setLassoOptions: (opts) => set((s) => ({ lassoOptions: { ...s.lassoOptions, ...opts } })),
+        setBrushSelectOptions: (opts) =>
+            set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
         setBrushOptions: (opts) => set((s) => ({ brushOptions: { ...s.brushOptions, ...opts } })),
         setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
         setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
@@ -859,6 +889,8 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setAirDistance: (d) => set({ airDistance: d }),
     setMagicSelectOptions: (opts) => set((s) => ({ magicSelectOptions: { ...s.magicSelectOptions, ...opts } })),
     setLassoOptions: (opts) => set((s) => ({ lassoOptions: { ...s.lassoOptions, ...opts } })),
+    setBrushSelectOptions: (opts) =>
+        set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
     setBrushOptions: (opts) => set((s) => ({ brushOptions: { ...s.brushOptions, ...opts } })),
     setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
     setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
