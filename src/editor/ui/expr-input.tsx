@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as Popover from '@radix-ui/react-popover';
+import { Popover } from '@base-ui/react/popover';
 import { registry } from '../../core/registry';
 
 export type ExprSuggestion = { text: string; label?: string; detail?: string };
@@ -123,84 +123,95 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
 
     return (
         <div className="flex-1">
-            <Popover.Root open={popoverOpen} onOpenChange={(o) => !o && setOpen(false)}>
-                <Popover.Anchor asChild>
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={value}
-                        placeholder={placeholder}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        className="w-full bg-neutral-800 text-neutral-200 text-[10px] font-mono px-1 py-0.5 rounded border border-neutral-700"
-                        onChange={(e) => {
-                            onChange(e.target.value);
-                            setCursor(e.target.selectionStart ?? e.target.value.length);
-                            setSelectedIndex(0);
-                            setOpen(true);
-                        }}
-                        onFocus={(e) => {
-                            setCursor(e.target.selectionStart ?? e.target.value.length);
-                            setOpen(true);
-                        }}
-                        onKeyUp={(e) => {
-                            const t = e.target as HTMLInputElement;
-                            setCursor(t.selectionStart ?? t.value.length);
-                        }}
-                        onClick={(e) => {
-                            const t = e.target as HTMLInputElement;
-                            setCursor(t.selectionStart ?? t.value.length);
-                            setOpen(true);
-                        }}
-                        onKeyDown={onKeyDown}
-                    />
-                </Popover.Anchor>
+            <input
+                ref={inputRef}
+                type="text"
+                value={value}
+                placeholder={placeholder}
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                className="w-full bg-neutral-800 text-neutral-200 text-[10px] font-mono px-1 py-0.5 rounded border border-neutral-700"
+                onChange={(e) => {
+                    onChange(e.target.value);
+                    setCursor(e.target.selectionStart ?? e.target.value.length);
+                    setSelectedIndex(0);
+                    setOpen(true);
+                }}
+                onFocus={(e) => {
+                    setCursor(e.target.selectionStart ?? e.target.value.length);
+                    setOpen(true);
+                }}
+                onKeyUp={(e) => {
+                    const t = e.target as HTMLInputElement;
+                    setCursor(t.selectionStart ?? t.value.length);
+                }}
+                onClick={(e) => {
+                    const t = e.target as HTMLInputElement;
+                    setCursor(t.selectionStart ?? t.value.length);
+                    setOpen(true);
+                }}
+                onKeyDown={onKeyDown}
+            />
+            <Popover.Root
+                open={popoverOpen}
+                onOpenChange={(next, details) => {
+                    if (next) return;
+                    // ignore outside-pointer-down only when it lands in our own
+                    // input so the input keeps focus while we type; clicks
+                    // elsewhere should close.
+                    if (details.reason === 'outside-press' && details.event.target === inputRef.current) {
+                        details.cancel();
+                        return;
+                    }
+                    setOpen(false);
+                }}
+            >
                 <Popover.Portal>
-                    <Popover.Content
+                    <Popover.Positioner
+                        // anchor to the input rather than a trigger button.
+                        anchor={inputRef}
                         side="bottom"
                         align="start"
                         sideOffset={2}
-                        // keep focus in the input — Popover.Content otherwise grabs
-                        // focus on open and steals the caret.
-                        onOpenAutoFocus={(e) => e.preventDefault()}
-                        // ignore outside-pointer-down only when it lands in our own
-                        // input so the input keeps focus while we type; clicks
-                        // elsewhere should close (default behaviour, no-op here).
-                        onInteractOutside={(e) => {
-                            if (e.target === inputRef.current) e.preventDefault();
-                        }}
-                        className="z-50 max-h-48 overflow-y-auto bg-neutral-900 border border-neutral-700 text-[10px] font-mono shadow-lg"
-                        style={{ width: 'var(--radix-popover-trigger-width)' }}
                     >
-                        {suggestions.map((sug, i) => (
-                            <div
-                                key={`${sug.text}-${i}`}
-                                className={`flex items-baseline justify-between px-1.5 py-0.5 cursor-pointer ${
-                                    i === selectedIndex
-                                        ? 'bg-neutral-700 text-white'
-                                        : 'text-neutral-300 hover:bg-neutral-800'
-                                }`}
-                                onMouseDown={(e) => {
-                                    // mousedown (not click) so the input keeps focus
-                                    // and the accept happens before blur fires.
-                                    e.preventDefault();
-                                    accept(sug);
-                                }}
-                            >
-                                <span>{sug.label ?? sug.text}</span>
-                                {sug.detail && (
-                                    <span
-                                        className={
-                                            i === selectedIndex ? 'text-neutral-300 ml-2' : 'text-neutral-500 ml-2'
-                                        }
-                                    >
-                                        {sug.detail}
-                                    </span>
-                                )}
-                            </div>
-                        ))}
-                    </Popover.Content>
+                        <Popover.Popup
+                            // keep focus in the input — the popup otherwise grabs
+                            // focus on open and steals the caret.
+                            initialFocus={false}
+                            finalFocus={false}
+                            className="z-50 max-h-48 overflow-y-auto bg-neutral-900 border border-neutral-700 text-[10px] font-mono shadow-lg"
+                            style={{ width: 'var(--anchor-width)' }}
+                        >
+                            {suggestions.map((sug, i) => (
+                                <div
+                                    key={`${sug.text}-${i}`}
+                                    className={`flex items-baseline justify-between px-1.5 py-0.5 cursor-pointer ${
+                                        i === selectedIndex
+                                            ? 'bg-neutral-700 text-white'
+                                            : 'text-neutral-300 hover:bg-neutral-800'
+                                    }`}
+                                    onMouseDown={(e) => {
+                                        // mousedown (not click) so the input keeps focus
+                                        // and the accept happens before blur fires.
+                                        e.preventDefault();
+                                        accept(sug);
+                                    }}
+                                >
+                                    <span>{sug.label ?? sug.text}</span>
+                                    {sug.detail && (
+                                        <span
+                                            className={
+                                                i === selectedIndex ? 'text-neutral-300 ml-2' : 'text-neutral-500 ml-2'
+                                            }
+                                        >
+                                            {sug.detail}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </Popover.Popup>
+                    </Popover.Positioner>
                 </Popover.Portal>
             </Popover.Root>
             {error && <div className="text-[10px] font-mono text-red-400 mt-0.5">{error}</div>}

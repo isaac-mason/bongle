@@ -323,7 +323,11 @@ export function HierarchyPanel() {
         (e: React.MouseEvent<HTMLDivElement>) => {
             const li = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]');
             if (!li) {
+                // empty space: suppress both the native menu and Base UI opening
+                // its context menu (Base UI honours preventBaseUIHandler, not
+                // preventDefault, for skipping its own handler).
                 e.preventDefault();
+                (e as typeof e & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
                 setContextNodeId(null);
                 return;
             }

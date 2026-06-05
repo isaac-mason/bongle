@@ -78,7 +78,7 @@
         "starter:oak_planks"
       ],
       "blocks": "H4sIAAAAAAAAA+3QMQ4AIAgEQeX/j7YxdtiZCJm5cqkYAAAAAAAAALQw9+LTHme3nqvR85vX/130DENlACAAAA==",
-      "light": "H4sIAAAAAAAAA+3RsQ2AMAxFQe8/BSMwAiMwAiMwAhWiwVBFjqVLyqcU+RdLrLHFHkecr7e63zXrX2879L//Ve9f3fnP7cOfP3/+/Pnz58+fP3/+/Pnz58+fP/+88+fPn/+s+1d3/mP3fU7nnu/bo5ftdwEjb8ePACAAAA=="
+      "light": "H4sIAAAAAAAAA+3S0QmAMAyEYfefwhEcwREcwREcQai2fek1ECgh8HuPlyj263a3PK5Yu1eJnjhL9MTxt6qf7Wborf/b28SaHn/88ccff/w9sXbxxx9/3eOPP/7444//KPjjj7/+RrQf/vNd/PHHX/f44x/p//n474fV17erHv9Y//5k7vX55ujDzu8FhCbDoQAgAAA="
     },
     "-1,-1,-1": {
       "palette": [
@@ -87,7 +87,7 @@
         "starter:oak_planks"
       ],
       "blocks": "H4sIAAAAAAAAA+3QIQ4AIAwDwMH/H00CHgxiW+4qq9oAAAAAAAAAoLUZYydvf3JTuX/t+/XvArKfm2AAIAAA",
-      "light": "H4sIAAAAAAAAA+3RsQ3AIAwAQe8/TUbICBkhI2SEFMglogNbOijfQsIX3+S+8cQdV+E+JmY93+jaV/87v//TnX9tH/78+fPnz58/f/78+fPnz58/f/78+fPnz58/f/6V/PN07TnTtW/a3w8lKzfdACAAAA=="
+      "light": "H4sIAAAAAAAAA+3RwQnAIAwFUPefpiM4giN0hI5QoXjUHFoKkafo5UfFvHJN5llaqX2t8tb3N+drn+v8WORPxSwfd2TNo//F/fki58+fP3/+/Pnz58+fP3/+/Pnz58+fP3/+/Pnz57+Xf/R+5Ms/q/8YWfNRkzX/qX83sUYYaAAgAAA="
     },
     "-1,-1,-2": {
       "palette": [
@@ -96,7 +96,7 @@
         "starter:grass"
       ],
       "blocks": "H4sIAAAAAAAAA+3QsQ0AIAwDsML/RyPBASCmtrIzRlkSAAAAAAAAALQ2Yu7k7U9+3fb1+7d/F81bD5YAIAAA",
-      "light": "H4sIAAAAAAAAA+3RwQmAMAwF0Ow/jSN0BEdwBEcQEY8xB6m18PqPn5KEF3uSLdZosXTu22N/Ju+vZH2V6n89v97/7f2t+/zRPX/+/Pnz58+fP3/+/Pnz58+fP3/+/Pnz58+fP3/+/L/wv9+sfZXR+/2kPwACMhQ3ACAAAA=="
+      "light": "H4sIAAAAAAAAA+3RwQmAQAwEwPRfjSWkBEuwBEsQEZ8xD5HzYG6fy5GEib3IFmtkLB/3+difqfsrVd+l+9/P7/d/e38On8+fP3/+/Pnz58+fP3/+/Pnz58+fP3/+/Pnz58+fP/95/Ov+frP2XUbv95P+AHi2NpUAIAAA"
     },
     "0,-1,-2": {
       "palette": [
@@ -105,7 +105,7 @@
         "starter:grass"
       ],
       "blocks": "H4sIAAAAAAAAA+3QIQ4AIAwDQMb/H40hSCZmluWusqnpAgAAAAAAAGCEfRNN+3iZ2v9l++q/B5LPvZoAIAAA",
-      "light": "H4sIAAAAAAAAA+3R2wmAMAwF0Ow/hSM4giN0hI7gCD4Q/KlGFBTkNH+5DQmc6KKPIUrUGJv1NO+TfEjyMqdneV1/3J/P9i/p+XxZ63h/3ero/nb/6ny2P7ufP3/+/Pnz58+fP3/+/Pnz58+fP3/+/Pnz58+fP3/+//Hfn/ybvN1/af8ERJeDCwAgAAA="
+      "light": "H4sIAAAAAAAAA+3R0QmAMAxF0bf/FI7QETpCR8gIjqAtgj9pIgqKcJu/vIYEjhYVVTWZVree5iXJa5K3PY1yGz/uz2f7exrPt1Hz/XbU7H6/f3U+3x/n+OOPP/74448//vjjjz/++OOPP/74448//vjjjz/++OOP/3/8+/XR/ecj/yb3+y/t3wBXkP69ACAAAA=="
     },
     "-1,0,-2": {
       "palette": [

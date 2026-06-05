@@ -1,4 +1,4 @@
-import * as RadixCollapsible from '@radix-ui/react-collapsible';
+import { Collapsible as BaseCollapsible } from '@base-ui/react/collapsible';
 import type { ReactNode } from 'react';
 
 interface CollapsibleProps {
@@ -12,11 +12,11 @@ interface CollapsibleProps {
  */
 export function Collapsible({ open, onOpenChange, children }: CollapsibleProps) {
     return (
-        <RadixCollapsible.Root open={open} onOpenChange={onOpenChange}>
+        <BaseCollapsible.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
             {children}
-        </RadixCollapsible.Root>
+        </BaseCollapsible.Root>
     );
 }
 
-export const CollapsibleTrigger = RadixCollapsible.Trigger;
-export const CollapsibleContent = RadixCollapsible.Content;
+export const CollapsibleTrigger = BaseCollapsible.Trigger;
+export const CollapsibleContent = BaseCollapsible.Panel;
