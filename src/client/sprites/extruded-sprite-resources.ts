@@ -181,7 +181,7 @@ export type GeometrySlot = {
     indexOffset: number;
     indexCount: number;
     /** mesh AABB in source-pixel units (Z = -0.5..+0.5); per-instance
-     *  scale into BoundsTrait.aabbLocal at install. */
+     *  scaled into the instance's `cull.aabb` at install. */
     pixelWidth: number;
     pixelHeight: number;
     /** dense bucket index used by the per-frame loop to group instances

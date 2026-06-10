@@ -8,16 +8,16 @@
 //     model). bakeModel is the single writer; mutations to a baked model
 //     are dropped until `invalidateVoxelModel(visuals, model)` is called.
 //   - per-trait `VoxelMeshState` on `VoxelMeshTrait._state` holds the
-//     stable instanceData slot, the resolved modelEntry, the sibling
-//     BoundsTrait (auto-installed if missing, seeded from the model's
-//     local AABB), and the optional ModelTrait ancestor used as the
-//     shared-light home.
-//   - per frame: walk alive states, skip when bounds.visible is false,
+//     stable instanceData slot, the resolved modelEntry, this instance's
+//     own frustum-cull entry (`cull`, seeded from the model's local AABB
+//     and registered with the room culler), and the optional ModelTrait
+//     ancestor used as the shared-light home.
+//   - per frame: walk alive states, skip when `cull.visible` is false,
 //     write instanceData (transform + params), bucket by (modelEntry,
 //     sourceChunkIdx). then walk buckets, write slotMap entries (packed
 //     realSlot | bucketId<<24), write chunkInfoTable, emit one
 //     DrawIndirect per bucket. geometry.indirectDrawCount caps the loop.
-//   - CPU cull only. Visibility writes BoundsTrait.visible once per frame.
+//   - CPU cull only. Visibility writes `cull.visible` once per frame.
 //
 // the VS does:
 //   slotEntry  = slotMap[instanceIndex]
@@ -42,15 +42,16 @@ import {
 } from 'gpucat';
 import { box3, type Vec3, vec3 } from 'mathcat';
 
-import { BoundsTrait } from '../../builtins/bounds';
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import { getVisualWorldMatrix } from '../../api/transforms';
+import { type CullState, createCullState } from '../../core/scene/cull';
 import { buildMeshInput, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Node, Nodes } from '../../core/scene/nodes';
-import { addTrait, getTrait, query } from '../../core/scene/nodes';
+import { getTrait, query } from '../../core/scene/nodes';
+import * as Visibility from '../visibility';
 import type * as Environment from '../environment';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -132,10 +133,10 @@ export type VoxelMeshState = {
     modelRef: VoxelModel | null;
     /** resolved model entry (refcounted geometry). */
     modelEntry: ModelEntry | null;
-    /** sibling BoundsTrait on the same node. auto-installed by the visuals
-     *  system on first sight (mirrors sprite-visuals). seeded from the
-     *  model's local AABB. */
-    bounds: BoundsTrait;
+    /** this instance's own frustum-cull entry — registered with the shared
+     *  Visibility culler at alloc, seeded from the VoxelModel's local AABB.
+     *  The culler writes `cull.visible`. */
+    cull: CullState;
     /** optional ModelTrait ancestor used as a shared-light home. mirrors
      *  model-visuals: present ⇒ read model.light, absent ⇒ sample voxel
      *  light at the instance origin. fed into the shader as a floor on the
@@ -277,7 +278,7 @@ export function init(
 
 // ── update ──────────────────────────────────────────────────────────
 
-export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
+export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Visibility.Visibility): void {
     const q = visuals._query;
     const frameId = ++visuals.frameId;
 
@@ -285,7 +286,7 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
     let instanceDataDirty = false;
 
     // ── phase 1: allocate / refresh states ──────────────────────────
-    for (const [vmTrait, _transformTrait] of q) {
+    for (const [vmTrait, transformTrait] of q) {
         let state = vmTrait._state;
         const model = vmTrait.model;
 
@@ -297,13 +298,13 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
 
         // ── slow path ─────────────────────────────────────────────
         if (model === null) {
-            if (state !== null) destroyInstance(visuals, vmTrait);
+            if (state !== null) destroyInstance(visuals, vmTrait, visibility);
             continue;
         }
 
         // existing state with a different model — destroy + recreate so
         // refcounts on the old/new model settle and bucket key updates.
-        if (state !== null) destroyInstance(visuals, vmTrait);
+        if (state !== null) destroyInstance(visuals, vmTrait, visibility);
 
         const entry = registerGeometry(visuals, model);
         if (entry.chunkAllocs.length === 0) {
@@ -319,28 +320,33 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
         }
 
         const node = vmTrait._node;
-        const bounds = ensureBounds(node, model);
         const modelAncestor = findModelAncestor(node);
+
+        // own frustum-cull box from the VoxelModel's local AABB
+        // (boundsMin/Max − origin, the space the mesh is baked in).
+        const cull = createCullState();
+        seedVoxelCullAabb(cull, model);
 
         state = {
             slot,
             trait: vmTrait,
             modelRef: model,
             modelEntry: entry,
-            bounds,
+            cull,
             model: modelAncestor,
             lastSeenFrame: frameId,
             transformVersionAtUpload: -1,
         };
         vmTrait._state = state;
         visuals.aliveStates.push(state);
+        Visibility.register(visibility, cull, transformTrait);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait);
+        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, visibility);
     }
 
     // ── phase 3: per-instance writes + bucket sort ──────────────────
@@ -353,7 +359,7 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
         const entry = state.modelEntry;
         if (entry === null) continue;
 
-        const visible = state.bounds.visible && state.trait.visible;
+        const visible = state.cull.visible && state.trait.visible;
         if (!visible) continue;
 
         const trait = state.trait;
@@ -479,9 +485,9 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels): void {
 
 // ── dispose ─────────────────────────────────────────────────────────
 
-export function dispose(visuals: VoxelMeshVisuals, scene: Scene): void {
+export function dispose(visuals: VoxelMeshVisuals, scene: Scene, visibility: Visibility.Visibility): void {
     const arr = visuals.aliveStates;
-    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait);
+    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait, visibility);
     scene.remove(visuals.mesh);
     visuals.geometry.dispose();
     arenaDispose(visuals.meshArena);
@@ -497,7 +503,11 @@ export function dispose(visuals: VoxelMeshVisuals, scene: Scene): void {
  *  required after mutating the model's voxels — bakes are immutable
  *  otherwise. live instances referencing this model are torn down and
  *  rebuilt on the next update tick. */
-export function invalidateVoxelModel(visuals: VoxelMeshVisuals, model: VoxelModel): void {
+export function invalidateVoxelModel(
+    visuals: VoxelMeshVisuals,
+    model: VoxelModel,
+    visibility: Visibility.Visibility,
+): void {
     const entry = visuals.modelEntries.get(model);
     if (!entry) return;
 
@@ -506,7 +516,7 @@ export function invalidateVoxelModel(visuals: VoxelMeshVisuals, model: VoxelMode
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const s = aliveStates[i]!;
-        if (s.modelRef === model) destroyInstance(visuals, s.trait);
+        if (s.modelRef === model) destroyInstance(visuals, s.trait, visibility);
     }
 
     // free the entry's arena ranges + drop the cached bake.
@@ -516,10 +526,11 @@ export function invalidateVoxelModel(visuals: VoxelMeshVisuals, model: VoxelMode
 
 // ── instance lifecycle ──────────────────────────────────────────────
 
-function destroyInstance(visuals: VoxelMeshVisuals, trait: VoxelMeshTrait): void {
+function destroyInstance(visuals: VoxelMeshVisuals, trait: VoxelMeshTrait, visibility: Visibility.Visibility): void {
     const state = trait._state;
     if (state === null) return;
 
+    Visibility.unregister(visibility, state.cull);
     const slot = state.slot;
     // zero per-slot params so a reused slot doesn't briefly inherit
     // stale tint/light before the first write lands.
@@ -635,29 +646,24 @@ function bakeModel(visuals: VoxelMeshVisuals, model: VoxelModel): SourceChunkAll
     return out;
 }
 
-// ── bounds helper (sibling auto-install) ────────────────────────────
+// ── cull box helper ─────────────────────────────────────────────────
 
-/** install a sibling BoundsTrait on this node if missing, seeded from
- *  the VoxelModel's local AABB (boundsMin/Max - origin). mirrors the
- *  pattern in sprite-visuals / extruded-sprite-visuals. */
-function ensureBounds(node: Node, model: VoxelModel): BoundsTrait {
-    const existing = getTrait(node, BoundsTrait);
-    if (existing !== undefined) return existing;
-
+/** seed a cull entry's local AABB from the VoxelModel's local AABB
+ *  (boundsMin/Max − origin, the space the mesh is baked in). */
+function seedVoxelCullAabb(cull: CullState, model: VoxelModel): void {
     const ox = model.origin[0];
     const oy = model.origin[1];
     const oz = model.origin[2];
-    const lminX = model.boundsMin[0] - ox;
-    const lminY = model.boundsMin[1] - oy;
-    const lminZ = model.boundsMin[2] - oz;
-    const lmaxX = model.boundsMax[0] - ox;
-    const lmaxY = model.boundsMax[1] - oy;
-    const lmaxZ = model.boundsMax[2] - oz;
-    return addTrait(node, BoundsTrait, {
-        aabbLocal: box3.set(box3.create(), lminX, lminY, lminZ, lmaxX, lmaxY, lmaxZ),
-        _seedAabb: box3.set(box3.create(), lminX, lminY, lminZ, lmaxX, lmaxY, lmaxZ),
-        _version: 1,
-    });
+    box3.set(
+        cull.aabb,
+        model.boundsMin[0] - ox,
+        model.boundsMin[1] - oy,
+        model.boundsMin[2] - oz,
+        model.boundsMax[0] - ox,
+        model.boundsMax[1] - oy,
+        model.boundsMax[2] - oz,
+    );
+    cull.version = 1;
 }
 
 function findModelAncestor(node: Node): ModelTrait | null {

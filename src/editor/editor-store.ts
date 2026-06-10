@@ -98,12 +98,7 @@ export type EditorStore = {
     blockIconPx: number;
     blockIconCols: number;
     blockIconRows: number;
-
-    /* ── prefab icon atlas ── */
-    prefabIconAtlasUrl: string | null;
-    prefabIconCoords: Record<string, [number, number]>;
-    prefabIconPx: number;
-    prefabIconCols: number;
+    // (prefab + scene icons are per-file PNGs loaded by direct URL — no atlas)
 
     /* ── per-player scene-view (tabs) ── */
     // which perspective the user is viewing the scene through. only present
@@ -192,11 +187,6 @@ export const useEditor = create<EditorStore>((set) => ({
     blockIconPx: 0,
     blockIconCols: 0,
     blockIconRows: 0,
-
-    prefabIconAtlasUrl: null,
-    prefabIconCoords: {},
-    prefabIconPx: 0,
-    prefabIconCols: 0,
 
     playerToView: new Map(),
 

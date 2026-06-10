@@ -56,7 +56,6 @@ export * from './builtins/player';
 export * from './builtins/player-controller';
 export * from './builtins/rigid-body';
 export * from './builtins/aabb-body';
-export * from './builtins/bounds';
 export * from './builtins/shadow-caster';
 export * from './builtins/sprite';
 export * from './builtins/extruded-sprite';

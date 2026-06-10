@@ -37,11 +37,13 @@ import * as Resources from '../../core/resources';
 import type { MeshId } from '../../core/models/handle';
 import type { Node, Nodes } from '../../core/scene/nodes';
 import { query, getTrait } from '../../core/scene/nodes';
+import { box3 } from 'mathcat';
 import { TransformTrait } from '../../builtins/transform';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
-import { BoundsTrait } from '../../builtins/bounds';
+import { type CullState, createCullState } from '../../core/scene/cull';
 import { ModelTrait } from '../../builtins/model';
+import * as Visibility from '../visibility';
 import { env } from '../../api/env';
 import {
     type MeshInfoEntry,
@@ -130,12 +132,12 @@ export type MeshVisualState = {
      *  Image-decode patches replace the entry object — mismatch retriggers
      *  the params upload so the new uvOffset/uvScale reach the slot. */
     entryRefAtUpload: MeshInfoEntry | null;
-    /** nearest `BoundsTrait` ancestor (the logical cullable this mesh
-     *  belongs to). per-frame loop reads `bounds.visible` to gate
-     *  inclusion in the per-mesh buckets. Required at alloc time — meshes
-     *  whose subtree has no BoundsTrait ancestor are rejected and don't
-     *  render (warned once per node). */
-    bounds: BoundsTrait;
+    /** this mesh's own frustum-cull entry. `cull.aabb` is the mesh handle's
+     *  bind-pose box (filled at alloc / mesh swap); the shared Visibility
+     *  culler owns the leaf and writes `cull.visible`, which the per-frame
+     *  loop reads to gate inclusion in the per-mesh buckets. Registered at
+     *  alloc, unregistered on destroy. */
+    cull: CullState;
     /** nearest `ModelTrait` ancestor (shared light slot for the rig).
      *  Required at alloc time — without it there's no light source for
      *  the params upload (the engine no longer falls back to per-mesh
@@ -290,6 +292,7 @@ export function update(
     visuals: ModelVisuals,
     modelResources: ModelResources,
     resources: Resources.Resources,
+    visibility: Visibility.Visibility,
 ): void {
     const q = visuals._query;
 
@@ -311,26 +314,26 @@ export function update(
 
         // ── slow path ─────────────────────────────────────────────
         if (meshId === null) {
-            if (state !== null) destroyInstance(visuals, meshTrait);
+            if (state !== null) destroyInstance(visuals, meshTrait, visibility);
             continue;
         }
 
         if (!Resources.hasModel(resources, meshId.modelId)) {
             Resources.ensureModel(resources, meshId.modelId);
-            if (state !== null) destroyInstance(visuals, meshTrait);
+            if (state !== null) destroyInstance(visuals, meshTrait, visibility);
             continue;
         }
 
         const meshKey = `${meshId.modelId}/${meshId.meshName}`;
         const meshSlot = meshInfoIndexOf(modelResources.meshInfo, meshKey);
         if (meshSlot === null) {
-            if (state !== null) destroyInstance(visuals, meshTrait);
+            if (state !== null) destroyInstance(visuals, meshTrait, visibility);
             continue;
         }
 
         // existing state with a different MeshId — destroy + recreate so
         // the new meshSlot resolves fresh.
-        if (state !== null) destroyInstance(visuals, meshTrait);
+        if (state !== null) destroyInstance(visuals, meshTrait, visibility);
 
         const slot = allocateOne(visuals.instanceAllocator);
         if (slot >= visuals.instanceCapacity) {
@@ -338,19 +341,31 @@ export function update(
             instArr = visuals.instanceDataBuf.array as Float32Array;
         }
 
-        const bounds = findBoundsAncestor(meshTrait._node);
         const model = findModelAncestor(meshTrait._node);
-        if (bounds === null || model === null) {
-            // Engine policy: meshes render only inside a cullable rig
-            // (BoundsTrait + ModelTrait on an ancestor — both installed by
-            // cloneModel). Roll back the slot we just took. Warn only in
-            // editor mode — at runtime, silent drop. env.editor is build-
-            // time-replaced so the warn branch DCEs out of prod bundles.
+        if (model === null) {
+            // Engine policy: meshes render only under a ModelTrait ancestor
+            // (the shared light slot, installed by cloneModel). Frustum
+            // culling is per-mesh and needs no ancestor. Roll back the slot
+            // we just took. Warn only in editor mode — at runtime, silent
+            // drop. env.editor is build-time-replaced so the warn branch
+            // DCEs out of prod bundles.
             freeOne(visuals.instanceAllocator, slot);
-            if (env.editor) warnMissingRigTraits(meshTrait._node, bounds === null, model === null);
+            if (env.editor) warnMissingModelTrait(meshTrait._node);
             continue;
         }
         const transform = getTrait(meshTrait._node, TransformTrait)!;
+
+        // seed this mesh's cull box from the handle's bind-pose AABB, then
+        // register it with the shared culler. world AABB = this box × the
+        // mesh node's world matrix — exact even mid-animation (TRS only, no
+        // skinning), so per-mesh culling is correct.
+        const cull = createCullState();
+        const handle = resources.models.get(meshId.modelId)?.handle;
+        const meshEntry = handle?.meshes[meshId.meshName];
+        if (meshEntry) {
+            box3.copy(cull.aabb, meshEntry.aabb);
+            cull.version = 1;
+        }
 
         state = {
             slot,
@@ -361,7 +376,7 @@ export function update(
             paramsVersionAtUpload: -1,
             transformVersionAtUpload: -1,
             entryRefAtUpload: null,
-            bounds,
+            cull,
             model,
             transform,
             lastLightR: NaN,
@@ -371,13 +386,14 @@ export function update(
         };
         meshTrait._state = state;
         visuals.aliveStates.push(state);
+        Visibility.register(visibility, cull, transform);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait);
+        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, visibility);
     }
 
     // ── phase 3: per-instance writes + per-mesh bucket sort ─────────
@@ -390,10 +406,9 @@ export function update(
 
     for (let i = 0; i < aliveStates.length; i++) {
         const state = aliveStates[i]!;
-        const bounds = state.bounds;
         const model = state.model;
 
-        if (!bounds.visible || !state.trait.visible) continue;
+        if (!state.cull.visible || !state.trait.visible) continue;
 
         const meshTrait = state.trait;
         const transformTrait = state.transform;
@@ -575,16 +590,6 @@ export function update(
     if (instanceDataDirty) visuals.instanceDataBuf.needsUpdate = true;
 }
 
-function findBoundsAncestor(node: Node): BoundsTrait | null {
-    let cur: Node | null = node;
-    while (cur) {
-        const b = getTrait(cur, BoundsTrait);
-        if (b) return b;
-        cur = cur.parent;
-    }
-    return null;
-}
-
 function findModelAncestor(node: Node): ModelTrait | null {
     let cur: Node | null = node;
     while (cur) {
@@ -596,25 +601,22 @@ function findModelAncestor(node: Node): ModelTrait | null {
 }
 
 const _warnedNodes = new WeakSet<Node>();
-function warnMissingRigTraits(node: Node, missingBounds: boolean, missingModel: boolean): void {
+function warnMissingModelTrait(node: Node): void {
     if (_warnedNodes.has(node)) return;
     _warnedNodes.add(node);
-    const missing = [missingBounds ? 'BoundsTrait' : null, missingModel ? 'ModelTrait' : null]
-        .filter(Boolean)
-        .join(' + ');
     console.warn(
-        `[model-visuals] MeshTrait has no ${missing} ancestor — instance will not render. ` +
-            'Use cloneModel() or add both BoundsTrait + ModelTrait to the cullable-unit ancestor. Node:',
+        '[model-visuals] MeshTrait has no ModelTrait ancestor — instance will not render. ' +
+            'Use cloneModel() or add a ModelTrait to the model-root ancestor. Node:',
         node,
     );
 }
 
 // ── dispose ─────────────────────────────────────────────────────────
 
-export function dispose(visuals: ModelVisuals): void {
+export function dispose(visuals: ModelVisuals, visibility: Visibility.Visibility): void {
     // walk backward — destroyInstance does swap-pop from aliveStates.
     const arr = visuals.aliveStates;
-    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait);
+    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait, visibility);
     visuals.scene.remove(visuals.mesh);
 
     // geometry's pooled vertex/index buffers are owned by ModelResources and
@@ -629,9 +631,10 @@ export function dispose(visuals: ModelVisuals): void {
 
 // ── internal ────────────────────────────────────────────────────────
 
-function destroyInstance(visuals: ModelVisuals, trait: MeshTrait): void {
+function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Visibility.Visibility): void {
     const state = trait._state as MeshVisualState | null;
     if (state === null) return;
+    Visibility.unregister(visibility, state.cull);
     const slot = state.slot;
 
     // zero per-slot params so a reused slot doesn't briefly inherit

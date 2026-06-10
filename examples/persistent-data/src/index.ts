@@ -108,7 +108,7 @@ script(
 
                     for (let i = 0; i < SPARK_POSITIONS.length; i++) {
                         const pos = SPARK_POSITIONS[i]!;
-                        const mesh = cloneModel(SparkModel.scene, { aabb: SparkModel.aabb });
+                        const mesh = cloneModel(SparkModel.scene);
                         mesh.name = `spark-${i}`;
                         mesh.persist = false;
                         const t = addTrait(mesh, TransformTrait);

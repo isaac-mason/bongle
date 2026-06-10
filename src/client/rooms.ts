@@ -713,7 +713,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const particles = Particles.init();
     const particleVisuals: ParticleVisuals.ParticleVisuals = ParticleVisuals.init(scene, opts.spriteResources, opts.particleResources, environmentResources);
 
-    const visibility = Visibility.init(nodes);
+    const visibility = Visibility.init();
     const modelLighting = ModelLighting.init(nodes);
     const interpolation = Interpolation.init(nodes, playerId);
     const animations = Animation.init(nodes);
@@ -727,7 +727,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         namespace,
         isNamespaceRoot,
         local,
-        nodes: nodes,
+        nodes,
         scene,
         scriptRuntime,
         syncSnapshots,
@@ -1031,16 +1031,16 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
  * on unknown rooms or server-mirrored rooms (those are membership-driven
  * and disposed via `room_left`).
  */
-export function stopLocalRoom(state: Rooms, roomId: string): void {
-    const room = findRoomByRoomId(state, roomId);
+export function stopLocalRoom(state: EngineClient, roomId: string): void {
+    const room = findRoomByRoomId(state.rooms, roomId);
     if (!room) {
         throw new Error(`[bongle] stopLocalRoom: room '${roomId}' not found`);
     }
     if (!room.local) {
         throw new Error(`[bongle] stopLocalRoom: room '${roomId}' is server-backed; only local rooms can be stopped`);
     }
-    disposeRoom(room);
-    state.rooms.delete(room.playerId);
+    disposeRoom(state, room);
+    state.rooms.rooms.delete(room.playerId);
     useClient.getState().removeRoom(room.playerId);
     // mirror the registry: drop the synthetic RoomInfo we added in
     // startLocalRoom so this room disappears from roomList too.
@@ -1062,16 +1062,18 @@ export function findRoomByRoomId(state: Rooms, roomId: string): ClientRoom | und
 }
 
 /**
- * dispose gpu resources for a room.
+ * dispose gpu resources for a room. `state` supplies the engine-global
+ * resources a few teardowns need (e.g. the extruded-sprite geometry pool
+ * to release this room's refcounts back into).
  */
-export function disposeRoom(room: ClientRoom): void {
+export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
-    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene);
-    ModelVisuals.dispose(room.modelVisuals);
+    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
+    ModelVisuals.dispose(room.modelVisuals, room.visibility);
     DomUi.dispose(room.domUi);
-    SpriteVisuals.dispose(room.spriteVisuals);
-    ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals);
+    SpriteVisuals.dispose(room.spriteVisuals, room.visibility);
+    ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.visibility);
     ShadowVisuals.dispose(room.shadowVisuals);
     ParticleVisuals.dispose(room.particleVisuals);
     Environment.dispose(room.environment);

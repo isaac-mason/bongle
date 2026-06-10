@@ -1,15 +1,22 @@
-// per-room visibility — queries `(BoundsTrait, TransformTrait)`, owns a
-// dynamic bounding volume tree keyed by trait, and writes `bounds.visible`
-// once per frame via frustum cull. The sole producer of `BoundsTrait.visible`;
-// mesh-visuals / animator / model-lighting are pure consumers.
+// per-room visibility — a generic frustum culler over a dynamic bounding
+// volume tree. It knows nothing about meshes, sprites, or any trait: callers
+// `register(cull, transform)` an entry, `unregister(cull)` it, and each frame
+// `update(camera, viewRadius)` refits every entry and writes the cull result
+// back into its `cull` object.
 //
-// Each BoundsTrait corresponds to one logical cullable thing (a rig, a static
-// model instance, etc.). The DBVT leaf for trait T is `T.aabbLocal ×
-// T._node.world`. Refresh trigger: `T._version` or `transform._version`
-// changed since last seen.
+// An entry is a `CullState` (see core/scene/cull.ts) plus the `TransformTrait`
+// whose world matrix places it. The owning renderer keeps the `CullState` on
+// its own render-state object (`MeshVisualState.cull`, `SpriteVisualState.cull`,
+// …), fills `cull.aabb` (local) from geometry it already knows, and registers
+// it. The culler owns the DBVT leaf and writes `cull.visible / distSq /
+// extentSq` each frame — so consumers (the renderers themselves, the animator
+// gate/LOD, model lighting) just read `cull` with no reference to the culler.
 //
-// Empty BoundsTrait leaves (aabb min > max) are treated as always-invisible
-// rather than registered — useful for traits that haven't been seeded yet.
+// The culler holds the `TransformTrait` ref directly, so it recomputes the
+// world AABB itself at cull time (`cull.aabb × transform.world`) — fresh, no
+// frame lag. Refit triggers on a `cull.version` (geometry changed) or
+// `transform._version` (moved) bump. Lifecycle is explicit: a leaf exists
+// from `register` to `unregister`, so there's no per-frame trait sweep.
 //
 // The DBVT is a port of crashcat's broadphase, stripped to visibility-only:
 // fat-aabb expansion margin, freelist node pool, insert / remove / update
@@ -21,13 +28,9 @@
 
 import { type Camera, type Frustum, frustum } from 'gpucat';
 import { type Box3, box3 } from 'mathcat';
-import { BoundsTrait } from '../builtins/bounds';
-import { TransformTrait } from '../builtins/transform';
+import type { TransformTrait } from '../builtins/transform';
 import { getVisualWorldMatrix } from '../api/transforms';
-import type { Nodes } from '../core/scene/nodes';
-import { query } from '../core/scene/nodes';
-
-type VisQuery = ReturnType<typeof query<[typeof BoundsTrait, typeof TransformTrait]>>;
+import type { CullState } from '../core/scene/cull';
 
 // ── DBVT internals ───────────────────────────────────────────────────────
 
@@ -313,33 +316,34 @@ function dbvtFrustumCull(dbvt: DBVT, f: Frustum, onLeaf: (leafIndex: number) => 
 // ── public Visibility surface ────────────────────────────────────────────
 
 export type Visibility = {
-    _dbvt: DBVT;
+    dbvt: DBVT;
     /** scratch frustum, rebuilt each `update`. */
-    _frustum: Frustum;
-    /** cached `(BoundsTrait, TransformTrait)` query, registered on the room's Nodes. */
-    _query: VisQuery;
+    frustum: Frustum;
     /**
-     * Registered traits indexed by DBVT leaf index (sparse — slot may be
-     * null after the trait's node is destroyed and the leaf freed).
+     * Registered cull entries indexed by DBVT leaf index (sparse — slot is
+     * null between `unregister` and the leaf index being reused).
      */
-    _traits: (BoundsTrait | null)[];
-    /** Per-trait last-seen versions, indexed by DBVT leaf index. */
-    _aabbVersions: number[];
-    _transformVersions: number[];
+    cullables: (CullState | null)[];
+    /** the `TransformTrait` placing each entry, parallel to `please cullables`.
+     *  the culler reads `transform.world` each frame to refit the leaf. */
+    transforms: (TransformTrait | null)[];
+    /** per-leaf versions last folded into the leaf's world AABB. */
+    aabbVersions: number[];
+    transformVersions: number[];
     /** prev-frame `visible` bit per leaf — feeds hysteresis on the
      *  distance cull so leaves crossing the radius boundary don't flicker. */
-    _wasVisible: Uint8Array;
+    wasVisible: Uint8Array;
 };
 
-export function init(sg: Nodes): Visibility {
+export function init(): Visibility {
     return {
-        _dbvt: dbvtCreate(),
-        _frustum: frustum.create(),
-        _query: query(sg, [BoundsTrait, TransformTrait]),
-        _traits: [],
-        _aabbVersions: [],
-        _transformVersions: [],
-        _wasVisible: new Uint8Array(0),
+        dbvt: dbvtCreate(),
+        frustum: frustum.create(),
+        cullables: [],
+        transforms: [],
+        aabbVersions: [],
+        transformVersions: [],
+        wasVisible: new Uint8Array(0),
     };
 }
 
@@ -355,87 +359,96 @@ function isEmptyAabb(b: Box3): boolean {
     return b[0] > b[3] || b[1] > b[4] || b[2] > b[5];
 }
 
+function ensureLeafArrays(v: Visibility, leaf: number): void {
+    while (v.cullables.length <= leaf) {
+        v.cullables.push(null);
+        v.transforms.push(null);
+        v.aabbVersions.push(0);
+        v.transformVersions.push(0);
+    }
+}
+
+/**
+ * Register a cull entry. The owning renderer must have filled `cull.aabb`
+ * (local) before calling — the leaf is seeded from `cull.aabb ×
+ * transform.world`. No-op (leaves it unregistered + visible) if the box is
+ * still empty. Pair with `unregister` when the render-state is freed.
+ */
+export function register(v: Visibility, cull: CullState, transform: TransformTrait): void {
+    if (cull.leaf !== -1) return;
+    if (isEmptyAabb(cull.aabb)) return;
+    box3.transformMat4(_scratchWorldAabb, cull.aabb, getVisualWorldMatrix(transform));
+    const leaf = dbvtAdd(v.dbvt, _scratchWorldAabb);
+    cull.leaf = leaf;
+    ensureLeafArrays(v, leaf);
+    v.cullables[leaf] = cull;
+    v.transforms[leaf] = transform;
+    v.aabbVersions[leaf] = cull.version;
+    v.transformVersions[leaf] = transform._version;
+}
+
+/** Remove a previously-registered entry and free its leaf. Resets
+ *  `cull.leaf` to -1 so the entry can be re-registered later. */
+export function unregister(v: Visibility, cull: CullState): void {
+    const leaf = cull.leaf;
+    if (leaf === -1) return;
+    dbvtRemove(v.dbvt, leaf);
+    v.cullables[leaf] = null;
+    v.transforms[leaf] = null;
+    cull.leaf = -1;
+}
+
 /**
  * Per-frame pass:
- *   1. for each `(BoundsTrait, TransformTrait)`:
- *      - register if not yet (leaf == -1): world AABB = `aabbLocal ×
- *        transform.world`, insert leaf, store leaf + versions.
- *      - else if bounds._version or transform._version changed: recompute
- *        world AABB, update leaf (fat-AABB skip handles sub-margin moves).
- *   2. snapshot prev `visible` per leaf, then reset every registered
- *      trait's `visible = false`.
+ *   1. refit each registered leaf whose `cull.version` (geometry changed)
+ *      or `transform._version` (moved) bumped since last folded in. World
+ *      AABB = `cull.aabb × transform.world`, recomputed here so it's fresh.
+ *   2. snapshot prev `visible` per leaf, then reset every entry's
+ *      `cull.visible = false`.
  *   3. frustum-cull the DBVT; for each in-frustum leaf, additionally
  *      reject if its world-AABB center is past `viewRadius` (with
  *      `VIEW_RADIUS_MARGIN` hysteresis vs the prev-frame bit). Flip
- *      `visible=true` on survivors.
+ *      `cull.visible = true` on survivors and stash `distSq`/`extentSq`.
  *
- * `viewRadius` is block-space. Conventionally the renderer's voxel
- * chunk view radius (× CHUNK_SIZE) drives this so visuals fade at the
- * same boundary the chunk mesher uses. Tests may pass `Infinity` to
- * isolate frustum-only behavior.
- *
- * Traits whose nodes have been destroyed are detected lazily on next
- * frame via the query missing them. v0 relies on `_visLeaf !== i`
- * mismatch to orphan stale slots.
+ * `viewRadius` is block-space. Conventionally the renderer's voxel chunk
+ * view radius (× CHUNK_SIZE) drives this so visuals fade at the same
+ * boundary the chunk mesher uses. Tests may pass `Infinity` to isolate
+ * frustum-only behavior.
  */
 export function update(v: Visibility, camera: Camera, viewRadius: number): void {
-    // ── register / refresh ─────────────────────────────────────────
-    for (const [bounds, transform] of v._query) {
-        if (bounds._visLeaf === -1) {
-            if (isEmptyAabb(bounds.aabbLocal)) continue;
-            box3.transformMat4(_scratchWorldAabb, bounds.aabbLocal, getVisualWorldMatrix(transform));
-            const leaf = dbvtAdd(v._dbvt, _scratchWorldAabb);
-            bounds._visLeaf = leaf;
-            while (v._traits.length <= leaf) {
-                v._traits.push(null);
-                v._aabbVersions.push(0);
-                v._transformVersions.push(0);
-            }
-            v._traits[leaf] = bounds;
-            v._aabbVersions[leaf] = bounds._version;
-            v._transformVersions[leaf] = transform._version;
-            continue;
-        }
-
-        const leaf = bounds._visLeaf;
-        const aabbDirty = bounds._version !== v._aabbVersions[leaf];
-        const transformDirty = transform._version !== v._transformVersions[leaf];
+    // ── refit moved / resized leaves ────────────────────────────────
+    for (let i = 0; i < v.cullables.length; i++) {
+        const cull = v.cullables[i];
+        if (cull === null) continue;
+        const transform = v.transforms[i]!;
+        const aabbDirty = cull.version !== v.aabbVersions[i];
+        const transformDirty = transform._version !== v.transformVersions[i];
         if (aabbDirty || transformDirty) {
-            box3.transformMat4(_scratchWorldAabb, bounds.aabbLocal, getVisualWorldMatrix(transform));
-            dbvtUpdate(v._dbvt, leaf, _scratchWorldAabb);
-            v._aabbVersions[leaf] = bounds._version;
-            v._transformVersions[leaf] = transform._version;
-        }
-    }
-
-    // ── sweep stale slots ──────────────────────────────────────────
-    for (let i = 0; i < v._traits.length; i++) {
-        const t = v._traits[i];
-        if (t === null) continue;
-        if (t._visLeaf !== i) {
-            dbvtRemove(v._dbvt, i);
-            v._traits[i] = null;
+            box3.transformMat4(_scratchWorldAabb, cull.aabb, getVisualWorldMatrix(transform));
+            dbvtUpdate(v.dbvt, i, _scratchWorldAabb);
+            v.aabbVersions[i] = cull.version;
+            v.transformVersions[i] = transform._version;
         }
     }
 
     // ── snapshot prev `visible` (for distance hysteresis), then reset ──
-    if (v._wasVisible.length < v._traits.length) {
-        const grown = new Uint8Array(v._traits.length);
-        grown.set(v._wasVisible);
-        v._wasVisible = grown;
+    if (v.wasVisible.length < v.cullables.length) {
+        const grown = new Uint8Array(v.cullables.length);
+        grown.set(v.wasVisible);
+        v.wasVisible = grown;
     }
-    for (let i = 0; i < v._traits.length; i++) {
-        const t = v._traits[i];
-        if (t === null) {
-            v._wasVisible[i] = 0;
+    for (let i = 0; i < v.cullables.length; i++) {
+        const cs = v.cullables[i];
+        if (cs === null) {
+            v.wasVisible[i] = 0;
             continue;
         }
-        v._wasVisible[i] = t.visible ? 1 : 0;
-        t.visible = false;
+        v.wasVisible[i] = cs.visible ? 1 : 0;
+        cs.visible = false;
     }
 
     // ── frustum + distance cull ────────────────────────────────────
-    frustum.setFromViewProjectionMatrix(v._frustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromViewProjectionMatrix(v.frustum, camera.projectionMatrix, camera.matrixWorldInverse);
     _activeVisibility = v;
     _activeCamX = camera.position[0];
     _activeCamY = camera.position[1];
@@ -443,7 +456,7 @@ export function update(v: Visibility, camera: Camera, viewRadius: number): void 
     _activeInnerSq = viewRadius * viewRadius;
     const outer = viewRadius + VIEW_RADIUS_MARGIN;
     _activeOuterSq = outer * outer;
-    dbvtFrustumCull(v._dbvt, v._frustum, _onVisibleLeaf);
+    dbvtFrustumCull(v.dbvt, v.frustum, _onVisibleLeaf);
     _activeVisibility = null;
 }
 
@@ -456,29 +469,29 @@ let _activeOuterSq = Infinity;
 
 function _onVisibleLeaf(leafIndex: number): void {
     const v = _activeVisibility!;
-    const t = v._traits[leafIndex];
-    if (t === null) return;
+    const cs = v.cullables[leafIndex];
+    if (cs === null) return;
 
     // distance cull with hysteresis: leaves that were visible last
     // frame keep visibility out to `outer` (= viewRadius + margin);
     // fresh leaves must be inside `inner` (= viewRadius). prevents
     // flicker for things sitting near the boundary that a script or
     // animation nudges across.
-    const aabb = v._dbvt.nodes[leafIndex].aabb;
+    const aabb = v.dbvt.nodes[leafIndex].aabb;
     const dx = (aabb[0] + aabb[3]) * 0.5 - _activeCamX;
     const dy = (aabb[1] + aabb[4]) * 0.5 - _activeCamY;
     const dz = (aabb[2] + aabb[5]) * 0.5 - _activeCamZ;
     const distSq = dx * dx + dy * dy + dz * dz;
-    const limit = v._wasVisible[leafIndex] ? _activeOuterSq : _activeInnerSq;
+    const limit = v.wasVisible[leafIndex] ? _activeOuterSq : _activeInnerSq;
     if (distSq > limit) return;
 
-    t.visible = true;
+    cs.visible = true;
     // stash coverage inputs for animation LOD (and any future consumer
     // ranking by projected size). world-space extent² ÷ distSq is monotonic
     // with projected pixel size for a given fov — no sqrt, no projection.
-    t._distSq = distSq;
+    cs.distSq = distSq;
     const ex = aabb[3] - aabb[0];
     const ey = aabb[4] - aabb[1];
     const ez = aabb[5] - aabb[2];
-    t._extentSq = ex * ex + ey * ey + ez * ez;
+    cs.extentSq = ex * ex + ey * ey + ez * ez;
 }

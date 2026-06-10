@@ -77,7 +77,7 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
     flushActive(iconRoom.environment);
 
     if (renderableStates.length === 0) {
-        disposeRoom(iconRoom);
+        disposeRoom(state, iconRoom);
         return {
             pixels: new Uint8Array(0),
             atlasWidth: 0,
@@ -97,7 +97,7 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
 
     console.log(`[block-icons] grid: ${cols}x${rows}, atlas: ${atlasWidth}x${atlasHeight}`);
 
-    const session = beginSnapshotSession(renderer, ICON_PX, atlasPixels, atlasWidth);
+    const session = beginSnapshotSession(renderer, ICON_PX);
 
     // isometric camera setup — same angle for every block, centered on
     // the block at voxel (1,1,1). the mesher places vertices from
@@ -160,12 +160,38 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
             renderer.render(iconRoom.scene, camera);
             renderer.endFrame();
 
-            await captureTile(session, col, row);
+            blitTile(atlasPixels, atlasWidth, await captureTile(session), ICON_PX, col, row);
         }
     } finally {
         endSnapshotSession(session);
-        disposeRoom(iconRoom);
+        disposeRoom(state, iconRoom);
     }
 
     return { pixels: atlasPixels, atlasWidth, atlasHeight, coords, iconPx: ICON_PX, cols, rows };
+}
+
+/**
+ * Row-by-row copy of a tightly-packed RGBA tile (`tilePixels`, pxSize²) into
+ * a tightly-packed RGBA atlas (`atlasPixels`, atlasWidth × *) at grid (col,
+ * row). block-icons is the only atlas task, so the blit lives here rather
+ * than in the shared snapshot primitive.
+ */
+function blitTile(
+    atlasPixels: Uint8Array,
+    atlasWidth: number,
+    tilePixels: Uint8Array,
+    pxSize: number,
+    col: number,
+    row: number,
+): void {
+    const BPP = 4;
+    const atlasStride = atlasWidth * BPP;
+    const tileStride = pxSize * BPP;
+    const dstX = col * pxSize;
+    const dstY = row * pxSize;
+    for (let y = 0; y < pxSize; y++) {
+        const srcOffset = y * tileStride;
+        const dstOffset = (dstY + y) * atlasStride + dstX * BPP;
+        atlasPixels.set(tilePixels.subarray(srcOffset, srcOffset + tileStride), dstOffset);
+    }
 }

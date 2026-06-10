@@ -2,9 +2,13 @@
  * Icon-artifact writer. Inputs come from the persistent-puppeteer page via
  * POST /__bongle/pipeline/emit — the page renders RGBA into a RenderTarget,
  * reads it back into a Uint8Array, and POSTs that buffer + a manifest header.
- * Here we sharp-encode it to PNG and write the sidecar JSON. Mirrors the
- * legacy `voxels-icons.{png,json}` + `prefabs-icons.{png,json}` artifact
- * shape so client + game-client consumers don't need to change.
+ *
+ * Two output shapes:
+ *   - block-icons → a packed `voxels-icons.{png,json}` atlas (many tiny,
+ *     bounded icons; one request + one texture + coords JSON).
+ *   - scenes + prefabs → one PNG per subject under `<group>/<id>.icon.png`,
+ *     plus a `<group>-icons.json` hash map the page reads back for gating
+ *     (few, large, id-addressed icons; loaded lazily by direct URL).
  */
 
 import fs from 'node:fs';
@@ -18,16 +22,14 @@ export type IconManifest = {
     rows: number;
     atlasWidth: number;
     atlasHeight: number;
-    /** opaque to this writer — block-icons uses `states`, prefab-icons uses
-     *  `coords`. We pass it through under the same key the source result used. */
+    /** block-icons coords, keyed by block state-key. */
     coords: unknown;
 };
 
-export type IconKind = 'block-icons' | 'prefab-icons';
+export type IconKind = 'block-icons';
 
-const FILE_NAMES: Record<IconKind, { json: string; png: string; coordsKey: 'states' | 'coords' }> = {
+const FILE_NAMES: Record<IconKind, { json: string; png: string; coordsKey: 'states' }> = {
     'block-icons': { json: 'voxels-icons.json', png: 'voxels-icons.png', coordsKey: 'states' },
-    'prefab-icons': { json: 'prefabs-icons.json', png: 'prefabs-icons.png', coordsKey: 'coords' },
 };
 
 export async function writeIconArtifact(
@@ -57,56 +59,37 @@ export async function writeIconArtifact(
         fs.writeFileSync(path.join(resourcesClientDir, pngName), png);
         console.log(`[bongle] ${kind} written to resources/client/${pngName}`);
     } else {
-        console.log(`[bongle] no ${kind === 'block-icons' ? 'blocks' : 'prefabs'} to render — wrote empty ${jsonName}`);
+        console.log(`[bongle] no blocks to render — wrote empty ${jsonName}`);
     }
 }
 
-// per-scene PNGs at resources/client/scenes/<id>.icon.png with a shared
-// hash sidecar at resources/client/scenes-icons.json. one sidecar (rather
-// than per-id) keeps the watcher target set small — the writer rewrites
-// the sidecar after every per-scene write so the on-disk hash map and PNG
-// set stay consistent.
+// per-subject PNGs at resources/client/<dir>/<id>.icon.png. scenes and
+// prefabs are the same shape, different dir. No hash sidecar: render gating
+// is in-memory in the orchestrator (it computes + compares hashes itself and
+// only dispatches renders that changed), so there's nothing to persist here —
+// the worker only ever POSTs a render that needs writing.
 
-const SCENE_ICONS_DIR = 'scenes';
-const SCENE_HASHES_FILE = 'scenes-icons.json';
+export type PerIdIconGroup = { dir: string };
 
-export type SceneIconHashes = {
-    /** map of sceneId → render hash; the page reads this back via
-     *  /__bongle/pipeline/hashes to skip unchanged scenes. */
-    icons: Record<string, string>;
-};
+export const SCENE_ICONS: PerIdIconGroup = { dir: 'scenes' };
+export const PREFAB_ICONS: PerIdIconGroup = { dir: 'prefabs' };
 
-export function readSceneIconHashes(resourcesClientDir: string): SceneIconHashes {
-    const p = path.join(resourcesClientDir, SCENE_HASHES_FILE);
-    if (!fs.existsSync(p)) return { icons: {} };
-    try {
-        const parsed = JSON.parse(fs.readFileSync(p, 'utf8')) as SceneIconHashes;
-        return { icons: parsed.icons ?? {} };
-    } catch {
-        return { icons: {} };
-    }
-}
-
-function sceneIconPath(resourcesClientDir: string, id: string): string {
+function perIdIconPath(resourcesClientDir: string, group: PerIdIconGroup, id: string): string {
     // ids may be slash-segmented (e.g. "blueprints/tree"); mkdir -p the
     // parent so nested ids don't ENOENT on first write.
-    return path.join(resourcesClientDir, SCENE_ICONS_DIR, `${id}.icon.png`);
+    return path.join(resourcesClientDir, group.dir, `${id}.icon.png`);
 }
 
-export async function writeSceneIcon(
+export async function writePerIdIcon(
     resourcesClientDir: string,
+    group: PerIdIconGroup,
     id: string,
-    hash: string,
     pxSize: number,
     pixels: Uint8Array,
 ): Promise<void> {
-    if (pixels.byteLength === 0) {
-        // skip-write: caller already determined this scene's render is
-        // unchanged. just update the hash map.
-        updateSceneHash(resourcesClientDir, id, hash);
-        return;
-    }
-    const outPath = sceneIconPath(resourcesClientDir, id);
+    // empty pixels = nothing renderable; no file to write.
+    if (pixels.byteLength === 0) return;
+    const outPath = perIdIconPath(resourcesClientDir, group, id);
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     const png = await sharp(Buffer.from(pixels.buffer, pixels.byteOffset, pixels.byteLength), {
         raw: { width: pxSize, height: pxSize, channels: 4 },
@@ -114,16 +97,5 @@ export async function writeSceneIcon(
         .png()
         .toBuffer();
     fs.writeFileSync(outPath, png);
-    updateSceneHash(resourcesClientDir, id, hash);
-    console.log(`[bongle] scene-icon written to resources/client/${SCENE_ICONS_DIR}/${id}.icon.png`);
-}
-
-function updateSceneHash(resourcesClientDir: string, id: string, hash: string): void {
-    fs.mkdirSync(resourcesClientDir, { recursive: true });
-    const current = readSceneIconHashes(resourcesClientDir);
-    current.icons[id] = hash;
-    fs.writeFileSync(
-        path.join(resourcesClientDir, SCENE_HASHES_FILE),
-        JSON.stringify(current, null, 2),
-    );
+    console.log(`[bongle] icon written to resources/client/${group.dir}/${id}.icon.png`);
 }

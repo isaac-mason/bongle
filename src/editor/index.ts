@@ -105,7 +105,7 @@ import { openViewportContextMenu, updateInspect } from './tools/inspect';
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
 import { createPainterState, updatePainter } from './tools/painter';
-import { createBrushState, updateBrush } from './tools/brush';
+import { createBrushState, updateBrush } from './tools/brush-build';
 import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
 import { createElevationState, updateElevation } from './tools/elevation';
 import { createSmoothState, updateSmooth } from './tools/smooth';
@@ -490,6 +490,8 @@ script(
         // per-room stroke state for the brush-family tools (active flag,
         // last centre, accumulating ops, preview keys). lives here rather
         // than module scope so two joined edit rooms keep independent strokes.
+        // each tool owns its own State/create; that brush / brush-select /
+        // smooth happen to share a stroke harness underneath is their detail.
         const brushState = createBrushState();
         const brushSelectState = createBrushSelectState();
         const painterState = createPainterState();
@@ -1281,11 +1283,14 @@ export async function registerServer(_state: EngineServer): Promise<void> {
 }
 
 /**
- * fetch the pre-built block + prefab icon atlases (written by the offline
- * renderer during dev) into the global editor store. project-wide assets;
- * loaded once per page and shared across every editor activation. fire-
- * and-forget — late resolution onto a doomed store at page teardown is
- * harmless.
+ * fetch the pre-built block icon atlas (written by the offline renderer
+ * during dev) into the global editor store. project-wide asset; loaded once
+ * per page and shared across every editor activation. fire-and-forget — late
+ * resolution onto a doomed store at page teardown is harmless.
+ *
+ * The block atlas is the only icon artifact fetched into the store: scene +
+ * prefab icons are per-file PNGs the UI loads by direct URL, so they need no
+ * store state and no refetch.
  */
 let iconsReadyWired = false;
 
@@ -1298,14 +1303,17 @@ function loadEditorAssets(): void {
     // client UI graph it pulls in) into the gameServer env's bundle.
     if (isPipelinePageMarked()) return;
 
-    // Cold-start race: the editor's boot-time fetch can beat the kit's
-    // first icon-render pass, in which case the artifact isn't on disk
-    // yet and Vite's SPA fallback returns `index.html`. `bongle:icons-ready`
-    // (sent by kit/src/vite/plugin.ts after each icon artifact is written)
-    // triggers a retry on each fresh pass.
+    // Cold-start race: the editor's boot-time fetch can beat the kit's first
+    // block-icon render, in which case the artifact isn't on disk yet and
+    // Vite's SPA fallback returns `index.html`. `bongle:icons-ready` (sent by
+    // kit/vite/plugin.ts after each icon write) triggers a retry — but only
+    // for the block atlas. Per-id scene/prefab icon events load by direct URL
+    // and would just cause a pointless atlas refetch, so they're ignored here.
     if (import.meta.hot && !iconsReadyWired) {
-        import.meta.hot.on('bongle:icons-ready', loadEditorAssets);
         iconsReadyWired = true;
+        import.meta.hot.on('bongle:icons-ready', (data: { kind?: string } | undefined) => {
+            if (!data || data.kind === 'block-icons') loadEditorAssets();
+        });
     }
 
     fetch(assetUrl('voxels-icons.json'))
@@ -1321,20 +1329,6 @@ function loadEditorAssets(): void {
             console.log('[bongle] block icon atlas loaded from static artifacts');
         })
         .catch((e) => console.warn('[bongle] failed to load block icon artifacts:', e));
-
-    fetch(assetUrl('prefabs-icons.json'))
-        .then((r) => (r.ok ? r.json() : null))
-        .then((json: { iconPx: number; cols: number; rows: number; coords: Record<string, [number, number]> } | null) => {
-            if (!json) return;
-            useEditor.setState({
-                prefabIconAtlasUrl: assetUrl('prefabs-icons.png'),
-                prefabIconCoords: json.coords,
-                prefabIconPx: json.iconPx,
-                prefabIconCols: json.cols,
-            });
-            console.log('[bongle] prefab icon atlas loaded from static artifacts');
-        })
-        .catch((e) => console.warn('[bongle] failed to load prefab icon artifacts:', e));
 }
 
 export function registerClient(state: EngineClient): void {
@@ -1346,7 +1340,7 @@ export function registerClient(state: EngineClient): void {
         switchRoom: (roomId, mode) => {
             for (const room of state.rooms.rooms.values()) {
                 if (room.roomId === roomId && room.playerMode === mode) {
-                    setActivePlayer(state.rooms, state.net, room.playerId);
+                    setActivePlayer(state.rooms, state.net, state.voxelResources, room.playerId);
                     return;
                 }
             }

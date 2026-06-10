@@ -21,9 +21,6 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
     const blockCoords = useEditor((s) => s.blockIconCoords);
     const blockCols = useEditor((s) => s.blockIconCols);
     const blockRows = useEditor((s) => s.blockIconRows);
-    const prefabAtlasUrl = useEditor((s) => s.prefabIconAtlasUrl);
-    const prefabCoords = useEditor((s) => s.prefabIconCoords);
-    const prefabCols = useEditor((s) => s.prefabIconCols);
 
     switch (item.kind) {
         case 'block': {
@@ -46,18 +43,18 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             );
         }
         case 'prefab': {
-            if (!prefabAtlasUrl || !prefabCols) return <Placeholder size={size} />;
-            const coord = prefabCoords[item.prefabId];
-            if (!coord) return <Placeholder size={size} />;
-            const [col, row] = coord;
+            // per-prefab PNG written by the offline-renderer prefab-icon task.
+            // missing-file (cold start, hash gate) renders as a broken img;
+            // ok for now — the placeholder fallback only fires when the
+            // prefabId itself is empty.
+            if (!item.prefabId) return <Placeholder size={size} />;
             return (
                 <div
                     style={{
                         width: size,
                         height: size,
-                        backgroundImage: `url(${prefabAtlasUrl})`,
-                        backgroundSize: `${prefabCols * size}px auto`,
-                        backgroundPosition: `-${col * size}px -${row * size}px`,
+                        backgroundImage: `url(${assetUrl('prefabs/' + item.prefabId + '.icon.png')})`,
+                        backgroundSize: `${size}px ${size}px`,
                         backgroundRepeat: 'no-repeat',
                         imageRendering: 'auto',
                     }}
@@ -65,7 +62,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             );
         }
         case 'blueprint': {
-            // per-scene PNG written by the offline-renderer scene-icons task.
+            // per-scene PNG written by the offline-renderer scene-icon task.
             // missing-file (cold start, hash gate) renders as a broken img;
             // ok for now — the placeholder fallback only fires when the
             // sceneId itself is empty.

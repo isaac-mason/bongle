@@ -17,8 +17,8 @@
 //   - `instanceData[realSlot]` carries the world matrix + InstanceParams
 //     (merged into one binding, same shape as model-resources).
 //
-// CPU frustum cull (voxel-mesh-visuals reads each trait's sibling
-// BoundsTrait.visible) replaces the old GPU cull compute. per-corner
+// CPU frustum cull: voxel-mesh-visuals reads each instance's own
+// `cull.visible` (written by the room culler). per-corner
 // light lives in the trailing 4 u32 of each quad's stride-14 slot in
 // `meshQuads`, written by `meshChunk`'s `emitQuadLight*` helpers.
 

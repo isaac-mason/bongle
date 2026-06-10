@@ -1,8 +1,6 @@
-import { type Box3, box3 } from 'mathcat';
 import type { Node, TraitHandle, TraitProps } from '../core/scene/nodes';
 import * as Nodes from '../core/scene/nodes';
 import type { TraitBase } from '../core/scene/traits';
-import { BoundsTrait } from '../builtins/bounds';
 import { ModelTrait } from '../builtins/model';
 
 export type { Node } from '../core/scene/nodes';
@@ -27,35 +25,25 @@ export function cloneNode(node: Node): Node {
 
 /**
  * Clone a node intended for the **visual scene** — same as `cloneNode`, plus
- * a `BoundsTrait` (for Visibility cull) and a `ModelTrait` (shared light
- * slot for descendant meshes) installed on the clone root. Use this
- * for every cloneNode site that goes into the visible scene; reserve
- * `cloneNode` for non-visual subtree duplication (e.g. detached prefab data).
+ * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
+ * installed on the clone root. Use this for every cloneNode site that goes
+ * into the visible scene; reserve `cloneNode` for non-visual subtree
+ * duplication (e.g. detached prefab data).
  *
  * Typical usage:
  * ```ts
- * const instance = cloneModel(wizard.scene, { aabb: wizard.aabb });
+ * const instance = cloneModel(wizard.scene);
  * // or for a sub-mesh:
- * const hat = cloneModel(wizard.nodes.HatA, { aabb: wizard.meshes.HatA.aabb });
+ * const hat = cloneModel(wizard.nodes.HatA);
  * ```
  *
- * If the source already has a `BoundsTrait` (or `ModelTrait`), the existing
- * one is left in place — only missing traits are installed. BoundsTrait
- * `aabbLocal` (and `_seedAabb`) is set from `opts.aabb`, or left empty
- * when absent — Visibility treats empty AABBs as "not yet registered" and
- * any downstream producer (animator, script) can fill them in later.
+ * Frustum culling is per-mesh and derived automatically by the renderer from
+ * each mesh's own geometry, so there's nothing cull-related for the caller to
+ * supply or maintain. If the source already has a `ModelTrait`, the existing
+ * one is left in place.
  */
-export function cloneModel(node: Node, opts?: { aabb?: Box3 }): Node {
+export function cloneModel(node: Node): Node {
     const clone = Nodes.cloneNode(node);
-
-    if (!Nodes.getTrait(clone, BoundsTrait)) {
-        const seed = opts?.aabb ?? box3.create();
-        Nodes.addTrait(clone, BoundsTrait, {
-            aabbLocal: box3.copy(box3.create(), seed),
-            _seedAabb: box3.copy(box3.create(), seed),
-            _version: 1,
-        });
-    }
     if (!Nodes.getTrait(clone, ModelTrait)) {
         Nodes.addTrait(clone, ModelTrait);
     }

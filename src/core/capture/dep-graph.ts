@@ -178,6 +178,18 @@ export function hasConsumers(producer: DepKey): boolean {
     return forward.has(encode(producer));
 }
 
+/**
+ * The consumer's direct producers (one hop of its current dep set). On-demand
+ * read of the reverse map — pays nothing unless called. Used by tooling that
+ * needs to walk a consumer's dependency closure itself (e.g. the offline icon
+ * pipeline deciding which icons a producer edit invalidates), rather than the
+ * forward `getDirtyConsumers` propagation the runtime uses.
+ */
+export function directProducersOf(consumer: DepKey): DepKey[] {
+    const producers = reverse.get(encode(consumer));
+    return producers ? Array.from(producers, decode) : [];
+}
+
 /** Bumped on every setDeps/addDeps/clearDeps that actually changed an edge.
  *  Dev surfaces (debug panel deps tab) poll this to know when to rebuild
  *  their snapshot — saves walking the maps every frame. */

@@ -38,11 +38,12 @@ import {
 } from 'gpucat';
 import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
-import { BoundsTrait } from '../../builtins/bounds';
 import { SpriteTrait } from '../../builtins/sprite';
 import { TransformTrait } from '../../builtins/transform';
-import { addTrait, getTrait, type Nodes, query } from '../../core/scene/nodes';
+import { type CullState, createCullState } from '../../core/scene/cull';
+import { type Nodes, query } from '../../core/scene/nodes';
 import { getVisualWorldMatrix } from '../../builtins/transform';
+import * as Visibility from '../visibility';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
@@ -85,9 +86,9 @@ export type SpriteVisualState = {
      *  Reassigned by `freeSlot`'s swap-pop. */
     slot: number;
     trait: SpriteTrait;
-    /** sibling BoundsTrait installed at first-sight — Visibility writes
-     *  `bounds.visible` each frame from the DBVT frustum cull. */
-    bounds: BoundsTrait;
+    /** this sprite's own frustum-cull entry — registered with the shared
+     *  Visibility culler at install, which writes `cull.visible` each frame. */
+    cull: CullState;
     /** sprite id observed at install — re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
@@ -126,7 +127,6 @@ export type SpriteVisuals = {
     frameId: number;
 
     scene: Scene;
-    resources: SpriteResources;
 };
 
 // ── init ────────────────────────────────────────────────────────────
@@ -175,7 +175,6 @@ export function init(scene: Scene, nodes: Nodes, resources: SpriteResources, env
         _query: query(nodes, [SpriteTrait, TransformTrait]),
         frameId: 0,
         scene,
-        resources,
     };
 }
 
@@ -194,7 +193,13 @@ const _scratchUp: [number, number, number] = [0, 0, 0];
  * batched pipeline reads camera state in-shader via cameraViewMatrix /
  * cameraPosition, so no CPU-side camera math is needed here.
  */
-export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera): void {
+export function update(
+    visuals: SpriteVisuals,
+    resources: SpriteResources,
+    voxels: Voxels,
+    _camera: Camera,
+    visibility: Visibility.Visibility,
+): void {
     const frameId = ++visuals.frameId;
     const nowMs = performance.now();
 
@@ -208,11 +213,11 @@ export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera):
     for (const [trait, transform] of visuals._query) {
         const sprite = trait.sprite;
         if (!sprite) {
-            if (trait._state !== null) destroyInstance(visuals, trait);
+            if (trait._state !== null) destroyInstance(visuals, trait, visibility);
             continue;
         }
 
-        const entry = visuals.resources.frames.get(sprite.spriteId);
+        const entry = resources.frames.get(sprite.spriteId);
         // sprite known to the trait but not yet in the atlas (asset
         // pipeline hasn't emitted it / atlas refresh mid-flight). Skip
         // and install next frame once the lookup succeeds.
@@ -221,26 +226,21 @@ export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera):
         let state: SpriteVisualState;
         const existing = trait._state;
         if (existing === null || existing.spriteIdAtInstall !== sprite.spriteId) {
-            if (existing !== null) destroyInstance(visuals, trait);
-            // sibling BoundsTrait for Visibility frustum cull. The quad
-            // can rotate freely (billboard modes) so we seed a conservative
-            // diagonal box that contains the quad in any orientation.
-            const node = trait._node;
-            let bounds = getTrait(node, BoundsTrait);
-            if (bounds === undefined) {
-                const w0 = trait.width;
-                const h0 = trait.height;
-                const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5;
-                bounds = addTrait(node, BoundsTrait, {
-                    aabbLocal: box3.set(box3.create(), -r, -r, -r, r, r, r),
-                    _seedAabb: box3.set(box3.create(), -r, -r, -r, r, r, r),
-                    _version: 1,
-                });
-            }
+            if (existing !== null) destroyInstance(visuals, trait, visibility);
+            // own frustum-cull entry. The quad can rotate freely (billboard
+            // modes) so the local box is a conservative diagonal that
+            // contains the quad in any orientation, in world units
+            // (width/height are source pixels → × worldScale).
+            const w0 = trait.width;
+            const h0 = trait.height;
+            const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5 * trait.worldScale;
+            const cull = createCullState();
+            box3.set(cull.aabb, -r, -r, -r, r, r, r);
+            cull.version = 1;
             state = {
                 slot: -1,
                 trait,
-                bounds,
+                cull,
                 spriteIdAtInstall: sprite.spriteId,
                 entry,
                 installedAtMs: nowMs,
@@ -248,12 +248,13 @@ export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera):
             };
             trait._state = state;
             visuals.aliveStates.push(state);
+            Visibility.register(visibility, cull, transform);
         } else {
             state = existing;
         }
         state.lastSeenFrame = frameId;
 
-        const visible = state.bounds.visible && trait.visible;
+        const visible = state.cull.visible && trait.visible;
 
         if (!visible) {
             if (state.slot !== -1) {
@@ -323,7 +324,7 @@ export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera):
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const s = aliveStates[i]!;
         if (s.lastSeenFrame !== frameId) {
-            destroyInstance(visuals, s.trait);
+            destroyInstance(visuals, s.trait, visibility);
             poseDirty = true;
             matDirty = true;
         }
@@ -335,9 +336,9 @@ export function update(visuals: SpriteVisuals, voxels: Voxels, _camera: Camera):
     if (matDirty) visuals.instanceMaterialBuf.needsUpdate = true;
 }
 
-export function dispose(visuals: SpriteVisuals): void {
+export function dispose(visuals: SpriteVisuals, visibility: Visibility.Visibility): void {
     const arr = visuals.aliveStates;
-    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait);
+    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait, visibility);
     visuals.scene.remove(visuals.mesh);
     visuals.geometry.dispose();
     visuals.instancePoseBuf.dispose();
@@ -346,10 +347,11 @@ export function dispose(visuals: SpriteVisuals): void {
 
 // ── internals ───────────────────────────────────────────────────────
 
-function destroyInstance(visuals: SpriteVisuals, trait: SpriteTrait): void {
+function destroyInstance(visuals: SpriteVisuals, trait: SpriteTrait, visibility: Visibility.Visibility): void {
     const state = trait._state;
     if (state === null) return;
 
+    Visibility.unregister(visibility, state.cull);
     if (state.slot !== -1) freeSlot(visuals, state);
 
     const arr = visuals.aliveStates;

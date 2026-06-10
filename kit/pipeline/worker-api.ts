@@ -35,9 +35,10 @@ export type WorkerApi = {
      *  label written into the sidecar manifest. */
     renderBlockIcons(hash: string): Promise<void>;
 
-    /** Render the prefab-icons atlas and POST it. */
-    renderPrefabIcons(hash: string): Promise<void>;
+    /** Render a single prefab's icon and POST it (one PNG per prefab).
+     *  Render gating is Node-side; the worker just renders + POSTs. */
+    renderPrefabIcon(id: string): Promise<void>;
 
     /** Render a single scene's icon and POST it. */
-    renderSceneIcon(id: string, hash: string): Promise<void>;
+    renderSceneIcon(id: string): Promise<void>;
 };

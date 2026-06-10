@@ -4,5 +4,5 @@
 // gating, task ordering, and scene seeding now live Node-side.
 
 export { runBlockIcons, type BlockIconAtlasResult } from './tasks/block-icons';
-export { runPrefabIcons, type PrefabIconAtlasResult } from './tasks/prefab-icons';
+export { runPrefabIcon, type PrefabIconResult } from './tasks/prefab-icons';
 export { runSceneIcon, type SceneIconResult } from './tasks/scene-icon';

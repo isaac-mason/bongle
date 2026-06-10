@@ -19,7 +19,7 @@ import { readArtifactHashSync } from '../cache';
 import type { PipelineInternal } from '../asset-pipeline/pipeline';
 import {
     computeBlockIconsHash,
-    computePrefabIconsHash,
+    computePrefabIconHashes,
     computeSceneIconHashes,
 } from './icon-hashes';
 
@@ -31,7 +31,8 @@ export type State = {
      *  worker. Drives the apply/clear delta on each pass. */
     appliedSceneHashes: Map<string, string>;
     lastBlockIconsHash: string | null;
-    lastPrefabIconsHash: string | null;
+    /** prefabId → last rendered icon hash. */
+    lastPrefabIconHashes: Map<string, string>;
     /** sceneId → last rendered icon hash. */
     lastSceneIconHashes: Map<string, string>;
     /** worker's bootId from the last successful pass — wipes on mismatch. */
@@ -51,7 +52,7 @@ export function init(page: Page, internal: PipelineInternal, projectDir: string)
         projectDir,
         appliedSceneHashes: new Map(),
         lastBlockIconsHash: null,
-        lastPrefabIconsHash: null,
+        lastPrefabIconHashes: new Map(),
         lastSceneIconHashes: new Map(),
         lastBootId: null,
         lastBootAtlasHash: null,
@@ -126,7 +127,7 @@ async function runOnePass(s: State): Promise<void> {
         s.lastBootAtlasHash = atlasHashBefore;
         s.appliedSceneHashes.clear();
         s.lastBlockIconsHash = null;
-        s.lastPrefabIconsHash = null;
+        s.lastPrefabIconHashes.clear();
         s.lastSceneIconHashes.clear();
     }
 
@@ -159,14 +160,17 @@ async function runOnePass(s: State): Promise<void> {
     if (blockHash !== s.lastBlockIconsHash) {
         await callWorker(s.page, 'renderBlockIcons', blockHash);
     }
-    const prefabHash = computePrefabIconsHash(s.internal, atlasHashBefore);
-    if (prefabHash !== s.lastPrefabIconsHash) {
-        await callWorker(s.page, 'renderPrefabIcons', prefabHash);
+    // hashes gate dispatch in-memory (no on-disk sidecar); the worker just
+    // renders + writes the PNG, so the hash never leaves Node.
+    const prefabHashes = computePrefabIconHashes(s.internal, atlasHashBefore);
+    for (const { id, hash } of prefabHashes) {
+        if (s.lastPrefabIconHashes.get(id) === hash) continue;
+        await callWorker(s.page, 'renderPrefabIcon', id);
     }
     const sceneHashes = computeSceneIconHashes(s.internal, atlasHashBefore, current);
     for (const { id, hash } of sceneHashes) {
         if (s.lastSceneIconHashes.get(id) === hash) continue;
-        await callWorker(s.page, 'renderSceneIcon', id, hash);
+        await callWorker(s.page, 'renderSceneIcon', id);
     }
 
     // 8. Mid-flight rebuild check. If the asset pipeline rewrote the atlas
@@ -188,7 +192,13 @@ async function runOnePass(s: State): Promise<void> {
     }
     for (const { id, bytesHash } of current) s.appliedSceneHashes.set(id, bytesHash);
     s.lastBlockIconsHash = blockHash;
-    s.lastPrefabIconsHash = prefabHash;
+    // prune prefab ids no longer in the registry, then record the rest. (the
+    // stale PNG lingers on disk — same as scenes; nothing references it.)
+    const currentPrefabIds = new Set(prefabHashes.map((x) => x.id));
+    for (const id of Array.from(s.lastPrefabIconHashes.keys())) {
+        if (!currentPrefabIds.has(id)) s.lastPrefabIconHashes.delete(id);
+    }
+    for (const { id, hash } of prefabHashes) s.lastPrefabIconHashes.set(id, hash);
     for (const { id, hash } of sceneHashes) s.lastSceneIconHashes.set(id, hash);
 }
 

@@ -86,7 +86,8 @@ export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
 
     /** renderer-owned per-instance state. fast-path lookup — the
      *  ExtrudedSpriteVisuals per-frame loop reads this directly instead
-     *  of a Map probe. mirrors `SpriteTrait._state` + `MeshTrait._state`. */
+     *  of a Map probe. mirrors `SpriteTrait._state` + `MeshTrait._state`.
+     *  includes the frustum-cull entry (see `ExtrudedSpriteVisualState.cull`). */
     _state: null as ExtrudedSpriteVisualState | null,
 });
 

@@ -1,10 +1,10 @@
 import { PerspectiveCamera } from 'gpucat';
-import { mat4 } from 'mathcat';
+import { box3, mat4 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
-import { BoundsTrait } from '../builtins/bounds';
 import { TransformTrait } from '../builtins/transform';
-import { addChild, addTrait, createNode, createSceneGraph } from '../core/scene/nodes';
 import { setPosition } from '../builtins/transform';
+import { createCullState } from '../core/scene/cull';
+import { addChild, addTrait, createNode, createSceneGraph } from '../core/scene/nodes';
 import * as Visibility from './visibility';
 
 function makeCamera(): PerspectiveCamera {
@@ -14,51 +14,74 @@ function makeCamera(): PerspectiveCamera {
     return cam;
 }
 
-function spawn(sgRoot: ReturnType<typeof createSceneGraph>['root'], pos: [number, number, number]) {
+/** create a transformed node, register a unit-box cull entry for it with the
+ *  culler, and return the entry so the test can read `cull.visible`. */
+function spawn(
+    sgRoot: ReturnType<typeof createSceneGraph>['root'],
+    visibility: Visibility.Visibility,
+    pos: [number, number, number],
+) {
     const n = createNode({ name: 'thing' });
     addChild(sgRoot, n);
     const t = addTrait(n, TransformTrait);
     setPosition(t, pos);
-    const b = addTrait(n, BoundsTrait, {
-        aabbLocal: [-0.5, -0.5, -0.5, 0.5, 0.5, 0.5],
-        _seedAabb: [-0.5, -0.5, -0.5, 0.5, 0.5, 0.5],
-        _version: 1,
-    });
-    return { node: n, transform: t, bounds: b };
+    const cull = createCullState();
+    box3.set(cull.aabb, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
+    cull.version = 1;
+    Visibility.register(visibility, cull, t);
+    return { node: n, transform: t, cull };
 }
 
 describe('Visibility', () => {
-    it('marks in-frustum traits visible, out-of-frustum traits invisible', () => {
+    it('marks in-frustum entries visible, out-of-frustum entries invisible', () => {
         const sg = createSceneGraph();
-        const visibility = Visibility.init(sg);
-        const inFront = spawn(sg.root, [0, 0, 0]);
-        const offToSide = spawn(sg.root, [200, 0, 0]);
+        const visibility = Visibility.init();
+        const inFront = spawn(sg.root, visibility, [0, 0, 0]);
+        const offToSide = spawn(sg.root, visibility, [200, 0, 0]);
 
         Visibility.update(visibility, makeCamera(), Infinity);
 
-        expect(inFront.bounds.visible).toBe(true);
-        expect(offToSide.bounds.visible).toBe(false);
+        expect(inFront.cull.visible).toBe(true);
+        expect(offToSide.cull.visible).toBe(false);
     });
 
     it('refreshes the DBVT leaf when transform._version bumps past the fat-aabb margin', () => {
         const sg = createSceneGraph();
-        const visibility = Visibility.init(sg);
-        const a = spawn(sg.root, [0, 0, 0]);
+        const visibility = Visibility.init();
+        const a = spawn(sg.root, visibility, [0, 0, 0]);
         const camera = makeCamera();
 
         Visibility.update(visibility, camera, Infinity);
-        expect(a.bounds.visible).toBe(true);
+        expect(a.cull.visible).toBe(true);
 
         // teleport far out of frustum (setPosition marks dirty + bumps version)
         setPosition(a.transform, [200, 0, 0]);
 
         Visibility.update(visibility, camera, Infinity);
-        expect(a.bounds.visible).toBe(false);
+        expect(a.cull.visible).toBe(false);
+    });
+
+    it('drops a leaf on unregister so it stops being culled', () => {
+        const sg = createSceneGraph();
+        const visibility = Visibility.init();
+        const a = spawn(sg.root, visibility, [0, 0, 0]);
+
+        Visibility.update(visibility, makeCamera(), Infinity);
+        expect(a.cull.visible).toBe(true);
+
+        Visibility.unregister(visibility, a.cull);
+        expect(a.cull.leaf).toBe(-1);
+
+        // the entry no longer participates; its visible bit is left as-is and
+        // the culler must not touch it (no throw on the freed leaf).
+        a.cull.visible = true;
+        Visibility.update(visibility, makeCamera(), Infinity);
+        expect(a.cull.visible).toBe(true);
     });
 
     it('distance-culls past viewRadius, with hysteresis across the margin', () => {
         const sg = createSceneGraph();
-        const visibility = Visibility.init(sg);
+        const visibility = Visibility.init();
         // camera at world-space [0,0,30] looking toward origin. lookAt
         // only fills the view matrix; position is read separately by the
         // distance cull, so set it explicitly to match.
@@ -66,51 +89,52 @@ describe('Visibility', () => {
         camera.position = [0, 0, 30];
         mat4.lookAt(camera.matrixWorldInverse, [0, 0, 30], [0, 0, 0], [0, 1, 0]);
         // leaf at origin — distance 30 from camera.
-        const a = spawn(sg.root, [0, 0, 0]);
+        const a = spawn(sg.root, visibility, [0, 0, 0]);
 
         // generous radius — well inside inner sphere.
         Visibility.update(visibility, camera, 50);
-        expect(a.bounds.visible).toBe(true);
+        expect(a.cull.visible).toBe(true);
 
-        // shrink radius so leaf is past inner (10) but inside outer
-        // (10 + 16 = 26)? 30 > 26 — past outer. So expect culled even
-        // though prev-visible. Use radius 20 instead: outer = 36, dist
-        // 30 ≤ 36 → hysteresis keeps it visible.
+        // radius 20 → outer = 36, dist 30 ≤ 36 → hysteresis keeps it visible.
         Visibility.update(visibility, camera, 20);
-        expect(a.bounds.visible).toBe(true);
+        expect(a.cull.visible).toBe(true);
 
         // steady state in the hysteresis band: still visible next frame.
         Visibility.update(visibility, camera, 20);
-        expect(a.bounds.visible).toBe(true);
+        expect(a.cull.visible).toBe(true);
 
         // collapse the outer band below leaf distance: radius 10 → outer
         // 26 < 30 → reject regardless of prev-visible.
         Visibility.update(visibility, camera, 10);
-        expect(a.bounds.visible).toBe(false);
+        expect(a.cull.visible).toBe(false);
 
         // once invisible, a fresh leaf needs to be inside *inner* to come
         // back. radius 20 → inner 20 < 30 → still rejected.
         Visibility.update(visibility, camera, 20);
-        expect(a.bounds.visible).toBe(false);
+        expect(a.cull.visible).toBe(false);
 
         // radius 35 → inner 35 ≥ 30 → visible again.
         Visibility.update(visibility, camera, 35);
-        expect(a.bounds.visible).toBe(true);
+        expect(a.cull.visible).toBe(true);
     });
 
-    it('skips registration when aabbLocal is empty (producer not yet seeded)', () => {
+    it('skips registration when the cull box is empty (renderer not yet seeded)', () => {
         const sg = createSceneGraph();
-        const visibility = Visibility.init(sg);
+        const visibility = Visibility.init();
         const n = createNode({ name: 'empty' });
-        addTrait(n, TransformTrait);
-        const bounds = addTrait(n, BoundsTrait); // defaults to empty box3 + visible:true
+        const t = addTrait(n, TransformTrait);
         addChild(sg.root, n);
+        const cull = createCullState(); // defaults to empty box3 + visible:true
+
+        Visibility.register(visibility, cull, t);
+
+        // empty box → no leaf assigned.
+        expect(cull.leaf).toBe(-1);
 
         Visibility.update(visibility, makeCamera(), Infinity);
 
-        // not registered, _visLeaf stays -1
-        expect(bounds._visLeaf).toBe(-1);
         // default visible stays true (server / pre-seed contexts treat as visible)
-        expect(bounds.visible).toBe(true);
+        expect(cull.leaf).toBe(-1);
+        expect(cull.visible).toBe(true);
     });
 });

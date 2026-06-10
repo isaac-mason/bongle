@@ -11,13 +11,43 @@
 // `cloneVoxels(handle.voxels)` to get a writable copy. clone children of
 // `handle.node` with `cloneNode()` before attaching them anywhere.
 
+import type { DepKey } from '../capture/dep-graph';
 import type { ScenePayload } from '../content/scene-store';
 import type { Voxels } from '../voxels/voxels';
-import { createNode, type Node } from './nodes';
+import { createNode, type Node, type SerializedNode } from './nodes';
 
 /** scene id used as the default landing scene at boot and as the fallback
  *  for editor commands that take an optional sceneId arg. */
 export const DEFAULT_SCENE_ID = 'main';
+
+/**
+ * On-demand: the DepKeys of every prefab a scene payload embeds (a node
+ * carrying `prefab: { prefabId }`). This is deliberately NOT wired into the
+ * scenes registry store's `extractDeps` — scenes need no dep edges at runtime
+ * (embedded prefab anchors re-tick at the instance level via
+ * `markPrefabAnchorsDirty`), and an always-on extractor would fire redundant
+ * `scene changed` dispatch on every embedded-prefab edit. Callers that DO want
+ * a scene's prefab dependencies — the offline icon pipeline deciding which
+ * icons a prefab edit invalidates — call this explicitly, so unused paths pay
+ * nothing.
+ *
+ * Prefab nodes own no serialized children (serializeNode drops them), so the
+ * walk just collects ids down the authored tree.
+ */
+export function extractScenePrefabDeps(payload: ScenePayload): DepKey[] {
+    const out: DepKey[] = [];
+    const seen = new Set<string>();
+    const walk = (node: SerializedNode): void => {
+        const prefabId = node.prefab?.prefabId;
+        if (prefabId && !seen.has(prefabId)) {
+            seen.add(prefabId);
+            out.push({ registry: 'prefabs', id: prefabId });
+        }
+        for (const child of node.children) walk(child);
+    };
+    walk(payload.nodes.root);
+    return out;
+}
 
 export type SceneOptions = {
     /** human-readable display name for editor UIs. falls back to the

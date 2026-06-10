@@ -1,12 +1,11 @@
-import { box3, type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { BoundsTrait } from '../../builtins/bounds';
+import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';
 import { AnimatorTrait } from '../../builtins/animator';
 import { TransformTrait } from '../../builtins/transform';
 import { env } from '../../api/env';
 import type { ClipChannel, ClipChannels, ClipDef } from '../models/handle';
 import * as Resources from '../resources';
-import { unionSubtreeLocalAabb } from './node-aabb';
 import { addTrait, findChildByName, getTrait, type Node, type Nodes, query } from './nodes';
 import { composeWorldMatrix, getWorldMatrix, TRANSFORM_DIRTY_ALL, TRANSFORM_DIRTY_WORLD_MATRIX } from '../../builtins/transform';
 
@@ -133,11 +132,13 @@ export type AnimatorState = {
     /** capacity of layerAccum / subtreeEnd / subtreeDirty in bones. */
     accumCapacity: number;
 
-    /** sibling BoundsTrait on the animator node — cached at first tick.
-     *  Visibility system writes `visible` on this trait; the per-rig tick
-     *  gate reads it to skip sample/compose/publish for off-screen rigs.
-     *  null when ensure-on-first-tick hasn't run yet. */
-    _bounds: BoundsTrait | null;
+    /** the rig's renderable meshes, cached when `boneOrder` is (re)built.
+     *  The per-rig tick gate + LOD fold these meshes' own `cull` entries
+     *  (on `MeshVisualState.cull`, written by the Visibility culler): the
+     *  rig is visible iff any mesh is, and coverage comes from the
+     *  closest/largest one. "Is the model visible" = "is any child mesh
+     *  visible" — there's no rig-level cullable. */
+    _cullMeshes: MeshTrait[];
 
     /** current LOD stride: 1 (sample every frame) / 2 / 4 / 8. Defaults 1
      *  until the first classify pass runs; that way the first visible frame
@@ -150,10 +151,7 @@ export type AnimatorState = {
     _lodPhase: number;
     /** `Animations._frameCount` when classification last ran. */
     _lodClassifiedAtFrame: number;
-    /** `bounds._version` when classification last ran — a bump (aabb resize)
-     *  forces immediate reclassification regardless of frame cadence. */
-    _lodClassifiedAtVersion: number;
-    /** previous frame's `bounds.visible` (0/1). False→true transition forces
+    /** previous frame's rig visibility (0/1). False→true transition forces
      *  a sample regardless of stride/phase so a rig coming on-screen doesn't
      *  show its up-to-8-frame-stale last pose. */
     _lastVisible: number;
@@ -173,69 +171,80 @@ function createAnimatorState(): AnimatorState {
         subtreeEnd: new Int32Array(0),
         subtreeDirty: new Uint8Array(0),
         accumCapacity: 0,
-        _bounds: null,
+        _cullMeshes: [],
         _lodStride: 1,
         _lodPhase: -1,
         _lodClassifiedAtFrame: -1,
-        _lodClassifiedAtVersion: -1,
         _lastVisible: 0,
     };
 }
 
 /**
- * Resolve the sibling BoundsTrait that the Visibility system writes `visible`
- * into. Convention: BoundsTrait + AnimatorTrait (+ ModelTrait for the shared
- * voxel-light slot) live on the same node. Auto-installs both if missing,
- * seeding BoundsTrait from the rig's bind-pose subtree AABB so Visibility
- * has something to register on the first frame.
+/**
+ * Ensure the animator node carries a ModelTrait — the shared voxel-light
+ * slot every mesh under the rig reads. Frustum culling is per-mesh now and
+ * needs no rig-level trait, so this is the only colocated trait the animator
+ * installs.
  */
-function ensureBounds(state: AnimatorState, animatorNode: Node, resources: Resources.Resources): BoundsTrait {
-    if (state._bounds) return state._bounds;
-    let bounds = getTrait(animatorNode, BoundsTrait);
-    if (!bounds) {
-        const seed = box3.create();
-        unionSubtreeLocalAabb(animatorNode, resources, seed);
-        bounds = addTrait(animatorNode, BoundsTrait, {
-            aabbLocal: box3.copy(box3.create(), seed),
-            _seedAabb: box3.copy(box3.create(), seed),
-            _version: 1,
-        });
-    }
+function ensureModelTrait(animatorNode: Node): void {
     if (!getTrait(animatorNode, ModelTrait)) {
         addTrait(animatorNode, ModelTrait);
     }
-    state._bounds = bounds;
-    return bounds;
+}
+
+/** Fold the rig's meshes' own cull entries into a rig-level answer. The rig
+ *  is visible iff any mesh is (a mesh with no render-state yet — not drawn
+ *  this frame, e.g. server tick or pre-first-render — counts as visible so
+ *  animation runs at full fidelity until the renderer catches up). Coverage
+ *  comes from the largest-projected visible mesh, for LOD. */
+type RigVisibility = { visible: boolean; distSq: number; extentSq: number };
+function rigVisibility(state: AnimatorState): RigVisibility {
+    const meshes = state._cullMeshes;
+    // no determinable meshes → default visible at full fidelity.
+    let visible = meshes.length === 0;
+    let bestCoverage = -1;
+    let distSq = 0;
+    let extentSq = 0;
+    for (let i = 0; i < meshes.length; i++) {
+        const s = meshes[i]!._state;
+        if (s === null) {
+            // mesh not realized by the renderer yet — treat as visible.
+            visible = true;
+            continue;
+        }
+        if (!s.cull.visible) continue;
+        visible = true;
+        const coverage = s.cull.distSq > 0 ? s.cull.extentSq / s.cull.distSq : Infinity;
+        if (coverage > bestCoverage) {
+            bestCoverage = coverage;
+            distSq = s.cull.distSq;
+            extentSq = s.cull.extentSq;
+        }
+    }
+    return { visible, distSq, extentSq };
 }
 
 /**
  * Reclassify the rig's sampling stride from its current projected coverage
- * (`bounds._extentSq / bounds._distSq` — monotonic with projected pixel size
- * for a given fov, no sqrt or projection math needed).
+ * (`extentSq / distSq` — monotonic with projected pixel size for a given
+ * fov, no sqrt or projection math needed). `distSq === 0` means "no coverage
+ * data yet" → treat as closest (Infinity) so the rig samples at full
+ * fidelity until the culler has measured it.
  *
- * Reclassifies on:
- *  - first call (state hasn't been classified yet),
- *  - `bounds._version` bump (aabb resize: rig swapped clips, mesh changed),
- *  - every 8 frames (slow drift across tier boundaries).
- *
- * Holds tier choice stable between reclassifications so the stride gate is a
- * single integer compare in the steady-state hot path.
+ * Reclassifies on first call and every 8 frames (slow drift across tier
+ * boundaries); holds tier choice stable between reclassifications so the
+ * stride gate is a single integer compare in the steady-state hot path.
  *
  * Hysteresis: bands have asymmetric thresholds — upgrading to a smaller
  * stride (more sampling) requires clearing the boundary by 20%, mirroring
  * the visibility distance-cull pattern. Prevents oscillation for rigs
  * drifting across a boundary.
  */
-function classifyLod(state: AnimatorState, bounds: BoundsTrait, frameCount: number): void {
+function classifyLod(state: AnimatorState, distSq: number, extentSq: number, frameCount: number): void {
     const sinceLast = frameCount - state._lodClassifiedAtFrame;
-    const versionChanged = bounds._version !== state._lodClassifiedAtVersion;
-    if (state._lodClassifiedAtFrame >= 0 && !versionChanged && sinceLast < 8) return;
+    if (state._lodClassifiedAtFrame >= 0 && sinceLast < 8) return;
 
-    const distSq = bounds._distSq;
-    // No visibility data yet (rig hasn't been classified by Visibility yet)
-    // → keep stride 1 so we sample the first visible frame at full fidelity.
-    // The next classify pass after Visibility runs will demote if needed.
-    const coverage = distSq > 0 ? bounds._extentSq / distSq : Infinity;
+    const coverage = distSq > 0 ? extentSq / distSq : Infinity;
 
     const current = state._lodStride;
     let stride = current;
@@ -254,7 +263,6 @@ function classifyLod(state: AnimatorState, bounds: BoundsTrait, frameCount: numb
 
     state._lodStride = stride;
     state._lodClassifiedAtFrame = frameCount;
-    state._lodClassifiedAtVersion = bounds._version;
 }
 
 /** advance action.time on enabled actions without sampling. used by the
@@ -469,14 +477,22 @@ function tickAnimator(
     lod: boolean,
     frameCount: number,
 ): void {
+    // bone order + cached rig mesh list are rebuilt only when invalidated
+    // (boneOrder emptied via `Animation.invalidateRig` or never built).
+    // Must run BEFORE the visibility gate, which folds the rig meshes' cull
+    // entries; also ensures the colocated ModelTrait (shared light slot).
+    // Steady state: skip the walk.
+    if (state.boneOrder.length === 0) {
+        rebuildBoneOrder(state, animatorNode);
+    }
+
     // ── visibility gate ─────────────────────────────────────────────────
     // Skip sample/compose/publish for off-screen rigs. `action.time` still
-    // advances so resumption is seamless. Visibility runs earlier in the
-    // frame and sets `_bounds.visible`; BoundsTrait + ModelTrait are
-    // auto-installed on the animator's node (colocation convention) on
-    // first tick.
-    const bounds = ensureBounds(state, animatorNode, resources);
-    if (!bounds.visible) {
+    // advances so resumption is seamless. "Is the rig visible" folds its
+    // meshes' own per-mesh cull results — written earlier this frame by the
+    // Visibility culler — so the rig is visible iff any of its meshes is.
+    const rig = rigVisibility(state);
+    if (!rig.visible) {
         state._lastVisible = 0;
         advanceActionTimes(state, dt);
         return;
@@ -496,7 +512,7 @@ function tickAnimator(
     const wasVisible = state._lastVisible;
     state._lastVisible = 1;
     if (env.client && lod) {
-        classifyLod(state, bounds, frameCount);
+        classifyLod(state, rig.distSq, rig.extentSq, frameCount);
         const forceSample = wasVisible === 0;
         if (!forceSample) {
             const stride = state._lodStride;
@@ -508,21 +524,6 @@ function tickAnimator(
         }
     }
 
-    // bone order is cached. typical rigs don't change shape at runtime, so
-    // we rebuild only when invalidated (boneOrder emptied via
-    // `Animation.invalidateRig` or never built). steady state: skip the walk.
-    if (state.boneOrder.length === 0) {
-        rebuildBoneOrder(state, animatorNode);
-        // The rig's mesh subtree just changed (initial mount, or a
-        // post-mount swap). Recompute the local-space envelope so
-        // Visibility can register a real DBVT leaf and ModelLighting can
-        // sample at a meaningful centroid — the install-time seed was
-        // computed before meshes were attached and is typically empty.
-        box3.empty(bounds.aabbLocal);
-        unionSubtreeLocalAabb(animatorNode, resources, bounds.aabbLocal);
-        box3.copy(bounds._seedAabb, bounds.aabbLocal);
-        bounds._version++;
-    }
     ensureAccumCapacity(state, state.boneOrder.length);
 
     // advance time + weights on enabled actions, hoist channels lookup,
@@ -929,7 +930,22 @@ function tickAnimator(
  * the animator node itself is included — gltf rigs often have the root
  * node as an animation target (e.g. the 'penguin' root waddling its body).
  */
+/** collect every `MeshTrait` in the subtree (inclusive) into `out`. The
+ *  animator folds these meshes' cull entries for its visibility gate + LOD. */
+function collectMeshes(node: Node, out: MeshTrait[]): void {
+    const mesh = getTrait(node, MeshTrait);
+    if (mesh) out.push(mesh);
+    for (const child of node.children) collectMeshes(child, out);
+}
+
 function rebuildBoneOrder(state: AnimatorState, animatorNode: Node): void {
+    // the rig's mesh subtree just changed (initial mount or post-mount
+    // swap) — recache the meshes the visibility gate/LOD folds, and ensure
+    // the shared-light ModelTrait now that the meshes are attached.
+    state._cullMeshes.length = 0;
+    collectMeshes(animatorNode, state._cullMeshes);
+    ensureModelTrait(animatorNode);
+
     state.boneOrder.length = 0;
     state.bonePos.length = 0;
     state.boneQuat.length = 0;

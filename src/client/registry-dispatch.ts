@@ -329,7 +329,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
             // the stale meshes (which still reference the disposed
             // geometries) and adds fresh ones bound to the new resources.
             VoxelVisuals.dispose(room.voxelVisuals, room.scene);
-            VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene);
+            VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
             room.voxelVisuals = VoxelVisuals.initRoomMeshes(room.scene, state.voxelResources);
             room.voxelMeshVisuals = VoxelMeshVisuals.init(
                 room.scene,
@@ -371,7 +371,7 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
     // update lazily re-acquires into the freshly-cleared pool.
     ExtrudedSpriteResources.clearGeometryPool(state.extrudedSpriteResources);
     for (const room of state.rooms.rooms.values()) {
-        ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals);
+        ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.visibility);
         room.extrudedSpriteVisuals = ExtrudedSpriteVisuals.init(
             room.scene,
             room.nodes,

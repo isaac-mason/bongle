@@ -4,7 +4,7 @@
 //
 // callers handle their own fallback when the subtree contributes no AABB.
 
-import { type Box3, box3, type Mat4, mat4 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
 import { getVisualWorldMatrix } from '../../api/transforms';
@@ -15,9 +15,6 @@ import { getTrait } from './nodes';
 
 const _scratchLocal: Box3 = box3.create();
 const _scratchWorld: Box3 = box3.create();
-const _scratchMat: Mat4 = mat4.create();
-const _scratchInvRoot: Mat4 = mat4.create();
-const _scratchChildLocal: Box3 = box3.create();
 
 /**
  * write `node`'s own local-space mesh-or-voxel AABB into `out`. returns true
@@ -66,51 +63,6 @@ export function unionSubtreeWorldAabb(node: Node, resources: Resources, out: Box
     }
     for (const child of node.children) {
         if (unionSubtreeWorldAabb(child, resources, out)) found = true;
-    }
-    return found;
-}
-
-/**
- * walk `node` and its descendants, unioning each subtree node's mesh AABB
- * into `out` expressed in `node`'s local space — i.e. each descendant's AABB
- * is transformed by `inverse(rootWorld) * descendantWorld` before union.
- *
- * intended for stable per-rig envelopes (e.g. animator frustum gate): the
- * AABB lives in rig-local space so it only needs to be re-transformed to
- * world when the rig root moves, not when bones move inside the rig.
- *
- * returns true if at least one aabb was unioned. if the root has no transform
- * or its world matrix is singular, returns false and `out` is left untouched.
- */
-export function unionSubtreeLocalAabb(node: Node, resources: Resources, out: Box3): boolean {
-    const rootTransform = getTrait(node, TransformTrait);
-    if (!rootTransform) return false;
-    const rootWorld = getVisualWorldMatrix(rootTransform);
-    if (!mat4.invert(_scratchInvRoot, rootWorld)) return false;
-
-    let found = false;
-    if (nodeLocalAabb(node, resources, _scratchLocal)) {
-        box3.union(out, out, _scratchLocal);
-        found = true;
-    }
-    for (const child of node.children) {
-        if (unionDescendantsIntoLocal(child, resources, _scratchInvRoot, out)) found = true;
-    }
-    return found;
-}
-
-function unionDescendantsIntoLocal(node: Node, resources: Resources, invRoot: Mat4, out: Box3): boolean {
-    let found = false;
-    const transform = getTrait(node, TransformTrait);
-    if (transform && nodeLocalAabb(node, resources, _scratchLocal)) {
-        // descendantWorld -> rigLocal
-        mat4.multiply(_scratchMat, invRoot, getVisualWorldMatrix(transform));
-        box3.transformMat4(_scratchChildLocal, _scratchLocal, _scratchMat);
-        box3.union(out, out, _scratchChildLocal);
-        found = true;
-    }
-    for (const child of node.children) {
-        if (unionDescendantsIntoLocal(child, resources, invRoot, out)) found = true;
     }
     return found;
 }

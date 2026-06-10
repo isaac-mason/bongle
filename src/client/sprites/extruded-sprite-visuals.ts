@@ -25,12 +25,12 @@
 //     caps the renderer loop.
 //
 // Visibility:
-//   - every instance carries a sibling `BoundsTrait` (installed at alloc,
-//     sized from the bake's pixel dims × worldScale + depth*worldScale on Z).
-//     Visibility frustum-culls it once per frame; per-frame loop reads
-//     `bounds.visible && trait.visible` and skips invisible instances —
-//     no per-slot visible flag, visibility = "got included in some bucket
-//     this frame".
+//   - every instance owns a frustum-cull entry on its state (`cull`, sized
+//     from the bake's pixel dims × worldScale + depth*worldScale on Z),
+//     registered with the room culler at alloc. Visibility frustum-culls it
+//     once per frame; the per-frame loop reads `cull.visible && trait.visible`
+//     and skips invisible instances — no per-slot visible flag, visibility =
+//     "got included in some bucket this frame".
 //
 // Atlas swap invalidates every cached silhouette in the engine-global
 // pool. `registry-dispatch.ts:refreshSpriteResources` calls
@@ -50,11 +50,12 @@ import {
 } from 'gpucat';
 import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
-import { BoundsTrait } from '../../builtins/bounds';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
 import { TransformTrait } from '../../builtins/transform';
-import { addTrait, getTrait, type Nodes, query } from '../../core/scene/nodes';
+import { type CullState, createCullState } from '../../core/scene/cull';
+import { getTrait, type Nodes, query } from '../../core/scene/nodes';
 import { getVisualWorldMatrix } from '../../builtins/transform';
+import * as Visibility from '../visibility';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
@@ -109,8 +110,9 @@ function freeOne(a: SlotAllocator, slot: number): void {
 export type ExtrudedSpriteVisualState = {
     slot: number;
     trait: ExtrudedSpriteMeshTrait;
-    /** sibling BoundsTrait — Visibility writes `.visible` each frame. */
-    bounds: BoundsTrait;
+    /** this instance's own frustum-cull entry — registered with the shared
+     *  Visibility culler at install, which writes `cull.visible` each frame. */
+    cull: CullState;
     /** sprite id observed at install — re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
@@ -128,10 +130,6 @@ export type ExtrudedSpriteVisualState = {
 export type ExtrudedSpriteVisuals = {
     mesh: Mesh;
     geometry: Geometry;
-
-    /** ref to the engine-global resources — owns the shared geometry pool +
-     *  spriteResources ref used by acquire/release. */
-    extrudedSpriteResources: ExtrudedSpriteResources;
 
     /** stable per-slot {worldMatrix, material}; 128B/slot. */
     instanceDataBuf: GpuBufferType;
@@ -223,7 +221,6 @@ export function init(
     return {
         mesh,
         geometry,
-        extrudedSpriteResources,
         instanceDataBuf,
         slotMapBuf,
         drawIndirectArrayBuf,
@@ -255,12 +252,13 @@ export function init(
  */
 export function update(
     visuals: ExtrudedSpriteVisuals,
+    resources: ExtrudedSpriteResources,
     voxels: Voxels,
+    visibility: Visibility.Visibility,
 ): void {
     const frameId = ++visuals.frameId;
     const nowMs = performance.now();
-    const res = visuals.extrudedSpriteResources;
-    const spriteResources = res.spriteResources;
+    const spriteResources = resources.spriteResources;
 
     let instArr = visuals.instanceDataBuf.array as Float32Array;
     let instanceDataDirty = false;
@@ -282,9 +280,9 @@ export function update(
             continue;
         }
 
-        if (existing !== null) destroyInstance(visuals, trait);
+        if (existing !== null) destroyInstance(visuals, trait, resources, visibility);
 
-        const geomSlot = acquireGeometry(res, sprite.spriteId);
+        const geomSlot = acquireGeometry(resources, sprite.spriteId);
         if (!geomSlot) continue;
 
         const slot = allocateOne(visuals.instanceAllocator);
@@ -293,26 +291,25 @@ export function update(
             instArr = visuals.instanceDataBuf.array as Float32Array;
         }
 
-        const node = trait._node;
-        let bounds = getTrait(node, BoundsTrait);
-        if (bounds === undefined) {
-            const sx = trait.worldScale;
-            const sy = trait.worldScale;
-            const sz = trait.depth * trait.worldScale;
-            const hx = geomSlot.pixelWidth * 0.5 * sx;
-            const hy = geomSlot.pixelHeight * 0.5 * sy;
-            const hz = 0.5 * sz;
-            bounds = addTrait(node, BoundsTrait, {
-                aabbLocal: box3.set(box3.create(), -hx, -hy, -hz, hx, hy, hz),
-                _seedAabb: box3.set(box3.create(), -hx, -hy, -hz, hx, hy, hz),
-                _version: 1,
-            });
-        }
+        const transform = getTrait(trait._node, TransformTrait);
+        if (!transform) continue;
+
+        // own frustum-cull box from the baked silhouette's pixel dims ×
+        // per-axis scale (worldScale on x/y, depth*worldScale on z).
+        const sx = trait.worldScale;
+        const sy = trait.worldScale;
+        const sz = trait.depth * trait.worldScale;
+        const hx = geomSlot.pixelWidth * 0.5 * sx;
+        const hy = geomSlot.pixelHeight * 0.5 * sy;
+        const hz = 0.5 * sz;
+        const cull = createCullState();
+        box3.set(cull.aabb, -hx, -hy, -hz, hx, hy, hz);
+        cull.version = 1;
 
         const state: ExtrudedSpriteVisualState = {
             slot,
             trait,
-            bounds,
+            cull,
             spriteIdAtInstall: sprite.spriteId,
             entry,
             geomSlot,
@@ -321,13 +318,14 @@ export function update(
         };
         trait._state = state;
         visuals.aliveStates.push(state);
+        Visibility.register(visibility, cull, transform);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
         const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait);
+        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, resources, visibility);
     }
 
     // ── phase 3: per-instance writes + per-sprite bucket sort ───────
@@ -339,7 +337,7 @@ export function update(
     for (let i = 0; i < aliveStates.length; i++) {
         const state = aliveStates[i]!;
         const trait = state.trait;
-        const visible = state.bounds.visible && trait.visible;
+        const visible = state.cull.visible && trait.visible;
         if (!visible) continue;
 
         const transformTrait = getTrait(trait._node, TransformTrait);
@@ -448,9 +446,13 @@ export function update(
     if (instanceDataDirty) visuals.instanceDataBuf.needsUpdate = true;
 }
 
-export function dispose(visuals: ExtrudedSpriteVisuals): void {
+export function dispose(
+    visuals: ExtrudedSpriteVisuals,
+    resources: ExtrudedSpriteResources,
+    visibility: Visibility.Visibility,
+): void {
     const arr = visuals.aliveStates;
-    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait);
+    for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait, resources, visibility);
     visuals.scene.remove(visuals.mesh);
     // engine-global pool buffers are owned by ExtrudedSpriteResources and
     // created with MANUAL lifecycle, so geometry.dispose()'s decreaseUsages()
@@ -463,12 +465,18 @@ export function dispose(visuals: ExtrudedSpriteVisuals): void {
 
 // ── internals ───────────────────────────────────────────────────────
 
-function destroyInstance(visuals: ExtrudedSpriteVisuals, trait: ExtrudedSpriteMeshTrait): void {
+function destroyInstance(
+    visuals: ExtrudedSpriteVisuals,
+    trait: ExtrudedSpriteMeshTrait,
+    resources: ExtrudedSpriteResources,
+    visibility: Visibility.Visibility,
+): void {
     const state = trait._state;
     if (state === null) return;
 
+    Visibility.unregister(visibility, state.cull);
     freeOne(visuals.instanceAllocator, state.slot);
-    releaseGeometry(visuals.extrudedSpriteResources, state.spriteIdAtInstall);
+    releaseGeometry(resources, state.spriteIdAtInstall);
 
     const arr = visuals.aliveStates;
     const last = arr.length - 1;

@@ -92,11 +92,10 @@ export function stop(ctx: ScriptContext, roomId: string): void {
         return;
     }
     if (env.client && ctx.client?.state) {
-        const rooms = ctx.client.state.rooms;
-        const target = ClientRooms.findRoomByRoomId(rooms, roomId);
+        const target = ClientRooms.findRoomByRoomId(ctx.client.state.rooms, roomId);
         if (!target) return;
         assertSameNamespace(callerNamespace(ctx), target.namespace, roomId);
-        ClientRooms.stopLocalRoom(rooms, roomId);
+        ClientRooms.stopLocalRoom(ctx.client.state, roomId);
         return;
     }
     throw new Error('[bongle] rooms.stop: ctx has neither server nor client');
@@ -212,14 +211,14 @@ export function view(
         const rt = target.scriptRuntime;
         return {
             mode: target.mode,
-            project: rt.project,
+            clock: target.clock,
             node: target.nodes.root,
             nodes: target.nodes,
             voxels: target.voxels,
             physics: target.physics,
             blocks: rt.blocks,
             client: undefined,
-            server: { state: ctx.server.state, room: target },
+            server: { state: ctx.server.state, room: target, gameOptions: ctx.server.gameOptions },
             _runtime: rt,
             _instance: ctx._instance,
             trait: ctx.trait,
@@ -240,7 +239,7 @@ export function view(
         const rt = target.scriptRuntime;
         return {
             mode: target.playerMode,
-            project: rt.project,
+            clock: target.clock,
             node: target.nodes.root,
             nodes: target.nodes,
             voxels: target.voxels,

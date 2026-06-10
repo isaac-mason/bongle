@@ -13,12 +13,12 @@
 // on the ground hit point), no orientation modes (always world-XZ
 // flat).
 //
-// Visibility flow per frame, per ShadowCasterTrait:
+// Visibility flow per frame, per ShadowCasterTrait (casters are few, so the
+// down-ray is the only gate — no frustum check):
 //   1. fetch the node's world-space position from TransformTrait
-//   2. if a covering BoundsTrait is off-screen → not visible
-//   3. else raycastVoxels straight down to trait.maxDistance; visible
-//      iff top-face hit (ny > 0.5)
-//   4. visible+no slot → alloc + write; visible+slot → write;
+//   2. raycastVoxels straight down to trait.maxDistance; visible iff
+//      top-face hit (ny > 0.5)
+//   3. visible+no slot → alloc + write; visible+slot → write;
 //      not visible+slot → free (swap-pop)
 
 import {
@@ -30,10 +30,9 @@ import {
     Mesh,
     type Scene,
 } from 'gpucat';
-import { BoundsTrait } from '../../builtins/bounds';
 import { ShadowCasterTrait } from '../../builtins/shadow-caster';
 import { TransformTrait } from '../../builtins/transform';
-import { getTrait, type Node, type Nodes, query } from '../../core/scene/nodes';
+import { type Nodes, query } from '../../core/scene/nodes';
 import { getVisualWorldMatrix } from '../../builtins/transform';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -65,7 +64,6 @@ export type ShadowVisualState = {
     /** -1 when the caster is currently invisible (no slot held). */
     slot: number;
     trait: ShadowCasterTrait;
-    bounds: BoundsTrait | null;
     lastSeenFrame: number;
 };
 
@@ -148,22 +146,11 @@ export function update(visuals: ShadowVisuals, voxels: Voxels, _camera: Camera):
         // lazily when the caster becomes visible.
         let state = trait._state;
         if (state === null) {
-            const bounds = findBoundsOnSelfOrAncestor(trait._node);
-            state = { slot: -1, trait, bounds, lastSeenFrame: frameId };
+            state = { slot: -1, trait, lastSeenFrame: frameId };
             trait._state = state;
             visuals.aliveStates.push(state);
         }
         state.lastSeenFrame = frameId;
-
-        // Bounds gate: if a covering BoundsTrait flipped this off-screen,
-        // free any held slot and skip the raycast.
-        if (state.bounds !== null && !state.bounds.visible) {
-            if (state.slot !== -1) {
-                freeSlot(visuals, state);
-                dirty = true;
-            }
-            continue;
-        }
 
         // raycast straight down from the caster's world position.
         const worldMat = getVisualWorldMatrix(transform);
@@ -225,16 +212,6 @@ export function dispose(visuals: ShadowVisuals): void {
 }
 
 // ── internals ───────────────────────────────────────────────────────
-
-function findBoundsOnSelfOrAncestor(node: Node): BoundsTrait | null {
-    let cur: Node | null = node;
-    while (cur) {
-        const b = getTrait(cur, BoundsTrait);
-        if (b !== undefined) return b;
-        cur = cur.parent;
-    }
-    return null;
-}
 
 /** swap-and-pop: move the last live slot into `state.slot`, shrink head. */
 function freeSlot(visuals: ShadowVisuals, state: ShadowVisualState): void {

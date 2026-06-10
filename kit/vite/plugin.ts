@@ -126,7 +126,7 @@
  *        boots an EngineClient against `virtual:bongle/user-src` and
  *        exposes a dumb RPC surface on `window.__bongle_worker`
  *        (`bootEngine`, `applyScene`, `clearScene`,
- *        `applyRegistryChanges`, `renderBlockIcons`/`renderPrefabIcons`/
+ *        `applyRegistryChanges`, `renderBlockIcons`/`renderPrefabIcon`/
  *        `renderSceneIcon`). It makes zero rendering decisions.
  *
  *      - **Orchestrator.** Node-side
@@ -155,7 +155,14 @@ import puppeteer from 'puppeteer';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { readArtifactHashSync } from '../cache';
 import { collectAssetSources, createPipelineState, runAssetPipelinePass } from '../asset-pipeline/pipeline';
-import { type IconKind, type IconManifest, writeIconArtifact, writeSceneIcon } from '../asset-pipeline/icons-write';
+import {
+    type IconKind,
+    type IconManifest,
+    PREFAB_ICONS,
+    SCENE_ICONS,
+    writeIconArtifact,
+    writePerIdIcon,
+} from '../asset-pipeline/icons-write';
 import * as Orchestrator from '../pipeline/orchestrator';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
 import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from './dep-resolve';
@@ -718,10 +725,13 @@ if (import.meta.hot) {
                 server.watcher.on('unlink', onAssetChange);
 
                 // POST /__bongle/pipeline/emit — worker submits icon results.
-                // Query params: kind=block-icons|prefab-icons|scene-icon, hash, (scene only: id, px).
-                // Header X-Manifest carries the sidecar JSON (block/prefab); body is raw RGBA.
-                // The orchestrator hash-gates render dispatch, so the worker only
-                // ever POSTs renders that need writing — no cached branch here.
+                // Query params: kind=block-icons|scene-icon|prefab-icon;
+                // per-id kinds also carry id, px.
+                // block-icons carries its sidecar JSON in the X-Manifest header
+                // (it's a packed atlas); scene-icon + prefab-icon are one PNG
+                // per subject. Body is raw RGBA either way. The orchestrator
+                // hash-gates render dispatch in-memory, so the worker only ever
+                // POSTs renders that need writing — no cached branch here.
                 server.middlewares.use('/__bongle/pipeline/emit', async (req, res) => {
                     if (req.method !== 'POST') {
                         res.statusCode = 405;
@@ -729,32 +739,32 @@ if (import.meta.hot) {
                         return;
                     }
                     const url = new URL(req.url ?? '/', 'http://localhost');
-                    const kind = url.searchParams.get('kind') as IconKind | 'scene-icon' | null;
-                    if (kind !== 'block-icons' && kind !== 'prefab-icons' && kind !== 'scene-icon') {
+                    const kind = url.searchParams.get('kind') as IconKind | 'scene-icon' | 'prefab-icon' | null;
+                    if (kind !== 'block-icons' && kind !== 'scene-icon' && kind !== 'prefab-icon') {
                         res.statusCode = 400;
-                        res.end('kind must be block-icons|prefab-icons|scene-icon');
+                        res.end('kind must be block-icons|scene-icon|prefab-icon');
                         return;
                     }
-                    if (kind === 'scene-icon') {
-                        const sceneId = url.searchParams.get('id');
-                        const hash = url.searchParams.get('hash');
+                    if (kind === 'scene-icon' || kind === 'prefab-icon') {
+                        const id = url.searchParams.get('id');
                         const pxSize = Number(url.searchParams.get('px') ?? '0');
-                        if (!sceneId || !hash || !pxSize) {
+                        if (!id || !pxSize) {
                             res.statusCode = 400;
-                            res.end('scene-icon requires id, hash, px params');
+                            res.end(`${kind} requires id, px params`);
                             return;
                         }
+                        const group = kind === 'scene-icon' ? SCENE_ICONS : PREFAB_ICONS;
                         const chunks: Buffer[] = [];
                         for await (const chunk of req) chunks.push(chunk as Buffer);
                         const body = Buffer.concat(chunks);
                         const pixels = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
                         try {
-                            await writeSceneIcon(resourcesDir, sceneId, hash, pxSize, pixels);
-                            server.environments.client?.hot.send('bongle:icons-ready', { kind, id: sceneId });
+                            await writePerIdIcon(resourcesDir, group, id, pxSize, pixels);
+                            server.environments.client?.hot.send('bongle:icons-ready', { kind, id });
                             res.statusCode = 204;
                             res.end();
                         } catch (err) {
-                            console.error(`[bongle:pipeline] write scene-icon failed:`, err);
+                            console.error(`[bongle:pipeline] write ${kind} failed:`, err);
                             res.statusCode = 500;
                             res.end(String(err));
                         }

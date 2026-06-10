@@ -9,8 +9,8 @@
 // raises/lowers are clamped to the column's footprint y range so the op
 // never escapes the user's stamp/selection.
 //
-// the brush variant accumulates a 3D Selection of stamps during drag
-// (mirrors `tools/brush.ts`) and commits once on release. the region
+// the brush variant accumulates a 3D Selection of stamps during drag (via the
+// shared `utils/brush` harness) and commits once on release. the region
 // command (`actions.smoothSelection`) shares `runSmooth()`.
 
 import type { ScriptContext } from '../../core/scene/scripts';
@@ -19,13 +19,20 @@ import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
-import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
 import type { Input } from '../../client/input';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import * as Selection from '../../core/scene/selection';
-import { buildShape } from '../scene/shapes';
 import { testMask, type Mask } from '../scene/mask';
 import type { VoxelOp } from '../blueprint';
+import { advanceBrushStroke, createBrushStrokeState, type BrushStrokeState } from './utils/brush';
+
+// per-room state contract. the shared stroke harness is nested under `brush`
+// so a smooth-specific field can be added later as a sibling (no intersection,
+// no churn) without the parent EditorScript having to know.
+export type SmoothState = { brush: BrushStrokeState };
+export function createSmoothState(): SmoothState {
+    return { brush: createBrushStrokeState() };
+}
 
 const OPS_PER_PACKET = 4096;
 
@@ -50,32 +57,6 @@ const KERNEL = new Float32Array([
     1, 4, 6, 4, 1,
 ]);
 
-// ── stroke state (brush variant) ───────────────────────────────────
-
-/** per-room smooth stroke state. created once per edit room in EditorScript
- *  onInit and threaded into `updateSmooth` — never module-scoped, so two
- *  joined rooms can't share one stroke flag. */
-export type SmoothState = {
-    active: boolean;
-    lastCenter: [number, number, number] | null;
-    previewKey: string;
-};
-
-export function createSmoothState(): SmoothState {
-    return { active: false, lastCenter: null, previewKey: '' };
-}
-
-const STAMP_SCRATCH: Selection.Selection = Selection.create();
-
-function previewKeyFor(
-    center: [number, number, number],
-    shape: string,
-    size: number,
-    height: number,
-): string {
-    return `${center[0]},${center[1]},${center[2]}|${shape}|${size}|${height}`;
-}
-
 // ── per-frame update ───────────────────────────────────────────────
 
 export function updateSmooth(
@@ -86,95 +67,21 @@ export function updateSmooth(
     input: Input,
     voxels: Voxels,
 ): void {
-    const justDown = pointerJustDown(pointer, input);
-    const held = pointerHeld(pointer, input);
-    const justUp = pointerJustUp(pointer, input);
-    const cancel = pointerJustRight(input);
-    const s = store.getState();
-    const { shape, size, height, iterations, heightmapMask } = s.smoothOptions;
-    const hv = s.hoverVoxel;
-
-    // ── right-click cancel ──
-    // discard the accumulated stamp Selection without committing; the
-    // release branch is gated on state.active so it won't fire when LMB
-    // eventually releases.
-    if (state.active && cancel) {
-        state.active = false;
-        state.lastCenter = null;
-        state.previewKey = '';
-        store.setState({ brush: null });
-        return;
-    }
-
-    // ── stroke start ──
-    if (justDown && !state.active) {
-        state.active = true;
-        state.lastCenter = null;
-        const sel = Selection.create();
-        if (hv) {
-            buildShape(sel, shape, hv[0], hv[1], hv[2], size, height);
-            state.lastCenter = [hv[0], hv[1], hv[2]];
+    advanceBrushStroke(state.brush, store, pointer, input, store.getState().smoothOptions, (accumulated) => {
+        const { iterations, heightmapMask } = store.getState().smoothOptions;
+        const { forward, reverse } = runSmooth(voxels, accumulated, iterations, heightmapMask);
+        if (forward.length > 0) {
+            store.getState().action({
+                label: 'smooth',
+                do() {
+                    sendOps(ctx, forward);
+                },
+                undo() {
+                    sendOps(ctx, reverse);
+                },
+            });
         }
-        store.setState({ brush: sel });
-        state.previewKey = '';
-    }
-
-    // ── drag: OR each new centre's stamp into the accumulator ──
-    if (state.active && held && hv) {
-        const sameAsLast =
-            state.lastCenter !== null &&
-            state.lastCenter[0] === hv[0] &&
-            state.lastCenter[1] === hv[1] &&
-            state.lastCenter[2] === hv[2];
-        if (!sameAsLast) {
-            state.lastCenter = [hv[0], hv[1], hv[2]];
-            const prev = store.getState().brush;
-            const next = prev ? Selection.clone(prev) : Selection.create();
-            STAMP_SCRATCH.chunks.clear();
-            STAMP_SCRATCH.nodes.clear();
-            buildShape(STAMP_SCRATCH, shape, hv[0], hv[1], hv[2], size, height);
-            Selection.merge(next, STAMP_SCRATCH);
-            store.setState({ brush: next });
-        }
-    }
-
-    // ── release: commit ──
-    if (state.active && (justUp || !held)) {
-        const accumulated = store.getState().brush;
-        if (accumulated && !Selection.isEmpty(accumulated)) {
-            const { forward, reverse } = runSmooth(voxels, accumulated, iterations, heightmapMask);
-            if (forward.length > 0) {
-                store.getState().action({
-                    label: 'smooth',
-                    do() {
-                        sendOps(ctx, forward);
-                    },
-                    undo() {
-                        sendOps(ctx, reverse);
-                    },
-                });
-            }
-        }
-        state.active = false;
-        state.lastCenter = null;
-        state.previewKey = '';
-    }
-
-    // ── idle: shape-at-hover preview ──
-    if (!state.active) {
-        if (hv) {
-            const key = previewKeyFor(hv, shape, size, height);
-            if (key !== state.previewKey) {
-                state.previewKey = key;
-                const sel = Selection.create();
-                buildShape(sel, shape, hv[0], hv[1], hv[2], size, height);
-                store.setState({ brush: sel });
-            }
-        } else if (state.previewKey !== '') {
-            state.previewKey = '';
-            store.setState({ brush: null });
-        }
-    }
+    });
 }
 
 // ── shared core ────────────────────────────────────────────────────

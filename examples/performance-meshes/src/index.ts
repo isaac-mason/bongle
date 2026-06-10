@@ -52,7 +52,7 @@ script(
             for (let y = 0; y < N; y++) {
                 for (let z = 0; z < N; z++) {
                     for (let x = 0; x < N; x++) {
-                        const mesh = cloneModel(SparkModel.scene, { aabb: SparkModel.aabb });
+                        const mesh = cloneModel(SparkModel.scene);
                         mesh.name = `spark-${x}-${y}-${z}`;
                         mesh.persist = false;
                         const transform = addTrait(mesh, TransformTrait);

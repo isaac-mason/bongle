@@ -178,10 +178,12 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         process.exit(1);
     }
 
-    // cold-start wipes: artifacts whose sidecar JSON doubles as a rebuild
-    // cache marker. The pipeline's hash gates short-circuit on cache hit;
-    // wiping ensures the first run does a full render. Models are skipped
-    // — their bins are content-addressed with their own per-id cache + GC.
+    // cold-start wipes. The block atlas's sidecar JSON doubles as a rebuild
+    // cache marker; wiping ensures the first run does a full render. Models
+    // are skipped — content-addressed with their own per-id cache + GC.
+    // The trailing three are dead artifacts: prefab icons moved to per-file
+    // PNGs under prefabs/, and the scene/prefab hash sidecars are gone (render
+    // gating is in-memory). Unlink the orphans so they don't linger.
     const resourcesClientDir = path.join(resolvedProjectDir, 'resources', 'client');
     const coldStartWipes = [
         path.join(resourcesClientDir, 'voxels-atlas.json'),
@@ -190,6 +192,7 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         path.join(resourcesClientDir, 'voxels-icons.png'),
         path.join(resourcesClientDir, 'prefabs-icons.json'),
         path.join(resourcesClientDir, 'prefabs-icons.png'),
+        path.join(resourcesClientDir, 'scenes-icons.json'),
     ];
     for (const f of coldStartWipes) {
         try { fs.unlinkSync(f); } catch { /* missing is fine */ }

@@ -92,7 +92,8 @@ export const SpriteTrait = trait('sprite', {
 
     /** renderer-internal allocation state; populated lazily by `SpriteVisuals`
      *  on first sight, cleared on dispose. fast-path lookup avoids a per-frame
-     *  Map probe. mirrors `MeshTrait._state`'s pattern. */
+     *  Map probe. mirrors `MeshTrait._state`'s pattern. includes the
+     *  frustum-cull entry (see `SpriteVisualState.cull`). */
     _state: null as SpriteVisualState | null,
 });
 

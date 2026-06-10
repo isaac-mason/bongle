@@ -118,7 +118,7 @@ script(ExampleTrait, 'demo', (ctx) => {
         // the audio coordinator. clone the spark gltf so the source has
         // a visual you can track as it orbits. attach as a child of the
         // root so it shares the scene's lifecycle but not a player's.
-        orbiterNode = cloneModel(models.spark.scene, { aabb: models.spark.aabb });
+        orbiterNode = cloneModel(models.spark.scene);
         orbiterNode.name = 'orbiter';
         orbiterNode.persist = false;
         const t = addTrait(orbiterNode, TransformTrait);

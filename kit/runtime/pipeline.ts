@@ -15,7 +15,7 @@
 
 import { env } from 'bongle';
 import { EngineClient } from 'bongle/engine-client';
-import { runBlockIcons, runPrefabIcons, runSceneIcon } from 'bongle/offline-renderer';
+import { runBlockIcons, runPrefabIcon, runSceneIcon } from 'bongle/offline-renderer';
 import { __kit, type ScenePayload } from 'bongle/internal';
 import type { WorkerApi } from '../pipeline/worker-api';
 
@@ -75,16 +75,16 @@ export async function start(opts: StartOptions) {
             await emitIconAtlas('block-icons', hash, result);
         },
 
-        async renderPrefabIcons(hash: string) {
-            if (!state) throw new Error('[pipeline] renderPrefabIcons before bootEngine');
-            const result = await runPrefabIcons(state);
-            await emitIconAtlas('prefab-icons', hash, result);
+        async renderPrefabIcon(id: string) {
+            if (!state) throw new Error('[pipeline] renderPrefabIcon before bootEngine');
+            const result = await runPrefabIcon(state, id);
+            await emitPerIdIcon('prefab-icon', id, result.pxSize, result.pixels);
         },
 
-        async renderSceneIcon(id: string, hash: string) {
+        async renderSceneIcon(id: string) {
             if (!state) throw new Error('[pipeline] renderSceneIcon before bootEngine');
             const result = await runSceneIcon(state, id);
-            await emitSceneIcon(id, hash, result.pxSize, result.pixels);
+            await emitPerIdIcon('scene-icon', id, result.pxSize, result.pixels);
         },
     };
 
@@ -102,7 +102,7 @@ type IconAtlasResult = {
     rows: number;
 };
 
-async function emitIconAtlas(kind: 'block-icons' | 'prefab-icons', hash: string, artifact: IconAtlasResult) {
+async function emitIconAtlas(kind: 'block-icons', hash: string, artifact: IconAtlasResult) {
     const headers: Record<string, string> = {
         'Content-Type': 'application/octet-stream',
         'X-Manifest': JSON.stringify({
@@ -119,10 +119,15 @@ async function emitIconAtlas(kind: 'block-icons' | 'prefab-icons', hash: string,
     await fetch('/__bongle/pipeline/emit?kind=' + kind, { method: 'POST', headers, body });
 }
 
-async function emitSceneIcon(id: string, hash: string, pxSize: number, pixels: Uint8Array): Promise<void> {
+async function emitPerIdIcon(
+    kind: 'scene-icon' | 'prefab-icon',
+    id: string,
+    pxSize: number,
+    pixels: Uint8Array,
+): Promise<void> {
     const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
     const body = pixelsToArrayBuffer(pixels);
-    const q = '?kind=scene-icon&id=' + encodeURIComponent(id) + '&hash=' + encodeURIComponent(hash) + '&px=' + pxSize;
+    const q = '?kind=' + kind + '&id=' + encodeURIComponent(id) + '&px=' + pxSize;
     await fetch('/__bongle/pipeline/emit' + q, { method: 'POST', headers, body });
 }
 

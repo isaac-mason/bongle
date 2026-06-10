@@ -45,6 +45,12 @@ export { __kit } from './kit';
 
 export type { ScenePayload } from './core/content/scene-store';
 export type { SceneHandle } from './core/scene/scene-handle';
+export { extractScenePrefabDeps } from './core/scene/scene-handle';
+
+// dependency graph — on-demand reads for tooling that walks a consumer's
+// closure itself (e.g. the offline icon pipeline's selective re-render gating).
+export type { DepKey } from './core/capture/dep-graph';
+export { directProducersOf } from './core/capture/dep-graph';
 
 // block registry builder — pure data computation that takes the raw
 // BlockDef / BlockHandle / BlockTextureDef maps and produces the flat

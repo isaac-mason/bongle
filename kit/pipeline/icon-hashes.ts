@@ -9,21 +9,15 @@
 
 import { createHash } from 'node:crypto';
 import type { PipelineInternal } from '../asset-pipeline/pipeline';
+import { closureVersionDigest, iconDepClosure } from './icon-deps';
 
 const BLOCK_HASH_VERSION = 4;
-const PREFAB_HASH_VERSION = 3;
-const SCENE_HASH_VERSION = 3;
+const PREFAB_HASH_VERSION = 4;
+const SCENE_HASH_VERSION = 4;
 
 const BLOCK_ICON_PX = 128;
 const PREFAB_ICON_PX = 256;
 const SCENE_ICON_PX = 256;
-
-/** djb2 of Function.prototype.toString — same shape the previous
- *  per-task hash relied on for `prefab.apply` body. Not cryptographic; we
- *  just need a stable string the hash mixes in. */
-function fnToHashable(fn: unknown): string {
-    return typeof fn === 'function' ? fn.toString() : String(fn);
-}
 
 function sha256Json(input: unknown): string {
     return createHash('sha256').update(JSON.stringify(input, stableReplacer)).digest('hex');
@@ -78,37 +72,43 @@ export function computeBlockIconsHash(internal: PipelineInternal, atlasHash: str
     });
 }
 
-export function computePrefabIconsHash(internal: PipelineInternal, atlasHash: string | null): string {
-    const reg = internal.registry.blockRegistry;
-    const prefabs = Array.from(internal.registry.prefabs.byId.values())
-        .map((h) => h.payload)
-        .sort((a, b) => a.id.localeCompare(b.id));
-    return sha256Json({
-        v: PREFAB_HASH_VERSION,
-        PREFAB_ICON_PX,
-        atlasHash,
-        registry: blockRegistrySlice(reg),
-        prefabs: prefabs.map((p) => ({
-            id: p.id,
-            deps: p.deps.map((d) => `${d.registry}:${d.id}`),
-            type: p.type,
-            argsDefault: p.args?.default ?? null,
-            node: p.node ?? null,
-            apply: fnToHashable(p.apply),
-        })),
-        scenes: Array.from(internal.registry.scenes.byId.entries())
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([id, h]) => ({ id, version: h.payload.version })),
-        models: modelsSlice(internal),
+/** Per-prefab icon hashes (one PNG per prefab). Each prefab's hash is a pure
+ *  function of its own registry `version` plus the versions of its transitive
+ *  dependency closure (other prefabs/scenes it pulls in — see icon-deps), so
+ *  editing one prefab re-renders only the icons that actually depend on it.
+ *  Block + model inputs stay coarse (atlasHash / registry slice / modelsSlice):
+ *  a block-atlas or model edit re-renders all icons. */
+export function computePrefabIconHashes(
+    internal: PipelineInternal,
+    atlasHash: string | null,
+): Array<{ id: string; hash: string }> {
+    const registry = blockRegistrySlice(internal.registry.blockRegistry);
+    const models = modelsSlice(internal);
+    const prefabs = Array.from(internal.registry.prefabs.byId.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return prefabs.map(([id, handle]) => {
+        const closure = iconDepClosure(internal, { registry: 'prefabs', id });
+        const hash = sha256Json({
+            v: PREFAB_HASH_VERSION,
+            PREFAB_ICON_PX,
+            id,
+            atlasHash,
+            registry,
+            selfVersion: handle.version,
+            closure: closureVersionDigest(internal, closure),
+            models,
+        });
+        return { id, hash };
     });
 }
 
-/** Pure function of `(diskCorpus, atlasHash, blockRegistrySlice, models)`.
- *  Disk is the source of truth for which scenes exist — the gameServer's
- *  `registry.scenes` is a derived view that only catches up to new
- *  filesystem-discovered blueprints once the codegen barrel re-emits.
- *  Routing icons through it would race that codegen, so we walk disk
- *  directly (corpus comes from `scanScenes` in the orchestrator). */
+/** Per-scene icon hashes. Self-identity is the disk `bytesHash` (the gameServer
+ *  `registry.scenes` is a derived view that lags codegen for new
+ *  filesystem-discovered blueprints, so disk stays the source of truth for
+ *  *which* scenes exist + their authored bytes — corpus comes from `scanScenes`
+ *  in the orchestrator). On top of that we fold in the scene's transitive
+ *  dependency closure (the prefabs it embeds + their deps — see icon-deps), so
+ *  editing an embedded prefab re-renders the scene icon even though its bytes
+ *  didn't move. Block + model inputs stay coarse. */
 export function computeSceneIconHashes(
     internal: PipelineInternal,
     atlasHash: string | null,
@@ -126,6 +126,7 @@ export function computeSceneIconHashes(
     const models = modelsSlice(internal);
     const out: Array<{ id: string; hash: string }> = [];
     for (const { id, bytesHash } of corpus) {
+        const closure = iconDepClosure(internal, { registry: 'scenes', id });
         const hash = sha256Json({
             v: SCENE_HASH_VERSION,
             SCENE_ICON_PX,
@@ -133,6 +134,7 @@ export function computeSceneIconHashes(
             atlasHash,
             bytesHash,
             registry: sceneRegistrySlice,
+            closure: closureVersionDigest(internal, closure),
             models,
         });
         out.push({ id, hash });

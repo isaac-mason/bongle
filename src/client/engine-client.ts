@@ -617,7 +617,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     Nodes.initSceneGraph(room.nodes);
 
     if (existing) {
-        Rooms.disposeRoom(existing);
+        Rooms.disposeRoom(state, existing);
     }
 
     // add to rooms map (additive — replaces if already present). does NOT
@@ -637,7 +637,7 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
     const leavingRoom = state.rooms.rooms.get(message.playerId);
 
     if (leavingRoom) {
-        Rooms.disposeRoom(leavingRoom);
+        Rooms.disposeRoom(state, leavingRoom);
     }
 
     // remove the room from our state
@@ -1143,15 +1143,16 @@ export function update(state: EngineClient, delta: number) {
         Renderer.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
         if (!controlCamera) continue;
 
-        // visibility cull with fresh camera + rig-root transforms. The
-        // ModelTrait envelope is conservative across all clips, so cull is
-        // animator-pose-independent — no need to wait for Animation.tick.
-        // `model.visible` published here is read by Animation.tick (per-rig
-        // gate), ModelLighting.update (per-rig light sample gate), and
-        // ModelVisuals (per-instance upload gate) downstream.
-        // shared view radius across chunk mesher (cullCPU) and BoundsTrait
-        // visibility — same Euclidean sphere so a sprite/rig fades at the
-        // same boundary the chunks it sits on do.
+        // per-mesh frustum cull with the fresh camera. Refits each renderable
+        // cull entry from this frame's transforms and writes `cull.visible`,
+        // read downstream by Animation.tick (per-rig gate, folding its
+        // meshes), ModelLighting.update (per-model light-sample gate), and the
+        // mesh/sprite/voxel renderers (per-instance upload gate). Runs before
+        // Animation.tick: the meshes' transforms reflect last frame's pose,
+        // which the fat-AABB margin absorbs.
+        // shared view radius across the chunk mesher (cullCPU) and frustum
+        // cull — same Euclidean sphere so a sprite/rig fades at the same
+        // boundary the chunks it sits on do.
         Debug.begin(room.clientMetrics, 'visibility');
         Visibility.update(room.visibility, controlCamera, perfSettings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
         Debug.end(room.clientMetrics, 'visibility');
@@ -1213,11 +1214,11 @@ export function update(state: EngineClient, delta: number) {
         }
 
         Debug.begin(room.clientMetrics, 'voxel-mesh');
-        VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels);
+        VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels, room.visibility);
         Debug.end(room.clientMetrics, 'voxel-mesh');
 
         Debug.begin(room.clientMetrics, 'model');
-        ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources);
+        ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
         Debug.end(room.clientMetrics, 'model');
 
         Debug.begin(room.clientMetrics, 'dom-ui');
@@ -1225,11 +1226,11 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'dom-ui');
 
         Debug.begin(room.clientMetrics, 'sprite');
-        SpriteVisuals.update(room.spriteVisuals, room.voxels, controlCamera);
+        SpriteVisuals.update(room.spriteVisuals, state.spriteResources, room.voxels, controlCamera, room.visibility);
         Debug.end(room.clientMetrics, 'sprite');
 
         Debug.begin(room.clientMetrics, 'extruded-sprite');
-        ExtrudedSpriteVisuals.update(room.extrudedSpriteVisuals, room.voxels);
+        ExtrudedSpriteVisuals.update(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.voxels, room.visibility);
         Debug.end(room.clientMetrics, 'extruded-sprite');
 
         Debug.begin(room.clientMetrics, 'shadow');
@@ -1326,7 +1327,7 @@ export function update(state: EngineClient, delta: number) {
 
 export function dispose(state: EngineClient): void {
     for (const room of state.rooms.rooms.values()) {
-        Rooms.disposeRoom(room);
+        Rooms.disposeRoom(state, room);
     }
     state.rooms.rooms.clear();
     state.rooms.activePlayerId = null;

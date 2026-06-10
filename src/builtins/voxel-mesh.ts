@@ -79,7 +79,8 @@ export const VoxelMeshTrait = trait('voxel-mesh', {
      */
     visible: true,
 
-    /** renderer-internal allocation state */
+    /** renderer-internal allocation state (includes the frustum-cull entry —
+     *  see `VoxelMeshState.cull`). */
     _state: null as VoxelMeshState | null,
 }, { persist: false });
 

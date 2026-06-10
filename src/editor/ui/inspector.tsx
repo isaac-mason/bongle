@@ -9,6 +9,7 @@ import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/pro
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
 import { registry } from '../../core/registry';
+import { assetUrl } from '../../client/asset-url';
 import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
 import * as Selection from '../../core/scene/selection';
@@ -540,35 +541,28 @@ function NodeRefEditor({ value, schema, onChange }: { value: string; schema: Nod
 
 function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRefSchema; onChange: (v: string) => void }) {
     const room = useEditor((s) => s.room);
-    const prefabIconAtlasUrl = useEditor((s) => s.prefabIconAtlasUrl);
-    const prefabIconCoords = useEditor((s) => s.prefabIconCoords);
-    const prefabIconPx = useEditor((s) => s.prefabIconPx);
-    const prefabIconCols = useEditor((s) => s.prefabIconCols);
     if (!room) return null;
     const prefabDefs = registry.prefabs.byId;
     const ids = Array.from(prefabDefs.keys()).sort();
     const thumbSize = 16;
-    const hasAtlas = prefabIconAtlasUrl && prefabIconPx > 0 && prefabIconCols > 0;
     const items: SearchableSelectItem<string>[] = [
         { id: '', label: 'none' },
         ...ids.map((id) => {
             const def = prefabDefs.get(id)?.payload;
             const name = def?.name ?? id;
-            const coord = prefabIconCoords[id];
-            const leading =
-                hasAtlas && coord ? (
-                    <div
-                        key={id}
-                        className="rounded-sm overflow-hidden shrink-0"
-                        style={{
-                            width: thumbSize,
-                            height: thumbSize,
-                            backgroundImage: `url(${prefabIconAtlasUrl})`,
-                            backgroundPosition: `-${coord[0] * thumbSize}px -${coord[1] * thumbSize}px`,
-                            backgroundSize: `${prefabIconCols * thumbSize}px auto`,
-                        }}
-                    />
-                ) : null;
+            const leading = (
+                <div
+                    key={id}
+                    className="rounded-sm overflow-hidden shrink-0"
+                    style={{
+                        width: thumbSize,
+                        height: thumbSize,
+                        backgroundImage: `url(${assetUrl('prefabs/' + id + '.icon.png')})`,
+                        backgroundSize: `${thumbSize}px ${thumbSize}px`,
+                        backgroundRepeat: 'no-repeat',
+                    }}
+                />
+            );
             return { id, label: name, sublabel: name === id ? undefined : id, leading };
         }),
     ];
@@ -922,10 +916,6 @@ AddPrefabTriggerButton.displayName = 'AddPrefabTriggerButton';
 function AddPrefabAction({ node }: { node: Node }) {
     const room = useEditor((s) => s.room);
     const setPrefab = useEditRoom((s) => s.setPrefab);
-    const prefabIconAtlasUrl = useEditor((s) => s.prefabIconAtlasUrl);
-    const prefabIconCoords = useEditor((s) => s.prefabIconCoords);
-    const prefabIconPx = useEditor((s) => s.prefabIconPx);
-    const prefabIconCols = useEditor((s) => s.prefabIconCols);
 
     const prefabDefs = room ? registry.prefabs.byId : null;
     const prefabIds = prefabDefs ? Array.from(prefabDefs.keys()).sort() : [];
@@ -933,23 +923,20 @@ function AddPrefabAction({ node }: { node: Node }) {
     if (node.prefab || prefabIds.length === 0) return null;
 
     const thumbSize = 24;
-    const hasAtlas = prefabIconAtlasUrl && prefabIconPx > 0 && prefabIconCols > 0;
     const items: SearchableSelectItem<string>[] = prefabIds.map((id) => {
-        const coord = prefabIconCoords[id];
-        const leading =
-            hasAtlas && coord ? (
-                <div
-                    key={id}
-                    className="rounded-sm overflow-hidden shrink-0"
-                    style={{
-                        width: thumbSize,
-                        height: thumbSize,
-                        backgroundImage: `url(${prefabIconAtlasUrl})`,
-                        backgroundPosition: `-${coord[0] * thumbSize}px -${coord[1] * thumbSize}px`,
-                        backgroundSize: `${prefabIconCols * thumbSize}px auto`,
-                    }}
-                />
-            ) : null;
+        const leading = (
+            <div
+                key={id}
+                className="rounded-sm overflow-hidden shrink-0"
+                style={{
+                    width: thumbSize,
+                    height: thumbSize,
+                    backgroundImage: `url(${assetUrl('prefabs/' + id + '.icon.png')})`,
+                    backgroundSize: `${thumbSize}px ${thumbSize}px`,
+                    backgroundRepeat: 'no-repeat',
+                }}
+            />
+        );
         return { id, label: id, leading };
     });
 

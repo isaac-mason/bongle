@@ -78,7 +78,8 @@ export const MeshTrait = trait('mesh', {
      */
     _version: 0,
 
-    /** renderer-internal allocation state */
+    /** renderer-internal allocation state (includes the frustum-cull entry —
+     *  see `MeshVisualState.cull`). */
     _state: null as MeshVisualState | null,
 });
 
