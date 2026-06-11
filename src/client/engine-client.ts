@@ -195,6 +195,11 @@ export function init(opts: InitOptions) {
         /** last value sent in `debug_subscribe` — re-sent only on edge
          *  transitions, not every frame. */
         debugLogsSubscribed: false,
+        /** true while a portal ad (commercial/rewarded break) is showing. Set
+         *  by `api/platform`; the update loop reconciles audio output mute
+         *  against it each frame, so the game is silenced during ads with no
+         *  game code involved. */
+        adActive: false,
     };
 }
 
@@ -1036,6 +1041,11 @@ export function update(state: EngineClient, delta: number) {
 
     /* process inbox */
     processInbox(state);
+
+    // reconcile audio output mute with ad state — the game is silenced while a
+    // portal ad shows (flag set by api/platform). cheap: setOutputMuted no-ops
+    // unless the value changed.
+    if (state.audioResources) Audio.setOutputMuted(state.audioResources, state.adActive);
 
     const activeRoom = Rooms.getActiveRoom(state.rooms);
 

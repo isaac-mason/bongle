@@ -4,6 +4,7 @@ import path from 'node:path';
 import archiver from 'archiver';
 import tailwindcss from '@tailwindcss/vite';
 import { build as viteBuild } from 'vite';
+import { excludeEditorIcons } from './asset-pipeline/icons-write';
 import { createPipelineState, type PipelineInternal, runAssetPipelinePass } from './asset-pipeline/pipeline';
 import { resolveEngineRoot } from './asset-pipeline/run';
 import { captureImportPlugin } from './capture-import-plugin';
@@ -230,7 +231,12 @@ export async function build(projectDir: string) {
         fs.cpSync(projectResourcesServerDir, path.join(distDir, 'server', 'resources'), { recursive: true });
     }
     if (fs.existsSync(projectResourcesClientDir)) {
-        fs.cpSync(projectResourcesClientDir, path.join(distDir, 'client'), { recursive: true });
+        // exclude editor-only per-id icon dirs (scenes/, prefabs/); keep the
+        // block-icon atlas + all real runtime assets.
+        fs.cpSync(projectResourcesClientDir, path.join(distDir, 'client'), {
+            recursive: true,
+            filter: excludeEditorIcons(projectResourcesClientDir),
+        });
     }
 
     // Full bundle manifest — written AFTER both targets emit so we can

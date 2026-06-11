@@ -52,7 +52,6 @@ import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
 import { TransformTrait } from '../../builtins/transform';
-import { type CullState, createCullState } from '../../core/scene/cull';
 import { getTrait, type Nodes, query } from '../../core/scene/nodes';
 import { getVisualWorldMatrix } from '../../builtins/transform';
 import * as Visibility from '../visibility';
@@ -112,7 +111,7 @@ export type ExtrudedSpriteVisualState = {
     trait: ExtrudedSpriteMeshTrait;
     /** this instance's own frustum-cull entry — registered with the shared
      *  Visibility culler at install, which writes `cull.visible` each frame. */
-    cull: CullState;
+    cull: Visibility.CullState;
     /** sprite id observed at install — re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
@@ -302,9 +301,7 @@ export function update(
         const hx = geomSlot.pixelWidth * 0.5 * sx;
         const hy = geomSlot.pixelHeight * 0.5 * sy;
         const hz = 0.5 * sz;
-        const cull = createCullState();
-        box3.set(cull.aabb, -hx, -hy, -hz, hx, hy, hz);
-        cull.version = 1;
+        const cull = Visibility.add(visibility, box3.set(box3.create(), -hx, -hy, -hz, hx, hy, hz), transform);
 
         const state: ExtrudedSpriteVisualState = {
             slot,
@@ -318,7 +315,6 @@ export function update(
         };
         trait._state = state;
         visuals.aliveStates.push(state);
-        Visibility.register(visibility, cull, transform);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
@@ -474,7 +470,7 @@ function destroyInstance(
     const state = trait._state;
     if (state === null) return;
 
-    Visibility.unregister(visibility, state.cull);
+    Visibility.remove(visibility, state.cull);
     freeOne(visuals.instanceAllocator, state.slot);
     releaseGeometry(resources, state.spriteIdAtInstall);
 

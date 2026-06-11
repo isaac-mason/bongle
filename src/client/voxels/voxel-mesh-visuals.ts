@@ -40,13 +40,12 @@ import {
     Geometry,
     packTo,
 } from 'gpucat';
-import { box3, type Vec3, vec3 } from 'mathcat';
+import { type Box3, box3, type Vec3, vec3 } from 'mathcat';
 
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import { getVisualWorldMatrix } from '../../api/transforms';
-import { type CullState, createCullState } from '../../core/scene/cull';
 import { buildMeshInput, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Node, Nodes } from '../../core/scene/nodes';
@@ -136,7 +135,7 @@ export type VoxelMeshState = {
     /** this instance's own frustum-cull entry — registered with the shared
      *  Visibility culler at alloc, seeded from the VoxelModel's local AABB.
      *  The culler writes `cull.visible`. */
-    cull: CullState;
+    cull: Visibility.CullState;
     /** optional ModelTrait ancestor used as a shared-light home. mirrors
      *  model-visuals: present ⇒ read model.light, absent ⇒ sample voxel
      *  light at the instance origin. fed into the shader as a floor on the
@@ -322,10 +321,9 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
         const node = vmTrait._node;
         const modelAncestor = findModelAncestor(node);
 
-        // own frustum-cull box from the VoxelModel's local AABB
+        // register with a cull box from the VoxelModel's local AABB
         // (boundsMin/Max − origin, the space the mesh is baked in).
-        const cull = createCullState();
-        seedVoxelCullAabb(cull, model);
+        const cull = Visibility.add(visibility, voxelLocalAabb(box3.create(), model), transformTrait);
 
         state = {
             slot,
@@ -339,7 +337,6 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
         };
         vmTrait._state = state;
         visuals.aliveStates.push(state);
-        Visibility.register(visibility, cull, transformTrait);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
@@ -530,7 +527,7 @@ function destroyInstance(visuals: VoxelMeshVisuals, trait: VoxelMeshTrait, visib
     const state = trait._state;
     if (state === null) return;
 
-    Visibility.unregister(visibility, state.cull);
+    Visibility.remove(visibility, state.cull);
     const slot = state.slot;
     // zero per-slot params so a reused slot doesn't briefly inherit
     // stale tint/light before the first write lands.
@@ -648,14 +645,14 @@ function bakeModel(visuals: VoxelMeshVisuals, model: VoxelModel): SourceChunkAll
 
 // ── cull box helper ─────────────────────────────────────────────────
 
-/** seed a cull entry's local AABB from the VoxelModel's local AABB
- *  (boundsMin/Max − origin, the space the mesh is baked in). */
-function seedVoxelCullAabb(cull: CullState, model: VoxelModel): void {
+/** write the VoxelModel's local AABB (boundsMin/Max − origin, the space the
+ *  mesh is baked in) into `out` and return it. */
+function voxelLocalAabb(out: Box3, model: VoxelModel): Box3 {
     const ox = model.origin[0];
     const oy = model.origin[1];
     const oz = model.origin[2];
-    box3.set(
-        cull.aabb,
+    return box3.set(
+        out,
         model.boundsMin[0] - ox,
         model.boundsMin[1] - oy,
         model.boundsMin[2] - oz,
@@ -663,7 +660,6 @@ function seedVoxelCullAabb(cull: CullState, model: VoxelModel): void {
         model.boundsMax[1] - oy,
         model.boundsMax[2] - oz,
     );
-    cull.version = 1;
 }
 
 function findModelAncestor(node: Node): ModelTrait | null {

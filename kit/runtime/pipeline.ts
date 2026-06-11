@@ -50,6 +50,14 @@ export async function start(opts: StartOptions) {
                     matchmake() {
                         throw new Error('[pipeline] driver.matchmake invoked on pipeline page — wiring bug');
                     },
+                    platform: {
+                        commercialBreak() {
+                            throw new Error('[pipeline] driver.platform invoked on pipeline page — wiring bug');
+                        },
+                        rewardedBreak() {
+                            throw new Error('[pipeline] driver.platform invoked on pipeline page — wiring bug');
+                        },
+                    },
                 },
             });
             __kit.pipeline();

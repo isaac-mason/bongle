@@ -41,7 +41,6 @@ import { box3 } from 'mathcat';
 import { TransformTrait } from '../../builtins/transform';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
-import { type CullState, createCullState } from '../../core/scene/cull';
 import { ModelTrait } from '../../builtins/model';
 import * as Visibility from '../visibility';
 import { env } from '../../api/env';
@@ -137,7 +136,7 @@ export type MeshVisualState = {
      *  culler owns the leaf and writes `cull.visible`, which the per-frame
      *  loop reads to gate inclusion in the per-mesh buckets. Registered at
      *  alloc, unregistered on destroy. */
-    cull: CullState;
+    cull: Visibility.CullState;
     /** nearest `ModelTrait` ancestor (shared light slot for the rig).
      *  Required at alloc time — without it there's no light source for
      *  the params upload (the engine no longer falls back to per-mesh
@@ -355,17 +354,13 @@ export function update(
         }
         const transform = getTrait(meshTrait._node, TransformTrait)!;
 
-        // seed this mesh's cull box from the handle's bind-pose AABB, then
-        // register it with the shared culler. world AABB = this box × the
-        // mesh node's world matrix — exact even mid-animation (TRS only, no
-        // skinning), so per-mesh culling is correct.
-        const cull = createCullState();
+        // register this mesh with the shared culler, seeded from the handle's
+        // bind-pose AABB. world AABB = that box × the mesh node's world matrix
+        // — exact even mid-animation (TRS only, no skinning), so per-mesh
+        // culling is correct.
         const handle = resources.models.get(meshId.modelId)?.handle;
         const meshEntry = handle?.meshes[meshId.meshName];
-        if (meshEntry) {
-            box3.copy(cull.aabb, meshEntry.aabb);
-            cull.version = 1;
-        }
+        const cull = Visibility.add(visibility, meshEntry?.aabb ?? box3.create(), transform);
 
         state = {
             slot,
@@ -386,7 +381,6 @@ export function update(
         };
         meshTrait._state = state;
         visuals.aliveStates.push(state);
-        Visibility.register(visibility, cull, transform);
     }
 
     // ── phase 2: cleanup stale states ───────────────────────────────
@@ -634,7 +628,7 @@ export function dispose(visuals: ModelVisuals, visibility: Visibility.Visibility
 function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Visibility.Visibility): void {
     const state = trait._state as MeshVisualState | null;
     if (state === null) return;
-    Visibility.unregister(visibility, state.cull);
+    Visibility.remove(visibility, state.cull);
     const slot = state.slot;
 
     // zero per-slot params so a reused slot doesn't briefly inherit

@@ -40,7 +40,6 @@ import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { SpriteTrait } from '../../builtins/sprite';
 import { TransformTrait } from '../../builtins/transform';
-import { type CullState, createCullState } from '../../core/scene/cull';
 import { type Nodes, query } from '../../core/scene/nodes';
 import { getVisualWorldMatrix } from '../../builtins/transform';
 import * as Visibility from '../visibility';
@@ -88,7 +87,7 @@ export type SpriteVisualState = {
     trait: SpriteTrait;
     /** this sprite's own frustum-cull entry — registered with the shared
      *  Visibility culler at install, which writes `cull.visible` each frame. */
-    cull: CullState;
+    cull: Visibility.CullState;
     /** sprite id observed at install — re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
@@ -234,9 +233,7 @@ export function update(
             const w0 = trait.width;
             const h0 = trait.height;
             const r = Math.sqrt(w0 * w0 + h0 * h0) * 0.5 * trait.worldScale;
-            const cull = createCullState();
-            box3.set(cull.aabb, -r, -r, -r, r, r, r);
-            cull.version = 1;
+            const cull = Visibility.add(visibility, box3.set(box3.create(), -r, -r, -r, r, r, r), transform);
             state = {
                 slot: -1,
                 trait,
@@ -248,7 +245,6 @@ export function update(
             };
             trait._state = state;
             visuals.aliveStates.push(state);
-            Visibility.register(visibility, cull, transform);
         } else {
             state = existing;
         }
@@ -351,7 +347,7 @@ function destroyInstance(visuals: SpriteVisuals, trait: SpriteTrait, visibility:
     const state = trait._state;
     if (state === null) return;
 
-    Visibility.unregister(visibility, state.cull);
+    Visibility.remove(visibility, state.cull);
     if (state.slot !== -1) freeSlot(visuals, state);
 
     const arr = visuals.aliveStates;

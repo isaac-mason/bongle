@@ -74,6 +74,22 @@ export type PerIdIconGroup = { dir: string };
 export const SCENE_ICONS: PerIdIconGroup = { dir: 'scenes' };
 export const PREFAB_ICONS: PerIdIconGroup = { dir: 'prefabs' };
 
+/** the per-id icon dirs under resources/client. these hold editor-only
+ *  library/inspector thumbnails that grow unbounded with content and are never
+ *  fetched in a play-mode bundle — so they're excluded from build output. (the
+ *  bounded block-icon atlas, `voxels-icons.*`, is kept.) */
+export const PER_ID_ICON_DIRS: readonly string[] = [SCENE_ICONS.dir, PREFAB_ICONS.dir];
+
+/** `fs.cpSync` filter for copying resources/client into a bundle: drops the
+ *  per-id icon dirs (editor-only) and keeps everything else. `root` is the
+ *  resources/client dir being copied. */
+export function excludeEditorIcons(root: string): (src: string) => boolean {
+    return (src: string): boolean => {
+        const top = path.relative(root, src).split(path.sep)[0];
+        return !PER_ID_ICON_DIRS.includes(top);
+    };
+}
+
 function perIdIconPath(resourcesClientDir: string, group: PerIdIconGroup, id: string): string {
     // ids may be slash-segmented (e.g. "blueprints/tree"); mkdir -p the
     // parent so nested ids don't ENOENT on first write.

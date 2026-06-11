@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { build as viteBuild } from 'vite';
+import { excludeEditorIcons } from './asset-pipeline/icons-write';
 import { createPipelineState, type PipelineInternal, runAssetPipelinePass } from './asset-pipeline/pipeline';
 import { resolveEngineRoot } from './asset-pipeline/run';
 import { captureImportPlugin } from './capture-import-plugin';
@@ -33,7 +34,13 @@ env.client = true
 env.server = false
 env.editor = false
 
-const state = EngineClient.init({ mode: 'play', driver: { matchmake() {} } })
+const state = EngineClient.init({
+    mode: 'play',
+    driver: {
+        matchmake() {},
+        platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+    },
+})
 // Mount the play-mode UI shell before load() — the React Viewport
 // component owns the canvas, and the resize callback in load() needs
 // viewportElement to be set before it can size the renderer.
@@ -172,7 +179,12 @@ export async function buildStatic(projectDir: string, opts?: { sceneId?: string 
     // and other browser-side runtime assets the engine fetches via assetUrl().
     const projectResourcesClientDir = path.join(resolvedProjectDir, 'resources', 'client');
     if (fs.existsSync(projectResourcesClientDir)) {
-        fs.cpSync(projectResourcesClientDir, outDir, { recursive: true });
+        // exclude editor-only per-id icon dirs (scenes/, prefabs/); keep the
+        // block-icon atlas + all real runtime assets.
+        fs.cpSync(projectResourcesClientDir, outDir, {
+            recursive: true,
+            filter: excludeEditorIcons(projectResourcesClientDir),
+        });
     }
 
     const elapsed = (performance.now() - start).toFixed(0);

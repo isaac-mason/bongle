@@ -256,7 +256,13 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
             env.server = false;
             env.client = true;
 
-            const clientState = EngineClientModule.init({ mode: 'play', driver: { matchmake: () => {} } });
+            const clientState = EngineClientModule.init({
+                mode: 'play',
+                driver: {
+                    matchmake: () => {},
+                    platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+                },
+            });
             await EngineClientModule.load(clientState);
 
             env.server = true;

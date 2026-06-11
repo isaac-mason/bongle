@@ -23,6 +23,7 @@ export * from './api/lighting';
 export * from './api/matchmaking';
 export * from './api/mobile';
 export * from './api/mobile-controls';
+export { platform } from './api/platform';
 export * from './api/pack';
 export * from './api/physics';
 export * from './api/prefabs';

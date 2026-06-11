@@ -1,4 +1,4 @@
-export type { ClientApp, ClientDriver, JsonValue } from './client';
+export type { ClientApp, ClientDriver, JsonValue, Platform } from './client';
 export { client } from './client';
 export type {
     AvatarsServerDriver,

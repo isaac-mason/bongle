@@ -79,9 +79,39 @@ type ResolvedClip =
 export type AudioResources = {
     /** browser-owned audio context, lazy-resumed on first play. */
     context: AudioContext;
+    /** engine-global output bus — every room's `masterGain` feeds this, and
+     *  this feeds the context destination. Ramping it to 0 (`setOutputMuted`)
+     *  silences all rooms at once; used to auto-mute the game during portal
+     *  ads without games having to do anything. */
+    outputGain: GainNode;
+    /** last-applied output mute — lets `setOutputMuted` be called every frame
+     *  (it reconciles from engine state) while only ramping on a real change. */
+    muted: boolean;
     /** clips by sound id — atlas entries ready, standalones lazy. */
     clips: Map<string, ResolvedClip>;
 };
+
+/** Build the resources object + the engine-global output bus for a context. */
+function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>): AudioResources {
+    const outputGain = context.createGain();
+    outputGain.gain.value = 1;
+    outputGain.connect(context.destination);
+    return { context, outputGain, muted: false, clips };
+}
+
+/** Mute/unmute all engine audio at the output bus, ramping (to avoid clicks)
+ *  only on a real change. Called every frame from the client update loop,
+ *  reconciling against `state.adActive` — muting during a portal ad is built-in,
+ *  no game code involved. */
+export function setOutputMuted(resources: AudioResources, muted: boolean): void {
+    if (resources.muted === muted) return;
+    resources.muted = muted;
+    const g = resources.outputGain.gain;
+    const now = resources.context.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(muted ? 0 : 1, now + 0.05);
+}
 
 /** load + decode the audio manifest + atlas. Called from
  *  `EngineClient.load()`. Always returns a live `AudioResources` — when
@@ -94,12 +124,12 @@ export async function loadResources(): Promise<AudioResources> {
     let manifest: AudioManifest;
     try {
         const res = await fetch(assetUrl('audio-manifest.json'));
-        if (!res.ok) return { context: new Ctx(), clips: new Map() };
+        if (!res.ok) return makeResources(new Ctx(), new Map());
         manifest = (await res.json()) as AudioManifest;
     } catch {
         // no manifest = no sounds declared. fine, return a live but empty
         // resources object so `play(unknownId, ...)` still no-ops cleanly.
-        return { context: new Ctx(), clips: new Map() };
+        return makeResources(new Ctx(), new Map());
     }
 
     const context = new Ctx({ sampleRate: manifest.sampleRate });
@@ -138,7 +168,7 @@ export async function loadResources(): Promise<AudioResources> {
         });
     }
 
-    return { context, clips };
+    return makeResources(context, clips);
 }
 
 /* ── PlaybackHandle ────────────────────────────────────────────────── */
@@ -228,7 +258,9 @@ export type Audio = {
 export function init(resources: AudioResources): Audio {
     const masterGain = resources.context.createGain();
     masterGain.gain.value = 1;
-    masterGain.connect(resources.context.destination);
+    // feed the engine-global output bus (not the context destination directly)
+    // so `setOutputMuted` can silence every room at once during ads.
+    masterGain.connect(resources.outputGain);
     return {
         resources,
         masterGain,

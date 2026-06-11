@@ -13,6 +13,7 @@
 import type { Client } from 'bongle/interface';
 import * as ChatCommands from '../core/chat-commands';
 import type { CommandInvocation } from '../core/chat-commands';
+import * as Profanity from '../core/profanity';
 import type { Clients } from './clients';
 import * as Net from './net';
 import type { Rooms } from './rooms';
@@ -25,6 +26,10 @@ export type ChatBroadcastMsg = {
     from: string;
     text: string;
     kind: ChatBroadcastKind;
+    /** when set, deliver this entry to that one client only instead of
+     *  fanning to the whole room. used by the shadow profanity filter: a
+     *  flagged line is echoed back to its sender alone. */
+    to?: Client;
 };
 
 export type ChatInputEntry = {
@@ -83,13 +88,18 @@ export function tick(
 
     for (let i = 0; i < chat.outbox.length; i++) {
         const msg = chat.outbox[i]!;
-        Net.broadcastToRoom(net, rooms, room, {
+        const wire = {
             type: 'chat_broadcast',
             roomId: room.id,
             from: msg.from,
             text: msg.text,
             kind: msg.kind,
-        });
+        } as const;
+        if (msg.to !== undefined) {
+            Net.send(net, msg.to, wire);
+        } else {
+            Net.broadcastToRoom(net, rooms, room, wire);
+        }
     }
     chat.outbox.length = 0;
 }
@@ -109,11 +119,22 @@ function processInputEntry(chat: ChatServer, entry: ChatInputEntry, clients: Cli
         );
         return;
     }
-    broadcast(chat, {
-        from: entry.from !== undefined ? displayNameOf(entry.from, clients) : 'system',
+    const fromClient = entry.from;
+    if (fromClient === undefined) {
+        // server-script-queued line: trusted, never filtered.
+        broadcast(chat, { from: 'system', text: trimmed, kind: 'system' });
+        return;
+    }
+    const msg: ChatBroadcastMsg = {
+        from: displayNameOf(fromClient, clients),
         text: trimmed,
-        kind: entry.from !== undefined ? 'message' : 'system',
-    });
+        kind: 'message',
+    };
+    // shadow profanity filter: a flagged line is echoed back to its sender
+    // alone (their UI renders it as normal) and never fanned to the room, so
+    // there's no feedback signal to probe the filter against.
+    if (Profanity.containsProfanity(trimmed)) msg.to = fromClient;
+    broadcast(chat, msg);
 }
 
 function displayNameOf(client: Client, clients: Clients): string {

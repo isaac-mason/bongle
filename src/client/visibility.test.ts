@@ -3,7 +3,6 @@ import { box3, mat4 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
 import { TransformTrait } from '../builtins/transform';
 import { setPosition } from '../builtins/transform';
-import { createCullState } from '../core/scene/cull';
 import { addChild, addTrait, createNode, createSceneGraph } from '../core/scene/nodes';
 import * as Visibility from './visibility';
 
@@ -25,10 +24,7 @@ function spawn(
     addChild(sgRoot, n);
     const t = addTrait(n, TransformTrait);
     setPosition(t, pos);
-    const cull = createCullState();
-    box3.set(cull.aabb, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5);
-    cull.version = 1;
-    Visibility.register(visibility, cull, t);
+    const cull = Visibility.add(visibility, box3.set(box3.create(), -0.5, -0.5, -0.5, 0.5, 0.5, 0.5), t);
     return { node: n, transform: t, cull };
 }
 
@@ -69,7 +65,7 @@ describe('Visibility', () => {
         Visibility.update(visibility, makeCamera(), Infinity);
         expect(a.cull.visible).toBe(true);
 
-        Visibility.unregister(visibility, a.cull);
+        Visibility.remove(visibility, a.cull);
         expect(a.cull.leaf).toBe(-1);
 
         // the entry no longer participates; its visible bit is left as-is and
@@ -118,17 +114,15 @@ describe('Visibility', () => {
         expect(a.cull.visible).toBe(true);
     });
 
-    it('skips registration when the cull box is empty (renderer not yet seeded)', () => {
+    it('registering an empty box returns an unregistered, visible handle', () => {
         const sg = createSceneGraph();
         const visibility = Visibility.init();
         const n = createNode({ name: 'empty' });
         const t = addTrait(n, TransformTrait);
         addChild(sg.root, n);
-        const cull = createCullState(); // defaults to empty box3 + visible:true
 
-        Visibility.register(visibility, cull, t);
-
-        // empty box → no leaf assigned.
+        // empty box (renderer has no geometry yet) → no leaf assigned.
+        const cull = Visibility.add(visibility, box3.create(), t);
         expect(cull.leaf).toBe(-1);
 
         Visibility.update(visibility, makeCamera(), Infinity);

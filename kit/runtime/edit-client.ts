@@ -41,7 +41,13 @@ export async function start(opts: StartOptions) {
 
     await opts.userEntry();
 
-    const state = EngineClient.init({ mode: 'edit', driver: { matchmake() {} } });
+    const state = EngineClient.init({
+        mode: 'edit',
+        driver: {
+            matchmake() {},
+            platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+        },
+    });
 
     // EditorScript + commands land in the registry before load()'s
     // clearPendingChanges sweep.
