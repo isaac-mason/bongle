@@ -147,7 +147,6 @@ describe('stair chirality under flip', () => {
 describe('place hooks (stairs / slab / trapdoor)', () => {
     function placeCtx(overrides: Partial<BlockPlaceCtx>): BlockPlaceCtx {
         return {
-            voxels: null as never,
             worldX: 0, worldY: 0, worldZ: 0,
             normalX: 0, normalY: 1, normalZ: 0,
             hitX: 0.5, hitY: 0, hitZ: 0.5,
@@ -156,56 +155,60 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
         };
     }
 
+    // run a block's imperative place hook with a capturing io; returns the key
+    // written at the target cell (these single-cell presets only set target).
+    function placedKey(def: BlockDef, ctx: BlockPlaceCtx): string {
+        let key = '';
+        def.place!(ctx, { get: () => 'air', set: (_x, _y, _z, k) => { key = k; } });
+        return key;
+    }
+
     it('slab top-face click → bottom half', () => {
-        const id = slabHandle._def.place!(placeCtx({ normalX: 0, normalY: 1, normalZ: 0 }));
-        const key = registry.stateToKey[id];
+        const key = placedKey(slabHandle._def, placeCtx({ normalX: 0, normalY: 1, normalZ: 0 }));
         expect(key).toBe('test:slab[half=bottom]');
     });
 
     it('slab bottom-face click → top half', () => {
-        const id = slabHandle._def.place!(placeCtx({ normalX: 0, normalY: -1, normalZ: 0, hitY: 1 }));
-        const key = registry.stateToKey[id];
+        const key = placedKey(slabHandle._def, placeCtx({ normalX: 0, normalY: -1, normalZ: 0, hitY: 1 }));
         expect(key).toBe('test:slab[half=top]');
     });
 
     it('slab wall click with hitY=0.2 → bottom half', () => {
-        const id = slabHandle._def.place!(placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.2 }));
-        const key = registry.stateToKey[id];
+        const key = placedKey(slabHandle._def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.2 }));
         expect(key).toBe('test:slab[half=bottom]');
     });
 
     it('slab wall click with hitY=0.8 → top half', () => {
-        const id = slabHandle._def.place!(placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.8 }));
-        const key = registry.stateToKey[id];
+        const key = placedKey(slabHandle._def, placeCtx({ normalX: 1, normalY: 0, normalZ: 0, hitY: 0.8 }));
         expect(key).toBe('test:slab[half=top]');
     });
 
     it('stairs top-face click with camera facing north (yaw=π) → facing=north, half=bottom', () => {
         // yaw=π → forward = (sin π, cos π) = (0, -1), so snapCardinal picks
         // -Z → 'north'. with the floor-click branch we pick from yaw.
-        const id = stairHandle._def.place!(placeCtx({
+        const key = placedKey(stairHandle._def, placeCtx({
             normalX: 0, normalY: 1, normalZ: 0, hitY: 0, yaw: Math.PI,
         }));
-        const parsed = parseKey(registry.stateToKey[id]!)!;
+        const parsed = parseKey(key)!;
         expect(parsed.props['facing']).toBe('north');
         expect(parsed.props['half']).toBe('bottom');
         expect(parsed.props['shape']).toBe('straight');
     });
 
     it('stairs wall click (east normal) → facing=east, half from hitY', () => {
-        const id = stairHandle._def.place!(placeCtx({
+        const key = placedKey(stairHandle._def, placeCtx({
             normalX: 1, normalY: 0, normalZ: 0, hitY: 0.8,
         }));
-        const parsed = parseKey(registry.stateToKey[id]!)!;
+        const parsed = parseKey(key)!;
         expect(parsed.props['facing']).toBe('east');
         expect(parsed.props['half']).toBe('top');
     });
 
     it('trapdoor wall click → facing=normal, half from hitY, open=false', () => {
-        const id = trapdoorHandle._def.place!(placeCtx({
+        const key = placedKey(trapdoorHandle._def, placeCtx({
             normalX: 0, normalY: 0, normalZ: -1, hitY: 0.2,
         }));
-        const parsed = parseKey(registry.stateToKey[id]!)!;
+        const parsed = parseKey(key)!;
         expect(parsed.props['facing']).toBe('north');
         expect(parsed.props['half']).toBe('bottom');
         expect(parsed.props['open']).toBe('false');

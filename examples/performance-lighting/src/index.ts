@@ -4,7 +4,7 @@ import {
     BLOCK_AIR,
     control,
     env,
-    getBlockKey,
+    getBlock,
     getTrait,
     matchmaking,
     onInit,
@@ -149,7 +149,7 @@ script(LightingTrait, 'cycle', (ctx) => {
         if (emitterTick >= ctx.trait.emitterInterval) {
             emitterTick = 0;
             const [x, y, z] = emitterSlots[emitterCursor]!;
-            const current = getBlockKey(voxels, x, y, z);
+            const current = getBlock(voxels, x, y, z);
             if (current === BLOCK_AIR) {
                 const color = emitterKeys[emitterCursor % emitterKeys.length]!;
                 setBlock(voxels, x, y, z, color);
@@ -163,7 +163,7 @@ script(LightingTrait, 'cycle', (ctx) => {
         if (ceilingTick >= ctx.trait.ceilingInterval) {
             ceilingTick = 0;
             const [x, y, z] = ceilingSlots[ceilingCursor]!;
-            const current = getBlockKey(voxels, x, y, z);
+            const current = getBlock(voxels, x, y, z);
             if (current === stoneKey) {
                 setBlock(voxels, x, y, z, BLOCK_AIR);
             } else {

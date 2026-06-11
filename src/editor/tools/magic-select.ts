@@ -12,7 +12,7 @@
 import { AIR } from '../../core/voxels/block-registry';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
-import { getBlock } from '../../core/voxels/voxels';
+import { getBlockState } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown } from '../pointer-state';
 import type { EditRoomStoreApi, MagicSelectOptions } from '../edit-room-store';
@@ -87,7 +87,7 @@ function runBFS(
     const result = Selection.create();
 
     const [sx, sy, sz] = seed;
-    const seedStateId = getBlock(voxels, sx, sy, sz);
+    const seedStateId = getBlockState(voxels, sx, sy, sz);
 
     // nothing to do if seed is air
     if (seedStateId === AIR) return result;
@@ -111,7 +111,7 @@ function runBFS(
         const item = queue.shift()!;
         const [cx, cy, cz] = item;
 
-        const sid = getBlock(voxels, cx, cy, cz);
+        const sid = getBlockState(voxels, cx, cy, cz);
         if (!matches(sid)) continue;
 
         Selection.set(result, cx, cy, cz);
@@ -132,7 +132,7 @@ function runBFS(
                     // note: the matches check at the top of the loop handles the filtering.
                     if (
                         step === 1 ||
-                        getBlock(voxels, cx + dx * (step - 1), cy + dy * (step - 1), cz + dz * (step - 1)) === AIR
+                        getBlockState(voxels, cx + dx * (step - 1), cy + dy * (step - 1), cz + dz * (step - 1)) === AIR
                     ) {
                         queue.push([nx, ny, nz]);
                     }

@@ -6,9 +6,11 @@
 import {
     AIR,
     BLOCK_FLAG_COLLISION,
+    BLOCK_FLAG_DOOR,
     BLOCK_FLAG_FENCE,
     BLOCK_FLAG_PANE,
     BLOCK_FLAG_WALL,
+    parseKey,
 } from './block-registry';
 import * as blockShape from './block-collider';
 import * as blockModel from './block-model';
@@ -16,7 +18,6 @@ import * as blockState from './block-state';
 import {
     block,
     type BlockHandle,
-    type BlockPlaceCtx,
     type BlockQuad,
     type BlockSoundConfig,
     type CubeTextures,
@@ -43,7 +44,18 @@ import {
  * blending (stained glass cube).
  */
 type PresetOptions = { name?: string; sounds?: BlockSoundConfig; material?: MaterialType };
-import { getBlock } from './voxels';
+import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
+import {
+    type Facing4,
+    FACING4_STEPS,
+    FACING4_ORDER,
+    FACING4_FLIP_X,
+    FACING4_FLIP_Z,
+    rotateFacing4,
+    facing4FromPlaceCtx,
+    halfFromPlaceCtx,
+    axisFromPlaceCtx,
+} from './block-place';
 
 // ── cube ────────────────────────────────────────────────────────────
 //
@@ -135,6 +147,8 @@ export function column(
                 },
             };
         },
+        place: (ctx, io) =>
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ axis: axisFromPlaceCtx(ctx) })),
         rotate: (stateId, axis) => {
             const local = stateId - handle._baseStateId;
             const p = handle.states.decode(local);
@@ -155,7 +169,7 @@ export function column(
 //     placer. for a stair the "front" face is the low/climbable side
 //     (the side you step onto from ground level). base orientation has
 //     the high back step at +Z (south); rotateY is CCW compass, so we
-//     rotate by `(4 - FACING_STEPS[facing]) % 4` — same inversion the
+//     rotate by `(4 - FACING4_STEPS[facing]) % 4` — same inversion the
 //     ladder uses — so that `facing=name` lands the low step on the
 //     named side for all four cardinals.
 //   half: 'bottom' = staircase rests on the floor, 'top' = upside-down
@@ -168,61 +182,9 @@ export function column(
 // onNeighbourUpdate derives `shape` from same-block neighbours with
 // matching half whose facing is perpendicular to ours.
 
-const FACING_STEPS = { north: 0, east: 1, south: 2, west: 3 } as const;
-const FACING_ORDER = ['north', 'east', 'south', 'west'] as const;
-type Facing = 'north' | 'east' | 'south' | 'west';
-
-// ── shared rotate/flip tables for the 4-cardinal facing enum ────────
-//
-// convention: `cw=true` matches the position rotation used by
-// rotateVoxelsByQuat / Blueprint.rotateAxis: under axis='y', +X → -Z.
-// applied to facing vectors: east(+X) → north(-Z) → west(-X) → south(+Z).
-// X / Z rotations are not defined for these horizontal-only presets — the
-// `rotate` hook returns the input stateId in those cases (matches MC).
-const FACING4_ROT_Y_CW: Record<Facing, Facing> = {
-    east: 'north', north: 'west', west: 'south', south: 'east',
-};
-const FACING4_ROT_Y_CCW: Record<Facing, Facing> = {
-    north: 'east', east: 'south', south: 'west', west: 'north',
-};
-const FACING4_FLIP_X: Record<Facing, Facing> = {
-    east: 'west', west: 'east', north: 'north', south: 'south',
-};
-const FACING4_FLIP_Z: Record<Facing, Facing> = {
-    north: 'south', south: 'north', east: 'east', west: 'west',
-};
-function rotFacing4(f: Facing, cw: boolean): Facing {
-    return (cw ? FACING4_ROT_Y_CW : FACING4_ROT_Y_CCW)[f];
-}
-
-// shared place-ctx helpers for directional half-block presets (stairs,
-// trapdoor, slab). mirrors the `applyDirectionalProps` convention so the
-// hooked path produces the same result for the common cases.
-
-// facing toward the placer: wall click → opposite of clicked face (direction
-// of the hit normal); floor/ceiling click → snap from camera yaw.
-function facingFromPlaceCtx(ctx: BlockPlaceCtx): Facing {
-    const ax = Math.abs(ctx.normalX);
-    const ay = Math.abs(ctx.normalY);
-    const az = Math.abs(ctx.normalZ);
-    if (ax >= ay || az >= ay) {
-        if (ax >= az) return ctx.normalX >= 0 ? 'east' : 'west';
-        return ctx.normalZ >= 0 ? 'south' : 'north';
-    }
-    const fx = Math.sin(ctx.yaw);
-    const fz = Math.cos(ctx.yaw);
-    if (Math.abs(fx) >= Math.abs(fz)) return fx >= 0 ? 'east' : 'west';
-    return fz >= 0 ? 'south' : 'north';
-}
-
-// half pick for stair/trapdoor/slab: clicking the top face of a block places
-// the half-block at the bottom of the cell above; clicking the bottom face
-// places at the top; wall clicks pick by where on the wall the player aimed.
-function halfFromPlaceCtx(ctx: BlockPlaceCtx): 'bottom' | 'top' {
-    if (ctx.normalY > 0.5) return 'bottom';
-    if (ctx.normalY < -0.5) return 'top';
-    return ctx.hitY < 0.5 ? 'bottom' : 'top';
-}
+// FACING4_STEPS / FACING4_ORDER / Facing / the rotate-flip tables / the
+// place-ctx resolvers all live in ./block-place now (the single source of
+// truth shared with the build tool). imported (aliased) at the top of file.
 
 const StairState = blockState.create({
     facing: blockState.enumeration(['north', 'east', 'south', 'west'] as const),
@@ -339,14 +301,14 @@ function readStairAt(
     handle: BlockHandle<typeof StairState.props>,
     wx: number, wy: number, wz: number,
     matchHalf: StairHalf,
-): Facing | null {
-    const id = getBlock(voxels, wx, wy, wz);
+): Facing4 | null {
+    const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return null;
     if (voxels.registry.stateToBlockIndex[id] !== handle._index) return null;
     const local = voxels.registry.stateToLocalIndex[id]!;
     const props = handle.states.decode(local);
     if (props.half !== matchHalf) return null;
-    return props.facing as Facing;
+    return props.facing as Facing4;
 }
 
 export function stairs(id: string, textures: CubeTextures, options?: PresetOptions) {
@@ -358,26 +320,28 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
         material: options?.material ?? MaterialType.OPAQUE,
         states: StairState,
         defaultState: { facing: 'south', half: 'bottom', shape: 'straight' },
-        shape: (p) => blockShape.rotateY(blockShape.aabbs(stairBoxes(p)), (4 - FACING_STEPS[p.facing]) % 4),
+        shape: (p) => blockShape.rotateY(blockShape.aabbs(stairBoxes(p)), (4 - FACING4_STEPS[p.facing]) % 4),
         model: (p) => ({
             type: 'custom' as const,
-            quads: blockModel.rotateY(stairQuads(textures, topTex, p), (4 - FACING_STEPS[p.facing]) % 4),
+            quads: blockModel.rotateY(stairQuads(textures, topTex, p), (4 - FACING4_STEPS[p.facing]) % 4),
         }),
         cull: CullType.PARTIAL,
-        place: (ctx) => {
-            const facing = facingFromPlaceCtx(ctx);
-            const half = halfFromPlaceCtx(ctx);
+        place: (ctx, io) => {
             // shape stays 'straight' — onNeighbourUpdate re-derives corners post-placement.
-            return handle.stateId({ facing, half, shape: 'straight' });
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({
+                facing: facing4FromPlaceCtx(ctx),
+                half: halfFromPlaceCtx(ctx),
+                shape: 'straight',
+            }));
         },
         onNeighbourUpdate(ctx) {
             const me = handle.states.decode(ctx.voxels.registry.stateToLocalIndex[ctx.stateId]!);
-            const f = me.facing as Facing;
+            const f = me.facing as Facing4;
             const h = me.half as StairHalf;
             // CW / CCW rotations of our facing (from above). used to recognise
             // perpendicular neighbours and pick a corner side.
-            const cw = FACING_ORDER[(FACING_STEPS[f] + 1) % 4]!;
-            const ccw = FACING_ORDER[(FACING_STEPS[f] + 3) % 4]!;
+            const cw = FACING4_ORDER[(FACING4_STEPS[f] + 1) % 4]!;
+            const ccw = FACING4_ORDER[(FACING4_STEPS[f] + 3) % 4]!;
 
             // world-direction the stair faces — same direction the low/front
             // step points (= where the placer was standing).
@@ -405,14 +369,14 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             return handle.stateId({
-                facing: rotFacing4(p.facing as Facing, cw),
+                facing: rotateFacing4(p.facing as Facing4, cw),
                 half: p.half,
                 shape: p.shape,
             });
         },
         flip: (stateId, axis) => {
             const p = handle.states.decode(stateId - handle._baseStateId);
-            const f = p.facing as Facing;
+            const f = p.facing as Facing4;
             const h = p.half as StairHalf;
             const s = p.shape as StairShape;
             if (axis === 'y') {
@@ -459,7 +423,8 @@ export function slab(id: string, textures: CubeTextures, options?: PresetOptions
             return { type: 'custom' as const, quads: blockModel.box(from, to, textures) };
         },
         cull: (p) => (p.half === 'double' ? CullType.SOLID : CullType.PARTIAL),
-        place: (ctx) => handle.stateId({ half: halfFromPlaceCtx(ctx) }),
+        place: (ctx, io) =>
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ half: halfFromPlaceCtx(ctx) })),
         // rotate is identity (half/double are axis-aligned).
         flip: (stateId, axis) => {
             if (axis !== 'y') return stateId;
@@ -526,11 +491,11 @@ export function ladder(id: string, texture: TextureRef, options?: PresetOptions)
         states: LadderFacingState,
         // base panel sits at +Z facing -Z (texture normal points north). the
         // rotation goes CCW per step around Y, so to make the texture face
-        // the named direction we rotate by (4 - FACING_STEPS[facing]) — the
+        // the named direction we rotate by (4 - FACING4_STEPS[facing]) — the
         // CW-sense complement. without this inversion N/S would look right
         // (180° is self-inverse) but E/W would be swapped.
         defaultState: { facing: 'south' },
-        shape: (p) => blockShape.rotateY(LADDER_SHAPE, (4 - FACING_STEPS[p.facing]) % 4),
+        shape: (p) => blockShape.rotateY(LADDER_SHAPE, (4 - FACING4_STEPS[p.facing]) % 4),
         model: (p) => {
             const z = 1 - LADDER_DEPTH;
             // -Z-facing quad, matching the winding box() uses for its
@@ -549,22 +514,24 @@ export function ladder(id: string, texture: TextureRef, options?: PresetOptions)
             ];
             return {
                 type: 'custom' as const,
-                quads: blockModel.rotateY(quads, (4 - FACING_STEPS[p.facing]) % 4),
+                quads: blockModel.rotateY(quads, (4 - FACING4_STEPS[p.facing]) % 4),
             };
         },
         cull: CullType.PARTIAL,
         collision: false,
         climbable: true,
+        place: (ctx, io) =>
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ facing: facing4FromPlaceCtx(ctx) })),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
-            return handle.stateId({ facing: rotFacing4(p.facing as Facing, cw) });
+            return handle.stateId({ facing: rotateFacing4(p.facing as Facing4, cw) });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             const table = axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z;
-            return handle.stateId({ facing: table[p.facing as Facing] });
+            return handle.stateId({ facing: table[p.facing as Facing4] });
         },
     });
     return handle;
@@ -754,7 +721,7 @@ function hasGroupConnection(
     wx: number, wy: number, wz: number,
     groupFlag: number,
 ): boolean {
-    const id = getBlock(voxels, wx, wy, wz);
+    const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return false;
     if (voxels.registry.cull[id]! === CullType.SOLID) return true;
     return (voxels.registry.flags[id]! & groupFlag) !== 0;
@@ -797,9 +764,9 @@ export function fence(id: string, textures: CubeTextures, options?: PresetOption
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             // a neighbour that was at direction D before rotation is at
-            // direction rotFacing4(D, cw) after rotation. so the new bool
+            // direction rotateFacing4(D, cw) after rotation. so the new bool
             // at direction D' = old bool at the direction that rotates *to*
-            // D' = rotFacing4(D', !cw).
+            // D' = rotateFacing4(D', !cw).
             return cw
                 ? handle.stateId({ north: p.east, east: p.south, south: p.west, west: p.north })
                 : handle.stateId({ north: p.west, east: p.north, south: p.east, west: p.south });
@@ -961,23 +928,24 @@ export function trapdoor(id: string, textures: CubeTextures, options?: PresetOpt
         sounds: options?.sounds,
         // placement opens closed: half from where the player clicked, facing
         // toward the placer. open can be toggled later via interaction.
-        place: (ctx) => handle.stateId({
-            facing: facingFromPlaceCtx(ctx),
-            half: halfFromPlaceCtx(ctx),
-            open: false,
-        }),
+        place: (ctx, io) =>
+            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({
+                facing: facing4FromPlaceCtx(ctx),
+                half: halfFromPlaceCtx(ctx),
+                open: false,
+            })),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             return handle.stateId({
-                facing: rotFacing4(p.facing as Facing, cw),
+                facing: rotateFacing4(p.facing as Facing4, cw),
                 half: p.half,
                 open: p.open,
             });
         },
         flip: (stateId, axis) => {
             const p = handle.states.decode(stateId - handle._baseStateId);
-            const f = p.facing as Facing;
+            const f = p.facing as Facing4;
             if (axis === 'y') {
                 return handle.stateId({
                     facing: f, half: p.half === 'top' ? 'bottom' : 'top', open: p.open,
@@ -1101,7 +1069,7 @@ export function wall(id: string, textures: CubeTextures, options?: PresetOptions
             // `up` rule: the post extends full height when something rests
             // on the wall or when the arm layout isn't a clean straight pass.
             // exactly two opposite arms (N+S or E+W only) gives the low post.
-            const above = getBlock(ctx.voxels, ctx.worldX, ctx.worldY + 1, ctx.worldZ);
+            const above = getBlockState(ctx.voxels, ctx.worldX, ctx.worldY + 1, ctx.worldZ);
             const aboveSolid = above !== AIR && ctx.voxels.registry.cull[above]! === CullType.SOLID;
             const straightNS = north && south && !east && !west;
             const straightEW = east && west && !north && !south;
@@ -1181,7 +1149,7 @@ function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'so
 }
 
 function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: number, wz: number): boolean {
-    const id = getBlock(voxels, wx, wy, wz);
+    const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return false;
     return (voxels.registry.flags[id]! & BLOCK_FLAG_COLLISION) !== 0;
 }
@@ -1226,15 +1194,142 @@ export function torch(
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             if (p.mount === 'floor') return stateId;
-            return handle.stateId({ mount: rotFacing4(p.mount as Facing, cw) });
+            return handle.stateId({ mount: rotateFacing4(p.mount as Facing4, cw) });
         },
         flip: (stateId, axis) => {
             if (axis === 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             if (p.mount === 'floor') return stateId;
             const table = axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z;
-            return handle.stateId({ mount: table[p.mount as Facing] });
+            return handle.stateId({ mount: table[p.mount as Facing4] });
         },
     });
     return handle;
+}
+
+// ── door ────────────────────────────────────────────────────────────
+//
+// two-cell (lower + upper) door. state is (facing, half, hinge, open):
+//   facing : direction the door's front faces = toward the placer.
+//   half   : lower / upper — both cells carry identical facing/hinge/open,
+//            differing only in `half` (and which texture they render).
+//   hinge  : which vertical edge the door pivots on (sets double-door pairing).
+//   open   : closed flush across the doorway, or swung 90° to the hinge side.
+//
+// placement writes BOTH cells (validate both air first → never a half-door)
+// and picks the hinge from a same-facing door immediately to the right, so two
+// adjacent doors form a double door. removal cohesion (break one half → remove
+// the other) is deferred to a future onBlockBreak gameplay hook — v1 leaves an
+// orphaned half. open/close is driven by setDoorOpen, not by any block hook.
+
+const DoorState = blockState.create({
+    facing: blockState.enumeration(['north', 'east', 'south', 'west'] as const),
+    half: blockState.enumeration(['lower', 'upper'] as const),
+    hinge: blockState.enumeration(['left', 'right'] as const),
+    open: blockState.bool(),
+});
+
+type DoorProps = { facing: Facing4; half: 'lower' | 'upper'; hinge: 'left' | 'right'; open: boolean };
+
+const DOOR_DEPTH = 3 / 16;
+
+// (dx,dz) step per cardinal (world convention: north=-Z, south=+Z, east=+X, west=-X).
+const FACING_DELTA: Record<Facing4, readonly [number, number]> = {
+    north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
+};
+
+// door panel AABB in the base (facing=north) orientation. closed = a thin slab
+// on the -Z edge spanning the cell; open = swung 90° onto the hinge-side edge
+// (-X for a left hinge, +X for a right hinge).
+function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
+    if (!open) return [0, 0, 0, 1, 1, DOOR_DEPTH];
+    return hinge === 'left' ? [0, 0, 0, DOOR_DEPTH, 1, 1] : [1 - DOOR_DEPTH, 0, 0, 1, 1, 1];
+}
+
+export function door(
+    id: string,
+    textures: { top: TextureRef; bottom: TextureRef },
+    options?: PresetOptions,
+) {
+    let handle: BlockHandle<typeof DoorState.props>;
+    handle = block(id, {
+        name: options?.name,
+        sounds: options?.sounds,
+        material: options?.material ?? MaterialType.TRANSPARENT,
+        states: DoorState,
+        defaultState: { facing: 'north', half: 'lower', hinge: 'left', open: false },
+        flags: BLOCK_FLAG_DOOR,
+        cull: CullType.PARTIAL,
+        shape: (p) => blockShape.rotateY(blockShape.aabbs([doorBox(p.hinge, p.open)]), (4 - FACING4_STEPS[p.facing]) % 4),
+        model: (p) => {
+            // model the left door always; mirror across X for the right hinge so
+            // the handle/panel — and the open swing — land on the correct side.
+            const b = doorBox('left', p.open);
+            const texture = p.half === 'lower' ? textures.bottom : textures.top;
+            let quads = blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], { all: { texture } }, { uvs: 'local', cull: false });
+            if (p.hinge === 'right') quads = blockModel.mirrorX(quads);
+            return { type: 'custom' as const, quads: blockModel.rotateY(quads, (4 - FACING4_STEPS[p.facing]) % 4) };
+        },
+        // place both cells; validate both air first so a half-door is impossible.
+        // hinge: right if a same-facing door is immediately to our right.
+        place: (ctx, io) => {
+            const { worldX: x, worldY: y, worldZ: z } = ctx;
+            if (io.get(x, y, z) !== BLOCK_AIR) return;
+            if (io.get(x, y + 1, z) !== BLOCK_AIR) return;
+            const facing = facing4FromPlaceCtx(ctx);
+            const [rdx, rdz] = FACING_DELTA[rotateFacing4(facing, false)];
+            const right = parseKey(io.get(x + rdx, y, z + rdz));
+            const hinge: 'left' | 'right' =
+                right && right.blockId === handle.id && right.props['facing'] === facing ? 'right' : 'left';
+            io.set(x, y, z, handle.stateKey({ facing, half: 'lower', hinge, open: false }));
+            io.set(x, y + 1, z, handle.stateKey({ facing, half: 'upper', hinge, open: false }));
+        },
+        rotate: (stateId, axis, cw) => {
+            if (axis !== 'y') return stateId;
+            const p = handle.states.decode(stateId - handle._baseStateId);
+            return handle.stateId({ ...p, facing: rotateFacing4(p.facing as Facing4, cw) });
+        },
+        flip: (stateId, axis) => {
+            const p = handle.states.decode(stateId - handle._baseStateId);
+            const facing =
+                axis === 'y' ? (p.facing as Facing4) : (axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z)[p.facing as Facing4];
+            const hinge = axis === 'y' ? p.hinge : p.hinge === 'left' ? 'right' : 'left';
+            const half = axis === 'y' ? (p.half === 'lower' ? 'upper' : 'lower') : p.half;
+            return handle.stateId({ facing, half, hinge, open: p.open });
+        },
+    });
+    return handle;
+}
+
+// ── door open/close utils (programmatic, callable anywhere) ──────────
+//
+// flag-gated + decoded via the shared DoorState, so they work across every
+// door block. A controller / lever / redstone / quest binds the trigger.
+
+function doorAt(voxels: Voxels, x: number, y: number, z: number): { idx: number; p: DoorProps } | null {
+    const stateId = getBlockState(voxels, x, y, z);
+    if (stateId === AIR) return null;
+    const reg = voxels.registry;
+    if ((reg.flags[stateId]! & BLOCK_FLAG_DOOR) === 0) return null;
+    const idx = reg.stateToBlockIndex[stateId]!;
+    const local = stateId - reg.handles[idx]!._baseStateId;
+    return { idx, p: DoorState.decode(local) as DoorProps };
+}
+
+/** whether the door at (x,y,z) is open. false if the cell isn't a door. */
+export function getDoorOpen(voxels: Voxels, x: number, y: number, z: number): boolean {
+    return doorAt(voxels, x, y, z)?.p.open ?? false;
+}
+
+/** set the open state of the door at (x,y,z) — writes both halves (partner
+ *  re-derived from `half`). no-op if the cell isn't a door or already matches.
+ *  toggle = `setDoorOpen(v, x, y, z, !getDoorOpen(v, x, y, z))`. */
+export function setDoorOpen(voxels: Voxels, x: number, y: number, z: number, open: boolean): void {
+    const d = doorAt(voxels, x, y, z);
+    if (!d || d.p.open === open) return;
+    const handle = voxels.registry.handles[d.idx]!;
+    setBlock(voxels, x, y, z, handle.stateKey({ ...d.p, open }));
+    const dy = d.p.half === 'lower' ? 1 : -1;
+    const o = doorAt(voxels, x, y + dy, z);
+    if (o && o.idx === d.idx) setBlock(voxels, x, y + dy, z, handle.stateKey({ ...o.p, open }));
 }

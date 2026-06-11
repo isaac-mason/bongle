@@ -31,7 +31,7 @@ import {
     setEnvironment,
     setPosition,
     setQuaternion,
-    setTime,
+    setEnvironmentTime,
     TransformTrait,
     trait,
     VoxelMeshTrait,
@@ -218,7 +218,7 @@ script(
     'session',
     (ctx) => {
         if (env.client) {
-            setTime(ctx, 18);
+            setEnvironmentTime(ctx, 18);
             setEnvironment(ctx, ENVIRONMENT_OVERWORLD);
 
             onInit(ctx, () => {

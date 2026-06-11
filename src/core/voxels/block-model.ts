@@ -331,6 +331,51 @@ export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[] {
     }));
 }
 
+// ── mirror (X) helper ───────────────────────────────────────────────
+//
+// reflect across the plane x = 0.5 to produce the chiral opposite — used
+// for left/right-handed variants (door hinge, etc.). a reflection flips
+// winding, so per-quad vertex + uv order reverses to keep faces outward;
+// the x-normal flips and east↔west cullFaces swap. because uvs reverse in
+// lockstep with verts, the texture mirrors with the geometry.
+
+/** mirror a position [x,y,z] across the plane x = 0.5. */
+function mirrorPosX(v: Vec3): Vec3 {
+    return [1 - v[0], v[1], v[2]];
+}
+
+/** mirror a normal across X (negate x). */
+function mirrorNormalX(n: Vec3): Vec3 {
+    return [-n[0], n[1], n[2]];
+}
+
+/** mirror a cullFace direction across X (east ↔ west; others unchanged). */
+function mirrorCullFaceX(cf: CullFace | undefined): CullFace | undefined {
+    if (cf === 'east') return 'west';
+    if (cf === 'west') return 'east';
+    return cf;
+}
+
+/**
+ * mirror an array of BlockQuad across the plane x = 0.5 (block-local).
+ * involutive: mirrorX(mirrorX(q)) === q.
+ */
+export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
+    return quads.map((q) => ({
+        verts: [
+            mirrorPosX(q.verts[3]),
+            mirrorPosX(q.verts[2]),
+            mirrorPosX(q.verts[1]),
+            mirrorPosX(q.verts[0]),
+        ] as const,
+        normal: mirrorNormalX(q.normal),
+        texture: q.texture,
+        uvs: [q.uvs[3], q.uvs[2], q.uvs[1], q.uvs[0]] as const,
+        cullFace: mirrorCullFaceX(q.cullFace),
+        material: q.material,
+    }));
+}
+
 // ── cross helper ────────────────────────────────────────────────────
 //
 // two diagonal planes, each double-sided (4 quads).

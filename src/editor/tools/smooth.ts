@@ -17,7 +17,7 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
 import type { Input } from '../../client/input';
 import type { EditRoomStoreApi } from '../edit-room-store';
@@ -137,7 +137,7 @@ export function runSmooth(
     const rng = Math.random;
     for (const c of cols.values()) {
         for (let y = c.yHi; y >= c.yLo; y--) {
-            const key = getBlockKey(voxels, c.wx, y, c.wz);
+            const key = getBlock(voxels, c.wx, y, c.wz);
             if (heightmapMask) {
                 if (testMask(heightmapMask, voxels, c.wx, y, c.wz, rng)) {
                     c.oldH = y;
@@ -191,14 +191,14 @@ export function runSmooth(
         if (dH > 0) {
             const fill = c.oldKey!;
             for (let y = c.oldH + 1; y <= newH; y++) {
-                const cur = getBlockKey(voxels, c.wx, y, c.wz);
+                const cur = getBlock(voxels, c.wx, y, c.wz);
                 if (cur === fill) continue;
                 forward.push({ wx: c.wx, wy: y, wz: c.wz, key: fill });
                 reverse.push({ wx: c.wx, wy: y, wz: c.wz, key: cur });
             }
         } else {
             for (let y = newH + 1; y <= c.oldH; y++) {
-                const cur = getBlockKey(voxels, c.wx, y, c.wz);
+                const cur = getBlock(voxels, c.wx, y, c.wz);
                 if (cur === BLOCK_AIR) continue;
                 forward.push({ wx: c.wx, wy: y, wz: c.wz, key: BLOCK_AIR });
                 reverse.push({ wx: c.wx, wy: y, wz: c.wz, key: cur });

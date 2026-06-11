@@ -24,7 +24,7 @@ import * as Selection from '../core/scene/selection';
 import type { ScriptContext } from '../core/scene/scripts';
 import { fuzzyRank } from '../core/utils/fuzzy';
 import { parseKey } from '../core/voxels/block-registry';
-import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlockKey, toChunkCoord } from '../core/voxels/voxels';
+import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlock, toChunkCoord } from '../core/voxels/voxels';
 import type { EditRoomStoreApi, SelectTarget } from './edit-room-store';
 import type { NodeBodies } from './node-bodies';
 import { parseMask, testMask, type Mask } from './scene/mask';
@@ -540,7 +540,7 @@ export function installSelectionChatCommands(
             const counts = new Map<string, number>();
             const sel = store.getState().selection;
             Selection.forEach(sel, (wx, wy, wz) => {
-                const key = getBlockKey(ctx.voxels, wx, wy, wz);
+                const key = getBlock(ctx.voxels, wx, wy, wz);
                 if (key === BLOCK_AIR) return;
                 const parsed = parseKey(key);
                 if (!parsed) return;

@@ -22,7 +22,7 @@
  */
 import { parseKey } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { splitTopLevel } from './pattern';
 import { fuzzyRank } from '../../core/utils/fuzzy';
 
@@ -43,7 +43,7 @@ export type Mask =
 export function testMask(m: Mask, voxels: Voxels, x: number, y: number, z: number, rng: () => number = Math.random): boolean {
     switch (m.kind) {
         case 'blocks': {
-            const key = getBlockKey(voxels, x, y, z);
+            const key = getBlock(voxels, x, y, z);
             const parsed = parseKey(key);
             if (!parsed) return false;
             for (const match of m.blocks) {
@@ -68,7 +68,7 @@ export function testMask(m: Mask, voxels: Voxels, x: number, y: number, z: numbe
             }
             return true;
         case 'existing':
-            return getBlockKey(voxels, x, y, z) !== BLOCK_AIR;
+            return getBlock(voxels, x, y, z) !== BLOCK_AIR;
         case 'noise':
             return rng() * 100 < m.percent;
     }

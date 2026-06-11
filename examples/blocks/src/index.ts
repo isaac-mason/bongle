@@ -14,6 +14,7 @@ import {
     onTick,
     script,
     setBlock,
+    setDoorOpen,
     setPosition,
     TransformTrait,
     trait,
@@ -41,6 +42,7 @@ const {
     glassPane: GlassPane,
     snowCarpet: SnowCarpet,
     oakTrapdoor: OakTrapdoor,
+    oakDoor: OakDoor,
     stonePlate: StonePlate,
     lava: Lava,
     water: Water,
@@ -224,6 +226,18 @@ script(GameplayTrait, 'session', (ctx) => {
             }
         }
 
+        // doors (col 22..25) — two-cell blocks placed as lower + upper halves
+        // (here directly via setBlock; in-game the door's place hook writes
+        // both cells from one click). col 22: a single door. col 24+25: a
+        // double door — adjacent leaves with opposite hinges meet flush.
+        const placeDoor = (dx: number, hinge: 'left' | 'right') => {
+            setBlock(ctx.voxels, ox + dx, baseY, oz + 0, OakDoor.stateKey({ facing: 'north', half: 'lower', hinge, open: false }));
+            setBlock(ctx.voxels, ox + dx, baseY + 1, oz + 0, OakDoor.stateKey({ facing: 'north', half: 'upper', hinge, open: false }));
+        };
+        placeDoor(22, 'left');
+        placeDoor(24, 'left');
+        placeDoor(25, 'right');
+
         // number-block row (demoing draw() composition) — 10 cells at
         // x=-5..4 on z=4, right in front of spawn. each block's top
         // texture is dirt + a stamped 3×5 digit, baked at pipeline
@@ -290,6 +304,12 @@ script(GameplayTrait, 'session', (ctx) => {
         // of east-facing perpendicular neighbours appear/disappear at
         // x=±1 to drive the centre stair's shape between straight and L.
         setBlock(ctx.voxels, 0, baseY, -11, StoneStairs.stateKey({ facing: 'north', half: 'bottom', shape: 'straight' }));
+
+        // door (x=4, z=-9): a two-cell door swung open/closed by the step
+        // machine below via setDoorOpen — the programmatic door operation
+        // (no interaction layer yet; this is what a controller would call).
+        setBlock(ctx.voxels, 4, baseY, -9, OakDoor.stateKey({ facing: 'south', half: 'lower', hinge: 'left', open: false }));
+        setBlock(ctx.voxels, 4, baseY + 1, -9, OakDoor.stateKey({ facing: 'south', half: 'upper', hinge: 'left', open: false }));
 
         // ── lighting cave (left of spawn, -x) ────────────────────────
         // hollow stone box with entrance carved through the east wall.
@@ -385,6 +405,12 @@ script(GameplayTrait, 'session', (ctx) => {
             for (let dx = -2; dx <= 1; dx++) {
                 setBlock(ctx.voxels, dx, demoBaseY, -9, OakTrapdoor.stateKey({ facing: 'north', half: 'bottom', open }));
             }
+        }
+
+        // door swing — operate the placed door via setDoorOpen (writes both
+        // halves; partner re-derived from `half`).
+        if (demoStep % 2 === 0) {
+            setDoorOpen(ctx.voxels, 4, demoBaseY, -9, (demoStep >> 1) % 2 === 0);
         }
 
         // stair perpendicular cycle — drives the centre stair's auto-L

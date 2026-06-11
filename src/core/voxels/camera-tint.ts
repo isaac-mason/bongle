@@ -1,4 +1,4 @@
-import { getBlock, type Voxels } from './voxels';
+import { getBlockState, type Voxels } from './voxels';
 
 /**
  * read the screen tint at the camera position. writes the RGBA tint into
@@ -25,7 +25,7 @@ export function getCameraTint(
     const x = Math.floor(camX);
     const y = Math.floor(camY);
     const z = Math.floor(camZ);
-    const stateId = getBlock(voxels, x, y, z);
+    const stateId = getBlockState(voxels, x, y, z);
     const registry = voxels.registry;
     const off = stateId * 4;
     const a = registry.screenTint[off + 3]!;
@@ -38,7 +38,7 @@ export function getCameraTint(
         // surface where air actually starts.
         const group = registry.fluidGroup[stateId]!;
         if (group === 0) return false;
-        const aboveId = getBlock(voxels, x, y + 1, z);
+        const aboveId = getBlockState(voxels, x, y + 1, z);
         if (registry.fluidGroup[aboveId]! !== group) return false;
         if (registry.surfaceHeight[aboveId]! <= 0) return false;
     }

@@ -32,7 +32,7 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import { getVisualWorldPosition, getVisualWorldQuaternion, markTransformDirty, setPosition } from '../../builtins/transform';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { setTraitProps } from '../actions';
 import type { Blueprint as BlueprintData, VoxelOp } from '../blueprint';
 import * as Blueprint from '../blueprint';
@@ -1365,7 +1365,7 @@ export function nudgeVoxelsFromSelection(
     const reverseOps: VoxelOp[] = [];
 
     Selection.forEach(selection, (wx, wy, wz) => {
-        const key = getBlockKey(voxels, wx, wy, wz);
+        const key = getBlock(voxels, wx, wy, wz);
         if (key === BLOCK_AIR) return;
 
         const destX = wx + dx;

@@ -19,7 +19,7 @@ import * as Selection from '../core/scene/selection';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import { fuzzyRank } from '../core/utils/fuzzy';
-import { BLOCK_AIR, getBlockKey } from '../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../core/voxels/voxels';
 import * as Blueprint from './blueprint';
 import { SaveBlueprintCommand } from './commands';
 import type { EditRoomStoreApi } from './edit-room-store';
@@ -96,7 +96,7 @@ export function installEditorChatCommands(
     function selectionBlockIds(): string[] {
         const counts = new Map<string, number>();
         Selection.forEach(store.getState().selection, (wx, wy, wz) => {
-            const key = getBlockKey(ctx.voxels, wx, wy, wz);
+            const key = getBlock(ctx.voxels, wx, wy, wz);
             if (key === BLOCK_AIR) return;
             const parsed = parseKey(key);
             if (!parsed) return;

@@ -655,11 +655,12 @@ export function rebuildColumns(voxels: Voxels): void {
 /** get or create a chunk at the given chunk coordinates. */
 export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number): Chunk {
     const key = chunkKey(cx, cy, cz);
+
     let chunk = voxels.chunks.get(key);
+
     if (!chunk) {
         chunk = createChunk(cx, cy, cz);
         voxels.chunks.set(key, chunk);
-        // createChunk seeds dirty=true; mirror into the sidecar index.
         voxels.dirty.blocks.add(chunk);
         addChunkToColumn(voxels, chunk);
         linkChunkNeighbors(voxels, chunk);
@@ -667,12 +668,13 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
         // queue this chunk for sky light seeding so flushPendingLight
         // can seed it before processing any block changes. when flood-fill
         // is disabled, fill light inline with a flat sky-level seed instead.
-        const auth = voxels.authority;
-        if (auth) {
-            if (auth.floodFillLighting.enabled) {
-                auth.changes.pendingNewChunks.push(chunk);
+        const authority = voxels.authority;
+
+        if (authority) {
+            if (authority.floodFillLighting.enabled) {
+                authority.changes.pendingNewChunks.push(chunk);
             } else {
-                const sky = auth.floodFillLighting.minLevel & 0xf;
+                const sky = authority.floodFillLighting.minLevel & 0xf;
                 chunk.light.fill(sky << 12);
                 // no markChunkLightDirty here — initial light ships with
                 // voxel_chunk_full via addedChunks, and the bulk fill bypasses
@@ -680,14 +682,24 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
                 // dirtyCount=0 would only create a ghost the dispatch fallback
                 // would re-ship as a redundant full-light payload.
             }
-            auth.changes.addedChunks.add(chunk);
+            authority.changes.addedChunks.add(chunk);
         }
     }
     return chunk;
 }
 
+/** get the string key at a world position. returns "air" if chunk doesn't exist. */
+export function getBlock(voxels: Voxels, wx: number, wy: number, wz: number): string {
+    const cx = toChunkCoord(wx);
+    const cy = toChunkCoord(wy);
+    const cz = toChunkCoord(wz);
+    const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
+    if (!chunk) return BLOCK_AIR;
+    return getChunkBlockKey(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
+}
+
 /** get the global state id at a world position. returns AIR if chunk doesn't exist. */
-export function getBlock(voxels: Voxels, wx: number, wy: number, wz: number): number {
+export function getBlockState(voxels: Voxels, wx: number, wy: number, wz: number): number {
     const cx = toChunkCoord(wx);
     const cy = toChunkCoord(wy);
     const cz = toChunkCoord(wz);
@@ -696,26 +708,16 @@ export function getBlock(voxels: Voxels, wx: number, wy: number, wz: number): nu
     return getChunkBlock(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }
 
-export function getBlockRelative(voxels: Voxels, chunk: Chunk, lx: number, ly: number, lz: number): number {
+export function getBlockStateRelative(voxels: Voxels, chunk: Chunk, lx: number, ly: number, lz: number): number {
     // if local coords are out of bounds, delegate to getBlock which will find the correct chunk
     if (lx < 0 || lx >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) {
         const wx = chunk.wx + lx;
         const wy = chunk.wy + ly;
         const wz = chunk.wz + lz;
-        return getBlock(voxels, wx, wy, wz);
+        return getBlockState(voxels, wx, wy, wz);
     }
 
     return getChunkBlock(chunk, lx, ly, lz);
-}
-
-/** get the string key at a world position. returns "air" if chunk doesn't exist. */
-export function getBlockKey(voxels: Voxels, wx: number, wy: number, wz: number): string {
-    const cx = toChunkCoord(wx);
-    const cy = toChunkCoord(wy);
-    const cz = toChunkCoord(wz);
-    const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
-    if (!chunk) return BLOCK_AIR;
-    return getChunkBlockKey(chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz));
 }
 
 /** iterate every non-air block in a voxels instance, yielding world coords and string key. */
@@ -876,6 +878,8 @@ function cloneChunk(src: Chunk): Chunk {
         dirty: true,
         meshGen: src.meshGen + 1,
         lightDirty: false,
+        lightDirtyMask: new Uint8Array(src.lightDirtyMask),
+        lightDirtyCount: src.lightDirtyCount,
         compressedSnapshot: null,
         snapshotPalette: null,
         compressedLight: null,

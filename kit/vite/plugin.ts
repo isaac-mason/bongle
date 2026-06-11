@@ -727,11 +727,12 @@ if (import.meta.hot) {
                 // POST /__bongle/pipeline/emit — worker submits icon results.
                 // Query params: kind=block-icons|scene-icon|prefab-icon;
                 // per-id kinds also carry id, px.
-                // block-icons carries its sidecar JSON in the X-Manifest header
-                // (it's a packed atlas); scene-icon + prefab-icon are one PNG
-                // per subject. Body is raw RGBA either way. The orchestrator
-                // hash-gates render dispatch in-memory, so the worker only ever
-                // POSTs renders that need writing — no cached branch here.
+                // block-icons (a packed atlas) frames its sidecar manifest at
+                // the head of the body — [uint32 LE len][manifest JSON][pixels]
+                // — since the coords map outgrows HTTP header limits. scene-icon
+                // + prefab-icon are one raw-RGBA PNG body per subject. The
+                // orchestrator hash-gates render dispatch in-memory, so the
+                // worker only ever POSTs renders that need writing.
                 server.middlewares.use('/__bongle/pipeline/emit', async (req, res) => {
                     if (req.method !== 'POST') {
                         res.statusCode = 405;
@@ -770,24 +771,31 @@ if (import.meta.hot) {
                         }
                         return;
                     }
-                    const manifestHeader = req.headers['x-manifest'];
-                    if (typeof manifestHeader !== 'string') {
-                        res.statusCode = 400;
-                        res.end('X-Manifest header required');
-                        return;
-                    }
-                    let manifest: IconManifest;
-                    try {
-                        manifest = JSON.parse(manifestHeader) as IconManifest;
-                    } catch {
-                        res.statusCode = 400;
-                        res.end('X-Manifest is not valid JSON');
-                        return;
-                    }
+                    // block-icons: manifest is framed at the head of the body
+                    // (see emitIconAtlas) — its coords map outgrows HTTP header
+                    // limits (→ 431). Layout: [uint32 LE len][manifest JSON][pixels].
                     const chunks: Buffer[] = [];
                     for await (const chunk of req) chunks.push(chunk as Buffer);
                     const body = Buffer.concat(chunks);
-                    const pixels = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+                    if (body.byteLength < 4) {
+                        res.statusCode = 400;
+                        res.end('block-icons body too short');
+                        return;
+                    }
+                    const manifestLen = body.readUInt32LE(0);
+                    let manifest: IconManifest;
+                    try {
+                        manifest = JSON.parse(body.subarray(4, 4 + manifestLen).toString('utf8')) as IconManifest;
+                    } catch {
+                        res.statusCode = 400;
+                        res.end('block-icons manifest is not valid JSON');
+                        return;
+                    }
+                    const pixels = new Uint8Array(
+                        body.buffer,
+                        body.byteOffset + 4 + manifestLen,
+                        body.byteLength - 4 - manifestLen,
+                    );
                     try {
                         await writeIconArtifact(resourcesDir, kind, manifest, pixels);
                         // editor's loadEditorAssets() listens for this to

@@ -26,10 +26,10 @@
 //   4  edge entirely interior                  → false
 
 import { AIR, BLOCK_FLAG_COLLISION, type BlockRegistry, MISSING } from './block-registry';
-import { getBlock, type Voxels } from './voxels';
+import { getBlockState, type Voxels } from './voxels';
 
 function isSolidCube(voxels: Voxels, blocks: BlockRegistry, x: number, y: number, z: number): boolean {
-    const stateId = getBlock(voxels, x, y, z);
+    const stateId = getBlockState(voxels, x, y, z);
     if (stateId === AIR || stateId === MISSING) return false;
     if (!(blocks.flags[stateId]! & BLOCK_FLAG_COLLISION)) return false;
     return blocks.colliderId[stateId] === 0;

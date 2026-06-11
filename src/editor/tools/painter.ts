@@ -14,7 +14,7 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
 import { useEditor } from '../editor-store';
@@ -133,7 +133,7 @@ export function updatePainter(
                 // skipping air here (rather than via a default mask) keeps the
                 // rule built-in: the user's mask field is purely additive
                 // filtering on top of "only existing voxels".
-                if (getBlockKey(voxels, wx, wy, wz) === BLOCK_AIR) return;
+                if (getBlock(voxels, wx, wy, wz) === BLOCK_AIR) return;
                 Selection.set(fresh, wx, wy, wz);
             });
             const frameForward: VoxelOp[] = [];

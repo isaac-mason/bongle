@@ -59,7 +59,7 @@ export type BuildManifestArgs = {
     serverEntry: string;
     /** Resolved version of `bongle` (engine package) at build time. */
     bongleVersion: string;
-    /** Version of the interface */
+    /** Engine⇄game contract semver — `INTERFACE_VERSION` from `bongle/interface`. */
     interfaceVersion: string;
     /** Per-game matchmaking config, harvested by the asset-pipeline
      *  introspection pass from the user's matchmaking() call (or

@@ -21,7 +21,8 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
+import type { PlaceIO } from '../../core/voxels/blocks';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { PointerState } from '../pointer-state';
@@ -32,7 +33,6 @@ import { isMouseJustDown, isMouseTap } from '../../client/input';
 import type { Input } from '../../client/input';
 import type { TransformToolState } from './transform';
 import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
-import { applyDirectionalProps } from '../build-direction';
 import { pitchFromQuat, yawFromQuat } from '../camera';
 import type { PerspectiveCamera } from 'gpucat';
 import type { Quat, Vec3 } from 'mathcat';
@@ -77,7 +77,7 @@ export function updateBuild(
     // left click: break the hovered block (set to air)
     if (pointerJustDown(pointer, input) && s.hoverVoxel) {
         const [wx, wy, wz] = s.hoverVoxel;
-        const oldKey = getBlockKey(voxels, wx, wy, wz);
+        const oldKey = getBlock(voxels, wx, wy, wz);
 
         // don't break air
         if (oldKey !== BLOCK_AIR) {
@@ -106,37 +106,35 @@ export function updateBuild(
     if (rmb && s.hoverVoxel && s.hoverNormal) {
         const activeBlockKey = slot && slot.kind === 'block' ? slot.blockKey : '';
         if (activeBlockKey) {
-            const wx = s.hoverVoxel[0] + s.hoverNormal[0];
-            const wy = s.hoverVoxel[1] + s.hoverNormal[1];
-            const wz = s.hoverVoxel[2] + s.hoverNormal[2];
+            const tx = s.hoverVoxel[0] + s.hoverNormal[0];
+            const ty = s.hoverVoxel[1] + s.hoverNormal[1];
+            const tz = s.hoverVoxel[2] + s.hoverNormal[2];
 
-            // only place into air
-            const existingKey = getBlockKey(voxels, wx, wy, wz);
-            if (existingKey === BLOCK_AIR) {
-                const placedKey = resolvePlacedKey(
+            // only place into air (the block's `place` may validate further cells)
+            if (getBlock(voxels, tx, ty, tz) === BLOCK_AIR) {
+                const placement = resolvePlacement(
                     activeBlockKey,
                     s.hoverVoxel,
                     s.hoverNormal,
                     s.hoverPoint,
                     camera.quaternion,
-                    wx,
-                    wy,
-                    wz,
+                    tx,
+                    ty,
+                    tz,
                     voxels,
                     ctx.blocks,
                 );
-                const fwd: Op = { wx, wy, wz, key: placedKey };
-                const rev: Op = { wx, wy, wz, key: BLOCK_AIR };
-
-                store.getState().action({
-                    label: 'place',
-                    do() {
-                        send(ctx, VoxelEditCommand, { ops: [fwd] });
-                    },
-                    undo() {
-                        send(ctx, VoxelEditCommand, { ops: [rev] });
-                    },
-                });
+                if (placement) {
+                    store.getState().action({
+                        label: 'place',
+                        do() {
+                            send(ctx, VoxelEditCommand, { ops: placement.fwd });
+                        },
+                        undo() {
+                            send(ctx, VoxelEditCommand, { ops: placement.rev });
+                        },
+                    });
+                }
             }
         }
     }
@@ -144,17 +142,14 @@ export function updateBuild(
 
 // ── placement resolution ──────────────────────────────────────────
 //
-// pick the final placed key. preference order:
-//   1. block's `place` hook (if defined on its def) — gets the full
-//      placement ctx (hit point, normal, yaw, pitch) and returns a stateId.
-//   2. convention-based applyDirectionalProps — mutates `axis` / `facing`
-//      props on the active key based on the hit normal and camera yaw.
-//
-// if place is defined, the block owns the decision — its return is used
-// verbatim. only an unregistered stateId (stateToKey miss) falls through
-// to convention, as a defensive guard.
+// runs the block's `place` hook (if any) against a recording `io`: each
+// io.set becomes a forward edit op and (on first touch of a cell) captures
+// that cell's original key as the reverse op for undo; io.get reads the
+// world, reflecting this place-action's own pending writes. a block with no
+// `place` hook just writes its selected key at the target cell. returns null
+// if `place` wrote nothing (aborted) — e.g. a door with no headroom.
 
-function resolvePlacedKey(
+function resolvePlacement(
     activeBlockKey: string,
     hoverVoxel: readonly [number, number, number],
     hoverNormal: Vec3,
@@ -165,35 +160,52 @@ function resolvePlacedKey(
     targetZ: number,
     voxels: Voxels,
     registry: BlockRegistry,
-): string {
+): { fwd: Op[]; rev: Op[] } | null {
     const parsed = parseKey(activeBlockKey);
     const def = parsed ? registry.idToDef.get(parsed.blockId) : null;
 
-    if (def?.place && hoverPoint) {
-        // hit point in clicked block's [0..1]³ local space.
-        const hitX = hoverPoint[0] - hoverVoxel[0];
-        const hitY = hoverPoint[1] - hoverVoxel[1];
-        const hitZ = hoverPoint[2] - hoverVoxel[2];
-        const yaw = yawFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]);
-        const pitch = pitchFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]);
+    const writes = new Map<string, Op>(); // last forward write per cell
+    const reverses = new Map<string, Op>(); // original key per cell (first touch)
+    const pending = new Map<string, string>(); // pending key per cell (for io.get)
+    const cellId = (x: number, y: number, z: number) => `${x},${y},${z}`;
+    const io: PlaceIO = {
+        get(x, y, z) {
+            const p = pending.get(cellId(x, y, z));
+            return p !== undefined ? p : getBlock(voxels, x, y, z);
+        },
+        set(x, y, z, key) {
+            const id = cellId(x, y, z);
+            if (!reverses.has(id)) {
+                reverses.set(id, { wx: x, wy: y, wz: z, key: getBlock(voxels, x, y, z) });
+            }
+            writes.set(id, { wx: x, wy: y, wz: z, key });
+            pending.set(id, key);
+        },
+    };
 
-        const stateId = def.place({
-            voxels,
-            worldX: targetX,
-            worldY: targetY,
-            worldZ: targetZ,
-            normalX: hoverNormal[0],
-            normalY: hoverNormal[1],
-            normalZ: hoverNormal[2],
-            hitX,
-            hitY,
-            hitZ,
-            yaw,
-            pitch,
-        });
-        const key = registry.stateToKey[stateId];
-        if (key) return key;
+    if (def?.place && hoverPoint) {
+        // hit point in the clicked block's [0..1]³ local space.
+        def.place(
+            {
+                worldX: targetX,
+                worldY: targetY,
+                worldZ: targetZ,
+                normalX: hoverNormal[0],
+                normalY: hoverNormal[1],
+                normalZ: hoverNormal[2],
+                hitX: hoverPoint[0] - hoverVoxel[0],
+                hitY: hoverPoint[1] - hoverVoxel[1],
+                hitZ: hoverPoint[2] - hoverVoxel[2],
+                yaw: yawFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]),
+                pitch: pitchFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]),
+            },
+            io,
+        );
+    } else {
+        // no place hook — write the selected key as-is at the target cell.
+        io.set(targetX, targetY, targetZ, activeBlockKey);
     }
 
-    return applyDirectionalProps(activeBlockKey, hoverNormal, cameraQuat, registry);
+    if (writes.size === 0) return null;
+    return { fwd: [...writes.values()], rev: [...reverses.values()] };
 }

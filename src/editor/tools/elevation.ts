@@ -26,7 +26,7 @@ import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
 import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlockKey } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
 import type { Input } from '../../client/input';
@@ -94,7 +94,7 @@ function findTopH(
     yHi: number,
 ): { h: number; key: string } | null {
     for (let y = yHi; y >= yLo; y--) {
-        const key = getBlockKey(voxels, wx, y, wz);
+        const key = getBlock(voxels, wx, y, wz);
         if (key !== BLOCK_AIR) return { h: y, key };
     }
     return null;
@@ -415,14 +415,14 @@ function applyElevationStamp(
             if (opts.mode === 'raise') {
                 const targetH = Math.min(yMax, top.h + blocks);
                 for (let y = top.h + 1; y <= targetH; y++) {
-                    const cur = getBlockKey(voxels, wx, y, wz);
+                    const cur = getBlock(voxels, wx, y, wz);
                     forward.push({ wx, wy: y, wz, key: pickFill(wx, y, wz, top.key) });
                     reverse.push({ wx, wy: y, wz, key: cur });
                 }
             } else if (opts.mode === 'lower') {
                 const targetH = Math.max(yMin, top.h - blocks);
                 for (let y = top.h; y > targetH; y--) {
-                    const cur = getBlockKey(voxels, wx, y, wz);
+                    const cur = getBlock(voxels, wx, y, wz);
                     forward.push({ wx, wy: y, wz, key: BLOCK_AIR });
                     reverse.push({ wx, wy: y, wz, key: cur });
                 }
@@ -432,14 +432,14 @@ function applyElevationStamp(
                 if (dir > 0) {
                     const targetH = Math.min(yMax, Math.min(flattenTargetY, top.h + blocks));
                     for (let y = top.h + 1; y <= targetH; y++) {
-                        const cur = getBlockKey(voxels, wx, y, wz);
+                        const cur = getBlock(voxels, wx, y, wz);
                         forward.push({ wx, wy: y, wz, key: pickFill(wx, y, wz, top.key) });
                         reverse.push({ wx, wy: y, wz, key: cur });
                     }
                 } else {
                     const targetH = Math.max(yMin, Math.max(flattenTargetY, top.h - blocks));
                     for (let y = top.h; y > targetH; y--) {
-                        const cur = getBlockKey(voxels, wx, y, wz);
+                        const cur = getBlock(voxels, wx, y, wz);
                         forward.push({ wx, wy: y, wz, key: BLOCK_AIR });
                         reverse.push({ wx, wy: y, wz, key: cur });
                     }
@@ -528,7 +528,7 @@ function integrateContinuous(
                 const capped = Math.min(newApplied, ceil);
                 for (let i = col.applied + 1; i <= capped; i++) {
                     const wy = col.baselineH + i;
-                    const cur = getBlockKey(voxels, wx, wy, wz);
+                    const cur = getBlock(voxels, wx, wy, wz);
                     const key = opts.pattern
                         ? samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng)
                         : col.baselineKey;
@@ -547,7 +547,7 @@ function integrateContinuous(
                 const capped = Math.min(newApplied, floor);
                 for (let i = col.applied + 1; i <= capped; i++) {
                     const wy = col.baselineH - (i - 1);
-                    const cur = getBlockKey(voxels, wx, wy, wz);
+                    const cur = getBlock(voxels, wx, wy, wz);
                     state.forward.push({ wx, wy, wz, key: BLOCK_AIR });
                     state.reverse.push({ wx, wy, wz, key: cur });
                     added++;

@@ -9,7 +9,7 @@ import {
     createNode,
     createVoxelModelShape,
     env,
-    getBlock,
+    getBlockState,
     getTrait,
     MotionType,
     objectLayerForMotionType,
@@ -228,7 +228,7 @@ script(VoxelDropTrait, 'drop', (ctx) => {
         let surfaceY = -Infinity;
         const scanStart = Math.floor(bottomY) + 1;
         for (let yy = scanStart; yy >= scanStart - 16; yy--) {
-            const sid = getBlock(ctx.voxels, bx, yy, bz);
+            const sid = getBlockState(ctx.voxels, bx, yy, bz);
             if ((flags[sid]! & BLOCK_FLAG_LIQUID) !== 0) {
                 surfaceY = yy + 1;
                 break;

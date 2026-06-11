@@ -1317,8 +1317,13 @@ function loadEditorAssets(): void {
     }
 
     fetch(assetUrl('voxels-icons.json'))
-        .then((r) => r.json())
-        .then((json: { iconPx: number; cols: number; rows: number; states: Record<string, [number, number]> }) => {
+        // not-ok = the artifact isn't on disk yet (cold start wipes it; the
+        // pipeline regenerates it shortly). Skip quietly — the `bongle:icons-
+        // ready` retry above re-runs this once block-icons finishes writing.
+        // Parsing a 404 body would throw "Unexpected end of JSON input".
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json: { iconPx: number; cols: number; rows: number; states: Record<string, [number, number]> } | null) => {
+            if (!json) return;
             useEditor.setState({
                 blockIconAtlasUrl: assetUrl('voxels-icons.png'),
                 blockIconCoords: json.states,

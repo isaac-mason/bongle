@@ -3,7 +3,7 @@ import {
     BLOCK_AIR,
     control,
     env,
-    getBlockKey,
+    getBlock,
     getTrait,
     matchmaking,
     onInit,
@@ -102,7 +102,7 @@ script(StormTrait, 'tick', (ctx) => {
             const z = -half + Math.floor(Math.random() * span);
             const y = baseY + Math.floor(Math.random() * height);
 
-            const current = getBlockKey(ctx.voxels, x, y, z);
+            const current = getBlock(ctx.voxels, x, y, z);
             setBlock(ctx.voxels, x, y, z, current === BLOCK_AIR ? stoneKey : BLOCK_AIR);
         }
     });

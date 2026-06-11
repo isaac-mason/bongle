@@ -26,7 +26,7 @@ import type { EditRoomStoreApi } from '../edit-room-store';
 import { isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
 import { isInputFocused } from '../input';
 import * as Selector from '../selector';
-import { getBlockKey } from '../../core/voxels/voxels';
+import { getBlock } from '../../core/voxels/voxels';
 import { getNodeById, getTrait, isAncestorOf } from '../../core/scene/nodes';
 import type { Node } from '../../core/scene/nodes';
 import { TransformTrait } from '../../builtins/transform';
@@ -390,7 +390,7 @@ export function updateInspect(
         // inspect tool: set inspected voxel on click
         if (activeTool === 'inspect' && selectTarget !== 'nodes') {
             if (voxelHit && (voxelWins || selectTarget === 'voxels')) {
-                const key = getBlockKey(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ);
+                const key = getBlock(ctx.voxels, voxelHit.voxelX, voxelHit.voxelY, voxelHit.voxelZ);
                 store.setState({
                     inspectedVoxel: {
                         wx: voxelHit.voxelX,

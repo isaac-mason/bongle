@@ -25,7 +25,7 @@ import {
     createChunk,
     createVoxels,
     createVoxelsAuthority,
-    getBlock,
+    getBlockState,
     setBlock,
     setChunkBlock,
     type Voxels,
@@ -252,10 +252,10 @@ const FenceBlock = block('bench:fence', {
         const cullTable = v.registry.cull;
         const flagsTable = v.registry.flags;
 
-        const idN = getBlock(v, ctx.worldX, ctx.worldY, ctx.worldZ - 1);
-        const idS = getBlock(v, ctx.worldX, ctx.worldY, ctx.worldZ + 1);
-        const idE = getBlock(v, ctx.worldX + 1, ctx.worldY, ctx.worldZ);
-        const idW = getBlock(v, ctx.worldX - 1, ctx.worldY, ctx.worldZ);
+        const idN = getBlockState(v, ctx.worldX, ctx.worldY, ctx.worldZ - 1);
+        const idS = getBlockState(v, ctx.worldX, ctx.worldY, ctx.worldZ + 1);
+        const idE = getBlockState(v, ctx.worldX + 1, ctx.worldY, ctx.worldZ);
+        const idW = getBlockState(v, ctx.worldX - 1, ctx.worldY, ctx.worldZ);
 
         const connectsN = idN !== 0 && (cullTable[idN] === CullType.SOLID || (flagsTable[idN]! & BLOCK_FLAG_FENCE) !== 0);
         const connectsS = idS !== 0 && (cullTable[idS] === CullType.SOLID || (flagsTable[idS]! & BLOCK_FLAG_FENCE) !== 0);

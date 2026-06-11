@@ -43,6 +43,10 @@ export const BLOCK_FLAG_WALL = 1 << 6;
 /** block is a glass pane / bars — panes connect to other pane-flagged blocks. */
 export const BLOCK_FLAG_PANE = 1 << 7;
 
+/** block is a door half — identifies the two cells of a door for the
+ *  get/setDoorOpen utils (all door presets share one DoorState schema). */
+export const BLOCK_FLAG_DOOR = 1 << 8;
+
 /**
  * format a string key from a block id, its state schema, and a local state index.
  *

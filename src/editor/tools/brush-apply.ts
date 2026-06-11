@@ -9,7 +9,7 @@
 
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
-import { getBlockKey } from '../../core/voxels/voxels';
+import { getBlock } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
 import { samplePattern } from '../scene/pattern';
 import { testMask } from '../scene/mask';
@@ -30,7 +30,7 @@ export function applyStamp(
     Selection.forEach(stamp, (wx, wy, wz) => {
         if (opts.mask && !testMask(opts.mask, voxels, wx, wy, wz, rng)) return;
         const newKey = samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng);
-        const oldKey = getBlockKey(voxels, wx, wy, wz);
+        const oldKey = getBlock(voxels, wx, wy, wz);
         if (oldKey === newKey) return;
         forward.push({ wx, wy, wz, key: newKey });
         reverse.push({ wx, wy, wz, key: oldKey });

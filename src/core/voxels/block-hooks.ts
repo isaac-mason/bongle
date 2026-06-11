@@ -23,7 +23,7 @@
 import { SetBlockFlags } from './block-flags';
 import { AIR } from './block-registry';
 import type { BlockChangeCtx, BlockStateChangeCtx } from './blocks';
-import { _registerBlockHooksDriver, getBlock, setBlock, type VoxelBlockOp, type Voxels } from './voxels';
+import { _registerBlockHooksDriver, getBlockState, setBlock, type VoxelBlockOp, type Voxels } from './voxels';
 
 // ── intrinsic hook bitmask ──────────────────────────────────────────
 
@@ -158,7 +158,7 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
 }
 
 function recomputeAt(voxels: Voxels, wx: number, wy: number, wz: number): void {
-    const stateId = getBlock(voxels, wx, wy, wz);
+    const stateId = getBlockState(voxels, wx, wy, wz);
     if (stateId === AIR) return;
     const registry = voxels.registry;
     const blockIdx = registry.stateToBlockIndex[stateId]!;
@@ -210,7 +210,7 @@ function fireEventsForOp(voxels: Voxels, op: VoxelBlockOp): void {
         const nwx = op.wx + dx;
         const nwy = op.wy + dy;
         const nwz = op.wz + dz;
-        const neighbourId = getBlock(voxels, nwx, nwy, nwz);
+        const neighbourId = getBlockState(voxels, nwx, nwy, nwz);
         if (neighbourId === AIR) continue;
         const neighbourBlockIdx = registry.stateToBlockIndex[neighbourId]!;
         const neighbourHandle = registry.handles[neighbourBlockIdx]!;

@@ -34,7 +34,7 @@ import {
     SHAPE_AABBS,
     type BlockRegistry,
 } from '../core/voxels/block-registry';
-import { getBlock, type Voxels } from '../core/voxels/voxels';
+import { getBlockState, type Voxels } from '../core/voxels/voxels';
 import { unpackVoxelHitInfo } from '../core/voxels/voxel-physics-shape';
 import { pack } from '../api/pack';
 import type { Physics } from '../api/physics';
@@ -636,14 +636,14 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     // between gravity and swim physics and retriggered landing footsteps
     // as `grounded` toggled.
     const liquidProbeY = Math.floor(feet[1] + (state.inLiquid ? 0.1 : 0.5));
-    const liquidProbeState = getBlock(voxels, fx, liquidProbeY, fz);
+    const liquidProbeState = getBlockState(voxels, fx, liquidProbeY, fz);
     const liquidProbeIsLiquid = flags[liquidProbeState]! & BLOCK_FLAG_LIQUID;
 
     // climb still needs the head sample (climb mode wants any body cell
     // touching a ladder, including the head voxel for tall columns).
-    const headState = getBlock(voxels, fx, headY, fz);
-    const feetStateForFlags = getBlock(voxels, fx, Math.floor(feet[1] + 0.1), fz);
-    const belowState = getBlock(voxels, fx, belowY, fz);
+    const headState = getBlockState(voxels, fx, headY, fz);
+    const feetStateForFlags = getBlockState(voxels, fx, Math.floor(feet[1] + 0.1), fz);
+    const belowState = getBlockState(voxels, fx, belowY, fz);
     const climbable = (flags[headState]! | flags[feetStateForFlags]! | flags[belowState]!) & BLOCK_FLAG_CLIMBABLE;
     state.isClimbing = cc.input.climbOverride || climbable !== 0;
 
@@ -663,7 +663,7 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     const standingFromContacts = deriveStandingStateFromContacts(state.vcc!);
     state.standingStateId = standingFromContacts !== 0
         ? standingFromContacts
-        : getBlock(voxels, fx, belowY, fz);
+        : getBlockState(voxels, fx, belowY, fz);
 }
 
 /** pick the most up-facing voxel contact above the slope threshold; 0
@@ -769,7 +769,7 @@ function blockUnionAabbLocal(
 function hasSneakHeadroom(voxels: Voxels, x: number, fy: number, z: number): boolean {
     const flags = voxels.registry.flags;
     for (let y = 1; y <= SNEAK_HEADROOM_CELLS; y++) {
-        if ((flags[getBlock(voxels, x, fy + y, z)]! & BLOCK_FLAG_COLLISION) !== 0) return false;
+        if ((flags[getBlockState(voxels, x, fy + y, z)]! & BLOCK_FLAG_COLLISION) !== 0) return false;
     }
     return true;
 }
@@ -811,7 +811,7 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
     // still guardable. cheaper than re-running the full 3×3 search.
     if (state.sneakNode &&
         state.sneakNode[0] === cx && state.sneakNode[1] === fy && state.sneakNode[2] === cz) {
-        const stateId = getBlock(voxels, cx, fy, cz);
+        const stateId = getBlockState(voxels, cx, fy, cz);
         if ((flags[stateId]! & BLOCK_FLAG_SNEAK_GUARD) !== 0) return true;
     }
 
@@ -830,7 +830,7 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
         const dz = SNEAK_SEARCH_OFFSETS[i]![1];
         const x = cx + dx;
         const z = cz + dz;
-        const stateId = getBlock(voxels, x, fy, z);
+        const stateId = getBlockState(voxels, x, fy, z);
         if ((flags[stateId]! & BLOCK_FLAG_SNEAK_GUARD) === 0) continue;
         const localBox = blockUnionAabbLocal(registry, stateId);
         const cxw = x + (localBox[0] + localBox[3]) * 0.5;

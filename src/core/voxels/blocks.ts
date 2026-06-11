@@ -276,7 +276,6 @@ export type OnNeighbourChangedFn = (ctx: BlockChangeCtx) => void;
  * trig on yaw/pitch when richer pitch-aware logic is needed.
  */
 export type BlockPlaceCtx = {
-    voxels: import('./voxels').Voxels;
     /** target cell (where the block will land — adjacent to the clicked one). */
     worldX: number;
     worldY: number;
@@ -295,9 +294,22 @@ export type BlockPlaceCtx = {
     pitch: number;
 };
 
-/** pick the placed stateId from hit context. when undefined, engine falls back
- *  to the prop-name convention (axis / facing). */
-export type PlaceFn = (ctx: BlockPlaceCtx) => number;
+/** read/write seam handed to a `place` hook. the caller binds it: the editor
+ *  records each `set` as an undoable edit op; gameplay writes authoritative
+ *  voxels; tests mock it. `place` never touches voxels directly — same string
+ *  block-key currency as `getBlock`/`setBlock`, so a hook decodes a neighbour
+ *  via `parseKey` with no registry. `get` reflects this place-action's own
+ *  pending writes ('air' for an empty cell). */
+export type PlaceIO = {
+    get(x: number, y: number, z: number): string;
+    set(x: number, y: number, z: number, key: string): void;
+};
+
+/** imperative placement (= Luanti `on_place`). validate via `io.get`, then
+ *  `io.set` the cell(s) — multiple sets for a footprint (door = 2). return
+ *  early to abort (no writes). optional on the def; when absent the build tool
+ *  writes the block's default/selected state at the target cell. */
+export type PlaceFn = (ctx: BlockPlaceCtx, io: PlaceIO) => void;
 
 /** rotate a stateId 90° around an axis. cw = looking down the +axis. when
  *  undefined, engine falls back to the prop-name convention. */

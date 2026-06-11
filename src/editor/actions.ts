@@ -38,7 +38,7 @@ import {
     setPrefab,
 } from '../core/scene/nodes';
 import { rotateVoxelsByQuat } from '../core/voxels/voxel-rotate';
-import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlockKey, type Voxels } from '../core/voxels/voxels';
+import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlock, type Voxels } from '../core/voxels/voxels';
 import type { VoxelOp } from './blueprint';
 import type { EditRoomState, ElevationMode } from './edit-room-store';
 import { testMask, type Mask } from './scene/mask';
@@ -96,7 +96,7 @@ function resolveFill(
     Selection.forEach(selection, (wx, wy, wz) => {
         if (mask && !testMask(mask, voxels, wx, wy, wz, rng)) return;
         const newKey = samplePattern(pattern, voxels, wx, wy, wz, active, rng);
-        const oldKey = getBlockKey(voxels, wx, wy, wz);
+        const oldKey = getBlock(voxels, wx, wy, wz);
         if (oldKey === newKey) return;
         forward.push({ wx, wy, wz, key: newKey });
         reverse.push({ wx, wy, wz, key: oldKey });
@@ -150,7 +150,7 @@ export function del(
         forwardVoxelOps = [];
         reverseVoxelOps = [];
         Selection.forEach(sel, (wx, wy, wz) => {
-            const oldKey = getBlockKey(ctx.voxels, wx, wy, wz);
+            const oldKey = getBlock(ctx.voxels, wx, wy, wz);
             if (oldKey === BLOCK_AIR) return;
             forwardVoxelOps!.push({ wx, wy, wz, key: BLOCK_AIR });
             reverseVoxelOps!.push({ wx, wy, wz, key: oldKey });
@@ -249,7 +249,7 @@ export function pickBlock(state: EditRoomState, ctx: ScriptContext): void {
 
     if (wx === undefined || wy === undefined || wz === undefined) return;
 
-    const key = getBlockKey(ctx.voxels, wx, wy, wz);
+    const key = getBlock(ctx.voxels, wx, wy, wz);
     if (key === BLOCK_AIR) return;
 
     const { activeSlotIndex } = state;
@@ -272,9 +272,9 @@ export function overlay(
     const forward: VoxelOp[] = [];
     const reverse: VoxelOp[] = [];
     Selection.forEach(sel, (wx, wy, wz) => {
-        const here = getBlockKey(ctx.voxels, wx, wy, wz);
+        const here = getBlock(ctx.voxels, wx, wy, wz);
         if (here === BLOCK_AIR) return;
-        const aboveOld = getBlockKey(ctx.voxels, wx, wy + 1, wz);
+        const aboveOld = getBlock(ctx.voxels, wx, wy + 1, wz);
         if (aboveOld !== BLOCK_AIR) return;
         const newKey = samplePattern(pattern, ctx.voxels, wx, wy + 1, wz, active, rng);
         if (newKey === BLOCK_AIR) return;
@@ -323,7 +323,7 @@ export function walls(
             !Selection.has(sel, wx, wy, wz - 1);
         if (!isWall) return;
         const newKey = samplePattern(pattern, ctx.voxels, wx, wy, wz, active, rng);
-        const oldKey = getBlockKey(ctx.voxels, wx, wy, wz);
+        const oldKey = getBlock(ctx.voxels, wx, wy, wz);
         if (oldKey === newKey) return;
         forward.push({ wx, wy, wz, key: newKey });
         reverse.push({ wx, wy, wz, key: oldKey });
@@ -380,7 +380,7 @@ export function elevateSelection(
         let oldH = -1;
         let oldKey = BLOCK_AIR;
         for (let y = r.yHi; y >= r.yLo; y--) {
-            const key = getBlockKey(ctx.voxels, wx, y, wz);
+            const key = getBlock(ctx.voxels, wx, y, wz);
             if (key !== BLOCK_AIR) {
                 oldH = y;
                 oldKey = key;
@@ -403,7 +403,7 @@ export function elevateSelection(
         if (mode === 'raise') {
             const targetH = Math.min(yHi, oldH + blocks);
             for (let y = oldH + 1; y <= targetH; y++) {
-                const cur = getBlockKey(ctx.voxels, wx, y, wz);
+                const cur = getBlock(ctx.voxels, wx, y, wz);
                 if (cur === oldKey) continue;
                 forward.push({ wx, wy: y, wz, key: oldKey });
                 reverse.push({ wx, wy: y, wz, key: cur });
@@ -411,7 +411,7 @@ export function elevateSelection(
         } else if (mode === 'lower') {
             const targetH = Math.max(yLo, oldH - blocks);
             for (let y = oldH; y > targetH; y--) {
-                const cur = getBlockKey(ctx.voxels, wx, y, wz);
+                const cur = getBlock(ctx.voxels, wx, y, wz);
                 if (cur === BLOCK_AIR) continue;
                 forward.push({ wx, wy: y, wz, key: BLOCK_AIR });
                 reverse.push({ wx, wy: y, wz, key: cur });
@@ -422,7 +422,7 @@ export function elevateSelection(
             if (dir > 0) {
                 const targetH = Math.min(yHi, Math.min(flattenTarget, oldH + blocks));
                 for (let y = oldH + 1; y <= targetH; y++) {
-                    const cur = getBlockKey(ctx.voxels, wx, y, wz);
+                    const cur = getBlock(ctx.voxels, wx, y, wz);
                     if (cur === oldKey) continue;
                     forward.push({ wx, wy: y, wz, key: oldKey });
                     reverse.push({ wx, wy: y, wz, key: cur });
@@ -430,7 +430,7 @@ export function elevateSelection(
             } else {
                 const targetH = Math.max(yLo, Math.max(flattenTarget, oldH - blocks));
                 for (let y = oldH; y > targetH; y--) {
-                    const cur = getBlockKey(ctx.voxels, wx, y, wz);
+                    const cur = getBlock(ctx.voxels, wx, y, wz);
                     if (cur === BLOCK_AIR) continue;
                     forward.push({ wx, wy: y, wz, key: BLOCK_AIR });
                     reverse.push({ wx, wy: y, wz, key: cur });
@@ -1005,7 +1005,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
                         const wy = chunk.wy + ly + oy;
                         const wz = chunk.wz + lz + oz;
                         forwardOps.push({ wx, wy, wz, key });
-                        reverseOps.push({ wx, wy, wz, key: getBlockKey(ctx.voxels, wx, wy, wz) });
+                        reverseOps.push({ wx, wy, wz, key: getBlock(ctx.voxels, wx, wy, wz) });
                     }
                 }
             }

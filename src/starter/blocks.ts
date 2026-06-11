@@ -61,6 +61,9 @@ export const cobblestoneWall = blockPreset.wall('starter:cobblestone_wall', { al
 export const glassPane = blockPreset.pane('starter:glass_pane', { all: { texture: tex.glass } }, { name: 'Glass Pane', sounds: soundPreset.glass });
 export const snowCarpet = blockPreset.carpet('starter:snow_carpet', { all: { texture: tex.snow } }, { name: 'Snow Carpet', sounds: soundPreset.snow });
 export const oakTrapdoor = blockPreset.trapdoor('starter:oak_trapdoor', { all: { texture: tex.oakPlanks } }, { name: 'Oak Trapdoor', sounds: soundPreset.wood });
+// two-cell door (lower + upper). top/bottom textures reuse oak planks as a
+// placeholder until dedicated door art lands. open/close via setDoorOpen.
+export const oakDoor = blockPreset.door('starter:oak_door', { top: tex.oakPlanks, bottom: tex.oakPlanks }, { name: 'Oak Door', sounds: soundPreset.wood });
 export const stonePlate = blockPreset.plate('starter:stone_plate', tex.stone, { name: 'Stone Pressure Plate', sounds: soundPreset.stone });
 export const mushroomRed = blockPreset.plant('starter:mushroom_red', tex.mushroomRed, { name: 'Red Mushroom', sounds: soundPreset.leaves });
 export const grassPlant1 = blockPreset.plant('starter:grass_plant_1', tex.grassPlant1, { name: 'Grass', sounds: soundPreset.leaves });

@@ -10,7 +10,7 @@ import { buildBlockRegistry } from './block-registry';
 import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
 import { cube, fence, pane } from './block-presets';
 import { runNeighbourRecompute } from './block-hooks';
-import { AIR, clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlock, setBlock } from './voxels';
+import { AIR, clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from './voxels';
 import { SetBlockFlags } from './block-flags';
 
 beforeAll(() => {
@@ -56,7 +56,7 @@ function decodeAt(voxels: ReturnType<typeof makeVoxels>, wx: number, wy: number,
     | { id: 'air' }
     | { id: string } & Partial<ConnectProps>
 {
-    const id = getBlock(voxels, wx, wy, wz);
+    const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return { id: 'air' };
     const blockIdx = voxels.registry.stateToBlockIndex[id]!;
     const handle = voxels.registry.handles[blockIdx]!;
@@ -226,7 +226,7 @@ describe('pane neighbour update', () => {
                 const wx = blockOp.cx * 16 + (blockOp.index & 0xf);
                 const wy = blockOp.cy * 16 + (blockOp.index >> 8);
                 const wz = blockOp.cz * 16 + ((blockOp.index >> 4) & 0xf);
-                const stateId = getBlock(voxels, wx, wy, wz);
+                const stateId = getBlockState(voxels, wx, wy, wz);
                 const key = voxels.registry.stateToKey[stateId] ?? '?';
                 lastByPos.set(`${wx},${wy},${wz}`, key);
             }

@@ -102,17 +102,17 @@ function activeEnv(ctx: ScriptContext): ClientEnvironment.Environment | null {
  *   0 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. wraps mod 24.
  *
  * the underlying uniform is normalised to [0,1) so a `0.25`-style fraction
- * still works (`setTime(0.25 * 24)`), but hours are the natural unit for
- * game scripts (`setTime(7.5)` reads as 7:30am).
+ * still works (`setEnvironmentTime(0.25 * 24)`), but hours are the natural unit for
+ * game scripts (`setEnvironmentTime(7.5)` reads as 7:30am).
  */
-export function setTime(ctx: ScriptContext, hours: number): void {
+export function setEnvironmentTime(ctx: ScriptContext, hours: number): void {
     const env = activeEnv(ctx);
     if (!env) return;
     ClientEnvironment.applyTime(env, hours / 24);
 }
 
 /** current environment time in hours, in [0, 24). */
-export function getTime(ctx: ScriptContext): number {
+export function getEnvironmentTime(ctx: ScriptContext): number {
     const env = activeEnv(ctx);
     return env ? env.time * 24 : 0;
 }

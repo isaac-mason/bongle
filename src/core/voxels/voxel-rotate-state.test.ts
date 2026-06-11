@@ -18,7 +18,7 @@ import type { Quat } from 'mathcat';
 import { buildBlockRegistry, parseKey } from './block-registry';
 import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
 import { column, stairs, fence } from './block-presets';
-import { createVoxels, getBlockKey, setBlock } from './voxels';
+import { createVoxels, getBlock, setBlock } from './voxels';
 import { rotateVoxelsByQuat } from './voxel-rotate';
 
 beforeAll(() => {

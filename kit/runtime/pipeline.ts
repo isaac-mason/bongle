@@ -111,9 +111,12 @@ type IconAtlasResult = {
 };
 
 async function emitIconAtlas(kind: 'block-icons', hash: string, artifact: IconAtlasResult) {
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/octet-stream',
-        'X-Manifest': JSON.stringify({
+    // The manifest's `coords` map grows with the block count and can exceed
+    // HTTP header limits (→ 431), so it travels framed at the head of the body
+    // rather than in an X-Manifest header:
+    //   [uint32 LE manifest-byte-length][manifest UTF-8 JSON][raw RGBA pixels]
+    const manifestBytes = new TextEncoder().encode(
+        JSON.stringify({
             hash,
             iconPx: artifact.iconPx,
             cols: artifact.cols,
@@ -122,9 +125,17 @@ async function emitIconAtlas(kind: 'block-icons', hash: string, artifact: IconAt
             atlasHeight: artifact.atlasHeight,
             coords: artifact.coords,
         }),
-    };
-    const body = pixelsToArrayBuffer(artifact.pixels);
-    await fetch('/__bongle/pipeline/emit?kind=' + kind, { method: 'POST', headers, body });
+    );
+    const pixels = artifact.pixels;
+    const body = new Uint8Array(4 + manifestBytes.byteLength + pixels.byteLength);
+    new DataView(body.buffer).setUint32(0, manifestBytes.byteLength, true);
+    body.set(manifestBytes, 4);
+    body.set(pixels, 4 + manifestBytes.byteLength);
+    await fetch('/__bongle/pipeline/emit?kind=' + kind, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body,
+    });
 }
 
 async function emitPerIdIcon(

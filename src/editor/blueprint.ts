@@ -5,7 +5,7 @@
 // trait snapshots with positions relative to the blueprint origin.
 //
 // voxel data uses the same Voxels type as the world — no custom chunk
-// format needed. this means setBlock/getBlockKey/createVoxelModel all
+// format needed. this means setBlock/getBlock/createVoxelModel all
 // work directly on blueprint voxels.
 //
 // usage: import * as Blueprint from './blueprint'
@@ -19,7 +19,7 @@ import type { NodesRuntime } from '../core/scene/scripts';
 import type { BlockRegistry } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
 import type { Voxels } from '../core/voxels/voxels';
-import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, getBlockKey, setBlock } from '../core/voxels/voxels';
+import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, getBlock, setBlock } from '../core/voxels/voxels';
 import { saveVoxels, loadVoxels, type SavedVoxels } from '../core/voxels/voxel-savefile';
 import { TransformTrait } from '../builtins/transform';
 import * as Selection from '../core/scene/selection';
@@ -161,7 +161,7 @@ export function copySelection(
         blueprintVoxels = createVoxels(worldVoxels.registry);
 
         Selection.forEach(selection, (wx, wy, wz) => {
-            const key = getBlockKey(worldVoxels, wx, wy, wz);
+            const key = getBlock(worldVoxels, wx, wy, wz);
             if (key === BLOCK_AIR) return;
             setBlock(blueprintVoxels!, wx - minX, wy - minY, wz - minZ, key);
             blockCount++;
@@ -828,7 +828,7 @@ export function buildPasteOps(
                     const wz = chunk.wz + lz + anchor[2];
 
                     // capture current world block for undo
-                    const existingKey = getBlockKey(worldVoxels, wx, wy, wz);
+                    const existingKey = getBlock(worldVoxels, wx, wy, wz);
                     reverse.push({ wx, wy, wz, key: existingKey });
                     forward.push({ wx, wy, wz, key });
                 }

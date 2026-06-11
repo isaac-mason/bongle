@@ -28,7 +28,7 @@
 import type { AABB } from '../voxels/block-collider';
 import { BLOCK_FLAG_COLLISION } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
-import { getBlock } from '../voxels/voxels';
+import { getBlockState } from '../voxels/voxels';
 import type { ParticlePool, UpdateFn } from './particles';
 
 /* ── primitives ── */
@@ -192,7 +192,7 @@ function sweepSolid(voxels: Voxels, sx: number, sy: number, sz: number, ex: numb
 
     // start cell: sub-AABB-only (cube start cells are skipped — escape rule).
     {
-        const stateId = getBlock(voxels, vx, vy, vz);
+        const stateId = getBlockState(voxels, vx, vy, vz);
         if ((registry.flags[stateId]! & BLOCK_FLAG_COLLISION) !== 0) {
             const cid = registry.colliderId[stateId]!;
             if (cid !== 0) {
@@ -244,7 +244,7 @@ function sweepSolid(voxels: Voxels, sx: number, sy: number, sz: number, ex: numb
             }
         }
         if (t > 1) return null;
-        const stateId = getBlock(voxels, vx, vy, vz);
+        const stateId = getBlockState(voxels, vx, vy, vz);
         if ((registry.flags[stateId]! & BLOCK_FLAG_COLLISION) === 0) continue;
         const cid = registry.colliderId[stateId]!;
         if (cid === 0) {

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import { INTERFACE_VERSION } from 'bongle/interface';
 import archiver from 'archiver';
 import tailwindcss from '@tailwindcss/vite';
 import { build as viteBuild } from 'vite';
@@ -257,7 +258,7 @@ export async function build(projectDir: string) {
         clientStyles: fs.existsSync(clientStylesPath) ? clientStylesPath : undefined,
         serverEntry: path.join(distDir, 'server', 'index.js'),
         bongleVersion: readPackageVersion('bongle/package.json'),
-        interfaceVersion: "0.0.1",
+        interfaceVersion: INTERFACE_VERSION,
         matchmaking,
     });
     fs.writeFileSync(path.join(distDir, 'bongle.json'), `${JSON.stringify(manifest, null, 2)}\n`);
