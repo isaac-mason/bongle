@@ -17,7 +17,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ServerApp } from 'bongle/interface';
-import { createInMemoryAvatarsDriver, createInMemoryStorageDriver } from 'bongle/engine-server';
+import { createInMemoryStorageDriver } from 'bongle/engine-server';
 import { attachGameTransport, type GameTransport } from 'bongle/kit/runtime/transport';
 
 export type StartHostOptions = {
@@ -62,7 +62,6 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
         options: {},
         driver: {
             storage: createInMemoryStorageDriver(),
-            avatars: createInMemoryAvatarsDriver(),
         },
     });
     await adapter.load(state);

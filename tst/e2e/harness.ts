@@ -36,7 +36,6 @@ import * as Nodes from '../../src/core/scene/nodes';
 import { registry } from '../../src/core/registry';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
-import { createInMemoryAvatarsDriver } from '../../src/server/avatars-in-memory';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
 
 // ── types ───────────────────────────────────────────────────────────
@@ -233,7 +232,6 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
         resourcesDir,
         driver: {
             storage: createInMemoryStorageDriver(),
-            avatars: createInMemoryAvatarsDriver(),
         },
     });
     await EngineServerModule.load(server);

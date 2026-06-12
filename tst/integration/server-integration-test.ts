@@ -12,7 +12,7 @@ import * as Resources from '../../src/core/resources';
 import * as Rpc from '../../src/core/rpc';
 import type { SerializedSceneGraph } from '../../src/core/scene/nodes';
 import * as Nodes from '../../src/core/scene/nodes';
-import type { NodesRuntime } from '../../src/core/scene/scripts';
+import type { NodesContext } from '../../src/core/scene/scripts';
 import * as Rooms from '../../src/server/rooms';
 
 // ── types ───────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ export type TestServer = {
     room: Rooms.Room;
 
     /** shorthand for room.scriptRuntime */
-    runtime: NodesRuntime;
+    runtime: NodesContext;
 
     /** shorthand for room.nodes */
     nodes: Nodes.Nodes;

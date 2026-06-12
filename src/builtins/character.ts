@@ -90,7 +90,7 @@ type CharacterState = {
 
 import type { ScriptContext } from '../core/scene/scripts';
 import type { Quat, Vec3 } from 'mathcat';
-import { degreesToRadians, quat } from 'mathcat';
+import { degreesToRadians, quat, vec3 } from 'mathcat';
 import { RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
@@ -121,6 +121,7 @@ import { AnimatorTrait } from './animator';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
 import { MeshTrait, setMeshDither } from './mesh';
+import { ModelTrait } from './model';
 import { getControlCamera } from './camera';
 import { OrbitControllerTrait } from './orbit-controller';
 import { PlayerControllerTrait } from './player-controller';
@@ -153,6 +154,12 @@ function bodyYawFromQuat(q: Quat): number {
 // per-event puff count. three is enough for a visible kick without
 // blowing the 8192 pool on a long sprint.
 const FOOTSTEP_DUST_COUNT = 3;
+
+// voxel-light sample height (m) above the rig root. the root sits at the
+// feet (y=0), so sampling there reads the floor block the character stands
+// on; push the sample up to ~half the standing height (1.8 / 2) so it lands
+// in the torso interior and the model is lit by the space it occupies.
+const LIGHT_SAMPLE_HEIGHT = 0.9;
 
 // ── loading-state dither pulse ─────────────────────────────────────
 // While the intended `modelId` hasn't hydrated yet (placeholder rig
@@ -698,6 +705,12 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
 
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
+
+    // Sample voxel light from the torso center, not the feet. The animator
+    // installs the shared-light ModelTrait on this node; ensure it exists
+    // (server has no animator) and point its sample at half standing height.
+    const model = getTrait(playerNode, ModelTrait) ?? addTrait(playerNode, ModelTrait);
+    vec3.set(model.lightOffset, 0, LIGHT_SAMPLE_HEIGHT, 0);
 }
 
 /**

@@ -8,7 +8,6 @@ export const INTERFACE_VERSION = '0.0.1';
 export type { ClientApp, ClientDriver, JsonValue, Platform } from './client';
 export { client } from './client';
 export type {
-    AvatarsServerDriver,
     Client,
     ResolvedAvatar,
     ServerApp,

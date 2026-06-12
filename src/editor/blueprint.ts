@@ -15,7 +15,7 @@ import { registry as kindRegistry } from '../core/registry';
 import type { Nodes, PrefabConfig, SerializedNode } from '../core/scene/nodes';
 import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/nodes';
 import { expandPrefab } from '../core/scene/prefab';
-import type { NodesRuntime } from '../core/scene/scripts';
+import type { NodesContext } from '../core/scene/scripts';
 import type { BlockRegistry } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
 import type { Voxels } from '../core/voxels/voxels';
@@ -385,7 +385,7 @@ export function createSceneBlueprint(
 export function createPrefabBlueprint(
     prefabId: string,
     anchor: Vec3,
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     registry: BlockRegistry,
 ): Blueprint | null {
     const def = kindRegistry.prefabs.byId.get(prefabId)?.payload;

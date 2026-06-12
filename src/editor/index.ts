@@ -10,8 +10,8 @@ import {
     TransformTrait,
 } from 'bongle';
 import { type PerspectiveCamera, unproject } from 'gpucat';
-import type { Quat, Vec3 } from 'mathcat';
-import { quat, vec3 } from 'mathcat';
+import type { Quat, Spherical, Vec3 } from 'mathcat';
+import { quat, spherical, vec3 } from 'mathcat';
 import * as chat from '../api/chat';
 import * as ClientChat from '../client/chat';
 import { assetUrl } from '../client/asset-url';
@@ -1158,6 +1158,8 @@ script(
         const _snapPos: Vec3 = [0, 0, 0];
         const _snapQuat: Quat = [0, 0, 0, 1];
         const _seedBodyPos: Vec3 = [0, 0, 0];
+        const _seedBackward: Vec3 = [0, 0, 0];
+        const _seedSph: Spherical = [0, 0, 0];
         const ORBIT_TAKEOVER_DISTANCE = 5;
         const snapshotCameraPose = (n: Node): boolean => {
             const ref = getTrait(n, CameraRefTrait);
@@ -1239,8 +1241,11 @@ script(
                     }
                 } else if (desiredMode === 'character') {
                     const pc = getTrait(node, PlayerControllerTrait);
+                    const cc = getTrait(node, CharacterControllerTrait);
                     const transform = getTrait(node, TransformTrait);
-                    if (pc && transform) {
+                    if (pc && cc && transform) {
+                        // seed the body under the snapshot eye, so the player
+                        // camera (head = body + eyeHeight) lands on the prior pose.
                         _seedBodyPos[0] = _snapPos[0];
                         _seedBodyPos[1] = _snapPos[1] - pc.config.eyeHeight;
                         _seedBodyPos[2] = _snapPos[2];
@@ -1249,6 +1254,26 @@ script(
                         vec3.copy(transform.interpolatedWorldPosition, transform.position);
                         quat.copy(transform.interpolatedWorldQuaternion, transform.quaternion);
                         transform.teleport++;
+
+                        // seed look from the snapshot orientation so the player
+                        // camera reproduces it. fwd(look) = -toVec3(look), and
+                        // the camera's backward axis (+Z) fed through setFromVec3
+                        // yields look with fwd(look) = camera-forward.
+                        const qx = _snapQuat[0],
+                            qy = _snapQuat[1],
+                            qz = _snapQuat[2],
+                            qw = _snapQuat[3];
+                        _seedBackward[0] = 2 * (qx * qz + qw * qy);
+                        _seedBackward[1] = 2 * (qy * qz - qw * qx);
+                        _seedBackward[2] = 1 - 2 * (qx * qx + qy * qy);
+                        spherical.setFromVec3(_seedSph, _seedBackward);
+                        cc.input.look[1] = _seedSph[1];
+                        cc.input.look[2] = _seedSph[2];
+
+                        // editor character mode starts in free-fly with the
+                        // double-tap-Space toggle armed.
+                        cc.input.noclip = true;
+                        pc.controls.desktop.doubleTapNoclip = true;
                     }
                 }
         });

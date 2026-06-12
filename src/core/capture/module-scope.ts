@@ -20,10 +20,11 @@
  *     and future introspection (debug panels, what-did-this-file-declare
  *     queries). not consulted by the diff today; wholesale consumer
  *     rebuilds via registry flush already propagate any content change.
- *   • shape — for traits, `paramKeys`; for scripts, the ordered list of
- *     `{traitId, hookSet, factoryHash}`. these are the only fields whose
- *     change requires importer cascade, because user call sites read them
- *     by name (trait param destructuring, script ordering by position).
+ *   • shape — for traits, the body hash; for scripts, the set of declared
+ *     keys (`${traitId}.${scriptId}`). a change here requires importer
+ *     cascade: a trait body delta can change the field shape scripts
+ *     destructure, and adding/removing/renaming a script key changes the
+ *     binding identity that the instance map and registry are keyed on.
  *
  * `__decideReload(id)` is called by the plugin's injected hot.accept
  * callback after the module re-evaluates. it returns 'initial' on first
@@ -117,9 +118,10 @@ export function onModulePop(fn: (moduleId: string) => void): void {
  *   traits — `bodyHash` over the entire trait body. scripts destructure
  *     trait params by name, capturing field shape; any body delta is an
  *     api contract change → invalidate.
- *   scripts — order-bearing list of `{ traitId, factoryHash }`. ScriptDef
- *     index is assigned by call order; traitId at position is the binding
- *     contract; factoryHash is content for patch-path swaps.
+ *   scripts — set of declared keys (`${traitId}.${scriptId}`). the key is a
+ *     script's binding identity (instance map key + registry id); set
+ *     equality means only factory bodies changed (swapped in place via the
+ *     flush path), any key delta is a shape change → invalidate.
  *   commands — wire indexing is decoupled from registration order via
  *     explicit protocol negotiation (server pushes the ordered command
  *     list on connect and on registry change); `send`/`broadcast` resolve
@@ -137,7 +139,8 @@ export type ModuleSnapshot = {
     scenes: Set<string>;
     matchmaking: Set<string>;
     traits: Map<string, { bodyHash: string }>;
-    scripts: Array<{ traitId: string; factoryHash: string }>;
+    /** declared script keys (`${traitId}.${scriptId}`); set equality ⇒ patch — see shape note above. */
+    scripts: Set<string>;
     commands: Set<string>;
 };
 
@@ -160,7 +163,7 @@ function emptySnapshot(): ModuleSnapshot {
         scenes: new Set(),
         matchmaking: new Set(),
         traits: new Map(),
-        scripts: [],
+        scripts: new Set(),
         commands: new Set(),
     };
 }
@@ -265,13 +268,14 @@ export function recordTrait(id: string, bodyHash: string): void {
 }
 
 /**
- * record one script registration's shape. order matters — array position
- * must match the ScriptDef.index assigned in scripts.ts. scripts reload as
- * a unit (no per-hook granularity) so only traitId binding participates in
- * the diff; factoryHash is content-bearing, handled by registry flush.
+ * record one script registration by its key (`${traitId}.${scriptId}`). the
+ * diff is set-based: a script's identity is its key (also the instance map
+ * key and registry id), so the patch-vs-invalidate decision only cares which
+ * keys exist this run, not their order or factory bodies. body changes
+ * propagate via the registry flush path (`applyTraitSwap`), not the snapshot.
  */
-export function recordScript(traitId: string, factoryHash: string): void {
-    currentSnapshot()?.scripts.push({ traitId, factoryHash });
+export function recordScript(key: string): void {
+    currentSnapshot()?.scripts.add(key);
 }
 
 /* ── reload decision ────────────────────────────────────────────── */
@@ -288,7 +292,10 @@ export function __decideReload(id: string): ReloadDecision {
  * returns true if shapes are equal (→ patch is safe). false → invalidate.
  *
  *   1. trait id sets equal AND every shared trait's bodyHash identical.
- *   2. script array same length AND every position's traitId identical.
+ *   2. declared script-key sets equal (a script's key is its binding
+ *      identity — same set means only factory bodies changed, which the
+ *      registry flush path swaps in place; a key added/removed/renamed or
+ *      reparented to another trait is a shape change → invalidate).
  *
  * everything else (blockTextures, blocks, models, prefabs,
  * scenes, commands, matchmaking) is presence-only and propagates via the
@@ -311,9 +318,9 @@ function diffSnapshots(prev: ModuleSnapshot, curr: ModuleSnapshot): boolean {
         if (prevShape.bodyHash !== currShape.bodyHash) return false;
     }
 
-    if (prev.scripts.length !== curr.scripts.length) return false;
-    for (let i = 0; i < prev.scripts.length; i++) {
-        if (prev.scripts[i].traitId !== curr.scripts[i].traitId) return false;
+    if (prev.scripts.size !== curr.scripts.size) return false;
+    for (const key of prev.scripts) {
+        if (!curr.scripts.has(key)) return false;
     }
 
     return true;

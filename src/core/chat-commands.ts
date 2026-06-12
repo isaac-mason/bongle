@@ -223,7 +223,10 @@ export function tokenize(input: string): Token[] {
         const start = i;
         while (i < input.length && input.charAt(i) !== ' ') i++;
         const value = input.slice(start, i);
-        tokens.push({ value, start, end: i, isFlag: value.startsWith('-') });
+        // a leading '-' followed by a digit or '.' is a negative number/coord,
+        // not a flag (flags are '--word' or '-letter').
+        const isFlag = value.startsWith('-') && !/^-[\d.]/.test(value);
+        tokens.push({ value, start, end: i, isFlag });
     }
     return tokens;
 }

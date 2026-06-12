@@ -1,6 +1,5 @@
 import type { Client, User } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
-import type { PlayerId } from '../core/client';
 import { type WireIndex } from '../core/registry';
 
 export type ClientState = {
@@ -17,26 +16,11 @@ export type ClientState = {
     inboundTraitWireIndex: WireIndex;
     inboundCommandWireIndex: WireIndex;
 
-    /** The user's resolved avatar — null until the engine's avatar
-     *  pipeline completes (driver.avatars.resolve + model load into
-     *  Resources). Once set it stays set for the connection lifetime. */
+    /** The user's resolved avatar identity — recorded at join from the
+     *  reservation the matchmaker stamped (or the builtin on dev/edit).
+     *  Set once and stays set for the connection lifetime; its model
+     *  payload streams into Resources behind it. */
     avatar: Avatar | null;
-
-    /** True once the engine has kicked driver.avatars.resolve for this
-     *  client. Prevents duplicate resolves if onClientJoin is re-entered
-     *  for any reason. */
-    avatarResolveStarted: boolean;
-
-    /** Players awaiting their resolved avatar to be stamped onto their
-     *  CharacterTrait. Populated when a player is created before this
-     *  client's avatar has finished loading; drained by the engine the
-     *  moment `avatar` lands. */
-    avatarPendingPlayers: Set<PlayerId>;
-
-    /** @internal staging slot for the resolved-but-not-yet-loaded avatar.
-     *  Filled by the avatar subsystem's resolve completion; consumed by
-     *  the per-tick drain once `Resources.hasModel(modelId)` flips true. */
-    _pendingResolved?: { modelId: string; rigType: string };
 };
 
 export function init() {
@@ -60,8 +44,6 @@ export function onJoin(
         inboundTraitWireIndex,
         inboundCommandWireIndex,
         avatar: null,
-        avatarResolveStarted: false,
-        avatarPendingPlayers: new Set(),
     });
 }
 

@@ -29,7 +29,7 @@ import {
     vec4f,
 } from 'gpucat';
 import type { Mat4, Quat, Vec3 } from 'mathcat';
-import { degreesToRadians, mat4, quat, spherical, vec3 } from 'mathcat';
+import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
 import type * as vcc from '../core/physics/vcc';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
@@ -42,10 +42,11 @@ import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
 import { control, type TraitType, trait } from '../api/traits';
-import { getVisualWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { type CameraTrait, resolveCamera } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
+import { Physics } from '../api/physics';
 
 // ── perspective ───────────────────────────────────────────────────────
 
@@ -66,6 +67,11 @@ export type ControlsConfig = {
         /** double-tap W activates sprint until W releases. off for games
          *  where sprint is RMB-held or always-on. */
         doubleTapSprint: boolean;
+        /** double-tap Space toggles noclip (free-fly). off by default; the
+         *  editor flips it on for its character mode, and games that want a
+         *  fly cheat can enable it too. the noclip movement itself lives on
+         *  the CC and is independent of this gesture. */
+        doubleTapNoclip: boolean;
     };
 
     touch: {
@@ -202,6 +208,7 @@ export const PlayerControllerTrait = trait(
             enabled: true,
             desktop: {
                 doubleTapSprint: true,
+                doubleTapNoclip: false,
             },
             touch: {
                 joystick: true,
@@ -249,12 +256,9 @@ control(PlayerControllerTrait, 'debugPanel', {
 // ── input / camera constants ──────────────────────────────────────────
 
 const AXIS_UP: Vec3 = [0, 1, 0];
-const AXIS_RIGHT: Vec3 = [1, 0, 0];
 const LOOK_SENSITIVITY = 0.002;
 const TOUCH_LOOK_SENSITIVITY = 0.005;
-/** joystick magnitude² above which sprint engages without a sprint button. */
 const SPRINT_MAG_THRESHOLD_SQ = 0.9 * 0.9;
-const EDIT_PITCH_LIMIT = Math.PI / 2 - 0.01;
 const CHARACTER_PITCH_LIMIT = Math.PI / 2 - 0.01;
 const CHARACTER_PHI_MIN = Math.PI / 2 - CHARACTER_PITCH_LIMIT;
 const CHARACTER_PHI_MAX = Math.PI / 2 + CHARACTER_PITCH_LIMIT;
@@ -262,13 +266,6 @@ const DOUBLE_TAP_WINDOW = 0.35;
 
 const NOCLIP_SPEED = 10;
 
-// ── scratch ───────────────────────────────────────────────────────────
-
-const _qYaw = quat.create();
-const _qPitch = quat.create();
-const _qTmp = quat.create();
-const _sph = spherical.create();
-const _forward = vec3.create();
 const _noclipMove: Vec3 = [0, 0, 0];
 const _center: Vec3 = [0, 0, 0];
 const _vTmp1: Vec3 = [0, 0, 0];
@@ -284,18 +281,17 @@ function pollInput(
     pc: PlayerControllerTrait,
     cc: CharacterControllerTrait,
     input: Input,
-    skipCameraMouse: boolean,
     viewportWidth: number,
 ): void {
     if (!pc.controls.enabled) return;
     const mk = input.mouseKeyboard;
     const t = input.touch;
 
-    if (!skipCameraMouse && document.pointerLockElement) {
+    if (document.pointerLockElement) {
         cc.input.look[1] -= mk._dx * LOOK_SENSITIVITY;
         cc.input.look[2] -= mk._dy * LOOK_SENSITIVITY;
     }
-    if (!skipCameraMouse && pc.controls.touch.canvasLook && viewportWidth > 0) {
+    if (pc.controls.touch.canvasLook && viewportWidth > 0) {
         // right-half canvas drag = look. left half is reserved for the
         // joystick area so accidental tracking doesn't compete with it.
         const halfW = viewportWidth / 2;
@@ -361,14 +357,14 @@ function pollInput(
 // ── noclip tick (player-driven; uses camera pitch for fly direction) ─
 
 function tickPlayerNoclip(
-    pc: PlayerControllerTrait,
-    cc: CharacterControllerTrait,
+    _playerController: PlayerControllerTrait,
+    characterController: CharacterControllerTrait,
     transform: TransformTrait,
-    physics: import('../physics').Physics,
+    physics: Physics,
     dt: number,
 ): void {
-    const theta = cc.input.look[1];
-    const phi = cc.input.look[2];
+    const theta = characterController.input.look[1];
+    const phi = characterController.input.look[2];
 
     const sinTheta = Math.sin(theta);
     const cosTheta = Math.cos(theta);
@@ -380,16 +376,16 @@ function tickPlayerNoclip(
     const rgtX = cosTheta;
     const rgtZ = -sinTheta;
 
-    const strafe = cc.input.move[0];
-    const fwd = cc.input.move[1];
-    const up = cc.input.jump ? 1 : 0;
-    const down = cc.input.sprint ? -1 : 0;
+    const strafe = characterController.input.move[0];
+    const fwd = characterController.input.move[1];
+    const up = characterController.input.jump ? 1 : 0;
+    const down = characterController.input.sprint ? -1 : 0;
 
     _noclipMove[0] = (fwdX * fwd + rgtX * strafe) * NOCLIP_SPEED;
     _noclipMove[1] = fwdY * fwd + (up + down) * NOCLIP_SPEED;
     _noclipMove[2] = (fwdZ * fwd + rgtZ * strafe) * NOCLIP_SPEED;
 
-    applyNoclipDisplacement(cc, transform, physics, _noclipMove, dt);
+    applyNoclipDisplacement(characterController, transform, physics, _noclipMove, dt);
 }
 
 // ── camera collision ──────────────────────────────────────────────────
@@ -401,7 +397,7 @@ function tickPlayerNoclip(
 
 function castCameraRay(
     cc: CharacterControllerTrait,
-    physics: import('../physics').Physics,
+    physics: Physics,
     headX: number,
     headY: number,
     headZ: number,
@@ -448,7 +444,6 @@ function castCameraRay(
 
 // ── camera update ─────────────────────────────────────────────────────
 
-// scratch — single-threaded writes per frame
 const _camPosScratch: Vec3 = [0, 0, 0];
 const _camQuatScratch: Quat = [0, 0, 0, 1];
 const _eyeScratch: Vec3 = [0, 0, 0];
@@ -456,36 +451,35 @@ const _targetScratch: Vec3 = [0, 0, 0];
 const _lookMatScratch: Mat4 = mat4.create();
 
 function updateCamera(
-    pc: PlayerControllerTrait,
-    cc: CharacterControllerTrait,
+    playerController: PlayerControllerTrait,
+    characterController: CharacterControllerTrait,
     transform: TransformTrait,
-    physics: import('../physics').Physics,
+    physics: Physics,
     cameraTransform: TransformTrait,
     cameraTrait: CameraTrait,
-    skipQuat: boolean,
     dt: number,
 ): void {
     // decay step-smooth offset toward zero — camera rises smoothly to match
     // physics position after a stair step-up. exp(-23*dt) mirrors Minetest.
-    if (transform.teleport !== pc.state.lastTeleportId) {
-        pc.state.lastTeleportId = transform.teleport;
-        cc.state.stepSmoothOffset = 0;
-    } else if (cc.state.stepSmoothOffset !== 0) {
-        cc.state.stepSmoothOffset *= Math.exp(-23 * dt);
-        if (Math.abs(cc.state.stepSmoothOffset) < 1e-3) cc.state.stepSmoothOffset = 0;
+    if (transform.teleport !== playerController.state.lastTeleportId) {
+        playerController.state.lastTeleportId = transform.teleport;
+        characterController.state.stepSmoothOffset = 0;
+    } else if (characterController.state.stepSmoothOffset !== 0) {
+        characterController.state.stepSmoothOffset *= Math.exp(-23 * dt);
+        if (Math.abs(characterController.state.stepSmoothOffset) < 1e-3) characterController.state.stepSmoothOffset = 0;
     }
 
     const pos = getVisualWorldPosition(transform);
     // when step-smoothing, base camera Y on the authoritative position (not
     // interpolated) so the offset doesn't fight the prevPosition→position lerp
     // which would cause a one-frame dip before the smooth rise.
-    const baseY = cc.state.stepSmoothOffset !== 0 ? transform.position[1] : pos[1];
+    const baseY = characterController.state.stepSmoothOffset !== 0 ? transform.position[1] : pos[1];
     const headX = pos[0];
-    const headY = baseY + pc.state.currentEyeHeight + cc.state.stepSmoothOffset;
+    const headY = baseY + playerController.state.currentEyeHeight + characterController.state.stepSmoothOffset;
     const headZ = pos[2];
 
-    const theta = cc.input.look[1];
-    const phi = cc.input.look[2];
+    const theta = characterController.input.look[1];
+    const phi = characterController.input.look[2];
 
     // Forward (world-space look direction) from spherical.
     // Engine convention: theta=0, phi=π/2 → fwd = -Z (matches glTF /
@@ -512,20 +506,20 @@ function updateCamera(
     let targetY = headY + fwdY;
     let targetZ = headZ + fwdZ;
 
-    if (pc.config.perspective === 'third-back') {
+    if (playerController.config.perspective === 'third-back') {
         // Camera behind head, looking the same direction as the player.
-        const hitDist = castCameraRay(cc, physics, headX, headY, headZ, -fwdX, -fwdY, -fwdZ, pc.config.thirdPersonDistance);
-        const clamped = Math.max(0, hitDist - pc.config.cameraCollisionMargin);
-        pc.state.currentCameraDistance = clamped;
+        const hitDist = castCameraRay(characterController, physics, headX, headY, headZ, -fwdX, -fwdY, -fwdZ, playerController.config.thirdPersonDistance);
+        const clamped = Math.max(0, hitDist - playerController.config.cameraCollisionMargin);
+        playerController.state.currentCameraDistance = clamped;
         eyeX = headX - fwdX * clamped;
         eyeY = headY - fwdY * clamped;
         eyeZ = headZ - fwdZ * clamped;
         // target = head + fwd keeps the camera looking in +fwd direction.
-    } else if (pc.config.perspective === 'third-front') {
+    } else if (playerController.config.perspective === 'third-front') {
         // Camera in front of head, looking back at the head.
-        const hitDist = castCameraRay(cc, physics, headX, headY, headZ, fwdX, fwdY, fwdZ, pc.config.thirdPersonDistance);
-        const clamped = Math.max(0, hitDist - pc.config.cameraCollisionMargin);
-        pc.state.currentCameraDistance = clamped;
+        const hitDist = castCameraRay(characterController, physics, headX, headY, headZ, fwdX, fwdY, fwdZ, playerController.config.thirdPersonDistance);
+        const clamped = Math.max(0, hitDist - playerController.config.cameraCollisionMargin);
+        playerController.state.currentCameraDistance = clamped;
         eyeX = headX + fwdX * clamped;
         eyeY = headY + fwdY * clamped;
         eyeZ = headZ + fwdZ * clamped;
@@ -534,17 +528,17 @@ function updateCamera(
         targetY = headY;
         targetZ = headZ;
     } else {
-        pc.state.currentCameraDistance = 0;
+        playerController.state.currentCameraDistance = 0;
 
         // First-person camera bob: shift eye and target by the same
         // offset so the look direction is preserved. Third-person skips
         // this — bobbing an orbit anchor produces visible jitter.
-        if (cc.state.bobOffsetX !== 0 || cc.state.bobOffsetY !== 0) {
+        if (characterController.state.bobOffsetX !== 0 || characterController.state.bobOffsetY !== 0) {
             const rightX = cosTheta;
             const rightZ = -sinTheta;
-            const dx = rightX * cc.state.bobOffsetX;
-            const dy = cc.state.bobOffsetY;
-            const dz = rightZ * cc.state.bobOffsetX;
+            const dx = rightX * characterController.state.bobOffsetX;
+            const dy = characterController.state.bobOffsetY;
+            const dz = rightZ * characterController.state.bobOffsetX;
             eyeX += dx;
             eyeY += dy;
             eyeZ += dz;
@@ -559,19 +553,17 @@ function updateCamera(
     _camPosScratch[2] = eyeZ;
     setWorldPosition(cameraTransform, _camPosScratch);
 
-    if (!skipQuat) {
-        _eyeScratch[0] = eyeX;
-        _eyeScratch[1] = eyeY;
-        _eyeScratch[2] = eyeZ;
-        _targetScratch[0] = targetX;
-        _targetScratch[1] = targetY;
-        _targetScratch[2] = targetZ;
-        mat4.targetTo(_lookMatScratch, _eyeScratch, _targetScratch, AXIS_UP);
-        quat.fromMat4(_camQuatScratch, _lookMatScratch);
-        setWorldQuaternion(cameraTransform, _camQuatScratch);
-    }
+    _eyeScratch[0] = eyeX;
+    _eyeScratch[1] = eyeY;
+    _eyeScratch[2] = eyeZ;
+    _targetScratch[0] = targetX;
+    _targetScratch[1] = targetY;
+    _targetScratch[2] = targetZ;
+    mat4.targetTo(_lookMatScratch, _eyeScratch, _targetScratch, AXIS_UP);
+    quat.fromMat4(_camQuatScratch, _lookMatScratch);
+    setWorldQuaternion(cameraTransform, _camQuatScratch);
 
-    cameraTrait.fov = pc.state.currentFov;
+    cameraTrait.fov = playerController.state.currentFov;
 }
 
 // ── debug viz ─────────────────────────────────────────────────────────
@@ -806,23 +798,6 @@ script(
             }
         };
 
-        // ── edit-mode camera state ──
-        const editBaseQuat: Quat = [0, 0, 0, 1];
-        let editYawDelta = 0;
-        let editPitchDelta = 0;
-        let editBasePitch = 0;
-        const editLastQuat: Quat = [0, 0, 0, 1];
-
-        const rebaseEditCamera = (cameraQuat: Quat): void => {
-            quat.copy(editBaseQuat, cameraQuat);
-            editYawDelta = 0;
-            editPitchDelta = 0;
-            vec3.set(_forward, 0, 0, -1);
-            vec3.transformQuat(_forward, _forward, editBaseQuat);
-            editBasePitch = Math.asin(Math.max(-1, Math.min(1, _forward[1])));
-            quat.copy(editLastQuat, cameraQuat);
-        };
-
         const onCanvasClick = (): void => {
             if (!ctx.trait.controls.enabled) return;
             if (!document.pointerLockElement) {
@@ -927,9 +902,6 @@ script(
 
             const domElement = ctx.client?.domElement;
             if (domElement) domElement.addEventListener('click', onCanvasClick);
-
-            const pc = ctx.trait;
-            cc.input.noclip = ctx.mode === 'edit';
 
             // grab handles to the camera this controller drives. CameraRefTrait
             // on ctx.node is pre-installed at room init pointing at the room's
@@ -1061,49 +1033,15 @@ script(
             const pc = ctx.trait;
             pc.state.elapsed += delta;
             const input = ctx.client?.input;
-            const editMode = ctx.mode === 'edit';
             syncHud(pc);
             if (input) {
                 const viewportWidth = ctx.client?.state?.viewport.width ?? 0;
-                pollInput(pc, cc, input, editMode, viewportWidth);
+                pollInput(pc, cc, input, viewportWidth);
 
-                if (editMode && cameraTransform) {
-                    const mk = input.mouseKeyboard;
-                    const camQuat = getWorldQuaternion(cameraTransform);
-                    const dot =
-                        editLastQuat[0] * camQuat[0] +
-                        editLastQuat[1] * camQuat[1] +
-                        editLastQuat[2] * camQuat[2] +
-                        editLastQuat[3] * camQuat[3];
-                    if (8 * (1 - Math.abs(dot)) > 1e-6) {
-                        rebaseEditCamera(camQuat);
-                    }
-                    if (document.pointerLockElement) {
-                        editYawDelta -= mk._dx * LOOK_SENSITIVITY;
-                        editPitchDelta -= mk._dy * LOOK_SENSITIVITY;
-                        editPitchDelta = Math.max(
-                            -EDIT_PITCH_LIMIT - editBasePitch,
-                            Math.min(EDIT_PITCH_LIMIT - editBasePitch, editPitchDelta),
-                        );
-                    }
-                    quat.setAxisAngle(_qYaw, AXIS_UP, editYawDelta);
-                    quat.setAxisAngle(_qPitch, AXIS_RIGHT, editPitchDelta);
-                    quat.multiply(_qTmp, _qYaw, editBaseQuat);
-                    quat.multiply(_camQuatScratch, _qTmp, _qPitch);
-                    setWorldQuaternion(cameraTransform, _camQuatScratch);
-                    quat.copy(editLastQuat, _camQuatScratch);
-
-                    const [qx, qy, qz, qw] = _camQuatScratch;
-                    const fx = 2 * (qx * qz + qw * qy);
-                    const fy = 2 * (qy * qz - qw * qx);
-                    const fz = 1 - 2 * (qx * qx + qy * qy);
-                    spherical.setFromVec3(_sph, [fx, fy, fz]);
-                    cc.input.look[1] = _sph[1];
-                    cc.input.look[2] = _sph[2];
-                }
-
-                // double-tap space toggles noclip in edit mode
-                if (editMode && isKeyJustDown(input.mouseKeyboard, 'Space')) {
+                // double-tap Space toggles noclip when enabled (editor character
+                // mode; opt-in fly cheat in games). pure gesture — the noclip
+                // movement itself lives on the CC.
+                if (pc.controls.desktop.doubleTapNoclip && isKeyJustDown(input.mouseKeyboard, 'Space')) {
                     if (pc.state.lastJumpDownTime >= 0 && pc.state.elapsed - pc.state.lastJumpDownTime < DOUBLE_TAP_WINDOW) {
                         cc.input.noclip = !cc.input.noclip;
                         if (cc.input.noclip) vec3.set(cc.state.velocity, 0, 0, 0);
@@ -1114,8 +1052,9 @@ script(
                     }
                 }
 
-                // 'C' cycles perspective (play mode only — keep edit-mode camera predictable)
-                if (!editMode && isKeyJustDown(input.mouseKeyboard, 'KeyC')) {
+                // 'C' cycles perspective (play mode only — keep the edit-mode
+                // camera predictable while building).
+                if (ctx.mode !== 'edit' && isKeyJustDown(input.mouseKeyboard, 'KeyC')) {
                     const idx = PERSPECTIVE_ORDER.indexOf(pc.config.perspective);
                     pc.config.perspective = PERSPECTIVE_ORDER[(idx + 1) % PERSPECTIVE_ORDER.length]!;
                 }
@@ -1157,7 +1096,7 @@ script(
             // linger over whatever lens is now active.
             if (getControlNode(ctx) === ctx.node) {
                 if (cameraTransform && cameraTrait) {
-                    updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, ctx.mode === 'edit', delta);
+                    updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
                 }
                 updateCrosshair(pc, delta);
             } else {

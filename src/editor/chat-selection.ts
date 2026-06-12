@@ -1,8 +1,10 @@
 /**
  * WorldEdit-style selection slash commands.
  *
- * Shape selectors (`/select box`, `/select sphere`, …) rasterise a primitive
- * centred on the hovered voxel. Region modifiers (`/expand`, `/contract`,
+ * Shape brushes (`/shape box`, `/shape sphere`, …, `/shape chunk`) rasterise a
+ * primitive centred on the hovered voxel (or the current selection's centre).
+ * Coordinate selection (`/select box <from> <to>`) fills the explicit cuboid
+ * between two `x,y,z` corners. Region modifiers (`/expand`, `/contract`,
  * `/shift`, `/outset`, `/inset`) transform the current voxel selection.
  * Introspection (`/size`, `/count`, `/distr`) reports state.
  *
@@ -68,6 +70,34 @@ const DirectionArg: ArgType<readonly DirectionVec[]> = {
     },
     describe: () => 'up | down | n | s | e | w | all | vert',
 };
+
+// ── coordinate arg ─────────────────────────────────────────────────
+
+type Vec3 = readonly [number, number, number];
+
+// absolute integer voxel coordinate written `x,y,z` with no spaces — the
+// tokenizer splits on spaces, so a corner is a single token. relative `~`
+// forms are a later addition.
+const Vec3Arg: ArgType<Vec3> = {
+    name: 'coord',
+    parse: (s) => {
+        // tolerate a trailing comma (`5,0,5,`) and surrounding whitespace; an
+        // empty component (`5,,5`) is an error — Number('') is 0, not NaN.
+        const parts = s.replace(/,+$/, '').split(',').map((p) => p.trim());
+        if (parts.length !== 3 || parts.some((p) => p === '')) {
+            return { ok: false, error: `expected x,y,z (got: ${s})` };
+        }
+        const n = parts.map(Number);
+        if (n.some((v) => !Number.isFinite(v))) return { ok: false, error: `not a coordinate: ${s}` };
+        return { ok: true, value: [Math.floor(n[0]!), Math.floor(n[1]!), Math.floor(n[2]!)] };
+    },
+    describe: () => 'x,y,z (e.g. 0,4,0)',
+};
+
+// cap on the chunk span of an explicit `/select box`, so a missing digit can't
+// allocate a runaway number of chunk bitsets. ~65k chunks covers any plausible
+// world; a real typo lands orders of magnitude above it.
+const MAX_BOX_CHUNK_SPAN = 1 << 16;
 
 // ── flag helpers ───────────────────────────────────────────────────
 
@@ -224,8 +254,8 @@ export function installSelectionChatCommands(
 
         install(
             {
-                name: `/select ${label}`,
-                description: `select a ${label} centred on the hovered voxel`,
+                name: `/shape ${label}`,
+                description: `make a ${label} centred on the hovered voxel`,
                 args,
                 flags: [...SHAPE_FLAGS],
             },
@@ -242,7 +272,7 @@ export function installSelectionChatCommands(
                 const scratch = Selection.create();
                 buildShape(scratch, shape, anchor[0], anchor[1], anchor[2], size, height);
                 commitShape(scratch, flags, target);
-                reportShape(`/select ${label}`, store.getState().selection);
+                reportShape(`/shape ${label}`, store.getState().selection);
             },
         );
     }
@@ -255,7 +285,7 @@ export function installSelectionChatCommands(
 
     install(
         {
-            name: '/select chunk',
+            name: '/shape chunk',
             description: 'select the 16³ chunk containing the hovered voxel',
             args: [],
             flags: [...SHAPE_FLAGS],
@@ -285,7 +315,46 @@ export function installSelectionChatCommands(
                 wzBase + CHUNK_SIZE - 1,
             );
             commitShape(scratch, flags, target);
-            reportShape('/select chunk', store.getState().selection);
+            reportShape('/shape chunk', store.getState().selection);
+        },
+    );
+
+    // ── coordinate selection ───────────────────────────────────────
+
+    install(
+        {
+            name: '/select box',
+            description: 'select the cuboid between two corners (x,y,z each)',
+            args: [
+                { name: 'from', type: Vec3Arg as ArgType<unknown> },
+                { name: 'to', type: Vec3Arg as ArgType<unknown> },
+            ],
+            flags: [...SHAPE_FLAGS],
+        },
+        ({ args, flags }) => {
+            const from = args.from as Vec3;
+            const to = args.to as Vec3;
+            const minX = Math.min(from[0], to[0]);
+            const minY = Math.min(from[1], to[1]);
+            const minZ = Math.min(from[2], to[2]);
+            const maxX = Math.max(from[0], to[0]);
+            const maxY = Math.max(from[1], to[1]);
+            const maxZ = Math.max(from[2], to[2]);
+
+            const chunkSpan =
+                (toChunkCoord(maxX) - toChunkCoord(minX) + 1) *
+                (toChunkCoord(maxY) - toChunkCoord(minY) + 1) *
+                (toChunkCoord(maxZ) - toChunkCoord(minZ) + 1);
+            if (chunkSpan > MAX_BOX_CHUNK_SPAN) {
+                emit(`box too large (${chunkSpan} chunks); check the coordinates`);
+                return;
+            }
+
+            const target = resolveTarget(flags, store.getState().selectTarget);
+            const scratch = Selection.create();
+            Selection.setAABB(scratch, minX, minY, minZ, maxX, maxY, maxZ);
+            commitShape(scratch, flags, target);
+            reportShape('/select box', store.getState().selection);
         },
     );
 

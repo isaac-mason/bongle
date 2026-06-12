@@ -9,7 +9,7 @@ import type { Voxels } from '../voxels/voxels';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import { logScriptError } from './script-errors';
-import type { NodesRuntime, ScriptInstance } from './scripts';
+import type { NodesContext, ScriptInstance } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
@@ -306,7 +306,7 @@ export type Nodes = {
      * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
      * set this after createSceneGraph, before adding live nodes.
      */
-    runtime?: NodesRuntime;
+    runtime?: NodesContext;
 };
 
 export type CreateSceneGraphOptions = {
@@ -625,7 +625,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
  * fire `onInit`, then `onEnter` if the node is in-graph. used by addTrait
  * (live path) and registerSubtree (scene-load path).
  */
-function instantiateTraitScripts(runtime: NodesRuntime, node: Node, trait: TraitBase, def: TraitDef): ScriptInstance[] {
+function instantiateTraitScripts(runtime: NodesContext, node: Node, trait: TraitBase, def: TraitDef): ScriptInstance[] {
     if (def.scripts.length === 0) return [];
 
     let nodeInstances = runtime.instances.get(node.id);
@@ -648,7 +648,7 @@ function instantiateTraitScripts(runtime: NodesRuntime, node: Node, trait: Trait
  * dispose every live script instance bound to a specific trait on a node.
  * fires onExit then onDispose. called from removeTrait and destroyNode paths.
  */
-function disposeTraitScripts(runtime: NodesRuntime, node: Node, def: TraitDef): void {
+function disposeTraitScripts(runtime: NodesContext, node: Node, def: TraitDef): void {
     if (def.scripts.length === 0) return;
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;

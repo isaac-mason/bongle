@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import type { Client, JsonValue, ServerDriver, User } from 'bongle/interface';
+import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import { env } from 'bongle';
 import * as Clock from '../core/clock';
 import * as Debug from '../core/debug';
@@ -16,7 +16,6 @@ import { saveVoxels } from '../core/voxels/voxel-savefile';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
 import * as Clients from './clients';
-import type { ClientState } from './clients';
 import * as Discovery from './discovery';
 import * as Net from './net';
 import * as Rooms from './rooms';
@@ -118,10 +117,6 @@ export function init(opts: InitOptions) {
         /** timestamp of last flush to disk */
         lastFlushTime: 0,
         rpc,
-        /** Clients whose avatar resolve has landed but whose model is
-         *  still loading into Resources. Drained per update tick by
-         *  `Avatars.drainPending`. */
-        pendingAvatarClients: new Set<ClientState>(),
         /** global metrics (tick timing) */
         metrics: Debug.createMetrics() as Debug.Metrics,
         /**
@@ -154,6 +149,7 @@ export function onClientJoin(
     clientId: Client,
     user: User,
     joinData: Record<string, JsonValue>,
+    avatar?: ResolvedAvatar,
 ) {
     // seed the client's inbound wire-index tables from our local registry.
     // both peers built from the same source, so the client's outbound
@@ -178,12 +174,12 @@ export function onClientJoin(
         commands: registry.commandWireIndex.indexToId,
     });
 
-    // kick the avatar resolve as soon as identity is in place. resolve
-    // runs unconditionally for every client; bundled and runtime alike
-    // flow through the same hasModel poll before the avatar is stamped
-    // onto each waiting Player's CharacterTrait.
+    // Record the resolved avatar identity (or builtin, dev/edit) and
+    // kick its payload load, BEFORE the player nodes are created below —
+    // so each node's CharacterTrait is stamped with the right
+    // modelId/rigType before its onJoin fires.
     const cs = state.clients.connected.get(clientId);
-    if (cs) Avatars.kickResolve(state, cs);
+    if (cs) Avatars.setClientAvatar(state, cs, avatar);
 
     // belt-and-suspenders cap check. the matchmaker (and gatho admission)
     // are the primary gates and shouldn't let a past-cap client reach
@@ -672,10 +668,6 @@ export function update(state: EngineServer, delta: number) {
 
     // drain queued reset/stop requests now that no room is mid-tick.
     Rooms.drainPending(state);
-
-    // advance pending avatar loads — stamps the resolved modelId onto
-    // each waiting Player's CharacterTrait once the model lands.
-    Avatars.drainPending(state);
 
     // auto-persist edit rooms to disk on a fixed interval
     if (Date.now() - state.lastFlushTime > FLUSH_INTERVAL_MS) {

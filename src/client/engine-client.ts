@@ -694,15 +694,20 @@ function processRoomList(state: EngineClient, message: Protocol.RoomList): void 
 // the mesher reads 1-voxel borders from neighbor chunks, so when data or
 // light changes at a chunk boundary, the neighbor must remesh too.
 
-// unconditionally dirty all 6 face neighbors (used for voxel_chunk_full)
-const NEIGHBOR_OFFSETS: readonly (readonly [number, number, number])[] = [
-    [1, 0, 0],
-    [-1, 0, 0],
-    [0, 1, 0],
-    [0, -1, 0],
-    [0, 0, 1],
-    [0, 0, -1],
-];
+// all 26 neighbours (6 faces + 12 edges + 8 corners). the mesher's slab
+// reads a 1-voxel apron from every diagonal neighbour for AO + smooth
+// light, so a whole-chunk data/light replacement must remesh all 26 — not
+// just the 6 faces — or stale light lingers at chunk edges and corners
+// until a full /relight. (the per-cell light_delta path already dirties the
+// correct 3×3×3 subset; this is the full-chunk analog.)
+const NEIGHBOR_OFFSETS: readonly (readonly [number, number, number])[] = /* @__PURE__ */ (() => {
+    const offsets: [number, number, number][] = [];
+    for (let dz = -1; dz <= 1; dz++)
+        for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++)
+                if (dx !== 0 || dy !== 0 || dz !== 0) offsets.push([dx, dy, dz]);
+    return offsets;
+})();
 
 function dirtyAllNeighborChunks(voxels: Voxels.Voxels, cx: number, cy: number, cz: number): void {
     for (const [dx, dy, dz] of NEIGHBOR_OFFSETS) {

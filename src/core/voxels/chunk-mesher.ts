@@ -1880,7 +1880,14 @@ export function meshChunk(
 
                     const upStride = FACE_STRIDE[2]!;
                     const aboveId = _slab[slabIdx + upStride]!;
+                    // `top_is_same_liquid` (Luanti): the cell directly above is the
+                    // same fluid, i.e. this cell is submerged in a merged column.
+                    // gates same-fluid side culling + the surface height below.
                     const sameFluidAbove = myFluidGroup !== 0 && (fluidGroupTable[aboveId] ?? 0) === myFluidGroup;
+                    // submerged cells fill the whole cell (merged column); an exposed
+                    // cell sits at its surface level (meniscus). a non-fluid block
+                    // above does NOT raise the surface — a lowered surface still shows
+                    // its top through the gap beneath that block (Luanti getCornerLevel).
                     const effectiveHeight = sameFluidAbove ? 1 : surfaceHeight;
 
                     for (let face = 0; face < 6; face++) {
@@ -1888,35 +1895,43 @@ export function meshChunk(
                         const neighborId = _slab[slabIdx + faceStride]!;
                         const neighborCull = cullTable[neighborId] ?? CULL_NONE;
                         const neighborFluidGroup = fluidGroupTable[neighborId] ?? 0;
-                        let neighborEffectiveHeight = 1;
+                        // `neighbor.top_is_same_liquid` (Luanti): the cell above the
+                        // neighbour is the same fluid — i.e. the neighbour is itself
+                        // submerged. only meaningful when the neighbour is same-fluid.
+                        let sameFluidAboveNeighbor = false;
                         if (neighborFluidGroup !== 0) {
-                            const neighborSurfaceHeight = surfaceHeightTable[neighborId] ?? 1;
                             const aboveNeighborId = _slab[slabIdx + faceStride + upStride]!;
-                            const sameFluidAboveNeighbor = (fluidGroupTable[aboveNeighborId] ?? 0) === neighborFluidGroup;
-                            neighborEffectiveHeight = sameFluidAboveNeighbor ? 1 : neighborSurfaceHeight;
+                            sameFluidAboveNeighbor = (fluidGroupTable[aboveNeighborId] ?? 0) === neighborFluidGroup;
                         }
-                        // ── face-aware cull for MODEL_LIQUID ─────────
-                        // liquid cells span [y, y+effectiveH] vertically,
-                        // where effectiveH = 1 when same-fluid sits above
-                        // (cells merge into a continuous column) and =
-                        // surfaceHeight otherwise (top-of-column meniscus).
-                        // cull rules:
-                        //   top/bottom: cull against same-fluid above/below
-                        //               (merged), or solid.
-                        //   sides:      cull against same-fluid neighbour
-                        //               whose effective height covers our
-                        //               span, or any solid (always covers
-                        //               [0..1]).
-                        // same-fluid check runs before solid: opaque liquids
-                        // (e.g. lava) carry CULL_SOLID, but adjacent cells of
-                        // differing heights still need their exposed bands;
-                        // solid-first would punch holes in the geometry.
+                        // ── face-aware cull for MODEL_LIQUID (Luanti) ─────
                         const sameFluid = myFluidGroup !== 0 && neighborFluidGroup === myFluidGroup;
-                        if (sameFluid) {
-                            if (face === 2 || face === 3) continue;
-                            if (neighborEffectiveHeight >= effectiveHeight) continue;
-                        } else if (neighborCull === CULL_SOLID) {
-                            continue;
+                        if (face === 2) {
+                            // TOP (drawLiquidTop: drawn iff !top_is_same_liquid).
+                            // merged into the same-fluid column above → hidden.
+                            // otherwise the surface shows — even under a solid block,
+                            // a lowered surface is visible through the gap. only a
+                            // full surface flush against a solid is occluded.
+                            if (sameFluidAbove) continue;
+                            if (effectiveHeight >= 1 && neighborCull === CULL_SOLID) continue;
+                        } else if (face === 3) {
+                            // BOTTOM (draw_bottom): hidden against same fluid below
+                            // (merged column) or a solid floor.
+                            if (sameFluid) continue;
+                            if (neighborCull === CULL_SOLID) continue;
+                        } else {
+                            // SIDES (drawLiquidSides): a same-fluid side is drawn ONLY
+                            // where a submerged cell (same fluid directly above) meets a
+                            // neighbour that is NOT submerged (its surface is exposed) —
+                            // the visible step down to the neighbour's surface. a flag
+                            // test, NOT a height comparison: matching heights don't make
+                            // a face interior, and a block sitting above the fluid must
+                            // not turn an interior side into a wall.
+                            if (sameFluid) {
+                                if (!sameFluidAbove) continue;
+                                if (sameFluidAboveNeighbor) continue;
+                            } else if (neighborCull === CULL_SOLID) {
+                                continue;
+                            }
                         }
 
                         const facing = FACE_TO_FACING[face]!;

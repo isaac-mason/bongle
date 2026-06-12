@@ -33,7 +33,7 @@ import {
     type Realm,
 } from './nodes';
 import { logScriptError } from './script-errors';
-import type { NodesRuntime } from './scripts';
+import type { NodesContext } from './scripts';
 
 /**
  * resolve a node's *effective* realm by walking up parent pointers until
@@ -168,7 +168,7 @@ export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): Pref
  */
 export function expandPrefab(
     node: Node,
-    _runtime: NodesRuntime,
+    _runtime: NodesContext,
     blockRegistry: import('../voxels/block-registry').BlockRegistry | null,
 ): Voxels | null {
     const config = node.prefab;
@@ -203,7 +203,7 @@ export function expandPrefab(
 export function reconcilePrefabNode(
     nodes: Nodes,
     node: Node,
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     worldVoxels: Voxels | null,
 ): void {
     const config = node.prefab!;
@@ -338,7 +338,7 @@ function dissolveAnchor(sg: Nodes, anchor: Node): void {
  */
 export function tick(
     sg: Nodes,
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     _resources: Resources,
     worldVoxels: Voxels | null,
     side: 'server' | 'client',

@@ -67,13 +67,8 @@ export type ResolvedAvatar =
           rigType?: string;
       };
 
-export type AvatarsServerDriver = {
-    resolve(userId: string): Promise<ResolvedAvatar>;
-};
-
 export type ServerDriver = {
     storage: StorageServerDriver;
-    avatars: AvatarsServerDriver;
 };
 
 export type ServerInitOptions = {
@@ -87,7 +82,16 @@ export type ServerApp<S = any> = {
     update: (state: S, dt: number) => void;
     dispose?: (state: S) => void;
 
-    onClientJoin: (state: S, client: Client, user: User, joinData: Record<string, JsonValue>) => void;
+    onClientJoin: (
+        state: S,
+        client: Client,
+        user: User,
+        joinData: Record<string, JsonValue>,
+        // Avatar the matchmaker resolved at allocation time and stamped
+        // into the reservation. Absent on the dev/edit path (no
+        // matchmaker) — the engine defaults to the builtin then.
+        avatar?: ResolvedAvatar,
+    ) => void;
     onClientLeave: (state: S, client: Client) => void;
 
     getInbox: (state: S) => Map<Client, Uint8Array[]>;

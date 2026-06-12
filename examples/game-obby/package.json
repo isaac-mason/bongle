@@ -1,0 +1,13 @@
+{
+    "name": "@bongle/example-game-obby",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "build": "bongle build"
+    },
+    "dependencies": {
+
+        "bongle": "workspace:*"
+    }
+}

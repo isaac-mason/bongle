@@ -1,0 +1,3356 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "name": "Root",
+      "traits": [],
+      "children": []
+    }
+  },
+  "chunks": {
+    "-1,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RsQ0AIQwDwH/2H5oFEBQIxaC7lG4i+//euTY4+Ty/yep/+V6errqf1/tNV72f/Wul95v+H2fZHwAAAABI0gFkiITdACAAAA==",
+      "light": "H4sIAAAAAAAAA+3RsQ3AIAxFwew/XUbICBmBlgJB8YUw0vnK11j2813kHej7aPR5/y+y2l/PenWn75N2Mqf/l3Yy1e9bfT/28n8AAAAAoJAGjxJeagAgAAA="
+    },
+    "0,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:stone",
+        "starter:stone_stairs[facing=east,half=bottom,shape=straight]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3USQrAIBAEwCz//3NO5qTEQIItVs1tGkEddN/mrqNa8t48XX3/8q/ydG/Od969MXnpt+43PU/UP/8yndb6v/Pnd5WeJ0r/v8x/beYPAAAAAKS6ABkepHsAIAAA",
+      "light": "H4sIAAAAAAAAA+3SwQmAMBBFQfuvzhIswRI8iQorSUDJP0zmlqeQsFm2cGvp6vXSe/serl76Vz3dyP2uvTn93L/3512ye6L++bf+/7u/f1O9m8SeqDX/2UbOld4ZZ/4AAAAAQKgDTkkcWgAgAAA="
+    },
+    "-1,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RMQ4AIAgEQfX/j7bUgpIEQmau3IaEvd5OMD2vd9wvul/P68zm/wAAAAAAAFS7FfdgsAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3RsQ0AMAgDwew/ZUbICGkpKJFA6Hzllz43yKbX9YlekE2v6+zmfwAAAAAAAJp9zmke8wAgAAA="
+    },
+    "0,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:stone",
+        "starter:wool_yellow"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3ROxKAIAxAQT/3v7OVWoiVAiHspnwzTCZsS2nWa/RvPfqU97/N1vef3x/Juffb/vqzZ/x/vU6Prvd9svfoet8newcAAAAAaOkAitanXQAgAAA=",
+      "light": "H4sIAAAAAAAAA+3RsQ3AIAwAwew/ZUbICKmgASoEGOt85TeW/fTnrfS5Hl1/vkqf6zcpe4/219ue8f/6mh7d6ftk79Gdvk/2DgAAAACw0Q9vMe4oACAAAA=="
+    },
+    "1,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-7,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RoQHAMADDsG3/Hz3SGxpgKTDQDwAAMPedrX629G97z1Y/W/q36d+mf5v+bfq36d+mf9ut/j9LpMPlACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UwQnAIBAF0fRfTUpICSkhJaSEBNGbigdxhRnf8Z9kYI9XW3qy9n4nvf369fcz/J+qsz+b/dnsz2Z/tvKidsWyP5v3n83+bPZnsz+b/dnsz2Z/tjX927tizeg/sH/V6IgvACAAAA=="
+    },
+    "-6,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "-5,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "-4,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "-3,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "-2,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "-1,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "0,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "1,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "2,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "3,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "4,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "5,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RQQHAIADEsA3/onHBPZpUQj8AAOCZM44t/9v+cWz53+Z/m/9t/rf53+Z/m/9t6/8XIht7SAAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ0AIRAEwfOv5iQgAQlIQAIS5kHIPLq3FEw62W+ragUzGMEftPfT2Z/N/mz2Z7M/W/va++na195P5/9nsz+b/dnsz2Z/Nvuz2Z/tdf+kvZ/utv+lA5g/vmAAIAAA"
+    },
+    "6,-1,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RoQHAMADDsG3/Hz3WExpgKTDQDwAAcM13tvnZ0r/tPdv8bOnfpn+b/m36t+nfpn+b/m3r/j+RkeOTACAAAA==",
+      "light": "H4sIAAAAAAAAA+3Uuw2AMBAEUfqvhhIogRIogRJACEHiT2BZG8zcCzcc6ZZTUcenvO+v2r496vt6a+3Ksj+b/dnsz2Z/tv8yu7Lsz+b/Z7M/m/3Z7M9mfzb7s9mfbXb/3q6s0f6D+wUHFJj/ACAAAA=="
+    },
+    "-7,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UbQ1AUBSHcRFEEEEEEUQQQQQRRBBBBBFEMjNz320M9zrPeT7+Pv63kw2n9cFW7wJt3nrbvfF0eO1M9cqR7qWV6YWR7bmWy9WL39mf/dmf/dmf/dlf2v4cx8m9P/1//Iqnsj/+jMexP/6Vv7E/Hq/f3x9P2UlyI4luItHNJLkFp1uKJgAgAAA="
+    },
+    "-5,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "-4,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "-3,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "-2,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "-1,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "0,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "1,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "2,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "3,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "4,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AMBAEUSQgAQlIQAISkIAEJCABCUhAApKQMB9N0x43+yRMssMFTnCAHWxgBQuYwQRGEH32t7/97W9/+9s/X3/nXN5F/3+V6b2/6mrdX23V7q++lfZXbNRf/3YrtUepvcrsA6VhOqkAIAAA"
+    },
+    "5,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3USw2AMBBFUSQgAQlIQAISkIAEJCABCUhAApIIIQRa+lk0TVvmzlne5UumWjxmj8lprkaHsw9WV+8t7t4ZPb01ePfmQ+21Ru/qldfZn/3Zn/3Zn/3ZX97+HMfJvdL/Pz2s574/PW5PvT89bY+9Pz3vHro/yubbH/+2QrQNou2Q7ABRPbFJACAAAA=="
+    },
+    "6,-1,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RsREAIQzEwH/ov2caYCD0nFkpVGTfBwAAgKcYZBPnRv3c/0be7tPtr9tft79uf93+eh+r/5fe063+X3pPt/p/iX0B75JVfQAgAAA=",
+      "light": "H4sIAAAAAAAAA+2SMQ0CAQADkYYEJCABCUhAAhKQgISX9GuTNunc/N2NNzXpDQAAAAAAAK7BY8h7UHvbR3eeQ6ZPaG/76M5ryPQJ7W0f3XkPmT6hve2jO58h0ye0t3105ztk+oT2to/u/IZMn9De9tGd/5DpE9rbPrpzDJk+ob3toxsncS+uAQAgAAA="
+    },
+    "0,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+2QuREAIACDfPbf2QUs7DhOoKRKRkRERER8xcoUu6/WX/uUe99Xf+126f/s3S79n73bpf+zd7v0f/Zul/7P3u3S/9m7Xfo/e7dL/2fvB+EyfTcAIAAA",
+      "light": "H4sIAAAAAAAAA+3SMQ3DABAEwUALhEAIhEAIBEMwBEMwBENyec3K/vIk71451Uv/MjMzMzMzs2f0Kd8bF7+7Sr/2b/n4K+KcPvVf+fgr4pw+9X/5+CvinD71pXz8FXFOn/paPv6KOKdPfSsff0Wc06e+l4+/Is7pUz/Kx18R5/Shn8nnvZkAIAAA"
+    },
+    "1,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+2QKw5AIQDD3uf+d8YgEEiSNaOtrFn2iIiIiMhVfKrTf6P9XCf6Lu722891uul/2jvd9D/tnW76n/ZON/1Pe6eb/qe9003/097ppv9p73TT/7R3ogPog3rVACAAAA==",
+      "light": "H4sIAAAAAAAAA+3JMRGAQAADQSQiAQlIQAISkIAEJCDp2xQp8zOZ+dsrbwMAAAAArGGX+HN/Y4fk8HO/sVNy+Lnf2CU5/Nxv7JYcfu439kgOP/cbeyWHn/uNfZLDz/3Gfsnh535hA+cB8K8AIAAA"
+    },
+    "0,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt",
+        "starter:stone"
+      ],
+      "blocks": "H4sIAAAAAAAAA+2QKw5AIQDD3uf+d8ahcJCsGW1lzbJHRERERK7i06v9l9pPdbrr/e/Uvtfppv9p73TT/7R3uul/2jvd9D/tnW76n/ZON/1Pe6eb/qe9003/097pDr3PS3oAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMRWAMAADUSQiAQlIQAISkICESqikbpmyZcl7vX/jHQAAAACAnZ2Kn/32vEvxs9+edyt+9tvzHsXPfnveq/jZb8/7FD/77Xm/4me/PW8ofvbb86biZ7+8BUyesFsAIAAA"
+    },
+    "1,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQGAMAADwZeABCQgAQlIQAISkIAEJCABCUhi7dBWQPP58fZwc3FysLOxsjAzUU7XdV3XdV0fy51zuSv/oZae4vX0DG+lJ3g7fXzvpY/ultxj0b0W3WfJ/fqacd8AIAAA"
+    },
+    "-5,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-4,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-3,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-2,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "-1,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "0,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "1,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "2,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "3,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "4,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3BgQCAMAAAwRBDCCGEEEIYwhCGMKSB/N1dAAAANNymP6a/pn+m/6YP06fpy/Rt+QEDD2i3ACAAAA=="
+    },
+    "5,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UMQHAIBQD0UiohEqohEpAAhKQgIRKqIRKqAQkMTEwgICfy41vj+YdOnXpVlJWUdWD4ziO4ziOh3bGmNPSovEPeGzPy3AHL5vw+F634dGdvHvJuo+s+8m6Rs51R+2EcgAgAAA="
+    },
+    "6,-1,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsREAAATAQOw/NIUlnE/KD0mSJGmqnXP+z3PnnHPOOeecc84557e9AWQxBS0AIAAA",
+      "light": "H4sIAAAAAAAAA+3UMQ0AIBAEwfevBglIQAISkEAoKGkh4ee2nP5iHOrRokbhnHPOOedJfI9zns9f/w/nnHPOOeec85teeWJf8a99AorkWLMAIAAA"
+    },
+    "-6,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+2VWwmAQBQFTwQjGMEIRjCCEYxgBCMYwQhGMJKIiOtrFWTxcefM56D7MbCrWpVKFcqVKVWiWJHc/dG7bP2StV+z9Ftcv8fs95n8EaM/ZvA+3tiH/vSnP/3pT3/6h+3PGLO76/cTPqx/+v33n49/1ofu7/8//t3+bn//9/hv+7P+eMseLNOAaVowTQeW6QHQHPHMACAAAA=="
+    },
+    "-5,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "-4,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "-3,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "-2,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "-1,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "0,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "1,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "2,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "3,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "4,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMAAEQSQgAQlIQAISkIAEJCABCUhAApJQQPZBSKG3N++2j03a1L4WdKAHAxjBBGawgBXUPvvb3/72t7/97Z/X3zl3P/qf9K7S/z+9r7Le7k/369ue9qfz+jfqr2ybou2KdijaqWQXAMMaigAgAAA="
+    },
+    "5,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoOr/6H4oMAAAVDm19qqqqqoa/QHn62xGACAAAA==",
+      "light": "H4sIAAAAAAAAA+2USw2AMBAFnwQkIAEJSEACEpCABCQgAQlIQBIhhPDvHggpZOfNcdL2MEm1X6JUmXIVKlWpVvN7nxw4+vTE3mcXbH1+yeqLGxZf3jL7KsDk6yCNSew+9Kc//elPf/rTP3Z/xpinWf8T/l0f+/+33sfH9W/3t+7Hf9s/7W+dx//bA4RowTUduKYH1wzgmREhMfskACAAAA=="
+    },
+    "6,-1,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMQEAAAjDMMC/aD5EsLRnSpIkSVHNzTlP874555xzzjnnnHPO+Udf7eB2LwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3UQQ2AMBREwfWvAgmVUAmVgAQkkBASLpzbpH/2Hee+OdLSM3Lm+o1zzjnnnO/l3zjn1Xz1/3DOOeecc87neeOlvT/xqj7eeEm/AU9yPX8AIAAA"
+    },
+    "-7,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RsQHAIADDsJb/j4aBF8AMUsaM/gAAYBl7r/6cVffVv/XvvfpzVt1X/1bdV/9W3Vf/Vt1X/1bdV/9W3Vf/Vt1X/1bdV/87JiIiL4AAIAAA",
+      "light": "H4sIAAAAAAAAA+3UwQmAQAwF0fRfjSVsCZZgCZYgIh7jCkt0YSbv+I8DiT2xxRotlsG9Pe6nfL9ku2rZn83+bPZnsz/bfbPuqvV3396uWv5/Nvuz2Z/N/mz2Z7M/m/3Z3vQb3e0/r36f6t3+HzgA+ys6VwAgAAA="
+    },
+    "-6,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "-5,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "-4,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "-3,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "-2,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "-1,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "0,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "1,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "2,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "3,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "4,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "5,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RAQ0AIAzAMMC/aFSQPaGdhC0AAL5yhsdb9V//W3t4vFX/9b9V//W/Vf/1v1X/9b9V//W/Vf/1v1X/9b9V//W/dQHnUsnsACAAAA==",
+      "light": "H4sIAAAAAAAAA+3UUQ2AQAwEUfyrQAISkIAEJCABCftxubTpTJ+DnaTHGVzBHTzBG3zayv5s9mezP5v92bpf9T7Tdb/qfabz/7PZn83+bPZnsz+b/dlSX/vPlvqtsn9vqc9u9i/1A+NNWVwAIAAA"
+    },
+    "6,-1,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]",
+        "starter:dirt"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3RsQ0AIADDMOD/o9n4AAUJu2PHDAAAvrLO3vy5q+6rf2uevflzV91X/1bdV/9W3Vf/Vt1X/1bdV/9W3Vf/Vt1X/1bdV//WBqMYI6kAIAAA",
+      "light": "H4sIAAAAAAAAA+3UwQmAMBBE0em/CkuwhJSQElKCJQgieknYgywJzt93nOOH1aZdRVVNR9ce7OUy3utttLdHf0cu+nujvzf6e6O/t/fW3JFrdt9oRy7+vzf6e6O/N/p7o783+nuL+tL/36J+X3f6ry3qk73Tf6oTytIAiAAgAAA="
+    },
+    "-7,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aRZ+gEp2xhQv9Xb1AQAAAAAAAMgyZ7KwiwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgAIPunNIIRfOygboyTKE7KsfUAAAAAAAAAvNIFp/BeACAAAA=="
+    },
+    "-6,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "-5,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "-4,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "-3,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "-2,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "-1,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "0,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "1,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "2,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "3,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "4,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "5,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQ0AAAwCoL9/aWO4OeCo+nIAAAAAAAAANgTpXChYACAAAA==",
+      "light": "H4sIAAAAAAAAA+3PMQ0AAAgDMPyrRAISMLFkT1MFnaNqy9p/AAAAAAAAACIe8+RxZAAgAAA="
+    },
+    "6,0,-7": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aTZeqFTZGTNE7Zf5AAAAAAAAAHQ4DiyNHwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3JQQkAAAgEMPunNIIR/FnhQMaeqyGqT+YBAAAAAAAAeGEBUmz5xAAgAAA="
+    },
+    "-7,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,-1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,0": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,1": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,2": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,3": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,4": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JMREAAAjEMPBvmoUVAdwnHVuH3vzMDwAAAAAAAMAvA8ZAWScAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMFgCML7LRy1y+J8PAAAAAAAAwCkNcqYZDgAgAAA="
+    },
+    "-6,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-5,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-4,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-3,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-2,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "-1,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "0,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "1,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "2,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "3,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "4,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "5,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
+      "light": "H4sIAAAAAAAAA+3BAQ0AAAgCMPunNIIR7AHfZ6l2AAAAAAAAACR4AYBsHwAgAAA="
+    },
+    "6,0,5": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/aSa2XlDZGbPzZX73BwAAAAAAAKDDAWBdX8AAIAAA",
+      "light": "H4sIAAAAAAAAA+3JMQ0AAAgDMPyrRAIS+LhQsDQ9W33m5bMfAAAAAAAAgAgLXZfMNgAgAAA="
+    },
+    "-7,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JoREAAAjEMNh/aQx3KPyLpLL16C31AwAAAAAAAABnAOSovCsAIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRMAyHR3yXjzrk+PoAAAAAAAAAwGoFGX8xACAAAA=="
+    },
+    "-6,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "-5,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "-4,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "-3,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "-2,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "-1,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "0,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "1,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "2,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "3,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "4,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "5,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3BMQEAAAwCoK1/aSP4egB/2wEAAAAAAACALhRbATcAIAAA",
+      "light": "H4sIAAAAAAAAA+3BMQ0AAAgDMPyrRAISkLB3R9PZcgcAAAAAAAAAJA+fAjxFACAAAA=="
+    },
+    "6,0,6": {
+      "palette": [
+        "air",
+        "starter:water[level=8]"
+      ],
+      "blocks": "H4sIAAAAAAAAA+3JoREAAAjEMNh/aRSOO+SbpLJd2y39AQAAAAAAAIDfANwJVT8AIAAA",
+      "light": "H4sIAAAAAAAAA+3JIQ0AAAgAMPqnJAIRcCg2JOa7fOSo1fcDAAAAAAAAAKcGzVogZQAgAAA="
+    }
+  }
+}

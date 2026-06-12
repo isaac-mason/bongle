@@ -27,7 +27,7 @@ import {
     type Nodes,
 } from '../core/scene/nodes';
 import * as Scripts from '../core/scene/scripts';
-import type { NodesRuntime } from '../core/scene/scripts';
+import type { NodesContext } from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import type { Voxels } from '../core/voxels/voxels';
 import { createVoxels, createVoxelsAuthority, setBlock } from '../core/voxels/voxels';
@@ -77,7 +77,7 @@ export type Room = {
     sourceRoomId: string | null;
 
     /** Runtime env for scripts in this room */
-    scriptRuntime: NodesRuntime;
+    scriptRuntime: NodesContext;
 
     /** PlayerId → in-scene node bearing PlayerTrait. one body per Player. */
     playerNodes: Map<PlayerId, Node>;
@@ -267,7 +267,7 @@ export type CreateRoomOptions = {
     sceneId: string;
     kind: 'edit' | 'play';
     sourceRoomId?: string;
-    rpc: NodesRuntime['rpc'];
+    rpc: NodesContext['rpc'];
     resources: Resources.Resources;
     /** Namespace for this room. Defaults to 'main'. */
     namespace?: string;
@@ -776,17 +776,27 @@ export function addClientToRoom(
     const playerNodeT0 = performance.now();
     const playerNode = createPlayerNode(state, room, player);
     const playerNodeMs = performance.now() - playerNodeT0;
+    // Stamp the resolved avatar onto the player's CharacterTrait BEFORE
+    // firing join hooks, so onJoin observes the right modelId/rigType and
+    // JoinArgs carries it.
+    const avatarT0 = performance.now();
+    Avatars.enqueuePlayer(state, room, player);
+    const avatarMs = performance.now() - avatarT0;
     const joinHooksT0 = performance.now();
-    Scripts.fireJoinHooks(room.scriptRuntime, client, user, joinData ?? {}, playerNode);
+    Scripts.fireJoinHooks(
+        room.scriptRuntime,
+        client,
+        user,
+        joinData ?? {},
+        playerNode,
+        Avatars.clientAvatarIdentity(clientState),
+    );
     const joinHooksMs = performance.now() - joinHooksT0;
     Chat.broadcast(room.chat, {
         from: 'system',
         text: `${user.username || 'anon'} joined`,
         kind: 'system',
     });
-    const avatarT0 = performance.now();
-    Avatars.enqueuePlayer(state, room, player);
-    const avatarMs = performance.now() - avatarT0;
     setActivePlayer(state.rooms, client, player.id);
     const discoveryT0 = performance.now();
     Discovery.invalidatePlayer(state.discovery, state.net, state.rooms, state.resources, player);
@@ -896,7 +906,6 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
     for (const snap of playerSnapshots) {
         const player = state.rooms.players.get(snap.id);
         leaveRoom(state.rooms, snap.id);
-        Avatars.dequeuePlayer(state, snap.id);
         destroyPlayerNode(room, snap.id);
         if (player) Discovery.notifyPlayerLeft(state.discovery, state.net, player);
     }
@@ -965,7 +974,6 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
     });
 
     leaveRoom(state.rooms, playerId);
-    Avatars.dequeuePlayer(state, playerId);
     destroyPlayerNode(room, playerId);
 
     Discovery.notifyPlayerLeft(state.discovery, state.net, player);
@@ -981,13 +989,21 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
                 const cs = state.clients.connected.get(client);
                 const user = cs?.user ?? { id: '', username: '' };
                 const playerNode = createPlayerNode(state, def, fp);
-                Scripts.fireJoinHooks(def.scriptRuntime, client, user, {}, playerNode);
+                // stamp avatar before join hooks (see addClientToRoom)
+                Avatars.enqueuePlayer(state, def, fp);
+                Scripts.fireJoinHooks(
+                    def.scriptRuntime,
+                    client,
+                    user,
+                    {},
+                    playerNode,
+                    Avatars.clientAvatarIdentity(cs),
+                );
                 Chat.broadcast(def.chat, {
                     from: 'system',
                     text: `${user.username || 'anon'} joined`,
                     kind: 'system',
                 });
-                Avatars.enqueuePlayer(state, def, fp);
             }
             setActivePlayer(state.rooms, client, fp.id);
             Discovery.invalidatePlayer(state.discovery, state.net, state.rooms, state.resources, fp);

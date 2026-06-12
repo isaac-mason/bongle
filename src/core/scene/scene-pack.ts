@@ -30,7 +30,7 @@ import {
     type Nodes,
 } from './nodes';
 import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
-import { disposeScriptInstance, type NodesRuntime } from './scripts';
+import { disposeScriptInstance, type NodesContext } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
 
 /* ── pack ── */
@@ -104,7 +104,7 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
  * and passes it here. callers without a peer (in-process pack/unpack in
  * tests) omit it and the runtime's local table is used.
  */
-export function unpackSceneGraph(sg: Nodes, runtime: NodesRuntime, data: Uint8Array, traitWireIndex?: WireIndex): void {
+export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Array, traitWireIndex?: WireIndex): void {
     const unpacked = unpackPackedSceneGraph(data);
     const root = sg.root;
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
@@ -183,7 +183,7 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesRuntime, data: Uint8Ar
  * packed the update (the server, when called from the client inbox).
  * absent → runtime's local table is used (in-process tests).
  */
-export function applySceneSyncUpdate(sg: Nodes, runtime: NodesRuntime, update: SceneSyncUpdate, traitWireIndex?: WireIndex): void {
+export function applySceneSyncUpdate(sg: Nodes, runtime: NodesContext, update: SceneSyncUpdate, traitWireIndex?: WireIndex): void {
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
     switch (update.type) {
         case 'node_created': {
@@ -329,7 +329,7 @@ function walkReplicable(
  * create a node from packed data and add it to the scene graph.
  * shared between unpackSceneGraph and applySceneSyncUpdate('node_created').
  */
-function applyNodeCreated(sg: Nodes, runtime: NodesRuntime, pn: PackedNode, traitWireIndex: WireIndex): void {
+function applyNodeCreated(sg: Nodes, runtime: NodesContext, pn: PackedNode, traitWireIndex: WireIndex): void {
     const parent = getNodeById(sg, pn.parentId);
     if (!parent) return;
 

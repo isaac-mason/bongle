@@ -14,7 +14,7 @@ import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import * as Nodes from '../core/scene/nodes';
 import { unpackSceneGraph } from '../core/scene/scene-pack';
-import type { ControlClientState, EditRoomState, NodesRuntime } from '../core/scene/scripts';
+import type { ControlClientState, EditRoomState, NodesContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
@@ -92,7 +92,7 @@ export type ClientRoom = {
     scene: Scene;
 
     /** the scripting runtime for this room */
-    scriptRuntime: NodesRuntime;
+    scriptRuntime: NodesContext;
 
     /** snapshot of the last scene graph state we sent to the server, for replication diffing. */
     syncSnapshots: ReturnType<typeof Replication.createSyncSnapshots>;
@@ -401,7 +401,7 @@ export type CreateRoomOptions = {
         packedNodes: Uint8Array;
     };
     net: Net.ClientNet;
-    rpc: NodesRuntime['rpc'];
+    rpc: NodesContext['rpc'];
     resources: Resources;
     renderer: Renderer.Renderer;
     modelResources: ModelResourcesNs.ModelResources;
@@ -483,7 +483,7 @@ type CreateRoomCoreOptions = {
     isNamespaceRoot: boolean;
     local: boolean;
     net: Net.ClientNet;
-    rpc: NodesRuntime['rpc'];
+    rpc: NodesContext['rpc'];
     resources: Resources;
     renderer: Renderer.Renderer;
     modelResources: ModelResourcesNs.ModelResources;
@@ -507,7 +507,7 @@ type CreateRoomCoreOptions = {
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: NodesRuntime;
+    scriptRuntime: NodesContext;
     playerNode: Nodes.Node;
 };
 
@@ -524,7 +524,7 @@ type CreateRoomCoreOptions = {
  */
 function newRoomCore(opts: {
     resources: Resources;
-    rpc: NodesRuntime['rpc'];
+    rpc: NodesContext['rpc'];
     roomId: string;
     playerMode: PlayerMode;
     roomMode: RoomMode;
@@ -534,7 +534,7 @@ function newRoomCore(opts: {
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: NodesRuntime;
+    scriptRuntime: NodesContext;
 } {
     const blocks = registry.blockRegistry;
     const voxels = Voxels.createVoxels(blocks);
@@ -542,7 +542,7 @@ function newRoomCore(opts: {
     const physics = Physics.init(nodes, voxels, blocks);
     const clock = Clock.init();
     const chat = Chat.init();
-    const scriptRuntime: NodesRuntime = {
+    const scriptRuntime: NodesContext = {
         roomId: opts.roomId,
         resources: opts.resources,
         rpc: opts.rpc,

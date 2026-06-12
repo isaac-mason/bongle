@@ -15,7 +15,7 @@ import { VoxelModel, VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import { registry as kindRegistry } from '../../core/registry';
 import { addChild, addTrait, createNode, destroyNode, getTrait, type Node, type Nodes } from '../../core/scene/nodes';
 import { prefabHasVoxels } from '../../core/scene/prefab';
-import type { NodesRuntime } from '../../core/scene/scripts';
+import type { NodesContext } from '../../core/scene/scripts';
 import { markTransformDirty } from '../../builtins/transform';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { rotateVoxelsByQuat } from '../../core/voxels/voxel-rotate';
@@ -48,7 +48,7 @@ export function dispose(state: PrefabVisuals): void {
 export function update(
     state: PrefabVisuals,
     sg: Nodes,
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     registry: BlockRegistry,
 ): void {
     if (sg.roomMode !== 'edit') return;

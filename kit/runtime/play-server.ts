@@ -38,7 +38,8 @@ export default server({
     },
     update: (state, dt) => EngineServer.update(state, dt),
     dispose: (state) => EngineServer.dispose(state),
-    onClientJoin: (state, client, user, joinData) => EngineServer.onClientJoin(state, client, user, joinData),
+    onClientJoin: (state, client, user, joinData, avatar) =>
+        EngineServer.onClientJoin(state, client, user, joinData, avatar),
     onClientLeave: (state, client) => EngineServer.onClientLeave(state, client),
     getInbox: (state) => state.net.inbox,
     getOutbox: (state) => state.net.outbox,

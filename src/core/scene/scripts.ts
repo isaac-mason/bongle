@@ -3,6 +3,7 @@ import type { ContactManifold, ContactSettings, RigidBody } from 'crashcat';
 import type { Scene } from 'gpucat';
 import type * as Scripts from 'packcat';
 import { env } from '../../api/env';
+import type { Avatar } from '../avatar/avatar';
 import type { EngineClient } from '../../client/engine-client';
 import type { Input } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
@@ -11,7 +12,7 @@ import type { Room } from '../../server/rooms';
 import type { DepHandle } from '../capture/dep-graph';
 import { setDeps } from '../capture/dep-graph';
 import { recordScript } from '../capture/module-scope';
-import { registry, structuralHash, upsert } from '../registry';
+import { registry, upsert } from '../registry';
 import type { ClientId } from '../client';
 import type { Clock } from '../clock';
 import type { Physics } from '../physics/physics';
@@ -25,39 +26,7 @@ import * as nodes from './nodes';
 import { logScriptError } from './script-errors';
 import type { TraitBase, TraitHandle } from './traits';
 
-/* ── unsubscribe handle ─────────────────────────────────────────── */
-
 export type Unsubscribe = () => void;
-
-/* ── hook arg types ─────────────────────────────────────────────── */
-
-export type TickArgs = { delta: number };
-export type UpdateArgs = { delta: number };
-export type FrameArgs = { delta: number };
-
-/** args passed to onJoin callbacks */
-export type JoinArgs = {
-    client: ClientId;
-    playerNode: nodes.Node;
-    user: User;
-    joinData: Record<string, JsonValue>;
-};
-
-/** args passed to onLeave callbacks */
-export type LeaveArgs = {
-    client: ClientId;
-    playerNode: nodes.Node;
-};
-
-/** args passed to onPhysicsContact callbacks — raw crashcat types */
-export type PhysicsContactArgs = {
-    bodyA: RigidBody;
-    bodyB: RigidBody;
-    manifold: ContactManifold;
-    settings: ContactSettings;
-};
-
-/* ── control state ──────────────────────────────────────────────── */
 
 /**
  * mutable POV pointer — the node whose CameraTrait the renderer binds into
@@ -73,8 +42,6 @@ export type PhysicsContactArgs = {
 export type ControlClientState = {
     node: nodes.Node | null;
 };
-
-/* ── editor lens state ──────────────────────────────────────────── */
 
 /**
  * client-side editor lens. when present, this client is in some flavor of
@@ -110,8 +77,6 @@ export type EditRoomState = {
      */
     cameraNode: nodes.Node;
 };
-
-/* ── client context ─────────────────────────────────────────────── */
 
 export type ClientContext = {
     /** the scene this client is in */
@@ -179,8 +144,6 @@ export type ClientContext = {
     editor?: EditRoomState;
 };
 
-/* ── server context ─────────────────────────────────────────────── */
-
 export type ServerContext = {
     /** top-level server engine state */
     state: EngineServer;
@@ -197,9 +160,7 @@ export type ServerContext = {
     readonly gameOptions: Readonly<Record<string, string | number | boolean>>;
 };
 
-/* ── runtime env ───────────────────────────────────────────────── */
-
-export type NodesRuntime = {
+export type NodesContext = {
     /** room id for rpc send/broadcast */
     roomId: string;
 
@@ -235,10 +196,13 @@ export type NodesRuntime = {
     instances: Map<number, Map<string, ScriptInstance>>;
 };
 
-/* ── script context ─────────────────────────────────────────────── */
-
 export type ScriptOptions = {
+    /**
+     * whether the script should run in edit mode.
+     * @default false
+     */
     editor?: boolean;
+
     /**
      * producer handles whose changes trigger this script to be re-built
      * on its attached trait instances. accepts anything with a DepGraph
@@ -286,7 +250,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     _instance?: ScriptInstance;
 
     /** @internal reference to nodes runtime for hook/RPC functions */
-    _runtime?: NodesRuntime;
+    _runtime?: NodesContext;
 };
 
 export type ScriptInstance = {
@@ -369,7 +333,7 @@ export type ScriptInstance = {
     netListeners: Array<{ commandId: string; entry: Rpc.ListenerEntry }>;
 
     /** runtime env for this instance */
-    _runtime: NodesRuntime;
+    _runtime: NodesContext;
 
     /** context passed to the factory — held until initScriptInstance runs the factory, then cleared */
     _ctx: ScriptContext;
@@ -424,10 +388,6 @@ export function script<T extends TraitBase>(
     opts?: ScriptOptions,
 ): ScriptDef {
     const target = handle._def;
-    if (target.scriptsById.has(scriptId)) {
-        console.warn(`[bongle] trait '${target.id}' already has a script with id '${scriptId}'; ignoring re-register`);
-        return target.scriptsById.get(scriptId)!.reg;
-    }
     const key = `${handle._id}.${scriptId}`;
     const def: ScriptDef = {
         traitId: handle._id,
@@ -437,18 +397,26 @@ export function script<T extends TraitBase>(
         factory: factory as unknown as ScriptFactory,
         editor: opts?.editor === true,
     };
-    target.scriptsById.set(scriptId, { reg: def, index: target.scripts.length });
-    target.scripts.push(def);
+    // upsert into the trait def's script list: reuse the slot if this id already
+    // exists, else append (`scripts[length] = def` extends the array). re-
+    // registration is normal under HMR — a built-in trait like WorldTrait keeps
+    // its def (and `scriptsById`) across a user-file reload, so the same
+    // `script()` call re-runs against a populated map; latest factory wins.
+    const existing = target.scriptsById.get(scriptId);
+    const index = existing ? existing.index : target.scripts.length;
+    target.scripts[index] = def;
+    target.scriptsById.set(scriptId, { reg: def, index });
     // upsert into the per-kind store so HMR detects individual script
     // factory edits without flipping the parent trait hash. dispatch
     // turns these pendingChanges into a targeted applyTraitSwap.
     upsert(registry.scripts, key, def);
-    // record into the owning module's snapshot so the patch/invalidate diff
-    // can see this script registration. traitId binding is the shape-bearing
-    // field (position-stable on `scripts`); factoryHash is content-bearing
-    // and lives here for the patch path to know which scripts actually
-    // changed bodies (vs reordered/added). order matches def.scripts index.
-    recordScript(handle._id, structuralHash(factory));
+    // record this script key into the owning module's snapshot so the
+    // patch/invalidate diff sees which scripts the module declares this run.
+    // the diff is set-based: an unchanged key set means only factory bodies
+    // moved (swapped in place below), while an added/removed/renamed key is a
+    // shape change that invalidates — which is what disposes a script the
+    // user deleted or renamed, even on a persistent (built-in) trait def.
+    recordScript(key);
     // wire dep edges so the dirty set covers scripts whose closed-over
     // producers changed even when the factory body itself is unchanged
     // (e.g. a referenced model handle reloaded). dispatch uses these to
@@ -520,6 +488,8 @@ export function onInit(ctx: ScriptContext, fn: () => void): Unsubscribe {
     return () => instance.onInit.delete(fn);
 }
 
+export type TickArgs = { delta: number };
+
 export function onTick(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -527,6 +497,8 @@ export function onTick(ctx: ScriptContext, fn: (args: TickArgs) => void): Unsubs
     instance.onTick.add(fn);
     return () => instance.onTick.delete(fn);
 }
+
+export type UpdateArgs = { delta: number };
 
 /**
  * register a callback that fires once per frame, before the fixed-timestep tick
@@ -543,6 +515,8 @@ export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Un
     instance.onUpdate.add(fn);
     return () => instance.onUpdate.delete(fn);
 }
+
+export type FrameArgs = { delta: number };
 
 export function onFrame(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsubscribe {
     const instance = ctx._instance;
@@ -603,6 +577,20 @@ export function onExit(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Un
     return () => instance.onExit.delete(fn);
 }
 
+export type JoinArgs = {
+    client: ClientId;
+    playerNode: nodes.Node;
+    user: User;
+    joinData: Record<string, JsonValue>;
+    /** Model id the player renders with, resolved upstream (matchmaker /
+     *  builtin) and already stamped onto `playerNode`'s CharacterTrait
+     *  before this fires. */
+    characterModelId: string;
+    /** Rig contract of that model, e.g. `RIG_TYPE_6BONE` — lets onJoin
+     *  branch on rig family without reaching for the trait. */
+    rigType: string;
+};
+
 /**
  * register a callback that fires when a client joins the room.
  * server-only — no-op on the client.
@@ -615,6 +603,12 @@ export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubs
     instance.onJoin.add(fn);
     return () => instance.onJoin.delete(fn);
 }
+
+/** args passed to onLeave callbacks */
+export type LeaveArgs = {
+    client: ClientId;
+    playerNode: nodes.Node;
+};
 
 /**
  * register a callback that fires when a client leaves the room.
@@ -758,6 +752,14 @@ export function onPostAnimate(ctx: ScriptContext, fn: (args: TickArgs) => void):
     return () => instance.onPostAnimate.delete(fn);
 }
 
+/** args passed to onPhysicsContact callbacks — raw crashcat types */
+export type PhysicsContactArgs = {
+    bodyA: RigidBody;
+    bodyB: RigidBody;
+    manifold: ContactManifold;
+    settings: ContactSettings;
+};
+
 /**
  * register a callback that fires during the physics step when a contact is detected.
  * receives raw crashcat body/manifold/settings — you can modify settings to customize
@@ -862,7 +864,7 @@ export function listen(
 
 /* ── script instance creation ───────────────────────────────────── */
 
-export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nodes.Node, runtime: NodesRuntime): ScriptInstance {
+export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nodes.Node, runtime: NodesContext): ScriptInstance {
     const instance: ScriptInstance = {
         def,
         node,
@@ -1029,13 +1031,21 @@ export function inputScriptInstance(instance: ScriptInstance, args: FrameArgs): 
  * called by the server after a client joins a room.
  */
 export function fireJoinHooks(
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     client: ClientId,
     user: User,
     joinData: Record<string, JsonValue>,
     playerNode: nodes.Node,
+    avatar: Avatar,
 ): void {
-    const args: JoinArgs = { client, playerNode, user, joinData };
+    const args: JoinArgs = {
+        client,
+        playerNode,
+        user,
+        joinData,
+        characterModelId: avatar.modelId,
+        rigType: avatar.rigType,
+    };
     for (const nodeInstances of runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
             for (const fn of instance.onJoin) {
@@ -1053,7 +1063,7 @@ export function fireJoinHooks(
  * fire leave hooks on all script instances in a scene graph.
  * called by the server before a client leaves a room.
  */
-export function fireLeaveHooks(runtime: NodesRuntime, client: ClientId, playerNode: nodes.Node): void {
+export function fireLeaveHooks(runtime: NodesContext, client: ClientId, playerNode: nodes.Node): void {
     const args: LeaveArgs = { client, playerNode };
     for (const nodeInstances of runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
@@ -1069,7 +1079,7 @@ export function fireLeaveHooks(runtime: NodesRuntime, client: ClientId, playerNo
 }
 
 /** fire onEnter hooks on all script instances of a node */
-export function fireEnterHooks(runtime: NodesRuntime, node: nodes.Node, parent: nodes.Node): void {
+export function fireEnterHooks(runtime: NodesContext, node: nodes.Node, parent: nodes.Node): void {
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;
     for (const instance of nodeInstances.values()) {
@@ -1084,7 +1094,7 @@ export function fireEnterHooks(runtime: NodesRuntime, node: nodes.Node, parent: 
 }
 
 /** fire onExit hooks on all script instances of a node */
-export function fireExitHooks(runtime: NodesRuntime, node: nodes.Node, parent: nodes.Node): void {
+export function fireExitHooks(runtime: NodesContext, node: nodes.Node, parent: nodes.Node): void {
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;
     for (const instance of nodeInstances.values()) {
@@ -1098,7 +1108,7 @@ export function fireExitHooks(runtime: NodesRuntime, node: nodes.Node, parent: n
     }
 }
 
-export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDef, runtime: NodesRuntime): ScriptInstance {
+export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDef, runtime: NodesContext): ScriptInstance {
     let snapshot: unknown;
     if (oldInstance.onSwap) {
         snapshot = oldInstance.onSwap.ser();
@@ -1135,7 +1145,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * structurally invalid if a trait field they depend on moved indices.
  */
 export function applyTraitSwap(
-    runtime: NodesRuntime,
+    runtime: NodesContext,
     dirtyScriptIds: ReadonlySet<string> | null = null,
 ): void {
     for (const [nodeId, nodeInstances] of runtime.instances) {
