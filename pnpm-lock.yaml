@@ -175,6 +175,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  examples/game-wizards:
+    dependencies:
+      bongle:
+        specifier: workspace:*
+        version: link:../..
+
   examples/performance-animated-meshes:
     dependencies:
       bongle:

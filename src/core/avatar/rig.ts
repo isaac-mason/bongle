@@ -26,26 +26,43 @@ export const RIG_TYPE_6BONE = '6bone';
 
 /* ── 6bone constants ── */
 
-/** Nodes the validator requires by exact name. Missing any → reject.
+/** Individually-addressable node names. Game code references these when
+ *  attaching held items / accessories or resolving a bone by name
+ *  (`findByName(playerNode, RIG_6BONE_HAND_RIGHT)`); the arrays below are
+ *  the validator / iteration surface, built from these so there's one
+ *  source of truth. Required bones are always present once a rig mounts;
+ *  the hand/back sockets only when the avatar authored them.
  *  Naming convention: `<part>_<side>` (e.g. `arm_left`, not `left_arm`)
  *  so the long form sorts by part in editors / consoles. */
+export const RIG_6BONE_WAIST = 'waist';
+export const RIG_6BONE_BODY = 'body';
+export const RIG_6BONE_HEAD = 'head';
+export const RIG_6BONE_ARM_LEFT = 'arm_left';
+export const RIG_6BONE_ARM_RIGHT = 'arm_right';
+export const RIG_6BONE_LEG_LEFT = 'leg_left';
+export const RIG_6BONE_LEG_RIGHT = 'leg_right';
+export const RIG_6BONE_HAND_LEFT = 'hand_left';
+export const RIG_6BONE_HAND_RIGHT = 'hand_right';
+export const RIG_6BONE_BACK = 'back';
+
+/** Nodes the validator requires by exact name. Missing any → reject. */
 export const RIG_6BONE_REQUIRED_NODES = [
-    'waist',
-    'body',
-    'head',
-    'arm_left',
-    'arm_right',
-    'leg_left',
-    'leg_right',
+    RIG_6BONE_WAIST,
+    RIG_6BONE_BODY,
+    RIG_6BONE_HEAD,
+    RIG_6BONE_ARM_LEFT,
+    RIG_6BONE_ARM_RIGHT,
+    RIG_6BONE_LEG_LEFT,
+    RIG_6BONE_LEG_RIGHT,
 ] as const;
 
 /** Optional attach-point empties. Avatars may include them; nothing
  *  breaks if they're missing. Documented here so creators have one
  *  source of truth for the names. */
 export const RIG_6BONE_ATTACH_NODES = [
-    'back',
-    'hand_left',
-    'hand_right',
+    RIG_6BONE_BACK,
+    RIG_6BONE_HAND_LEFT,
+    RIG_6BONE_HAND_RIGHT,
 ] as const;
 
 /** Height bounds (metres) — referenced by the post-v1 validator,

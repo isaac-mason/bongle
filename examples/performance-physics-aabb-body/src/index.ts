@@ -2,8 +2,6 @@ import {
     AabbBodyTrait,
     addChild,
     addTrait,
-    CharacterControllerTrait,
-    CharacterTrait,
     cloneModel,
     configureFloodFillLighting,
     control,
@@ -14,7 +12,6 @@ import {
     onInit,
     onJoin,
     onTick,
-    PlayerControllerTrait,
     prop,
     script,
     setBlock,
@@ -156,9 +153,5 @@ script(GameplayTrait, 'session', (ctx) => {
         const transform = getTrait(playerNode, TransformTrait)!;
         setPosition(transform, [0, 5, 0]);
 
-        addTrait(playerNode, CharacterControllerTrait);
-
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
     });
 });

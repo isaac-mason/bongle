@@ -3,8 +3,6 @@ import {
     addChild,
     addTrait,
     BLOCK_FLAG_LIQUID,
-    CharacterControllerTrait,
-    CharacterTrait,
     configureFloodFillLighting,
     createNode,
     createVoxelModelShape,
@@ -16,7 +14,6 @@ import {
     onInit,
     onJoin,
     onPrePhysicsStep,
-    PlayerControllerTrait,
     RigidBodyTrait,
     scene,
     script,
@@ -291,8 +288,5 @@ script(GameplayTrait, 'session', (ctx) => {
     onJoin(ctx, ({ playerNode }) => {
         const t = getTrait(playerNode, TransformTrait)!;
         setPosition(t, [0, POOL_WALL_H + 2, POOL_HALF + 4]);
-        addTrait(playerNode, CharacterControllerTrait);
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
     });
 });

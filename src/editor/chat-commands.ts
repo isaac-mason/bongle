@@ -72,15 +72,30 @@ function maskToString(m: Mask): string {
     }
 }
 
+// candidate block id + the hint shown next to it. registry defs become
+// candidates, plus `air` — a valid clear/erase token for `/set` + `/replace`
+// that isn't a placeable block, so it carries its own hint instead of a name.
+type BlockCandidate = { id: string; detail?: string };
+
+const airCandidate: BlockCandidate = { id: 'air', detail: 'clear / empty' };
+
+function blockCandidates(): BlockCandidate[] {
+    return [
+        airCandidate,
+        ...registry.blockRegistry.defs
+            .filter((d) => d.id !== 'air')
+            .map((d) => ({ id: d.id, detail: d.name !== d.id ? d.name : undefined })),
+    ];
+}
+
 // fuzzy-match blocks against `partial`, packaged so the chat UI can swap
 // them in for the full current token. ranked by fuzzy score so e.g. `oklg`
 // finds `oak_log` ahead of `oak_planks`.
 function blockSuggestions(prefix: string, partial: string): Suggestion[] {
-    const defs = registry.blockRegistry.defs.filter((d) => d.id !== 'air');
-    return fuzzyRank(partial, defs, (d) => d.id).map(({ item: d }) => ({
-        text: prefix + d.id,
-        label: d.id,
-        detail: d.name !== d.id ? d.name : undefined,
+    return fuzzyRank(partial, blockCandidates(), (c) => c.id).map(({ item: c }) => ({
+        text: prefix + c.id,
+        label: c.id,
+        detail: c.detail,
     }));
 }
 

@@ -23,7 +23,6 @@ import {
     addTrait,
     BLOCK_AIR,
     CharacterControllerTrait,
-    CharacterTrait,
     characterLook,
     createNode,
     env,
@@ -33,7 +32,6 @@ import {
     onFrame,
     onInit,
     onJoin,
-    PlayerControllerTrait,
     scene,
     script,
     setBlock,
@@ -77,9 +75,6 @@ script(SpritesDemoTrait, 'spawn', (ctx) => {
         const t = getTrait(playerNode, TransformTrait)!;
         // stand a few steps back on -z so all three zones are in front.
         setPosition(t, [0, 1, -6]);
-        addTrait(playerNode, CharacterControllerTrait);
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
         // face +Z so the zones (placed at z=2) are straight ahead.
         characterLook(cc, Math.PI);

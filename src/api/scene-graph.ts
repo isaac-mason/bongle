@@ -14,6 +14,7 @@ export {
     removeChild,
     replaceChildren,
 } from '../core/scene/nodes';
+export { traverse } from '../core/scene/traverse';
 
 /**
  * clone a node and all its descendants. the returned subtree is **detached** —

@@ -1,7 +1,9 @@
 import type { Client, JsonValue } from 'bongle/interface';
 import type { PlayerId } from '../core/client';
 import { env, PlayerTrait, TransformTrait } from 'bongle';
-import { CharacterTrait } from '../builtins/character';
+import { addCharacter } from '../builtins/character';
+import { CharacterControllerTrait } from '../builtins/character-controller';
+import { PlayerControllerTrait } from '../builtins/player-controller';
 import { attachWorldTrait } from '../builtins/world';
 import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
 import * as Clock from '../core/clock';
@@ -1077,7 +1079,18 @@ export function createPlayerNode(state: EngineServer, room: Room, player: Player
         trait.userId = cs.user.id;
         trait.username = cs.user.username;
     }
-    addTrait(node, CharacterTrait);
+    // Add CharacterTrait + mount the rig now (not on the reconciler's first
+    // frame) so join hooks can `findByName(playerNode, 'hand_right')` to attach
+    // held items synchronously. The reconciler swaps in the resolved avatar later.
+    addCharacter(node);
+    // Default play-mode players to the standard humanoid controls (movement +
+    // input/camera). It's the 90% case; games with a different control scheme
+    // (or none) remove these in `onJoin`. Edit-mode players drive via the editor
+    // lens, so they're left without.
+    if (player.mode === 'play') {
+        addTrait(node, CharacterControllerTrait);
+        addTrait(node, PlayerControllerTrait);
+    }
     // per-player editor activation follows the player's mode, not the room's
     // auth mode: an 'edit' player joining a play room (inspect-server) gets
     // the editor too. play-mode players use a client-local lens node instead

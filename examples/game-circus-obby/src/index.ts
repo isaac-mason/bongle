@@ -2,6 +2,7 @@ import { blocks } from 'bongle/starter';
 import {
     addChild,
     addTrait,
+    CharacterControllerTrait,
     cloneModel,
     ContactsTrait,
     createVoxelRaycastResult,
@@ -25,7 +26,9 @@ import {
     onTick,
     onUpdate,
     pack,
+    PlayerControllerTrait,
     raycastVoxels,
+    removeTrait,
     RigidBodyTrait,
     script,
     setEnvironment,
@@ -231,6 +234,11 @@ script(GameplayTrait, 'session', (ctx) => {
         // (auto-added by the engine) mounts the avatar visuals here.
         const pt = getTrait(playerNode, TransformTrait)!;
         setPosition(pt, [SPAWN[0], SPAWN[1] + BALL_RADIUS, SPAWN[2]]);
+
+        // this game drives the player via BallControllerTrait, so drop the
+        // engine's default humanoid controls (movement + input/camera).
+        removeTrait(playerNode, CharacterControllerTrait);
+        removeTrait(playerNode, PlayerControllerTrait);
 
         // ── ball ──
         // separate node, sibling under room root. owner = same player; the

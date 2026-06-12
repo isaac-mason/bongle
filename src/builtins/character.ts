@@ -112,6 +112,7 @@ import {
     type Node,
     removeChild,
 } from '../api/scene-graph';
+import type { TraitProps } from '../core/scene/nodes';
 import { getControlNode, isOwner, onFrame, query, script } from '../api/scripts';
 import { sync, trait, type TraitType } from '../api/traits';
 import { setPosition, setQuaternion, setTransform } from '../api/transforms';
@@ -380,9 +381,11 @@ script(WorldTrait, 'character', (ctx) => {
                     t.state.modelId = t.modelId;
                     t.state.modelHandle = handle;
                 } else if (t.state.modelId === null) {
-                    mountRig(node, baseAvatar);
-                    t.state.modelId = BUILTIN_BASE_AVATAR_ID;
-                    t.state.modelHandle = baseAvatar;
+                    // Target not loaded yet → placeholder. May already be
+                    // mounted (the server eager-mounts at node creation so
+                    // join hooks see bones — see `ensureCharacterRig`); this
+                    // is idempotent.
+                    ensureCharacterRig(node);
                 }
             }
 
@@ -570,6 +573,48 @@ function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, t
 // ── skeleton + mount helpers ─────────────────────────────────────────
 
 /**
+ * Synchronously mount the placeholder (baseAvatar) rig on `node` if it has no
+ * rig yet, so code running before the reconciler's first frame sees the bones.
+ *
+ * The reconciler builds the rig in `onFrame`, which runs *after* the server's
+ * join processing — so a server `onJoin` hook that does
+ * `findByName(playerNode, 'hand_right')` would otherwise get null. The server
+ * calls this at player-node creation (`createPlayerNode`) so bones exist by the
+ * time join hooks fire; game code spawning characters that need bones
+ * immediately can call it too.
+ *
+ * Idempotent (no-op once a rig is mounted) and a no-op on a node without
+ * `CharacterTrait`. Mounts only the placeholder — the reconciler still swaps in
+ * the resolved avatar once its model loads.
+ */
+export function ensureCharacterRig(node: Node): void {
+    const t = getTrait(node, CharacterTrait);
+    if (!t || t.state.modelId !== null) return;
+    mountRig(node, baseAvatar);
+    t.state.modelId = BUILTIN_BASE_AVATAR_ID;
+    t.state.modelHandle = baseAvatar;
+}
+
+/**
+ * Add `CharacterTrait` to `node` and mount its rig immediately, so the bones
+ * (`head`, `hand_right`, …) are available the same tick for attaching held
+ * items / accessories. The higher-level sibling of
+ * `addTrait(node, CharacterControllerTrait)` — the engine uses it for player
+ * nodes (`createPlayerNode`) and game code uses it to spawn character NPCs.
+ *
+ * Returns the trait. Mounts the base/placeholder rig synchronously (via
+ * `ensureCharacterRig`); the reconciler swaps in the resolved avatar later if
+ * `props.modelId` names one that isn't loaded yet. Use `ensureCharacterRig`
+ * directly when a node already carries `CharacterTrait` and you only need its
+ * bones mounted now.
+ */
+export function addCharacter(node: Node, props?: TraitProps<CharacterTrait>): CharacterTrait {
+    const t = addTrait(node, CharacterTrait, props);
+    ensureCharacterRig(node);
+    return t;
+}
+
+/**
  * Canonical 6bone parenting. waist + legs hang off `playerNode`; body
  * nests inside waist so torso rotation propagates; head + arms nest
  * inside body so they ride along. Authoring tools MUST produce this
@@ -631,6 +676,21 @@ function ensureCanonicalBones(playerNode: Node): void {
     }
 }
 
+/** First direct child of `parent` matching `name` that hasn't already been
+ *  claimed this mount pass, or null. Used by `mountRig` to reconcile a loaded
+ *  node against an already-present child (replicated or prior-frame) instead
+ *  of cloning a duplicate. Direct-children only — `mountRig` matches level by
+ *  level, so a deeper same-named node must not stand in for a missing direct
+ *  child. The `claimed` set makes each existing child consumable at most once,
+ *  so a model with repeated (or unnamed) sibling names still maps one loaded
+ *  node to one mounted node rather than collapsing them. */
+function firstUnclaimedChild(parent: Node, name: string, claimed: Set<Node>): Node | null {
+    for (const child of parent.children) {
+        if (!claimed.has(child) && (child.name ?? '') === name) return child;
+    }
+    return null;
+}
+
 /**
  * Install / re-install a model's rig under `playerNode`:
  *
@@ -659,6 +719,11 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
 
     const canonical = new Set<string>(RIG_6BONE_REQUIRED_NODES);
 
+    // Tracks the placeholder nodes consumed this pass so a reused child (or a
+    // node cloned earlier in this same pass) is never matched twice — keeps
+    // repeated / unnamed sibling names mapping one-to-one.
+    const claimed = new Set<Node>();
+
     const visit = (loaded: Node, placeholder: Node | null): void => {
         // copy loaded TRS onto the matched placeholder (if any).
         if (placeholder) {
@@ -686,11 +751,26 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
                 visit(loadedChild, phChild);
                 continue;
             }
-            // non-canonical: clone subtree + attach under whatever
-            // placeholder bone we last matched (falls back to playerNode
-            // when the loaded root itself was non-canonical, e.g. the
-            // synthetic wrapper around a multi-root scene).
-            addChild(placeholder ?? playerNode, cloneNode(loadedChild));
+            // non-canonical child, attached under whatever placeholder bone
+            // we last matched (falls back to playerNode when the loaded root
+            // itself was non-canonical, e.g. the synthetic wrapper around a
+            // multi-root scene). Mount-if-not-already: a matching child may
+            // already exist — replicated from the server (player rigs are
+            // 'shared', so the server's mount reaches clients) or mounted a
+            // prior frame. Reuse it and reconcile its subtree rather than
+            // cloning a duplicate; only clone when there's no unclaimed match.
+            const parent = placeholder ?? playerNode;
+            const existing = firstUnclaimedChild(parent, childName, claimed);
+            if (existing) {
+                claimed.add(existing);
+                visit(loadedChild, existing);
+            } else {
+                const fresh = cloneNode(loadedChild);
+                addChild(parent, fresh);
+                // claim the fresh clone so a later same-named loaded sibling
+                // clones its own node instead of folding into this one.
+                claimed.add(fresh);
+            }
         }
     };
 

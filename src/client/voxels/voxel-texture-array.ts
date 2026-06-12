@@ -11,7 +11,8 @@
 //      the server-built atlas PNG, extracts each tile, and writes it
 //      into the corresponding layer. progressive enhancement.
 //
-// nearest-neighbor filtering for pixel art. all layers are TILE_SIZE².
+// nearest magnification for crisp pixel art, with mipmaps + trilinear mip
+// blending to kill minification aliasing at distance. all layers are TILE_SIZE².
 
 import { ArrayTexture } from 'gpucat';
 import { assetUrl } from '../asset-url';
@@ -72,11 +73,15 @@ export function createVoxelTextureArray(layerCount: number): ArrayTexture {
 
     return new ArrayTexture(data, TILE_SIZE, TILE_SIZE, count, {
         format: 'rgba8unorm-srgb',
-        magFilter: 'nearest',
-        minFilter: 'nearest',
+        magFilter: 'nearest', // crisp texels up close (pixel art, no blur)
+        minFilter: 'nearest', // within a mip level; the levels are pre-averaged
+        mipmapFilter: 'linear', // trilinear blend between levels, no LOD popping
         wrapS: 'repeat',
         wrapT: 'repeat',
-        generateMipmaps: false,
+        // each tile is its own array layer, so mips downsample per-tile with no
+        // cross-tile bleed. cutout (transparent) pass is intentionally left
+        // unchanged here so the erosion impact is visible for evaluation.
+        generateMipmaps: true,
     });
 }
 

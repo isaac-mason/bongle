@@ -1,8 +1,6 @@
 import {
     addChild,
     addTrait,
-    CharacterControllerTrait,
-    CharacterTrait,
     cloneModel,
     control,
     type createNode,
@@ -12,7 +10,6 @@ import {
     onInit,
     onJoin,
     onTick,
-    PlayerControllerTrait,
     prop,
     RigidBodyTrait,
     script,
@@ -148,10 +145,5 @@ script(GameplayTrait, 'session', (ctx) => {
     onJoin(ctx, ({ playerNode }) => {
         const transform = getTrait(playerNode, TransformTrait)!;
         setPosition(transform, [0, 5, 0]);
-
-        addTrait(playerNode, CharacterControllerTrait);
-
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
     });
 });

@@ -6,7 +6,6 @@ import {
     BLOCK_AIR,
     block,
     blockTexture,
-    CharacterControllerTrait,
     CullType,
     cloneModel,
     cloneNode,
@@ -23,7 +22,6 @@ import {
     onInit,
     onJoin,
     onTick,
-    PlayerControllerTrait,
     prefab,
     scene,
     script,
@@ -254,11 +252,6 @@ script(
 
             const transform = getTrait(playerNode, TransformTrait)!;
             setPosition(transform, [5, 20, 5]);
-
-            addTrait(playerNode, CharacterControllerTrait);
-
-            // addTrait(playerNode, CharacterTrait);
-            addTrait(playerNode, PlayerControllerTrait);
         });
 
         onTick(ctx, (args) => {

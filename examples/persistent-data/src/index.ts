@@ -11,8 +11,6 @@ import {
     addChild,
     addTrait,
     broadcast,
-    CharacterControllerTrait,
-    CharacterTrait,
     type ClientId,
     clientToUser,
     cloneModel,
@@ -29,7 +27,6 @@ import {
     onJoin,
     onTick,
     pack,
-    PlayerControllerTrait,
     PlayerTrait,
     query,
     RigidBodyTrait,
@@ -186,9 +183,6 @@ script(
         onJoin(ctx, ({ client, playerNode }) => {
             const transform = getTrait(playerNode, TransformTrait)!;
             setPosition(transform, [FLOOR_SIZE / 2, FLOOR_Y + 4, FLOOR_SIZE / 2]);
-            addTrait(playerNode, CharacterControllerTrait);
-            addTrait(playerNode, CharacterTrait);
-            addTrait(playerNode, PlayerControllerTrait);
             addTrait(playerNode, ContactsTrait);
 
             const user = clientToUser(ctx, client);

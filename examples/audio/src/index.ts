@@ -22,7 +22,6 @@ import {
     addTrait,
     BLOCK_AIR,
     CharacterControllerTrait,
-    CharacterTrait,
     characterLook,
     cloneModel,
     createNode,
@@ -36,7 +35,6 @@ import {
     onInit,
     onJoin,
     type PlaybackHandle,
-    PlayerControllerTrait,
     playAt,
     playMono,
     playOnNode,
@@ -80,9 +78,6 @@ script(ExampleTrait, 'spawn', (ctx) => {
     onJoin(ctx, ({ playerNode }) => {
         const t = getTrait(playerNode, TransformTrait)!;
         setPosition(t, [0, 1, 0]);
-        addTrait(playerNode, CharacterControllerTrait);
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
         // theta=π → face +Z so the orbiter at (0,2,4) is straight ahead.
         characterLook(cc, Math.PI);

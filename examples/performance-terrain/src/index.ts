@@ -1,5 +1,4 @@
 import {
-    addTrait,
     env,
     getTrait,
     matchmaking,
@@ -10,9 +9,6 @@ import {
     setPosition,
     TransformTrait,
     trait,
-    CharacterControllerTrait,
-    CharacterTrait,
-    PlayerControllerTrait,
 } from 'bongle';
 import { blocks } from 'bongle/starter';
 
@@ -61,11 +57,6 @@ script(
         onJoin(ctx, ({ playerNode }) => {
             const transform = getTrait(playerNode, TransformTrait)!;
             setPosition(transform, [5, 20, 5]);
-
-            addTrait(playerNode, CharacterControllerTrait);
-
-            addTrait(playerNode, CharacterTrait);
-            addTrait(playerNode, PlayerControllerTrait);
         });
     },
     { editor: true },

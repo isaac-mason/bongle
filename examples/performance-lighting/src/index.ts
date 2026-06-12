@@ -1,5 +1,4 @@
 import {
-    addTrait,
     block,
     BLOCK_AIR,
     control,
@@ -16,9 +15,6 @@ import {
     setPosition,
     TransformTrait,
     trait,
-    CharacterControllerTrait,
-    CharacterTrait,
-    PlayerControllerTrait,
 } from 'bongle';
 import { blocks, blockTextures } from 'bongle/starter';
 
@@ -184,10 +180,5 @@ script(GameplayTrait, 'session', (ctx) => {
     onJoin(ctx, ({ playerNode }) => {
         const transform = getTrait(playerNode, TransformTrait)!;
         setPosition(transform, [0, 5, 0]);
-
-        addTrait(playerNode, CharacterControllerTrait);
-
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
     });
 });

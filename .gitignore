@@ -6,3 +6,6 @@ AGENTS.md
 tmp
 generated
 resources
+
+.DS_Store
+**/.DS_Store

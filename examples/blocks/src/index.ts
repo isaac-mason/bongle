@@ -1,5 +1,4 @@
 import {
-    addTrait,
     block,
     BLOCK_AIR,
     blockPreset,
@@ -19,8 +18,6 @@ import {
     TransformTrait,
     trait,
     CharacterControllerTrait,
-    CharacterTrait,
-    PlayerControllerTrait,
 } from 'bongle';
 import { blocks, blockTextures, blockSoundPresets } from 'bongle/starter';
 
@@ -434,11 +431,6 @@ script(GameplayTrait, 'session', (ctx) => {
 
         const transform = getTrait(playerNode, TransformTrait)!;
         setPosition(transform, [0, 5, 0]);
-
-        addTrait(playerNode, CharacterControllerTrait);
-
-        addTrait(playerNode, CharacterTrait);
-        addTrait(playerNode, PlayerControllerTrait);
 
         // theta=π → forward = +Z (engine: forward = (-sinθsinφ, -cosφ, -cosθsinφ))
         const cc = getTrait(playerNode, CharacterControllerTrait)!;

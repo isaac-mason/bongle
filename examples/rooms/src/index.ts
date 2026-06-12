@@ -1,5 +1,4 @@
 import {
-    addTrait,
     CLIENT_TO_SERVER,
     command,
     env,
@@ -19,9 +18,6 @@ import {
     setPosition,
     TransformTrait,
     trait,
-    CharacterControllerTrait,
-    CharacterTrait,
-    PlayerControllerTrait,
 } from 'bongle';
 import { blocks } from 'bongle/starter';
 
@@ -164,9 +160,6 @@ script(NavTrait, 'nav', (ctx) => {
         onJoin(ctx, ({ playerNode }) => {
             const tx = getTrait(playerNode, TransformTrait)!;
             setPosition(tx, [6, 8, 6]);
-            addTrait(playerNode, CharacterControllerTrait);
-            addTrait(playerNode, CharacterTrait);
-            addTrait(playerNode, PlayerControllerTrait);
         });
 
         listen(ctx, gotoCmd, (data, from) => {
