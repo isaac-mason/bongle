@@ -537,6 +537,10 @@ export type VCC = {
     groundVoxelX: number;
     groundVoxelY: number;
     groundVoxelZ: number;
+    /** block state id at the supporting voxel (0 when not voxel-grounded). the
+     *  authoritative "standing block" — read this instead of re-deriving from
+     *  contacts + column probes, which mis-sample at cell boundaries. */
+    groundVoxelStateId: number;
 
     // body queries.
     innerBody: RigidBody;
@@ -645,6 +649,7 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
         groundVoxelX: 0,
         groundVoxelY: 0,
         groundVoxelZ: 0,
+        groundVoxelStateId: 0,
 
         innerBody,
         innerBodyId: innerBody.id,
@@ -1995,12 +2000,14 @@ function updateGroundState(world: World, vcc: VCC): void {
         vcc.groundVoxelX = best.voxelX;
         vcc.groundVoxelY = best.voxelY;
         vcc.groundVoxelZ = best.voxelZ;
+        vcc.groundVoxelStateId = best.stateId;
     } else {
         vcc.groundBodyId = INVALID_BODY_ID;
         vec3.zero(vcc.groundPosition);
         vcc.groundVoxelX = 0;
         vcc.groundVoxelY = 0;
         vcc.groundVoxelZ = 0;
+        vcc.groundVoxelStateId = 0;
     }
 
     if (numSupported > 0) {
@@ -2174,6 +2181,7 @@ export function stickToFloor(world: World, voxels: Voxels, aabbWorld: AabbPhysic
     vcc.groundVoxelX = _stick_contact.voxelX;
     vcc.groundVoxelY = _stick_contact.voxelY;
     vcc.groundVoxelZ = _stick_contact.voxelZ;
+    vcc.groundVoxelStateId = _stick_contact.stateId;
 
     return true;
 }
@@ -2387,6 +2395,7 @@ export function walkStairs(
     vcc.groundVoxelX = _walk_downContact.voxelX;
     vcc.groundVoxelY = _walk_downContact.voxelY;
     vcc.groundVoxelZ = _walk_downContact.voxelZ;
+    vcc.groundVoxelStateId = _walk_downContact.stateId;
 
     return true;
 }

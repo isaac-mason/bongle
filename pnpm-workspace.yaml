@@ -3,6 +3,11 @@ packages:
   - interface
   - examples/*
 
+minimumReleaseAge: 10080
+
+minimumReleaseAgeExclude:
+  - '@bongle/*'
+
 onlyBuiltDependencies:
   - '@ffmpeg-installer/*'
   - '@ffprobe-installer/*'
@@ -12,6 +17,5 @@ onlyBuiltDependencies:
   - sharp
   - skia-canvas
 
-minimumReleaseAge: 10080
-minimumReleaseAgeExclude:
-  - '@bongle/*'
+overrides:
+  gpucat: link:../../gpucat

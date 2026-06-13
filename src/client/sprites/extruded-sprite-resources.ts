@@ -195,7 +195,7 @@ export type GeometryPool = {
     /** interleaved ExtrudedVertex (posU + v, 32B/vertex). HW vertex usage. */
     vertices: GpuBuffer<typeof ExtrudedVertex>;
     /** rebased absolute u32 indices into the vertex pool. HW index usage. */
-    indices: GpuBuffer<typeof d.u32>;
+    indices: GpuBuffer<d.u32>;
     vertexAllocator: RangeAllocator;
     indexAllocator: RangeAllocator;
     slots: Map<string, GeometrySlot>;
@@ -461,10 +461,12 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
     const voxelLight = max(max(blockLight, skyContrib), litMinFloor).toVar('esVoxelLight');
     const light = max(voxelLight, ambientMinimum).toVar('esLight');
 
-    const litShaded = mul(sampled.rgb, light).toVar('esLitShaded');
-    const litRgb = mix(litShaded, sampled.rgb, vUnlit).toVar('esLitRgb');
-    const tintedRgb = mix(litRgb, vTint.rgb, vTint.w).toVar('esTintedRgb');
-    const glowedRgb = tintedRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('esGlowedRgb');
+    // tint the albedo first, then light it — lighting/shadows modulate the
+    // tinted surface rather than a flat tint replacing the lit result.
+    const tintedAlbedo = mix(sampled.rgb, vTint.rgb, vTint.w).toVar('esTintedAlbedo');
+    const litShaded = mul(tintedAlbedo, light).toVar('esLitShaded');
+    const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('esLitRgb');
+    const glowedRgb = litRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('esGlowedRgb');
     const tinted = vec4f(glowedRgb, sampled.a).toVar('esTinted');
 
     const alphaCutout = Fn(

@@ -156,7 +156,7 @@ export type VoxelMeshVisuals = {
     /** shared interleaved quad arena — packs every registered model's
      *  quads with per-corner light at u32[10..13] of each 14-u32 stride. */
     meshArena: SegmentArena<{
-        meshQuads: { schema: typeof d.u32; perSlot: number };
+        meshQuads: { schema: d.u32; perSlot: number };
     }>;
 
     /** stable per-slot {worldMatrix, params}; merged into one buffer like

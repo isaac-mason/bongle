@@ -366,11 +366,11 @@ const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4; // 56 — interleaved header (40 B)
 const BYTES_PER_ORDER = QUAD_ORDER_U32S_PER_SLOT * 4; // 4
 
 export type QuadArenaStreams = {
-    quads: { schema: typeof d.u32; perSlot: number };
+    quads: { schema: d.u32; perSlot: number };
 };
 
 export type QuadOrderArenaStreams = {
-    quadOrder: { schema: typeof d.u32; perSlot: number };
+    quadOrder: { schema: d.u32; perSlot: number };
 };
 
 export type QuadArena = SegmentArena<QuadArenaStreams>;

@@ -425,10 +425,12 @@ function createSpriteMaterial(atlas: Texture): { material: Material; atlasTexNod
     const voxelLight = max(max(blockLight, skyContrib), litMinFloor).toVar('svVoxelLight');
     const light = max(voxelLight, ambientMinimum).toVar('svLight');
 
-    const litShaded = mul(sampled.rgb, light).toVar('svLitShaded');
-    const litRgb = mix(litShaded, sampled.rgb, vUnlit).toVar('svLitRgb');
-    const tintedRgb = mix(litRgb, vTint.rgb, vTint.w).toVar('svTintedRgb');
-    const glowedRgb = tintedRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('svGlowedRgb');
+    // tint the albedo first, then light it — lighting/shadows modulate the
+    // tinted surface rather than a flat tint replacing the lit result.
+    const tintedAlbedo = mix(sampled.rgb, vTint.rgb, vTint.w).toVar('svTintedAlbedo');
+    const litShaded = mul(tintedAlbedo, light).toVar('svLitShaded');
+    const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('svLitRgb');
+    const glowedRgb = litRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('svGlowedRgb');
     const tinted = vec4f(glowedRgb, sampled.a).toVar('svTinted');
 
     const alphaCutout = Fn(

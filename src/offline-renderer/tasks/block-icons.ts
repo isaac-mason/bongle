@@ -14,7 +14,8 @@
 
 import { type ComputeDispatch, OrthographicCamera } from 'gpucat';
 import type { EngineClient } from '../../client/engine-client';
-import { applyTime, flushActive } from '../../client/environment';
+import { applyConfig, flushActive } from '../../client/environment';
+import { PRESETS } from '../../api/environment';
 import { createOfflineRoom, disposeRoom } from '../../client/rooms';
 import * as VoxelResources from '../../client/voxels/voxel-resources';
 import * as VoxelVisuals from '../../client/voxels/voxel-visuals';
@@ -66,14 +67,18 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
 
     // offline room holds the per-pass `Mesh` wrappers (added to
     // room.scene by `VoxelVisuals.initRoomMeshes`). the arena packer +
-    // geometries live engine-global on `state.voxelResources`. pin env
-    // to noon so icons match `setTime(12)` instead of the env default.
-    // hide sky/clouds so they don't bleed into icon tiles (voxel
-    // skyBrightness still drives off env.enabled=1 + time=noon → fully lit).
+    // geometries live engine-global on `state.voxelResources`.
+    //
+    // light icons flat and full-bright: disabling the env pins voxel
+    // skyBrightness to DISABLED_SKY_BRIGHTNESS (1.0), and sun.intensity=0
+    // drops the directional sunShade term to 1.0 on every face. that
+    // leaves only the per-face directional factor (top 1.0, sides 0.6/0.8)
+    // to give the cube its 3D read — the classic inventory-icon look. (a
+    // lit env at noon instead crushes the two visible side faces, which
+    // sit perpendicular to the overhead sun, down to ~0.3-0.4.) disabling
+    // the env also hides the sky + cloud meshes so they don't bleed in.
     const iconRoom = createOfflineRoom(state);
-    applyTime(iconRoom.environment, 12 / 24);
-    iconRoom.environment.skyMesh.visible = false;
-    iconRoom.environment.clouds.mesh.visible = false;
+    applyConfig(iconRoom.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
     flushActive(iconRoom.environment);
 
     if (renderableStates.length === 0) {

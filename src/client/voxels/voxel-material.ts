@@ -130,11 +130,9 @@ export function buildEnvSky() {
     const skyBrightness = mix(f32(DISABLED_SKY_BRIGHTNESS), skyBrightnessActive, enabledMask).toVar('skyBrightness');
 
     const sunIntensity = cfg.sunIntensity;
-    const ambientMinimum = vec3f(
-        f32(AMBIENT_MINIMUM[0]),
-        f32(AMBIENT_MINIMUM[1]),
-        f32(AMBIENT_MINIMUM[2]),
-    ).toVar('ambientMinimum');
+    const ambientMinimum = vec3f(f32(AMBIENT_MINIMUM[0]), f32(AMBIENT_MINIMUM[1]), f32(AMBIENT_MINIMUM[2])).toVar(
+        'ambientMinimum',
+    );
 
     return { sunDirection, sunIntensity, skyBrightness, ambientMinimum };
 }
@@ -143,12 +141,12 @@ export function buildEnvSky() {
 // the polynomial (-0.5*x + 1.5)*x*x in the shader. Equivalent (within
 // rounding) to the legacy CPU-side LIGHT_LUT but skips the table and lets
 // `calculateCornerBrightness` average values in packed-byte parallel form.
-function brightnessCurve(x: Node<typeof d.f32>) {
+function brightnessCurve(x: Node<d.f32>) {
     // f(x) = (-0.5 * x + 1.5) * x * x  on x ∈ [0, 1]
     return mul(mul(add(mul(f32(-0.5), x), f32(1.5)), x), x);
 }
 
-export function unpackVoxelLight(lightNode: Node<typeof d.u32>, skyBrightness: Node<typeof d.f32>) {
+export function unpackVoxelLight(lightNode: Node<d.u32>, skyBrightness: Node<d.f32>) {
     const lightR = brightnessCurve(lightNode.bitwiseAnd(u32(0xf)).toF32().div(f32(15.0))).toVar('lightR');
     const lightG = brightnessCurve(lightNode.shiftRight(u32(8)).bitwiseAnd(u32(0xf)).toF32().div(f32(15.0))).toVar('lightG');
     const lightB = brightnessCurve(lightNode.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toF32().div(f32(15.0))).toVar('lightB');
@@ -160,7 +158,9 @@ export function unpackVoxelLight(lightNode: Node<typeof d.u32>, skyBrightness: N
     // sky-occluded) override a bright block-light corner — manifests as a
     // dark halo extending from opaque blocks even when a torch is adjacent.
     // Additive lets both channels contribute, so block light fills sky shadow.
-    const skyContrib = vec3f(mul(lightSky, skyBrightness), mul(lightSky, skyBrightness), mul(lightSky, skyBrightness)).toVar('skyContrib');
+    const skyContrib = vec3f(mul(lightSky, skyBrightness), mul(lightSky, skyBrightness), mul(lightSky, skyBrightness)).toVar(
+        'skyContrib',
+    );
     const blockLight = vec3f(lightR, lightG, lightB).toVar('blockLight');
     return min(add(blockLight, skyContrib), vec3f(f32(1.0), f32(1.0), f32(1.0))).toVar('voxelLight');
 }
@@ -170,17 +170,26 @@ export function unpackVoxelLight(lightNode: Node<typeof d.u32>, skyBrightness: N
 export const decodeOct16 = Fn(
     (packed) => {
         const u = packed.bitwiseAnd(u32(0xff)).toF32().div(f32(255.0)).mul(f32(2.0)).sub(f32(1.0)).toVar('octU');
-        const v = packed.shiftRight(u32(8)).bitwiseAnd(u32(0xff)).toF32().div(f32(255.0)).mul(f32(2.0)).sub(f32(1.0)).toVar('octV');
-        const nx = Var(u, 'octNx');
-        const ny = Var(v, 'octNy');
-        const nz = Var(sub(sub(f32(1.0), abs(u)), abs(v)), 'octNz');
+        const v = packed
+            .shiftRight(u32(8))
+            .bitwiseAnd(u32(0xff))
+            .toF32()
+            .div(f32(255.0))
+            .mul(f32(2.0))
+            .sub(f32(1.0))
+            .toVar('octV');
+        const nx = Var('octNx', u);
+        const ny = Var('octNy', v);
+        const nz = Var('octNz', sub(sub(f32(1.0), abs(u)), abs(v)));
         If(nz.lessThan(f32(0.0)), () => {
             const tx = mul(sub(f32(1.0), abs(ny)), sign(u));
             const ty = mul(sub(f32(1.0), abs(nx)), sign(v));
             nx.assign(tx);
             ny.assign(ty);
         });
-        const lenInv = f32(1.0).div(max(f32(1e-6), sqrt(add(add(mul(nx, nx), mul(ny, ny)), mul(nz, nz))))).toVar('lenInv');
+        const lenInv = f32(1.0)
+            .div(max(f32(1e-6), sqrt(add(add(mul(nx, nx), mul(ny, ny)), mul(nz, nz)))))
+            .toVar('lenInv');
         return vec3f(mul(nx, lenInv), mul(ny, lenInv), mul(nz, lenInv));
     },
     { name: 'decodeOct16', params: [{ name: 'packed', type: d.u32 }] },
@@ -195,11 +204,7 @@ export const readByte = Fn(
     (u0, u1, u2, byteIdx) => {
         const which = byteIdx.shiftRight(u32(2)).toVar('byteWhich');
         const bit = byteIdx.bitwiseAnd(u32(3)).mul(u32(8)).toVar('byteBit');
-        const pack = select(
-            select(u2, u1, which.equal(u32(1))),
-            u0,
-            which.equal(u32(0)),
-        ).toVar('bytePack');
+        const pack = select(select(u2, u1, which.equal(u32(1))), u0, which.equal(u32(0))).toVar('bytePack');
         return pack.shiftRight(bit).bitwiseAnd(u32(0xff));
     },
     {
@@ -226,9 +231,9 @@ export const readByte = Fn(
 
 export const computeVertexAnimation = Fn(
     (worldPos, blockCenter, animType) => {
-        const xDisp = Var(f32(0.0), 'xDisp');
-        const zDisp = Var(f32(0.0), 'zDisp');
-        const depthBias = Var(f32(0.0), 'depthBias');
+        const xDisp = Var('xDisp', f32(0.0));
+        const zDisp = Var('zDisp', f32(0.0));
+        const depthBias = Var('depthBias', f32(0.0));
         // per-vertex phase — water and leaves want per-corner shimmer.
         const vertexPhase = add(worldPos.x, worldPos.z).toVar('vertexPhase');
 
@@ -238,23 +243,25 @@ export const computeVertexAnimation = Fn(
             xDisp.assign(amount);
             zDisp.assign(amount);
             depthBias.assign(mul(f32(-0.002), abs(amount)));
-        }).ElseIf(equal(animType, u32(2)), () => {
-            const phase = add(vertexPhase, mul(timeElapsed, f32(3.2)));
-            const amount = mul(sin(phase), f32(0.06));
-            xDisp.assign(amount);
-            zDisp.assign(amount);
-        }).ElseIf(equal(animType, u32(3)), () => {
-            // crossed-plant case: phase the whole block coherently so both
-            // diagonals agree at their shared corners. tip-weight is 0 at
-            // the block's base, 1 at its top — clamps tolerate sub-block
-            // geometry that pokes outside [base, base+1].
-            const blockPhase = add(blockCenter.x, blockCenter.z).toVar('blockPhase');
-            const blockBaseY = sub(blockCenter.y, f32(0.5)).toVar('blockBaseY');
-            const weight = max(f32(0.0), sub(worldPos.y, blockBaseY)).toVar('tipWeight');
-            const phase = add(blockPhase, mul(timeElapsed, f32(2.0)));
-            xDisp.assign(mul(mul(sin(phase), f32(0.12)), weight));
-            zDisp.assign(mul(mul(cos(phase), f32(0.12)), weight));
-        });
+        })
+            .ElseIf(equal(animType, u32(2)), () => {
+                const phase = add(vertexPhase, mul(timeElapsed, f32(3.2)));
+                const amount = mul(sin(phase), f32(0.06));
+                xDisp.assign(amount);
+                zDisp.assign(amount);
+            })
+            .ElseIf(equal(animType, u32(3)), () => {
+                // crossed-plant case: phase the whole block coherently so both
+                // diagonals agree at their shared corners. tip-weight is 0 at
+                // the block's base, 1 at its top — clamps tolerate sub-block
+                // geometry that pokes outside [base, base+1].
+                const blockPhase = add(blockCenter.x, blockCenter.z).toVar('blockPhase');
+                const blockBaseY = sub(blockCenter.y, f32(0.5)).toVar('blockBaseY');
+                const weight = max(f32(0.0), sub(worldPos.y, blockBaseY)).toVar('tipWeight');
+                const phase = add(blockPhase, mul(timeElapsed, f32(2.0)));
+                xDisp.assign(mul(mul(sin(phase), f32(0.12)), weight));
+                zDisp.assign(mul(mul(cos(phase), f32(0.12)), weight));
+            });
 
         return vec3f(xDisp, zDisp, depthBias);
     },
@@ -280,16 +287,19 @@ export const computeVertexAnimation = Fn(
 /** vertInQuad (0..5) → corner index (0..3) via 2-bit LUT, picked by diagFlip.
  *  Caller pulls `diagFlip` from `light[realQuadId * 4 + 0]` bit 29 (set by
  *  meshChunk's emitQuadLight* helpers — Sodium hierarchical compare). */
-export function pickCornerIdx(diagFlip: Node<typeof d.u32>, vertInQuad: Node<typeof d.u32>) {
+export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
     const decode = select(u32(TRI_DECODE_FLIPPED), u32(TRI_DECODE_DEFAULT), diagFlip.equal(u32(0))).toVar('triDecode');
-    return decode.shiftRight(mul(vertInQuad, u32(2))).bitwiseAnd(u32(3)).toVar('cornerIdx');
+    return decode
+        .shiftRight(mul(vertInQuad, u32(2)))
+        .bitwiseAnd(u32(3))
+        .toVar('cornerIdx');
 }
 
 /** flags word (u32[8]) → { texIndex, animType }. layout:
  *  texIndex(16) | animType(4) | facing(3) | reserved(9).
  *  diagFlip used to live at bit 23; it's now in `light[0]` bit 29 and
  *  callers extract it directly from the light buffer. */
-export function decodeQuadFlags(flags: Node<typeof d.u32>) {
+export function decodeQuadFlags(flags: Node<d.u32>) {
     const texIndex = flags.bitwiseAnd(u32(0xffff)).toF32().toVar('texIndex');
     const animType = flags.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toVar('animType');
     return { texIndex, animType };
@@ -300,11 +310,7 @@ export function decodeQuadFlags(flags: Node<typeof d.u32>) {
  *  scale (inverse of mesher pos16's 255/16 — byte 0 → 0, byte 255 → 16).
  *  `u3` is returned so callers can read source-block bits 16..27 without
  *  re-fetching. */
-export function decodeQuadCorner(
-    quadBuf: Node<any>,
-    realQuadId: Node<typeof d.u32>,
-    cornerIdx: Node<typeof d.u32>,
-) {
+export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>, cornerIdx: Node<d.u32>) {
     const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('quadBase');
     const u0 = index(quadBuf, add(base, u32(0))).toVar('qd0');
     const u1 = index(quadBuf, add(base, u32(1))).toVar('qd1');
@@ -317,8 +323,12 @@ export function decodeQuadCorner(
 
     const byteBase = mul(cornerIdx, u32(3)).toVar('byteBase');
     const bx = readByte(u0, u1, u2, byteBase).toF32().toVar('bx');
-    const by = readByte(u0, u1, u2, add(byteBase, u32(1))).toF32().toVar('by');
-    const bz = readByte(u0, u1, u2, add(byteBase, u32(2))).toF32().toVar('bz');
+    const by = readByte(u0, u1, u2, add(byteBase, u32(1)))
+        .toF32()
+        .toVar('by');
+    const bz = readByte(u0, u1, u2, add(byteBase, u32(2)))
+        .toF32()
+        .toVar('bz');
     const chunkLocalByte = vec3f(bx, by, bz).toVar('chunkLocalByte');
 
     const uvPacked = select(
@@ -340,13 +350,13 @@ export function decodeQuadCorner(
 export function buildVoxelFragment(
     atlas: ArrayTexture,
     texAnimBuffer: GpuBuffer,
-    vTexIndex: Node<typeof d.f32>,
-    vUv: Node<typeof d.vec2f>,
-    vLight: Node<typeof d.vec3f>,
-    vNormal: Node<typeof d.vec3f>,
-    sunDirection: Node<typeof d.vec3f>,
-    sunIntensity: Node<typeof d.f32>,
-    ambientMinimum: Node<typeof d.vec3f>,
+    vTexIndex: Node<d.f32>,
+    vUv: Node<d.vec2f>,
+    vLight: Node<d.vec3f>,
+    vNormal: Node<d.vec3f>,
+    sunDirection: Node<d.vec3f>,
+    sunIntensity: Node<d.f32>,
+    ambientMinimum: Node<d.vec3f>,
 ) {
     // texture animation
     const texAnimData = storage(texAnimBuffer, 'read');
@@ -368,7 +378,7 @@ export function buildVoxelFragment(
     const colorB = arrayTexture(atlas, layerB).sample(vUv).toVar('colorB');
 
     const mixFactor = mul(doInterpolate, interpFrac).toVar('mixFactor');
-    const texColor = (mix(colorA, colorB, mixFactor) as Node<typeof d.vec4f>).toVar('texColor');
+    const texColor = (mix(colorA, colorB, mixFactor) as Node<d.vec4f>).toVar('texColor');
 
     // lighting — per-face directional shade is folded into vLight
     // vertex-side (see vertex shader's aoMul). sunShade and ambient
@@ -389,9 +399,9 @@ export function buildVoxelFragment(
 export function makePassMaterial(opts: {
     name: string;
     pass: VoxelPass;
-    clipPos: Node<typeof d.vec4f>;
-    fragColor: Node<typeof d.vec4f>;
-    texColor: Node<typeof d.vec4f>;
+    clipPos: Node<d.vec4f>;
+    fragColor: Node<d.vec4f>;
+    texColor: Node<d.vec4f>;
 }): Material {
     const { name, pass, clipPos, fragColor, texColor } = opts;
 
@@ -409,7 +419,9 @@ export function makePassMaterial(opts: {
     if (pass === 'transparent') {
         const alphaCutout = Fn(
             (color, alpha) => {
-                If(alpha.lessThan(f32(0.5)), () => { Discard(); });
+                If(alpha.lessThan(f32(0.5)), () => {
+                    Discard();
+                });
                 return color;
             },
             {
@@ -459,11 +471,7 @@ export function makePassMaterial(opts: {
 //   'chunkInfo'     — per-room ChunkInfo side-table (slot → {origin, arenaBase})
 //   'env'           — per-room EnvConfig
 
-export function createQuadMaterial(opts: {
-    atlas: ArrayTexture;
-    texAnimBuffer: GpuBuffer;
-    pass: VoxelPass;
-}): Material {
+export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: GpuBuffer; pass: VoxelPass }): Material {
     const { atlas, texAnimBuffer, pass } = opts;
 
     // ── per-name storage bindings ───────────────────────────────────
@@ -511,7 +519,10 @@ export function createQuadMaterial(opts: {
     //    full-block AO bakes through AO_BRIGHTNESS_TABLE (softened from
     //    vanilla MC); partial-face quads keep sub-level precision via
     //    bilinear blend.
-    const aoBits = meta.shiftRight(mul(cornerIdx, u32(4))).bitwiseAnd(u32(0xf)).toVar('aoBits');
+    const aoBits = meta
+        .shiftRight(mul(cornerIdx, u32(4)))
+        .bitwiseAnd(u32(0xf))
+        .toVar('aoBits');
     const aoFactor = aoBits.toF32().div(f32(30.0)).add(f32(0.5)).toVar('aoFactor');
 
     // ── per-face directional shade (vanilla MC parity): top=1.0,
@@ -543,11 +554,7 @@ export function createQuadMaterial(opts: {
     const zDisp = animResult.y;
     const depthBias = animResult.z;
 
-    const worldPos = vec3f(
-        add(worldPosBase.x, xDisp),
-        worldPosBase.y,
-        add(worldPosBase.z, zDisp),
-    ).toVar('worldPos');
+    const worldPos = vec3f(add(worldPosBase.x, xDisp), worldPosBase.y, add(worldPosBase.z, zDisp)).toVar('worldPos');
     const viewPos = mul(cameraViewMatrix, vec4f(worldPos, f32(1.0))).toVar('viewPos');
     const rawClipPos = mul(cameraProjectionMatrix, viewPos).toVar('rawClipPos');
     const clipPos = vec4f(rawClipPos.x, rawClipPos.y, add(rawClipPos.z, depthBias), rawClipPos.w).toVar('clipPos');
@@ -569,8 +576,15 @@ export function createQuadMaterial(opts: {
     const vNormal = varying(normal, 'vNormal');
 
     const { fragColor, texColor } = buildVoxelFragment(
-        atlas, texAnimBuffer, vTexIndex, vUv, vLight, vNormal,
-        sunDirection, sunIntensity, ambientMinimum,
+        atlas,
+        texAnimBuffer,
+        vTexIndex,
+        vUv,
+        vLight,
+        vNormal,
+        sunDirection,
+        sunIntensity,
+        ambientMinimum,
     );
 
     return makePassMaterial({

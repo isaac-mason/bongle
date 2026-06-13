@@ -658,8 +658,9 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     // the body straddles a block's edge). fall back to the column probe
     // when no voxel contact qualifies. note: sampleEnvironment runs
     // pre-move, so this scans LAST tick's contacts — fine for steady
-    // walking, but the landing tick has no ground contact yet. that
-    // case is patched up post-move via deriveStandingStateFromContacts.
+    // walking; on the landing tick it falls back to the column probe (a
+    // one-tick friction approximation). footstep sfx/particles don't use
+    // this — they read the solver's authoritative `groundVoxelStateId`.
     const standingFromContacts = deriveStandingStateFromContacts(state.vcc!);
     state.standingStateId = standingFromContacts !== 0
         ? standingFromContacts
@@ -1252,11 +1253,13 @@ export function tickCharacterController(
     //      entry splash).
     //   3. otherwise airborne → 0; presentation traits treat 0 as "no
     //      contact" and stay silent.
-    // post-move contact derivation catches the landing tick where the
-    // pre-move sample saw last frame's airborne (contact-less) state.
-    const standingContact = deriveStandingStateFromContacts(v) || state.standingStateId;
+    // authoritative standing block: the solver already pinned the exact ground
+    // voxel (updateGroundState / stick / walk-down) and stamped its state, so
+    // read it directly instead of re-deriving from contacts + a floor-of-center
+    // column probe — that mis-sampled the block at cell boundaries (wrong-block
+    // footstep sfx + particles).
     let footState = 0;
-    if (grounded && standingContact !== 0) footState = standingContact;
+    if (grounded && v.groundVoxelStateId !== 0) footState = v.groundVoxelStateId;
     else if (state.inLiquidStable) footState = state.feetStateId;
     state.groundBlockState = footState;
     // horizontal velocity reflects the *effective* post-solve motion (from

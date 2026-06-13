@@ -47,6 +47,12 @@ export const BLOCK_FLAG_PANE = 1 << 7;
  *  get/setDoorOpen utils (all door presets share one DoorState schema). */
 export const BLOCK_FLAG_DOOR = 1 << 8;
 
+/** a navigating agent may occupy/pass through this cell. defaults to the
+ *  inverse of `collision` at registration, overridable via
+ *  `block({ pathfindable })` — e.g. open doors pathable, hazards not. read by
+ *  the voxel pathfinding utils (core/nav). mirrors Minecraft `isPathfindable`. */
+export const BLOCK_FLAG_PATHFINDABLE = 1 << 9;
+
 /**
  * format a string key from a block id, its state schema, and a local state index.
  *
@@ -729,6 +735,12 @@ export function buildBlockRegistry(
 
     // air (0) and missing (1) get CullType.NONE (0) — already zero-initialized
     // air/missing light opacity = 0 (transparent) — already zero-initialized
+    // air (0) is navigable: set PATHFINDABLE explicitly. the reserved air state
+    // usually isn't a registered block, so it bypasses the per-block flag loop
+    // below (where it would derive from !collision) and its flags stay 0. a
+    // positive flag means 0 ≠ passable, so nav would treat air as solid without
+    // this. missing (1) intentionally stays non-pathfindable (unknown = blocked).
+    flagsTable[AIR] |= BLOCK_FLAG_PATHFINDABLE;
 
     for (let bi = 0; bi < orderedDefs.length; bi++) {
         const def = orderedDefs[bi]!;
@@ -806,6 +818,12 @@ export function buildBlockRegistry(
             const collides = hasGeometry && collisionVal;
             const climbableVal = typeof def.climbable === 'function' ? def.climbable(props) : (def.climbable ?? false);
             const liquidVal = typeof def.liquid === 'function' ? def.liquid(props) : (def.liquid ?? null);
+            // pathfindable defaults to the inverse of collision — passable cells
+            // (air, plants) are navigable, solid cells are not. authors override
+            // to mark colliding-but-passable (open doors) or passable-but-blocked
+            // (hazards) for the nav utils.
+            const pathfindableVal =
+                typeof def.pathfindable === 'function' ? def.pathfindable(props) : (def.pathfindable ?? !collides);
             // sneakGuard defaults true for any collidable block, false otherwise.
             const sneakGuardVal =
                 typeof def.sneakGuard === 'function' ? def.sneakGuard(props) : (def.sneakGuard ?? collides);
@@ -816,6 +834,7 @@ export function buildBlockRegistry(
             if (climbableVal) f |= BLOCK_FLAG_CLIMBABLE;
             if (liquidVal) f |= BLOCK_FLAG_LIQUID;
             if (sneakGuardVal && collides) f |= BLOCK_FLAG_SNEAK_GUARD;
+            if (pathfindableVal) f |= BLOCK_FLAG_PATHFINDABLE;
             if (def.flags) f |= def.flags;
             flagsTable[globalId] = f;
 

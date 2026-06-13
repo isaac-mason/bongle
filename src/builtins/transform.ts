@@ -193,26 +193,37 @@ sync(TransformTrait, 'teleport', {
 });
 
 /**
- * pose: position + quaternion as a single slice. movement-rate gated.
- * markDirty(t) flags this for emission via poseSync.dirty(t).
+ * position + quaternion as two independent owner-authority slices, both
+ * movement-rate gated. kept separate (not a combined pose tuple) so a node
+ * whose position changes every tick but whose rotation is static — or vice
+ * versa — only re-emits the slice that actually changed. `setPosition` /
+ * `setQuaternion` dirty just their own slice; `markTransformDirty` (physics,
+ * animator, compound/world writes) dirties both.
  *
- * receiving side just copies the values and invalidates world caches —
- * the per-frame `interpolate()` chase-lerps `interpolatedWorld*` toward
- * the freshly-landed pose, with a teleport edge handled via the
- * `teleport` counter. no snapshot buffer, no prev seeding.
+ * receiving side copies the value and invalidates world caches — the per-frame
+ * `interpolate()` chase-lerps `interpolatedWorld*` toward the freshly-landed
+ * pose, with a teleport edge handled via the `teleport` counter. no snapshot
+ * buffer, no prev seeding.
  */
-const transformPoseSync = sync(TransformTrait, 'pose', {
-    schema: pack.tuple([pack.position(), pack.quaternion()]),
-    pack: (t) => [t.position, t.quaternion] as [Vec3, Quat],
-    unpack: ([p, q], t) => {
+const transformPositionSync = sync(TransformTrait, 'position', {
+    schema: pack.position(),
+    pack: (t) => t.position,
+    unpack: (p, t) => {
         vec3.copy(t.position, p);
-        quat.copy(t.quaternion, q);
-        // same world-cache effect as markTransformDirty's lazy-recompute
-        // bits, but skipping the snapshot enqueue (we don't read prev on
-        // the chase path) and the replication-dirty flags (not the owner).
         markWorldDirty(t);
     },
-    authority: "owner",
+    authority: 'owner',
+    rate: 'movement',
+});
+
+const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
+    schema: pack.quaternion(),
+    pack: (t) => t.quaternion,
+    unpack: (q, t) => {
+        quat.copy(t.quaternion, q);
+        markWorldDirty(t);
+    },
+    authority: 'owner',
     rate: 'movement',
 });
 
@@ -235,22 +246,30 @@ const transformScaleSync = sync(TransformTrait, 'scale', {
  * also bumps `_version` on the transition to dirty so consumers
  * (renderers, etc.) can cheaply detect "matrix changed since last upload".
  */
-export function markTransformDirty(t: TransformTrait): void {
+// mark a transform changed for world-recompute + interpolation snapshot +
+// descendant invalidation, WITHOUT flagging any replication sync. callers pair
+// this with the specific `transform*Sync.dirty(t)` for the slice they wrote.
+function markTransformChanged(t: TransformTrait): void {
     // always enqueue for snapshot — even when _dirty is already maxed,
     // the node may have moved again this tick and prev snapshot needs to
     // catch the new pose.
     const node = t._node;
     if (node && node.nodes) node.nodes._transformDirty.add(t);
-    // fire replication dirty bits unconditionally: setting them is cheap
-    // (single bit), and freshly-created traits start at _dirty=ALL — the
-    // early-out below would otherwise swallow the first local write's
-    // sync emission (mountRig hit this with bone TRS on first set).
-    transformPoseSync.dirty(t);
-    transformScaleSync.dirty(t);
     if (t._dirty === TRANSFORM_DIRTY_ALL) return;
     t._dirty = TRANSFORM_DIRTY_ALL;
     t._version++;
     markDescendants(t._node);
+}
+
+export function markTransformDirty(t: TransformTrait): void {
+    markTransformChanged(t);
+    // fire replication dirty bits unconditionally (cheap single bits, and
+    // freshly-created traits start at _dirty=ALL so markTransformChanged's
+    // early-out would otherwise swallow the first local write's emission —
+    // mountRig hit this with bone TRS on first set). full write: every slice.
+    transformPositionSync.dirty(t);
+    transformQuaternionSync.dirty(t);
+    transformScaleSync.dirty(t);
 }
 
 /**
@@ -754,29 +773,32 @@ export function resetInterpolation(node: Node): void {
 
 // ── local-space setters ─────────────────────────────────────────────────
 
-/** set local position and mark dirty. */
+/** set local position and mark dirty. only the position slice replicates. */
 export function setPosition(t: TransformTrait, v: Vec3): void {
     t.position[0] = v[0];
     t.position[1] = v[1];
     t.position[2] = v[2];
-    markTransformDirty(t);
+    markTransformChanged(t);
+    transformPositionSync.dirty(t);
 }
 
-/** set local quaternion and mark dirty. */
+/** set local quaternion and mark dirty. only the quaternion slice replicates. */
 export function setQuaternion(t: TransformTrait, q: Quat): void {
     t.quaternion[0] = q[0];
     t.quaternion[1] = q[1];
     t.quaternion[2] = q[2];
     t.quaternion[3] = q[3];
-    markTransformDirty(t);
+    markTransformChanged(t);
+    transformQuaternionSync.dirty(t);
 }
 
-/** set local scale and mark dirty. */
+/** set local scale and mark dirty. only the scale slice replicates. */
 export function setScale(t: TransformTrait, v: Vec3): void {
     t.scale[0] = v[0];
     t.scale[1] = v[1];
     t.scale[2] = v[2];
-    markTransformDirty(t);
+    markTransformChanged(t);
+    transformScaleSync.dirty(t);
 }
 
 /** set all local transform fields and mark dirty (single dirty pass). */

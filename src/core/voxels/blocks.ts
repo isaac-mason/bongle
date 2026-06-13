@@ -512,6 +512,16 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     liquid?: { viscosity: number } | null | ((props: PropsValues<P>) => { viscosity: number } | null);
 
     /**
+     * pathfindable: may a navigating agent (see core/nav voxel pathfinding)
+     * occupy/pass through this cell? defaults to the inverse of `collision`, so
+     * normal blocks need no annotation. override to mark colliding-but-passable
+     * cells (open doors) or passable-but-avoided cells (hazards). can be
+     * state-dependent.
+     * @default !collision
+     */
+    pathfindable?: boolean | ((props: PropsValues<P>) => boolean);
+
+    /**
      * friction coefficient. multiplied with the body's per-rigid-body /
      * per-aabb-body friction to produce the effective contact friction
      * (and with the vcc character controller's `groundDragRate` when the
@@ -692,6 +702,8 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
     climbable?: boolean | ((props: PropsValues<P>) => boolean);
     /** liquid setting */
     liquid?: { viscosity: number } | null | ((props: PropsValues<P>) => { viscosity: number } | null);
+    /** pathfindable setting (defaults to !collision) */
+    pathfindable?: boolean | ((props: PropsValues<P>) => boolean);
     /** friction setting */
     friction?: number | ((props: PropsValues<P>) => number);
     /** restitution setting */
@@ -814,6 +826,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
         shape: options.shape,
         climbable: options.climbable,
         liquid: options.liquid,
+        pathfindable: options.pathfindable,
         friction: options.friction,
         restitution: options.restitution,
         sneakGuard: options.sneakGuard,

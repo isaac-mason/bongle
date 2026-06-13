@@ -444,6 +444,9 @@ export function plant(id: string, texture: TextureRef, options?: PresetOptions) 
         model: () => ({ type: 'custom' as const, quads: blockModel.cross(texture) }),
         cull: CullType.SELF,
         collision: false,
+        // sparse cross-quads — don't filter light. without this, CullType.SELF
+        // would default to opacity 1 (like leaves/glass) and dim what's behind.
+        lightOpacity: 0,
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
         sounds: options?.sounds,

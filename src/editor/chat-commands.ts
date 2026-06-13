@@ -8,26 +8,25 @@
  * any registered by game scripts via `chat.command(ctx, ...)`.
  */
 
+import type { ChatClient } from '../client/chat';
+import * as ClientChat from '../client/chat';
 import type { ArgType, CommandHandler, CommandSpec, Suggestion } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
 import { enumType } from '../core/chat-commands';
-import * as ClientChat from '../client/chat';
-import type { ChatClient } from '../client/chat';
-import { parseKey } from '../core/voxels/block-registry';
 import { registry } from '../core/registry';
-import * as Selection from '../core/scene/selection';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
 import { fuzzyRank } from '../core/utils/fuzzy';
+import { parseKey } from '../core/voxels/block-registry';
 import { BLOCK_AIR, getBlock } from '../core/voxels/voxels';
+import { elevateSelection, smoothSelection, walls } from './actions';
 import * as Blueprint from './blueprint';
 import { SaveBlueprintCommand } from './commands';
-import type { EditRoomStoreApi } from './edit-room-store';
-import { parseMask, type Mask } from './scene/mask';
-import { parsePattern, splitTopLevel, type Pattern } from './scene/pattern';
+import type { EditRoomStoreApi, ElevationMode } from './edit-room-store';
+import { type Mask, parseMask } from './scene/mask';
+import { type Pattern, parsePattern, splitTopLevel } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
-import type { ElevationMode } from './edit-room-store';
-import { elevateSelection, smoothSelection, walls } from './actions';
 
 // chat tokenize splits on spaces, so a /set arg is a single space-free
 // token. that's fine for patterns (`,` and `N%` are space-free) and for
@@ -48,27 +47,34 @@ function stripWeight(s: string): string {
 // form (whitespace and prop ordering may differ from the user's input).
 function blockSpecToString(blockId: string, props?: Record<string, string>): string {
     if (!props || Object.keys(props).length === 0) return blockId;
-    return `${blockId}[${Object.entries(props).map(([k, v]) => `${k}=${v}`).join(',')}]`;
+    return `${blockId}[${Object.entries(props)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(',')}]`;
 }
 
 function patternToString(p: Pattern): string {
     switch (p.kind) {
-        case 'block': return blockSpecToString(p.block.blockId, p.block.props);
-        case 'active': return '$active';
+        case 'block':
+            return blockSpecToString(p.block.blockId, p.block.props);
+        case 'active':
+            return '$active';
         case 'random':
-            return p.choices
-                .map((c) => (c.weight === 1 ? '' : `${c.weight}%`) + patternToString(c.pattern))
-                .join(',');
+            return p.choices.map((c) => (c.weight === 1 ? '' : `${c.weight}%`) + patternToString(c.pattern)).join(',');
     }
 }
 
 function maskToString(m: Mask): string {
     switch (m.kind) {
-        case 'blocks': return m.blocks.map((b) => blockSpecToString(b.blockId, b.props)).join(',');
-        case 'not': return `!${maskToString(m.mask)}`;
-        case 'and': return m.masks.map(maskToString).join(' ');
-        case 'existing': return '#existing';
-        case 'noise': return `%${m.percent}`;
+        case 'blocks':
+            return m.blocks.map((b) => blockSpecToString(b.blockId, b.props)).join(',');
+        case 'not':
+            return `!${maskToString(m.mask)}`;
+        case 'and':
+            return m.masks.map(maskToString).join(' ');
+        case 'existing':
+            return '#existing';
+        case 'noise':
+            return `%${m.percent}`;
     }
 }
 
@@ -117,9 +123,7 @@ export function installEditorChatCommands(
             if (!parsed) return;
             counts.set(parsed.blockId, (counts.get(parsed.blockId) ?? 0) + 1);
         });
-        return [...counts.entries()]
-            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-            .map(([id]) => id);
+        return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([id]) => id);
     }
 
     // pattern token: comma-split (bracket-aware) random list; each segment
@@ -246,7 +250,7 @@ export function installEditorChatCommands(
     install(
         {
             name: '/walls',
-            description: 'paint the pattern onto the selection\'s vertical sides (no floor or ceiling)',
+            description: "paint the pattern onto the selection's vertical sides (no floor or ceiling)",
             args: [{ name: 'pattern', type: PatternArg as ArgType<unknown> }],
         },
         ({ args }) => {
@@ -260,7 +264,8 @@ export function installEditorChatCommands(
     install(
         {
             name: '/replace',
-            description: 'replace existing voxels in the current selection with a pattern (mask = which existing blocks; default #existing)',
+            description:
+                'replace existing voxels in the current selection with a pattern (mask = which existing blocks; default #existing)',
             args: [
                 { name: 'pattern', type: PatternArg as ArgType<unknown> },
                 { name: 'from', type: MaskArg as ArgType<unknown>, optional: true },
@@ -318,7 +323,7 @@ export function installEditorChatCommands(
             args: [{ name: 'axis', type: AxisArg as ArgType<unknown>, optional: true }],
         },
         ({ args }) => {
-            const axis = ((args.axis as 'x' | 'y' | 'z' | undefined) ?? 'x');
+            const axis = (args.axis as 'x' | 'y' | 'z' | undefined) ?? 'x';
             const ok = store.getState().flip(axis);
             if (!ok) {
                 emit('nothing to flip');
@@ -434,7 +439,11 @@ export function installEditorChatCommands(
             const iterations = Math.max(1, Math.floor((args.iterations as number | undefined) ?? 1));
             const mask = args.mask as Mask | undefined;
             const n = smoothSelection(store.getState(), ctx, iterations, mask);
-            emit(n === 0 ? 'nothing to smooth' : `smoothed ${n} ${blocksWord(n)} (${iterations} pass${iterations === 1 ? '' : 'es'})`);
+            emit(
+                n === 0
+                    ? 'nothing to smooth'
+                    : `smoothed ${n} ${blocksWord(n)} (${iterations} pass${iterations === 1 ? '' : 'es'})`,
+            );
         },
     );
 
@@ -470,13 +479,7 @@ export function installEditorChatCommands(
         },
     );
 
-    install(
-        { name: 'undo', description: 'undo the last action', args: [] },
-        () => store.getState().undo(),
-    );
+    install({ name: 'undo', description: 'undo the last action', args: [] }, () => store.getState().undo());
 
-    install(
-        { name: 'redo', description: 'redo the last undone action', args: [] },
-        () => store.getState().redo(),
-    );
+    install({ name: 'redo', description: 'redo the last undone action', args: [] }, () => store.getState().redo());
 }

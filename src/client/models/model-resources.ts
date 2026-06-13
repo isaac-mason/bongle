@@ -216,7 +216,7 @@ export type ModelGeometryPool = {
     slots: Map<string, GeometrySlot>;
     /** interleaved {posU, normalV} per vertex. */
     vertices: GpuBuffer<typeof ModelVertex>;
-    indices: GpuBuffer<typeof d.u32>;
+    indices: GpuBuffer<d.u32>;
     vertexAllocator: RangeAllocator;
     indexAllocator: RangeAllocator;
 };
@@ -705,11 +705,12 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     const voxelLight = max(max(vInstLight.yzw, skyContrib), litMinFloor).toVar('mvVoxelLight');
     const light = max(mul(voxelLight, sunShade), ambientMinimum).toVar('mvLight');
 
-    const litShaded = mul(texColor.rgb, light).toVar('mvLitShaded');
-    const litRgb = mix(litShaded, texColor.rgb, vUnlit).toVar('mvLitRgb');
-
-    const tintedRgb = mix(litRgb, vTint.rgb, vTint.w).toVar('mvTintedRgb');
-    const glowedRgb = tintedRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('mvGlowedRgb');
+    // tint the albedo first, then light it — so lighting/shadows modulate the
+    // tinted surface rather than a flat tint colour replacing the lit result.
+    const tintedAlbedo = mix(texColor.rgb, vTint.rgb, vTint.w).toVar('mvTintedAlbedo');
+    const litShaded = mul(tintedAlbedo, light).toVar('mvLitShaded');
+    const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('mvLitRgb');
+    const glowedRgb = litRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('mvGlowedRgb');
 
     const fragColor = vec4(glowedRgb, texColor.a).toVar('mvFragColor');
 
