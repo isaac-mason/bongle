@@ -117,13 +117,6 @@ export type Room = {
      * rooms use 'editor'; each play session allocates 'play-<uuid>'.
      */
     namespace: string;
-
-    /**
-     * True if this room is the entry/root of its namespace. Stopping a
-     * namespace-root room cascades to every other room in the namespace.
-     */
-    isNamespaceRoot: boolean;
-
 };
 
 /* ── Player ─────────────────────────────────────────────────────── */
@@ -273,8 +266,6 @@ export type CreateRoomOptions = {
     resources: Resources.Resources;
     /** Namespace for this room. Defaults to 'main'. */
     namespace?: string;
-    /** True if this room is the namespace root (cascades on stop). Defaults to false. */
-    isNamespaceRoot?: boolean;
 };
 
 /**
@@ -320,7 +311,6 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         logs: createLogs(),
         tick: 0,
         namespace,
-        isNamespaceRoot: opts.isNamespaceRoot ?? false,
         scriptRuntime: {
             roomId: id,
             resources: opts.resources,
@@ -843,18 +833,16 @@ export function createPlayRoom(state: EngineServer, sceneId: string, sourceRoomI
 }
 
 /**
- * Create + initialize a room in an explicit namespace, optionally as
- * the namespace root. Used by editor command handlers to mint
- * play-session and editor namespaces. Authored scripts cannot reach
- * this — api/rooms.create inherits the caller's namespace and never
- * sets isNamespaceRoot=true.
+ * Create + initialize a room in an explicit namespace. Used by editor
+ * command handlers to mint play-session and editor namespaces. Authored
+ * scripts cannot reach this — api/rooms.create inherits the caller's
+ * namespace.
  */
 export function createRoomInNamespace(
     state: EngineServer,
     sceneId: string,
     mode: RoomMode,
     namespace: string,
-    isNamespaceRoot: boolean,
     sourceRoomId?: string,
 ): Room {
     const room = createRoom(state.rooms, {
@@ -864,7 +852,6 @@ export function createRoomInNamespace(
         rpc: state.rpc,
         resources: state.resources,
         namespace,
-        isNamespaceRoot,
     });
     initializeRoom(state, room);
     return room;
@@ -875,16 +862,6 @@ export function stopRoom(state: EngineServer, roomId: string): void {
     if (!room) return;
 
     if (room.mode === 'edit' && roomId === state.defaultRoomId) return;
-
-    // namespace cascade: stopping a namespace-root room ends the entire
-    // session — every other room in the same namespace is also stopped.
-    // 'main' is excluded because production rooms all live there.
-    if (room.isNamespaceRoot && room.namespace !== 'main') {
-        const siblings = findRoomsInNamespace(state.rooms, room.namespace);
-        for (const sib of siblings) {
-            if (sib.id !== roomId) stopRoomInner(state, sib.id);
-        }
-    }
 
     stopRoomInner(state, roomId);
 }

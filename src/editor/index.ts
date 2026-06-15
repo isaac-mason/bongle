@@ -585,16 +585,11 @@ script(
         onInput(ctx, () => {
                 const mk = client.input.mouseKeyboard;
 
-                // ── undo / redo (cmd+z, cmd+shift+z, cmd+y) ──
-                if (isModDown(mk)) {
-                    if (isKeyJustDown(mk, 'KeyZ')) {
-                        if (isShiftDown(mk)) store.getState().redo();
-                        else store.getState().undo();
-                    } else if (isKeyJustDown(mk, 'KeyY')) {
-                        store.getState().redo();
-                    }
-                    return;
-                }
+                // cmd/ctrl combos (undo/redo etc.) are handled at the DOM layer
+                // (edit-ui.tsx) so they fire while a tool-option input holds
+                // focus. swallow them here so a held modifier doesn't trigger
+                // letter-key tool shortcuts.
+                if (isModDown(mk)) return;
 
                 // ── backtick: debug panel chord prefix ──
                 if (isKeyJustDown(mk, 'Backquote')) backtickConsumed = false;

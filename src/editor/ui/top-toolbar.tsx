@@ -123,7 +123,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                 onClick={() => leaveRoom?.(info.id, tabMode)}
             />
             <MenuItem
-                label={info.isNamespaceRoot ? 'Stop session (cascade)' : 'Stop room'}
+                label="Stop room"
                 danger
                 disabled={isMainEdit}
                 onClose={onClose}
@@ -295,11 +295,7 @@ function RoomTab({
                     type="button"
                     onClick={onActivate}
                     onContextMenu={onContextMenu}
-                    title={
-                        info.isNamespaceRoot
-                            ? `${info.sceneId} [${tabMode}] (root of namespace '${info.namespace}')`
-                            : `${info.sceneId} [${tabMode}] (namespace '${info.namespace}')`
-                    }
+                    title={`${info.sceneId} [${tabMode}] (namespace '${info.namespace}')`}
                     className={`flex items-center gap-1 text-[11px] font-mono cursor-pointer border border-l-2 ${
                         isPlay ? 'border-l-neutral-400' : 'border-l-amber-500'
                     } ${

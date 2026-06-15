@@ -160,10 +160,8 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
                 VoxelVisuals.expandDispatches(state.voxelResources);
 
             iconRoom.scene.updateWorldMatrix();
-            renderer.beginFrame();
             if (dispatches.length > 0) renderer.compute(dispatches);
             renderer.render(iconRoom.scene, camera);
-            renderer.endFrame();
 
             blitTile(atlasPixels, atlasWidth, await captureTile(session), ICON_PX, col, row);
         }

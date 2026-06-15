@@ -28,6 +28,7 @@ import * as Environment from './environment';
 import type { ClientRoom } from './rooms';
 import type { VoxelResources } from './voxels/voxel-resources';
 import * as VoxelVisuals from './voxels/voxel-visuals';
+import { elapsedTime } from './voxels/voxel-material';
 
 export type Renderer = {
     renderer: WebGPURenderer;
@@ -288,10 +289,10 @@ export function render(
     // visible slices into per-quad entries the VS reads.
     for (const disp of VoxelVisuals.expandDispatches(voxelResources)) dispatches.push(disp);
 
-    state.renderer.beginFrame();
+    // drive the voxel animation clock — gpucat no longer ticks time itself.
+    elapsedTime.value = performance.now() / 1000;
     state.renderer.compute(dispatches);
     state.pipeline.pipeline.render();
-    state.renderer.endFrame();
 }
 
 /** tear down the renderer and release gpu resources. */

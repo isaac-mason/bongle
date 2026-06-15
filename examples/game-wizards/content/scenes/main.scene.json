@@ -13,48 +13,33 @@
     "-1,0,-1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass_plant_1%1",
-        "starter:grass_plant_1%10",
-        "10%starter:grass_plant_1"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3LORIAEBREQdv9z6wEQvwS0v3CqclJPxfTlsX2umwom+Z++tvvdwAAAAAAAOANHcR6qY8AIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "-1,0,0": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass_plant_1%1",
-        "starter:grass_plant_1%10"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3JqQEAIAzAQJ79dwYEsqp1vYvMHOrcs2476P+oig8AAAAAAABA3gE42lheACAAAA==",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "0,0,-1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass_plant_1%1",
-        "starter:grass_plant_1%10",
-        "10%starter:grass_plant_1",
-        "starter:grass_plant_2",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3O2wZAIRQE0HPt/z85InpJiYqsNY9jm31fUkvYtrZuOfsm5U2p90+jb93P6P/N+6N9+XfvPQAAAAAAAHCOCPRYefMAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "0,0,0": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass_plant_1%1",
-        "starter:grass_plant_1%10",
-        "10%starter:grass_plant_1",
-        "starter:grass_plant_2",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3OOQrAIABFwcQs9z9yILhUggqCwswrLL6g59HT23V7Xqv8Y/+uvztWPPEMlT0JeavtY9L7AAAAAAAAALT5AADnSKcAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "-4,-2,-4": {
@@ -748,10 +733,9 @@
     "2,-1,-2": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3RMQoAIAwDQPX/jxZ0cFGXUrocN6ZQSHoDAAAAAAAAcowlL6fSXue9UHVO1L/df/8nvV9E8/v/CWlQ0D8AIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQkAAAACoPp/uh2B2AAAAAAAAAAA7waJA88WACAAAA==",
       "light": "H4sIAAAAAAAAA+3AAQ0AAADCIPunNsc3GAAAAAAAAACQd5SZ9NgAIAAA"
     },
     "3,-1,-2": {
@@ -813,10 +797,9 @@
     "2,-1,-1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3TQQrAIAwEwLb/f3RvLQVhpSooDnNzA0ZDzgMAAAAAAAB2dD3G5Pn+3F9Lvrt3PuV/miNP/f/Pa2tWVb+feT6lip55S//p/d/TG0MSBMAAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQkAAAACoPp/uh2B2AAAAAAAAAAA7waJA88WACAAAA==",
       "light": "H4sIAAAAAAAAA+3AAQ0AAADCIPunNsc3GAAAAAAAAACQd5SZ9NgAIAAA"
     },
     "3,-1,-1": {
@@ -878,19 +861,17 @@
     "2,-1,0": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3UQQqAIBQE0Or+h64IKSQiSRqKx1u4mIUO6h8HAAAAAAAA/mlaJPOvK/3WtTQ9Nn6av3H+q/3Sedp2vl39otN5r37ZPDc/7vzPlvup+/TOz/Zvnx8zMRjLcAAgAAA=",
+      "blocks": "H4sIAAAAAAAAA+3BAQkAAAACoPp/uh2B2AAAAAAAAAAA7waJA88WACAAAA==",
       "light": "H4sIAAAAAAAAA+3AAQ0AAADCIPunNsc3GAAAAAAAAACQd5SZ9NgAIAAA"
     },
     "3,-1,0": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3UQQoAIAgEwOr/j64eEAQRGY4e56SL1jJ7XZxzzjnnnHPOOeecc84555xn8jb6pr+eL7vPfFpgf72f333nPiPnf/o/OrzWDkkAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/acQB3Ts4Gb3z5zjnnHPOOeecc84555xzzjnnnHPe7wfHHKM6ACAAAA==",
       "light": "H4sIAAAAAAAAA+3JoQEAAAjDMP6/lhMQ6PmJtDLzbZxzzjnnnHPOOeecc84555xzzjnn9X4lN2MgACAAAA=="
     },
     "-4,-1,1": {
@@ -928,19 +909,17 @@
     "0,-1,1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3RsQ0AAAjDMOD/ozmiC0iWx4zpAgAAAAAAACA3YeezOfB/AYXsgLMAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQkAAAACoPp/uh2B2AAAAAAAAAAA7waJA88WACAAAA==",
       "light": "H4sIAAAAAAAAA+3AAQ0AAADCIPunNsc3GAAAAAAAAACQd5SZ9NgAIAAA"
     },
     "1,-1,1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3SQQoAEBAFUNz/0JYiMUnN5vVW+pHpTy0AAAAAAABAVJuM8+1G9r/5Y+5/3YZTfnsvezIi3vvf5ZH+z+mqAy5UcZcAIAAA",
+      "blocks": "H4sIAAAAAAAAA+3BAQkAAAACoPp/uh2B2AAAAAAAAAAA7waJA88WACAAAA==",
       "light": "H4sIAAAAAAAAA+3AAQ0AAADCIPunNsc3GAAAAAAAAACQd5SZ9NgAIAAA"
     },
     "2,-1,1": {
@@ -1250,19 +1229,17 @@
     "0,0,-2": {
       "palette": [
         "air",
-        "starter:dirt",
-        "10%starter:grass_plant_1"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3JsQ0AMAjAsJb/j+YCJFbAzpj/dDl2iKLuBwAAAAAAAOZL/5RkhQAgAAA=",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "1,0,-2": {
       "palette": [
         "air",
-        "starter:dirt",
-        "10%starter:grass_plant_1"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3JoQEAMAjAsI3/j8bjkEBS2f90OWaLUvcDAAAAAAAAeyTK0SC7ACAAAA==",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "2,0,-2": {
@@ -1308,12 +1285,9 @@
     "1,0,-1": {
       "palette": [
         "air",
-        "starter:dirt",
-        "10%starter:grass_plant_1",
-        "starter:grass_plant_2",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3NOQoAQAgEwb3+/+bNTQQzparDQdxLWW/w/xOK7B32W74HAAAAAAAA5vid8Bq3ACAAAA==",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "2,0,-1": {
@@ -1359,10 +1333,9 @@
     "1,0,0": {
       "palette": [
         "air",
-        "starter:dirt",
-        "starter:grass"
+        "starter:dirt"
       ],
-      "blocks": "H4sIAAAAAAAAA+3OMQoAIAwEQfX/j7bSXgmEhJlt0gRujtO610t/X5HlL6gcAAAAAAAAAD1sMpndUAAgAAA=",
+      "blocks": "H4sIAAAAAAAAA+3BAQEAAAgCoPp/2h8K/LkcAAAAAAAAgA4BnJXIKwAgAAA=",
       "light": "H4sIAAAAAAAAA+3BAQEAAAgCoP6vbYI/FDi2vaqqqqqqqqoNA0YMIo0AIAAA"
     },
     "2,0,0": {

@@ -20,8 +20,6 @@ export type RoomInfo = {
     sourceRoomId: string | null;
     /** namespace this room belongs to ('main' / 'editor' / 'play-<uuid>'). */
     namespace: string;
-    /** true if this room is the namespace's root (cascades on stop). */
-    isNamespaceRoot: boolean;
 };
 
 /* ── binary trait data for scene sync ── */
@@ -553,8 +551,6 @@ export const JoinRoom = pack.object({
     clientId: pack.varuint(),
     /** Namespace this room belongs to (e.g. 'editor', 'main', 'play-<uuid>'). */
     namespace: pack.string(),
-    /** True if this room is the namespace's root (cascades on stop). */
-    isNamespaceRoot: pack.boolean(),
 });
 
 export type JoinRoom = pack.SchemaType<typeof JoinRoom>;

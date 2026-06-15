@@ -336,7 +336,6 @@ export function invalidatePlayer(
         packedNodes,
         clientId: player.client,
         namespace: room.namespace,
-        isNamespaceRoot: room.isNamespaceRoot,
     });
 
     // snapshot every node so the same-tick scene_sync diff finds no changes
@@ -573,7 +572,6 @@ export function flush(
                     clientCount: RoomsModule.getClientsInRoom(rooms, room).size,
                     sourceRoomId: room.sourceRoomId,
                     namespace: room.namespace,
-                    isNamespaceRoot: room.isNamespaceRoot,
                 });
             }
             roomListJson = JSON.stringify(infos);

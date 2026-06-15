@@ -159,6 +159,25 @@ function EditUI() {
     // play/stop on the active room.
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
+            // undo/redo routes to the active edit-room history here, at the DOM
+            // layer, so cmd/ctrl+z works even while a tool-option input (brush
+            // size, pattern, …) holds focus — preventDefault stops the field's
+            // native text-undo. handled before the isInputFocused bail for that
+            // reason; the game-loop input path leaves mod combos to us.
+            if (e.metaKey || e.ctrlKey) {
+                const key = e.key.toLowerCase();
+                if (key === 'z' || key === 'y') {
+                    e.preventDefault();
+                    const { room, playerEditStores } = useEditor.getState();
+                    const store = room ? playerEditStores[room.playerId] : null;
+                    if (store) {
+                        if (key === 'y' || e.shiftKey) store.getState().redo();
+                        else store.getState().undo();
+                    }
+                }
+                return;
+            }
+
             if (isInputFocused()) return;
 
             if (e.key === '`' && e.shiftKey) {

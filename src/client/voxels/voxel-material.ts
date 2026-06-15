@@ -79,10 +79,12 @@ import {
     sin,
     smoothstep,
     sqrt,
+    renderGroup,
     storage,
     sub,
-    timeElapsed,
     u32,
+    Uniform,
+    UniformNode,
     Var,
     varying,
     vec2f,
@@ -90,8 +92,19 @@ import {
     vec4,
     vec4f,
     vertexIndex,
+    uniform,
 } from 'gpucat';
 import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+
+/**
+ * Voxel animation clock in seconds. gpucat no longer ticks time itself, so the
+ * render loop drives this each frame (see client/renderer.ts); static offline
+ * renders leave it at 0, freezing animation. renderGroup so it uploads once per
+ * render rather than per draw.
+ */
+export const elapsedTime = uniform('elapsedTime', d.f32);
+elapsedTime.value = 0;
+
 import { EnvConfig } from '../environment';
 import { ChunkInfo, VisibleQuad } from './voxel-resources';
 
@@ -238,14 +251,14 @@ export const computeVertexAnimation = Fn(
         const vertexPhase = add(worldPos.x, worldPos.z).toVar('vertexPhase');
 
         If(equal(animType, u32(1)), () => {
-            const phase = add(vertexPhase, mul(timeElapsed, f32(2.5)));
+            const phase = add(vertexPhase, mul(elapsedTime, f32(2.5)));
             const amount = mul(sin(phase), f32(0.08));
             xDisp.assign(amount);
             zDisp.assign(amount);
             depthBias.assign(mul(f32(-0.002), abs(amount)));
         })
             .ElseIf(equal(animType, u32(2)), () => {
-                const phase = add(vertexPhase, mul(timeElapsed, f32(3.2)));
+                const phase = add(vertexPhase, mul(elapsedTime, f32(3.2)));
                 const amount = mul(sin(phase), f32(0.06));
                 xDisp.assign(amount);
                 zDisp.assign(amount);
@@ -258,7 +271,7 @@ export const computeVertexAnimation = Fn(
                 const blockPhase = add(blockCenter.x, blockCenter.z).toVar('blockPhase');
                 const blockBaseY = sub(blockCenter.y, f32(0.5)).toVar('blockBaseY');
                 const weight = max(f32(0.0), sub(worldPos.y, blockBaseY)).toVar('tipWeight');
-                const phase = add(blockPhase, mul(timeElapsed, f32(2.0)));
+                const phase = add(blockPhase, mul(elapsedTime, f32(2.0)));
                 xDisp.assign(mul(mul(sin(phase), f32(0.12)), weight));
                 zDisp.assign(mul(mul(cos(phase), f32(0.12)), weight));
             });
@@ -366,7 +379,7 @@ export function buildVoxelFragment(
     const fps = animInfo.y;
     const doInterpolate = animInfo.z;
 
-    const t = mul(timeElapsed, fps).toVar('animT');
+    const t = mul(elapsedTime, fps).toVar('animT');
     const frameF = floor(t).mod(frameCount).toVar('frameF');
     const nextFrameF = add(frameF, f32(1.0)).mod(frameCount).toVar('nextFrameF');
 

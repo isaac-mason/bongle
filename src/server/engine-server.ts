@@ -535,7 +535,7 @@ export function processInbox(state: EngineServer) {
                         const createT0 = performance.now();
                         let createdRoom = false;
                         if (!room) {
-                            room = Rooms.createRoomInNamespace(state, sceneId, 'play', namespace, true, message.sourceRoomId);
+                            room = Rooms.createRoomInNamespace(state, sceneId, 'play', namespace, message.sourceRoomId);
                             createdRoom = true;
                         }
                         const createMs = performance.now() - createT0;

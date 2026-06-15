@@ -210,10 +210,8 @@ export async function renderPopulatedRoom(
         const gpuRenderer = state.renderer.renderer;
         const dispatches: ComputeDispatch[] = [];
         for (const d of VoxelVisuals.expandDispatches(state.voxelResources)) dispatches.push(d);
-        gpuRenderer.beginFrame();
         gpuRenderer.compute(dispatches);
         pipeline.render();
-        gpuRenderer.endFrame();
         return await captureTile(session);
     } finally {
         pipeline.dispose();

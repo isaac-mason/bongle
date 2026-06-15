@@ -74,9 +74,6 @@ export type ClientRoom = {
     /** namespace this room belongs to (mirrors server-side) */
     namespace: string;
 
-    /** true if this ClientRoom is the namespace's root */
-    isNamespaceRoot: boolean;
-
     /**
      * true if this room is a client-only room created via `rooms.create`
      * from a client ScriptContext. local rooms have synthetic playerId/roomId
@@ -369,7 +366,6 @@ function makeLocalRoomInfo(room: ClientRoom): RoomInfo {
         clientCount: 1,
         sourceRoomId: null,
         namespace: room.namespace,
-        isNamespaceRoot: room.isNamespaceRoot,
     };
 }
 
@@ -397,7 +393,6 @@ export type CreateRoomOptions = {
         playerMode: PlayerMode;
         roomMode: RoomMode;
         namespace: string;
-        isNamespaceRoot: boolean;
         packedNodes: Uint8Array;
     };
     net: Net.ClientNet;
@@ -422,8 +417,7 @@ export type CreateRoomOptions = {
 
 export function createRoom(opts: CreateRoomOptions): ClientRoom {
     const { message } = opts;
-    const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, isNamespaceRoot, packedNodes } =
-        message;
+    const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, packedNodes } = message;
     const { inboundTraitWireIndex } = opts;
 
     const { nodes, voxels, physics, clock, chat, scriptRuntime } = newRoomCore({
@@ -447,7 +441,6 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         playerMode,
         roomMode,
         namespace,
-        isNamespaceRoot,
         local: false,
         net: opts.net,
         rpc: opts.rpc,
@@ -480,7 +473,6 @@ type CreateRoomCoreOptions = {
     playerMode: PlayerMode;
     roomMode: RoomMode;
     namespace: string;
-    isNamespaceRoot: boolean;
     local: boolean;
     net: Net.ClientNet;
     rpc: NodesContext['rpc'];
@@ -592,7 +584,7 @@ function findPlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, roomId: string):
 }
 
 function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
-    const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, isNamespaceRoot, local } = opts;
+    const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, local } = opts;
     const { nodes, voxels, physics, clock, chat, scriptRuntime, playerNode } = opts;
     const { renderer } = opts;
     const input: Input.Input = Input.createInput();
@@ -725,7 +717,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         playerMode,
         roomMode,
         namespace,
-        isNamespaceRoot,
         local,
         nodes,
         scene,
@@ -986,7 +977,6 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         playerMode,
         roomMode,
         namespace,
-        isNamespaceRoot: false,
         local: true,
         net: state.net,
         rpc: state.rpc,
@@ -1189,7 +1179,6 @@ export function createOfflineRoom(state: EngineClient): ClientRoom {
         playerMode: 'play',
         roomMode: 'play',
         namespace: 'offline',
-        isNamespaceRoot: false,
         local: true,
         net: state.net,
         rpc: state.rpc,

@@ -34,8 +34,8 @@ function assertSameNamespace(callerNs: string, targetNs: string, roomId: string)
 /**
  * Create a new room from a scene id.
  *
- * Server: allocates a server room in the caller's namespace, never as
- * a namespace root. Returns the new roomId.
+ * Server: allocates a server room in the caller's namespace. Returns the
+ * new roomId.
  *
  * Client: creates a local-only ClientRoom from a scene() handle (Phase 8).
  */
@@ -51,7 +51,6 @@ export function create(
             sceneId,
             o?.mode ?? 'play',
             ns,
-            false,
             o?.sourceRoomId,
         );
         return room.id;
@@ -76,9 +75,7 @@ export function create(
 /**
  * Stop a room.
  *
- * Server: destroys the server room. If it's the namespace root, the
- * stop cascades to every other room in the namespace. Forbidden across
- * namespaces.
+ * Server: destroys the server room. Forbidden across namespaces.
  *
  * Client: disposes a local ClientRoom; throws on server-mirrored rooms
  * (those are membership-driven, not script-controlled).
@@ -99,6 +96,55 @@ export function stop(ctx: ScriptContext, roomId: string): void {
         return;
     }
     throw new Error('[bongle] rooms.stop: ctx has neither server nor client');
+}
+
+/**
+ * Recreate the caller's room: boot a fresh room from the same on-disk scene,
+ * move every client into it, then destroy the old room. Server-only.
+ *
+ * The fresh room loads pristine voxels from disk and re-runs every script
+ * onInit (fresh authored/spawned entities), and each client re-joins via the
+ * normal onJoin path (reset to spawn) — i.e. a whole-map reset for a new round.
+ * The successor runs the same scripts, so a round timer driving this restarts
+ * on its own.
+ *
+ * Runs inline (no deferral): the old room is torn down with destroyRoom — the
+ * direct, non-cascading teardown — which is safe mid-tick because every
+ * downstream tick stage iterates queries, and destroyNode removes dying nodes
+ * from every query as it goes, so those stages simply see nothing this frame.
+ */
+export function recreate(ctx: ScriptContext): void {
+    if (!env.server || !ctx.server) throw new Error('[bongle] rooms.recreate: server-only');
+    const state = ctx.server.state;
+    const old = ctx.server.room;
+
+    // fresh room from the same scene, in the same namespace — gameOptions and
+    // matchmaking are namespace-scoped, so they carry over untouched.
+    const fresh = ServerRooms.createRoomInNamespace(
+        state,
+        old.sceneId,
+        old.mode,
+        old.namespace,
+        old.sourceRoomId ?? undefined,
+    );
+
+    // move every client across: a fresh player node + onJoin in the new room,
+    // then point their active view at it. snapshot the clients first, since
+    // addClientToRoom mutates membership.
+    const clients = new Set<Client>();
+    for (const playerId of old.players) {
+        const player = state.rooms.players.get(playerId);
+        if (player) clients.add(player.client);
+    }
+    for (const client of clients) {
+        const player = ServerRooms.addClientToRoom(state, client, fresh, fresh.mode);
+        ServerRooms.setActivePlayer(state.rooms, client, player.id);
+        Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
+    }
+
+    // retire the old room — its now-inactive players and all its nodes are
+    // cleaned up here.
+    ServerRooms.destroyRoom(state.rooms, old.id);
 }
 
 /* ── active control ──────────────────────────────────────────────── */

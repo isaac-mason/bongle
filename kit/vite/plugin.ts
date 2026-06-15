@@ -186,6 +186,9 @@ export function bongle(opts: BongleOptions): Plugin[] {
     // that re-renders icons on every settled HMR cascade, and POSTs results
     // back through /__bongle/pipeline/emit. Closed in closeBundle.
     let browser: Browser | null = null;
+    // set in closeBundle so the page-crash / browser-disconnect recovery
+    // handlers don't try to relaunch while the dev server is tearing down.
+    let shuttingDown = false;
 
     // Per-module symbol table, keyed by Rollup's normalised module id
     // (query string stripped). The capture transform populates this on
@@ -821,37 +824,85 @@ if (import.meta.hot) {
                     : '127.0.0.1';
                 const pageUrl = `http://${host}:${port}/pipeline.html`;
 
+                const launchArgs = [
+                    '--enable-unsafe-webgpu',
+                    '--use-angle=metal',
+                    '--ignore-gpu-blocklist',
+                    '--no-sandbox',
+                ];
+
+                // Wire diagnostics + crash recovery onto a freshly-opened page.
+                // The renderer/GPU process can die after a long edit session
+                // (accumulated WebGPU work); `page.on('error')` is the only
+                // signal for that and is otherwise unhandled, so the crash is
+                // invisible and every later pass just times out waiting for the
+                // worker. Reloading revives the same Page handle — the
+                // orchestrator's `bootId` mismatch then re-boots the engine.
+                const wirePage = (page: import('puppeteer').Page) => {
+                    page.on('console', (msg) => {
+                        const type = msg.type();
+                        if (type === 'error' || type === 'warn') {
+                            console.log(`[pipeline-page ${type}] ${msg.text()}`);
+                        }
+                    });
+                    page.on('pageerror', (err: unknown) => {
+                        console.log(`[pipeline-page pageerror] ${err instanceof Error ? err.message : String(err)}`);
+                    });
+                    page.on('requestfailed', (req) => {
+                        console.log(`[pipeline-page requestfailed] ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`);
+                    });
+                    page.on('response', (res) => {
+                        if (res.status() >= 400) {
+                            console.log(`[pipeline-page http ${res.status()}] ${res.url()}`);
+                        }
+                    });
+                    page.on('error', (err: unknown) => {
+                        console.error(
+                            `[bongle:pipeline] pipeline page crashed: ${err instanceof Error ? err.message : String(err)} — reloading`,
+                        );
+                        void recoverPipeline();
+                    });
+                };
+
+                // Single-flight recovery. A page crash reloads in place (Page
+                // handle survives); a full browser disconnect relaunches Chrome
+                // and re-inits the orchestrator against the new page.
+                let recovering = false;
+                const recoverPipeline = async () => {
+                    if (recovering || shuttingDown) return;
+                    recovering = true;
+                    try {
+                        if (browser && browser.connected && orchestrator) {
+                            await orchestrator.page.reload({ waitUntil: 'load' });
+                        } else {
+                            browser = await puppeteer.launch({ headless: true, args: launchArgs });
+                            browser.on('disconnected', onBrowserDisconnected);
+                            const page = await browser.newPage();
+                            wirePage(page);
+                            await page.goto(pageUrl, { waitUntil: 'load' });
+                            orchestrator = Orchestrator.init(page, pipelineInternal, projectDir);
+                        }
+                        if (orchestrator) void Orchestrator.scheduleRender(orchestrator);
+                    } catch (err) {
+                        console.error('[bongle:pipeline] pipeline recovery failed:', err);
+                    } finally {
+                        recovering = false;
+                    }
+                };
+                const onBrowserDisconnected = () => {
+                    if (shuttingDown) return;
+                    console.error('[bongle:pipeline] puppeteer browser disconnected — relaunching');
+                    void recoverPipeline();
+                };
+
                 // Defer to nextTick so the dev server is listening when we
                 // navigate. configureServer fires before listen() resolves.
                 queueMicrotask(async () => {
                     try {
-                        browser = await puppeteer.launch({
-                            headless: true,
-                            args: [
-                                '--enable-unsafe-webgpu',
-                                '--use-angle=metal',
-                                '--ignore-gpu-blocklist',
-                                '--no-sandbox',
-                            ],
-                        });
+                        browser = await puppeteer.launch({ headless: true, args: launchArgs });
+                        browser.on('disconnected', onBrowserDisconnected);
                         const page = await browser.newPage();
-                        page.on('console', (msg) => {
-                            const type = msg.type();
-                            if (type === 'error' || type === 'warn') {
-                                console.log(`[pipeline-page ${type}] ${msg.text()}`);
-                            }
-                        });
-                        page.on('pageerror', (err: unknown) => {
-                            console.log(`[pipeline-page pageerror] ${err instanceof Error ? err.message : String(err)}`);
-                        });
-                        page.on('requestfailed', (req) => {
-                            console.log(`[pipeline-page requestfailed] ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`);
-                        });
-                        page.on('response', (res) => {
-                            if (res.status() >= 400) {
-                                console.log(`[pipeline-page http ${res.status()}] ${res.url()}`);
-                            }
-                        });
+                        wirePage(page);
                         await page.goto(pageUrl, { waitUntil: 'load' });
                         orchestrator = Orchestrator.init(page, pipelineInternal, projectDir);
                         // Kick the initial pass — the page has booted its
@@ -865,6 +916,7 @@ if (import.meta.hot) {
             },
 
             async closeBundle() {
+                shuttingDown = true;
                 if (browser) {
                     try {
                         await browser.close();
