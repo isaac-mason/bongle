@@ -703,16 +703,19 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     ).toVar('mvSkyContrib');
     const litMinFloor = vec3f(vLitMin, vLitMin, vLitMin).toVar('mvLitMinFloor');
     const voxelLight = max(max(vInstLight.yzw, skyContrib), litMinFloor).toVar('mvVoxelLight');
-    const light = max(mul(voxelLight, sunShade), ambientMinimum).toVar('mvLight');
+    // glow raises the lighting floor — a script-driven self-illumination knob
+    // in the mesh's OWN colour (glow=1 → fully lit, shadow-free) rather than
+    // adding white, which would wash the surface out. parallels `litMin`.
+    const glowFloor = vec3f(vGlow, vGlow, vGlow).toVar('mvGlowFloor');
+    const light = max(max(mul(voxelLight, sunShade), ambientMinimum), glowFloor).toVar('mvLight');
 
     // tint the albedo first, then light it — so lighting/shadows modulate the
     // tinted surface rather than a flat tint colour replacing the lit result.
     const tintedAlbedo = mix(texColor.rgb, vTint.rgb, vTint.w).toVar('mvTintedAlbedo');
     const litShaded = mul(tintedAlbedo, light).toVar('mvLitShaded');
     const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('mvLitRgb');
-    const glowedRgb = litRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('mvGlowedRgb');
 
-    const fragColor = vec4(glowedRgb, texColor.a).toVar('mvFragColor');
+    const fragColor = vec4(litRgb, texColor.a).toVar('mvFragColor');
 
     // alpha cutout + screen-door dither. dither uses interleaved gradient
     // noise against the per-instance value — cheap (2 muls + 2 fracts +

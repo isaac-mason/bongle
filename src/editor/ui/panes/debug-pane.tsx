@@ -1,4 +1,7 @@
 import { useEditRoom } from '../../edit-room-store';
+import { useEditor } from '../../editor-store';
+import { NumberInput } from '../components/number-input';
+import { Range } from '../components/range';
 
 export function DebugPane() {
     const showColliders = useEditRoom((s) => s.showPhysicsColliders);
@@ -9,6 +12,10 @@ export function DebugPane() {
     const setShowOrientationCube = useEditRoom((s) => s.setShowOrientationCube);
     const showChunkBoundaries = useEditRoom((s) => s.showChunkBoundaries);
     const setShowChunkBoundaries = useEditRoom((s) => s.setShowChunkBoundaries);
+    const netSimEnabled = useEditor((s) => s.netSimEnabled);
+    const setNetSimEnabled = useEditor((s) => s.setNetSimEnabled);
+    const netSimRttMs = useEditor((s) => s.netSimRttMs);
+    const setNetSimRttMs = useEditor((s) => s.setNetSimRttMs);
 
     return (
         <div className="flex flex-col gap-1 px-3 py-2">
@@ -48,6 +55,34 @@ export function DebugPane() {
                 />
                 show chunk boundaries
             </label>
+            <label className="flex items-center gap-2 text-[10px] font-mono text-neutral-600 cursor-pointer select-none">
+                <input
+                    type="checkbox"
+                    checked={netSimEnabled}
+                    onChange={(e) => setNetSimEnabled(e.target.checked)}
+                    className="accent-blue-500"
+                />
+                simulate ws latency
+            </label>
+            {netSimEnabled && (
+                <div className="flex items-center gap-1 pl-5">
+                    <span className="text-[10px] font-mono text-neutral-500 w-12 shrink-0">rtt ms</span>
+                    <NumberInput
+                        value={netSimRttMs}
+                        onChange={setNetSimRttMs}
+                        min={0}
+                        max={2000}
+                        step={10}
+                    />
+                    <Range
+                        value={netSimRttMs}
+                        onChange={setNetSimRttMs}
+                        min={0}
+                        max={500}
+                        step={10}
+                    />
+                </div>
+            )}
         </div>
     );
 }

@@ -74,11 +74,21 @@ export type ParticlePool = {
     expiresAt: Float32Array;
     /** per-particle render size (multiplies sprite world dims). */
     size: Float32Array;
-    /** per-particle emissive level in [0,1]. 0 = lit by world voxel
-     *  light, 1 = unmodulated (self-lit), values in between linearly
-     *  mix lit ↔ raw at render time. mutate from the update fn to
+    /** per-particle glow (self-illumination) in [0,1]. raises the
+     *  lighting floor so the particle lights up in its own colour —
+     *  0 = lit by world voxel light, 1 = fully lit / shadow-free —
+     *  matching mesh/sprite `glow`. mutate from the update fn to
      *  animate (e.g. fire embers fade 1 → 0 over lifetime). */
-    emissive: Float32Array;
+    glow: Float32Array;
+    /** per-particle RGBA tint multiplier. RGB multiplies the shaded
+     *  color (so [0,0,0] fades to black), A multiplies the sprite alpha
+     *  (so 0 fades to transparent). default [1,1,1,1] = no tint. mutate
+     *  from the update fn to animate (e.g. fade RGB or A over lifetime).
+     *  decomposed per-channel to match the posX/Y/Z SoA convention. */
+    tintR: Float32Array;
+    tintG: Float32Array;
+    tintB: Float32Array;
+    tintA: Float32Array;
     /** deterministic per-particle jitter seed. */
     seed: Uint32Array;
 };
@@ -114,12 +124,16 @@ export type ParticleOptions = {
      *  tick. compose primitives from `particleUpdate.*` or write your
      *  own. */
     update: UpdateFn;
-    /** spawn-time default for the per-particle emissive level [0,1].
-     *  0 = fully sample world light (lit like models / voxel-meshes),
-     *  1 = unmodulated (sparks, glow motes), in-between blends. the
-     *  update fn can mutate `pool.emissive[i]` per-frame for fades.
-     *  default 0. */
-    emissive?: number;
+    /** spawn-time default for the per-particle glow (self-illumination)
+     *  level [0,1]. 0 = fully sample world light (lit like models /
+     *  voxel-meshes), 1 = fully lit / shadow-free — matching mesh/sprite
+     *  `glow`. the update fn can mutate `pool.glow[i]` per-frame for
+     *  fades. default 0. */
+    glow?: number;
+    /** spawn-time default RGBA tint multiplier. RGB multiplies the
+     *  shaded color, A the sprite alpha. the update fn can mutate
+     *  `pool.tintR/G/B/A[i]` per-frame for fades. default [1,1,1,1]. */
+    tint?: [r: number, g: number, b: number, a: number];
 };
 
 export type ParticleHandle = {
@@ -139,8 +153,10 @@ export type ParticleHandle = {
     fps: number;
     /** per-particle update fn. */
     update: UpdateFn;
-    /** resolved spawn-time default for emissive [0,1]. */
-    emissive: number;
+    /** resolved spawn-time default for glow [0,1]. */
+    glow: number;
+    /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */
+    tint: [r: number, g: number, b: number, a: number];
 };
 
 /* ── registration ── */
@@ -169,7 +185,8 @@ export function particle(id: string, options: ParticleOptions): ParticleHandle {
         playback: options.playback,
         fps: options.fps ?? 0,
         update: options.update,
-        emissive: options.emissive ?? 0,
+        glow: options.glow ?? 0,
+        tint: options.tint ?? [1, 1, 1, 1],
     };
     upsert(registry.particles, id, handle);
     recordParticle(id);

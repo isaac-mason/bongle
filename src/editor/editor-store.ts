@@ -111,6 +111,14 @@ export type EditorStore = {
     /* ── transient toasts (top-left HMR notifications) ── */
     toasts: Toast[];
 
+    /* ── network latency simulation (editor dev only) ──
+     * When enabled, edit-client's RAF loop holds outbound + inbound WS
+     * frames to simulate round-trip latency; `netSimRttMs` is split in
+     * half across each direction. Read by kit/runtime/edit-client.ts via
+     * `useEditor.getState()` each frame. Per-session, never persisted. */
+    netSimEnabled: boolean;
+    netSimRttMs: number;
+
     /* ── hotbar (localStorage-persisted user palette, shared across rooms) ── */
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
 
@@ -146,6 +154,10 @@ export type EditorStore = {
     /* ── toasts ── */
     pushToast: (toast: Omit<Toast, 'id' | 'createdAt'>) => void;
     dismissToast: (id: string) => void;
+
+    /* ── net sim ── */
+    setNetSimEnabled: (enabled: boolean) => void;
+    setNetSimRttMs: (ms: number) => void;
 };
 
 export const useEditor = create<EditorStore>((set) => ({
@@ -191,6 +203,9 @@ export const useEditor = create<EditorStore>((set) => ({
     playerToView: new Map(),
 
     toasts: [],
+
+    netSimEnabled: false,
+    netSimRttMs: 100,
 
     hotbar: loadHotbar(),
 
@@ -254,6 +269,9 @@ export const useEditor = create<EditorStore>((set) => ({
 
     dismissToast: (id) =>
         set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+    setNetSimEnabled: (netSimEnabled) => set({ netSimEnabled }),
+    setNetSimRttMs: (netSimRttMs) => set({ netSimRttMs }),
 }));
 
 // persist hotbar slot changes to localStorage. only fires when the array

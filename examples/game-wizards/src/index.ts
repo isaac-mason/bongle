@@ -6,10 +6,13 @@ import {
     broadcast,
     chat,
     CharacterControllerTrait,
+    CLIENT_TO_SERVER,
     cloneModel,
     command,
     createNode,
+    createVoxelRaycastResult,
     destroyNode,
+    draw,
     ENVIRONMENT_OVERWORLD,
     env,
     findByName,
@@ -36,11 +39,15 @@ import {
     PlayerTrait,
     pack,
     query,
+    raycastVoxels,
     removeTrait,
     resolveCamera,
     rooms,
     script,
+    type ScriptContext,
+    send,
     SERVER_TO_CLIENT,
+    sprite,
     setBlock,
     setEnvironment,
     setEnvironmentTime,
@@ -54,6 +61,7 @@ import {
     setWorldPosition,
     setWorldQuaternion,
     spawnParticle,
+    SpriteTrait,
     sync,
     TransformTrait,
     trait,
@@ -63,7 +71,7 @@ import {
     WorldTrait,
 } from 'bongle';
 import { RIG_6BONE_ARM_RIGHT, RIG_6BONE_HAND_RIGHT, RIG_6BONE_HEAD } from 'bongle/avatar/rig';
-import { blocks, particlePresets, sprites } from 'bongle/starter';
+import { blocks, particlePresets } from 'bongle/starter';
 import { degreesToRadians, mat4, quat, type Quat, vec3, type Vec3, type Vec4 } from 'mathcat';
 import { castRay, CastRayStatus, createClosestCastRayCollector, createDefaultCastRaySettings, filter as crashFilter } from 'crashcat';
 
@@ -89,16 +97,21 @@ const WizardTrait = trait('wizard', {
     kills: 0,
     deaths: 0,
     // owner-authored + replicated *held* cast intent: true while this wizard's
-    // owner is holding fire — the local player's client for its own player, the
-    // server's npc AI for the dummies. it's the single input both share: the
-    // server reads it (+ the synced look + stats.fireRate) to spawn shots
-    // uniformly, and every client reads it to drive the third-person arm-raise.
+    // owner is holding fire — see combat-cast. drives the firing tick + arm-raise.
     casting: false,
-    // how this wizard fires — synced (set once at spawn) so the client can predict
-    // its own muzzle/viewmodel cadence at the same rate the server actually fires.
-    stats: { fireRate: 3 } as { fireRate: number }, // shots/sec
-    // server-only clock of this wizard's last spawned shot — paces the firing tick
-    // against stats.fireRate. not synced.
+    // xp accrued from orbs → level → upgrade points. synced for the hud + cadence.
+    xp: 0,
+    // upgradable stat LEVELS (integers); effective values derived via STAT_TABLE.
+    // synced so the client derives fire cadence, max health, the hud panel, etc.
+    stats: { levels: { maxHealth: 0, regenRate: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, splashRadius: 0 } as StatLevels },
+    // live health pool (folded in — every combatant is a wizard). `current` is
+    // discrete + synced; max is DERIVED from the maxHealth stat (not stored). the
+    // regen carry + damage bookkeeping stay server-only.
+    current: 10, // = STAT_TABLE.maxHealth.base (level 0)
+    regenAccum: 0,
+    lastDamageTime: -999,
+    lastAttacker: -1,
+    // server-only clock of this wizard's last spawned shot — paces the firing tick.
     lastFireTime: -999,
     // client-side timestamp of the LOCAL player's own last predicted shot — drives
     // the first-person viewmodel jab only, for zero-latency feedback. not synced.
@@ -145,13 +158,37 @@ sync(WizardTrait, 'casting', {
     authority: 'owner',
 });
 
-// stats are set once at spawn (server-authored) and don't change — 'dirty' emits
-// the initial value. the client needs them to predict its own fire cadence.
+// stat levels change at runtime (upgrades), so 'realtime' re-emits on byte-change.
+// the client derives fire cadence + max health + the hud panel from these.
 sync(WizardTrait, 'stats', {
-    schema: pack.object({ fireRate: pack.float32() }),
-    pack: (t) => t.stats,
-    unpack: (v, t) => (t.stats = v),
-    rate: 'dirty',
+    schema: pack.object({
+        maxHealth: pack.uint8(),
+        regenRate: pack.uint8(),
+        moveSpeed: pack.uint8(),
+        fireRate: pack.uint8(),
+        damage: pack.uint8(),
+        speed: pack.uint8(),
+        splashRadius: pack.uint8(),
+    }),
+    pack: (t) => t.stats.levels,
+    unpack: (v, t) => (t.stats.levels = v),
+    rate: 'realtime',
+});
+
+sync(WizardTrait, 'xp', {
+    schema: pack.uint32(),
+    pack: (t) => t.xp,
+    unpack: (v, t) => (t.xp = v),
+    rate: 'realtime',
+});
+
+// folded-in health pool: `current` is discrete and synced for the bar; max is
+// derived client-side from the maxHealth stat, so it isn't sent.
+sync(WizardTrait, 'current', {
+    schema: pack.float32(),
+    pack: (t) => t.current,
+    unpack: (v, t) => (t.current = v),
+    rate: 'realtime',
 });
 
 // attach a wizard's staff + hat to its rig (server-side; the cloned nodes
@@ -193,9 +230,8 @@ script(WorldTrait, 'join', (ctx) => {
         });
         attachGear(playerNode); // staff + hat onto the rig
 
-        // players are combat entities: full health + alive marker. damage,
-        // death, respawn and regen are driven by the combat systems below.
-        addTrait(playerNode, HealthTrait, { current: MAX_HEALTH, max: MAX_HEALTH });
+        // combat entity: WizardTrait already carries the health pool (current
+        // defaults to base max); the AliveTrait marker gates the combat systems.
         addTrait(playerNode, AliveTrait);
     });
 });
@@ -345,11 +381,60 @@ const PROJECTILE_SPIN_AXIS: Vec3 = [0, 0, 1]; // local forward/back (node faces 
 // node origin reset to [0,0,0] by the gear script. used to place the muzzle vfx.
 const STAFF_TIP_LOCAL: Vec3 = [0, 1.0625, 0];
 
-// health
-const MAX_HEALTH = 10;
+// ── upgradable stats (diep-style) ───────────────────────────────────
+// each stat is an integer LEVEL (0..max) carried on the wizard; the effective
+// value is derived here as base + level*perLevel. character stats apply to the
+// wizard/controller; projectile stats snapshot into each shot at fire time.
+const STAT_TABLE = {
+    regenRate: { base: 1, perLevel: 0.5, max: 8, label: 'Health Regen', color: '#dba463' },
+    maxHealth: { base: 10, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
+    damage: { base: 3, perLevel: 1, max: 8, label: 'Bullet Damage', color: '#e06e6e' },
+    speed: { base: 18, perLevel: 3, max: 8, label: 'Bullet Speed', color: '#6e9de0' },
+    splashRadius: { base: 2, perLevel: 0.5, max: 8, label: 'Splash', color: '#e0d56e' },
+    fireRate: { base: 3, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
+    moveSpeed: { base: 4.317, perLevel: 0.4, max: 8, label: 'Movement Speed', color: '#6ee0d5' },
+} as const;
+type StatKey = keyof typeof STAT_TABLE;
+const STAT_KEYS = Object.keys(STAT_TABLE) as StatKey[];
+type StatLevels = Record<StatKey, number>;
+
+// effective value of a stat at a given level.
+const lvlValue = (key: StatKey, level: number): number => STAT_TABLE[key].base + level * STAT_TABLE[key].perLevel;
+// derived effective values used at the call sites.
+const maxHealthOf = (levels: StatLevels): number => lvlValue('maxHealth', levels.maxHealth);
+const fireIntervalOf = (levels: StatLevels): number => 1 / lvlValue('fireRate', levels.fireRate);
+const TERRAIN_RADIUS = 1; // m — terrain carve radius (fixed, not a stat yet)
+const projectileStatsOf = (levels: StatLevels): ProjectileStats => ({
+    speed: lvlValue('speed', levels.speed),
+    damage: lvlValue('damage', levels.damage),
+    damageRadius: lvlValue('splashRadius', levels.splashRadius),
+    terrainDamageRadius: TERRAIN_RADIUS,
+});
+
+// ── xp / levels ─────────────────────────────────────────────────────
+// xp accrues from orbs; each level grants one upgrade point. quadratic curve:
+// reaching level L needs XP_PER_LEVEL * L^2 total xp, so each level costs more.
+const XP_PER_LEVEL = 12;
+const levelForXp = (xp: number): number => Math.floor(Math.sqrt(xp / XP_PER_LEVEL));
+const xpForLevel = (lvl: number): number => XP_PER_LEVEL * lvl * lvl; // inverse — xp at the start of `lvl`
+const sumLevels = (levels: StatLevels): number => STAT_KEYS.reduce((n, k) => n + levels[k], 0);
+// upgrade points still to spend = levels earned − levels allocated.
+const availablePoints = (xp: number, levels: StatLevels): number => levelForXp(xp) - sumLevels(levels);
+
+// ── health timing ───────────────────────────────────────────────────
 const REGEN_DELAY = 3; // s without damage before health regenerates
-const REGEN_RATE = 1; // hp/s
 const RESPAWN_DELAY = 3; // s after death before respawn
+
+// ── xp orbs (slither-style litter + death drops) ────────────────────
+const ORB_AMOUNT = 6; // xp per orb
+const ORB_TARGET = 40; // litter orbs kept scattered around the arena
+const ORB_RESPAWN_INTERVAL = 0.5; // s between litter top-ups
+const ORB_GRAB_RADIUS = 1.1; // m — an alive wizard within this collects an orb
+const ORB_SPAWN_AREA = 28; // m — half-extent of the square litter region around spawn
+const ORB_DROP_KEEP = 0.25; // fraction of xp the dead wizard keeps on respawn
+const ORB_DROP_SCATTER = 0.5; // fraction dropped as orbs (the rest is lost)
+const ORB_DROP_SPREAD = 3; // m — scatter radius for death-drop orbs
+const ORB_DROP_MIN = 3; // orbs — every kill scatters at least this many, so low-xp/NPC kills still pay out
 
 // falling hat — scripted pendulum sway-fall on death (faithful to wizard-game).
 // outlives the respawn so you come back hatted while the old one settles.
@@ -432,34 +517,19 @@ sync(ProjectileTrait, 'stats', {
     rate: 'dirty',
 });
 
-// combat state. damage/death/respawn logic + its event vfx are server-driven
-// and broadcast as messages; `current` / `max` are synced so clients can show
-// a health bar. `lastDamageTime` / `lastAttacker` stay server-only.
-const HealthTrait = trait('health', {
-    current: MAX_HEALTH,
-    max: MAX_HEALTH,
-    lastDamageTime: -999,
-    lastAttacker: -1,
-});
-
-// separate slices so a `current` change (every damage/regen tick) doesn't
-// re-send the rarely-changing `max`. 'realtime' emits on byte-change.
-sync(HealthTrait, 'current', {
-    schema: pack.float32(),
-    pack: (t) => t.current,
-    unpack: (v, t) => (t.current = v),
-    rate: 'realtime',
-});
-
-sync(HealthTrait, 'max', {
-    schema: pack.float32(),
-    pack: (t) => t.max,
-    unpack: (v, t) => (t.max = v),
-    rate: 'realtime',
+// xp pickup. `amount` synced (dirty) so the orb node replicates to clients,
+// which decorate it with a billboard sprite (SpriteTrait isn't itself synced).
+const XpOrbTrait = trait('xp-orb', { amount: ORB_AMOUNT });
+sync(XpOrbTrait, 'amount', {
+    schema: pack.uint16(),
+    pack: (t) => t.amount,
+    unpack: (v, t) => (t.amount = v),
+    rate: 'dirty',
 });
 
 // marker: present iff the entity is alive. removed on death, re-added on
-// respawn. the health/damage systems only touch entities that have it.
+// respawn. the combat systems only touch entities that have it. (health itself
+// folded onto WizardTrait — every combatant is a wizard.)
 const AliveTrait = trait('alive');
 
 // marker + respawn home for non-player targets.
@@ -474,14 +544,92 @@ const NpcTrait = trait('npc', {
 const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), fizzle: pack.boolean() }));
 const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32() }));
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
+// client → server: spend an upgrade point on the stat at index `stat` (into STAT_KEYS).
+const UpgradeStat = command('wizards.upgrade', CLIENT_TO_SERVER, pack.object({ stat: pack.uint8() }));
 
 // ── particle types (client vfx) ─────────────────────────────────────
-// single fixed look for now (starter sprites, self-lit). per-element
-// colors arrive with the elements layer.
+// deliberately low-detail: instead of the starter pack's 8–16px pixel-art
+// sprites we bake flat white squares procedurally (no art assets). tiny so
+// the fx read as chunky pixels rather than soft puffs, white so a future
+// elements layer can tint them per cast.
+const whiteSprite = (id: string, size: [number, number]) =>
+    sprite(id, {
+        src: draw(
+            (ctx) => {
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, size[0], size[1]);
+            },
+            { size },
+        ),
+        mipmap: false, // crisp pixels, no mushy mip blur
+    });
 
-const TrailFx = particlePresets.smoke('wizards:trail', { sprite: sprites.smoke });
-const ImpactFx = particlePresets.spark('wizards:impact', { sprite: sprites.dust });
-const DeathFx = particlePresets.smoke('wizards:death', { sprite: sprites.smoke });
+// 1×1 smoke puff for death; 3×3 for the chunkier cast/impact spark.
+const SmokeSprite = whiteSprite('wizards:smoke', [1, 1]);
+const SparkSprite = whiteSprite('wizards:spark', [3, 3]);
+
+// 2×2 trail variants: each is a different filled/empty pixel pattern, not
+// just a size. pixel index k → (x = k&1, y = k>>1), so bit k of `mask` sets
+// that cell. the trail picks among them deterministically per particle for
+// a bit of chunky variety without any single-frame flicker.
+const pattern2x2 = (id: string, mask: number) =>
+    sprite(id, {
+        src: draw(
+            (ctx, _inputs, { mask }) => {
+                ctx.fillStyle = '#fff';
+                for (let k = 0; k < 4; k++) {
+                    if (mask & (1 << k)) ctx.fillRect(k & 1, k >> 1, 1, 1);
+                }
+            },
+            { size: [2, 2], params: { mask } }, // mask in params → re-bakes when edited
+        ),
+        mipmap: false,
+    });
+
+// a few patterns to try: single corner, the two diagonals, a triple. tweak
+// this list to taste — index order doesn't matter, the pick is hashed.
+const TRAIL_MASKS = [
+    0b0001, // ▘ top-left
+    0b1001, // ◣ main diagonal
+    0b0110, // ◢ anti-diagonal
+    0b0111, // ◳ triple
+];
+const TrailVariants = TRAIL_MASKS.map((mask, i) =>
+    particlePresets.smoke(`wizards:trail-${i}`, { sprite: pattern2x2(`wizards:trail-px-${i}`, mask) }),
+);
+
+const ImpactFx = particlePresets.spark('wizards:impact', { sprite: SparkSprite });
+const DeathFx = particlePresets.smoke('wizards:death', { sprite: SmokeSprite });
+
+// small deterministic 32-bit hash (two ints in) — drives the trail variant
+// pick + scatter + per-particle seed so trails are reproducible, no Math.random.
+function hash32(a: number, b: number): number {
+    let x = (Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 1, 0xc2b2ae35)) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 0x2c1b3c6d) >>> 0;
+    x = Math.imul(x ^ (x >>> 13), 0x297a2d39) >>> 0;
+    return (x ^ (x >>> 16)) >>> 0;
+}
+// hash → float in [-0.5, 0.5), re-hashed per component `k`.
+const hashUnit = (h: number, k: number) => (hash32(h, k) >>> 8) / 0x100_0000 - 0.5;
+
+// xp orb — a small two-tone green diamond, billboarded on the client.
+const XpOrbSprite = sprite('wizards:xp-orb', {
+    src: draw(
+        (ctx, _inputs, { n }) => {
+            const c = (n - 1) / 2;
+            for (let y = 0; y < n; y++) {
+                for (let x = 0; x < n; x++) {
+                    const d = Math.abs(x - c) + Math.abs(y - c);
+                    if (d > c) continue;
+                    ctx.fillStyle = d <= c - 2 ? '#bcff7a' : '#5fd33a'; // light core, green rim
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+        },
+        { size: [7, 7], params: { n: 7 } },
+    ),
+    mipmap: false,
+});
 
 // ── server: spawn + simulate projectiles ────────────────────────────
 
@@ -508,6 +656,20 @@ function spawnProjectile(sceneRoot: Node, ownerNode: Node, origin: Vec3, aim: Qu
     addChild(node, visual);
 
     addChild(sceneRoot, node);
+}
+
+// reusable result for the orb ground-placement raycast.
+const _orbRay = createVoxelRaycastResult();
+// drop an xp orb onto the ground under (x, z): a downward voxel raycast finds the
+// surface and the orb sits just above it. server-spawned — the node replicates
+// and the client decorates it with the sprite (see the `xp` script).
+function spawnOrb(ctx: ScriptContext, x: number, z: number, amount: number): void {
+    raycastVoxels(_orbRay, ctx.voxels, ctx.voxels.registry, x, 64, z, 0, -1, 0, 80, 0);
+    const y = _orbRay.hit ? _orbRay.py + 0.4 : 2;
+    const node = createNode({ name: 'xp-orb' });
+    setPosition(addTrait(node, TransformTrait), [x, y, z]);
+    addTrait(node, XpOrbTrait, { amount });
+    addChild(ctx.node, node);
 }
 
 // world-space forward unit vector from a CharacterController look spherical
@@ -556,7 +718,7 @@ script(WorldTrait, 'combat-cast', (ctx) => {
             if (!wantsFire) return;
 
             // predict our own cadence locally for zero-latency feel.
-            if (now - predictedFireAt < 1 / selfWizard.stats.fireRate) return;
+            if (now - predictedFireAt < fireIntervalOf(selfWizard.stats.levels)) return;
             predictedFireAt = now;
             selfWizard.lastCastTime = now; // viewmodel jab
 
@@ -593,14 +755,15 @@ script(WorldTrait, 'combat-cast', (ctx) => {
             const now = ctx.clock.time;
             for (const [wizard, controller, , transform] of wizards) {
                 if (!wizard.casting) continue;
-                if (now - wizard.lastFireTime < 1 / wizard.stats.fireRate) continue;
+                if (now - wizard.lastFireTime < fireIntervalOf(wizard.stats.levels)) continue;
                 wizard.lastFireTime = now;
 
                 const dir = lookDirection(controller.input.look, _fireDir);
                 const aim = quat.rotationTo(quat.create(), [0, 0, -1], dir);
                 const p = getWorldPosition(transform);
                 const origin: Vec3 = [p[0] + dir[0] * 1.2, p[1] + EYE_HEIGHT + dir[1] * 1.2, p[2] + dir[2] * 1.2];
-                spawnProjectile(ctx.node, wizard._node, origin, aim, now, DEFAULT_PROJECTILE_STATS);
+                // snapshot the wizard's current projectile stats into the shot.
+                spawnProjectile(ctx.node, wizard._node, origin, aim, now, projectileStatsOf(wizard.stats.levels));
             }
         });
     }
@@ -610,7 +773,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
     if (!env.server) return;
 
     const projectiles = query(ctx, [ProjectileTrait, TransformTrait]);
-    const targets = query(ctx, [HealthTrait, AliveTrait, TransformTrait]);
+    const targets = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
 
     // reusable crashcat ray-query state.
     const rayCollector = createClosestCastRayCollector();
@@ -636,7 +799,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             }
         }
 
-        for (const [health, , transform] of targets) {
+        for (const [wiz, , transform] of targets) {
             if (transform._node.id === ownerId) continue; // no self-damage
             const wp = getWorldPosition(transform);
             const tx = wp[0];
@@ -647,9 +810,9 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             const ez = pos[2] - tz;
             if (ex * ex + ey * ey + ez * ez > stats.damageRadius * stats.damageRadius) continue;
 
-            health.current = Math.max(0, health.current - stats.damage);
-            health.lastDamageTime = ctx.clock.time;
-            health.lastAttacker = ownerId;
+            wiz.current = Math.max(0, wiz.current - stats.damage);
+            wiz.lastDamageTime = ctx.clock.time;
+            wiz.lastAttacker = ownerId;
             broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage });
         }
 
@@ -714,7 +877,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
 script(WorldTrait, 'combat-health', (ctx) => {
     if (!env.server) return;
 
-    const alive = query(ctx, [HealthTrait, AliveTrait, TransformTrait]);
+    const alive = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
     const combatants = query(ctx, [WizardTrait]); // every scoreable entity (players + npcs)
     const respawns: Array<{ node: Node; at: number; pos: Vec3 }> = [];
 
@@ -722,14 +885,23 @@ script(WorldTrait, 'combat-health', (ctx) => {
         const now = ctx.clock.time;
         const deaths: Array<{ node: Node; pos: Vec3; attacker: number }> = [];
 
-        for (const [health, , transform] of alive) {
-            if (health.current <= 0) {
+        for (const [wiz, , transform] of alive) {
+            if (wiz.current <= 0) {
                 const wp = getWorldPosition(transform);
-                deaths.push({ node: transform._node, pos: [wp[0], wp[1], wp[2]], attacker: health.lastAttacker });
+                deaths.push({ node: transform._node, pos: [wp[0], wp[1], wp[2]], attacker: wiz.lastAttacker });
                 continue;
             }
-            if (health.current < health.max && now - health.lastDamageTime >= REGEN_DELAY) {
-                health.current = Math.min(health.max, health.current + REGEN_RATE * delta);
+            const max = maxHealthOf(wiz.stats.levels);
+            if (wiz.current < max && now - wiz.lastDamageTime >= REGEN_DELAY) {
+                // accumulate at the derived regen rate, commit only whole hp so `current` stays discrete.
+                wiz.regenAccum += lvlValue('regenRate', wiz.stats.levels.regenRate) * delta;
+                if (wiz.regenAccum >= 1) {
+                    const gained = Math.floor(wiz.regenAccum);
+                    wiz.current = Math.min(max, wiz.current + gained);
+                    wiz.regenAccum -= gained;
+                }
+            } else {
+                wiz.regenAccum = 0; // drop partial progress while damaged or full
             }
         }
 
@@ -741,6 +913,21 @@ script(WorldTrait, 'combat-health', (ctx) => {
             // not self/terrain) a kill. `attacker` is the last node to damage them.
             const victim = getTrait(d.node, WizardTrait);
             if (victim) victim.deaths++;
+
+            // diep-style re-spec on death: scatter a chunk of xp as orbs near the
+            // corpse, keep a slice for the respawn, lose the rest, and reset all
+            // stat allocations to 0 so the wizard re-spends from scratch.
+            if (victim) {
+                const dropCount = Math.max(ORB_DROP_MIN, Math.floor((victim.xp * ORB_DROP_SCATTER) / ORB_AMOUNT));
+                for (let n = 0; n < dropCount; n++) {
+                    const ox = d.pos[0] + (Math.random() - 0.5) * 2 * ORB_DROP_SPREAD;
+                    const oz = d.pos[2] + (Math.random() - 0.5) * 2 * ORB_DROP_SPREAD;
+                    spawnOrb(ctx, ox, oz, ORB_AMOUNT);
+                }
+                victim.xp = Math.floor(victim.xp * ORB_DROP_KEEP);
+                for (const k of STAT_KEYS) victim.stats.levels[k] = 0;
+            }
+
             let killerName = '';
             if (d.attacker >= 0 && d.attacker !== d.node.id) {
                 for (const [w] of combatants) {
@@ -768,12 +955,13 @@ script(WorldTrait, 'combat-health', (ctx) => {
         for (let i = respawns.length - 1; i >= 0; i--) {
             if (now < respawns[i]!.at) continue;
             const r = respawns.splice(i, 1)[0]!;
-            const health = getTrait(r.node, HealthTrait);
+            const wiz = getTrait(r.node, WizardTrait);
             const transform = getTrait(r.node, TransformTrait);
-            if (!health || !transform) continue; // node went away
-            health.current = health.max;
-            health.lastDamageTime = now;
-            health.lastAttacker = -1;
+            if (!wiz || !transform) continue; // node went away
+            wiz.current = maxHealthOf(wiz.stats.levels); // base max (levels reset on death)
+            wiz.regenAccum = 0;
+            wiz.lastDamageTime = now;
+            wiz.lastAttacker = -1;
             setPosition(transform, r.pos);
             // re-add the character-controller first (it inits its body at the
             // freshly-set spawn position), then the player-controller (which
@@ -783,6 +971,111 @@ script(WorldTrait, 'combat-health', (ctx) => {
             if (getTrait(r.node, PlayerTrait)) addTrait(r.node, PlayerControllerTrait);
         }
     });
+});
+
+// ── server: stat upgrades ───────────────────────────────────────────
+// spend an earned point (level − allocated) on a stat. character stats apply
+// immediately; projectile / fire-rate / regen read their level at use.
+
+script(WorldTrait, 'upgrades', (ctx) => {
+    if (!env.server) return;
+    const players = query(ctx, [PlayerTrait, WizardTrait]);
+
+    listen(ctx, UpgradeStat, ({ stat }, from) => {
+        const key = STAT_KEYS[stat];
+        if (!key) return;
+        for (const [player, wiz] of players) {
+            if (player.client !== from) continue;
+            const levels = wiz.stats.levels;
+            if (availablePoints(wiz.xp, levels) <= 0) return; // no points to spend
+            if (levels[key] >= STAT_TABLE[key].max) return; // capped
+
+            const beforeMax = maxHealthOf(levels);
+            levels[key]++;
+            if (key === 'maxHealth') wiz.current += maxHealthOf(levels) - beforeMax; // grant the new hp
+            if (key === 'moveSpeed') {
+                const cc = getTrait(wiz._node, CharacterControllerTrait);
+                if (cc) cc.config.walkSpeed = lvlValue('moveSpeed', levels.moveSpeed);
+            }
+            return;
+        }
+    });
+});
+
+// ── xp orbs — litter + pickup (server), sprite decorate (client) ─────
+
+script(WorldTrait, 'xp', (ctx) => {
+    if (env.server) {
+        const orbs = query(ctx, [XpOrbTrait, TransformTrait]);
+        const wizards = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
+        let topUpIn = 0;
+
+        onTick(ctx, ({ delta }) => {
+            // litter: keep ~ORB_TARGET orbs scattered, topping up on a timer.
+            topUpIn -= delta;
+            if (topUpIn <= 0) {
+                topUpIn = ORB_RESPAWN_INTERVAL;
+                if (orbs.matches.length < ORB_TARGET) {
+                    const x = PLAYER_SPAWN[0] + (Math.random() - 0.5) * 2 * ORB_SPAWN_AREA;
+                    const z = PLAYER_SPAWN[2] + (Math.random() - 0.5) * 2 * ORB_SPAWN_AREA;
+                    spawnOrb(ctx, x, z, ORB_AMOUNT);
+                }
+            }
+
+            // pickup: an alive wizard within grab radius collects the orb. resolve
+            // outside the iteration — destroying nodes mid-loop is unsafe.
+            const collected: Node[] = [];
+            for (const [orb, orbTransform] of orbs) {
+                const op = getWorldPosition(orbTransform);
+                for (const [wiz, , wizTransform] of wizards) {
+                    const wp = getWorldPosition(wizTransform);
+                    const dx = wp[0] - op[0];
+                    const dy = wp[1] - op[1];
+                    const dz = wp[2] - op[2];
+                    if (dx * dx + dy * dy + dz * dz <= ORB_GRAB_RADIUS * ORB_GRAB_RADIUS) {
+                        wiz.xp += orb.amount;
+                        collected.push(orb._node);
+                        break;
+                    }
+                }
+            }
+            for (const n of collected) destroyNode(n);
+        });
+    }
+
+    if (env.client) {
+        const orbs = query(ctx, [XpOrbTrait, TransformTrait]);
+        const BOB_FREQ = 2.5; // rad/s
+        const BOB_AMP = 0.09; // m — local vertical float
+        const PULSE_FREQ = 3.2; // rad/s — white shimmer
+
+        onFrame(ctx, () => {
+            const time = ctx.clock.time;
+            for (const [, transform] of orbs) {
+                const orbNode = transform._node;
+                // the orb node holds the authoritative (synced) position. the sprite
+                // lives on a client-only child so we can bob + pulse it locally without
+                // fighting the replicated transform. it despawns with the orb node.
+                let visual = findChildByName(orbNode, 'orb-visual');
+                if (!visual) {
+                    visual = createNode({ name: 'orb-visual' });
+                    addTrait(visual, TransformTrait);
+                    addTrait(visual, SpriteTrait, { sprite: XpOrbSprite, mode: 'billboard', width: 7, height: 7, worldScale: 1 / 20 });
+                    addChild(orbNode, visual);
+                }
+
+                const phase = orbNode.id * 1.7; // de-sync the bob/pulse between orbs
+                setPosition(getTrait(visual, TransformTrait)!, [0, Math.sin(time * BOB_FREQ + phase) * BOB_AMP, 0]);
+
+                // gentle white shimmer: mix the tint toward white + a touch of glow.
+                const pulse = Math.sin(time * PULSE_FREQ + phase) * 0.5 + 0.5; // 0..1
+                const sprite = getTrait(visual, SpriteTrait)!;
+                sprite.tint[0] = sprite.tint[1] = sprite.tint[2] = 1;
+                sprite.tint[3] = pulse * 0.25; // up to 25% toward white
+                sprite.glow = pulse * 0.3; // slight additive glow
+            }
+        });
+    }
 });
 
 // ── server: NPC dummy wizards — spawn + steering ────────────────────
@@ -826,7 +1119,7 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
     const npcs = query(ctx, [NpcTrait, CharacterControllerTrait, TransformTrait]);
     // free-for-all: any alive entity with health is a candidate target (players
     // AND other NPCs); each NPC skips itself.
-    const combatants = query(ctx, [HealthTrait, AliveTrait, TransformTrait]);
+    const combatants = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
 
     type Brain = { path: Vec3[]; waypoint: number; repathIn: number; fireWindowIn: number; firing: boolean; strafeDir: number; strafeIn: number; jumpIn: number };
     const brains = new Map<number, Brain>();
@@ -878,8 +1171,8 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
             addTrait(node, WizardTrait, { color: NPC_COLORS[i % NPC_COLORS.length], name: `Dummy ${i + 1}` });
             attachGear(node); // staff + hat onto the rig
 
-            // combat state: killable dummy that respawns at home.
-            addTrait(node, HealthTrait, { current: MAX_HEALTH, max: MAX_HEALTH });
+            // combat state: killable dummy that respawns at home. WizardTrait
+            // carries the health pool; AliveTrait marks it killable.
             addTrait(node, AliveTrait);
             addTrait(node, NpcTrait, { homeX: home[0], homeY: home[1], homeZ: home[2] });
         });
@@ -1071,20 +1364,25 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
     // position, so the rotation is smooth here, not a network round-trip), and
     // emit a trail particle from it.
     let spinAngle = 0;
+    let frameNo = 0;
     onFrame(ctx, ({ delta }) => {
+        frameNo++;
         spinAngle += delta * PROJECTILE_SPIN_SPEED;
         quat.setAxisAngle(_rotation, PROJECTILE_SPIN_AXIS, spinAngle);
         for (const [projectile, transform] of projectiles) {
             // aim (synced once) × local roll. faces travel, rolls around it.
             setQuaternion(transform, quat.multiply(_orientation, projectile.aim, _rotation));
             const p = getWorldPosition(transform);
-            spawnParticle(ctx, TrailFx, [p[0], p[1], p[2]], {
+            // one hash per projectile-frame drives the variant, scatter + seed.
+            const h = hash32(projectile._node.id, frameNo);
+            spawnParticle(ctx, TrailVariants[h % TrailVariants.length], [p[0], p[1], p[2]], {
                 lifetime: 0.35,
                 size: 0.1,
                 emissive: 1,
-                velX: (Math.random() - 0.5) * 0.6,
-                velY: (Math.random() - 0.5) * 0.6,
-                velZ: (Math.random() - 0.5) * 0.6,
+                seed: h,
+                velX: hashUnit(h, 1) * 0.6,
+                velY: hashUnit(h, 2) * 0.6,
+                velZ: hashUnit(h, 3) * 0.6,
             });
         }
     });
@@ -1101,7 +1399,7 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
 script(WorldTrait, 'wizard-visuals', (ctx) => {
     if (!env.client) return;
 
-    const wizards = query(ctx, [WizardTrait, HealthTrait, TransformTrait]);
+    const wizards = query(ctx, [WizardTrait, TransformTrait]);
 
     const armRaiseAngle = degreesToRadians(80); // arm_right local X — staff lifts toward the aim at full raise
     const raiseEaseRate = 8; // 1/s — arm eases up while casting / down when it stops
@@ -1153,7 +1451,7 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
     onFrame(ctx, ({ delta }) => {
         const now = ctx.clock.time;
 
-        for (const [wizard, health, transform] of wizards) {
+        for (const [wizard, transform] of wizards) {
             const node = transform._node;
 
             // tint the hat to the wizard's colour once it appears.
@@ -1165,17 +1463,17 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
                 });
             }
 
-            const dead = health.current <= 0;
+            const dead = wizard.current <= 0;
             let s = state.get(node.id);
             if (!s) {
-                s = { dither: 0, dead: false, flash: 0, prevHealth: health.current };
+                s = { dither: 0, dead: false, flash: 0, prevHealth: wizard.current };
                 state.set(node.id, s);
             }
 
             // damage flash: start at 1 on any health drop, decay to 0 over the
             // duration. red tint + glow on the body only.
-            if (health.current < s.prevHealth) s.flash = 1;
-            s.prevHealth = health.current;
+            if (wizard.current < s.prevHealth) s.flash = 1;
+            s.prevHealth = wizard.current;
             if (s.flash > 0) {
                 s.flash = Math.max(0, s.flash - delta / DAMAGE_FLASH_DURATION);
                 flashBody(node, s.flash); // applies 0 on the last step → resets the body
@@ -1234,10 +1532,29 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
 });
 
 // ── client: HUD ─────────────────────────────────────────────────────
-// screen-space DOM into the viewport: a health bar (bottom-centre) from the
-// local player's synced HealthTrait, and a top-right scoreboard of every
-// combatant (players AND npcs) from the synced WizardTrait name/kills/deaths.
-// both diff-gated — the DOM is only touched when its rendered values change.
+// screen-space DOM into the viewport, all driven by the local player's synced
+// WizardTrait: a health bar (bottom-centre), a top-left upgrade panel (xp/level
+// /points + a tappable + per stat, plus number-key shortcuts), and a top-right
+// scoreboard of every combatant. each section is diff-gated — the DOM is only
+// touched when its rendered values change.
+
+// hand-authored 7×6 pixel-art heart (self-made → no asset/licensing). rendered as
+// inline SVG so it stays crisp at any HUD size and recolours for filled/empty.
+const HEART_PX = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+const heartSvg = (color: string): string => {
+    let rects = '';
+    for (let y = 0; y < HEART_PX.length; y++) {
+        const row = HEART_PX[y]!;
+        for (let x = 0; x < row.length; x++) {
+            if (row[x] === 'X') rects += `<rect x="${x}" y="${y}" width="1" height="1"/>`;
+        }
+    }
+    return `<svg viewBox="0 0 7 6" width="100%" height="100%" fill="${color}" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
+};
+const HEART_EMPTY_SVG = heartSvg('#2b2b2b');
+const HEART_FULL_SVG = heartSvg('#e8324a');
+const HEART_W = 24; // px — slot width (7:6 aspect → ~20px tall)
+const HEART_H = 20;
 
 script(WorldTrait, 'hud', (ctx) => {
     if (!env.client) return;
@@ -1246,16 +1563,21 @@ script(WorldTrait, 'hud', (ctx) => {
 
     const wizards = query(ctx, [WizardTrait]);
 
-    // health bar (bottom-centre)
-    const bar = document.createElement('div');
-    bar.style.cssText =
-        'position:absolute; left:50%; bottom:24px; transform:translateX(-50%); width:220px; height:18px; border:2px solid #000; background:#fff; box-sizing:border-box; font-family:ui-monospace,monospace;';
-    const fill = document.createElement('div');
-    fill.style.cssText = 'height:100%; width:100%;';
-    const label = document.createElement('div');
-    label.style.cssText =
-        'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; color:#000; pointer-events:none;';
-    bar.append(fill, label);
+    // bottom-centre: a row of hearts (each = 2 hp, half-heart granularity) over
+    // an xp-to-next-level bar.
+    const bottom = document.createElement('div');
+    bottom.style.cssText =
+        'position:absolute; left:50%; bottom:24px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; font-family:ui-monospace,monospace; pointer-events:none;';
+    const hearts = document.createElement('div');
+    hearts.style.cssText = 'display:flex; gap:2px;';
+    const xpWrap = document.createElement('div');
+    xpWrap.style.cssText = 'position:relative; width:320px; height:22px; border:2px solid #000; background:#fff; box-sizing:border-box;';
+    const xpFill = document.createElement('div');
+    xpFill.style.cssText = 'height:100%; width:0%; background:#5fd33a;';
+    const xpLabel = document.createElement('div');
+    xpLabel.style.cssText = 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; color:#000;';
+    xpWrap.append(xpFill, xpLabel);
+    bottom.append(hearts, xpWrap);
 
     // leaderboard (top-right)
     const board = document.createElement('div');
@@ -1265,29 +1587,130 @@ script(WorldTrait, 'hud', (ctx) => {
     header.textContent = 'SCORES';
     header.style.cssText = 'padding:3px 8px; border-bottom:2px solid #000; font-weight:bold;';
 
-    onInit(ctx, () => viewport.append(bar, board));
+    // upgrade panel (top-left): each stat row has a tappable + button (works on
+    // touch too); number keys 1–N are a desktop shortcut for the same command.
+    const OUTLINE = 'text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;';
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:absolute; top:12px; left:12px; width:240px; display:flex; flex-direction:column; gap:6px; font-family:ui-monospace,monospace;';
+    const panelHeader = document.createElement('div');
+    panelHeader.style.cssText = `align-self:center; font-weight:bold; font-size:12px; color:#fff; pointer-events:none; ${OUTLINE}`;
+    panel.append(panelHeader);
+    const rowEls = STAT_KEYS.map((key, i) => {
+        const color = STAT_TABLE[key].color;
+        // dark rounded pill: a colour fill grows with the stat's level behind a
+        // bold outlined label; a [N] keytag and a colour-matched + button at the right.
+        const pill = document.createElement('div');
+        pill.style.cssText = 'position:relative; display:flex; align-items:center; height:28px; border-radius:14px; background:#383838; overflow:hidden; padding-right:3px;';
+        const fill = document.createElement('div');
+        fill.style.cssText = `position:absolute; left:0; top:0; bottom:0; width:0%; background:${color}; opacity:0.55;`;
+        const name = document.createElement('span');
+        name.textContent = STAT_TABLE[key].label;
+        name.style.cssText = `position:relative; flex:1; text-align:center; padding-left:12px; font-weight:bold; font-size:13px; color:#fff; white-space:nowrap; pointer-events:none; ${OUTLINE}`;
+        const keyTag = document.createElement('span');
+        keyTag.textContent = `[${i + 1}]`;
+        keyTag.style.cssText = `position:relative; margin:0 6px; font-size:11px; color:#fff; pointer-events:none; ${OUTLINE}`;
+        const btn = document.createElement('button');
+        btn.textContent = '+';
+        btn.style.cssText = `position:relative; flex:none; width:30px; height:22px; border:none; border-radius:8px; background:${color}; color:#1c1c1c; font-weight:bold; font-size:17px; line-height:1; padding:0; cursor:pointer;`;
+        btn.onclick = () => send(ctx, UpgradeStat, { stat: i });
+        pill.append(fill, name, keyTag, btn);
+        panel.append(pill);
+        return { fill, btn };
+    });
+
+    // number keys 1..N → upgrade the matching stat.
+    const onKey = (e: KeyboardEvent) => {
+        const n = parseInt(e.key, 10);
+        if (n >= 1 && n <= STAT_KEYS.length) send(ctx, UpgradeStat, { stat: n - 1 });
+    };
+
+    onInit(ctx, () => {
+        viewport.append(bottom, board, panel);
+        window.addEventListener('keydown', onKey);
+    });
     onDispose(ctx, () => {
-        bar.remove();
+        bottom.remove();
         board.remove();
+        panel.remove();
+        window.removeEventListener('keydown', onKey);
     });
 
     let healthSig = ''; // each section only touches the DOM when its values change
     let boardSig = '';
+    let panelSig = '';
+    let xpSig = '';
     onFrame(ctx, () => {
-        // health bar — local player's synced health.
+        // local player's wizard drives the health bar + upgrade panel.
         const controlNode = getControlNode(ctx);
-        const health = controlNode && getTrait(controlNode, HealthTrait);
-        const hSig = health ? `${health.current}/${health.max}` : '';
+        const wiz = controlNode && getTrait(controlNode, WizardTrait);
+
+        // hearts — each slot is 2 hp, so half-hearts show odd values.
+        const max = wiz ? maxHealthOf(wiz.stats.levels) : 0;
+        const hSig = wiz ? `${wiz.current}/${max}` : '';
         if (hSig !== healthSig) {
             healthSig = hSig;
-            if (!health) {
-                bar.style.display = 'none';
+            if (!wiz) {
+                bottom.style.display = 'none';
             } else {
-                bar.style.display = '';
-                const pct = Math.max(0, Math.min(1, health.current / health.max));
-                fill.style.width = `${pct * 100}%`;
-                fill.style.background = pct > 0.5 ? '#22c55e' : pct > 0.25 ? '#eab308' : '#dc2626';
-                label.textContent = `${Math.ceil(health.current)} / ${health.max}`;
+                bottom.style.display = 'flex'; // restore flex (not '', which reverts to block)
+                const slots = Math.ceil(max / 2);
+                hearts.replaceChildren(
+                    ...Array.from({ length: slots }, (_, i) => {
+                        const hp = wiz.current - i * 2; // 2 = full, 1 = half, ≤0 = empty
+                        // dark heart base + a red heart clipped to the filled width
+                        // (full / half), with a crisp black outline for contrast.
+                        const slot = document.createElement('div');
+                        slot.style.cssText = `position:relative; width:${HEART_W}px; height:${HEART_H}px; filter:drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000);`;
+                        slot.innerHTML = HEART_EMPTY_SVG;
+                        const fillW = hp >= 2 ? 100 : hp === 1 ? 50 : 0;
+                        if (fillW > 0) {
+                            const clip = document.createElement('div');
+                            clip.style.cssText = `position:absolute; left:0; top:0; height:100%; width:${fillW}%; overflow:hidden;`;
+                            const full = document.createElement('div');
+                            full.style.cssText = `width:${HEART_W}px; height:${HEART_H}px;`;
+                            full.innerHTML = HEART_FULL_SVG;
+                            clip.append(full);
+                            slot.append(clip);
+                        }
+                        return slot;
+                    }),
+                );
+            }
+        }
+
+        // xp bar — progress through the current level.
+        const xSig = wiz ? `${wiz.xp}` : '';
+        if (xSig !== xpSig) {
+            xpSig = xSig;
+            if (wiz) {
+                const lvl = levelForXp(wiz.xp);
+                const cur = xpForLevel(lvl);
+                const next = xpForLevel(lvl + 1);
+                const prog = next > cur ? (wiz.xp - cur) / (next - cur) : 0;
+                xpFill.style.width = `${Math.max(0, Math.min(1, prog)) * 100}%`;
+                xpLabel.textContent = `LVL ${lvl}`;
+            }
+        }
+
+        // upgrade panel — level, points remaining, per-stat level/max + buttons.
+        const lvls = wiz ? wiz.stats.levels : null;
+        const pSig = wiz && lvls ? `${levelForXp(wiz.xp)}:${availablePoints(wiz.xp, lvls)}:${STAT_KEYS.map((k) => lvls[k]).join('')}` : '';
+        if (pSig !== panelSig) {
+            panelSig = pSig;
+            if (!wiz || !lvls) {
+                panel.style.display = 'none';
+            } else {
+                panel.style.display = 'flex'; // restore flex (not '', which reverts to block)
+                const pts = availablePoints(wiz.xp, lvls);
+                panelHeader.textContent = pts > 0 ? `${pts} point${pts === 1 ? '' : 's'} to spend` : '';
+                STAT_KEYS.forEach((k, i) => {
+                    const statMax = STAT_TABLE[k].max;
+                    rowEls[i]!.fill.style.width = `${(lvls[k] / statMax) * 100}%`;
+                    const canUp = pts > 0 && lvls[k] < statMax;
+                    rowEls[i]!.btn.disabled = !canUp;
+                    rowEls[i]!.btn.style.opacity = canUp ? '1' : '0.35';
+                    rowEls[i]!.btn.style.cursor = canUp ? 'pointer' : 'default';
+                });
             }
         }
 

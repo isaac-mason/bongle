@@ -317,6 +317,32 @@ function collideDestroy(pool: ParticlePool, i: number, _dt: number, voxels: Voxe
     pool.expiresAt[i] = 0;
 }
 
+/* ── tint primitives ── */
+
+// the `(pool, i, dt, voxels)` signature carries no `now`, so these decay
+// toward the target at a per-second `rate` (dt-correct, unlike `drag`'s
+// per-frame multiplier) rather than keying off lifetime fraction. to
+// reach the target exactly at death, pass `rate = 1 / lifetime`. for
+// anything fancier (pulsing, color ramps) mutate `pool.tintR/G/B/A[i]`
+// directly from a custom update fn.
+
+/** linearly fade the RGB tint toward black at `rate` units/s, clamped at
+ *  0. alpha untouched. pairs with a `lifetime` spawn opt: `rate =
+ *  1 / lifetime` reaches black at death. */
+function fadeRgb(pool: ParticlePool, i: number, dt: number, rate: number): void {
+    const d = rate * dt;
+    pool.tintR[i] = Math.max(0, pool.tintR[i]! - d);
+    pool.tintG[i] = Math.max(0, pool.tintG[i]! - d);
+    pool.tintB[i] = Math.max(0, pool.tintB[i]! - d);
+}
+
+/** linearly fade the alpha tint toward transparent at `rate` units/s,
+ *  clamped at 0. RGB untouched. `rate = 1 / lifetime` reaches fully
+ *  transparent at death. */
+function fadeAlpha(pool: ParticlePool, i: number, dt: number, rate: number): void {
+    pool.tintA[i] = Math.max(0, pool.tintA[i]! - rate * dt);
+}
+
 /* ── curated complete update fns ── */
 
 /** drift + drag, falls under gravity, slides along geometry. */
@@ -370,6 +396,8 @@ export const particleUpdate = {
     collideLand,
     collideBounce,
     collideDestroy,
+    fadeRgb,
+    fadeAlpha,
 
     dust,
     smoke,

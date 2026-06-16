@@ -48,8 +48,10 @@ export const SpriteTrait = trait('sprite', {
      *  loops forever; no playback enum (see file header). */
     fps: 8,
 
-    /** per-instance multiply tint. default [1,1,1,1] = no tint. */
-    tint: [1, 1, 1, 1] as Vec4,
+    /** per-instance tint [r, g, b, a]: the shader mixes the albedo toward `rgb`
+     *  by `a` (mesh-style), so `a = 0` means no tint regardless of rgb. default
+     *  [0,0,0,0] = untinted — leaves the sprite's own texture colour. client-only. */
+    tint: [0, 0, 0, 0] as Vec4,
 
     /**
      * voxel-light contribution [sky, r, g, b], each 0-1. client-only.

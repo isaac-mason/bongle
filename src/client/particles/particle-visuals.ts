@@ -137,7 +137,11 @@ export function update(visuals: ParticleVisuals, pool: ParticlePool, voxels: Vox
     const posY = pool.posY;
     const posZ = pool.posZ;
     const size = pool.size;
-    const emissive = pool.emissive;
+    const glow = pool.glow;
+    const tintR = pool.tintR;
+    const tintG = pool.tintG;
+    const tintB = pool.tintB;
+    const tintA = pool.tintA;
     const spawnTime = pool.spawnTime;
     const expiresAt = pool.expiresAt;
 
@@ -162,8 +166,11 @@ export function update(visuals: ParticleVisuals, pool: ParticlePool, voxels: Vox
         poseArr[off + 3] = w;
         poseArr[off + 7] = h;
 
-        const em = emissive[i]!;
-        if (em >= 1) {
+        const glowValue = glow[i]!;
+        // glow raises the light floor to `glowValue` (see shader). at >=1
+        // the floor saturates, so the sampled voxel light is irrelevant —
+        // skip the sample.
+        if (glowValue >= 1) {
             _light[0] = 0; _light[1] = 0; _light[2] = 0; _light[3] = 0;
         } else {
             sampleVoxelLight(voxels, posX[i]!, posY[i]!, posZ[i]!, _light);
@@ -171,9 +178,9 @@ export function update(visuals: ParticleVisuals, pool: ParticlePool, voxels: Vox
 
         packTo(InstanceMaterial, matArr, i * INSTANCE_MATERIAL_STRIDE, {
             uvRect: [resolved.u, resolved.v, resolved.w, resolved.h],
-            tint: [1, 1, 1, 1],
+            tint: [tintR[i]!, tintG[i]!, tintB[i]!, tintA[i]!],
             light: [_light[0]!, _light[1]!, _light[2]!, _light[3]!],
-            emissive: em,
+            glow: glowValue,
         });
     }
 

@@ -77,7 +77,11 @@ export function init(): ParticlePool {
         spawnTime: new Float32Array(capacity),
         expiresAt: new Float32Array(capacity),
         size: new Float32Array(capacity),
-        emissive: new Float32Array(capacity),
+        glow: new Float32Array(capacity),
+        tintR: new Float32Array(capacity),
+        tintG: new Float32Array(capacity),
+        tintB: new Float32Array(capacity),
+        tintA: new Float32Array(capacity),
         seed: new Uint32Array(capacity),
     };
 }
@@ -96,9 +100,12 @@ export type SpawnOpts = {
     spawnTime?: number;
     /** explicit seed. default = random u32. */
     seed?: number;
-    /** override the handle's spawn-default emissive (0..1). 1 = self-
-     *  lit, 0 = sample world light, in-between blends. */
-    emissive?: number;
+    /** override the handle's spawn-default glow (0..1). 1 = fully lit /
+     *  shadow-free, 0 = sample world light. */
+    glow?: number;
+    /** override the handle's spawn-default RGBA tint multiplier. RGB
+     *  multiplies the shaded color, A the sprite alpha. [1,1,1,1] = none. */
+    tint?: [r: number, g: number, b: number, a: number];
 };
 
 /**
@@ -139,7 +146,12 @@ export function allocateSlot(
         ? now + opts.lifetime
         : Number.POSITIVE_INFINITY;
     pool.size[i] = opts?.size ?? 1;
-    pool.emissive[i] = opts?.emissive ?? handle.emissive;
+    pool.glow[i] = opts?.glow ?? handle.glow;
+    const tint = opts?.tint ?? handle.tint;
+    pool.tintR[i] = tint[0];
+    pool.tintG[i] = tint[1];
+    pool.tintB[i] = tint[2];
+    pool.tintA[i] = tint[3];
     pool.seed[i] = opts?.seed ?? ((Math.random() * 0x1_0000_0000) >>> 0);
 
     return i;
@@ -195,6 +207,10 @@ function swapSlot(pool: ParticlePool, a: number, b: number): void {
     pool.spawnTime[a] = pool.spawnTime[b]!;
     pool.expiresAt[a] = pool.expiresAt[b]!;
     pool.size[a] = pool.size[b]!;
-    pool.emissive[a] = pool.emissive[b]!;
+    pool.glow[a] = pool.glow[b]!;
+    pool.tintR[a] = pool.tintR[b]!;
+    pool.tintG[a] = pool.tintG[b]!;
+    pool.tintB[a] = pool.tintB[b]!;
+    pool.tintA[a] = pool.tintA[b]!;
     pool.seed[a] = pool.seed[b]!;
 }

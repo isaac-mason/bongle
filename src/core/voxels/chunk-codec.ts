@@ -1,17 +1,22 @@
 // ── chunk codec ─────────────────────────────────────────────────────
 //
 // encoding pipeline for chunk_full messages:
-//   1. interleave data + light into Uint16Array
-//   2. RLE encode the Uint16Array
-//   3. deflate compress via fflate
+//   1. RLE encode data and light as two SEPARATE Uint16 streams
+//   2. concat them under a small length header (data bytes, light bytes)
+//   3. deflate the concatenation via fflate
 //
 // decoding pipeline:
 //   1. inflate decompress
-//   2. RLE decode into Uint16Array
-//   3. de-interleave into data + light
+//   2. read the header, RLE decode each stream back into data / light
 //
-// interleaving groups correlated values together (air voxels have
-// predictable light values), giving RLE much longer runs.
+// data and light are kept as separate streams rather than interleaved:
+// interleaving alternates two unrelated value distributions, which
+// shortens every RLE run and gives deflate a noisier window. encoding
+// each channel's runs contiguously is both smaller (measured 1.4–6× on
+// structured chunks) and faster to decode (one smaller inflate, no
+// de-interleave pass). RLE before deflate still earns its keep — it
+// pre-collapses the long air/sky runs so deflate's window isn't spent on
+// them. see chunk-codec-bench.ts for the variant comparison.
 //
 // the light-only codec (encodeLight/decodeLight, used by chunk_light)
 // skips the deflate step — inflateSync was the dominant decode cost on
@@ -73,49 +78,55 @@ export function rleDecode(pairs: Uint16Array, outputLength: number): Uint16Array
     return output;
 }
 
-// ── interleave / de-interleave ──────────────────────────────────────
-
-const INTERLEAVED_LENGTH = CHUNK_VOLUME * 2;
-
-/** interleave data and light arrays into a single Uint16Array. */
-export function interleave(data: Uint16Array, light: Uint16Array): Uint16Array {
-    const out = new Uint16Array(INTERLEAVED_LENGTH);
-    for (let i = 0; i < CHUNK_VOLUME; i++) {
-        out[i * 2] = data[i]!;
-        out[i * 2 + 1] = light[i]!;
-    }
-    return out;
-}
-
-/** de-interleave into separate data and light arrays. */
-export function deinterleave(interleaved: Uint16Array): { data: Uint16Array; light: Uint16Array } {
-    const data = new Uint16Array(CHUNK_VOLUME);
-    const light = new Uint16Array(CHUNK_VOLUME);
-    for (let i = 0; i < CHUNK_VOLUME; i++) {
-        data[i] = interleaved[i * 2]!;
-        light[i] = interleaved[i * 2 + 1]!;
-    }
-    return { data, light };
-}
-
 // ── compress / decompress ───────────────────────────────────────────
+
+// 8-byte header before the two RLE streams: data byte length, light byte
+// length (both uint32 LE). data starts at offset 8, light right after.
+// both stream offsets are even (header is 8 bytes, RLE streams are an
+// even number of bytes) so decode can view them as Uint16 without a copy.
+const CHUNK_HEADER_BYTES = 8;
+
+/** view a Uint16Array's used bytes (rleEncode returns a subarray view). */
+function u16Bytes(arr: Uint16Array): Uint8Array {
+    return new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+}
+
+/** reinterpret a byte slice as Uint16. zero-copy when 2-byte aligned,
+ *  else falls back to a copied (aligned) buffer. */
+function bytesAsU16(bytes: Uint8Array): Uint16Array {
+    return (bytes.byteOffset & 1) === 0
+        ? new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >>> 1)
+        : new Uint16Array(bytes.slice().buffer);
+}
 
 /** encode a chunk's data + light into compressed bytes. */
 export function encodeChunk(data: Uint16Array, light: Uint16Array): Uint8Array {
-    const interleaved = interleave(data, light);
-    const rle = rleEncode(interleaved);
-    // view the uint16 rle result as bytes for compression
-    const bytes = new Uint8Array(rle.buffer, rle.byteOffset, rle.byteLength);
-    return deflateSync(bytes);
+    const dataBytes = u16Bytes(rleEncode(data));
+    const lightBytes = u16Bytes(rleEncode(light));
+
+    const concat = new Uint8Array(CHUNK_HEADER_BYTES + dataBytes.length + lightBytes.length);
+    const header = new DataView(concat.buffer, 0, CHUNK_HEADER_BYTES);
+    header.setUint32(0, dataBytes.length, true);
+    header.setUint32(4, lightBytes.length, true);
+    concat.set(dataBytes, CHUNK_HEADER_BYTES);
+    concat.set(lightBytes, CHUNK_HEADER_BYTES + dataBytes.length);
+
+    return deflateSync(concat);
 }
 
 /** decode compressed bytes back to data + light arrays. */
 export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light: Uint16Array } {
-    const bytes = inflateSync(compressed);
-    // view the inflated bytes as uint16 pairs
-    const rle = new Uint16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-    const interleaved = rleDecode(rle, INTERLEAVED_LENGTH);
-    return deinterleave(interleaved);
+    const raw = inflateSync(compressed);
+    const header = new DataView(raw.buffer, raw.byteOffset, CHUNK_HEADER_BYTES);
+    const dataLen = header.getUint32(0, true);
+    const lightLen = header.getUint32(4, true);
+
+    const dataStart = CHUNK_HEADER_BYTES;
+    const lightStart = dataStart + dataLen;
+    const data = rleDecode(bytesAsU16(raw.subarray(dataStart, lightStart)), CHUNK_VOLUME);
+    const light = rleDecode(bytesAsU16(raw.subarray(lightStart, lightStart + lightLen)), CHUNK_VOLUME);
+
+    return { data, light };
 }
 
 // ── light codec ─────────────────────────────────────────────────────
@@ -158,14 +169,9 @@ export function encodeLight(light: Uint16Array): { sky: Uint8Array; rgb: Uint8Ar
  *  final Uint16Array, skipping the intermediate per-channel decode buffers. */
 export function decodeLight(skyBytes: Uint8Array, rgbBytes: Uint8Array): Uint16Array {
     // wire bytes may be misaligned for a Uint16Array view if pack copied them
-    // into a fresh buffer at an odd offset. fall back to a copied alignment
-    // when needed; the common path hits the zero-copy branch.
-    const skyRle = (skyBytes.byteOffset & 1) === 0
-        ? new Uint16Array(skyBytes.buffer, skyBytes.byteOffset, skyBytes.byteLength >>> 1)
-        : new Uint16Array(skyBytes.slice().buffer);
-    const rgbRle = (rgbBytes.byteOffset & 1) === 0
-        ? new Uint16Array(rgbBytes.buffer, rgbBytes.byteOffset, rgbBytes.byteLength >>> 1)
-        : new Uint16Array(rgbBytes.slice().buffer);
+    // into a fresh buffer at an odd offset; bytesAsU16 falls back to a copy.
+    const skyRle = bytesAsU16(skyBytes);
+    const rgbRle = bytesAsU16(rgbBytes);
 
     const light = new Uint16Array(CHUNK_VOLUME);
 

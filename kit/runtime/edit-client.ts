@@ -29,10 +29,46 @@ import { env } from 'bongle';
 import { EngineClient } from 'bongle/engine-client';
 import * as EngineEditor from 'bongle/engine-editor';
 import { __kit } from 'bongle/internal';
+// Deep import: this is the editor-only entrypoint (already coupled to
+// EngineEditor), so reaching the global editor store directly is the
+// in-package convention, not a barrier crossing. The play/prod client
+// must NOT import this.
+import { useEditor } from '../../src/editor/editor-store';
 
 export type StartOptions = {
     userEntry: () => Promise<unknown>;
 };
+
+/**
+ * Order-preserving latency hold for the WS frames in/out of the editor.
+ * WS is reliable and in-order, so each frame's release time is clamped to
+ * never precede the previous one's — this simulates delay, never reordering
+ * or loss. Frames always flow through the queue; when latency sim is off the
+ * delay is 0, so they release on the next drain (and any backlog flushes in
+ * order as the configured rtt winds down).
+ */
+class DelayQueue {
+    private queue: { releaseAt: number; bytes: Uint8Array }[] = [];
+    private lastReleaseAt = 0;
+
+    enqueue(bytes: Uint8Array, now: number, delayMs: number) {
+        const releaseAt = Math.max(now + delayMs, this.lastReleaseAt);
+        this.lastReleaseAt = releaseAt;
+        this.queue.push({ releaseAt, bytes });
+    }
+
+    drain(now: number, sink: (bytes: Uint8Array) => void) {
+        while (this.queue.length > 0 && this.queue[0].releaseAt <= now) {
+            sink(this.queue.shift()!.bytes);
+        }
+    }
+}
+
+/** Per-direction hold in ms — half the configured round-trip, or 0 when off. */
+function simHalfRttMs(): number {
+    const s = useEditor.getState();
+    return s.netSimEnabled ? s.netSimRttMs / 2 : 0;
+}
 
 export async function start(opts: StartOptions) {
     env.client = true;
@@ -112,20 +148,28 @@ export async function start(opts: StartOptions) {
     const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/game';
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
+    // server→client (inbound) and client→server (outbound) hold queues, used
+    // by the latency simulator. Held inbound frames are released into the
+    // engine inbox at the top of the frame, before update(); held outbound
+    // frames are released onto the socket after update().
+    const inbound = new DelayQueue();
+    const outbound = new DelayQueue();
     ws.onmessage = (ev) => {
         if (typeof ev.data === 'string') return;
-        state.net.inbox.push(new Uint8Array(ev.data as ArrayBuffer));
+        inbound.enqueue(new Uint8Array(ev.data as ArrayBuffer), performance.now(), simHalfRttMs());
     };
 
     let last = performance.now();
     const frame = (now: number) => {
         const dt = (now - last) / 1000;
         last = now;
+        inbound.drain(now, (bytes) => state.net.inbox.push(bytes));
         EngineClient.update(state, dt);
-        for (const msg of state.net.outbox) {
-            if (ws.readyState === WebSocket.OPEN) ws.send(msg);
-        }
+        for (const msg of state.net.outbox) outbound.enqueue(msg, now, simHalfRttMs());
         state.net.outbox.length = 0;
+        outbound.drain(now, (bytes) => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(bytes);
+        });
         requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

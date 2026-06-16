@@ -184,9 +184,10 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                             style={{ width: 'var(--anchor-width)' }}
                         >
                             {suggestions.map((sug, i) => (
-                                <div
+                                <button
+                                    type="button"
                                     key={`${sug.text}-${i}`}
-                                    className={`flex items-baseline justify-between px-1.5 py-0.5 cursor-pointer ${
+                                    className={`w-full flex items-baseline justify-between text-left px-1.5 py-0.5 cursor-pointer ${
                                         i === selectedIndex
                                             ? 'bg-neutral-700 text-white'
                                             : 'text-neutral-300 hover:bg-neutral-800'
@@ -208,7 +209,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                             {sug.detail}
                                         </span>
                                     )}
-                                </div>
+                                </button>
                             ))}
                         </Popover.Popup>
                     </Popover.Positioner>

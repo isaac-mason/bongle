@@ -3,8 +3,6 @@ import { CHUNK_VOLUME } from './voxels';
 import {
     rleEncode,
     rleDecode,
-    interleave,
-    deinterleave,
     encodeChunk,
     decodeChunk,
     encodeLight,
@@ -99,34 +97,6 @@ describe('rleEncode / rleDecode', () => {
     });
 });
 
-describe('interleave / deinterleave', () => {
-    it('roundtrip', () => {
-        const data = new Uint16Array(CHUNK_VOLUME);
-        const light = new Uint16Array(CHUNK_VOLUME);
-
-        // set some values
-        data[0] = 1;
-        data[100] = 5;
-        data[4095] = 42;
-        light[0] = 0xf000;
-        light[100] = 0x0f0f;
-        light[4095] = 0xffff;
-
-        const interleaved = interleave(data, light);
-        expect(interleaved.length).toBe(CHUNK_VOLUME * 2);
-
-        // check interleaving order
-        expect(interleaved[0]).toBe(1); // data[0]
-        expect(interleaved[1]).toBe(0xf000); // light[0]
-        expect(interleaved[200]).toBe(5); // data[100]
-        expect(interleaved[201]).toBe(0x0f0f); // light[100]
-
-        const result = deinterleave(interleaved);
-        expect(result.data).toEqual(data);
-        expect(result.light).toEqual(light);
-    });
-});
-
 describe('encodeChunk / decodeChunk', () => {
     it('roundtrip empty chunk (all air, no light)', () => {
         const data = new Uint16Array(CHUNK_VOLUME); // all zeros
@@ -145,7 +115,7 @@ describe('encodeChunk / decodeChunk', () => {
         const light = new Uint16Array(CHUNK_VOLUME).fill(0xf000); // full sky light
 
         const compressed = encodeChunk(data, light);
-        // interleaved [1, 0xF000, 1, 0xF000, ...] → one RLE run → tiny
+        // each channel is uniform → one RLE run apiece → tiny
         expect(compressed.byteLength).toBeLessThan(100);
 
         const result = decodeChunk(compressed);

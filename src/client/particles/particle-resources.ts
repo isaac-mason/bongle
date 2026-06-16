@@ -15,7 +15,6 @@ import {
     attribute,
     cameraProjectionMatrix,
     cameraViewMatrix,
-    clamp,
     cos,
     d,
     f32,
@@ -56,7 +55,7 @@ export const InstanceMaterial = struct('ParticleInstanceMaterial', {
     uvRect: d.vec4f,
     tint: d.vec4f,
     light: d.vec4f,
-    emissive: d.f32,
+    glow: d.f32,
 });
 
 export const INSTANCE_POSE_STRIDE = layoutStrideOf(InstancePose);
@@ -131,7 +130,7 @@ function createParticleMaterial(atlas: Texture): { material: Material; atlasTexN
     const uvRect = mat.field('uvRect').toVar('pvUvRect');
     const tint = mat.field('tint').toVar('pvTint');
     const instLight = mat.field('light').toVar('pvInstLight');
-    const instEmissive = mat.field('emissive').toVar('pvInstEmissive');
+    const glow = mat.field('glow').toVar('pvGlow');
 
     const sampledU = add(uvRect.x, mul(aUv.x, uvRect.z)).toVar('pvSampledU');
     const sampledV = add(uvRect.y, mul(aUv.y, uvRect.w)).toVar('pvSampledV');
@@ -140,7 +139,7 @@ function createParticleMaterial(atlas: Texture): { material: Material; atlasTexN
     const vUv = varying(sampledUv, 'pvUv').setInterpolation('perspective', 'centroid');
     const vTint = varying(tint, 'pvTintV').setInterpolation('flat');
     const vInstLight = varying(instLight, 'pvInstLightV').setInterpolation('flat');
-    const vInstEmissive = varying(instEmissive, 'pvInstEmissiveV').setInterpolation('flat');
+    const vGlow = varying(glow, 'pvGlowV').setInterpolation('flat');
 
     const cfg = storage('env', EnvConfig, 'read').fields();
     const TAU = f32(Math.PI * 2).toVar('pvTau');
@@ -159,9 +158,13 @@ function createParticleMaterial(atlas: Texture): { material: Material; atlasTexN
     const skyContribParticle = vec3f(skySkyScalar, skySkyScalar, skySkyScalar).toVar('pvSkyContrib');
     const blockLightParticle = vInstLight.yzw.toVar('pvBlockLight');
     const voxelLight = max(blockLightParticle, skyContribParticle).toVar('pvVoxelLight');
-    const lit = mul(sampled.rgb, voxelLight).toVar('pvLit');
-    const emissiveMix = clamp(vInstEmissive, f32(0), f32(1)).toVar('pvEmissiveMix');
-    const shaded = mix(lit, sampled.rgb, emissiveMix).toVar('pvShaded');
+    // glow raises the lighting floor — a script-driven self-illumination
+    // knob that lights the particle in its OWN colour (glow=1 → fully
+    // lit, shadow-free) rather than blending lit↔raw. matches mesh /
+    // sprite `glow`.
+    const glowFloor = vec3f(vGlow, vGlow, vGlow).toVar('pvGlowFloor');
+    const light = max(voxelLight, glowFloor).toVar('pvLight');
+    const shaded = mul(sampled.rgb, light).toVar('pvShaded');
     const tintedRgb = mul(shaded, vTint.rgb).toVar('pvTintedRgb');
     const finalAlpha = mul(sampled.a, vTint.w).toVar('pvFinalAlpha');
     const fragment = vec4f(tintedRgb, finalAlpha).toVar('pvFragment');

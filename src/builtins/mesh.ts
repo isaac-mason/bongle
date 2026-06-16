@@ -39,7 +39,11 @@ export const MeshTrait = trait('mesh', {
      */
     light: [0, 0, 0, 0] as Vec4,
 
-    /** Emissive glow intensity 0-1. Client-only. */
+    /**
+     * Self-illumination 0-1. Client-only. Raises the lighting floor so the
+     * mesh lights up in its OWN colour (1 = fully lit, shadow-free) — it does
+     * NOT add white. A brighter, script-driven sibling of `litMin`.
+     */
     glow: 0,
 
     /**
@@ -114,7 +118,8 @@ export function setMeshLight(t: MeshTrait, v: Vec4): void {
     t._version++;
 }
 
-/** set per-instance emissive glow intensity (0-1) and flag the renderer. */
+/** set per-instance self-illumination (0-1; lights the mesh in its own colour,
+ *  no white wash) and flag the renderer. */
 export function setMeshGlow(t: MeshTrait, v: number): void {
     t.glow = v;
     t._version++;
