@@ -453,6 +453,28 @@ export const ChatBroadcast = pack.object({
 
 export type ChatBroadcast = pack.SchemaType<typeof ChatBroadcast>;
 
+/**
+ * Client acknowledges chunks it has decoded + applied this frame, freeing the
+ * server's per-player in-flight slots (voxel backpressure). Keyed by playerId
+ * because one client can hold multiple players, each with its own in-flight
+ * window. Pure pacing — TCP guarantees delivery; the ack throttles the server
+ * to the client's decode rate. Only the full channel is slot-tracked today.
+ */
+export const VoxelAck = pack.object({
+    type: pack.literal('voxel_ack'),
+    playerId: pack.varuint(),
+    /** chunk coords decoded + applied since the last ack. */
+    full: pack.list(
+        pack.object({
+            cx: pack.int32(),
+            cy: pack.int32(),
+            cz: pack.int32(),
+        }),
+    ),
+});
+
+export type VoxelAck = pack.SchemaType<typeof VoxelAck>;
+
 export const ClientMessage = pack.union('type', [
     Ping,
     SetActiveRoom,
@@ -469,6 +491,7 @@ export const ClientMessage = pack.union('type', [
     RenameScene,
     DeleteScene,
     ChatInput,
+    VoxelAck,
 ]);
 
 export type ClientMessage = pack.SchemaType<typeof ClientMessage>;
@@ -657,17 +680,16 @@ export const VoxelChunkLight = pack.object({
     type: pack.literal('voxel_chunk_light'),
     /** Player these light updates target. */
     playerId: pack.varuint(),
-    chunks: pack.list(
-        pack.object({
-            cx: pack.int32(),
-            cy: pack.int32(),
-            cz: pack.int32(),
-            /** RLE'd then deflated sky channel (4 bits per voxel). */
-            sky: pack.uint8Array(),
-            /** RLE'd then deflated rgb channel (12 bits per voxel). */
-            rgb: pack.uint8Array(),
-        }),
-    ),
+    /** one chunk per message — the transport coalesces a tick's messages into
+     *  one ServerPacket, so per-chunk costs only a few bytes of framing while
+     *  keeping the dispatch/in-flight unit uniform with voxel_chunk_full. */
+    cx: pack.int32(),
+    cy: pack.int32(),
+    cz: pack.int32(),
+    /** RLE'd sky channel (4 bits per voxel). */
+    sky: pack.uint8Array(),
+    /** RLE'd rgb channel (12 bits per voxel). */
+    rgb: pack.uint8Array(),
 });
 
 export type VoxelChunkLight = pack.SchemaType<typeof VoxelChunkLight>;
@@ -681,19 +703,16 @@ export const VoxelChunkLightDelta = pack.object({
     type: pack.literal('voxel_chunk_light_delta'),
     /** Player these light updates target. */
     playerId: pack.varuint(),
-    chunks: pack.list(
+    /** one chunk per message (see VoxelChunkLight). */
+    cx: pack.int32(),
+    cy: pack.int32(),
+    cz: pack.int32(),
+    changes: pack.list(
         pack.object({
-            cx: pack.int32(),
-            cy: pack.int32(),
-            cz: pack.int32(),
-            changes: pack.list(
-                pack.object({
-                    /** flat voxel index (0..4095) */
-                    index: pack.uint16(),
-                    /** packed light value (sky + rgb) */
-                    light: pack.uint16(),
-                }),
-            ),
+            /** flat voxel index (0..4095) */
+            index: pack.uint16(),
+            /** packed light value (sky + rgb) */
+            light: pack.uint16(),
         }),
     ),
 });

@@ -3,7 +3,7 @@ import { PlayerTrait } from '../builtins/player';
 import { TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
 import type { PlayerId } from '../core/client';
-import type { BinaryField, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage } from '../core/protocol';
+import type { BinaryField, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
 import type { Resources } from '../core/resources';
 import {
     bumpFieldVersion,
@@ -193,6 +193,19 @@ type ClientVoxelKnowledge = {
      *  sort + per-client cap. survives across ticks so rate-limited skips
      *  ship on subsequent ticks rather than being lost. */
     pendingLight: Set<string>;
+    /** occupied chunks discovered in-range but not yet shipped as
+     *  voxel_chunk_full. the discovery walk populates this (bounded by
+     *  DISCOVERY_BACKLOG_CAP); the room-level dispatchFull drains it with a
+     *  global priority sort + per-client cap. a chunk becomes "known" only
+     *  once dispatchFull actually ships it. survives across ticks. */
+    pendingFull: Set<string>;
+    /** chunks shipped as voxel_chunk_full but not yet acked by the client
+     *  (voxel_ack). its size is the in-flight window: dispatchFull stops
+     *  shipping to a client once it hits MAX_IN_FLIGHT_FULL, so a slow
+     *  (decode-bound) client throttles the server. an ack removes the key,
+     *  freeing a slot. disjoint from pendingFull (ship moves the key across)
+     *  and a subset of knownChunks. pure pacing — TCP handles delivery. */
+    inFlightFull: Set<string>;
 };
 
 /* ── per-client scene graph knowledge ── */
@@ -312,6 +325,8 @@ export function invalidatePlayer(
         lastAnchor: null,
         cursor: 0,
         pendingLight: new Set(),
+        pendingFull: new Set(),
+        inFlightFull: new Set(),
     });
 
     // Catch this client up on any runtime model entries that exist now —
@@ -1143,14 +1158,32 @@ function snapshotAllNodeKnowledge(
 //
 // design mirrors minecraft's approach:
 //   - spherical expansion order (closest chunks first)
-//   - send all unknown chunks each tick (Map.get is cheap)
-//   - view-radius culled chunk_full sends (up to CHUNKS_PER_TICK per tick)
+//   - discovery walk queues occupied chunks into pendingFull (bounded by
+//     DISCOVERY_BACKLOG_CAP); the room-level dispatchFull drains it with a
+//     global priority sort + per-client cap (FULL_CHUNKS_PER_CLIENT_PER_TICK)
 //   - coalesced ops (dedup by voxel index, keep last value)
 //   - promotion threshold (too many ops → re-send as chunk_full)
 //   - light epoch for full-recompute detection
 
-/** max chunk_full messages per client per tick */
-const CHUNKS_PER_TICK = 2;
+/** max voxel_chunk_full messages per client per tick — burst limiter on the
+ *  room-level dispatchFull, mirroring LIGHT_CHUNKS_PER_CLIENT_PER_TICK. bounds
+ *  the cold-start decode burst when many chunks are queued at once; the
+ *  steady-state ceiling will come from in-flight acks (Part C). */
+const FULL_CHUNKS_PER_CLIENT_PER_TICK = 6;
+
+/** max chunks in flight (shipped as voxel_chunk_full, awaiting voxel_ack) per
+ *  client. the in-flight window: dispatchFull won't ship past this until acks
+ *  free slots, so a decode-bound client throttles the server. Luanti uses 40
+ *  against slower mesh-acks; we ack on decode, so start lower. effective
+ *  throughput ≈ MAX_IN_FLIGHT_FULL / RTT — tune up for high-RTT clients. */
+const MAX_IN_FLIGHT_FULL = 24;
+
+/** stop the per-player discovery walk once pendingFull reaches this size.
+ *  bounds cursor work + queue growth on a teleport / edit-radius anchor cross
+ *  (~58k offsets) where the walk would otherwise drain the whole sphere into
+ *  pendingFull in one tick. the cursor pauses and resumes next tick as
+ *  dispatchFull drains the queue. */
+const DISCOVERY_BACKLOG_CAP = 64;
 
 /** max empty-chunk announcements per client per tick. each entry is ~12
  *  bytes so we can be generous — empties race ahead of full chunks so the
@@ -1202,7 +1235,24 @@ export function resetAllVoxelKnowledge(state: Discovery): void {
             k.knownLightEpoch = 0;
             k.cursor = 0;
             k.pendingLight.clear();
+            k.pendingFull.clear();
+            k.inFlightFull.clear();
         }
+    }
+}
+
+/** apply a client's voxel_ack: free the in-flight slots for the chunks it has
+ *  decoded + applied, letting dispatchFull ship more. lookup by (client,
+ *  playerId) is inherently scoped — a client's voxelKnowledge only holds its
+ *  own players — and unknown keys (already evicted / re-sent / promoted) are
+ *  ignored, so a stale or spoofed ack is a harmless no-op. */
+export function handleVoxelAck(state: Discovery, client: Client, message: VoxelAck): void {
+    const cs = state.clients.get(client);
+    if (!cs) return;
+    const knowledge = cs.voxelKnowledge.get(message.playerId);
+    if (!knowledge) return;
+    for (const c of message.full) {
+        knowledge.inFlightFull.delete(chunkKey(c.cx, c.cy, c.cz));
     }
 }
 
@@ -1324,16 +1374,10 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
     if (!auth) return;
     const changes = auth.changes;
 
-    // per-player phase: cursor walks, ops, and absorb newly-dirty light chunks
-    // into each client's pendingLight set. nothing is sent for light yet —
-    // dispatch happens room-wide below.
-    // fullShippedChunks tracks chunks that shipped via voxel_chunk_full to any
-    // player this tick. those payloads carry the full light array, so any bits
-    // in the chunk's lightDirtyMask are already known to the receivers — we
-    // clear those masks at the end of dispatchLight to avoid re-shipping them
-    // as redundant deltas next tick.
+    // per-player phase: cursor walks → pendingFull, ops, and absorb newly-dirty
+    // light chunks into each client's pendingLight set. nothing is shipped for
+    // full/light yet — dispatch happens room-wide below.
     const players: Player[] = [];
-    const fullShippedChunks = new Set<Chunk>();
     for (const player of RoomsModule.getPlayersInRoom(rooms, room)) {
         const cs = state.clients.get(player.client);
         if (!cs) continue;
@@ -1347,55 +1391,71 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
                 lastAnchor: null,
                 cursor: 0,
                 pendingLight: new Set(),
+                pendingFull: new Set(),
+                inFlightFull: new Set(),
             };
             cs.voxelKnowledge.set(player.id, knowledge);
         }
 
-        flushVoxelsForPlayer(room, voxels, changes, player, knowledge, out, fullShippedChunks);
+        flushVoxelsForPlayer(room, voxels, changes, player, knowledge, out);
         players.push(player);
     }
 
+    // room-wide dispatch after every player has discovered + absorbed.
+    // dispatchFull runs first and returns the chunks it shipped as
+    // voxel_chunk_full this tick: those payloads carry fresh light, so
+    // dispatchLight clears their masks (and skips them — they were still in
+    // pendingFull, not knownChunks, when the per-player light-absorb ran).
+    const fullShippedChunks = dispatchFull(state, room, voxels, players, out);
     dispatchLight(state, room, voxels, players, out, fullShippedChunks);
 }
 
+type DispatchCandidate = { d2: number; key: string; pid: PlayerId; chunk: Chunk };
+
 /**
- * room-wide light dispatch. each player's pendingLight set is drained by a
- * globally-sorted priority queue: candidates from all players are ranked by
- * d² from their own anchor, then walked in order until the global cap is
- * hit. a per-client cap prevents any one player from soaking the budget.
- * mirrors luanti's GetNextBlocks → PrioritySortedBlockTransfer → SendBlocks
- * pipeline (src/server/clientiface.cpp + src/server.cpp), but adapted for
- * event-fed light queues instead of discovery-fed block queues.
+ * shared room-wide priority dispatch. each player's `selectPending` queue is
+ * gathered into one candidate list ranked by d² from that player's anchor, then
+ * shipped nearest-first under a per-client cap + a global cap (luanti's
+ * GetNextBlocks → PrioritySortedBlockTransfer → SendBlocks shape). one message
+ * per shipped chunk — the transport coalesces a tick's messages into one
+ * ServerPacket, so per-chunk keeps the dispatch unit uniform across channels.
+ *
+ * `ship` emits the channel's message + any per-winner bookkeeping; the generic
+ * loop deletes the shipped key from the pending set. returns the chunks shipped.
  */
-function dispatchLight(
+function dispatchChannel(
     state: Discovery,
     room: Room,
     voxels: Voxels,
     players: Player[],
-    out: Array<[Client, ServerMessage]>,
-    fullShippedChunks: Set<Chunk>,
-): void {
-    // even if no players are queued for delta dispatch, we still need to clear
-    // masks for chunks that shipped via voxel_chunk_full this tick — otherwise
-    // the bits leak across ticks and re-ship as redundant deltas later.
-    if (players.length === 0 && fullShippedChunks.size === 0) return;
-
-    type Candidate = { d2: number; key: string; pid: PlayerId; chunk: Chunk };
-    const candidates: Candidate[] = [];
+    perClientCap: number,
+    selectPending: (k: ClientVoxelKnowledge) => Set<string>,
+    ship: (c: DispatchCandidate, knowledge: ClientVoxelKnowledge, client: Client) => void,
+    // optional in-flight window (full channel): skip a client once this many
+    // chunks are outstanding (shipped, awaiting ack). pending and in-flight are
+    // disjoint — ship moves the key across — so this is the only gate needed.
+    inFlight?: { max: number; select: (k: ClientVoxelKnowledge) => Set<string> },
+): Set<Chunk> {
+    const candidates: DispatchCandidate[] = [];
     const knowledgeByPid = new Map<PlayerId, ClientVoxelKnowledge>();
+    const clientByPid = new Map<PlayerId, Client>();
 
     for (const player of players) {
         const cs = state.clients.get(player.client);
         if (!cs) continue;
         const knowledge = cs.voxelKnowledge.get(player.id);
-        if (!knowledge || knowledge.pendingLight.size === 0) continue;
+        if (!knowledge) continue;
+        const pending = selectPending(knowledge);
+        if (pending.size === 0) continue;
         knowledgeByPid.set(player.id, knowledge);
+        clientByPid.set(player.id, player.client);
 
         const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
-        for (const key of knowledge.pendingLight) {
+        for (const key of pending) {
             const chunk = voxels.chunks.get(key);
             if (!chunk) {
-                knowledge.pendingLight.delete(key);
+                // chunk deleted between queueing and dispatch — drop it.
+                pending.delete(key);
                 continue;
             }
             const dx = chunk.cx - pcx;
@@ -1405,77 +1465,131 @@ function dispatchLight(
         }
     }
 
-    if (candidates.length === 0) {
-        // no delta candidates, but still clear masks for chunks that shipped
-        // via voxel_chunk_full this tick.
-        for (const chunk of fullShippedChunks) {
-            if (chunk.lightDirtyCount > 0) {
-                chunk.lightDirtyMask.fill(0);
-                chunk.lightDirtyCount = 0;
-            }
-        }
-        return;
-    }
+    const shipped = new Set<Chunk>();
+    if (candidates.length === 0) return shipped;
 
     candidates.sort((a, b) => a.d2 - b.d2);
 
-    const globalCap = Math.floor((players.length + ROOM_MAX_USERS) * LIGHT_CHUNKS_PER_CLIENT_PER_TICK / 4) + 1;
+    const globalCap = Math.floor((players.length + ROOM_MAX_USERS) * perClientCap / 4) + 1;
     const perClientCount = new Map<PlayerId, number>();
-    const perClientBatch = new Map<PlayerId, Array<{ cx: number; cy: number; cz: number; sky: Uint8Array; rgb: Uint8Array }>>();
-    const perClientDeltaBatch = new Map<PlayerId, Array<{ cx: number; cy: number; cz: number; changes: Array<{ index: number; light: number }> }>>();
-    // chunks whose delta/full payload was actually shipped to at least one
-    // client this tick. their mask + count get cleared after the loop —
-    // deferring until then lets two players queued for the same chunk both
-    // see the same dirtyCount and ship matching payloads.
-    const shippedChunks = new Set<Chunk>();
     let totalSent = 0;
 
     for (const c of candidates) {
         if (totalSent >= globalCap) break;
         const sent = perClientCount.get(c.pid) ?? 0;
-        if (sent >= LIGHT_CHUNKS_PER_CLIENT_PER_TICK) continue;
+        if (sent >= perClientCap) continue;
 
-        const dirtyCount = c.chunk.lightDirtyCount;
-        if (dirtyCount > 0 && dirtyCount <= LIGHT_DELTA_THRESHOLD) {
-            // per-voxel delta path — iterate set bits in the mask
-            const mask = c.chunk.lightDirtyMask;
-            const light = c.chunk.light;
-            const changes: Array<{ index: number; light: number }> = new Array(dirtyCount);
-            let w = 0;
-            for (let i = 0; i < mask.length && w < dirtyCount; i++) {
-                if (mask[i] !== 0) {
-                    changes[w++] = { index: i, light: light[i]! };
-                }
-            }
-            let dbatch = perClientDeltaBatch.get(c.pid);
-            if (!dbatch) {
-                dbatch = [];
-                perClientDeltaBatch.set(c.pid, dbatch);
-            }
-            dbatch.push({ cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz, changes });
-        } else {
-            const { sky, rgb } = getCompressedLight(c.chunk);
-            let batch = perClientBatch.get(c.pid);
-            if (!batch) {
-                batch = [];
-                perClientBatch.set(c.pid, batch);
-            }
-            batch.push({ cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz, sky, rgb });
-        }
+        const knowledge = knowledgeByPid.get(c.pid)!;
+        // in-flight ceiling: skip (leave queued) once this client has too many
+        // outstanding. the set grows as we ship this tick, so the check is live.
+        if (inFlight && inFlight.select(knowledge).size >= inFlight.max) continue;
 
-        shippedChunks.add(c.chunk);
-        knowledgeByPid.get(c.pid)!.pendingLight.delete(c.key);
+        ship(c, knowledge, clientByPid.get(c.pid)!);
+        selectPending(knowledge).delete(c.key);
+        shipped.add(c.chunk);
         perClientCount.set(c.pid, sent + 1);
         totalSent++;
     }
 
-    // clear masks for chunks whose current light state was fully synced to
-    // every interested receiver this tick — either via delta/full-light ship
-    // here, or via voxel_chunk_full earlier in flushVoxelsForPlayer. unshipped
-    // delta candidates (cap-exhausted) keep their mask + count so next tick's
-    // dispatch still has the info; new writes OR into the same mask via
-    // setLight. lightDirty + dirty.light are cleared at end-of-tick.
-    for (const chunk of shippedChunks) {
+    return shipped;
+}
+
+/**
+ * room-wide chunk_full dispatch. drains each player's pendingFull (filled by
+ * discovery) nearest-first. returns the chunks shipped — handed to
+ * dispatchLight as fullShippedChunks so their light masks get cleared (the full
+ * payload already carried fresh light).
+ *
+ * runs before dispatchLight: shipping here adds the chunk to knownChunks, and
+ * since the per-player light-absorb ran while it was still in pendingFull (not
+ * known), it is not separately queued for light.
+ */
+function dispatchFull(
+    state: Discovery,
+    room: Room,
+    voxels: Voxels,
+    players: Player[],
+    out: Array<[Client, ServerMessage]>,
+): Set<Chunk> {
+    return dispatchChannel(
+        state,
+        room,
+        voxels,
+        players,
+        FULL_CHUNKS_PER_CLIENT_PER_TICK,
+        (k) => k.pendingFull,
+        (c, knowledge, client) => {
+            const { compressed, palette } = getCompressedSnapshot(c.chunk);
+            out.push([
+                client,
+                {
+                    type: 'voxel_chunk_full',
+                    playerId: c.pid,
+                    cx: c.chunk.cx,
+                    cy: c.chunk.cy,
+                    cz: c.chunk.cz,
+                    paletteKeys: palette,
+                    compressed,
+                },
+            ]);
+            knowledge.knownChunks.add(c.key);
+            knowledge.inFlightFull.add(c.key);
+        },
+        { max: MAX_IN_FLIGHT_FULL, select: (k) => k.inFlightFull },
+    );
+}
+
+/**
+ * room-wide light dispatch. drains each player's pendingLight nearest-first,
+ * shipping a per-voxel delta when the dirty count is small, else a whole-chunk
+ * light. then clears the light masks of chunks fully synced this tick — light
+ * shipped here, or chunk_full shipped earlier (its payload carried fresh light).
+ * unshipped (cap-exhausted) chunks keep their mask + count for next tick; new
+ * writes OR into the same mask via setLight.
+ */
+function dispatchLight(
+    state: Discovery,
+    room: Room,
+    voxels: Voxels,
+    players: Player[],
+    out: Array<[Client, ServerMessage]>,
+    fullShippedChunks: Set<Chunk>,
+): void {
+    const shipped = dispatchChannel(
+        state,
+        room,
+        voxels,
+        players,
+        LIGHT_CHUNKS_PER_CLIENT_PER_TICK,
+        (k) => k.pendingLight,
+        (c, _knowledge, client) => {
+            const dirtyCount = c.chunk.lightDirtyCount;
+            if (dirtyCount > 0 && dirtyCount <= LIGHT_DELTA_THRESHOLD) {
+                // per-voxel delta path — iterate set bits in the mask.
+                const mask = c.chunk.lightDirtyMask;
+                const light = c.chunk.light;
+                const changes: Array<{ index: number; light: number }> = new Array(dirtyCount);
+                let w = 0;
+                for (let i = 0; i < mask.length && w < dirtyCount; i++) {
+                    if (mask[i] !== 0) changes[w++] = { index: i, light: light[i]! };
+                }
+                out.push([
+                    client,
+                    { type: 'voxel_chunk_light_delta', playerId: c.pid, cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz, changes },
+                ]);
+            } else {
+                const { sky, rgb } = getCompressedLight(c.chunk);
+                out.push([
+                    client,
+                    { type: 'voxel_chunk_light', playerId: c.pid, cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz, sky, rgb },
+                ]);
+            }
+        },
+    );
+
+    // mask + count cleared only on ship (deferred so two players queued for the
+    // same chunk both see the same dirtyCount and ship matching payloads).
+    for (const chunk of shipped) {
         if (chunk.lightDirtyCount > 0) {
             chunk.lightDirtyMask.fill(0);
             chunk.lightDirtyCount = 0;
@@ -1485,31 +1599,6 @@ function dispatchLight(
         if (chunk.lightDirtyCount > 0) {
             chunk.lightDirtyMask.fill(0);
             chunk.lightDirtyCount = 0;
-        }
-    }
-
-    for (const player of players) {
-        const batch = perClientBatch.get(player.id);
-        if (batch) {
-            out.push([
-                player.client,
-                {
-                    type: 'voxel_chunk_light',
-                    playerId: player.id,
-                    chunks: batch,
-                },
-            ]);
-        }
-        const dbatch = perClientDeltaBatch.get(player.id);
-        if (dbatch) {
-            out.push([
-                player.client,
-                {
-                    type: 'voxel_chunk_light_delta',
-                    playerId: player.id,
-                    chunks: dbatch,
-                },
-            ]);
         }
     }
 }
@@ -1547,6 +1636,9 @@ function evictOutOfRange(
         out.push([client, { type: 'voxel_chunk_del', playerId, cx, cy, cz }]);
         knowledge.knownChunks.delete(key);
         knowledge.pendingLight.delete(key);
+        // in-flight keys are a subset of knownChunks; drop the slot. a late ack
+        // for an evicted chunk hits an unknown key and is ignored.
+        knowledge.inFlightFull.delete(key);
     }
     for (const key of knowledge.knownEmptyChunks) {
         const parts = key.split(',');
@@ -1559,6 +1651,20 @@ function evictOutOfRange(
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
         knowledge.knownEmptyChunks.delete(key);
     }
+    // pendingFull entries are neither known nor empty yet — drop any that
+    // drifted out of range before dispatchFull got to them (no chunk_del:
+    // the client never received them).
+    for (const key of knowledge.pendingFull) {
+        const parts = key.split(',');
+        const cx = Number.parseInt(parts[0]!, 10);
+        const cy = Number.parseInt(parts[1]!, 10);
+        const cz = Number.parseInt(parts[2]!, 10);
+        const dx = cx - pcx;
+        const dy = cy - pcy;
+        const dz = cz - pcz;
+        if (dx * dx + dy * dy + dz * dz <= r2) continue;
+        knowledge.pendingFull.delete(key);
+    }
 }
 
 function flushVoxelsForPlayer(
@@ -1568,14 +1674,18 @@ function flushVoxelsForPlayer(
     player: Player,
     knowledge: ClientVoxelKnowledge,
     out: Array<[Client, ServerMessage]>,
-    fullShippedChunks: Set<Chunk>,
 ): void {
     const client = player.client;
 
-    // 0. light epoch check — if server did a full recompute, reset client knowledge
+    // 0. light epoch check — if server did a full recompute, reset client
+    //    knowledge. clear the discovery queue too: pendingFull holds chunks
+    //    that would otherwise ship against the stale epoch; the cursor rewind
+    //    re-discovers them with fresh light.
     if (knowledge.knownLightEpoch < changes.lightEpoch) {
         knowledge.knownChunks.clear();
         knowledge.knownEmptyChunks.clear();
+        knowledge.pendingFull.clear();
+        knowledge.inFlightFull.clear();
         knowledge.knownLightEpoch = changes.lightEpoch;
         knowledge.cursor = 0;
     }
@@ -1627,14 +1737,11 @@ function flushVoxelsForPlayer(
     //    cursor reaches expansionOrder.length the sphere is fully discovered
     //    and per-tick cost drops to zero until the next anchor cross or
     //    addedChunks drain.
-    let sent = 0;
     const pendingEmpty: { cx: number; cy: number; cz: number }[] = [];
-    // light for these chunks was already shipped inside a voxel_chunk_full
-    // this tick; step 4 must skip them or the client decodes the same light
-    // array twice.
-    const lightSentInFull = new Set<string>();
     while (knowledge.cursor < expansionOrder.length) {
-        if (sent >= CHUNKS_PER_TICK && pendingEmpty.length >= EMPTY_CHUNKS_PER_TICK) break;
+        // stop once both queues are full for this tick. occupied chunks go to
+        // pendingFull (drained by dispatchFull); empties ship inline below.
+        if (knowledge.pendingFull.size >= DISCOVERY_BACKLOG_CAP && pendingEmpty.length >= EMPTY_CHUNKS_PER_TICK) break;
         const [dx, dy, dz] = expansionOrder[knowledge.cursor]!;
         knowledge.cursor++;
         const cx = pcx + dx;
@@ -1643,32 +1750,16 @@ function flushVoxelsForPlayer(
         const key = chunkKey(cx, cy, cz);
         if (knowledge.knownChunks.has(key)) continue;
         if (knowledge.knownEmptyChunks.has(key)) continue;
+        if (knowledge.pendingFull.has(key)) continue;
         const chunk = voxels.chunks.get(key);
         if (chunk) {
-            if (sent >= CHUNKS_PER_TICK) {
-                // budget exhausted for fulls — rewind one step so we revisit
-                // this offset next tick. empties may still drain below us, but
-                // their budget is checked at the top of the loop.
+            if (knowledge.pendingFull.size >= DISCOVERY_BACKLOG_CAP) {
+                // backlog full — rewind one step so we revisit this offset
+                // next tick once dispatchFull has drained the queue.
                 knowledge.cursor--;
                 break;
             }
-            const { compressed, palette } = getCompressedSnapshot(chunk);
-            out.push([
-                client,
-                {
-                    type: 'voxel_chunk_full',
-                    playerId: player.id,
-                    cx,
-                    cy,
-                    cz,
-                    paletteKeys: palette,
-                    compressed,
-                },
-            ]);
-            knowledge.knownChunks.add(key);
-            lightSentInFull.add(key);
-            fullShippedChunks.add(chunk);
-            sent++;
+            knowledge.pendingFull.add(key);
         } else {
             if (pendingEmpty.length >= EMPTY_CHUNKS_PER_TICK) {
                 knowledge.cursor--;
@@ -1693,19 +1784,22 @@ function flushVoxelsForPlayer(
     if (changes.ops.length > 0) {
         const blockChanges = coalesceBlockOps(changes.ops, knowledge.knownChunks, voxels.chunks);
 
-        // promote chunks with too many block changes to chunk_full re-send.
-        // dropping from knownChunks means the cursor walk needs to revisit
-        // those offsets — rewind so it does.
-        let promoted = false;
+        // promote chunks with too many block changes to a chunk_full re-send:
+        // drop from knownChunks (+ any queued light) and re-queue directly into
+        // pendingFull so dispatchFull re-ships the whole chunk. no cursor
+        // rewind needed — the chunk is back in the dispatch queue, and the
+        // pendingFull guard in the walk keeps re-discovery from duplicating it.
         for (const [key, entry] of blockChanges) {
             if (entry.changes.size > PROMOTION_THRESHOLD) {
                 knowledge.knownChunks.delete(key);
                 knowledge.pendingLight.delete(key);
+                // if it was shipped-but-not-acked, drop the in-flight slot; the
+                // stale ack for the old send is ignored (unknown key).
+                knowledge.inFlightFull.delete(key);
+                knowledge.pendingFull.add(key);
                 blockChanges.delete(key);
-                promoted = true;
             }
         }
-        if (promoted) knowledge.cursor = 0;
 
         // send chunk_ops (block changes)
         if (blockChanges.size > 0) {
@@ -1746,12 +1840,12 @@ function flushVoxelsForPlayer(
     //    queue. actual dispatch happens at the room level after all players
     //    have absorbed, so we can apply a globally-sorted priority + per-tick
     //    cap across the room (luanti-style global priority + per-client cap).
-    //    skip chunks whose light was just shipped inside a chunk_full this
-    //    tick — that payload already carried fresh light.
+    //    the knownChunks guard skips chunks still queued in pendingFull: their
+    //    light ships inside the chunk_full payload that dispatchFull sends this
+    //    tick (it runs after this), so there's no separate light send.
     for (const chunk of voxels.dirty.light) {
         const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
         if (!knowledge.knownChunks.has(key)) continue;
-        if (lightSentInFull.has(key)) continue;
         knowledge.pendingLight.add(key);
     }
 }

@@ -121,6 +121,11 @@ export function init(opts: InitOptions) {
         domElement,
         inputManager,
         rooms: Rooms.init(),
+        /** per-player buffer of chunk coords decoded + applied since the last
+         *  flush, drained into one voxel_ack per player at the end of
+         *  processInbox. frees the server's in-flight slots (voxel
+         *  backpressure). keyed by playerId — one client may hold several. */
+        voxelAckBuffer: new Map<number, Array<{ cx: number; cy: number; cz: number }>>(),
         content,
         resources,
         /** hardware capability probe, resolved once at boot. touch capability
@@ -571,6 +576,13 @@ function processInbox(state: EngineClient): void {
     }
 
     state.net.inbox.length = 0;
+
+    // flush voxel acks — one message per player that applied chunks this drain.
+    for (const [playerId, full] of state.voxelAckBuffer) {
+        if (full.length === 0) continue;
+        Net.send(state.net, { type: 'voxel_ack', playerId, full });
+    }
+    state.voxelAckBuffer.clear();
 }
 
 function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void {
@@ -718,6 +730,9 @@ function dirtyAllNeighborChunks(voxels: Voxels.Voxels, cx: number, cy: number, c
 
 function processVoxelChunkFull(state: EngineClient, message: Protocol.VoxelChunkFull): void {
     const room = state.rooms.rooms.get(message.playerId);
+    // no room for this player (desync) — drop without acking. the server's
+    // in-flight slot stays held until eviction/disconnect (or a future backstop
+    // sweep); acking a chunk we didn't apply would be wrong.
     if (!room) return;
     const { data, light } = decodeChunk(message.compressed);
     const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
@@ -741,6 +756,15 @@ function processVoxelChunkFull(state: EngineClient, message: Protocol.VoxelChunk
     // createChunk + resolveChunk both seed dirty=true; mirror into the index.
     Voxels.markChunkDirty(room.voxels, chunk);
     dirtyAllNeighborChunks(room.voxels, message.cx, message.cy, message.cz);
+
+    // ack: we paid the decode cost, free the server's in-flight slot. batched
+    // into one voxel_ack per player at the end of processInbox.
+    let buf = state.voxelAckBuffer.get(message.playerId);
+    if (!buf) {
+        buf = [];
+        state.voxelAckBuffer.set(message.playerId, buf);
+    }
+    buf.push({ cx: message.cx, cy: message.cy, cz: message.cz });
 }
 
 function processVoxelChunkOps(state: EngineClient, message: Protocol.VoxelChunkOps): void {
@@ -854,16 +878,14 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
 function processVoxelChunkLight(state: EngineClient, message: Protocol.VoxelChunkLight): void {
     const room = state.rooms.rooms.get(message.playerId);
     if (!room) return;
-    for (const entry of message.chunks) {
-        const key = Voxels.chunkKey(entry.cx, entry.cy, entry.cz);
-        const chunk = room.voxels.chunks.get(key);
-        if (!chunk) continue;
+    const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
+    const chunk = room.voxels.chunks.get(key);
+    if (!chunk) return;
 
-        chunk.light = decodeLight(entry.sky, entry.rgb);
+    chunk.light = decodeLight(message.sky, message.rgb);
 
-        Voxels.markChunkDirty(room.voxels, chunk);
-        dirtyAllNeighborChunks(room.voxels, entry.cx, entry.cy, entry.cz);
-    }
+    Voxels.markChunkDirty(room.voxels, chunk);
+    dirtyAllNeighborChunks(room.voxels, message.cx, message.cy, message.cz);
 }
 
 // scratch mask for the 3×3×3 neighbour cells around a chunk.
@@ -874,52 +896,50 @@ const _neighbourCellMask = new Uint8Array(27);
 function processVoxelChunkLightDelta(state: EngineClient, message: Protocol.VoxelChunkLightDelta): void {
     const room = state.rooms.rooms.get(message.playerId);
     if (!room) return;
-    for (const entry of message.chunks) {
-        const key = Voxels.chunkKey(entry.cx, entry.cy, entry.cz);
-        const chunk = room.voxels.chunks.get(key);
-        if (!chunk) continue;
+    const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
+    const chunk = room.voxels.chunks.get(key);
+    if (!chunk) return;
 
-        _neighbourCellMask.fill(0);
+    _neighbourCellMask.fill(0);
 
-        for (const change of entry.changes) {
-            chunk.light[change.index] = change.light;
+    for (const change of message.changes) {
+        chunk.light[change.index] = change.light;
 
-            // decompose index → local (x,y,z), then OR each axis span
-            // into the 27-cell mask. boundary voxels contribute 2 cells
-            // per boundary axis (their own + the neighbour across).
-            const idx = change.index;
-            const x = idx & 0xf;
-            const z = (idx >> 4) & 0xf;
-            const y = idx >> 8;
+        // decompose index → local (x,y,z), then OR each axis span
+        // into the 27-cell mask. boundary voxels contribute 2 cells
+        // per boundary axis (their own + the neighbour across).
+        const idx = change.index;
+        const x = idx & 0xf;
+        const z = (idx >> 4) & 0xf;
+        const y = idx >> 8;
 
-            const dxLo = x === 0 ? -1 : 0;
-            const dxHi = x === 15 ? 1 : 0;
-            const dyLo = y === 0 ? -1 : 0;
-            const dyHi = y === 15 ? 1 : 0;
-            const dzLo = z === 0 ? -1 : 0;
-            const dzHi = z === 15 ? 1 : 0;
+        const dxLo = x === 0 ? -1 : 0;
+        const dxHi = x === 15 ? 1 : 0;
+        const dyLo = y === 0 ? -1 : 0;
+        const dyHi = y === 15 ? 1 : 0;
+        const dzLo = z === 0 ? -1 : 0;
+        const dzHi = z === 15 ? 1 : 0;
 
-            for (let dz = dzLo; dz <= dzHi; dz++) {
-                for (let dy = dyLo; dy <= dyHi; dy++) {
-                    for (let dx = dxLo; dx <= dxHi; dx++) {
-                        _neighbourCellMask[(dz + 1) * 9 + (dy + 1) * 3 + (dx + 1)] = 1;
-                    }
+        for (let dz = dzLo; dz <= dzHi; dz++) {
+            for (let dy = dyLo; dy <= dyHi; dy++) {
+                for (let dx = dxLo; dx <= dxHi; dx++) {
+                    _neighbourCellMask[(dz + 1) * 9 + (dy + 1) * 3 + (dx + 1)] = 1;
                 }
             }
         }
+    }
 
-        Voxels.markChunkDirty(room.voxels, chunk);
+    Voxels.markChunkDirty(room.voxels, chunk);
 
-        // dirty all set cells in the 3×3×3 mask, skipping self (1,1,1 → 13).
-        for (let i = 0; i < 27; i++) {
-            if (i === 13) continue;
-            if (_neighbourCellMask[i] === 0) continue;
-            const dx = (i % 3) - 1;
-            const dy = (((i / 3) | 0) % 3) - 1;
-            const dz = ((i / 9) | 0) - 1;
-            const nc = room.voxels.chunks.get(Voxels.chunkKey(entry.cx + dx, entry.cy + dy, entry.cz + dz));
-            if (nc) Voxels.markChunkDirty(room.voxels, nc);
-        }
+    // dirty all set cells in the 3×3×3 mask, skipping self (1,1,1 → 13).
+    for (let i = 0; i < 27; i++) {
+        if (i === 13) continue;
+        if (_neighbourCellMask[i] === 0) continue;
+        const dx = (i % 3) - 1;
+        const dy = (((i / 3) | 0) % 3) - 1;
+        const dz = ((i / 9) | 0) - 1;
+        const nc = room.voxels.chunks.get(Voxels.chunkKey(message.cx + dx, message.cy + dy, message.cz + dz));
+        if (nc) Voxels.markChunkDirty(room.voxels, nc);
     }
 }
 

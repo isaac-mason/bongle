@@ -422,6 +422,10 @@ export function processInbox(state: EngineServer) {
                         Net.send(state.net, client, { type: 'pong' });
                         break;
 
+                    case 'voxel_ack':
+                        Discovery.handleVoxelAck(state.discovery, client, message);
+                        break;
+
                     case 'request_metrics': {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;

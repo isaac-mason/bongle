@@ -103,11 +103,11 @@ const WizardTrait = trait('wizard', {
     xp: 0,
     // upgradable stat LEVELS (integers); effective values derived via STAT_TABLE.
     // synced so the client derives fire cadence, max health, the hud panel, etc.
-    stats: { levels: { maxHealth: 0, regenRate: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, splashRadius: 0 } as StatLevels },
+    stats: { levels: { maxHealth: 0, regenRate: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, splashRadius: 0, knockback: 0 } as StatLevels },
     // live health pool (folded in — every combatant is a wizard). `current` is
     // discrete + synced; max is DERIVED from the maxHealth stat (not stored). the
     // regen carry + damage bookkeeping stay server-only.
-    current: 10, // = STAT_TABLE.maxHealth.base (level 0)
+    current: 8, // = STAT_TABLE.maxHealth.base (level 0)
     regenAccum: 0,
     lastDamageTime: -999,
     lastAttacker: -1,
@@ -169,6 +169,7 @@ sync(WizardTrait, 'stats', {
         damage: pack.uint8(),
         speed: pack.uint8(),
         splashRadius: pack.uint8(),
+        knockback: pack.uint8(),
     }),
     pack: (t) => t.stats.levels,
     unpack: (v, t) => (t.stats.levels = v),
@@ -373,8 +374,9 @@ const EYE_HEIGHT = 1.5; // m — spawn origin above the caster's origin
 
 // per-projectile stats, carried on the trait (set once, synced). one default for
 // now; the elements / stat-table layer varies them per cast later.
-type ProjectileStats = { speed: number; damage: number; damageRadius: number; terrainDamageRadius: number };
-const DEFAULT_PROJECTILE_STATS: ProjectileStats = { speed: 18, damage: 3, damageRadius: 2, terrainDamageRadius: 1 };
+type ProjectileStats = { speed: number; damage: number; damageRadius: number; terrainDamageRadius: number; knockback: number };
+const DEFAULT_PROJECTILE_STATS: ProjectileStats = { speed: 18, damage: 3, damageRadius: 2, terrainDamageRadius: 1, knockback: 5 };
+const KNOCKBACK_UP = 0.4; // upward kick as a fraction of the horizontal impulse (pops grounded targets so the shove lands)
 const PROJECTILE_SPIN_SPEED = 12; // rad/s — roll around the travel axis while flying
 const PROJECTILE_SPIN_AXIS: Vec3 = [0, 0, 1]; // local forward/back (node faces aim down -Z)
 // staff tip in the staff node's local space: mesh max-Y from the gltf, with the
@@ -387,11 +389,12 @@ const STAFF_TIP_LOCAL: Vec3 = [0, 1.0625, 0];
 // wizard/controller; projectile stats snapshot into each shot at fire time.
 const STAT_TABLE = {
     regenRate: { base: 1, perLevel: 0.5, max: 8, label: 'Health Regen', color: '#dba463' },
-    maxHealth: { base: 10, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
+    maxHealth: { base: 8, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
     damage: { base: 3, perLevel: 1, max: 8, label: 'Bullet Damage', color: '#e06e6e' },
     speed: { base: 18, perLevel: 3, max: 8, label: 'Bullet Speed', color: '#6e9de0' },
     splashRadius: { base: 2, perLevel: 0.5, max: 8, label: 'Splash', color: '#e0d56e' },
-    fireRate: { base: 3, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
+    knockback: { base: 5, perLevel: 1.5, max: 8, label: 'Knockback', color: '#9d6ee0' },
+    fireRate: { base: 1.5, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
     moveSpeed: { base: 4.317, perLevel: 0.4, max: 8, label: 'Movement Speed', color: '#6ee0d5' },
 } as const;
 type StatKey = keyof typeof STAT_TABLE;
@@ -409,6 +412,7 @@ const projectileStatsOf = (levels: StatLevels): ProjectileStats => ({
     damage: lvlValue('damage', levels.damage),
     damageRadius: lvlValue('splashRadius', levels.splashRadius),
     terrainDamageRadius: TERRAIN_RADIUS,
+    knockback: lvlValue('knockback', levels.knockback),
 });
 
 // ── xp / levels ─────────────────────────────────────────────────────
@@ -511,6 +515,7 @@ sync(ProjectileTrait, 'stats', {
         damage: pack.float32(),
         damageRadius: pack.float32(),
         terrainDamageRadius: pack.float32(),
+        knockback: pack.float32(),
     }),
     pack: (t) => t.stats,
     unpack: (v, t) => (t.stats = v),
@@ -546,6 +551,9 @@ const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ 
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
 // client → server: spend an upgrade point on the stat at index `stat` (into STAT_KEYS).
 const UpgradeStat = command('wizards.upgrade', CLIENT_TO_SERVER, pack.object({ stat: pack.uint8() }));
+// server → one client: a knockback impulse for that player's own wizard. velocity is
+// owner-authored, so the client applies it to its controller and it replicates out.
+const KnockbackCommand = command('wizards.knockback', SERVER_TO_CLIENT, pack.object({ impulse: pack.list(pack.float32(), 3) }));
 
 // ── particle types (client vfx) ─────────────────────────────────────
 // deliberately low-detail: instead of the starter pack's 8–16px pixel-art
@@ -742,6 +750,19 @@ script(WorldTrait, 'combat-cast', (ctx) => {
                 }
             }
         });
+
+        // knockback — the server directs an impulse to us when our wizard is hit.
+        // add it to our own controller velocity; owner-authority replicates the
+        // shove out, so the server + other clients see the same motion.
+        listen(ctx, KnockbackCommand, ({ impulse }) => {
+            const node = getControlNode(ctx);
+            const cc = node && getTrait(node, CharacterControllerTrait);
+            if (cc) {
+                cc.state.velocity[0] += impulse[0];
+                cc.state.velocity[1] += impulse[1];
+                cc.state.velocity[2] += impulse[2];
+            }
+        });
     }
 
     // ── server: one firing tick for ALL wizards — players AND npcs feed the same
@@ -814,6 +835,28 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             wiz.lastDamageTime = ctx.clock.time;
             wiz.lastAttacker = ownerId;
             broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage });
+
+            // knockback: radial shove away from the blast + an up-kick so it lands on
+            // grounded targets (ground drag would otherwise eat a flat horizontal push).
+            // players own their velocity → apply on their own client via a directed
+            // command; the server applies it for npcs (which it owns) directly.
+            const kx = tx - pos[0];
+            const kz = tz - pos[2];
+            const klen = Math.hypot(kx, kz) || 1;
+            const mag = stats.knockback;
+            const impulse: Vec3 = [(kx / klen) * mag, mag * KNOCKBACK_UP, (kz / klen) * mag];
+            const node = transform._node;
+            const player = getTrait(node, PlayerTrait);
+            if (player) {
+                send(ctx, KnockbackCommand, { impulse }, player.client);
+            } else {
+                const cc = getTrait(node, CharacterControllerTrait);
+                if (cc) {
+                    cc.state.velocity[0] += impulse[0];
+                    cc.state.velocity[1] += impulse[1];
+                    cc.state.velocity[2] += impulse[2];
+                }
+            }
         }
 
         broadcast(ctx, ImpactCommand, { pos: [pos[0], pos[1], pos[2]], fizzle: false });
@@ -1533,28 +1576,12 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
 
 // ── client: HUD ─────────────────────────────────────────────────────
 // screen-space DOM into the viewport, all driven by the local player's synced
-// WizardTrait: a health bar (bottom-centre), a top-left upgrade panel (xp/level
-// /points + a tappable + per stat, plus number-key shortcuts), and a top-right
-// scoreboard of every combatant. each section is diff-gated — the DOM is only
-// touched when its rendered values change.
+// WizardTrait: bottom-centre health + xp pill bars (styled like the stat panel),
+// a top-left upgrade panel, and a top-right scoreboard. each section is diff-gated
+// — the DOM is only touched when its rendered values change.
 
-// hand-authored 7×6 pixel-art heart (self-made → no asset/licensing). rendered as
-// inline SVG so it stays crisp at any HUD size and recolours for filled/empty.
-const HEART_PX = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
-const heartSvg = (color: string): string => {
-    let rects = '';
-    for (let y = 0; y < HEART_PX.length; y++) {
-        const row = HEART_PX[y]!;
-        for (let x = 0; x < row.length; x++) {
-            if (row[x] === 'X') rects += `<rect x="${x}" y="${y}" width="1" height="1"/>`;
-        }
-    }
-    return `<svg viewBox="0 0 7 6" width="100%" height="100%" fill="${color}" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
-};
-const HEART_EMPTY_SVG = heartSvg('#2b2b2b');
-const HEART_FULL_SVG = heartSvg('#e8324a');
-const HEART_W = 24; // px — slot width (7:6 aspect → ~20px tall)
-const HEART_H = 20;
+// shared with the panel: bold white text outline so HUD copy reads over any scene.
+const HUD_OUTLINE = 'text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;';
 
 script(WorldTrait, 'hud', (ctx) => {
     if (!env.client) return;
@@ -1563,37 +1590,47 @@ script(WorldTrait, 'hud', (ctx) => {
 
     const wizards = query(ctx, [WizardTrait]);
 
-    // bottom-centre: a row of hearts (each = 2 hp, half-heart granularity) over
-    // an xp-to-next-level bar.
+    // bottom-centre: rounded health + xp pill bars, matching the stat panel — a
+    // dark pill with a coloured fill behind a centred, outlined label.
+    const makeBar = (fillColor: string) => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative; width:300px; height:24px; border-radius:12px; background:#383838; overflow:hidden;';
+        const fill = document.createElement('div');
+        fill.style.cssText = `position:absolute; left:0; top:0; bottom:0; width:0%; background:${fillColor};`;
+        const label = document.createElement('div');
+        label.style.cssText = `position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold; color:#fff; ${HUD_OUTLINE}`;
+        wrap.append(fill, label);
+        return { wrap, fill, label };
+    };
+    const healthBar = makeBar('#e8324a');
+    const xpBar = makeBar('#8ce06e');
     const bottom = document.createElement('div');
     bottom.style.cssText =
-        'position:absolute; left:50%; bottom:24px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:8px; font-family:ui-monospace,monospace; pointer-events:none;';
-    const hearts = document.createElement('div');
-    hearts.style.cssText = 'display:flex; gap:2px;';
-    const xpWrap = document.createElement('div');
-    xpWrap.style.cssText = 'position:relative; width:320px; height:22px; border:2px solid #000; background:#fff; box-sizing:border-box;';
-    const xpFill = document.createElement('div');
-    xpFill.style.cssText = 'height:100%; width:0%; background:#5fd33a;';
-    const xpLabel = document.createElement('div');
-    xpLabel.style.cssText = 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:11px; color:#000;';
-    xpWrap.append(xpFill, xpLabel);
-    bottom.append(hearts, xpWrap);
+        'position:absolute; left:50%; bottom:24px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:6px; font-family:ui-monospace,monospace; pointer-events:none;';
+    bottom.append(healthBar.wrap, xpBar.wrap);
 
-    // leaderboard (top-right)
+    // leaderboard (top-right): a dark rounded panel with a Name | K | D table.
     const board = document.createElement('div');
-    board.style.cssText =
-        'position:absolute; top:12px; right:12px; min-width:150px; border:2px solid #000; background:#fff; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:12px; color:#000; pointer-events:none;';
-    const header = document.createElement('div');
-    header.textContent = 'SCORES';
-    header.style.cssText = 'padding:3px 8px; border-bottom:2px solid #000; font-weight:bold;';
+    board.style.cssText = `position:absolute; top:12px; right:12px; min-width:180px; background:#383838; border-radius:10px; padding:6px 10px 8px; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:12px; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
+    const boardTitle = document.createElement('div');
+    boardTitle.textContent = 'SCORES';
+    boardTitle.style.cssText = 'text-align:center; font-weight:bold; margin-bottom:5px;';
+    const boardGrid = document.createElement('div');
+    boardGrid.style.cssText = 'display:grid; grid-template-columns:1fr auto auto; gap:3px 12px; align-items:center;';
+    board.append(boardTitle, boardGrid);
+    const cell = (text: string, css = ''): HTMLSpanElement => {
+        const c = document.createElement('span');
+        c.textContent = text; // textContent = safe from username markup
+        c.style.cssText = css;
+        return c;
+    };
 
     // upgrade panel (top-left): each stat row has a tappable + button (works on
     // touch too); number keys 1–N are a desktop shortcut for the same command.
-    const OUTLINE = 'text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000;';
     const panel = document.createElement('div');
     panel.style.cssText = 'position:absolute; top:12px; left:12px; width:240px; display:flex; flex-direction:column; gap:6px; font-family:ui-monospace,monospace;';
     const panelHeader = document.createElement('div');
-    panelHeader.style.cssText = `align-self:center; font-weight:bold; font-size:12px; color:#fff; pointer-events:none; ${OUTLINE}`;
+    panelHeader.style.cssText = `align-self:center; font-weight:bold; font-size:12px; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
     panel.append(panelHeader);
     const rowEls = STAT_KEYS.map((key, i) => {
         const color = STAT_TABLE[key].color;
@@ -1605,10 +1642,10 @@ script(WorldTrait, 'hud', (ctx) => {
         fill.style.cssText = `position:absolute; left:0; top:0; bottom:0; width:0%; background:${color}; opacity:0.55;`;
         const name = document.createElement('span');
         name.textContent = STAT_TABLE[key].label;
-        name.style.cssText = `position:relative; flex:1; text-align:center; padding-left:12px; font-weight:bold; font-size:13px; color:#fff; white-space:nowrap; pointer-events:none; ${OUTLINE}`;
+        name.style.cssText = `position:relative; flex:1; text-align:center; padding-left:12px; font-weight:bold; font-size:13px; color:#fff; white-space:nowrap; pointer-events:none; ${HUD_OUTLINE}`;
         const keyTag = document.createElement('span');
         keyTag.textContent = `[${i + 1}]`;
-        keyTag.style.cssText = `position:relative; margin:0 6px; font-size:11px; color:#fff; pointer-events:none; ${OUTLINE}`;
+        keyTag.style.cssText = `position:relative; margin:0 6px; font-size:11px; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
         const btn = document.createElement('button');
         btn.textContent = '+';
         btn.style.cssText = `position:relative; flex:none; width:30px; height:22px; border:none; border-radius:8px; background:${color}; color:#1c1c1c; font-weight:bold; font-size:17px; line-height:1; padding:0; cursor:pointer;`;
@@ -1644,7 +1681,7 @@ script(WorldTrait, 'hud', (ctx) => {
         const controlNode = getControlNode(ctx);
         const wiz = controlNode && getTrait(controlNode, WizardTrait);
 
-        // hearts — each slot is 2 hp, so half-hearts show odd values.
+        // health bar — current vs the derived max.
         const max = wiz ? maxHealthOf(wiz.stats.levels) : 0;
         const hSig = wiz ? `${wiz.current}/${max}` : '';
         if (hSig !== healthSig) {
@@ -1653,28 +1690,9 @@ script(WorldTrait, 'hud', (ctx) => {
                 bottom.style.display = 'none';
             } else {
                 bottom.style.display = 'flex'; // restore flex (not '', which reverts to block)
-                const slots = Math.ceil(max / 2);
-                hearts.replaceChildren(
-                    ...Array.from({ length: slots }, (_, i) => {
-                        const hp = wiz.current - i * 2; // 2 = full, 1 = half, ≤0 = empty
-                        // dark heart base + a red heart clipped to the filled width
-                        // (full / half), with a crisp black outline for contrast.
-                        const slot = document.createElement('div');
-                        slot.style.cssText = `position:relative; width:${HEART_W}px; height:${HEART_H}px; filter:drop-shadow(1px 0 0 #000) drop-shadow(-1px 0 0 #000) drop-shadow(0 1px 0 #000) drop-shadow(0 -1px 0 #000);`;
-                        slot.innerHTML = HEART_EMPTY_SVG;
-                        const fillW = hp >= 2 ? 100 : hp === 1 ? 50 : 0;
-                        if (fillW > 0) {
-                            const clip = document.createElement('div');
-                            clip.style.cssText = `position:absolute; left:0; top:0; height:100%; width:${fillW}%; overflow:hidden;`;
-                            const full = document.createElement('div');
-                            full.style.cssText = `width:${HEART_W}px; height:${HEART_H}px;`;
-                            full.innerHTML = HEART_FULL_SVG;
-                            clip.append(full);
-                            slot.append(clip);
-                        }
-                        return slot;
-                    }),
-                );
+                const pct = max > 0 ? Math.max(0, Math.min(1, wiz.current / max)) : 0;
+                healthBar.fill.style.width = `${pct * 100}%`;
+                healthBar.label.textContent = `${Math.ceil(wiz.current)} / ${max}`;
             }
         }
 
@@ -1687,8 +1705,8 @@ script(WorldTrait, 'hud', (ctx) => {
                 const cur = xpForLevel(lvl);
                 const next = xpForLevel(lvl + 1);
                 const prog = next > cur ? (wiz.xp - cur) / (next - cur) : 0;
-                xpFill.style.width = `${Math.max(0, Math.min(1, prog)) * 100}%`;
-                xpLabel.textContent = `LVL ${lvl}`;
+                xpBar.fill.style.width = `${Math.max(0, Math.min(1, prog)) * 100}%`;
+                xpBar.label.textContent = `LVL ${lvl}  ·  ${next - wiz.xp} EXP to next level`;
             }
         }
 
@@ -1714,23 +1732,20 @@ script(WorldTrait, 'hud', (ctx) => {
             }
         }
 
-        // leaderboard — every combatant, sorted by kills.
+        // leaderboard — every combatant, sorted by kills then fewest deaths.
         const rows = wizards.matches.map(([w]) => w).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
         const bSig = rows.map((w) => `${w.name}:${w.kills}/${w.deaths}`).join(',');
         if (bSig !== boardSig) {
             boardSig = bSig;
-            board.replaceChildren(
-                header,
-                ...rows.map((w) => {
-                    const row = document.createElement('div');
-                    row.style.cssText = 'display:flex; justify-content:space-between; gap:12px; padding:2px 8px;';
-                    const name = document.createElement('span');
-                    name.textContent = w.name || '…'; // textContent = safe from username markup
-                    const score = document.createElement('span');
-                    score.textContent = `${w.kills}/${w.deaths}`;
-                    row.append(name, score);
-                    return row;
-                }),
+            boardGrid.replaceChildren(
+                cell('', 'font-weight:bold;'), // name column header (blank)
+                cell('K', 'font-weight:bold; text-align:center; color:#9be88a;'),
+                cell('D', 'font-weight:bold; text-align:center; color:#e88a8a;'),
+                ...rows.flatMap((w) => [
+                    cell(w.name || '…', 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:130px;'),
+                    cell(`${w.kills}`, 'text-align:center;'),
+                    cell(`${w.deaths}`, 'text-align:center;'),
+                ]),
             );
         }
     });
