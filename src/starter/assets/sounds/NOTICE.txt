@@ -26,17 +26,3 @@ file linked above for the full author list.
 
 The CC BY-SA 3.0 obligation (attribution + share-alike) applies ONLY to
 these audio files, not to the surrounding engine source code.
-
-----------------------------------------------------------------------
-
-EXCEPTION — wobbleboxx_coin.ogg
-
-The item-pickup blip is NOT from Minetest Game. It is a trimmed mono
-excerpt of "Coin01" from the "Level up, power up, Coin get (13 Sounds)"
-pack by wobbleboxx.
-
-Source:
-  https://opengameart.org/content/level-up-power-up-coin-get-13-sounds
-
-License: CC0 1.0 (Public Domain) — https://creativecommons.org/publicdomain/zero/1.0/
-Attribution is not required; credit (optional, per the author): "WobbleBoxx Workshop".
