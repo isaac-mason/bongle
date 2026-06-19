@@ -75,8 +75,8 @@ importers:
         specifier: ^0.25.0
         version: 0.25.0
       packcat:
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: github:isaac-mason/packcat#dev
+        version: https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f
       puppeteer:
         specifier: ^24.40.0
         version: 24.40.0(typescript@5.9.3)
@@ -2610,8 +2610,9 @@ packages:
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
 
-  packcat@0.3.0:
-    resolution: {integrity: sha512-5LfyKTxoyCIFuRIjF9+sr0JtJtLYviQj1NbBlz+EsZli+t12dY1Dx18hHwDM3/9ry39F4lIhUlfuSncPNYQ8Ig==}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f}
+    version: 0.3.0
 
   pacote@15.2.0:
     resolution: {integrity: sha512-rJVZeIwHTUta23sIZgEIM62WYwbmGbThdbnkt81ravBplQv+HjyroqnLRNH2+sLJHcGZmLRmhPwACqhfTcOmnA==}
@@ -5420,7 +5421,7 @@ snapshots:
 
   package-json-from-dist@1.0.1: {}
 
-  packcat@0.3.0: {}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f: {}
 
   pacote@15.2.0:
     dependencies:

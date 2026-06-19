@@ -1,6 +1,7 @@
 import { env } from '../../api/env';
 import { markAncestryChanged, TransformTrait } from '../../builtins/transform';
 import type { PlayerId } from '../client';
+import * as Debug from '../debug';
 import { registry } from '../registry';
 import type { Bitset } from '../utils/bitset';
 import * as bitset from '../utils/bitset';
@@ -86,6 +87,9 @@ export type Node = {
     /** @internal trait data stored directly on the node, keyed by trait slot */
     _traits: Map<number, TraitBase>;
 
+    /** @internal node-level replication version (send-path early-out gate). */
+    _sync: NodeSyncState;
+
     /** @internal bitset for fast trait query matching */
     _bitset: Bitset;
 
@@ -153,59 +157,42 @@ function createNodeObject(name?: string, id?: number, uuid?: string, persist?: b
         _traitIssues: new Map(),
         prefab: null,
         _prefabState: null,
+        _sync: { version: 0 },
     };
 }
 
 /* version bumping */
 
-/** per-node version tracking for replication */
-export type NodeVersionInfo = {
-    /** bumped when any replicable structural aspect changes */
+/** per-node replication version — the send path's node-level early-out gate.
+ *  the trait/field versions live on each trait instance's `_sync`; only this
+ *  node-level rollup lives here, since it spans all of a node's traits. */
+export type NodeSyncState = {
+    /** bumped on ANY replicable change to the node (structure, traits, fields). */
     version: number;
-    /** per-trait version stamps. traitSlot → version */
-    traitVersions: Map<number, number>;
-    /** per-field version stamps. key: "${traitSlot}:${fieldName}" → version */
-    fieldVersions: Map<string, number>;
 };
 
 /** bump a node's structural version */
 export function bumpNodeVersion(sg: Nodes, node: Node): void {
-    let info = sg._versions.nodes.get(node);
-    if (!info) {
-        info = { version: 0, traitVersions: new Map(), fieldVersions: new Map() };
-        sg._versions.nodes.set(node, info);
-    }
-    info.version = ++sg._versions.counter;
+    node._sync.version = ++sg._versions.counter;
 }
 
-/** bump a specific trait's version on a node */
+/** bump a specific trait's version on a node (+ the node version). */
 export function bumpTraitVersion(sg: Nodes, node: Node, traitSlot: number): void {
-    let info = sg._versions.nodes.get(node);
-    if (!info) {
-        info = { version: 0, traitVersions: new Map(), fieldVersions: new Map() };
-        sg._versions.nodes.set(node, info);
-    }
-    info.traitVersions.set(traitSlot, ++sg._versions.counter);
-    info.version = sg._versions.counter;
-}
-
-/** bump a single field's version on a node. also bumps node version. */
-export function bumpFieldVersion(sg: Nodes, node: Node, traitSlot: number, fieldName: string): void {
-    let info = sg._versions.nodes.get(node);
-    if (!info) {
-        info = { version: 0, traitVersions: new Map(), fieldVersions: new Map() };
-        sg._versions.nodes.set(node, info);
-    }
     const v = ++sg._versions.counter;
-    info.fieldVersions.set(`${traitSlot}:${fieldName}`, v);
-    // also bump trait version so existing code paths that check traitVersions still work
-    info.traitVersions.set(traitSlot, v);
-    info.version = v;
+    const inst = node._traits.get(traitSlot);
+    if (inst?._sync) inst._sync.traitVersion = v;
+    node._sync.version = v;
 }
 
-/** get version info for a node, or undefined if never tracked */
-export function getNodeVersionInfo(sg: Nodes, node: Node): NodeVersionInfo | undefined {
-    return sg._versions.nodes.get(node);
+/** bump a single field's version (+ the trait + node versions). takes the
+ *  instance + slice index directly — the diff already has both in hand. */
+export function bumpFieldVersion(sg: Nodes, node: Node, instance: TraitBase, i: number): void {
+    const v = ++sg._versions.counter;
+    if (instance._sync) {
+        instance._sync.versions[i] = v;
+        instance._sync.traitVersion = v;
+    }
+    node._sync.version = v;
 }
 
 /* node scene graph */
@@ -253,10 +240,10 @@ export type Nodes = {
      */
     playerIdToOwnedNodes: Map<PlayerId, Set<Node>>;
 
-    /** version tracking for replication — used by server discovery and client sync */
+    /** single monotonic source for replication versions. the per-node/trait/field
+     *  versions live on `node._sync` / `instance._sync`; this is just the counter. */
     _versions: {
         counter: number;
-        nodes: Map<Node, NodeVersionInfo>;
     };
 
     /**
@@ -329,7 +316,7 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
         _idToNode: new Map(),
         _uuidToNode: new Map(),
         playerIdToOwnedNodes: new Map(),
-        _versions: { counter: 0, nodes: new Map() },
+        _versions: { counter: 0 },
         _prefabNodes: new Set(),
         _prefabsDirty: new Set(),
         _transformDirty: new Set(),
@@ -496,7 +483,6 @@ export function destroyNode(nodes: Nodes, node: Node): void {
     nodes.nodes.delete(node);
     nodes._idToNode.delete(node.id);
     if (node._uuid) nodes._uuidToNode.delete(node._uuid);
-    nodes._versions.nodes.delete(node);
     nodes._prefabNodes.delete(node);
     nodes._prefabsDirty.delete(node);
     const t = getTrait(node, TransformTrait);
@@ -566,7 +552,7 @@ function updateSubtreeTransformPointers(subtreeRoot: Node, ancestor: TransformTr
 }
 
 /** user-facing props for addTrait — only the trait's own declared fields, minus base fields. */
-export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | '_syncDirty'>>;
+export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | '_sync'>>;
 
 /**
  * add a trait to a node. pass an optional props object to override defaults.
@@ -1196,7 +1182,6 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
     sg.nodes.delete(node);
     sg._idToNode.delete(node.id);
     if (node._uuid) sg._uuidToNode.delete(node._uuid);
-    sg._versions.nodes.delete(node);
     sg._prefabNodes.delete(node);
     sg._prefabsDirty.delete(node);
     node.nodes = null;
@@ -1217,105 +1202,90 @@ export { traverse } from './traverse';
 
 /* scene-graph-level script driving */
 
+// memoised `script/<hook>/<key>` metric ids — built once per (hook, script) so the
+// hot path (incl. while the client panel is closed and begin/end no-op) does no
+// string work.
+const perfKeyCache = new Map<string, Map<string, string>>();
+function perfKey(hook: string, key: string): string {
+    let byKey = perfKeyCache.get(hook);
+    if (byKey === undefined) {
+        byKey = new Map();
+        perfKeyCache.set(hook, byKey);
+    }
+    let id = byKey.get(key);
+    if (id === undefined) {
+        id = `script/${hook}/${key}`;
+        byKey.set(key, id);
+    }
+    return id;
+}
+
+// disabled metrics for hooks we don't surface (the physics-step hooks run from
+// physics.tick, which has no metrics handle); begin/end no-op on it.
+const SILENT = Debug.createMetrics(false);
+
+// the one driver behind every runOn* below: walk initialized instances, run each
+// `select`-ed hook fn with `args`, time it as `script/<hook>/<key>` (begin/end
+// self-gate on metrics.enabled), and log errors with the node + hook name.
+function runHook<A>(sg: Nodes, args: A, metrics: Debug.Metrics, hook: string, select: (i: ScriptInstance) => Iterable<(a: A) => void>): void {
+    if (!sg.runtime) return;
+    for (const nodeInstances of sg.runtime.instances.values()) {
+        for (const instance of nodeInstances.values()) {
+            if (!instance.initialized) continue;
+            for (const fn of select(instance)) {
+                const id = perfKey(hook, instance.def.key);
+                Debug.begin(metrics, id);
+                try {
+                    fn(args);
+                } catch (err) {
+                    logScriptError(`script '${instance.def.key}'.${hook} @${instance.node.id}`, err);
+                }
+                Debug.end(metrics, id);
+            }
+        }
+    }
+}
+
 /**
  * fire onInput hooks on all scripts. runs at the very start of each frame,
  * before runOnUpdate, so consumers can pre-process / consume input (e.g. an
  * editor zeroing mk._dx/_dy) before player controllers read it.
  */
-export function runOnInput(sg: Nodes, args: import('./scripts').FrameArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized || instance.onInput.size === 0) continue;
-            for (const fn of instance.onInput) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onInput @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+export function runOnInput(sg: Nodes, args: import('./scripts').FrameArgs, metrics: Debug.Metrics): void {
+    runHook(sg, args, metrics, 'onInput', (i) => i.onInput);
 }
 
 /**
  * update all scripts in the scene graph. fires once per frame before the
  * fixed-timestep tick loop — intended for input polling and camera binding.
  */
-export function runOnUpdate(sg: Nodes, args: import('./scripts').UpdateArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onUpdate) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onUpdate @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+export function runOnUpdate(sg: Nodes, args: import('./scripts').UpdateArgs, metrics: Debug.Metrics): void {
+    runHook(sg, args, metrics, 'onUpdate', (i) => i.onUpdate);
 }
 
 /**
  * tick all scripts in the scene graph. iterates all nodes and calls onTick
  * on each script instance.
  */
-export function runOnTick(sg: Nodes, args: import('./scripts').TickArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onTick) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onTick @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+export function runOnTick(sg: Nodes, args: import('./scripts').TickArgs, metrics: Debug.Metrics): void {
+    runHook(sg, args, metrics, 'onTick', (i) => i.onTick);
 }
 
 /**
- * fire onPrePhysicsStep hooks on all scripts in the scene graph.
- * called after tickSceneGraph but before the physics step.
+ * fire onPrePhysicsStep hooks on all scripts in the scene graph. called after
+ * tickSceneGraph but before the physics step. routes through SILENT — it runs
+ * from physics.tick, which carries no metrics, and isn't surfaced in the digest.
  */
 export function runOnPrePhysicsStep(sg: Nodes, args: import('./scripts').TickArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onPrePhysicsStep) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onPrePhysicsStep @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+    runHook(sg, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
 }
 
 /**
- * fire onPostPhysicsStep hooks on all scripts in the scene graph.
- * called after the physics step, before frameSceneGraph.
+ * fire onPostPhysicsStep hooks on all scripts in the scene graph. called after
+ * the physics step, before frameSceneGraph. SILENT — see runOnPrePhysicsStep.
  */
 export function runOnPostPhysicsStep(sg: Nodes, args: import('./scripts').TickArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onPostPhysicsStep) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onPostPhysicsStep @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+    runHook(sg, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
 }
 
 /**
@@ -1324,40 +1294,16 @@ export function runOnPostPhysicsStep(sg: Nodes, args: import('./scripts').TickAr
  * recompute, so post-anim callbacks see fresh local TRS but world matrices
  * are still last-tick.
  */
-export function runOnPostAnimate(sg: Nodes, args: import('./scripts').TickArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onPostAnimate) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onPostAnimate @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+export function runOnPostAnimate(sg: Nodes, args: import('./scripts').TickArgs, metrics: Debug.Metrics): void {
+    runHook(sg, args, metrics, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
 /**
  * frame all scripts in the scene graph. iterates all nodes and calls onFrame
  * on each script instance. intended for client-side render frame updates.
  */
-export function runOnFrame(sg: Nodes, args: import('./scripts').FrameArgs): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
-        for (const instance of nodeInstances.values()) {
-            if (!instance.initialized) continue;
-            for (const fn of instance.onFrame) {
-                try {
-                    fn(args);
-                } catch (err) {
-                    logScriptError(`script '${instance.def.key}'.onFrame @${instance.node.id}`, err);
-                }
-            }
-        }
-    }
+export function runOnFrame(sg: Nodes, args: import('./scripts').FrameArgs, metrics: Debug.Metrics): void {
+    runHook(sg, args, metrics, 'onFrame', (i) => i.onFrame);
 }
 
 /* serialization — schema-driven */

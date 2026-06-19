@@ -95,7 +95,7 @@
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
         "meshoptimizer": "^0.25.0",
-        "packcat": "0.3.0",
+        "packcat": "github:isaac-mason/packcat#dev",
         "puppeteer": "^24.40.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",

@@ -16,6 +16,12 @@ export type SyncCodec = {
     /** pack the sync slice from a trait instance to bytes. `node` is the
      *  owning node — only read (id/name) on error to enrich the log. */
     pack(instance: TraitBase, node: Node): Uint8Array;
+    /** pack into a caller-provided buffer — the zero-alloc path for per-tick
+     *  diffing. returns the byte length written (>0), `0` when there's nothing
+     *  to pack (no serdes / pack error → caller skips the slice), or the negated
+     *  required size (<0) when `u8` was too small — the caller grows to exactly
+     *  `-n` and retries once. */
+    packInto(instance: TraitBase, node: Node, u8: Uint8Array, offset: number): number;
     /** unpack bytes and apply to an existing instance via syncDef.unpack */
     apply(data: Uint8Array, instance: TraitBase): void;
 };
@@ -55,6 +61,7 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
     if (!serdes) {
         return {
             pack: () => new Uint8Array(0),
+            packInto: () => 0,
             apply: () => {},
         };
     }
@@ -71,6 +78,22 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
                     e,
                 );
                 return new Uint8Array(0);
+            }
+        },
+        packInto(instance, node, u8, offset) {
+            let value: unknown;
+            try {
+                value = syncDef.pack(instance);
+                const res = s.packInto(value, u8, offset);
+                // ok → bytes written; too small → negated required size, so the
+                // caller can grow to exactly that and retry once.
+                return res.ok ? res.size : -res.size;
+            } catch (e) {
+                console.error(
+                    `[bongle] failed to pack sync '${label}' @node#${node.id}${node.name ? `(${node.name})` : ''} (value=${describeValue(value)}, schema=${describeSchema(syncDef.schema)}):`,
+                    e,
+                );
+                return 0;
             }
         },
         apply(data, instance) {

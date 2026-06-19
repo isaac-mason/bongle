@@ -1,6 +1,7 @@
 /**
- * Starter pack sound clips (Minetest-derived, CC BY-SA 3.0 — see
- * `assets/sounds/NOTICE.txt`).
+ * Starter pack sound clips. Most are Minetest-Game-derived (CC BY-SA 3.0); the
+ * `itemPickup` coin blip is CC0 (wobbleboxx, via OpenGameArt). Per-file terms +
+ * attribution in `assets/sounds/NOTICE.txt`.
  *
  * Each `sound()` here uses `new URL('./assets/sounds/<file>.ogg',
  * import.meta.url)`. That same form works in both worlds the engine
@@ -259,4 +260,10 @@ export const toolBreaks3 = sound('starter:tool_breaks_3', {
 });
 export const playerDamage = sound('starter:player_damage', {
     src: new URL('./assets/sounds/player_damage.ogg', import.meta.url),
+});
+
+/* pickup — coin blip from wobbleboxx's "Level up, power up, Coin get" pack
+ * (CC0, via OpenGameArt), trimmed to a short mono hit. see NOTICE.txt. */
+export const itemPickup = sound('starter:item_pickup', {
+    src: new URL('./assets/sounds/wobbleboxx_coin.ogg', import.meta.url),
 });

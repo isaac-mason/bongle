@@ -6,13 +6,12 @@ import {
     createNode,
     createSceneGraph,
     destroyNode,
-    getNodeVersionInfo,
     getTrait,
     removeTrait,
 } from '../core/scene/nodes';
 import { prop } from '../core/scene/prop';
 import { control, sync, trait } from '../core/scene/traits';
-import { createDiffSnapshots, runDiffDetection } from './discovery';
+import { runDiffDetection } from './discovery';
 
 /* ── test traits ── */
 
@@ -72,16 +71,15 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Health);
 
-        const snapshots = createDiffSnapshots();
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
         // first run initializes snapshots — version stays where addTrait left it
-        const versionAfterAdd = getNodeVersionInfo(sg, node)!.version;
+        const versionAfterAdd = node._sync.version;
 
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
         // second run with no changes — version unchanged
-        expect(getNodeVersionInfo(sg, node)!.version).toBe(versionAfterAdd);
+        expect(node._sync.version).toBe(versionAfterAdd);
     });
 
     it('bumps versions when synced field changes', () => {
@@ -90,16 +88,15 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Health);
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        const versionAfterInit = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const versionAfterInit = node._sync.version;
 
         // mutate a synced field
         getTrait(node, Health)!.current = 50;
 
-        runDiffDetection(sg, snapshots);
-        expect(getNodeVersionInfo(sg, node)!.version).toBeGreaterThan(versionAfterInit);
+        runDiffDetection(sg);
+        expect(node._sync.version).toBeGreaterThan(versionAfterInit);
     });
 
     it('bumps versions when sync field changes', () => {
@@ -108,15 +105,14 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Position);
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        const versionAfterInit = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const versionAfterInit = node._sync.version;
 
         getTrait(node, Position)!.x = 42;
 
-        runDiffDetection(sg, snapshots);
-        expect(getNodeVersionInfo(sg, node)!.version).toBeGreaterThan(versionAfterInit);
+        runDiffDetection(sg);
+        expect(node._sync.version).toBeGreaterThan(versionAfterInit);
     });
 
     it('does not bump versions when nothing changed', () => {
@@ -125,16 +121,15 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Health);
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        const v1 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v1 = node._sync.version;
 
-        runDiffDetection(sg, snapshots);
-        const v2 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v2 = node._sync.version;
 
-        runDiffDetection(sg, snapshots);
-        const v3 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v3 = node._sync.version;
 
         expect(v1).toBe(v2);
         expect(v2).toBe(v3);
@@ -146,14 +141,12 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, DiffTag);
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
+        runDiffDetection(sg);
 
-        // tag trait has no serdes, so no snapshots stored
-        const nodeSnaps = snapshots.get(node);
-        expect(nodeSnaps).toBeUndefined();
+        // tag trait has no syncs, so no per-instance sync state
+        expect(getTrait(node, DiffTag)?._sync).toBeUndefined();
     });
 
     it('detects sync-only field changes', () => {
@@ -162,15 +155,14 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Position); // @sync only, no @property
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        const v1 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v1 = node._sync.version;
 
         getTrait(node, Position)!.x = 999;
 
-        runDiffDetection(sg, snapshots);
-        const v2 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v2 = node._sync.version;
 
         // should detect the change via sync serdes
         expect(v2).toBeGreaterThan(v1);
@@ -182,58 +174,56 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Health);
 
-        const snapshots = createDiffSnapshots();
 
-        runDiffDetection(sg, snapshots);
-        const v1 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v1 = node._sync.version;
 
         // mutate control-only field (max has a control but no sync)
         getTrait(node, Health)!.max = 999;
 
-        runDiffDetection(sg, snapshots);
-        const v2 = getNodeVersionInfo(sg, node)!.version;
+        runDiffDetection(sg);
+        const v2 = node._sync.version;
 
         // control-only changes are not part of replication diff
         expect(v2).toBe(v1);
     });
 
-    it('cleans up snapshots for destroyed nodes', () => {
+    it('per-instance snapshots die with a destroyed node', () => {
         const sg = createSceneGraph();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
 
-        const snapshots = createDiffSnapshots();
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
-        expect(snapshots.size).toBe(1);
+        // the snapshot lives on the trait instance (seeded on the first diff)
+        expect(getTrait(node, Health)!._sync!.bytes[0]).toBeInstanceOf(Uint8Array);
 
         destroyNode(sg, node);
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg); // no side-map to scan; the node is simply gone
 
-        expect(snapshots.has(node)).toBe(false);
+        expect(sg.nodes.has(node)).toBe(false);
     });
 
-    it('cleans up snapshots for removed traits', () => {
+    it('per-instance snapshots are dropped when a trait is removed', () => {
         const sg = createSceneGraph();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
         addTrait(node, Position);
 
-        const snapshots = createDiffSnapshots();
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
-        // one snapshot per sync:
-        // health: current → 1; position: x, y → 2; total 3
-        const nodeSnaps = snapshots.get(node)!;
-        expect(nodeSnaps.size).toBe(3);
+        // each trait instance holds its own per-slice snapshots
+        expect(getTrait(node, Position)!._sync!.bytes.filter(Boolean).length).toBe(2);
+        expect(getTrait(node, Health)!._sync!.bytes.filter(Boolean).length).toBe(1);
 
         removeTrait(node, Position);
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
-        // position snapshots should be cleaned up, health's 1 sync remains
-        expect(snapshots.get(node)!.size).toBe(1);
+        // the removed trait's instance (and its _sync) is gone; health's remains
+        expect(getTrait(node, Position)).toBeUndefined();
+        expect(getTrait(node, Health)!._sync!.bytes.filter(Boolean).length).toBe(1);
     });
 
     it('detects changes across multiple nodes independently', () => {
@@ -245,18 +235,17 @@ describe('diff detection', () => {
         addTrait(a, Health);
         addTrait(b, Health);
 
-        const snapshots = createDiffSnapshots();
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
-        const va1 = getNodeVersionInfo(sg, a)!.version;
-        const vb1 = getNodeVersionInfo(sg, b)!.version;
+        const va1 = a._sync.version;
+        const vb1 = b._sync.version;
 
         // only mutate node a
         getTrait(a, Health)!.current = 1;
 
-        runDiffDetection(sg, snapshots);
+        runDiffDetection(sg);
 
-        expect(getNodeVersionInfo(sg, a)!.version).toBeGreaterThan(va1);
-        expect(getNodeVersionInfo(sg, b)!.version).toBe(vb1);
+        expect(a._sync.version).toBeGreaterThan(va1);
+        expect(b._sync.version).toBe(vb1);
     });
 });

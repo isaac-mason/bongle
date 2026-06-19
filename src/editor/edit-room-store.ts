@@ -332,6 +332,8 @@ export type EditRoomState = {
     openScene: (sceneId: string) => void;
     renameScene: (oldSceneId: string, newSceneId: string) => void;
     deleteScene: (sceneId: string) => void;
+    /** persist an edit scene to disk (Ctrl+S / tab → Save). */
+    save: (sceneId: string) => void;
     undo: () => void;
     redo: () => void;
     /** dispatch an action: runs `do()` immediately, pushes onto undoStack,
@@ -592,6 +594,10 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         deleteScene: (sceneId) => {
             const net = ctx.client!.state!.net;
             Net.send(net, { type: 'delete_scene', sceneId });
+        },
+        save: (sceneId) => {
+            const net = ctx.client!.state!.net;
+            Net.send(net, { type: 'save_scene', sceneId });
         },
         undo: () => {
             const stack = get().undoStack;

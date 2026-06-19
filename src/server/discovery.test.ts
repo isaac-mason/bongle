@@ -3,6 +3,7 @@ import { block } from 'bongle';
 import { describe, expect, it } from 'vitest';
 import { createTestServer } from '../../tst/integration/server-integration-test';
 import { unpackPackedSceneGraph, unpackServerMessage } from '../core/protocol';
+import * as Debug from '../core/debug';
 import { addChild, addTrait, createNode } from '../core/scene/nodes';
 import { setPosition, TransformTrait } from '../builtins/transform';
 import * as Resources from '../core/resources';
@@ -93,7 +94,7 @@ function flushUntilQuiet(
     rooms: Rooms.Rooms,
     resources: Resources.Resources,
 ) {
-    return Discovery.flush(discovery, rooms, resources);
+    return Discovery.flush(discovery, rooms, resources, Debug.createMetrics(false));
 }
 
 /* ── tests ── */

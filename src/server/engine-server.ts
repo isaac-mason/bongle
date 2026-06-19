@@ -18,6 +18,7 @@ import * as Chat from './chat';
 import * as Clients from './clients';
 import * as Discovery from './discovery';
 import * as Net from './net';
+import { formatPerfDigest, PERF_EMIT_INTERVAL_S } from './perf-report';
 import * as Rooms from './rooms';
 import * as Rpc from '../core/rpc';
 import * as ServerRpc from './rpc';
@@ -35,7 +36,6 @@ import { clearPendingChanges } from '../core/registry';
 // directly.
 export { applyRegistryChanges } from './registry-dispatch';
 export { DEFAULT_SCENE_ID };
-const FLUSH_INTERVAL_MS = 1000; // 5000;
 
 /** cached editor module ref — populated by load() when env.editor */
 let _editor: typeof EditorModule | undefined;
@@ -114,11 +114,17 @@ export function init(opts: InitOptions) {
         driver: opts.driver,
         mode: opts.mode,
         defaultRoomId: null as string | null,
-        /** timestamp of last flush to disk */
-        lastFlushTime: 0,
         rpc,
         /** global metrics (tick timing) */
         metrics: Debug.createMetrics() as Debug.Metrics,
+        /** seconds accumulated since the last edit-mode perf digest (see perf-report) */
+        perfSince: 0,
+        /** emit the per-tick perf digest to the CLI — opt-in via `bongle edit
+         *  --performance-logs` (or `BONGLE_PERFORMANCE_LOGS=1`). per-tick timing is
+         *  always collected for the debug panel; this only gates the stdout digest,
+         *  which is otherwise too noisy for normal editing. read here (not at module
+         *  load) so the cli flag can set the env before the engine boots. */
+        performanceLogs: process.env.BONGLE_PERFORMANCE_LOGS === '1' || process.env.BONGLE_PERFORMANCE_LOGS === 'true',
         /**
          * debug log subscribers: per-client `roomId → last cursor sent`
          * cache. presence in the outer map = client wants pushes; the inner
@@ -429,10 +435,12 @@ export function processInbox(state: EngineServer) {
                     case 'request_metrics': {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
-                        // merge room metrics with global tick metric
+                        // merge room metrics with the global (non-room) stages
+                        const global = Debug.getLatestValues(state.metrics);
                         const values = {
                             ...Debug.getLatestValues(room.metrics),
-                            tick: Debug.getLatestValues(state.metrics).tick ?? 0,
+                            tick: global.tick ?? 0,
+                            inbox: global.inbox ?? 0,
                         };
                         Net.send(state.net, client, { type: 'room_metrics', roomId: room.id, values });
                         break;
@@ -595,6 +603,17 @@ export function processInbox(state: EngineServer) {
                         break;
                     }
 
+                    case 'save_scene': {
+                        Debug.begin(state.metrics, 'save');
+                        for (const room of state.rooms.rooms.values()) {
+                            if (room.mode !== 'edit' || room.sceneId !== message.sceneId) continue;
+                            saveRoom(state, room);
+                            Rooms.setRoomDirty(state.discovery, room, false);
+                        }
+                        Debug.end(state.metrics, 'save');
+                        break;
+                    }
+
                     case 'chat_input': {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
@@ -612,7 +631,11 @@ export function processInbox(state: EngineServer) {
 export function update(state: EngineServer, delta: number) {
     Debug.begin(state.metrics, 'tick');
 
+    // inbox drains client messages — joins/room-creates do scene instantiation here,
+    // a one-frame spike source distinct from the per-room tick stages.
+    Debug.begin(state.metrics, 'inbox');
     processInbox(state);
+    Debug.end(state.metrics, 'inbox');
 
     // tick all rooms
     for (const room of state.rooms.rooms.values()) {
@@ -621,28 +644,44 @@ export function update(state: EngineServer, delta: number) {
         room.tick++;
         Clock.tick(room.clock, delta);
 
-        Nodes.runOnUpdate(room.nodes, { delta });
+        Debug.begin(room.metrics, 'nodes/update');
+        Nodes.runOnUpdate(room.nodes, { delta }, room.metrics);
+        Debug.end(room.metrics, 'nodes/update');
 
-        Nodes.runOnTick(room.nodes, { delta });
+        // game-script onTick — the usual home of game-logic spikes (ai, projectile
+        // sweeps, the round reset). also timed per-script as `script/<key>`.
+        Debug.begin(room.metrics, 'nodes/tick');
+        Nodes.runOnTick(room.nodes, { delta }, room.metrics);
+        Debug.end(room.metrics, 'nodes/tick');
 
         // sample animations into rig TransformTraits before physics so the
         // teleport detector picks up the new pose this tick (matches client).
+        Debug.begin(room.metrics, 'animation');
         Animation.tick(room.animations, state.resources, delta);
+        Debug.end(room.metrics, 'animation');
 
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
-        Nodes.runOnPostAnimate(room.nodes, { delta });
+        Debug.begin(room.metrics, 'nodes/post-animate');
+        Nodes.runOnPostAnimate(room.nodes, { delta }, room.metrics);
+        Debug.end(room.metrics, 'nodes/post-animate');
 
         // tick prefab system — discovers and re-instantiates stale prefab nodes
+        Debug.begin(room.metrics, 'prefab');
         Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'server');
+        Debug.end(room.metrics, 'prefab');
 
+        Debug.begin(room.metrics, 'physics/pre');
         physics.preStep(room.physics, room.nodes, state.resources, null, room.mode === 'play');
+        Debug.end(room.metrics, 'physics/pre');
 
         Debug.begin(room.metrics, 'physics');
         physics.tick(room.physics, room.nodes, delta);
         Debug.end(room.metrics, 'physics');
 
+        Debug.begin(room.metrics, 'physics/post');
         physics.postStep(room.physics, room.nodes, null);
+        Debug.end(room.metrics, 'physics/post');
 
         // run block hooks (recompute + observer events + onNeighbourChanged)
         // before light flush so lighting sees settled block state.
@@ -655,12 +694,16 @@ export function update(state: EngineServer, delta: number) {
         Light.flushPendingLight(room.voxels);
         Debug.end(room.metrics, 'lighting');
 
-        Nodes.runOnFrame(room.nodes, { delta });
+        Debug.begin(room.metrics, 'nodes/frame');
+        Nodes.runOnFrame(room.nodes, { delta }, room.metrics);
+        Debug.end(room.metrics, 'nodes/frame');
 
         // drain chat inbox/outbox: parse queued `chat_input` lines from
         // clients (consumed by local handlers or promoted into outbox),
         // then broadcast every outbox entry as `chat_broadcast`.
+        Debug.begin(room.metrics, 'chat');
         Chat.tick(room.chat, state.net, state.rooms, room, state.clients);
+        Debug.end(room.metrics, 'chat');
 
         // release per-tick physics scratch (voxel hit pool). MUST come after
         // every subShapeId consumer for this room — contact listeners,
@@ -671,18 +714,14 @@ export function update(state: EngineServer, delta: number) {
     }
 
     // drain queued reset/stop requests now that no room is mid-tick.
+    Debug.begin(state.metrics, 'rooms/drain');
     Rooms.drainPending(state);
-
-    // auto-persist edit rooms to disk on a fixed interval
-    if (Date.now() - state.lastFlushTime > FLUSH_INTERVAL_MS) {
-        flushAllRooms(state);
-        state.lastFlushTime = Date.now();
-    }
+    Debug.end(state.metrics, 'rooms/drain');
 
     // flush discovery — runs diff detection per room (serialize once),
     // then distributes updates to clients based on per-client knowledge
     Debug.begin(state.metrics, 'discovery');
-    const pending = Discovery.flush(state.discovery, state.rooms, state.resources);
+    const pending = Discovery.flush(state.discovery, state.rooms, state.resources, state.metrics);
     const discoveryMs = Debug.end(state.metrics, 'discovery');
 
     for (const [client, message] of pending) {
@@ -726,7 +765,9 @@ export function update(state: EngineServer, delta: number) {
     }
 
     // pack typed outbox messages into Uint8Array packets for the runtime
+    Debug.begin(state.metrics, 'netflush');
     Net.flush(state.net);
+    Debug.end(state.metrics, 'netflush');
 
     // record net throughput per room. global bytes are split evenly across
     // rooms today — coarse but matches the per-room metric model. each
@@ -741,30 +782,42 @@ export function update(state: EngineServer, delta: number) {
     }
 
     Debug.end(state.metrics, 'tick');
-}
 
-/* ── auto-persist ── */
-
-/**
- * flush all edit rooms to disk. called on a fixed interval and on shutdown.
- */
-function flushAllRooms(state: EngineServer): void {
-    for (const room of state.rooms.rooms.values()) {
-        if (room.mode !== 'edit') continue;
-
-        const payload = {
-            nodes: Nodes.saveSceneGraph(room.nodes),
-            voxels: saveVoxels(room.voxels),
-        };
-        const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);
-
-        // bump the scene handle version so in-process consumers (cross-room
-        // prefab readers in the same tick) see the new state immediately —
-        // the file-watcher → HMR fan-out reaches the client out-of-band.
-        if (sceneChanged) {
-            Content.populateScene(state.content, registry.blockRegistry, room.sceneId, payload, 'server');
+    // perf digest to the server CLI every PERF_EMIT_INTERVAL_S, for edit rooms,
+    // when --performance-logs is on. timing itself is always collected (it feeds the panel).
+    if (state.performanceLogs) {
+        state.perfSince += delta;
+        if (state.perfSince >= PERF_EMIT_INTERVAL_S) {
+            state.perfSince = 0;
+            for (const room of state.rooms.rooms.values()) {
+                if (room.mode !== 'edit') continue;
+                const digest = formatPerfDigest(state.metrics, room.metrics, room.id);
+                if (digest) console.log(digest);
+            }
         }
     }
+}
+
+/* ── save ── */
+
+/** serialize + persist one edit room to disk; returns whether the file changed.
+ *  invoked on a manual save (the editor's `save_scene` message). */
+export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
+    if (room.mode !== 'edit') return false;
+
+    const payload = {
+        nodes: Nodes.saveSceneGraph(room.nodes),
+        voxels: saveVoxels(room.voxels),
+    };
+    const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);
+
+    // bump the scene handle version so in-process consumers (cross-room prefab
+    // readers in the same tick) see the new state immediately — the file-watcher
+    // → HMR fan-out reaches the client out-of-band.
+    if (sceneChanged) {
+        Content.populateScene(state.content, registry.blockRegistry, room.sceneId, payload, 'server');
+    }
+    return sceneChanged;
 }
 
 /* ── dispose ── */

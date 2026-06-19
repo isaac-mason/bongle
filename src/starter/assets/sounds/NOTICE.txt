@@ -1,7 +1,8 @@
-The .ogg audio files in this directory were lifted from the Minetest
-Game "default" mod (the stock content pack shipped with the Minetest
-engine) — footsteps, dig/dug, place, break, chest, furnace, lava,
-tool-break, item-smoke, and player-damage sounds.
+Most of the .ogg audio files in this directory were lifted from the
+Minetest Game "default" mod (the stock content pack shipped with the
+Minetest engine) — footsteps, dig/dug, place, break, chest, furnace,
+lava, tool-break, item-smoke, and player-damage sounds. (The one
+exception, wobbleboxx_coin.ogg, is covered separately at the bottom.)
 
 Source:
   https://github.com/minetest/minetest_game/tree/master/mods/default/sounds
@@ -15,8 +16,8 @@ Upstream lists sounds in this mod under a mix of:
   - CC0 1.0       https://creativecommons.org/publicdomain/zero/1.0/
 
 Per-file attribution is not provided upstream, so to stay on the safe
-side we redistribute every file in this directory under the most
-restrictive of those terms:
+side we redistribute every Minetest-Game file in this directory under
+the most restrictive of those terms:
 
   CC BY-SA 3.0 — https://creativecommons.org/licenses/by-sa/3.0/
 
@@ -25,3 +26,17 @@ file linked above for the full author list.
 
 The CC BY-SA 3.0 obligation (attribution + share-alike) applies ONLY to
 these audio files, not to the surrounding engine source code.
+
+----------------------------------------------------------------------
+
+EXCEPTION — wobbleboxx_coin.ogg
+
+The item-pickup blip is NOT from Minetest Game. It is a trimmed mono
+excerpt of "Coin01" from the "Level up, power up, Coin get (13 Sounds)"
+pack by wobbleboxx.
+
+Source:
+  https://opengameart.org/content/level-up-power-up-coin-get-13-sounds
+
+License: CC0 1.0 (Public Domain) — https://creativecommons.org/publicdomain/zero/1.0/
+Attribution is not required; credit (optional, per the author): "WobbleBoxx Workshop".

@@ -174,6 +174,12 @@ function EditUI() {
                         if (key === 'y' || e.shiftKey) store.getState().redo();
                         else store.getState().undo();
                     }
+                } else if (key === 's') {
+                    const { room, roomMode, sceneId, playerEditStores } = useEditor.getState();
+                    if (roomMode === 'edit' && room && sceneId) {
+                        e.preventDefault();
+                        playerEditStores[room.playerId]?.getState().save(sceneId);
+                    }
                 }
                 return;
             }
@@ -213,6 +219,18 @@ function EditUI() {
         }
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
+    }, []);
+
+    // warn before leaving with unsaved edits in any room.
+    useEffect(() => {
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (useEditor.getState().roomList.some((r) => r.dirty)) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
     }, []);
 
     return (

@@ -348,6 +348,14 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
  * nodes + scene graph + physics, removes every Player belonging to this
  * room (across all clients/modes), and deletes it from the registry.
  */
+/** flip a room's unsaved-edits flag, re-broadcasting the room list (which carries
+ *  `dirty`) only on a real change. set true on edits, false on save. */
+export function setRoomDirty(discovery: Discovery.Discovery, room: Room, value: boolean): void {
+    if (room.dirty === value) return;
+    room.dirty = value;
+    Discovery.invalidateRoomList(discovery);
+}
+
 export function destroyRoom(state: Rooms, roomId: string): void {
     const room = state.rooms.get(roomId);
     if (!room) return;

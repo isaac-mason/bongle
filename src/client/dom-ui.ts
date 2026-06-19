@@ -43,6 +43,7 @@ import { HtmlTrait } from '../builtins/html';
 import { getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
 import type { Nodes } from '../core/scene/nodes';
 import { query } from '../core/scene/nodes';
+import { UILayer } from './ui-layers';
 import type { Viewport } from './viewport';
 
 // ── shared per-instance state ──────────────────────────────────────
@@ -85,6 +86,10 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: Nodes) {
     htmlOverlay.style.inset = '0';
     htmlOverlay.style.pointerEvents = 'none';
     htmlOverlay.style.transformStyle = 'preserve-3d';
+    // explicit z-index makes this a stacking context, confining the huge
+    // per-frame depth z-indices the trait panels get (see UILayer) so they
+    // sort among themselves but never paint over the HUD above.
+    htmlOverlay.style.zIndex = String(UILayer.worldOverlay);
     viewport.appendChild(htmlOverlay);
 
     return {

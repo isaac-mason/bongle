@@ -207,8 +207,9 @@ const key = (x: number, y: number, z: number): string => `${x},${y},${z}`;
 export type SearchType = 'shortest' | 'greedy';
 
 export type FindPathOptions = {
-    /** cap on node expansions; returns null past it (disconnected-goal guard). */
-    maxExpansions?: number;
+    /** cap on A* iterations (nodes expanded); returns null once exceeded. the
+     *  guard against an unreachable/disconnected goal blowing up the search. */
+    maxIterations?: number;
     /** frontier scoring. default 'shortest'. */
     searchType?: SearchType;
 };
@@ -228,28 +229,29 @@ export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, model: Movemen
 
 /**
  * batteries-included ground pathfinding for the common case: a default 1×2×1
- * land agent, A*, and swept-box shortcut smoothing. it's exactly these three
- * calls —
+ * land agent, A*, and swept-box shortcut smoothing. `options` forwards to the
+ * underlying `findPath` — pass `maxIterations` to bound the search (essential for
+ * AI repathing toward possibly-unreachable goals) or `searchType: 'greedy'`. it's
+ * otherwise exactly —
  *
  * ```ts
  * const walkable = landWalkable();
- * const path = findPath(voxels, start, goal, landMovement({ walkable }));
+ * const path = findPath(voxels, start, goal, landMovement({ walkable }), options);
  * return path && smoothPath(voxels, path, groundShortcut(walkable));
  * ```
  *
- * so for anything else — a different agent size, no smoothing, an expansion
- * cap, greedy search, fly/swim/ladder movement — compose those inner APIs
- * directly rather than reaching for options here.
+ * so for a different agent size, no smoothing, or fly/swim/ladder movement,
+ * compose those inner APIs directly.
  */
-export function findGroundPath(voxels: Voxels, start: Vec3, goal: Vec3): Vec3[] | null {
+export function findGroundPath(voxels: Voxels, start: Vec3, goal: Vec3, options?: FindPathOptions): Vec3[] | null {
     const walkable = landWalkable();
-    const path = findPath(voxels, start, goal, landMovement({ walkable }));
+    const path = findPath(voxels, start, goal, landMovement({ walkable }), options);
     return path ? smoothPath(voxels, path, groundShortcut(walkable)) : null;
 }
 
 function search(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, options?: FindPathOptions): Node | null {
     const [gx, gy, gz] = goal;
-    const maxExpansions = options?.maxExpansions ?? Infinity;
+    const maxIterations = options?.maxIterations ?? Infinity;
     const greedy = options?.searchType === 'greedy';
     const { actions, heuristic } = model;
 
@@ -261,7 +263,7 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, o
     open.push({ x: start[0], y: start[1], z: start[2], parent: null, g: 0, f: h0 });
     gScore.set(key(start[0], start[1], start[2]), 0);
 
-    let expansions = 0;
+    let iterations = 0;
     while (open.size > 0) {
         const current = open.pop();
         const ck = key(current.x, current.y, current.z);
@@ -269,7 +271,7 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, o
 
         if (current.x === gx && current.y === gy && current.z === gz) return current;
 
-        if (++expansions > maxExpansions) return null;
+        if (++iterations > maxIterations) return null;
         closed.add(ck);
 
         for (const step of actions(voxels, current.x, current.y, current.z)) {

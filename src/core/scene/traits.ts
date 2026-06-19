@@ -38,7 +38,7 @@ export type TraitOptions = {
 type Factory<T> = () => T;
 
 /** field names that cannot be used in trait definitions. */
-type ReservedTraitKey = '_node' | '_def' | '_syncDirty';
+type ReservedTraitKey = '_node' | '_def' | '_sync';
 
 /**
  * map a TraitBody to its instance shape: factory values are unwrapped
@@ -74,14 +74,26 @@ export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
 
+/** measures how much a sync value changed — receives the previously-emitted value
+ *  and the current one, returns a magnitude compared against a `ThresholdRate`'s
+ *  `threshold`. `syncMetric.{distance,angle,scalar}` cover the common shapes. */
+export type SyncMetric = (previous: any, current: any) => number;
+
+/** threshold-gated rate: re-emit only once `metric(previous, current)` reaches
+ *  `threshold` since the last emit. sub-threshold changes accumulate against the
+ *  last emitted value, so slow drift still reconciles. body-agnostic — it reads the
+ *  field's own value, so it works for any field and any driver (rigid body, AABB
+ *  body, script, animation). this replaces the old velocity-based 'movement' rate. */
+export type ThresholdRate = { threshold: number; metric: SyncMetric };
+
 /**
  * sync rate category or explicit Hz cap for per-sync rate gating.
- * - 'realtime' — emit whenever bytes change (no throttle)
- * - 'movement' — adaptive rate based on rigid body velocity
- * - 'dirty'   — never auto-emit; only when SyncHandle.dirty() is called
- * - number    — explicit Hz cap for the cold-path byte diff
+ * - 'realtime'     — emit whenever bytes change (no throttle)
+ * - 'dirty'        — never auto-emit; only when SyncHandle.dirty() is called
+ * - number         — explicit Hz cap for the cold-path byte diff
+ * - ThresholdRate  — emit only on a significant value change (movement/rotation/etc.)
  */
-export type SyncRateConfig = 'realtime' | 'movement' | 'dirty' | number;
+export type SyncRateConfig = 'realtime' | 'dirty' | number | ThresholdRate;
 
 /** body passed by the user to `sync()` — fields only, no stamps. */
 export type SyncBody<T extends TraitBase = TraitBase, S = unknown> = {
@@ -112,6 +124,26 @@ export type SyncHandle<T extends TraitBase = TraitBase> = {
 
 /* ── instance base ── */
 
+/**
+ * per-instance replication working-state, array-indexed by sync slice (parallel
+ * to `_def.sync`) — so the diff is array indexing, not keyed side-map lookups.
+ */
+export type TraitSyncState = {
+    /** one "locally dirty" bit per slice — set by producers (SyncHandle.dirty),
+     *  consumed + cleared by the diff pass; cleared by clearSyncDirty on an
+     *  applied replicated write. */
+    dirty: Uint32Array;
+    /** [i] = last-emitted serialized bytes for slice i (the byte-diff snapshot). */
+    bytes: Array<Uint8Array | undefined>;
+    /** [i] = last-emitted value for slice i — ThresholdRate slices only. */
+    values: unknown[];
+    /** [i] = monotonic replication version for slice i. f64 because the version
+     *  counter grows unbounded and must not wrap an int32. */
+    versions: Float64Array;
+    /** max of this trait's field versions — the send-path trait-level gate. */
+    traitVersion: number;
+};
+
 /** base shape of every trait instance — has `_node` back-ref + def back-ref. */
 export type TraitBase = {
     /** reference to the node this trait instance belongs to */
@@ -119,18 +151,11 @@ export type TraitBase = {
     /** the TraitDef this instance was built from */
     _def: TraitDef;
     /**
-     * per-sync "locally dirty" bitset — one bit per registered SyncDef on
-     * this trait, parallel to `_def.sync`. set by producers (SyncHandle.dirty
-     * + setSyncDirty), consumed and cleared by the server's diff pass to
-     * emit replication updates. cleared by clearSyncDirty when a replicated
-     * write is applied (so the receive path doesn't re-emit).
-     *
-     * allocated once in buildTraitInstance when `def.sync.length > 0`, sized
-     * to `ceil(def.sync.length / 32)` Uint32 words — i.e. one Uint32 covers
-     * 32 syncs, so realistically all traits fit in a single word. undefined
-     * for traits with zero syncs; helpers no-op in that case.
+     * per-instance replication working-state — dirty bits + diff snapshots,
+     * array-indexed by sync slice. allocated in buildTraitInstance when the
+     * trait has syncs; undefined otherwise (helpers no-op in that case).
      */
-    _syncDirty?: Uint32Array;
+    _sync?: TraitSyncState;
 };
 
 /**
@@ -139,9 +164,9 @@ export type TraitBase = {
  * returned from the original `sync()` call).
  */
 export function setSyncDirty(instance: TraitBase, idx: number): void {
-    const bits = instance._syncDirty;
-    if (!bits) return;
-    bits[idx >> 5] |= 1 << (idx & 31);
+    const s = instance._sync;
+    if (!s) return;
+    s.dirty[idx >> 5] |= 1 << (idx & 31);
 }
 
 /**
@@ -151,9 +176,9 @@ export function setSyncDirty(instance: TraitBase, idx: number): void {
  * bit inside it.)
  */
 export function clearSyncDirty(instance: TraitBase, idx: number): void {
-    const bits = instance._syncDirty;
-    if (!bits) return;
-    bits[idx >> 5] &= ~(1 << (idx & 31));
+    const s = instance._sync;
+    if (!s) return;
+    s.dirty[idx >> 5] &= ~(1 << (idx & 31));
 }
 
 /* ── trait handle ── */
@@ -408,11 +433,17 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
         }
     }
 
-    // one bit per SyncDef, packed into Uint32 words. realistic trait sync
-    // counts (< 32) fit in a single word; the ceil handles the in-principle
-    // case of a trait declaring more than 32 syncs.
+    // per-instance sync working-state: one dirty bit per slice (Uint32 words,
+    // realistic counts < 32 fit a single word) + the diff snapshot arrays
+    // (bytes/values), indexed by slice.
     if (def.sync.length > 0) {
-        instance._syncDirty = new Uint32Array(Math.ceil(def.sync.length / 32));
+        instance._sync = {
+            dirty: new Uint32Array(Math.ceil(def.sync.length / 32)),
+            bytes: new Array(def.sync.length),
+            values: new Array(def.sync.length),
+            versions: new Float64Array(def.sync.length),
+            traitVersion: 0,
+        };
     }
 
     return instance;

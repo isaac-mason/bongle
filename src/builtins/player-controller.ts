@@ -47,6 +47,7 @@ import { type CameraTrait, resolveCamera } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
 import { Physics } from '../api/physics';
+import { UILayer } from '../client/ui-layers';
 
 // ── perspective ───────────────────────────────────────────────────────
 
@@ -740,7 +741,7 @@ script(
                 'pointer-events: auto',
                 'user-select: text',
                 'border: 1px solid #fff',
-                'z-index: 1',
+                `z-index: ${UILayer.debug}`,
             ].join('; ');
             viewport.appendChild(el);
             debugPanelEl = el;
@@ -781,7 +782,7 @@ script(
                 'width: 100%',
                 'height: 100%',
                 'pointer-events: none',
-                'z-index: 2',
+                `z-index: ${UILayer.crosshair}`,
             ].join('; ');
             viewport.appendChild(canvas);
             crosshairCanvas = canvas;

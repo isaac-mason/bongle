@@ -1,6 +1,7 @@
 import type { Client } from 'bongle/interface';
 import { PlayerTrait } from '../builtins/player';
 import { TransformTrait } from '../builtins/transform';
+import * as Debug from '../core/debug';
 import { registry } from '../core/registry';
 import type { PlayerId } from '../core/client';
 import type { BinaryField, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
@@ -9,7 +10,6 @@ import {
     bumpFieldVersion,
     encodePrefabConfig,
     getNodeById,
-    getNodeVersionInfo,
     getTrait,
     isReplicable,
     type Node,
@@ -18,10 +18,10 @@ import {
 } from '../core/scene/nodes';
 import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
 import { packSceneGraph } from '../core/scene/scene-pack';
+import { captureValue, diffSyncSlice, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
 import { getWorldPosition } from '../builtins/transform';
-import { bytesEqual } from '../core/utils/bytes';
 import { encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,
@@ -41,42 +41,23 @@ import * as RoomsModule from './rooms';
 /* ── diff snapshots (change detection) ── */
 
 /**
- * per-node, per-field binary snapshots for diff detection.
- * keyed by node → (snapshot key → last packed bytes).
- * snapshot keys: `${traitSlot}:${fieldName}` for each replicable field.
- */
-export type DiffSnapshots = Map<Node, Map<string, Uint8Array>>;
-
-export function createDiffSnapshots(): DiffSnapshots {
-    return new Map();
-}
-
-/**
- * run diff detection on a scene graph. compares current trait field values
- * against cached binary snapshots. when a difference is found, bumps
- * the trait and node versions and updates the snapshot.
+ * run diff detection on a scene graph: compare each trait's current sync values
+ * against the per-instance snapshots (`instance._sync.bytes/values`), bumping
+ * versions and updating the snapshot when a slice changed. diffs both property
+ * and sync fields regardless of mode — scripts can mutate either at any time.
  *
- * diffs both property and sync fields regardless of mode — scripts can
- * mutate either kind of field at any time.
+ * per-slice state lives on the instance, so it's reaped with the node via GC —
+ * no side-map to scan or clean up.
  *
  * call once per tick, after scripts have run.
  */
-export function runDiffDetection(sg: Nodes, snapshots: DiffSnapshots): void {
+export function runDiffDetection(sg: Nodes): void {
     for (const node of sg.nodes) {
-        diffNode(sg, snapshots, node);
-    }
-
-    // clean up snapshots for nodes that no longer exist
-    for (const node of snapshots.keys()) {
-        if (!sg.nodes.has(node)) {
-            snapshots.delete(node);
-        }
+        diffNode(sg, node);
     }
 }
 
-function diffNode(sg: Nodes, snapshots: DiffSnapshots, node: Node): void {
-    let nodeSnapshots: Map<string, Uint8Array> | undefined;
-
+function diffNode(sg: Nodes, node: Node): void {
     for (const [traitSlot, instance] of node._traits) {
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
@@ -84,29 +65,23 @@ function diffNode(sg: Nodes, snapshots: DiffSnapshots, node: Node): void {
         const codecs = getSyncCodecs(def);
         if (!codecs) continue;
 
-        if (!nodeSnapshots) {
-            nodeSnapshots = snapshots.get(node);
-            if (!nodeSnapshots) {
-                nodeSnapshots = new Map();
-                snapshots.set(node, nodeSnapshots);
-            }
-        }
-
-        // dirty fast path: read+clear sync-dirty bits before byte-diffing.
-        const dirtyBits = (instance as TraitBase & { _syncDirty?: Uint32Array })._syncDirty;
+        const sync = instance._sync;
+        if (!sync) continue;
 
         for (let i = 0; i < codecs.length; i++) {
             const codec = codecs[i];
-            const key = `${traitSlot}:${i}`;
 
-            if (dirtyBits) {
-                const word = i >> 5;
-                const bit = 1 << (i & 31);
-                if ((dirtyBits[word] & bit) !== 0) {
-                    dirtyBits[word] &= ~bit;
-                    const bytes = codec.pack(instance, node);
-                    nodeSnapshots.set(key, bytes);
-                    bumpFieldVersion(sg, node, traitSlot, String(i));
+            // dirty fast path: read+clear sync-dirty bits before byte-diffing.
+            const word = i >> 5;
+            const bit = 1 << (i & 31);
+            if ((sync.dirty[word] & bit) !== 0) {
+                sync.dirty[word] &= ~bit;
+                // ThresholdRate slices consume the dirty bit but do NOT emit on it —
+                // the threshold branch below decides if the change is big enough.
+                // (else setPosition / physics dirtying would bypass the threshold.)
+                if (typeof def.sync[i].rate !== 'object') {
+                    writeSnapshot(codec, instance, node, i, sync);
+                    bumpFieldVersion(sg, node, instance, i);
                     continue;
                 }
             }
@@ -115,29 +90,11 @@ function diffNode(sg: Nodes, snapshots: DiffSnapshots, node: Node): void {
             // SyncHandle.dirty() above can flag emission.
             if (def.sync[i].rate === 'dirty') continue;
 
-            // cold path: byte-diff against snapshot.
-            const current = codec.pack(instance, node);
-            const previous = nodeSnapshots.get(key);
-
-            if (!previous) {
-                nodeSnapshots.set(key, current);
-                continue;
-            }
-
-            if (!bytesEqual(current, previous)) {
-                nodeSnapshots.set(key, current);
-                bumpFieldVersion(sg, node, traitSlot, String(i));
-            }
-        }
-    }
-
-    // clean up snapshots for traits that have been removed from this node
-    nodeSnapshots = snapshots.get(node);
-    if (nodeSnapshots) {
-        for (const key of nodeSnapshots.keys()) {
-            const traitSlot = Number.parseInt(key, 10);
-            if (!node._traits.has(traitSlot)) {
-                nodeSnapshots.delete(key);
+            // shared cold path: byte-diff or ThresholdRate metric. the server seeds
+            // a first-seen slice silently (its initial version already covers it),
+            // so emitOnFirstSeen = false.
+            if (diffSyncSlice(def.sync[i], codec, instance, node, i, sync, false)) {
+                bumpFieldVersion(sg, node, instance, i);
             }
         }
     }
@@ -253,16 +210,12 @@ export type Discovery = {
 
     /** per-client tracking. */
     clients: Map<Client, ClientState>;
-
-    /** per-room diff snapshots for change detection. */
-    diffSnapshots: Map<string, DiffSnapshots>;
 };
 
 export function init(): Discovery {
     return {
         roomListVersion: 0,
         clients: new Map(),
-        diffSnapshots: new Map(),
     };
 }
 
@@ -437,7 +390,7 @@ export function stampNodeKnowledge(
         if (player.roomId !== roomId) continue;
         const nodeKnowledge = cs.playerKnowledge.get(player.id);
         if (!nodeKnowledge) continue;
-        snapshotNodeKnowledge(sg, nodeKnowledge, node);
+        snapshotNodeKnowledge(nodeKnowledge, node);
     }
 }
 
@@ -482,17 +435,8 @@ export function acceptOwnerFields(
     const codecs = getSyncCodecs(def);
     if (!codecs) return;
 
-    // get or create diff snapshots for this room + node
-    let roomSnapshots = state.diffSnapshots.get(roomId);
-    if (!roomSnapshots) {
-        roomSnapshots = createDiffSnapshots();
-        state.diffSnapshots.set(roomId, roomSnapshots);
-    }
-    let nodeSnapshots = roomSnapshots.get(node);
-    if (!nodeSnapshots) {
-        nodeSnapshots = new Map();
-        roomSnapshots.set(node, nodeSnapshots);
-    }
+    const sync = instance._sync;
+    if (!sync) return;
 
     // collect every Player the client holds in this room — we stamp all of
     // their knowledge so none echo this owner-authority write back.
@@ -511,24 +455,29 @@ export function acceptOwnerFields(
         //    the same write and double-bump.
         codec.apply(entry.data, instance);
 
-        // 2. update diff snapshot to the just-applied bytes so the byte-diff
-        //    in diffNode sees no change and doesn't re-bump.
+        // 2. update the per-instance snapshot to the just-applied bytes so the
+        //    byte-diff in diffNode sees no change and doesn't re-bump.
         const snapshotKey = `${def.slot}:${i}`;
-        const freshBytes = codec.pack(instance, node);
-        nodeSnapshots.set(snapshotKey, freshBytes);
+        sync.bytes[i] = codec.pack(instance, node);
+
+        // for a ThresholdRate slice, keep the value snapshot in lockstep with the
+        // bytes so the next diffNode measures against this just-applied value and
+        // doesn't re-emit it.
+        if (typeof syncDef.rate === 'object' && syncDef.rate !== null) {
+            sync.values[i] = captureValue(sync.values[i], syncDef.pack(instance));
+        }
 
         // 3. bump the field version once, here. broadcasts to non-owners
         //    via the per-client knowledge diff in buildSceneSyncUpdates;
         //    the owner is exempted by stamping their knowledge to the
         //    post-bump version below (step 4) so they don't echo it back.
-        bumpFieldVersion(sg, node, def.slot, String(i));
+        bumpFieldVersion(sg, node, instance, i);
 
         // 4. stamp every Player the owner client holds in this room to the
         //    post-bump version so this owner-authority write doesn't echo
         //    back to the sender.
         if (!cs) continue;
-        const vInfo = getNodeVersionInfo(sg, node);
-        const fieldVersion = vInfo?.fieldVersions.get(snapshotKey) ?? 0;
+        const fieldVersion = instance._sync?.versions[i] ?? 0;
         for (const player of targetPlayers) {
             const nodeKnowledge = cs.playerKnowledge.get(player.id);
             const known = nodeKnowledge?.get(node.id);
@@ -559,20 +508,19 @@ export function flush(
     state: Discovery,
     rooms: Rooms,
     resources: Resources,
+    metrics: Debug.Metrics,
 ): Array<[Client, ServerMessage]> {
     const out: Array<[Client, ServerMessage]> = [];
 
     // --- phase 1: diff detection (per-room, serialize once) ---
+    Debug.begin(metrics, 'discovery/diff');
     for (const room of rooms.rooms.values()) {
-        let snapshots = state.diffSnapshots.get(room.id);
-        if (!snapshots) {
-            snapshots = createDiffSnapshots();
-            state.diffSnapshots.set(room.id, snapshots);
-        }
-        runDiffDetection(room.nodes, snapshots);
+        runDiffDetection(room.nodes);
     }
+    Debug.end(metrics, 'discovery/diff');
 
     // --- phase 2: per-client knowledge diff + message generation ---
+    Debug.begin(metrics, 'discovery/scene');
 
     // build room list lazily (only if at least one client needs it)
     let roomListJson: string | null = null;
@@ -587,6 +535,7 @@ export function flush(
                     clientCount: RoomsModule.getClientsInRoom(rooms, room).size,
                     sourceRoomId: room.sourceRoomId,
                     namespace: room.namespace,
+                    dirty: room.dirty,
                 });
             }
             roomListJson = JSON.stringify(infos);
@@ -613,8 +562,7 @@ export function flush(
             const nodeKnowledge = cs.playerKnowledge.get(player.id);
             if (!nodeKnowledge) continue;
 
-            const snapshots = state.diffSnapshots.get(player.roomId);
-            const updates = buildSceneSyncUpdates(room.nodes, nodeKnowledge, snapshots, room.tick, player.mode);
+            const updates = buildSceneSyncUpdates(room.nodes, nodeKnowledge, room.tick, player.mode);
             if (updates.length > 0) {
                 out.push([
                     client,
@@ -641,13 +589,10 @@ export function flush(
 
     }
 
-    // clean up diff snapshots for rooms that no longer exist
-    for (const roomId of state.diffSnapshots.keys()) {
-        if (!rooms.rooms.has(roomId)) {
-            state.diffSnapshots.delete(roomId);
-        }
-    }
+    Debug.end(metrics, 'discovery/scene');
+
     // --- phase 3: voxel chunk streaming ---
+    Debug.begin(metrics, 'discovery/voxels');
     for (const room of rooms.rooms.values()) {
         const auth = room.voxels.authority;
         if (!auth) continue;
@@ -665,6 +610,7 @@ export function flush(
         }
         room.voxels.dirty.light.clear();
     }
+    Debug.end(metrics, 'discovery/voxels');
 
     return out;
 }
@@ -674,13 +620,12 @@ export function flush(
 /**
  * build incremental SceneSync updates for a single client's knowledge
  * of a single room, based on what they know vs what the scene graph
- * currently looks like. reads pre-serialized trait bytes from diff
- * snapshots to avoid redundant serialization across clients.
+ * currently looks like. reads pre-serialized trait bytes from each
+ * instance's `_sync.bytes` to avoid redundant serialization across clients.
  */
 function buildSceneSyncUpdates(
     sg: Nodes,
     nodeKnowledge: Map<number, ClientNodeKnowledge>,
-    snapshots: DiffSnapshots | undefined,
     currentTick: number,
     mode: RoomMode,
 ): SceneSyncUpdate[] {
@@ -698,18 +643,17 @@ function buildSceneSyncUpdates(
         const known = nodeKnowledge.get(node.id);
         if (!known) {
             // client doesn't know about this node — send full create
-            const update = buildNodeCreatedUpdate(node, snapshots, mode);
+            const update = buildNodeCreatedUpdate(node, mode);
             updates.push(update);
-            snapshotNodeKnowledge(sg, nodeKnowledge, node, currentTick);
+            snapshotNodeKnowledge(nodeKnowledge, node, currentTick);
         } else {
             // client knows this node — check for changes
-            const vInfo = getNodeVersionInfo(sg, node);
-            const currentVersion = vInfo?.version ?? 0;
+            const currentVersion = node._sync.version;
 
             if (currentVersion > known.nodeVersion) {
                 // per-field rate gating is handled inside diffNodeKnowledge —
                 // no node-level gate here. diffNodeKnowledge updates knowledge in-place.
-                diffNodeKnowledge(sg, node, known, updates, snapshots, mode, currentTick);
+                diffNodeKnowledge(sg, node, known, updates, mode, currentTick);
             }
         }
     });
@@ -752,14 +696,9 @@ function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callb
  * read all controls for a trait as control-shaped BinaryField entries.
  * used for full-state events (node_created, node_trait_added) where the
  * receiver wants every editable/persisted field, not just sync slices.
- * packs fresh — diff snapshots are sync-keyed, so they don't apply here.
+ * packs fresh — controls aren't snapshotted on the instance.
  */
-function readAllFields(
-    node: Node,
-    traitSlot: number,
-    instance: TraitBase,
-    _snapshots: DiffSnapshots | undefined,
-): BinaryField[] {
+function readAllFields(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return [];
 
@@ -802,11 +741,9 @@ function readChangedFields(
     node: Node,
     traitSlot: number,
     instance: TraitBase,
-    snapshots: DiffSnapshots | undefined,
     knownFieldVersions: Map<string, FieldKnowledge>,
-    currentFieldVersions: Map<string, number>,
     currentTick: number,
-    sentFieldKeys: string[],
+    sentFields: Array<{ key: string; version: number }>,
 ): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return [];
@@ -814,19 +751,20 @@ function readChangedFields(
     const codecs = getSyncCodecs(def);
     if (!codecs) return [];
 
-    const nodeSnaps = snapshots?.get(node);
+    const sync = instance._sync;
     const entries: BinaryField[] = [];
 
     for (let i = 0; i < codecs.length; i++) {
+        // current field version lives on the instance; known version is per-client.
+        const fieldVersion = sync?.versions[i] ?? 0;
         const key = `${traitSlot}:${i}`;
-        const fieldVersion = currentFieldVersions.get(key) ?? 0;
         const knownFk = knownFieldVersions.get(key);
         const knownVersion = knownFk?.version ?? 0;
 
         if (fieldVersion <= knownVersion) continue;
 
         const syncDef = def.sync[i];
-        const rate = SyncRate.resolveRate(syncDef.rate, node);
+        const rate = SyncRate.resolveRate(syncDef.rate);
         if (rate !== null) {
             const lastSent = knownFk?.lastSentTick ?? 0;
             if (!SyncRate.shouldSendThisTick(rate, lastSent, currentTick, 60)) {
@@ -834,27 +772,22 @@ function readChangedFields(
             }
         }
 
-        let data: Uint8Array | undefined;
-        if (nodeSnaps) {
-            data = nodeSnaps.get(key);
-        }
+        // the diff snapshot holds the just-emitted bytes; fall back to a fresh
+        // pack if a slice changed without a snapshot (shouldn't happen post-diff).
+        let data = sync?.bytes[i];
         if (!data) {
             data = codecs[i].pack(instance, node);
         }
 
         entries.push({ index: i, data });
-        sentFieldKeys.push(key);
+        sentFields.push({ key, version: fieldVersion });
     }
 
     return entries;
 }
 
 /** build a NodeCreated update from a live node with per-field binary entries. */
-function buildNodeCreatedUpdate(
-    node: Node,
-    snapshots: DiffSnapshots | undefined,
-    mode: RoomMode,
-): SceneSyncUpdate {
+function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const parentId = node.parent?.id ?? 0;
     const index = node.parent ? node.parent.children.indexOf(node) : 0;
 
@@ -866,7 +799,7 @@ function buildNodeCreatedUpdate(
         traits.push({
             netIndex: wireIndex.idToIndex.get(def.id),
             id: undefined,
-            fields: readAllFields(node, traitSlot, instance, snapshots),
+            fields: readAllFields(node, traitSlot, instance),
             syncs: readAllSyncs(node, traitSlot, instance),
         });
     }
@@ -894,7 +827,6 @@ function diffNodeKnowledge(
     node: Node,
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],
-    snapshots: DiffSnapshots | undefined,
     mode: RoomMode,
     currentTick: number,
 ): void {
@@ -933,7 +865,6 @@ function diffNodeKnowledge(
     }
 
     // trait changes — per-field granularity with per-field rate gating
-    const vInfo = getNodeVersionInfo(sg, node);
     const currentTraitIds = new Set<string>();
     const wireIndex = registry.traitWireIndex;
 
@@ -951,36 +882,31 @@ function diffNodeKnowledge(
                 id: node.id,
                 traitNetIndex: wireIndex.idToIndex.get(def.id),
                 traitId: undefined,
-                fields: readAllFields(node, traitSlot, instance, snapshots),
+                fields: readAllFields(node, traitSlot, instance),
                 syncs: readAllSyncs(node, traitSlot, instance),
             });
 
             // snapshot knowledge for this new trait
             const fieldVersions = new Map<string, FieldKnowledge>();
-            if (vInfo) {
-                for (let i = 0; i < def.sync.length; i++) {
-                    const key = `${traitSlot}:${i}`;
-                    const v = vInfo.fieldVersions.get(key) ?? 0;
-                    fieldVersions.set(key, { version: v, lastSentTick: currentTick });
-                }
+            for (let i = 0; i < def.sync.length; i++) {
+                const key = `${traitSlot}:${i}`;
+                const v = instance._sync?.versions[i] ?? 0;
+                fieldVersions.set(key, { version: v, lastSentTick: currentTick });
             }
             known.traits.set(def.id, {
-                version: vInfo?.traitVersions.get(traitSlot) ?? 0,
+                version: instance._sync?.traitVersion ?? 0,
                 fieldVersions,
             });
         } else {
             // existing trait — send only changed fields, with per-field rate gating
-            const currentFieldVersions = vInfo?.fieldVersions ?? new Map<string, number>();
-            const sentFieldKeys: string[] = [];
+            const sentFields: Array<{ key: string; version: number }> = [];
             const changedFields = readChangedFields(
                 node,
                 traitSlot,
                 instance,
-                snapshots,
                 traitKnowledge.fieldVersions,
-                currentFieldVersions,
                 currentTick,
-                sentFieldKeys,
+                sentFields,
             );
             if (changedFields.length > 0) {
                 updates.push({
@@ -992,11 +918,10 @@ function diffNodeKnowledge(
             }
 
             // update knowledge for sent fields only
-            for (const key of sentFieldKeys) {
-                const currentVersion = currentFieldVersions.get(key) ?? 0;
-                traitKnowledge.fieldVersions.set(key, { version: currentVersion, lastSentTick: currentTick });
+            for (const sf of sentFields) {
+                traitKnowledge.fieldVersions.set(sf.key, { version: sf.version, lastSentTick: currentTick });
             }
-            traitKnowledge.version = vInfo?.traitVersions.get(traitSlot) ?? 0;
+            traitKnowledge.version = instance._sync?.traitVersion ?? 0;
         }
     }
 
@@ -1052,26 +977,24 @@ function diffNodeKnowledge(
     // stale so the node is re-checked next tick. we detect this by comparing each trait's
     // field knowledge against the current field versions.
     let allFieldsCurrent = true;
-    if (vInfo) {
-        for (const [traitSlot] of node._traits) {
-            const def = registry.traitsBySlot.get(traitSlot);
-            if (!def) continue;
-            const tk = known.traits.get(def.id);
-            if (!tk) continue;
-            for (let i = 0; i < def.sync.length; i++) {
-                const key = `${traitSlot}:${i}`;
-                const currentFv = vInfo.fieldVersions.get(key) ?? 0;
-                const knownFk = tk.fieldVersions.get(key);
-                if (currentFv > (knownFk?.version ?? 0)) {
-                    allFieldsCurrent = false;
-                    break;
-                }
+    for (const [traitSlot, instance] of node._traits) {
+        const def = registry.traitsBySlot.get(traitSlot);
+        if (!def) continue;
+        const tk = known.traits.get(def.id);
+        if (!tk) continue;
+        for (let i = 0; i < def.sync.length; i++) {
+            const key = `${traitSlot}:${i}`;
+            const currentFv = instance._sync?.versions[i] ?? 0;
+            const knownFk = tk.fieldVersions.get(key);
+            if (currentFv > (knownFk?.version ?? 0)) {
+                allFieldsCurrent = false;
+                break;
             }
-            if (!allFieldsCurrent) break;
         }
+        if (!allFieldsCurrent) break;
     }
     if (allFieldsCurrent) {
-        known.nodeVersion = vInfo?.version ?? 0;
+        known.nodeVersion = node._sync.version;
     }
     // if not all fields are current, nodeVersion stays stale — the node will
     // be re-checked next tick and the throttled fields will be retried
@@ -1081,32 +1004,27 @@ function diffNodeKnowledge(
 
 /** snapshot the current state of a node into a knowledge map. */
 export function snapshotNodeKnowledge(
-    sg: Nodes,
     nodeKnowledge: Map<number, ClientNodeKnowledge>,
     node: Node,
     currentTick = 0,
 ): void {
     const parentId = node.parent?.id ?? 0;
     const childIndex = node.parent ? node.parent.children.indexOf(node) : 0;
-    const vInfo = getNodeVersionInfo(sg, node);
 
     const traits = new Map<string, TraitKnowledge>();
-    for (const [traitSlot] of node._traits) {
+    for (const [traitSlot, instance] of node._traits) {
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
 
-        // snapshot per-sync versions for this trait
+        // snapshot per-sync versions for this trait (0 = never bumped → not recorded)
         const fieldVersions = new Map<string, FieldKnowledge>();
-        if (vInfo) {
-            for (let i = 0; i < def.sync.length; i++) {
-                const key = `${traitSlot}:${i}`;
-                const v = vInfo.fieldVersions.get(key);
-                if (v !== undefined) fieldVersions.set(key, { version: v, lastSentTick: currentTick });
-            }
+        for (let i = 0; i < def.sync.length; i++) {
+            const v = instance._sync?.versions[i];
+            if (v) fieldVersions.set(`${traitSlot}:${i}`, { version: v, lastSentTick: currentTick });
         }
 
         traits.set(def.id, {
-            version: vInfo?.traitVersions.get(traitSlot) ?? 0,
+            version: instance._sync?.traitVersion ?? 0,
             fieldVersions,
         });
     }
@@ -1118,7 +1036,7 @@ export function snapshotNodeKnowledge(
     }
 
     nodeKnowledge.set(node.id, {
-        nodeVersion: vInfo?.version ?? 0,
+        nodeVersion: node._sync.version,
         parentId,
         childIndex: Math.max(0, childIndex),
         name: node.name,
@@ -1144,7 +1062,7 @@ function snapshotAllNodeKnowledge(
     // will see no knowledge entry and emit a redundant node_created.
     // root traits/scripts still diff normally on subsequent flushes.
     walkReplicable(sg.root, mode, 'shared', (node) => {
-        snapshotNodeKnowledge(sg, nodeKnowledge, node);
+        snapshotNodeKnowledge(nodeKnowledge, node);
     });
 }
 

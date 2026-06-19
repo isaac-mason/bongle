@@ -1080,7 +1080,7 @@ export function update(state: EngineClient, delta: number) {
     // input — its canvas is the only one mounted as `display: block`.
     if (activeRoom) {
         Debug.begin(activeRoom.clientMetrics, 'on-input');
-        Nodes.runOnInput(activeRoom.nodes, { delta });
+        Nodes.runOnInput(activeRoom.nodes, { delta }, activeRoom.clientMetrics);
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
@@ -1088,7 +1088,7 @@ export function update(state: EngineClient, delta: number) {
     // a per-frame pass; inactive rooms continue advancing scripts/animations.
     for (const room of state.rooms.rooms.values()) {
         Debug.begin(room.clientMetrics, 'on-update');
-        Nodes.runOnUpdate(room.nodes, { delta });
+        Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');
         // particles are visual fx — framerate-dependent motion is fine, and
         // running per-frame (not per fixed-step) avoids the spawn→render
@@ -1110,7 +1110,7 @@ export function update(state: EngineClient, delta: number) {
 
             Interpolation.snapshot(room.interpolation);
 
-            Nodes.runOnTick(room.nodes, { delta: timestep });
+            Nodes.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
 
             // tick prefab system — discovers and re-instantiates stale prefab nodes
             Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
@@ -1160,7 +1160,7 @@ export function update(state: EngineClient, delta: number) {
         // user frame scripts (camera follow, local player motion, etc.) run
         // on settled visual transforms.
         Debug.begin(room.clientMetrics, 'on-frame');
-        Nodes.runOnFrame(room.nodes, { delta });
+        Nodes.runOnFrame(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-frame');
 
         // drain chat inbox/outbox: inbox payloads append to room.chat.lines +
@@ -1212,7 +1212,7 @@ export function update(state: EngineClient, delta: number) {
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(room.clientMetrics, 'on-post-animate');
-        Nodes.runOnPostAnimate(room.nodes, { delta });
+        Nodes.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
 
         // engine-global voxel arenas hold only the active room's chunks

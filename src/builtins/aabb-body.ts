@@ -3,7 +3,7 @@ import * as AabbPhysics from '../core/physics/aabb-physics';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
-import { control, sync, type TraitType, trait } from '../api/traits';
+import { control, sync, syncRate, type TraitType, trait } from '../api/traits';
 
 // lightweight axis-aligned body trait. wraps an `AabbPhysics.Body` from the
 // `AabbPhysics.World` and routes its contacts through `ContactsTrait` fan-out.
@@ -148,7 +148,7 @@ sync(AabbBodyTrait, 'linearVelocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    rate: 'movement',
+    rate: syncRate.distance(0.1), // 0.1 m/s — resting bodies go silent
 });
 
 sync(AabbBodyTrait, 'gravityFactor', {

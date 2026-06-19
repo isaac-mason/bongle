@@ -12,51 +12,61 @@ import type { PlayerId } from '../core/client';
 import type { BinaryField } from '../core/protocol';
 import type { Node, Nodes } from '../core/scene/nodes';
 import { getSyncCodecs } from '../core/scene/packcat-bridge';
-import { bytesEqual } from '../core/utils/bytes';
+import { diffSyncSlice } from '../core/scene/sync/sync-diff';
 import type { ClientNet } from './net';
 import { send } from './net';
 
-/** per-node, per-sync last-sent bytes. keyed by node → "${traitSlot}:${syncIdx}" → bytes. */
-type SyncSnapshots = Map<Node, Map<string, Uint8Array>>;
-
-export function createSyncSnapshots(): SyncSnapshots {
-    return new Map();
+/** the set of owned nodes we currently hold an owner-upload snapshot for. the
+ *  snapshot itself lives on each trait instance's `_sync.bytes/values`; this set
+ *  exists only so we can reset a node's snapshot when ownership is lost, so a
+ *  future re-own re-uploads from scratch (first-seen) rather than diffing against
+ *  stale bytes. (name kept for caller stability — it tracks nodes, not state.) */
+export function createSyncSnapshots(): Set<Node> {
+    return new Set();
 }
 
 /**
  * send sync updates for owner-authority slices that changed since last tick.
- * call once per tick (not per frame) to match the server's tick rate.
+ * call once per tick (not per frame) to match the server's tick rate. the
+ * per-slice byte snapshot lives on `instance._sync` — same store the server
+ * diff uses.
  */
 export function sendOwnerSyncUpdates(
     net: ClientNet,
     sg: Nodes,
     roomId: string,
     playerId: PlayerId,
-    snapshots: SyncSnapshots,
+    tracked: Set<Node>,
 ): void {
     const owned = sg.playerIdToOwnedNodes.get(playerId);
-    if (!owned || owned.size === 0) {
-        // we own nothing this tick — drop any stale snapshots so they don't
-        // leak forever after an owner handoff. cheap when already empty.
-        if (snapshots.size > 0) snapshots.clear();
-        return;
+
+    // reset + untrack nodes we no longer own (destroyed, or owner handed off) so
+    // a future re-own re-uploads from scratch rather than diffing against a stale
+    // per-instance snapshot.
+    if (tracked.size > 0) {
+        for (const node of tracked) {
+            if (!owned || !owned.has(node)) {
+                resetOwnerSnapshot(node);
+                tracked.delete(node);
+            }
+        }
     }
 
-    // drop snapshot entries for nodes we no longer own (destroyed, or owner
-    // changed away). single pass covers both cases now that the index is the
-    // ground truth — no `_idToNode.has` probe per snapshot.
-    for (const node of snapshots.keys()) {
-        if (!owned.has(node)) snapshots.delete(node);
-    }
+    if (!owned || owned.size === 0) return;
 
     const wireIndex = registry.traitWireIndex;
     for (const node of owned) {
+        let ownsAnySync = false;
+
         for (const [traitSlot, instance] of node._traits) {
             const def = registry.traitsBySlot.get(traitSlot);
             if (!def) continue;
 
             const codecs = getSyncCodecs(def);
             if (!codecs) continue;
+
+            const sync = instance._sync;
+            if (!sync) continue;
 
             // skip traits with no owner-authority syncs
             let hasOwnerSync = false;
@@ -67,28 +77,19 @@ export function sendOwnerSyncUpdates(
                 }
             }
             if (!hasOwnerSync) continue;
-
-            let nodeSnapshots = snapshots.get(node);
-            if (!nodeSnapshots) {
-                nodeSnapshots = new Map();
-                snapshots.set(node, nodeSnapshots);
-            }
+            ownsAnySync = true;
 
             const changedFields: BinaryField[] = [];
 
             for (let i = 0; i < codecs.length; i++) {
                 if (def.sync[i].authority !== 'owner') continue;
 
-                const current = codecs[i].pack(instance, node);
-                if (current.length === 0) continue;
-
-                const key = `${traitSlot}:${i}`;
-                const previous = nodeSnapshots.get(key);
-
-                if (previous && bytesEqual(current, previous)) continue;
-
-                nodeSnapshots.set(key, current);
-                changedFields.push({ index: i, data: current });
+                // shared cold path: byte-diff or ThresholdRate metric. the client
+                // uploads a first-seen owned slice (the server needs the initial
+                // value), so emitOnFirstSeen = true.
+                if (diffSyncSlice(def.sync[i], codecs[i], instance, node, i, sync, true)) {
+                    changedFields.push({ index: i, data: sync.bytes[i]! });
+                }
             }
 
             if (changedFields.length === 0) continue;
@@ -101,5 +102,18 @@ export function sendOwnerSyncUpdates(
                 fields: changedFields,
             });
         }
+
+        if (ownsAnySync) tracked.add(node);
+    }
+}
+
+/** clear the per-instance owner-upload snapshots for every trait on a node, so a
+ *  future re-own re-uploads from first-seen. */
+function resetOwnerSnapshot(node: Node): void {
+    for (const [, instance] of node._traits) {
+        const sync = instance._sync;
+        if (!sync) continue;
+        sync.bytes.fill(undefined);
+        sync.values.fill(undefined);
     }
 }

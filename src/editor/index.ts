@@ -182,11 +182,21 @@ script(
                 fn(args, client);
             };
 
+        // editGated; on a body that actually mutated (returns true — guard
+        // early-returns don't), flag the room dirty (broadcast to clients via the
+        // room list). wraps the mutating listeners below.
+        const editMutate = <T>(fn: (args: T, client: Client) => boolean | void) =>
+            editGated<T>((args, client) => {
+                if (!fn(args, client)) return;
+                const { state, room } = ctx.server!;
+                _Rooms!.setRoomDirty(state.discovery, room, true);
+            });
+
         // voxel edit ops from clients
         listen(
             ctx,
             VoxelEditCommand,
-            editGated(({ ops }) => {
+            editMutate(({ ops }) => {
                 // batched edit — append all ops first, drain once at the end.
                 // per-op inline drain would be catastrophic on large brushes
                 // (87000× worse on a dense 16×16 fence grid; see setblock.bench).
@@ -194,6 +204,7 @@ script(
                     setBlock(ctx.voxels, op.wx, op.wy, op.wz, op.key, SetBlockFlags.BULK);
                 }
                 runNeighbourRecompute(ctx.voxels);
+                return true;
             }),
         );
 
@@ -236,7 +247,7 @@ script(
         listen(
             ctx,
             CreateNodeCommand,
-            editGated((args, _client) => {
+            editMutate((args, _client) => {
                 const { room } = ctx.server!;
                 const sg = room.nodes;
                 const parent = getNodeById(sg, args.parentId);
@@ -270,36 +281,39 @@ script(
                     }
                 }
                 reorderChild(parent, node, args.index);
+                return true;
             }),
         );
         listen(
             ctx,
             DestroyNodeCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const node = getNodeById(room.nodes, args.id);
                 if (!node) return;
                 if (node === room.nodes.root) return;
                 _Discovery!.forgetNode(state.discovery, state.rooms, client, room.id, args.id);
                 destroyNode(room.nodes, node);
+                return true;
             }),
         );
         listen(
             ctx,
             SetNameCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const node = getNodeById(room.nodes, args.id);
                 if (!node) return;
                 node.name = args.name ?? undefined;
                 bumpNodeVersion(room.nodes, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             SetRealmCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const node = getNodeById(room.nodes, args.id);
                 if (!node) return;
@@ -307,12 +321,13 @@ script(
                 node.realm = args.realm as Realm;
                 bumpNodeVersion(room.nodes, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             ReparentCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -325,12 +340,13 @@ script(
                 reorderChild(newParent, node, args.index);
                 bumpNodeVersion(sg, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             ReorderCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -338,23 +354,25 @@ script(
                 reorderChild(node.parent, node, args.index);
                 bumpNodeVersion(sg, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             SetTraitCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const node = getNodeById(room.nodes, args.id);
                 if (!node) return;
                 setTraitProps(room.nodes, node, args.traitId, JSON.parse(args.props));
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             AddTraitCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -367,12 +385,13 @@ script(
                     addTraitBySlot(node, def.slot, args.props ? JSON.parse(args.props) : undefined);
                 }
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             RemoveTraitCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -385,12 +404,13 @@ script(
                     removeTraitBySlot(node, def.slot);
                 }
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             SetPrefabCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -406,12 +426,13 @@ script(
                 }
                 bumpNodeVersion(sg, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
             }),
         );
         listen(
             ctx,
             SetNodePersistCommand,
-            editGated((args, client) => {
+            editMutate((args, client) => {
                 const { state, room } = ctx.server!;
                 const sg = room.nodes;
                 const node = getNodeById(sg, args.id);
@@ -419,6 +440,7 @@ script(
                 setNodePersist(node, args.persist);
                 bumpNodeVersion(sg, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                return true;
         }),
     );
     },
@@ -1299,7 +1321,10 @@ script(
 /* ── registration ── */
 
 export async function registerServer(_state: EngineServer): Promise<void> {
-    [_Rooms, _Discovery] = await Promise.all([import('../server/rooms'), import('../server/discovery')]);
+    [_Rooms, _Discovery] = await Promise.all([
+        import('../server/rooms'),
+        import('../server/discovery'),
+    ]);
 }
 
 /**

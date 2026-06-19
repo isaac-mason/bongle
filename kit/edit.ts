@@ -20,6 +20,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { open as openInspector, url as inspectorUrl } from 'node:inspector';
 import net from 'node:net';
 import path from 'node:path';
 import { startDevServer, type DevHandle } from './dev/start';
@@ -143,10 +144,12 @@ function getPort(preferred: number): Promise<number> {
 }
 
 export type EditOptions = {
-    /** reserved for future inspector wiring. The gameServer env's runner
-     *  shares the parent node process, so attach via that process's
-     *  inspector port (`--inspect` on the bongle cli launcher). */
+    /** open a node inspector on this process. the engine runs in-process, so a
+     *  debugger or CPU/heap profiler can attach directly via chrome://inspect. */
     inspect?: boolean;
+    /** print the per-tick server perf digest to the CLI (sets BONGLE_PERFORMANCE_LOGS,
+     *  which engine-server reads at init). */
+    performanceLogs?: boolean;
     /** expose the dev server publicly via a `cloudflared` tunnel. */
     share?: boolean;
 };
@@ -164,6 +167,17 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
 
     printBanner();
     console.log(`${DIM}› starting ${BOLD}edit${RESET}${DIM} mode in ${resolvedProjectDir}${RESET}`);
+
+    // opt-in server perf digest. set before the dev server boots — engine-server
+    // reads BONGLE_PERFORMANCE_LOGS at init(), which runs inside startDevServer.
+    if (opts.performanceLogs) process.env.BONGLE_PERFORMANCE_LOGS = '1';
+
+    // the engine runs in *this* process, so opening a node inspector here lets a
+    // debugger or CPU/heap profiler attach directly — no subprocess to target.
+    if (opts.inspect) {
+        if (!inspectorUrl()) openInspector(); // no-op if node was already launched with --inspect
+        console.log(`${DIM}› inspector listening — open chrome://inspect${inspectorUrl() ? ` (${inspectorUrl()})` : ''}${RESET}`);
+    }
 
     // Refuse to boot if any content file is behind the latest schema.
     // Migration is an explicit user action via `bongle migrate`; the

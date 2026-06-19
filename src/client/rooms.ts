@@ -35,6 +35,7 @@ import * as ParticleVisuals from './particles/particle-visuals';
 import * as Particles from './particles/particles';
 import * as Renderer from './renderer';
 import * as Replication from './replication';
+import { UILayer } from './ui-layers';
 import type * as ExtrudedSpriteResourcesNs from './sprites/extruded-sprite-resources';
 import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
 import type * as SpriteResourcesNs from './sprites/sprite-resources';
@@ -366,6 +367,7 @@ function makeLocalRoomInfo(room: ClientRoom): RoomInfo {
         clientCount: 1,
         sourceRoomId: null,
         namespace: room.namespace,
+        dirty: false,
     };
 }
 
@@ -615,13 +617,14 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // closures and ctx-builds observe the swap without re-seating.
     const control: ControlClientState = { node: null };
 
-    // touch overlay sits ABOVE the html overlay added in DomUi.init below.
-    // we create the div here (so we can pass it on the runtime client
-    // shape) but only append after DomUi.init runs.
+    // touch overlay sits ABOVE the html overlay (UILayer.touch). we create
+    // the div here (so we can pass it on the runtime client shape) and
+    // append it after DomUi.init; z-index, not DOM order, decides paint order.
     const touchOverlay = document.createElement('div');
     touchOverlay.style.position = 'absolute';
     touchOverlay.style.inset = '0';
     touchOverlay.style.pointerEvents = 'none';
+    touchOverlay.style.zIndex = String(UILayer.touch);
 
     const disposeCanvasTouchListeners = Input.installCanvasTouchListeners(canvas, input);
 
@@ -695,8 +698,8 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     const domUi: DomUi.DomUi = DomUi.init(scene, viewport, nodes);
 
-    // append touchOverlay AFTER DomUi.init so it sits visually above
-    // html-trait overlays by DOM order alone.
+    // append touchOverlay after DomUi.init created the html overlay; their
+    // paint order is set by UILayer z-index, not by DOM order.
     viewport.appendChild(touchOverlay);
 
     const spriteVisuals: SpriteVisuals.SpriteVisuals = SpriteVisuals.init(scene, nodes, opts.spriteResources, environmentResources);

@@ -20,6 +20,7 @@ import type { Node, Nodes } from '../core/scene/nodes';
 import { getTrait } from '../core/scene/nodes';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
+import { syncRate } from '../core/scene/sync/sync-rate';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 
@@ -194,11 +195,12 @@ sync(TransformTrait, 'teleport', {
 
 /**
  * position + quaternion as two independent owner-authority slices, both
- * movement-rate gated. kept separate (not a combined pose tuple) so a node
- * whose position changes every tick but whose rotation is static — or vice
- * versa — only re-emits the slice that actually changed. `setPosition` /
- * `setQuaternion` dirty just their own slice; `markTransformDirty` (physics,
- * animator, compound/world writes) dirties both.
+ * threshold-gated (emit only once the value moves ≥ threshold by its metric since
+ * the last emit — sub-threshold drift accumulates, a resting body goes silent).
+ * kept separate (not a combined pose tuple) so a node whose position changes every
+ * tick but whose rotation is static — or vice versa — only re-emits the slice that
+ * actually changed. `setPosition` / `setQuaternion` dirty just their own slice;
+ * `markTransformDirty` (physics, animator, compound/world writes) dirties both.
  *
  * receiving side copies the value and invalidates world caches — the per-frame
  * `interpolate()` chase-lerps `interpolatedWorld*` toward the freshly-landed
@@ -213,7 +215,7 @@ const transformPositionSync = sync(TransformTrait, 'position', {
         markWorldDirty(t);
     },
     authority: 'owner',
-    rate: 'movement',
+    rate: syncRate.distance(0.05), // 5cm
 });
 
 const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
@@ -224,7 +226,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
         markWorldDirty(t);
     },
     authority: 'owner',
-    rate: 'movement',
+    rate: syncRate.angle(0.02), // ~1.1°
 });
 
 const transformScaleSync = sync(TransformTrait, 'scale', {
