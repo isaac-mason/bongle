@@ -427,6 +427,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         roomId,
         playerMode,
         roomMode,
+        clockSeed: message.serverClockTime, // seed our clock from the server's (shared time base)
     });
 
     // server-driven path: unpack the wire payload into the fresh scene
@@ -521,6 +522,9 @@ function newRoomCore(opts: {
     roomId: string;
     playerMode: PlayerMode;
     roomMode: RoomMode;
+    /** server clock (seconds) to seed this room's clock from — the join handshake
+     *  supplies it on the networked path; omitted for local rooms (starts at 0). */
+    clockSeed?: number;
 }): {
     nodes: Nodes.Nodes;
     voxels: Voxels.Voxels;
@@ -533,7 +537,7 @@ function newRoomCore(opts: {
     const voxels = Voxels.createVoxels(blocks);
     const nodes = Nodes.createSceneGraph({ mode: opts.playerMode, roomMode: opts.roomMode });
     const physics = Physics.init(nodes, voxels, blocks);
-    const clock = Clock.init();
+    const clock = Clock.init(opts.clockSeed);
     const chat = Chat.init();
     const scriptRuntime: NodesContext = {
         roomId: opts.roomId,

@@ -12,6 +12,7 @@ import {
     CLIENT_TO_SERVER,
     cloneModel,
     command,
+    type CommandHandle,
     createNode,
     createVoxelRaycastResult,
     destroyNode,
@@ -554,42 +555,30 @@ const FLASH_TINT: Vec4 = [1, 0, 0, 0]; // red; alpha (flash strength) set per us
 // server-only. the server raycasts the bolt forward each tick (it never stores a
 // velocity — it derives it from aim × stats.speed); clients only render. `aim`
 // is the cast-time direction: the node faces it and rolls around it.
+// projectiles are NOT replicated — they live only on the server as `realm:'server'`
+// nodes, and reach clients purely through the ProjectileCast + ImpactCommand
+// broadcasts. so the trait carries no `sync()` at all; it's just the server's sim
+// state. `id` is a monotonic token that correlates a bolt's cast + impact across
+// the wire (so a client can match an impact to the right local bolt).
 const ProjectileTrait = trait('projectile', {
+    id: 0,
     ownerId: -1,
     spawnTime: 0,
     aim: [0, 0, 0, 1] as Quat,
     stats: DEFAULT_PROJECTILE_STATS,
-});
-
-sync(ProjectileTrait, 'spawnTime', {
-    schema: pack.float32(),
-    pack: (t) => t.spawnTime,
-    unpack: (v, t) => (t.spawnTime = v),
-    rate: 'dirty',
-});
-
-// the cast aim is synced (once) so clients can orient + spin the projectile
-// locally — the server only drives position, leaving the quaternion to the
-// client so the spin is smooth (no per-tick rotation round-trip).
-sync(ProjectileTrait, 'aim', {
-    schema: pack.list(pack.float32(), 4),
-    pack: (t) => t.aim,
-    unpack: (v, t) => (t.aim = v as Quat),
-    rate: 'dirty',
-});
-
-// stats never change after spawn — synced once so clients have them.
-sync(ProjectileTrait, 'stats', {
-    schema: pack.object({
-        speed: pack.float32(),
-        damage: pack.float32(),
-        damageRadius: pack.float32(),
-        terrainDamageRadius: pack.float32(),
-        knockback: pack.float32(),
-    }),
-    pack: (t) => t.stats,
-    unpack: (v, t) => (t.stats = v),
-    rate: 'dirty',
+    // the spawn origin, kept so a mid-flight cast can be re-sent to a late joiner
+    // (the sim transform has since advanced past it). clients derive from origin.
+    origin: [0, 0, 0] as Vec3,
+    // client-only: `predicted` marks our OWN locally-predicted bolt (it runs the
+    // shared hit query for a zero-latency impact); `lastT` is the elapsed time it
+    // was last simulated to, so each frame sweeps only the new segment. `wallSpawn`
+    // is the smooth render-clock time (`ctx.clock.wall`) this bolt's flight is
+    // anchored to — set once from `ctx.clock.server` on first render, then the
+    // visual advances by per-frame wall delta so motion is smooth at any refresh
+    // rate (the tick clock only steps at 60Hz). -1 = not yet anchored.
+    predicted: false,
+    lastT: 0,
+    wallSpawn: -1,
 });
 
 // xp pickup. `amount` synced (dirty) so the orb node replicates to clients,
@@ -641,13 +630,25 @@ const NpcTrait = trait('npc', {
 
 // `block` = the struck block's global state id on a terrain hit (0 = body/fizzle);
 // the client uses its dust sprite for the impact.
-const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), fizzle: pack.boolean(), block: pack.uint32() }));
+// `id` ties the impact to the bolt that caused it so the client destroys the
+// matching local bolt. sent to every client EXCEPT the owner (who predicted it).
+const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ id: pack.uint32(), pos: pack.list(pack.float32(), 3), fizzle: pack.boolean(), block: pack.uint32() }));
 const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32() }));
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
 // server → client: a gem shattered at `pos`; `tier` selects the burst colour/size.
 const GemDeathCommand = command('wizards.gem-death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), tier: pack.uint8() }));
 // client → server: spend an upgrade point on the stat at index `stat` (into STAT_KEYS).
 const UpgradeStat = command('wizards.upgrade', CLIENT_TO_SERVER, pack.object({ stat: pack.uint8() }));
+// a projectile was cast — the entire wire footprint of a (server-simulated) bolt.
+// clients derive its straight-line flight from these; `id` correlates the later
+// ImpactCommand. sent to every client EXCEPT the owner (who predicts it locally).
+const ProjectileCast = command('wizards.projectile-cast', SERVER_TO_CLIENT, pack.object({
+    id: pack.uint32(),
+    origin: pack.list(pack.float32(), 3),
+    aim: pack.list(pack.float32(), 4),
+    speed: pack.float32(),
+    spawnTime: pack.float64(),
+}));
 // server → one client: a knockback impulse for that player's own wizard. velocity is
 // owner-authored, so the client applies it to its controller and it replicates out.
 const KnockbackCommand = command('wizards.knockback', SERVER_TO_CLIENT, pack.object({ impulse: pack.list(pack.float32(), 3) }));
@@ -757,29 +758,57 @@ const PickupSound = sound('wizards:pickup', { src: 'assets/sounds/pickup.ogg' })
 
 // ── server: spawn + simulate projectiles ────────────────────────────
 
-// create a projectile node at `origin`, oriented to the cast `aim` quaternion
-// (which also encodes its travel direction). top-level (no owner) so it
-// replicates to every client; the cloned `projectile` mesh rides the transform.
-function spawnProjectile(sceneRoot: Node, ownerNode: Node, origin: Vec3, aim: Quat, spawnTime: number, stats: ProjectileStats): void {
-    const node = createNode({ name: 'projectile' });
+// send a server→client command to every player EXCEPT `ownerId` — that owner has
+// already predicted the effect locally, so we keep its own shots off its wire.
+// (NPCs aren't players, so an NPC-owned shot still reaches every client.)
+function sendToOthers<S extends pack.Schema>(
+    ctx: ScriptContext,
+    players: ReturnType<typeof query<[typeof PlayerTrait]>>,
+    ownerId: number,
+    handle: CommandHandle<S, typeof SERVER_TO_CLIENT>,
+    payload: pack.SchemaType<S>,
+): void {
+    for (const [player] of players) {
+        if (player._node.id !== ownerId) send(ctx, handle, payload, player.client);
+    }
+}
+
+// monotonic projectile id (server-only) — correlates a bolt's cast + impact.
+let projectileSeq = 0;
+
+// the ProjectileCast wire payload for a bolt — built from the live shot or a trait,
+// shared by the initial send and the per-joiner re-send so they can't drift.
+function projectileCastPayload(p: { id: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number }) {
+    return {
+        id: p.id,
+        origin: [p.origin[0], p.origin[1], p.origin[2]] as Vec3,
+        aim: [p.aim[0], p.aim[1], p.aim[2], p.aim[3]] as Quat,
+        speed: p.stats.speed,
+        spawnTime: p.spawnTime,
+    };
+}
+
+// spawn a projectile as a `realm:'server'` node — it lives ONLY on the server (never
+// replicated) and is simulated there for authoritative hit detection. its entire
+// presence on clients is the `ProjectileCast`, sent to every client EXCEPT the owner
+// (who predicts its own bolt locally); each derives the flight + builds its visual.
+function spawnProjectile(ctx: ScriptContext, players: ReturnType<typeof query<[typeof PlayerTrait]>>, sceneRoot: Node, ownerNode: Node, origin: Vec3, aim: Quat, spawnTime: number, stats: ProjectileStats): void {
+    const id = ++projectileSeq;
+    const node = createNode({ name: 'projectile', realm: 'server' });
     const transform = addTrait(node, TransformTrait);
     setPosition(transform, origin);
-    setQuaternion(transform, aim); // face the aim; the tick adds spin on top
+    setQuaternion(transform, aim);
     addTrait(node, ProjectileTrait, {
+        id,
         ownerId: ownerNode.id,
         spawnTime,
         aim: [aim[0], aim[1], aim[2], aim[3]],
         stats,
+        origin: [origin[0], origin[1], origin[2]],
     });
-
-    const visual = cloneModel(wizardModels.nodes.projectile);
-    visual.name = 'projectile:visual';
-    // the cloned gltf node carries its own local offset — zero it so the mesh
-    // is centred on the projectile node (which drives movement / collision / trail).
-    setPosition(getTrait(visual, TransformTrait)!, [0, 0, 0]);
-    addChild(node, visual);
-
     addChild(sceneRoot, node);
+
+    sendToOthers(ctx, players, ownerNode.id, ProjectileCast, projectileCastPayload({ id, origin, aim, stats, spawnTime }));
 }
 
 // ground height under (x, z) via a downward voxel raycast (used to drop litter
@@ -860,6 +889,55 @@ function raySegmentAabb(p: Vec3, d: Vec3, len: number, cx: number, cy: number, c
     return tmin / len;
 }
 
+// the nearest thing a bolt segment hits this step: one ray against the rigid world
+// (terrain voxels + every character's VCC body — both present on the SERVER and the
+// CLIENT, so this runs identically on each) plus the analytical gem AABB sweep
+// (gems carry no rigid body). returns the hit point + struck block (0 = body/gem),
+// or null for a clean miss. shared by the server sim (→ damage) and the client's
+// predicted bolts (→ impact vfx). the owner is behind its own bolt, so a hit that
+// resolves to the owner is ignored ("keep flying").
+function castProjectileSegment(
+    ctx: ScriptContext,
+    pos: Vec3,
+    dir: Vec3,
+    step: number,
+    ownerId: number,
+    gems: ReturnType<typeof query<[typeof GemTrait, typeof TransformTrait]>>,
+    rayCollector: ReturnType<typeof createClosestCastRayCollector>,
+    raySettings: ReturnType<typeof createDefaultCastRaySettings>,
+    rayFilter: ReturnType<typeof crashFilter.forWorld>,
+): { point: Vec3; block: number } | null {
+    const rigid = ctx.physics.rigid;
+    rayCollector.reset();
+    castRay(rigid.world, rayCollector, raySettings, pos, dir, step, rayFilter);
+    const rigidHit = rayCollector.hit;
+    const rigidValid = rigidHit.status === CastRayStatus.COLLIDING && rigid.bodyToNode.get(rigidHit.bodyIdB) !== ownerId;
+    const tRigid = rigidValid ? rigidHit.fraction : Infinity;
+
+    let tGem = Infinity;
+    for (const [gem, gemTransform] of gems) {
+        if (gem.current <= 0) continue;
+        const gc = getWorldPosition(gemTransform);
+        const half = (GEM_TIERS[gem.tier] ?? GEM_TIERS[0]!).halfExtent + GEM_HIT_MARGIN;
+        const tHit = raySegmentAabb(pos, dir, step, gc[0], gc[1], gc[2], half);
+        if (tHit >= 0 && tHit < tGem) tGem = tHit;
+    }
+
+    const t = Math.min(tRigid, tGem); // a gem ties to its own favour (block stays 0)
+    if (t === Infinity) return null;
+    const hx = pos[0] + dir[0] * step * t;
+    const hy = pos[1] + dir[1] * step * t;
+    const hz = pos[2] + dir[2] * step * t;
+    // only a nearer terrain rigid-hit samples a block id (for the dust sprite); a
+    // body or gem hit sends 0 → the white spark. getBlockState (numeric state id),
+    // sampled just past the surface so we read the struck block, not the air ahead.
+    const block =
+        tRigid <= tGem && rigid.bodyToNode.get(rigidHit.bodyIdB) === undefined
+            ? getBlockState(ctx.voxels, Math.floor(hx + dir[0] * 0.1), Math.floor(hy + dir[1] * 0.1), Math.floor(hz + dir[2] * 0.1))
+            : 0;
+    return { point: [hx, hy, hz], block };
+}
+
 // world-space forward unit vector from a CharacterController look spherical
 // [_, yaw, pitch] — the same basis the player-controller builds its camera
 // forward from (yaw=0, pitch=π/2 → -Z). the server firing tick uses this to
@@ -875,6 +953,16 @@ function lookDirection(look: Vec3, out: Vec3): Vec3 {
     return out;
 }
 
+// projectiles anchor their flight to `ctx.clock.server - spawnTime`, the shared
+// server timeline both sides read (a joining client seeds it from the server in the
+// join handshake — see the engine's Clock). spawnTime is always stamped with
+// `ctx.clock.server` too: a remote bolt's is the SERVER's value (from the cast), so
+// the client — a touch behind by join latency — places it slightly in the past,
+// landing its despawn cleanly at the impact; our own predicted bolt's is the CLIENT's
+// value at the moment we fire, so it sits at the muzzle/now (zero latency). the
+// client then advances each bolt's visual by wall-clock delta for smooth RAF motion
+// (see combat-vfx) — `ctx.clock.server` itself only steps at the 60Hz tick.
+
 script(WorldTrait, 'combat-cast', (ctx) => {
     // ── client: own our held cast intent; predict our own muzzle + viewmodel ──
     if (env.client) {
@@ -882,6 +970,8 @@ script(WorldTrait, 'combat-cast', (ctx) => {
         // paced at our own stats.fireRate — the server fires the real projectile
         // at the same rate off the replicated `casting`, so the two stay in step.
         let predictedFireAt = -999;
+        let predictedBoltSeq = 0; // negative ids → never clash with a server bolt id
+        const _castDir = vec3.create();
 
         onFrame(ctx, () => {
             const now = ctx.clock.time;
@@ -909,6 +999,21 @@ script(WorldTrait, 'combat-cast', (ctx) => {
             if (now - predictedFireAt < fireIntervalOf(selfWizard.stats.levels)) return;
             predictedFireAt = now;
             selfWizard.lastCastTime = now; // viewmodel jab
+
+            // predict our OWN bolt locally — same origin/aim formula as the server's
+            // firing tick, so the predicted path matches the authoritative one.
+            // combat-vfx renders it + runs the shared hit query (predicted=true) for a
+            // zero-latency bolt + impact; the authoritative cast/impact for it are
+            // ignored/suppressed on this client. negative id never clashes with a
+            // server bolt. damage stays server-authoritative.
+            const controller = getTrait(controlNode, CharacterControllerTrait);
+            if (controller) {
+                const dir = lookDirection(controller.input.look, _castDir);
+                const aim = quat.rotationTo(quat.create(), [0, 0, -1], dir);
+                const wp = getWorldPosition(getTrait(controlNode, TransformTrait)!);
+                const origin: Vec3 = [wp[0] + dir[0] * 1.2, wp[1] + EYE_HEIGHT + dir[1] * 1.2, wp[2] + dir[2] * 1.2];
+                spawnClientBolt(ctx, { id: --predictedBoltSeq, ownerId: controlNode.id, origin, aim, stats: projectileStatsOf(selfWizard.stats.levels), spawnTime: ctx.clock.server, predicted: true });
+            }
 
             // muzzle flash at the world tip of the held staff, spraying along the
             // view direction (camera forward = -Z) with a little scatter.
@@ -950,10 +1055,13 @@ script(WorldTrait, 'combat-cast', (ctx) => {
     // stats.fireRate and spawn the authoritative projectile along its look. ──
     if (env.server) {
         const wizards = query(ctx, [WizardTrait, CharacterControllerTrait, AliveTrait, TransformTrait]);
+        const players = query(ctx, [PlayerTrait]); // cast recipients (everyone but the shooter)
         const _fireDir = vec3.create();
 
         onTick(ctx, () => {
-            const now = ctx.clock.time;
+            // server clock (== local time here) so the bolt's spawnTime is in the
+            // shared timeline clients derive from.
+            const now = ctx.clock.server;
             for (const [wizard, controller, , transform] of wizards) {
                 if (!wizard.casting) continue;
                 if (now - wizard.lastFireTime < fireIntervalOf(wizard.stats.levels)) continue;
@@ -964,7 +1072,7 @@ script(WorldTrait, 'combat-cast', (ctx) => {
                 const p = getWorldPosition(transform);
                 const origin: Vec3 = [p[0] + dir[0] * 1.2, p[1] + EYE_HEIGHT + dir[1] * 1.2, p[2] + dir[2] * 1.2];
                 // snapshot the wizard's current projectile stats into the shot.
-                spawnProjectile(ctx.node, wizard._node, origin, aim, now, projectileStatsOf(wizard.stats.levels));
+                spawnProjectile(ctx, players, ctx.node, wizard._node, origin, aim, now, projectileStatsOf(wizard.stats.levels));
             }
         });
     }
@@ -976,6 +1084,18 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
     const projectiles = query(ctx, [ProjectileTrait, TransformTrait]);
     const targets = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
     const gems = query(ctx, [GemTrait, TransformTrait]); // shootable xp crystals — splashed like wizards
+    const players = query(ctx, [PlayerTrait]); // impact recipients (everyone but the shooter)
+
+    // catch a joining client up on bolts already in flight: re-send each one's cast
+    // (with its ORIGINAL origin + spawnTime) just to them. the seeded clock then
+    // places each at the correct point along its path, not back at the muzzle.
+    onJoin(ctx, ({ playerNode }) => {
+        const client = getTrait(playerNode, PlayerTrait)?.client;
+        if (!client) return;
+        for (const [projectile] of projectiles) {
+            send(ctx, ProjectileCast, projectileCastPayload(projectile), client);
+        }
+    });
 
     // reusable crashcat ray-query state.
     const rayCollector = createClosestCastRayCollector();
@@ -985,7 +1105,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
 
     // carve a voxel sphere + splash-damage characters within `damageRadius`,
     // then tell clients where it landed.
-    const handleHit = (pos: Vec3, ownerId: number, stats: ProjectileStats, block: number) => {
+    const handleHit = (id: number, pos: Vec3, ownerId: number, stats: ProjectileStats, block: number) => {
         const r = Math.floor(stats.terrainDamageRadius);
         const cx = Math.floor(pos[0]);
         const cy = Math.floor(pos[1]);
@@ -1054,23 +1174,23 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             broadcast(ctx, DamageCommand, { pos: [gp[0], gp[1], gp[2]], amount: stats.damage });
         }
 
-        broadcast(ctx, ImpactCommand, { pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
+        sendToOthers(ctx, players, ownerId, ImpactCommand, { id, pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
     };
 
     onTick(ctx, ({ delta }) => {
-        const now = ctx.clock.time;
+        const now = ctx.clock.server; // bolts' spawnTime is in the shared (server) timeline
         // the rigid world — voxels live in this same crashcat world, so one cast
         // covers terrain + character bodies.
         const rigid = ctx.physics.rigid;
         rayFilter ??= crashFilter.forWorld(rigid.world); // all layers: terrain + bodies
 
         // resolve outside the loop — destroying nodes mid-iteration is unsafe.
-        const spent: Array<{ node: Node; pos: Vec3; ownerId: number; stats: ProjectileStats; fizzle: boolean; block: number }> = [];
+        const spent: Array<{ node: Node; id: number; pos: Vec3; ownerId: number; stats: ProjectileStats; fizzle: boolean; block: number }> = [];
 
         for (const [projectile, transform] of projectiles) {
             const pos = transform.position;
             if (now - projectile.spawnTime > PROJECTILE_LIFETIME) {
-                spent.push({ node: projectile._node, pos: [pos[0], pos[1], pos[2]], ownerId: projectile.ownerId, stats: projectile.stats, fizzle: true, block: 0 });
+                spent.push({ node: projectile._node, id: projectile.id, pos: [pos[0], pos[1], pos[2]], ownerId: projectile.ownerId, stats: projectile.stats, fizzle: true, block: 0 });
                 continue;
             }
 
@@ -1078,69 +1198,20 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             const dir = vec3.transformQuat(_rayDir, [0, 0, -1], projectile.aim);
             const step = projectile.stats.speed * delta;
 
-            // one ray against the rigid world hits terrain (the voxel shape) AND
-            // character bodies; nearest wins. bodyToNode maps a body hit back to
-            // its node (undefined ⇒ terrain). the owner is behind the bolt, so a
-            // hit that resolves to the owner just means "keep flying".
-            rayCollector.reset();
-            castRay(rigid.world, rayCollector, raySettings, pos, dir, step, rayFilter);
-            const rigidHit = rayCollector.hit;
-            const rigidValid = rigidHit.status === CastRayStatus.COLLIDING && rigid.bodyToNode.get(rigidHit.bodyIdB) !== projectile.ownerId;
-            const tRigid = rigidValid ? rigidHit.fraction : Infinity;
-
-            // gems carry no rigid body (ray queries skip the impostor layer), so
-            // sweep this step's segment against each gem's padded AABB analytically
-            // and keep the nearest entry. a gem nearer than the rigid hit wins.
-            let tGem = Infinity;
-            for (const [gem, gemTransform] of gems) {
-                if (gem.current <= 0) continue;
-                const gc = getWorldPosition(gemTransform);
-                const half = (GEM_TIERS[gem.tier] ?? GEM_TIERS[0]!).halfExtent + GEM_HIT_MARGIN;
-                const tHit = raySegmentAabb(pos, dir, step, gc[0], gc[1], gc[2], half);
-                if (tHit >= 0 && tHit < tGem) tGem = tHit;
-            }
-
-            // detonate on whichever hit is nearer along this step.
-            if (tGem !== Infinity && tGem <= tRigid) {
-                // gem hit → white spark (block 0); handleHit's splash applies the
-                // damage to it (and any neighbours within damageRadius).
-                const hxp = pos[0] + dir[0] * step * tGem;
-                const hyp = pos[1] + dir[1] * step * tGem;
-                const hzp = pos[2] + dir[2] * step * tGem;
-                spent.push({ node: projectile._node, pos: [hxp, hyp, hzp], ownerId: projectile.ownerId, stats: projectile.stats, fizzle: false, block: 0 });
-                continue;
-            }
-            if (rigidValid) {
-                const t = tRigid;
-                const hxp = pos[0] + dir[0] * step * t;
-                const hyp = pos[1] + dir[1] * step * t;
-                const hzp = pos[2] + dir[2] * step * t;
-                // terrain hit (no body) → sample the struck block (just inside the
-                // surface, before the carve) so the client can use its dust sprite.
-                // body hits send 0 → the white spark, same as today.
-                const terrain = rigid.bodyToNode.get(rigidHit.bodyIdB) === undefined;
-                // getBlockState (numeric global state id), NOT getBlock (string key) —
-                // it's what indexes `ctx.blocks.particles[]`. air = 0.
-                const block = terrain ? getBlockState(ctx.voxels, Math.floor(hxp + dir[0] * 0.1), Math.floor(hyp + dir[1] * 0.1), Math.floor(hzp + dir[2] * 0.1)) : 0;
-                spent.push({
-                    node: projectile._node,
-                    pos: [hxp, hyp, hzp],
-                    ownerId: projectile.ownerId,
-                    stats: projectile.stats,
-                    fizzle: false,
-                    block,
-                });
+            // the SAME query the client predicts with — terrain + characters + gems.
+            const hit = castProjectileSegment(ctx, pos, dir, step, projectile.ownerId, gems, rayCollector, raySettings, rayFilter);
+            if (hit) {
+                spent.push({ node: projectile._node, id: projectile.id, pos: hit.point, ownerId: projectile.ownerId, stats: projectile.stats, fizzle: false, block: hit.block });
                 continue;
             }
 
-            // no hit — advance. server drives position only; clients own the
-            // quaternion (aim + local spin) so the rotation stays smooth.
+            // no hit — advance the server-only sim position.
             setPosition(transform, [pos[0] + dir[0] * step, pos[1] + dir[1] * step, pos[2] + dir[2] * step]);
         }
 
         for (const s of spent) {
-            if (s.fizzle) broadcast(ctx, ImpactCommand, { pos: s.pos, fizzle: true, block: 0 });
-            else handleHit(s.pos, s.ownerId, s.stats, s.block);
+            if (s.fizzle) sendToOthers(ctx, players, s.ownerId, ImpactCommand, { id: s.id, pos: s.pos, fizzle: true, block: 0 });
+            else handleHit(s.id, s.pos, s.ownerId, s.stats, s.block);
             destroyNode(s.node);
         }
     });
@@ -1358,7 +1429,7 @@ script(WorldTrait, 'xp', (ctx) => {
         let lastXp = -1; // local player's xp last frame; blip when it rises
 
         onFrame(ctx, () => {
-            const time = ctx.clock.time;
+            const time = ctx.clock.wall; // smooth per-frame clock → no 60Hz step in the bob/pulse
 
             // pickup blip — our own xp is synced, so just play when it ticks up
             // (covers magnetised orbs without a dedicated command). first sight
@@ -1486,7 +1557,7 @@ script(WorldTrait, 'gems', (ctx) => {
         });
 
         onFrame(ctx, () => {
-            const time = ctx.clock.time;
+            const time = ctx.clock.wall; // smooth per-frame clock → no 60Hz step in the spin/bob
             const camPos = getWorldPosition(getTrait(resolveCamera(ctx).node, TransformTrait)!);
             for (const [gem, transform] of gems) {
                 const gemNode = transform._node;
@@ -1848,62 +1919,126 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
 
 // ── client: impact / death / damage / trail particles ───────────────
 
+// for a terrain hit we reuse the block's auto-derived dust SPRITE, but in our own
+// particle (our motion + spawn opts) rather than its dust particle — so we keep full
+// control. cached per sprite (a ParticleHandle is pure data). dust motion: stronger
+// gravity than the stock `particleUpdate.dust` (−20) so the burst flies out then
+// snaps back down, with less drag so it carries further.
+const dustMotion: typeof particleUpdate.dust = (pool, i, dt, voxels) => {
+    particleUpdate.gravity(pool, i, dt, -36);
+    particleUpdate.drag(pool, i, dt, 0.97);
+    particleUpdate.integrate(pool, i, dt);
+    particleUpdate.collideSlide(pool, i, dt, voxels);
+};
+const dustFx = new Map<string, ParticleHandle>();
+const dustParticleFor = (sprite: SpriteHandle): ParticleHandle => {
+    let p = dustFx.get(sprite.spriteId);
+    if (!p) {
+        const id = `wizards:dust:${sprite.spriteId}`;
+        p = { typeId: id, name: id, dependency: { registry: 'particles', id }, sprite, playback: 'stretch', fps: 0, update: dustMotion, glow: 0, tint: [1, 1, 1, 1] };
+        dustFx.set(sprite.spriteId, p);
+    }
+    return p;
+};
+
+// the impact burst for a bolt landing at `pos`. shared by the authoritative
+// ImpactCommand (remote bolts) and the client-side predicted hit (own bolts), so
+// both look identical. `block` (>0) → that block's dust sprite; else a white spark.
+function spawnImpactVfx(ctx: ScriptContext, pos: Vec3, fizzle: boolean, block: number): void {
+    const dust = block > 0 ? ctx.blocks.particles[block]?.dust : undefined;
+    const count = fizzle ? 3 : dust?.length ? 48 : 14; // way more debris for terrain
+    const speed = fizzle ? 3 : 6.5;
+    for (let i = 0; i < count; i++) {
+        const d = randomDir();
+        if (dust?.length) {
+            // block dust: its sprite, our control — burst up + out, then the dust
+            // motion (gravity + terrain collide) drops + settles it.
+            spawnParticle(ctx, dustParticleFor(dust[i % dust.length]!.sprite), pos, {
+                lifetime: varyLife(1.2),
+                size: 0.14,
+                glow: 0.4,
+                tint: [1.4, 1.4, 1.4, 1], // a touch lighter than the raw block texture
+                velX: d[0] * 14, // fly out hard (horizontal), then gravity arcs them down
+                velY: Math.abs(d[1]) * 7 + 2,
+                velZ: d[2] * 14,
+            });
+        } else {
+            spawnParticle(ctx, ImpactFx, pos, {
+                lifetime: varyLife(0.6),
+                size: 0.12,
+                glow: 1,
+                velX: d[0] * speed,
+                velY: d[1] * speed,
+                velZ: d[2] * speed,
+            });
+        }
+    }
+}
+
+// build a client-only bolt: a `realm:'client'` ProjectileTrait node (never
+// networked) with the cloned projectile mesh. used for BOTH remote bolts (from a
+// ProjectileCast) and our own predicted bolts — they share the render + (for
+// predicted) the hit query in combat-vfx. clients derive the flight from `origin`.
+const _boltDir = vec3.create();
+const _boltSegStart = vec3.create();
+function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number; predicted: boolean }): void {
+    const node = createNode({ name: 'bolt', realm: 'client' });
+    setPosition(addTrait(node, TransformTrait), info.origin);
+    addTrait(node, ProjectileTrait, {
+        id: info.id,
+        ownerId: info.ownerId,
+        spawnTime: info.spawnTime,
+        aim: [info.aim[0], info.aim[1], info.aim[2], info.aim[3]],
+        stats: info.stats,
+        origin: [info.origin[0], info.origin[1], info.origin[2]],
+        predicted: info.predicted,
+        lastT: 0,
+    });
+    const visual = cloneModel(wizardModels.nodes.projectile);
+    visual.name = 'bolt:visual';
+    setPosition(getTrait(visual, TransformTrait)!, [0, 0, 0]);
+    addChild(node, visual);
+    addChild(ctx.node, node);
+}
+
 script(WorldTrait, 'combat-vfx', (ctx) => {
     if (!env.client) return;
 
-    const projectiles = query(ctx, [ProjectileTrait, TransformTrait]);
+    // all client bolts (remote + our predicted ones) are `realm:'client'`
+    // ProjectileTrait nodes — one query renders + simulates them uniformly.
+    const clientBolts = query(ctx, [ProjectileTrait, TransformTrait]);
 
-    // for a terrain hit we reuse the block's auto-derived dust SPRITE, but in our
-    // own particle (our motion + spawn opts) rather than its dust particle — so we
-    // keep full control. cached per sprite (a ParticleHandle is pure data).
-    // dust motion: stronger gravity than the stock `particleUpdate.dust` (−20) so the
-    // burst flies out then snaps back down, with less drag so it carries further.
-    const dustMotion: typeof particleUpdate.dust = (pool, i, dt, voxels) => {
-        particleUpdate.gravity(pool, i, dt, -36);
-        particleUpdate.drag(pool, i, dt, 0.97);
-        particleUpdate.integrate(pool, i, dt);
-        particleUpdate.collideSlide(pool, i, dt, voxels);
-    };
-    const dustFx = new Map<string, ParticleHandle>();
-    const dustParticleFor = (sprite: SpriteHandle): ParticleHandle => {
-        let p = dustFx.get(sprite.spriteId);
-        if (!p) {
-            const id = `wizards:dust:${sprite.spriteId}`;
-            p = { typeId: id, name: id, dependency: { registry: 'particles', id }, sprite, playback: 'stretch', fps: 0, update: dustMotion, glow: 0, tint: [1, 1, 1, 1] };
-            dustFx.set(sprite.spriteId, p);
-        }
-        return p;
-    };
+    // for the predicted hit query (our own bolts) — the same `castProjectileSegment`
+    // the server runs, against the client's identical rigid world (terrain + bodies).
+    const gems = query(ctx, [GemTrait, TransformTrait]);
+    const rayCollector = createClosestCastRayCollector();
+    const raySettings = createDefaultCastRaySettings();
+    let rayFilter: ReturnType<typeof crashFilter.forWorld> | null = null;
 
-    listen(ctx, ImpactCommand, ({ pos, fizzle, block }) => {
-        const dust = block > 0 ? ctx.blocks.particles[block]?.dust : undefined;
-        const count = fizzle ? 3 : dust && dust.length ? 48 : 14; // way more debris for terrain
-        const speed = fizzle ? 3 : 6.5;
-        for (let i = 0; i < count; i++) {
-            const d = randomDir();
-            if (dust && dust.length) {
-                // block dust: its sprite, our control — burst up + out, then the
-                // dust motion (gravity + terrain collide) drops + settles it.
-                spawnParticle(ctx, dustParticleFor(dust[i % dust.length]!.sprite), pos as Vec3, {
-                    lifetime: varyLife(1.2),
-                    size: 0.14,
-                    glow: 0.4,
-                    tint: [1.4, 1.4, 1.4, 1], // a touch lighter than the raw block texture
-                    velX: d[0] * 14, // fly out hard (horizontal), then gravity arcs them down
-                    velY: Math.abs(d[1]) * 7 + 2,
-                    velZ: d[2] * 14,
-                });
-            } else {
-                spawnParticle(ctx, ImpactFx, pos as Vec3, {
-                    lifetime: varyLife(0.6),
-                    size: 0.12,
-                    glow: 1,
-                    velX: d[0] * speed,
-                    velY: d[1] * speed,
-                    velZ: d[2] * speed,
-                });
+    // a remote bolt was cast — spawn its local copy. the server only sends this to
+    // non-owners, so we never get (or have to filter out) our own predicted shots.
+    listen(ctx, ProjectileCast, ({ id, origin, aim, speed, spawnTime }) => {
+        spawnClientBolt(ctx, {
+            id,
+            ownerId: -1, // remote bolts don't run the hit query, so the owner is unused
+            origin: [origin[0], origin[1], origin[2]],
+            aim: [aim[0], aim[1], aim[2], aim[3]],
+            stats: { ...DEFAULT_PROJECTILE_STATS, speed }, // only `speed` is used to render a remote bolt
+            spawnTime,
+            predicted: false,
+        });
+    });
+
+    // a bolt landed — destroy its local copy and play the impact. only non-owners
+    // receive this (the owner predicted the impact locally), so no self-filtering.
+    listen(ctx, ImpactCommand, ({ id, pos, fizzle, block }) => {
+        for (const [bolt, transform] of clientBolts) {
+            if (bolt.id === id) {
+                destroyNode(transform._node);
+                break;
             }
         }
+        spawnImpactVfx(ctx, pos as Vec3, fizzle, block);
     });
 
     listen(ctx, DeathCommand, ({ pos }) => {
@@ -1936,28 +2071,40 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
         }
     });
 
-    // per frame: orient + spin each projectile locally (server drives only its
-    // position, so the rotation is smooth here, not a network round-trip), and
-    // emit a trail particle from it.
+    // per frame: derive each client bolt's position from its cast, spin it, trail it,
+    // run the predicted hit query for our own bolts, and reap on hit/expiry. no synced
+    // positions — the whole flight is reconstructed locally from the seeded clock.
     let frameNo = 0;
     onFrame(ctx, () => {
         frameNo++;
-        const now = ctx.clock.time;
-        for (const [projectile, transform] of projectiles) {
-            // per-projectile roll: a stable id-hash gives each bolt its own spin
-            // direction (sign) + speed (0.5–1.5×) for visual variety. the angle is
-            // derived from spawnTime (stateless). aim (synced) × local roll → faces
-            // travel, rolls around it.
-            const ph = hash32(projectile._node.id, 0);
+        rayFilter ??= crashFilter.forWorld(ctx.physics.rigid.world);
+        const serverNow = ctx.clock.server; // shared timeline (anchors the flight; see below)
+        const wallNow = ctx.clock.wall; // smooth per-render-frame clock (engine-provided)
+        const reap: Node[] = []; // destroying mid-iteration is unsafe
+        for (const [bolt, transform] of clientBolts) {
+            const speed = bolt.stats.speed;
+            // anchor the flight to the smooth wall clock on first sight, using
+            // `serverNow` to place it correctly along its path (a remote bolt's
+            // spawnTime is the SERVER clock, so it lands a touch in the past — despawn
+            // meets the impact; our predicted bolt's is the CLIENT clock at fire, so
+            // it's at the muzzle/now). then advance by WALL time so motion is smooth at
+            // any refresh rate — `serverNow` only steps at the 60Hz tick.
+            if (bolt.wallSpawn < 0) bolt.wallSpawn = wallNow - Math.max(0, serverNow - bolt.spawnTime);
+            const elapsed = Math.max(0, wallNow - bolt.wallSpawn);
+
+            const dir = vec3.transformQuat(_boltDir, [0, 0, -1], bolt.aim);
+            const px = bolt.origin[0] + dir[0] * speed * elapsed;
+            const py = bolt.origin[1] + dir[1] * speed * elapsed;
+            const pz = bolt.origin[2] + dir[2] * speed * elapsed;
+
+            // id-hashed roll for visual variety; position + trail.
+            const ph = hash32(bolt.id, 0);
             const spinSpeed = PROJECTILE_SPIN_SPEED * (0.5 + (hashUnit(ph, 6) + 0.5)) * (hashUnit(ph, 7) < 0 ? -1 : 1);
-            quat.setAxisAngle(_rotation, PROJECTILE_SPIN_AXIS, spinSpeed * (now - projectile.spawnTime));
-            setQuaternion(transform, quat.multiply(_orientation, projectile.aim, _rotation));
-            const p = getWorldPosition(transform);
-            // one hash per projectile-frame drives the trail variant, scatter + seed.
-            const h = hash32(projectile._node.id, frameNo);
-            spawnParticle(ctx, TrailVariants[h % TrailVariants.length], [p[0], p[1], p[2]], {
-                // hash-varied lifetime (deterministic, ±35% around 0.6s) so the
-                // trail doesn't pop out in lockstep.
+            quat.setAxisAngle(_rotation, PROJECTILE_SPIN_AXIS, spinSpeed * elapsed);
+            setPosition(transform, [px, py, pz]);
+            setQuaternion(transform, quat.multiply(_orientation, bolt.aim, _rotation));
+            const h = hash32(bolt.id, frameNo);
+            spawnParticle(ctx, TrailVariants[h % TrailVariants.length], [px, py, pz], {
                 lifetime: 0.6 * (0.65 + (hashUnit(h, 4) + 0.5) * 0.7),
                 size: 0.1,
                 glow: 1,
@@ -1966,7 +2113,34 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
                 velY: hashUnit(h, 2) * 1.4,
                 velZ: hashUnit(h, 3) * 1.4,
             });
+
+            // predicted (our own) bolts run the SHARED hit query over the segment
+            // travelled since last frame → zero-latency impact vfx (damage stays
+            // server-authoritative). a divergence from the server is cosmetic only.
+            if (bolt.predicted && elapsed > bolt.lastT) {
+                const sx = bolt.origin[0] + dir[0] * speed * bolt.lastT;
+                const sy = bolt.origin[1] + dir[1] * speed * bolt.lastT;
+                const sz = bolt.origin[2] + dir[2] * speed * bolt.lastT;
+                _boltSegStart[0] = sx;
+                _boltSegStart[1] = sy;
+                _boltSegStart[2] = sz;
+                const hit = castProjectileSegment(ctx, _boltSegStart, dir, speed * (elapsed - bolt.lastT), bolt.ownerId, gems, rayCollector, raySettings, rayFilter);
+                bolt.lastT = elapsed;
+                if (hit) {
+                    spawnImpactVfx(ctx, hit.point, false, hit.block);
+                    reap.push(transform._node);
+                    continue;
+                }
+            }
+
+            // expire at lifetime — predicted bolts pop a fizzle; remote bolts go
+            // silently (the authoritative ImpactCommand normally reaps them first).
+            if (elapsed > PROJECTILE_LIFETIME) {
+                if (bolt.predicted) spawnImpactVfx(ctx, [px, py, pz], true, 0);
+                reap.push(transform._node);
+            }
         }
+        for (const n of reap) destroyNode(n);
     });
 });
 

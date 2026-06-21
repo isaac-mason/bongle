@@ -1,9 +1,9 @@
-import type { Node, TraitHandle, TraitProps } from '../core/scene/nodes';
+import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/nodes';
 import * as Nodes from '../core/scene/nodes';
 import type { TraitBase } from '../core/scene/traits';
 import { ModelTrait } from '../builtins/model';
 
-export type { Node } from '../core/scene/nodes';
+export type { Node, Realm } from '../core/scene/nodes';
 export {
     addChild,
     findAncestor,
@@ -55,9 +55,14 @@ export function cloneModel(node: Node): Node {
  * create a new **detached** node — no parent, no scripts fired, not in queries.
  * attach with `addChild(parent, node)` to make it live; an id is allocated at
  * attach time (negative on the client, positive on the server).
+ *
+ * `realm` controls which side(s) the node lives on (default `'inherit'`, which
+ * resolves to the nearest ancestor's realm, i.e. `'shared'` under the scene
+ * root). Use `'server'` for server-only nodes that must never replicate, or
+ * `'client'` for purely local client-side nodes.
  */
-export function createNode(options?: { name?: string; persist?: boolean }): Node {
-    return Nodes.createNode({ name: options?.name, persist: options?.persist });
+export function createNode(options?: { name?: string; persist?: boolean; realm?: Realm }): Node {
+    return Nodes.createNode({ name: options?.name, persist: options?.persist, realm: options?.realm });
 }
 
 /**

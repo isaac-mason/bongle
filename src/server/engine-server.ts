@@ -639,6 +639,7 @@ export function update(state: EngineServer, delta: number) {
 
         room.tick++;
         Clock.tick(room.clock, delta);
+        Clock.advanceWall(room.clock, delta); // server has no render frames — wall tracks time
 
         Debug.begin(room.metrics, 'nodes/update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.metrics);

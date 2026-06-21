@@ -304,6 +304,7 @@ export function invalidatePlayer(
         packedNodes,
         clientId: player.client,
         namespace: room.namespace,
+        serverClockTime: room.clock.time, // client seeds its clock from this (shared time base)
     });
 
     // snapshot every node so the same-tick scene_sync diff finds no changes

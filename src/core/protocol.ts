@@ -581,6 +581,10 @@ export const JoinRoom = pack.object({
     clientId: pack.varuint(),
     /** Namespace this room belongs to (e.g. 'editor', 'main', 'play-<uuid>'). */
     namespace: pack.string(),
+    /** The server room clock (seconds) at send time. The client seeds its own
+     *  clock from this so the two sides share a time base (modulo join latency).
+     *  See `Clock.init`. */
+    serverClockTime: pack.float64(),
 });
 
 export type JoinRoom = pack.SchemaType<typeof JoinRoom>;

@@ -1087,6 +1087,9 @@ export function update(state: EngineClient, delta: number) {
     // per-frame update — input polling, camera binding, etc. every room gets
     // a per-frame pass; inactive rooms continue advancing scripts/animations.
     for (const room of state.rooms.rooms.values()) {
+        // advance the smooth render clock by the real frame delta so per-frame
+        // visuals (onFrame) move smoothly between the 60Hz fixed ticks.
+        Clock.advanceWall(room.clock, delta);
         Debug.begin(room.clientMetrics, 'on-update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');
