@@ -14,7 +14,7 @@
 //     ExtrudedVertex (vertex usage) + u32 index (index usage). Lazily
 //     baked, refcounted, shared across rooms.
 //   - stable per-slot `instanceData` (mat4x4f worldMatrix +
-//     InstanceMaterial — uvRect / tint / light / glow / unlit / litMin).
+//     InstanceMaterial — uvRect / tint / flash / light / glow / unlit / litMin / dither).
 //     Written every frame for visible slots; never zeroed on destroy
 //     because the next allocation overwrites before use.
 //   - per-frame `slotMap` (u32[]) + `drawIndirectArray`
@@ -367,14 +367,17 @@ export function update(
             : 0;
         const f = state.entry.frames[frameIdx]!;
         const t = trait.tint;
+        const fl = trait.flash;
         const l = trait.light;
         packTo(InstanceMaterial, instArr, slot * EXTRUDED_INSTANCE_STRIDE + EXTRUDED_INSTANCE_MATERIAL_OFFSET, {
             uvRect: [f.u, f.v, f.w, f.h],
             tint: [t[0], t[1], t[2], t[3]],
+            flash: [fl[0], fl[1], fl[2], fl[3]],
             light: [l[0], l[1], l[2], l[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
+            dither: trait.dither,
         });
         instanceDataDirty = true;
 

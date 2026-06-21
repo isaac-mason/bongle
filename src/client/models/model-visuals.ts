@@ -55,16 +55,17 @@ import {
 
 type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrait]>>;
 
-// InstanceParams f32 layout (16 f32 / 64B, mirrors `InstanceParams` in
+// InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
 // model-resources.ts — must stay in sync, no compiler will catch drift):
-//   [ 0..3 ]  tint     vec4f
-//   [ 4..7 ]  light    vec4f
-//   [   8  ]  glow     f32
-//   [   9  ]  unlit    f32   (0=lit, 1=bypass)
-//   [  10  ]  litMin   f32
-//   [  11  ]  dither   f32
-//   [ 12..13] uvOffset vec2f
-//   [ 14..15] uvScale  vec2f
+//   [ 0..3 ]  tint     vec4f  (rgb = multiply, a = opacity)
+//   [ 4..7 ]  flash    vec4f  (rgb = colour, a = strength)
+//   [ 8..11]  light    vec4f
+//   [  12  ]  glow     f32
+//   [  13  ]  unlit    f32   (0=lit, 1=bypass)
+//   [  14  ]  litMin   f32
+//   [  15  ]  dither   f32
+//   [ 16..17] uvOffset vec2f
+//   [ 18..19] uvScale  vec2f
 // If you reorder fields in `InstanceParams`, update the writes below AND
 // `destroyInstance` AND `MODEL_INSTANCE_PARAMS_OFFSET_F32` in lockstep.
 
@@ -492,6 +493,7 @@ export function update(
         ) {
             const po = slotBase + MODEL_INSTANCE_PARAMS_OFFSET_F32;
             const tint = meshTrait.tint;
+            const flash = meshTrait.flash;
             const light = meshTrait.light;
             const uvOffset = entry.uvOffset;
             const uvScale = entry.uvScale;
@@ -499,18 +501,22 @@ export function update(
             instArr[po + 1] = tint[1]!;
             instArr[po + 2] = tint[2]!;
             instArr[po + 3] = tint[3]!;
-            instArr[po + 4] = light[0]!;
-            instArr[po + 5] = light[1]!;
-            instArr[po + 6] = light[2]!;
-            instArr[po + 7] = light[3]!;
-            instArr[po + 8] = meshTrait.glow;
-            instArr[po + 9] = meshTrait.unlit ? 1 : 0;
-            instArr[po + 10] = meshTrait.litMin;
-            instArr[po + 11] = meshTrait.dither;
-            instArr[po + 12] = uvOffset[0]!;
-            instArr[po + 13] = uvOffset[1]!;
-            instArr[po + 14] = uvScale[0]!;
-            instArr[po + 15] = uvScale[1]!;
+            instArr[po + 4] = flash[0]!;
+            instArr[po + 5] = flash[1]!;
+            instArr[po + 6] = flash[2]!;
+            instArr[po + 7] = flash[3]!;
+            instArr[po + 8] = light[0]!;
+            instArr[po + 9] = light[1]!;
+            instArr[po + 10] = light[2]!;
+            instArr[po + 11] = light[3]!;
+            instArr[po + 12] = meshTrait.glow;
+            instArr[po + 13] = meshTrait.unlit ? 1 : 0;
+            instArr[po + 14] = meshTrait.litMin;
+            instArr[po + 15] = meshTrait.dither;
+            instArr[po + 16] = uvOffset[0]!;
+            instArr[po + 17] = uvOffset[1]!;
+            instArr[po + 18] = uvScale[0]!;
+            instArr[po + 19] = uvScale[1]!;
             state.paramsVersionAtUpload = meshVersion;
             state.entryRefAtUpload = entry;
             instanceDataDirty = true;
@@ -634,7 +640,7 @@ function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Vi
     // zero per-slot params so a reused slot doesn't briefly inherit
     // stale tint/light/uv before the first write lands. transforms aren't
     // zeroed — the next allocation's version mismatch forces a full
-    // re-upload before the slot is referenced again. 16 f32 = 64B params
+    // re-upload before the slot is referenced again. 20 f32 = 80B params
     // block (mirrors `InstanceParams` layout above).
     const instArr = visuals.instanceDataBuf.array as Float32Array;
     const po = slot * MODEL_INSTANCE_STRIDE_F32 + MODEL_INSTANCE_PARAMS_OFFSET_F32;
@@ -654,6 +660,10 @@ function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Vi
     instArr[po + 13] = 0;
     instArr[po + 14] = 0;
     instArr[po + 15] = 0;
+    instArr[po + 16] = 0;
+    instArr[po + 17] = 0;
+    instArr[po + 18] = 0;
+    instArr[po + 19] = 0;
     visuals.instanceDataBuf.needsUpdate = true;
 
     freeOne(visuals.instanceAllocator, slot);

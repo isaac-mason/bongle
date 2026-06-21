@@ -116,7 +116,7 @@ export function update(
         // voxels at +Math.round(t.position)).
         model.origin = [0, 0, 0];
         vmt.model = model;
-        vmt.tint = [0.5, 0.6, 0.75, 0.4];
+        vmt.flash = [0.5, 0.6, 0.75, 0.4];
 
         const ghostT = getTrait(ghost, TransformTrait);
         if (ghostT) {

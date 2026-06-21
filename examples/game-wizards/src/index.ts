@@ -61,6 +61,7 @@ import {
     setEnvironment,
     setEnvironmentTime,
     setMeshDither,
+    setMeshFlash,
     setMeshGlow,
     setMeshLitMin,
     setMeshTint,
@@ -544,7 +545,7 @@ const _viewmodelRot = quat.create();
 const _castArmRaise = quat.create();
 const _castArmPose = quat.create();
 
-// damage flash — red body tint + glow pulse to 1 then back to 0 on taking a hit.
+// damage flash — red body flash + glow pulse to 1 then back to 0 on taking a hit.
 const DAMAGE_FLASH_DURATION = 0.2; // s
 const FLASH_TINT: Vec4 = [1, 0, 0, 0]; // red; alpha (flash strength) set per use
 
@@ -633,7 +634,7 @@ const NpcTrait = trait('npc', {
 // `id` ties the impact to the bolt that caused it so the client destroys the
 // matching local bolt. sent to every client EXCEPT the owner (who predicted it).
 const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ id: pack.uint32(), pos: pack.list(pack.float32(), 3), fizzle: pack.boolean(), block: pack.uint32() }));
-const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32() }));
+const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32(), tier: pack.int8() })); // tier ≥ 0 colours the pop as that gem; -1 for wizards
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
 // server → client: a gem shattered at `pos`; `tier` selects the burst colour/size.
 const GemDeathCommand = command('wizards.gem-death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), tier: pack.uint8() }));
@@ -1135,7 +1136,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             wiz.current = Math.max(0, wiz.current - stats.damage);
             wiz.lastDamageTime = ctx.clock.time;
             wiz.lastAttacker = ownerId;
-            broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage });
+            broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage, tier: -1 });
 
             // knockback: radial shove away from the blast + an up-kick so it lands on
             // grounded targets (ground drag would otherwise eat a flat horizontal push).
@@ -1171,7 +1172,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             const ez = pos[2] - gp[2];
             if (ex * ex + ey * ey + ez * ez > stats.damageRadius * stats.damageRadius) continue;
             gem.current = Math.max(0, gem.current - stats.damage);
-            broadcast(ctx, DamageCommand, { pos: [gp[0], gp[1], gp[2]], amount: stats.damage });
+            broadcast(ctx, DamageCommand, { pos: [gp[0], gp[1], gp[2]], amount: stats.damage, tier: gem.tier });
         }
 
         sendToOthers(ctx, players, ownerId, ImpactCommand, { id, pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
@@ -2057,10 +2058,13 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
     });
 
     // damage feedback — a small pop for now; floating numbers later.
-    listen(ctx, DamageCommand, ({ pos }) => {
+    listen(ctx, DamageCommand, ({ pos, tier }) => {
+        // gem hits (tier ≥ 0) pop in that gem's colour; wizard hits stay white.
+        const fx = tier >= 0 ? (GemShatterFx[tier] ?? GemShatterFx[0]!) : ImpactFx;
+        const at: Vec3 = [pos[0], pos[1], pos[2]];
         for (let i = 0; i < 6; i++) {
             const d = randomDir();
-            spawnParticle(ctx, ImpactFx, pos as Vec3, {
+            spawnParticle(ctx, fx, at, {
                 lifetime: varyLife(0.7),
                 size: 0.08,
                 emissive: 1,
@@ -2167,14 +2171,16 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
     const state = new Map<number, { dither: number; dead: boolean; flash: number; prevHealth: number; npSig: string; hatLevel: number }>();
     const hats: Hat[] = [];
 
-    // red tint + glow on the body meshes only — prune the hat/staff subtrees.
+    // red flash + glow on the body meshes only — prune the hat/staff subtrees.
+    // flash rides its own channel, so it overlays the persistent team tint
+    // rather than clobbering it.
     const flashBody = (entityNode: Node, flash: number) => {
         FLASH_TINT[3] = flash;
         traverse(entityNode, (n) => {
             if (n.name === 'wizard:hat' || n.name === 'wizard:staff') return false; // skip accessories
             const mesh = getTrait(n, MeshTrait);
             if (mesh) {
-                setMeshTint(mesh, FLASH_TINT);
+                setMeshFlash(mesh, FLASH_TINT);
                 setMeshGlow(mesh, flash);
             }
         });

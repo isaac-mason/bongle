@@ -51,8 +51,8 @@ export type Node = {
     /** ordered list of child nodes */
     children: Node[];
 
-    /** reference to the scene graph this node belongs to, or null if detached */
-    nodes: Nodes | null;
+    /** the scene graph this node belongs to, or null if detached */
+    scene: Nodes | null;
 
     /**
      * which Player owns this node. null = server-owned (default).
@@ -147,7 +147,7 @@ function createNodeObject(name?: string, id?: number, uuid?: string, persist?: b
         name: name ?? undefined,
         parent: null,
         children: [],
-        nodes: null,
+        scene: null,
         owner: null,
         persist: persist ?? true,
         realm: realm ?? 'inherit',
@@ -171,9 +171,19 @@ export type NodeSyncState = {
     version: number;
 };
 
+/** mark a node into its scene graph's per-tick discovery dirty set. server-side
+ *  only (gated on `!env.client`) — a no-op in the client bundle, where nothing
+ *  drains the set. every version bump funnels through here, so structural, trait,
+ *  and field changes all land in `dirtyNodes` for the per-client fan-out. room
+ *  graphs are drained + cleared each tick by `Discovery.flush`. */
+export function markNodeDirty(sg: Nodes, node: Node): void {
+    if (!env.client) sg.dirtyNodes.add(node);
+}
+
 /** bump a node's structural version */
 export function bumpNodeVersion(sg: Nodes, node: Node): void {
     node._sync.version = ++sg._versions.counter;
+    markNodeDirty(sg, node);
 }
 
 /** bump a specific trait's version on a node (+ the node version). */
@@ -182,6 +192,7 @@ export function bumpTraitVersion(sg: Nodes, node: Node, traitSlot: number): void
     const inst = node._traits.get(traitSlot);
     if (inst?._sync) inst._sync.traitVersion = v;
     node._sync.version = v;
+    markNodeDirty(sg, node);
 }
 
 /** bump a single field's version (+ the trait + node versions). takes the
@@ -193,6 +204,7 @@ export function bumpFieldVersion(sg: Nodes, node: Node, instance: TraitBase, i: 
         instance._sync.traitVersion = v;
     }
     node._sync.version = v;
+    markNodeDirty(sg, node);
 }
 
 /* node scene graph */
@@ -289,6 +301,18 @@ export type Nodes = {
     queries: Map<string, Query<any>>;
 
     /**
+     * @internal server-side discovery driver. nodes touched this tick (created,
+     * structural change, trait add/remove, field change, or destroyed) — the set
+     * the per-client scene-sync fan-out iterates instead of walking the whole tree.
+     * a destroyed node is parked here too; the fan-out recognises it by
+     * `node.context === null` and emits `node_destroyed`. populated by the
+     * `bump*Version` helpers + `registerSubtree` + `destroyNode` (gated on
+     * `!env.client`, so it stays empty in the client bundle), drained + cleared each
+     * tick by `Discovery.flush`.
+     */
+    dirtyNodes: Set<Node>;
+
+    /**
      * optional runtime reference. when set, registerSubtree creates script instances,
      * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
      * set this after createSceneGraph, before adding live nodes.
@@ -321,6 +345,7 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
         _prefabsDirty: new Set(),
         _transformDirty: new Set(),
         _interpolating: new Set(),
+        dirtyNodes: new Set(),
     };
 
     // create root node — always present, cannot be destroyed.
@@ -328,7 +353,7 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, generateUuid(), undefined, 'shared');
     root.id = sg._nextNodeId++;
-    root.nodes = sg;
+    root.scene = sg;
     sg.nodes.add(root);
     sg._idToNode.set(root.id, root);
     sg._uuidToNode.set(root._uuid!, root);
@@ -388,7 +413,7 @@ export function getNodeByUUID(sg: Nodes, uuid: string): Node | undefined {
  * returns whether a node is alive (registered in a scene graph).
  */
 export function nodeExists(node: Node): boolean {
-    return node.nodes !== null;
+    return node.scene !== null;
 }
 
 /**
@@ -416,6 +441,26 @@ export function setOwner(sg: Nodes, node: Node, owner: PlayerId | null): void {
         }
         set.add(node);
     }
+    // owner is replicated (node_owner); mark the change for discovery when the
+    // node is live. (editor/scene-pack paths also bump explicitly — harmless.)
+    if (node.scene) bumpNodeVersion(node.scene, node);
+}
+
+/**
+ * set a node's realm. realm controls which side(s)/clients a node replicates to,
+ * so changing it can flip the effective relevance of the whole subtree
+ * (descendants inherit) — mark them all dirty so the per-client discovery fan-out
+ * re-evaluates visibility (create on become-visible, destroy on become-hidden).
+ * route runtime realm changes through here so the change can't bypass discovery.
+ */
+export function setRealm(node: Node, realm: Realm): void {
+    if (node.realm === realm) return;
+    node.realm = realm;
+    const sg = node.scene;
+    if (!sg) return;
+    const subtree: Node[] = [];
+    collectSubtree(node, subtree);
+    for (const n of subtree) bumpNodeVersion(sg, n);
 }
 
 /**
@@ -445,8 +490,15 @@ export function isReplicable(node: Node): boolean {
  * the scene graph's root node cannot be destroyed.
  */
 export function destroyNode(nodes: Nodes, node: Node): void {
-    if (node.nodes !== nodes) return;
+    if (node.scene !== nodes) return;
     if (node === nodes.root) return; // root node is permanent
+
+    // park the node in the discovery dirty set (server-side; no-op on the client).
+    // node.context is nulled at the end of this fn, so the fan-out sees node.context
+    // === null and emits node_destroyed. recurses, so each destroyed node lands
+    // here. if the same node is re-added this tick it becomes live again → the
+    // fan-out treats it as a create/update instead (add→remove→add correctness).
+    if (!env.client) nodes.dirtyNodes.add(node);
 
     // destroy children first (iterate a copy since we mutate)
     const childrenCopy = node.children.slice();
@@ -490,7 +542,7 @@ export function destroyNode(nodes: Nodes, node: Node): void {
         nodes._transformDirty.delete(t);
         nodes._interpolating.delete(t);
     }
-    node.nodes = null;
+    node.scene = null;
 }
 
 /* trait operations */
@@ -581,7 +633,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
         updateChildTransformPointers(node, t);
     }
 
-    const nodes = node.nodes;
+    const nodes = node.scene;
 
     if (nodes) {
         bumpNodeVersion(nodes, node);
@@ -670,7 +722,7 @@ function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase)
 }
 
 export function removeTrait(node: Node, handle: TraitHandle): void {
-    const sg = node.nodes;
+    const sg = node.scene;
     const traitSlot = handle._slot;
     if (traitSlot === undefined) return;
 
@@ -716,7 +768,7 @@ export function hasTrait(node: Node, handle: TraitHandle): boolean {
  * and other engine code that works with numeric indices directly.
  */
 export function removeTraitBySlot(node: Node, traitSlot: number): void {
-    const nodes = node.nodes;
+    const nodes = node.scene;
 
     if (bitset.has(node._bitset, traitSlot)) {
         if (nodes?.runtime) {
@@ -753,7 +805,7 @@ export function addTraitBySlot(
     traitSlot: number,
     props?: Record<string, unknown>,
 ): TraitBase | null {
-    const nodes = node.nodes;
+    const nodes = node.scene;
 
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return null;
@@ -768,7 +820,7 @@ export function addTraitBySlot(
     // `setInterpolation(node, true)` — callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
-    // "addTrait happens before node.nodes is wired" hydration race.
+    // "addTrait happens before node.context is wired" hydration race.
     if (traitSlot === TransformTrait._slot) {
         const t = getTrait(node, TransformTrait)!;
         t._parent = findTransformAncestor(node);
@@ -917,8 +969,8 @@ export function addChild(parent: Node, child: Node): void {
     parent.children.push(child);
 
     // if parent is in a scene graph, register child subtree
-    if (parent.nodes) {
-        registerSubtree(parent.nodes, child);
+    if (parent.scene) {
+        registerSubtree(parent.scene, child);
     }
 
     // update parent transform pointers for the attached subtree
@@ -934,8 +986,8 @@ export function removeChild(parent: Node, child: Node): void {
     if (child.parent !== parent) return;
 
     // detach subtree from scene graph first
-    if (child.nodes) {
-        unregisterSubtree(child.nodes, child);
+    if (child.scene) {
+        unregisterSubtree(child.scene, child);
     }
 
     removeChildInternal(parent, child);
@@ -963,18 +1015,18 @@ export function reparent(node: Node, newParent: Node): void {
     if (node.parent === newParent) return;
 
     // can only reparent within the same scene graph (or from detached)
-    if (node.nodes !== null && node.nodes !== newParent.nodes) {
+    if (node.scene !== null && node.scene !== newParent.scene) {
         throw new Error(`cannot reparent node to a different scene graph`);
     }
-    if (newParent.nodes === null) {
+    if (newParent.scene === null) {
         throw new Error(`cannot reparent to a detached parent`);
     }
 
-    const sg = newParent.nodes;
+    const sg = newParent.scene;
     const oldParent = node.parent;
 
     // fire onExit before detaching — old parent is still set
-    if (oldParent && node.nodes !== null && sg.runtime) {
+    if (oldParent && node.scene !== null && sg.runtime) {
         fireExitHooks(sg.runtime, node, oldParent);
     }
 
@@ -984,12 +1036,18 @@ export function reparent(node: Node, newParent: Node): void {
     node.parent = newParent;
     newParent.children.push(node);
 
-    // if node was detached, register it now (also fires onInit + onEnter)
-    if (node.nodes === null) {
+    // if node was detached, register it now (also fires onInit + onEnter + marks dirty)
+    if (node.scene === null) {
         registerSubtree(sg, node);
-    } else if (sg.runtime) {
-        // already in-tree reparent: fire onEnter with the new parent
-        fireEnterHooks(sg.runtime, node, newParent);
+    } else {
+        // already in-tree reparent: fire onEnter with the new parent.
+        if (sg.runtime) fireEnterHooks(sg.runtime, node, newParent);
+        // mark the whole moved subtree for discovery: reparenting can flip
+        // effective relevance (e.g. moving under a non-shared parent), and
+        // descendants inherit it — the per-client fan-out must re-evaluate them.
+        const moved: Node[] = [];
+        collectSubtree(node, moved);
+        for (const n of moved) bumpNodeVersion(sg, n);
     }
 
     // update parent transform pointers for the moved subtree
@@ -1007,6 +1065,9 @@ export function reorderChild(parent: Node, child: Node, index: number): void {
     if (current === -1) return;
     parent.children.splice(current, 1);
     parent.children.splice(Math.min(index, parent.children.length), 0, child);
+    // index change is a structural change discovery must replicate (it bumped
+    // nothing before — the old per-client walk diffed childIndex directly).
+    if (child.scene) bumpNodeVersion(child.scene, child);
 }
 
 /**
@@ -1019,7 +1080,7 @@ export function replaceChildren(root: Node, node: Node): void {
     if (node.parent !== root) {
         throw new Error('replaceChildren: node must be a direct child of root');
     }
-    const sg = root.nodes;
+    const sg = root.scene;
     for (const child of root.children.slice()) {
         if (child === node) continue;
         if (sg) {
@@ -1075,8 +1136,12 @@ function registerSubtree(sg: Nodes, node: Node): void {
     const newScriptInstances: ScriptInstance[] = [];
 
     for (const n of subtree) {
-        n.nodes = sg;
+        n.scene = sg;
         sg.nodes.add(n);
+        // a node entering the live graph is a create for the discovery fan-out.
+        // server-only (gated inside markNodeDirty); pre-order so creates emit
+        // parent-first (fan-out also depth-orders as a backstop).
+        markNodeDirty(sg, n);
         if (n.prefab) {
             sg._prefabNodes.add(n);
             sg._prefabsDirty.add(n);
@@ -1184,7 +1249,7 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
     if (node._uuid) sg._uuidToNode.delete(node._uuid);
     sg._prefabNodes.delete(node);
     sg._prefabsDirty.delete(node);
-    node.nodes = null;
+    node.scene = null;
 }
 
 /** collect all nodes in a subtree (pre-order) into the output array */
@@ -2022,7 +2087,7 @@ export type PrefabState = {
 export function setPrefab(node: Node, config: PrefabConfig | null): void {
     node.prefab = config;
     node._prefabState = null;
-    const sg = node.nodes;
+    const sg = node.scene;
     if (!sg) return;
     if (config) {
         sg._prefabNodes.add(node);
@@ -2048,7 +2113,7 @@ export function setPrefab(node: Node, config: PrefabConfig | null): void {
 export function setNodePersist(node: Node, persist: boolean): void {
     if (node.persist === persist) return;
     node.persist = persist;
-    const sg = node.nodes;
+    const sg = node.scene;
     if (!sg) return;
     if (persist && !node._uuid && sg.mode === 'edit') {
         let uuid = generateUuid();

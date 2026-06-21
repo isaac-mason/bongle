@@ -55,7 +55,6 @@ import {
     cameraProjectionMatrix,
     cameraViewMatrix,
     cos,
-    Discard,
     d,
     dot,
     equal,
@@ -106,6 +105,7 @@ export const elapsedTime = uniform('elapsedTime', d.f32);
 elapsedTime.value = 0;
 
 import { EnvConfig } from '../environment';
+import { ditherDiscard } from '../visuals/dsl';
 import { ChunkInfo, VisibleQuad } from './voxel-resources';
 
 // ── env constants ───────────────────────────────────────────────────
@@ -404,7 +404,9 @@ export function buildVoxelFragment(
     const rgb = mul(texColor.rgb, light).toVar('rgb');
     const fragColor = vec4(rgb, texColor.a).toVar('fragColor');
 
-    return { fragColor, texColor };
+    // `light` is returned so per-instance traits (voxel meshes) can tint the
+    // albedo before lighting and floor in glow; the chunk path ignores it.
+    return { fragColor, texColor, light };
 }
 
 // ── pass-specific Material wiring ───────────────────────────────────
@@ -415,8 +417,12 @@ export function makePassMaterial(opts: {
     clipPos: Node<d.vec4f>;
     fragColor: Node<d.vec4f>;
     texColor: Node<d.vec4f>;
+    // per-instance fade for the cutout pass — defaults give a pure cutout
+    // (the chunk path); voxel meshes pass tint.a and their dither knob.
+    opacity?: Node<d.f32>;
+    dither?: Node<d.f32>;
 }): Material {
-    const { name, pass, clipPos, fragColor, texColor } = opts;
+    const { name, pass, clipPos, fragColor, texColor, opacity, dither } = opts;
 
     if (pass === 'opaque') {
         return new Material({
@@ -430,22 +436,7 @@ export function makePassMaterial(opts: {
     }
 
     if (pass === 'transparent') {
-        const alphaCutout = Fn(
-            (color, alpha) => {
-                If(alpha.lessThan(f32(0.5)), () => {
-                    Discard();
-                });
-                return color;
-            },
-            {
-                name: 'alphaCutout',
-                params: [
-                    { name: 'color', type: d.vec4f },
-                    { name: 'alpha', type: d.f32 },
-                ],
-            },
-        );
-        const fragment = alphaCutout(fragColor, texColor.a);
+        const fragment = ditherDiscard(fragColor, texColor.a, opacity ?? f32(1), dither ?? f32(0));
         return new Material({
             name,
             vertex: clipPos,

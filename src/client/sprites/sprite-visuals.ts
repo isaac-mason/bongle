@@ -303,14 +303,17 @@ export function update(
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const f = state.entry.frames[frameIdx]!;
         const t = trait.tint;
+        const fl = trait.flash;
         const l = trait.light;
         packTo(InstanceMaterial, matArr, state.slot * INSTANCE_MATERIAL_STRIDE, {
             uvRect: [f.u, f.v, f.w, f.h],
             tint: [t[0], t[1], t[2], t[3]],
+            flash: [fl[0], fl[1], fl[2], fl[3]],
             light: [l[0], l[1], l[2], l[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
+            dither: trait.dither,
         });
         matDirty = true;
     }

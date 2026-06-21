@@ -24,8 +24,19 @@ export const MeshTrait = trait('mesh', {
      */
     meshId: null as MeshId | null,
 
-    /** Per-instance tint color [r, g, b, a]. Client-only. */
-    tint: [0, 0, 0, 0] as Vec4,
+    /**
+     * Per-instance tint [r, g, b, a]. rgb multiplies the albedo (white =
+     * no-op), a is opacity. Persistent recolour: team colours, biome.
+     * Client-only.
+     */
+    tint: [1, 1, 1, 1] as Vec4,
+
+    /**
+     * Transient overlay [r, g, b, a]: rgb is the colour, a the strength,
+     * applied as `mix(surface, rgb, a)` over the tint but under lighting.
+     * For damage flashes, charge-ups. [0,0,0,0] = none (default). Client-only.
+     */
+    flash: [0, 0, 0, 0] as Vec4,
 
     /**
      * Voxel light contribution [sky, r, g, b], each 0-1. Client-only.
@@ -106,9 +117,17 @@ sync(MeshTrait, 'meshId', {
     },
 });
 
-/** set per-instance tint and flag the renderer to re-upload params. */
+/** set per-instance tint (rgb multiply, a = opacity) and flag the renderer
+ *  to re-upload params. */
 export function setMeshTint(t: MeshTrait, v: Vec4): void {
     vec4.copy(t.tint, v);
+    t._version++;
+}
+
+/** set the transient flash overlay [r,g,b,a] (rgb colour, a strength) and
+ *  flag the renderer to re-upload params. */
+export function setMeshFlash(t: MeshTrait, v: Vec4): void {
+    vec4.copy(t.flash, v);
     t._version++;
 }
 

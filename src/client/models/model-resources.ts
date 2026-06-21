@@ -35,15 +35,10 @@ import {
     cameraProjectionMatrix,
     cameraViewMatrix,
     cos,
-    Discard,
     d,
     dot,
-    Fn,
     f32,
-    fract,
-    fragCoord,
     GpuBuffer,
-    If,
     instanceIndex,
     layoutStrideOf,
     Material,
@@ -68,12 +63,16 @@ import {
 import type { Model } from '../../core/models/model';
 import type { ModelPayload, Resources } from '../../core/resources';
 import { EnvConfig } from '../environment';
+import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 import * as ModelAtlas from './model-atlas';
 
 // ── gpu structs ─────────────────────────────────────────────────────
 
 export const InstanceParams = struct('ModelInstanceParams', {
+    // tint: rgb multiplies the albedo (white = no-op), a = opacity.
     tint: d.vec4f,
+    // flash: transient overlay — rgb is the colour, a the strength (lerp).
+    flash: d.vec4f,
     light: d.vec4f,
     glow: d.f32,
     // unlit: 0 = lit, 1 = bypass all lighting (carried as f32 so the shader
@@ -96,8 +95,8 @@ export const InstanceParams = struct('ModelInstanceParams', {
 // storage buffers (transforms + params) into one binding — same
 // cardinality, same writer, same grow lifecycle.
 //
-// Layout: mat4x4f (64B, align 16) then InstanceParams (64B, align 16)
-// → total 128B per slot, struct align 16, no internal padding.
+// Layout: mat4x4f (64B, align 16) then InstanceParams (80B, align 16)
+// → total 144B per slot, struct align 16, no internal padding.
 export const ModelInstance = struct('ModelInstance', {
     worldMatrix: d.mat4x4f,
     params: InstanceParams,
@@ -666,6 +665,7 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     const vUv = varying(atlasUv, 'mvUv').setInterpolation('perspective', 'centroid');
     const vNormal = varying(worldNormal, 'mvNormalV');
     const vTint = varying(instParams.field('tint'), 'mvTint');
+    const vFlash = varying(instParams.field('flash'), 'mvFlash');
     const vInstLight = varying(instParams.field('light'), 'mvInstLight');
     const vGlow = varying(instParams.field('glow'), 'mvGlow');
     const vUnlit = varying(instParams.field('unlit'), 'mvUnlit').setInterpolation('flat');
@@ -703,49 +703,14 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     ).toVar('mvSkyContrib');
     const litMinFloor = vec3f(vLitMin, vLitMin, vLitMin).toVar('mvLitMinFloor');
     const voxelLight = max(max(vInstLight.yzw, skyContrib), litMinFloor).toVar('mvVoxelLight');
-    // glow raises the lighting floor — a script-driven self-illumination knob
-    // in the mesh's OWN colour (glow=1 → fully lit, shadow-free) rather than
-    // adding white, which would wash the surface out. parallels `litMin`.
-    const glowFloor = vec3f(vGlow, vGlow, vGlow).toVar('mvGlowFloor');
-    const light = max(max(mul(voxelLight, sunShade), ambientMinimum), glowFloor).toVar('mvLight');
+    const light = max(mul(voxelLight, sunShade), ambientMinimum).toVar('mvLight');
 
-    // tint the albedo first, then light it — so lighting/shadows modulate the
-    // tinted surface rather than a flat tint colour replacing the lit result.
-    const tintedAlbedo = mix(texColor.rgb, vTint.rgb, vTint.w).toVar('mvTintedAlbedo');
-    const litShaded = mul(tintedAlbedo, light).toVar('mvLitShaded');
-    const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('mvLitRgb');
-
+    const litRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
     const fragColor = vec4(litRgb, texColor.a).toVar('mvFragColor');
 
-    // alpha cutout + screen-door dither. dither uses interleaved gradient
-    // noise against the per-instance value — cheap (2 muls + 2 fracts +
-    // 1 add) and stays in the opaque pipeline (no sort, no blend). when
-    // `dither == 0`, the compare is always false → free fast path.
-    const fragmentDiscards = Fn(
-        (color, alpha, dither, fragX, fragY) => {
-            If(alpha.lessThan(f32(0.5)), () => {
-                Discard();
-            });
-            const ign = fract(mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY))))).toVar(
-                'mvIgn',
-            );
-            If(dither.greaterThan(ign), () => {
-                Discard();
-            });
-            return color;
-        },
-        {
-            name: 'modelFragmentDiscards',
-            params: [
-                { name: 'color', type: d.vec4f },
-                { name: 'alpha', type: d.f32 },
-                { name: 'dither', type: d.f32 },
-                { name: 'fragX', type: d.f32 },
-                { name: 'fragY', type: d.f32 },
-            ],
-        },
-    );
-    const fragment = fragmentDiscards(fragColor, texColor.a, vDither, fragCoord.x, fragCoord.y).toVar('mvFragment');
+    // cutout + screen-door fade: tint.a (opacity) and the dither knob both
+    // feed the shared discard.
+    const fragment = ditherDiscard(fragColor, texColor.a, vTint.w, vDither).toVar('mvFragment');
 
     return new Material({
         name: 'model',

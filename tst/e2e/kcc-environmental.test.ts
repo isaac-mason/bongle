@@ -15,6 +15,8 @@ import {
     CullType,
     getTrait,
     onJoin,
+    PlayerControllerTrait,
+    removeTrait,
     script,
     setBlock,
     trait,
@@ -60,6 +62,10 @@ describe('kcc environmental mechanics', () => {
             onJoin(ctx, ({ playerNode }) => {
                 const transform = getTrait(playerNode, TransformTrait)!;
                 transform.position = pos;
+                // play-mode players auto-get PlayerControllerTrait, whose input
+                // poll overwrites cc.input from (absent) real devices every
+                // frame. these tests drive cc.input directly, so drop it.
+                removeTrait(playerNode, PlayerControllerTrait);
                 addTrait(playerNode, CharacterControllerTrait);
             });
         });

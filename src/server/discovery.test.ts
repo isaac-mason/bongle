@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createTestServer } from '../../tst/integration/server-integration-test';
 import { unpackPackedSceneGraph, unpackServerMessage } from '../core/protocol';
 import * as Debug from '../core/debug';
-import { addChild, addTrait, createNode } from '../core/scene/nodes';
+import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../core/scene/nodes';
 import { setPosition, TransformTrait } from '../builtins/transform';
 import * as Resources from '../core/resources';
 import { setBlock } from '../core/voxels/voxels';
@@ -158,7 +158,7 @@ describe('discovery — realm filtering', () => {
         expect(quiet.find(([, m]) => m.type === 'scene_sync')).toBeUndefined();
 
         // flip realm so the node should disappear from the client's view
-        node.realm = 'server';
+        setRealm(node, 'server');
 
         const after = flushUntilQuiet(discovery, server.rooms, resources);
         const sync = after.find(([, m]) => m.type === 'scene_sync');
@@ -197,6 +197,56 @@ describe('discovery — realm filtering', () => {
         expect(createdNames).toContain('shared-X');
         expect(createdNames).not.toContain('server-Y');
         expect(createdNames).not.toContain('shared-Z');
+
+        server.dispose();
+    });
+
+    it('create ordering: reparent-fresh-under-fresh emits parent before child', () => {
+        const { server, discovery, net, player, resources } = setupRoom('play');
+        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
+        flushUntilQuiet(discovery, server.rooms, resources);
+
+        // create c under root, create p under root, then reparent c under p — all
+        // one tick. c was dirtied before p, but p is now c's parent, so the
+        // fan-out must emit p's node_created before c's (depth order).
+        const c = createNode({ name: 'child' });
+        addChild(server.nodes.root, c);
+        const p = createNode({ name: 'parent' });
+        addChild(server.nodes.root, p);
+        reparent(c, p);
+
+        const messages = flushUntilQuiet(discovery, server.rooms, resources);
+        const sync = messages.find(([, m]) => m.type === 'scene_sync');
+        expect(sync).toBeDefined();
+        const updates = (sync![1] as { updates: Array<{ type: string; id: number }> }).updates;
+        const pCreate = updates.findIndex((u) => u.type === 'node_created' && u.id === p.id);
+        const cCreate = updates.findIndex((u) => u.type === 'node_created' && u.id === c.id);
+        expect(pCreate).toBeGreaterThanOrEqual(0);
+        expect(cCreate).toBeGreaterThanOrEqual(0);
+        expect(pCreate).toBeLessThan(cCreate);
+
+        server.dispose();
+    });
+
+    it('add → remove → add of the same node ends as a create, no destroy', () => {
+        const { server, discovery, net, player, resources } = setupRoom('play');
+        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
+        flushUntilQuiet(discovery, server.rooms, resources);
+
+        const node = createNode({ name: 'flicker' });
+        addChild(server.nodes.root, node);
+        destroyNode(server.nodes, node);
+        // re-add the same node object — it becomes live again this tick.
+        addChild(server.nodes.root, node);
+
+        const messages = flushUntilQuiet(discovery, server.rooms, resources);
+        const sync = messages.find(([, m]) => m.type === 'scene_sync');
+        expect(sync).toBeDefined();
+        const updates = (sync![1] as { updates: Array<{ type: string; id: number }> }).updates;
+        expect(updates.some((u) => u.type === 'node_created' && u.id === node.id)).toBe(true);
+        expect(updates.some((u) => u.type === 'node_destroyed' && u.id === node.id)).toBe(false);
+        // node is live in the graph at end of tick
+        expect(getNodeById(server.nodes, node.id)).toBeDefined();
 
         server.dispose();
     });

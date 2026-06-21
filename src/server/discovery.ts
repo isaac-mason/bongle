@@ -589,6 +589,13 @@ export function flush(
 
     }
 
+    // clear the per-room dirty set now that every client has diffed against it
+    // this tick. next tick starts empty; nodes that don't change contribute
+    // nothing. (also drops refs to destroyed nodes that were parked here.)
+    for (const room of rooms.rooms.values()) {
+        if (room.nodes.dirtyNodes.size > 0) room.nodes.dirtyNodes.clear();
+    }
+
     Debug.end(metrics, 'discovery/scene');
 
     // --- phase 3: voxel chunk streaming ---
@@ -618,10 +625,32 @@ export function flush(
 /* ── scene sync generation ── */
 
 /**
- * build incremental SceneSync updates for a single client's knowledge
- * of a single room, based on what they know vs what the scene graph
- * currently looks like. reads pre-serialized trait bytes from each
- * instance's `_sync.bytes` to avoid redundant serialization across clients.
+ * tree depth of a node (root = 0). used to emit creates parent-first: a parent's
+ * depth is strictly less than its child's, so depth-ascending guarantees the
+ * parent's `node_created` precedes the child's regardless of mutation order.
+ */
+function nodeDepth(node: Node): number {
+    let d = 0;
+    let p = node.parent;
+    while (p) {
+        d++;
+        p = p.parent;
+    }
+    return d;
+}
+
+/**
+ * build incremental SceneSync updates for a single client's knowledge of a single
+ * room — driven by the room's per-tick dirty set (nodes touched this tick), not a
+ * whole-tree walk. per dirty node, the same per-client diff as before decides
+ * create / update / destroy against this client's knowledge (a destroyed node is a
+ * dirty node that's no longer live — `node.context === null`); the baseline for nodes
+ * that never change comes from the join snapshot. reads pre-serialized trait bytes
+ * from each instance's `_sync.bytes`.
+ *
+ * assembled as: creates (parent-first by depth) → updates → destroys, so a
+ * `node_structure` that points at a freshly-created parent finds it already sent,
+ * and a child's `node_created` never precedes its parent's.
  */
 function buildSceneSyncUpdates(
     sg: Nodes,
@@ -629,45 +658,49 @@ function buildSceneSyncUpdates(
     currentTick: number,
     mode: RoomMode,
 ): SceneSyncUpdate[] {
-    const updates: SceneSyncUpdate[] = [];
+    const creates: Node[] = [];
+    const updateList: SceneSyncUpdate[] = [];
+    const destroys: SceneSyncUpdate[] = [];
 
-    // track which ids exist (and are replicable) in the current scene graph
-    const livingIds = new Set<number>();
-
-    // walk nodes in parent-first order so creates arrive before children.
-    // in play mode prunes non-shared subtrees — those nodes are server- or
-    // client-local and never replicated. edit mode walks everything.
-    walkReplicable(sg.root, mode, 'shared', (node) => {
-        livingIds.add(node.id);
-
+    for (const node of sg.dirtyNodes) {
         const known = nodeKnowledge.get(node.id);
-        if (!known) {
-            // client doesn't know about this node — send full create
-            const update = buildNodeCreatedUpdate(node, mode);
-            updates.push(update);
-            snapshotNodeKnowledge(nodeKnowledge, node, currentTick);
-        } else {
-            // client knows this node — check for changes
-            const currentVersion = node._sync.version;
 
-            if (currentVersion > known.nodeVersion) {
-                // per-field rate gating is handled inside diffNodeKnowledge —
-                // no node-level gate here. diffNodeKnowledge updates knowledge in-place.
-                diffNodeKnowledge(sg, node, known, updates, mode, currentTick);
+        // detached at flush = destroyed this tick. (a node destroyed then re-added
+        // the same tick is live again here — node.context is set — so it flows to the
+        // create/update path below, never here. that makes add→remove→add correct
+        // with no id bookkeeping.)
+        if (node.scene === null) {
+            if (known) {
+                destroys.push({ type: 'node_destroyed', id: node.id });
+                nodeKnowledge.delete(node.id);
             }
+            continue;
         }
-    });
 
-    // nodes the client knows about that no longer exist (or stopped being
-    // replicable) → destroy. covers both deletion and shared→non-shared
-    // realm transitions.
-    for (const id of nodeKnowledge.keys()) {
-        if (!livingIds.has(id)) {
-            updates.push({ type: 'node_destroyed', id });
-            nodeKnowledge.delete(id);
+        // relevance: edit sees everything; play sees only replicable subtrees.
+        // (this is the seam AOI extends later — `&& inAOI(...)`.)
+        const visible = mode === 'edit' || isReplicable(node);
+        if (visible) {
+            if (!known) creates.push(node);
+            // diffNodeKnowledge updates knowledge in-place; per-field rate gating
+            // lives inside it.
+            else diffNodeKnowledge(sg, node, known, updateList, mode, currentTick);
+        } else if (known) {
+            // node left this client's relevance (realm hid it) → destroy.
+            destroys.push({ type: 'node_destroyed', id: node.id });
+            nodeKnowledge.delete(node.id);
         }
     }
 
+    // assemble parent-first creates → updates → destroys.
+    const updates: SceneSyncUpdate[] = [];
+    if (creates.length > 1) creates.sort((a, b) => nodeDepth(a) - nodeDepth(b));
+    for (const node of creates) {
+        updates.push(buildNodeCreatedUpdate(node, mode));
+        snapshotNodeKnowledge(nodeKnowledge, node, currentTick);
+    }
+    for (let i = 0; i < updateList.length; i++) updates.push(updateList[i]);
+    for (let i = 0; i < destroys.length; i++) updates.push(destroys[i]);
     return updates;
 }
 

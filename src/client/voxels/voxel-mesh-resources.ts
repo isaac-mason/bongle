@@ -37,7 +37,6 @@ import {
     type Material,
     mat3,
     max,
-    mix,
     mul,
     normalize,
     storage,
@@ -60,11 +59,15 @@ import {
     pickCornerIdx,
     unpackVoxelLight,
 } from './voxel-material';
+import { shadeTinted } from '../visuals/dsl';
 
 // ── gpu structs ─────────────────────────────────────────────────────
 
 export const InstanceParams = struct('VoxelMeshInstanceParams', {
+    /** rgb multiplies the albedo (white = no-op), a = opacity. */
     tint: d.vec4f,
+    /** transient overlay — rgb is the colour, a the strength (lerp). */
+    flash: d.vec4f,
     /** per-instance light floor [sky, r, g, b] sampled at the instance
      *  origin. combined as a floor on the per-corner `meshLight` so a
      *  moving instance never goes darker than its origin cell. */
@@ -74,11 +77,13 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
     unlit: d.f32,
     /** floor on voxel light (0..1) for readability. */
     litMin: d.f32,
+    /** screen-door fade 0..1. 0 = solid, 1 = fully invisible. */
+    dither: d.f32,
 });
 
 // Per-slot stable instance record. Merges world matrix + InstanceParams
 // into one binding — same shape as model-resources.ModelInstance. Layout:
-// mat4x4f (64B, align 16) then InstanceParams (40B + 24B pad to align 16)
+// mat4x4f (64B, align 16) then InstanceParams (64B, align 16, no pad)
 // → 128B per slot, struct align 16.
 export const ModelInstance = struct('VoxelMeshModelInstance', {
     worldMatrix: d.mat4x4f,
@@ -239,10 +244,12 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
     const vLight = varying(voxelLight, 'vmLight');
     const vNormal = varying(worldNormal, 'vmNormal');
     const vTint = varying(instParams.field('tint'), 'vmTint');
+    const vFlash = varying(instParams.field('flash'), 'vmFlash');
     const vGlow = varying(instParams.field('glow'), 'vmGlow');
     const vUnlit = varying(instParams.field('unlit'), 'vmUnlit').setInterpolation('flat');
+    const vDither = varying(instParams.field('dither'), 'vmDither').setInterpolation('flat');
 
-    const { fragColor, texColor } = buildVoxelFragment(
+    const { texColor, light } = buildVoxelFragment(
         atlas,
         texAnimBuffer,
         vTexIndex,
@@ -254,20 +261,18 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
         ambientMinimum,
     );
 
-    // unlit bypass: skip lighting, use raw texColor.
-    const litRgb = mix(fragColor.rgb, texColor.rgb, vUnlit).toVar('litRgb');
-    // tint: linear blend, weight = vTint.a.
-    const tintedRgb = mix(litRgb, vTint.rgb, vTint.w).toVar('tintedRgb');
-    // additive glow.
-    const glowedRgb = tintedRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('glowedRgb');
-    const bakedColor = vec4(glowedRgb, texColor.a).toVar('bakedColor');
+    const tintedRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
+    const bakedColor = vec4(tintedRgb, texColor.a).toVar('bakedColor');
 
-    // alpha-cutout pass mirrors the chunk transparent pass.
+    // cutout + screen-door pass: tint.a (opacity) and the dither knob feed
+    // the shared discard via makePassMaterial.
     return makePassMaterial({
         name: 'voxel-mesh-baked',
         pass: 'transparent',
         clipPos,
         fragColor: bakedColor,
         texColor,
+        opacity: vTint.w,
+        dither: vDither,
     });
 }

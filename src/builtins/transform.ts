@@ -256,7 +256,7 @@ function markTransformChanged(t: TransformTrait): void {
     // the node may have moved again this tick and prev snapshot needs to
     // catch the new pose.
     const node = t._node;
-    if (node && node.nodes) node.nodes._transformDirty.add(t);
+    if (node && node.scene) node.scene._transformDirty.add(t);
     if (t._dirty === TRANSFORM_DIRTY_ALL) return;
     t._dirty = TRANSFORM_DIRTY_ALL;
     t._version++;
@@ -744,13 +744,13 @@ export function setInterpolation(node: Node, on: boolean): void {
         // chase-lerping from (0,0,0). matches godot's
         // `reset_physics_interpolation` cold-start guarantee.
         t.lastTeleport = t.teleport - 1;
-        if (node.nodes) node.nodes._interpolating.add(t);
+        if (node.scene) node.scene._interpolating.add(t);
     } else {
         if (!t.interpolate) return;
         t.interpolate = 0;
         t._interpolated = 0;
         t._correctionFrames = 0;
-        if (node.nodes) node.nodes._interpolating.delete(t);
+        if (node.scene) node.scene._interpolating.delete(t);
     }
 }
 

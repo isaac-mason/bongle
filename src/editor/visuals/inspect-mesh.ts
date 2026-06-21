@@ -182,7 +182,7 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
     // everything else in the scene.
     const pts: number[] = [];
     for (const node of nodes) {
-        if (node === node.nodes?.root) continue;
+        if (node === node.scene?.root) continue;
         box3.set(_aabb, Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
         if (getNodeAABB(node, resources, _aabb)) appendBoxSegments(_aabb, pts);
     }

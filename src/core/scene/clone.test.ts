@@ -86,10 +86,10 @@ describe('cloneNode', () => {
         const clone = cloneNode(source);
 
         expect(clone.parent).toBeNull();
-        expect(clone.nodes).toBeNull();
+        expect(clone.scene).toBeNull();
         expect(clone.children.length).toBe(2);
-        expect(clone.children[0].nodes).toBeNull();
-        expect(clone.children[0].children[0].nodes).toBeNull();
+        expect(clone.children[0].scene).toBeNull();
+        expect(clone.children[0].children[0].scene).toBeNull();
     });
 
     it('preserves names and tree structure', () => {
@@ -182,8 +182,8 @@ it('addChild after clone wakes the subtree (registered, queryable)', () => {
 
         // clone + 2 children + 2 grandchildren = 5 new registered nodes
         expect(TEST_NODES.nodes.size).toBe(sizeBefore + 5);
-        expect(clone.nodes).toBe(TEST_NODES);
-        expect(clone.children[0].nodes).toBe(TEST_NODES);
+        expect(clone.scene).toBe(TEST_NODES);
+        expect(clone.children[0].scene).toBe(TEST_NODES);
 
         // queries pick the cloned subtree up
         const q = query(TEST_NODES, [Marker]);

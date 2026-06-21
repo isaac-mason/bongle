@@ -361,7 +361,7 @@ export function tick(
     for (const node of work) {
         // node may have been destroyed by an earlier iteration's reconcile
         // (nested-prefab teardown). detached nodes are already off the sets.
-        if (node.nodes !== sg) continue;
+        if (node.scene !== sg) continue;
         if (!node.prefab) {
             sg._prefabsDirty.delete(node);
             continue;

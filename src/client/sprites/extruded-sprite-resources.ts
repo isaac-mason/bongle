@@ -42,11 +42,8 @@ import {
     cameraViewMatrix,
     cos,
     d,
-    Discard,
-    Fn,
     f32,
     GpuBuffer,
-    If,
     instanceIndex,
     layoutStrideOf,
     Material,
@@ -67,6 +64,7 @@ import {
 } from 'gpucat';
 import type { TextureNode } from 'gpucat/dist/nodes/nodes';
 import { EnvConfig } from '../environment';
+import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 import { bakeExtrudedSpriteMesh } from './sprite-extrusion';
 import type { SpriteResources } from './sprite-resources';
 
@@ -77,11 +75,16 @@ import type { SpriteResources } from './sprite-resources';
 
 export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     uvRect: d.vec4f,
+    // tint: rgb multiplies the albedo (white = no-op), a = opacity.
     tint: d.vec4f,
+    // flash: transient overlay — rgb is the colour, a the strength (lerp).
+    flash: d.vec4f,
     light: d.vec4f,
     glow: d.f32,
     unlit: d.f32,
     litMin: d.f32,
+    /** screen-door fade 0..1. 0 = solid, 1 = fully invisible. */
+    dither: d.f32,
 });
 
 // Per-slot stable instance record. Merges transform + material into one
@@ -419,10 +422,12 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
 
     const uvRect = instMat.field('uvRect').toVar('esUvRect');
     const tint = instMat.field('tint').toVar('esTint');
+    const flashF = instMat.field('flash').toVar('esFlash');
     const lightF = instMat.field('light').toVar('esLight');
     const glowF = instMat.field('glow').toVar('esGlow');
     const unlitF = instMat.field('unlit').toVar('esUnlit');
     const litMinF = instMat.field('litMin').toVar('esLitMin');
+    const ditherF = instMat.field('dither').toVar('esDither');
 
     const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('esWorldPos');
     const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, worldPos)).toVar('esClipPos');
@@ -433,10 +438,12 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
 
     const vUv = varying(sampledUv, 'esUv').setInterpolation('perspective', 'centroid');
     const vTint = varying(tint, 'esTintV').setInterpolation('flat');
+    const vFlash = varying(flashF, 'esFlashV').setInterpolation('flat');
     const vInstLight = varying(lightF, 'esInstLight').setInterpolation('flat');
     const vGlow = varying(glowF, 'esGlowV').setInterpolation('flat');
     const vUnlit = varying(unlitF, 'esUnlitV').setInterpolation('flat');
     const vLitMin = varying(litMinF, 'esLitMinV').setInterpolation('flat');
+    const vDither = varying(ditherF, 'esDitherV').setInterpolation('flat');
 
     const atlasTexNode = texture(atlas);
     const sampled = atlasTexNode.sample(vUv).toVar('esSampled');
@@ -461,30 +468,12 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
     const voxelLight = max(max(blockLight, skyContrib), litMinFloor).toVar('esVoxelLight');
     const light = max(voxelLight, ambientMinimum).toVar('esLight');
 
-    // tint the albedo first, then light it — lighting/shadows modulate the
-    // tinted surface rather than a flat tint replacing the lit result.
-    const tintedAlbedo = mix(sampled.rgb, vTint.rgb, vTint.w).toVar('esTintedAlbedo');
-    const litShaded = mul(tintedAlbedo, light).toVar('esLitShaded');
-    const litRgb = mix(litShaded, tintedAlbedo, vUnlit).toVar('esLitRgb');
-    const glowedRgb = litRgb.add(vec3f(vGlow, vGlow, vGlow)).toVar('esGlowedRgb');
-    const tinted = vec4f(glowedRgb, sampled.a).toVar('esTinted');
+    const litRgb = shadeTinted(sampled.rgb, vTint, vFlash, light, vGlow, vUnlit);
+    const tinted = vec4f(litRgb, sampled.a).toVar('esTinted');
 
-    const alphaCutout = Fn(
-        (color, alpha) => {
-            If(alpha.lessThan(f32(0.5)), () => {
-                Discard();
-            });
-            return color;
-        },
-        {
-            name: 'extrudedSpriteAlphaCutout',
-            params: [
-                { name: 'color', type: d.vec4f },
-                { name: 'alpha', type: d.f32 },
-            ],
-        },
-    );
-    const fragment = alphaCutout(tinted, tinted.a).toVar('esFragment');
+    // cutout + screen-door fade: tint.a (opacity) and the dither knob feed
+    // the shared discard.
+    const fragment = ditherDiscard(tinted, sampled.a, vTint.w, vDither).toVar('esFragment');
 
     const material = new Material({
         name: 'extruded-sprite-batched',

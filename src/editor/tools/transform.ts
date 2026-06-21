@@ -879,7 +879,7 @@ export function enterPlacement(
 
         const voxelMeshTrait = addTrait(voxelNode, VoxelMeshTrait);
         voxelMeshTrait.model = createVoxelModel(rotatedBlueprint.voxels);
-        voxelMeshTrait.tint = [0.3, 0.7, 1.0, 0.25];
+        voxelMeshTrait.flash = [0.3, 0.7, 1.0, 0.25];
         voxelMeshTrait.glow = 0.12;
 
         voxelNodeId = voxelNode.id;
@@ -1409,7 +1409,7 @@ export function rotatePlacement(
             const vmTrait = getTrait(voxelNode, VoxelMeshTrait);
             if (vmTrait) {
                 vmTrait.model = createVoxelModel(newRotatedBlueprint.voxels);
-                vmTrait.tint = [0.3, 0.7, 1.0, 0.25];
+                vmTrait.flash = [0.3, 0.7, 1.0, 0.25];
                 vmTrait.glow = 0.12;
             }
         }
@@ -1468,7 +1468,7 @@ export function flipPlacement(
             const vmTrait = getTrait(voxelNode, VoxelMeshTrait);
             if (vmTrait) {
                 vmTrait.model = createVoxelModel(newRotatedBlueprint.voxels);
-                vmTrait.tint = [0.3, 0.7, 1.0, 0.25];
+                vmTrait.flash = [0.3, 0.7, 1.0, 0.25];
                 vmTrait.glow = 0.12;
             }
         }

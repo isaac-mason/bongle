@@ -757,8 +757,8 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
         <div className="border border-neutral-200 rounded">
             <div className="flex items-center justify-between px-2 py-1 bg-neutral-50">
                 <span className="text-[11px] font-mono font-semibold text-neutral-600">{def.id}</span>
-                {node.nodes && isEditorOwned && <Icons.Lock size={11} className="text-neutral-400" />}
-                {node.nodes && !isEditorOwned && (
+                {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-neutral-400" />}
+                {node.scene && !isEditorOwned && (
                     <IconButton
                         variant="danger"
                         onClick={() => {
@@ -811,7 +811,7 @@ function UnresolvedTraitSection({
                 <Icons.TriangleAlert size={12} className="text-amber-500 shrink-0" />
                 <span className="text-[11px] font-mono font-semibold text-amber-700">{traitId}</span>
                 <span className="text-[10px] font-mono text-amber-500 ml-auto">unresolved</span>
-                {node.nodes && (
+                {node.scene && (
                     <IconButton variant="danger" onClick={() => removeTrait(node.id, traitId)}>
                         <Icons.X size={12} />
                     </IconButton>

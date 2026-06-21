@@ -48,10 +48,14 @@ export const SpriteTrait = trait('sprite', {
      *  loops forever; no playback enum (see file header). */
     fps: 8,
 
-    /** per-instance tint [r, g, b, a]: the shader mixes the albedo toward `rgb`
-     *  by `a` (mesh-style), so `a = 0` means no tint regardless of rgb. default
-     *  [0,0,0,0] = untinted — leaves the sprite's own texture colour. client-only. */
-    tint: [0, 0, 0, 0] as Vec4,
+    /** per-instance tint [r, g, b, a]: rgb multiplies the albedo (white =
+     *  no-op), a is opacity. default [1,1,1,1] = untinted, opaque. client-only. */
+    tint: [1, 1, 1, 1] as Vec4,
+
+    /** transient overlay [r, g, b, a]: rgb is the colour, a the strength,
+     *  applied as `mix(surface, rgb, a)` over the tint but under lighting.
+     *  [0,0,0,0] = none (default). client-only. */
+    flash: [0, 0, 0, 0] as Vec4,
 
     /**
      * voxel-light contribution [sky, r, g, b], each 0-1. client-only.
@@ -78,6 +82,14 @@ export const SpriteTrait = trait('sprite', {
      * `unlit` is true. 0 = no floor (default). client-only.
      */
     litMin: 0,
+
+    /**
+     * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
+     * Fragments drop via `discard` against an interleaved-gradient
+     * threshold — stays in the opaque pipeline, no sort/blend. Pixelly,
+     * not smooth alpha. client-only.
+     */
+    dither: 0,
 
     /**
      * whether this sprite renders. false = skip; the slot stays

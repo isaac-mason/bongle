@@ -4,6 +4,7 @@ import {
     BLOCK_FLAG_CLIMBABLE,
     BLOCK_FLAG_COLLISION,
     BLOCK_FLAG_LIQUID,
+    BLOCK_FLAG_PATHFINDABLE,
     BLOCK_FLAG_SELECTION,
     BLOCK_FLAG_SNEAK_GUARD,
 } from './block-registry';
@@ -86,9 +87,11 @@ describe('block registry flags', () => {
         expect(flags & BLOCK_FLAG_SNEAK_GUARD).toBe(0);
     });
 
-    it('air state has no flags', () => {
+    it('air state is pathfindable and otherwise flag-free', () => {
         const { registry } = buildRegistry([{ id: 'stone', def: {} }]);
-        expect(registry.flags[0]).toBe(0); // AIR
+        // air (state 0) is explicitly marked navigable so nav treats it as
+        // passable; no other flags apply.
+        expect(registry.flags[0]).toBe(BLOCK_FLAG_PATHFINDABLE); // AIR
         expect(registry.friction[0]).toBe(1); // default
         expect(registry.restitution[0]).toBe(0); // default
         expect(registry.liquidViscosity[0]).toBe(0);

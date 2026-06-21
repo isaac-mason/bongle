@@ -110,10 +110,13 @@ describe('MODEL_LIQUID mesher', () => {
         expect(maxLiquidVertexY(result, 'translucent')).toBeCloseTo(5.875);
     });
 
-    it('liquid surrounded by solid on every side: nothing visible', () => {
+    it('full-height liquid surrounded by solid on every side: nothing visible', () => {
+        // a lowered surface (< 1) stays visible through the gap under a solid
+        // block (see open-top pool), so full occlusion only holds for a
+        // full-height liquid flush against the block above.
         const registry = buildTestRegistry([
             { id: 'stone', cull: CullType.SOLID, material: MaterialType.OPAQUE },
-            { id: 'water', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, surfaceHeight: 0.875, fluidGroup: 'water' },
+            { id: 'water', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, surfaceHeight: 1, fluidGroup: 'water' },
         ]);
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);

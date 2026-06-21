@@ -394,10 +394,12 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
 
         packTo(InstanceParams, instArr, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
             tint: trait.tint,
+            flash: trait.flash,
             light,
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
+            dither: trait.dither,
         });
         instanceDataDirty = true;
 
@@ -537,10 +539,12 @@ function destroyInstance(visuals: VoxelMeshVisuals, trait: VoxelMeshTrait, visib
         slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET,
         {
             tint: [0, 0, 0, 0],
+            flash: [0, 0, 0, 0],
             light: [0, 0, 0, 0],
             glow: 0,
             unlit: 0,
             litMin: 0,
+            dither: 0,
         },
     );
     visuals.instanceDataBuf.needsUpdate = true;

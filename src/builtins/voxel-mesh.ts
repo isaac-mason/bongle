@@ -4,9 +4,9 @@
 // slot in VoxelMeshVisuals on the client. multiple traits can reference
 // the same VoxelModel — geometry is shared, each gets its own instance.
 //
-// model is runtime-only (not persisted, not synced). tint, light, glow,
-// unlit, and litMin are client-only per-instance rendering params, same
-// as MeshTrait.
+// model is runtime-only (not persisted, not synced). tint, flash, light,
+// glow, unlit, litMin, and dither are client-only per-instance rendering
+// params, same as MeshTrait.
 
 import type { Vec4 } from 'mathcat';
 import type { VoxelMeshState } from '../client/voxels/voxel-mesh-visuals';
@@ -36,11 +36,18 @@ export const VoxelMeshTrait = trait('voxel-mesh', {
     model: null as VoxelModel | null,
 
     /**
-     * per-instance tint color [r, g, b, a]. client-only.
-     * blended as mix(originalColor, tint.rgb, tint.a).
-     * [0,0,0,0] = no tint (default). [1,0,0,1] = fully red.
+     * per-instance tint [r, g, b, a]. client-only. rgb multiplies the
+     * albedo (white = no-op), a is opacity. [1,1,1,1] = untinted, opaque
+     * (default). [1,0,0,1] = keep red, drop green/blue.
      */
-    tint: [0, 0, 0, 0] as Vec4,
+    tint: [1, 1, 1, 1] as Vec4,
+
+    /**
+     * transient overlay [r, g, b, a]: rgb is the colour, a the strength,
+     * applied as `mix(surface, rgb, a)` over the tint but under lighting.
+     * [0,0,0,0] = none (default). client-only.
+     */
+    flash: [0, 0, 0, 0] as Vec4,
 
     /**
      * per-instance light [sky, r, g, b], each 0-1. client-only.
@@ -72,6 +79,13 @@ export const VoxelMeshTrait = trait('voxel-mesh', {
      * in dim areas without going fully unlit. 0 = no floor (default).
      */
     litMin: 0,
+
+    /**
+     * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
+     * Fragments drop via `discard` against an interleaved-gradient
+     * threshold — stays in the opaque pipeline, no sort/blend. client-only.
+     */
+    dither: 0,
 
     /**
      * whether this voxel mesh renders. false = skip; the slot stays

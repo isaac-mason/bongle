@@ -41,7 +41,7 @@
  *
  * Cleanup: every frame `updateForFrame` reaps active playbacks whose
  * source ended naturally (via onended → `_ended = true`) or whose bound
- * node has been removed from the scene (`node.nodes === null`).
+ * node has been removed from the scene (`node.context === null`).
  */
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
@@ -188,7 +188,7 @@ export type PlaybackHandle = {
 
 /** internal record for an in-flight one-shot. lives in `Audio.active`
  *  until `_ended` (source.onended fired) or until its bound node is
- *  removed (`node.nodes === null`), at which point updateForFrame stops
+ *  removed (`node.context === null`), at which point updateForFrame stops
  *  + drops it. */
 type ActivePlayback = {
     handle: PlaybackHandle;
@@ -512,7 +512,7 @@ export function updateForFrame(audio: Audio, room: AudioRoomLike): void {
             continue;
         }
         if (p.node) {
-            if (p.node.nodes === null) {
+            if (p.node.scene === null) {
                 // node removed — cancel + reap.
                 try {
                     p.source?.stop();

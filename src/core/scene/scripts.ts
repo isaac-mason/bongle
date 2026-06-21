@@ -893,7 +893,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
         _ctx: undefined as unknown as ScriptContext, // set below
     };
 
-    const isEdit = node.nodes?.mode === 'edit';
+    const isEdit = node.scene?.mode === 'edit';
 
     // editor:true scripts see the room's editor lens as ctx.client.editor.
     let client = runtime.client;
@@ -904,7 +904,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
     instance._ctx = {
         trait,
         node,
-        nodes: node.nodes!,
+        nodes: node.scene!,
         mode: isEdit ? 'edit' : 'play',
         voxels: runtime.voxels,
         physics: runtime.physics,
@@ -971,9 +971,9 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
     }
 
     // release queries
-    if (instance.node.nodes) {
+    if (instance.node.scene) {
         for (const q of instance.queries) {
-            nodes.releaseQuery(instance.node.nodes, q);
+            nodes.releaseQuery(instance.node.scene, q);
         }
     }
     instance.queries.clear();

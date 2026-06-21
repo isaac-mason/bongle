@@ -83,8 +83,8 @@ export function removeTrait(node: Node, traitHandle: TraitHandle): void {
  * destroy a node and detach it from the scene.
  */
 export function destroyNode(node: Node): void {
-    if (node.nodes) {
-        Nodes.destroyNode(node.nodes, node);
+    if (node.scene) {
+        Nodes.destroyNode(node.scene, node);
     }
 }
 
