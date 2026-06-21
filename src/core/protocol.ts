@@ -20,8 +20,6 @@ export type RoomInfo = {
     sourceRoomId: string | null;
     /** namespace this room belongs to ('main' / 'editor' / 'play-<uuid>'). */
     namespace: string;
-    /** edit rooms only: has unsaved edits since the last manual save. */
-    dirty: boolean;
 };
 
 /* ── binary trait data for scene sync ── */

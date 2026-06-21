@@ -14,13 +14,13 @@ import type { ClientRoom } from '../rooms';
 /** debug panel tab. 'logs' and 'deps' are editor-only and filtered out of
  *  the tab strip in non-editor builds. 'renderer' shows the gpucat
  *  Inspector overlay; the panel's own content area is empty in that mode. */
-export type DebugTab = 'perf' | 'logs' | 'renderer' | 'deps';
+export type DebugTab = 'summary' | 'perf' | 'net' | 'logs' | 'renderer' | 'deps';
 
 /** Tabs visible in the current build. Lives here (not in debug-panel.tsx)
  *  so the keyboard handler in edit-ui.tsx can map `` ` + N `` to a tab
  *  without pulling the lazy DebugPanel chunk eagerly. */
 export function availableDebugTabs(): DebugTab[] {
-    return env.editor ? ['perf', 'logs', 'renderer', 'deps'] : ['perf', 'renderer'];
+    return env.editor ? ['summary', 'perf', 'net', 'logs', 'renderer', 'deps'] : ['summary', 'perf', 'net', 'renderer'];
 }
 
 export type ClientStore = {
@@ -73,7 +73,7 @@ export const useClient = create<ClientStore>((set) => ({
     debugOpen: false,
     setDebugOpen: (debugOpen) => set({ debugOpen }),
     toggleDebugOpen: () => set((s) => ({ debugOpen: !s.debugOpen })),
-    debugTab: 'perf',
+    debugTab: 'summary',
     setDebugTab: (debugTab) => set({ debugTab }),
 
     clientGlobalMetrics: null,

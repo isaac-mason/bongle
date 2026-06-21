@@ -1,9 +1,13 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ChatPanel, useChatPanel } from './chat-panel';
+import { useClient } from './client-store';
 import { Viewport } from './viewport';
 
 import './editor.css';
+
+// lazy — same chunk-splitting as edit mode; only loads when the panel opens.
+const DebugPanel = lazy(() => import('./debug-panel'));
 
 function isInputFocused(): boolean {
     const el = document.activeElement;
@@ -13,12 +17,22 @@ function isInputFocused(): boolean {
 }
 
 function PlayUI() {
+    const debugOpen = useClient((s) => s.debugOpen);
+    const debugTab = useClient((s) => s.debugTab);
+
     // `t` / `Enter` open chat (no seed); `/` opens chat seeded with a slash so
     // the user can immediately type a command. mirrors the edit-ui handler but
     // without the editor-enabled gate (edit mode uses Enter only, no `t`).
+    // backtick toggles the debug panel — the editor's backtick chord lives in its
+    // own input loop, which doesn't run in play, so play mode owns this here.
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (isInputFocused()) return;
+            if (e.key === '`') {
+                e.preventDefault();
+                useClient.getState().toggleDebugOpen();
+                return;
+            }
             if ((e.key === '/' || e.key === 't' || e.key === 'Enter') && !useChatPanel.getState().isOpen) {
                 e.preventDefault();
                 useChatPanel.getState().open({ seed: e.key === '/' ? '/' : '' });
@@ -32,6 +46,11 @@ function PlayUI() {
         <div className="fixed inset-0 flex flex-col">
             <Viewport />
             <ChatPanel />
+            {debugOpen && (
+                <Suspense fallback={null}>
+                    <DebugPanel tab={debugTab} />
+                </Suspense>
+            )}
         </div>
     );
 }

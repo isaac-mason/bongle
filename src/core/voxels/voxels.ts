@@ -142,6 +142,15 @@ export type Chunk = {
      *  first observation. */
     meshGen: number;
 
+    /** monotonically increasing version of this chunk's PERSISTED data —
+     *  blocks, light, and palette. bumped by every mutation that changes the
+     *  bytes `saveVoxels` would write (setChunkBlock, setLight, resolveChunk,
+     *  propagateAllLight) but NOT by mesh-only changes (boundary-neighbour
+     *  re-mesh). incremental scene save keys its per-chunk serialized-byte
+     *  cache on this: a chunk re-serializes only when its `version` moves.
+     *  starts at 1; cloneChunk carries `src.version` (clone has identical data). */
+    version: number;
+
     /** light dirty flag — set when light[] changes, cleared after network flush. */
     lightDirty: boolean;
 
@@ -197,6 +206,7 @@ export function createChunk(cx: number, cy: number, cz: number): Chunk {
         light: new Uint16Array(CHUNK_VOLUME),
         dirty: true,
         meshGen: 1,
+        version: 1,
         lightDirty: false,
         lightDirtyMask: EMPTY_LIGHT_MASK,
         lightDirtyCount: 0,
@@ -254,6 +264,7 @@ export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk {
         light: EMPTY_LIGHT,
         dirty: false,
         meshGen: 1,
+        version: 1,
         lightDirty: false,
         lightDirtyMask: EMPTY_LIGHT_MASK,
         lightDirtyCount: 0,
@@ -346,6 +357,7 @@ export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key
 
     chunk.dirty = true;
     chunk.meshGen++;
+    chunk.version++;
 }
 
 /**
@@ -360,6 +372,7 @@ export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key
 export function setLight(chunk: Chunk, index: number, value: number): void {
     chunk.light[index] = value;
     chunk.meshGen++;
+    chunk.version++;
     if (chunk.lightDirtyMask === EMPTY_LIGHT_MASK) {
         chunk.lightDirtyMask = new Uint8Array(CHUNK_VOLUME);
     }
@@ -391,6 +404,7 @@ export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
     chunk.aggregate = aggregate;
     chunk.dirty = true;
     chunk.meshGen++;
+    chunk.version++;
 }
 
 /**
@@ -877,6 +891,7 @@ function cloneChunk(src: Chunk): Chunk {
         light: new Uint16Array(src.light),
         dirty: true,
         meshGen: src.meshGen + 1,
+        version: src.version,
         lightDirty: false,
         lightDirtyMask: new Uint8Array(src.lightDirtyMask),
         lightDirtyCount: src.lightDirtyCount,

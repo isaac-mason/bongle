@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Debug from '../../core/debug';
 import { type DepGraphSnapshot, getDepGraphVersion, snapshotDepGraph } from '../../core/capture/dep-graph';
-import { useEditor } from '../../editor/editor-store';
 import type { ClientRoom } from '../rooms';
 import { availableDebugTabs, type DebugTab, useClient } from './client-store';
+import { UILayer } from '../ui-layers';
 import DepsGraph from './deps-graph';
 
 // ─── shared widget chrome (used by logs/deps tabs) ──────────────────────────
 
 const widgetStyle = (extra: React.CSSProperties): React.CSSProperties => ({
-    background: 'rgba(17,17,17,0.55)',
+    background: 'rgba(17,17,17,0.9)',
     border: '1px solid #333',
     borderRadius: 4,
     overflow: 'hidden',
@@ -124,17 +124,21 @@ type DrawState = {
     lastDraw: number;
 };
 
-function PerfCanvas() {
+function PerfCanvas({ view }: { view: 'summary' | 'cpu' | 'net' }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const allRooms = useEditor((s) => s.allRooms);
-    const activeRoom = useEditor((s) => s.room);
+    const rooms = useClient((s) => s.rooms);
+    const activePlayerId = useClient((s) => s.activePlayerId);
+    const allRooms = useMemo(() => [...rooms.values()], [rooms]);
+    const activeRoom = activePlayerId != null ? rooms.get(activePlayerId) ?? null : null;
     const clientGlobal = useClient((s) => s.clientGlobalMetrics);
 
     // mirror reactive data into a ref so the rAF loop sees the latest
     // without restarting the effect on every store update.
     const dataRef = useRef<PerfData>({ clientGlobal, activeRoom, allRooms });
     dataRef.current = { clientGlobal, activeRoom, allRooms };
+    const viewRef = useRef(view);
+    viewRef.current = view;
 
     const stateRef = useRef<DrawState>({
         collapsed: new Set(),
@@ -157,7 +161,7 @@ function PerfCanvas() {
             const now = performance.now();
             if (now - stateRef.current.lastDraw < DRAW_INTERVAL_MS) return;
             stateRef.current.lastDraw = now;
-            drawPerf(canvas, ctx, container, dataRef.current, stateRef.current);
+            drawPerf(canvas, ctx, container, dataRef.current, stateRef.current, viewRef.current);
         };
         raf = requestAnimationFrame(tick);
 
@@ -247,6 +251,7 @@ function drawPerf(
     container: HTMLDivElement,
     data: PerfData,
     state: DrawState,
+    view: 'summary' | 'cpu' | 'net',
 ): void {
     const pr = Math.round(window.devicePixelRatio || 1);
     const cssW = container.clientWidth;
@@ -264,19 +269,21 @@ function drawPerf(
     state.hits.length = 0;
     state.scrollRegions.length = 0;
 
-    drawFrameSquare(ctx, 0, 0, TOP_H, TOP_H, data.clientGlobal);
-    drawSummaryStrip(ctx, TOP_H + GAP, 0, cssW - (TOP_H + GAP), TOP_H, data);
+    if (view === 'summary') {
+        // 'summary' tab — widgets along the top: the frame-time square + strip.
+        drawFrameSquare(ctx, 0, 0, TOP_H, TOP_H, data.clientGlobal);
+        drawSummaryStrip(ctx, TOP_H + GAP, 0, cssW - (TOP_H + GAP), TOP_H, data);
+        return;
+    }
 
-    const colY = TOP_H + GAP;
-    const colH = cssH - colY;
-    const colW = (cssW - GAP) / 2;
+    // 'perf' = cpu breakdown, 'net' = net breakdown — one full-width column.
     const scopes = buildScopes(data);
-    drawColumn(ctx, 0, colY, colW, colH, 'net breakdown', isNetMetric, scopes, state, 'net');
-    drawColumn(ctx, colW + GAP, colY, colW, colH, 'cpu breakdown', isCpuMetric, scopes, state, 'cpu');
+    if (view === 'net') drawColumn(ctx, 0, 0, cssW, cssH, 'net breakdown', isNetMetric, scopes, state, 'net');
+    else drawColumn(ctx, 0, 0, cssW, cssH, 'cpu breakdown', isCpuMetric, scopes, state, 'cpu');
 }
 
 function drawPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
-    ctx.fillStyle = 'rgba(17,17,17,0.55)';
+    ctx.fillStyle = 'rgba(17,17,17,0.9)';
     ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
@@ -488,10 +495,16 @@ function drawMetricRow(
     ctx.fillStyle = '#888';
     ctx.fillText(id, x + 8, y + 8);
 
+    // header, right-aligned: current value (bright) at the far right, with labeled
+    // min/avg/max (dim, smaller) to its left — both up here so the graph stays clean.
     const valText = cfg.format(last);
-    ctx.fillStyle = '#ccc';
     ctx.textAlign = 'right';
+    ctx.fillStyle = '#eee';
     ctx.fillText(valText, x + w - 10, y + 8);
+    const valW = ctx.measureText(valText).width; // measured at 9px, before the font shrink
+    ctx.font = '8px monospace';
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`min ${cfg.format(min)}  avg ${cfg.format(avg)}  max ${cfg.format(max)}`, x + w - 16 - valW, y + 8);
 
     const gx = x + 8;
     const gy = y + 14;
@@ -501,21 +514,23 @@ function drawMetricRow(
     ctx.fillRect(gx, gy, gw, gh);
     if (values.length === 0) return;
 
-    const slice = values.slice(-100);
+    // draw the FULL retained window (~10s), bucketed to the graph width so a
+    // longer history fits — one bar per ~pixel, each the MAX of its bucket so
+    // spikes stay visible even when many samples collapse into one bar.
     const peak = max || 1;
-    const barW = Math.max(1, gw / slice.length);
+    const barCount = Math.max(1, Math.min(values.length, Math.floor(gw)));
+    const barW = gw / barCount;
+    const perBar = values.length / barCount;
     ctx.fillStyle = cfg.fg;
-    for (let i = 0; i < slice.length; i++) {
-        const v = slice[i]!;
+    for (let i = 0; i < barCount; i++) {
+        const start = Math.floor(i * perBar);
+        const end = Math.max(start + 1, Math.floor((i + 1) * perBar));
+        let v = 0;
+        for (let j = start; j < end && j < values.length; j++) if (values[j]! > v) v = values[j]!;
         const ratio = cfg.barRatio(v, peak);
         const bh = Math.max(1, ratio * gh);
         ctx.fillRect(gx + i * barW, gy + gh - bh, Math.max(1, barW - 0.5), bh);
     }
-
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = cfg.fg;
-    ctx.fillText(`${cfg.format(min)} / ${cfg.format(avg)} / ${cfg.format(max)}`, gx + 4, gy + 6);
 }
 
 // ─── log column (virtualized) ────────────────────────────────────────────────
@@ -856,7 +871,9 @@ function TabStrip({ tab, onSelect }: { tab: DebugTab; onSelect: (t: DebugTab) =>
 // widgets) lives in one chunk that only loads after the user opens it.
 
 export default function DebugPanel({ tab }: { tab: DebugTab }) {
-    const activeRoom = useEditor((s) => s.room);
+    const rooms = useClient((s) => s.rooms);
+    const activePlayerId = useClient((s) => s.activePlayerId);
+    const activeRoom = activePlayerId != null ? rooms.get(activePlayerId) ?? null : null;
     const setDebugTab = useClient((s) => s.setDebugTab);
 
     return (
@@ -868,13 +885,15 @@ export default function DebugPanel({ tab }: { tab: DebugTab }) {
                 flexDirection: 'column',
                 gap: 8,
                 pointerEvents: 'none',
-                zIndex: 50,
+                zIndex: UILayer.debug, // above hud/touch/world overlays under the viewport
                 overflow: 'hidden',
             }}
         >
             <TabStrip tab={tab} onSelect={setDebugTab} />
 
-            {tab === 'perf' && <PerfCanvas />}
+            {tab === 'summary' && <PerfCanvas view="summary" />}
+            {tab === 'perf' && <PerfCanvas view="cpu" />}
+            {tab === 'net' && <PerfCanvas view="net" />}
             {tab === 'logs' && <LogsRow activeRoom={activeRoom} />}
             {tab === 'deps' && <DepsTab />}
             {/* renderer tab: panel body is empty — gpucat Inspector overlay

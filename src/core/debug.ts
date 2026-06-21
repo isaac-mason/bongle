@@ -9,7 +9,7 @@
 // once the metrics poll is replaced with push. for now both Metrics
 // and Logs are pure local-state collectors — the protocol still polls.
 
-const MAX_HISTORY = 100;
+const MAX_HISTORY = 600; // ~10s at 60Hz — enough history to read trends/spikes in the panel
 
 // ── metrics ─────────────────────────────────────────────────────────
 

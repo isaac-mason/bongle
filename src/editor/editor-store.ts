@@ -232,16 +232,7 @@ export const useEditor = create<EditorStore>((set, get) => ({
     setRoomId: (roomId) => set({ roomId }),
     setSceneId: (sceneId) => set({ sceneId }),
     setRoom: (room) => set({ room }),
-    setRoomList: (roomList) => {
-        // a room going dirty → clean means a save landed; toast it.
-        const prev = get().roomList;
-        const saved = roomList.some((r) => {
-            const before = prev.find((p) => p.id === r.id);
-            return before?.dirty && !r.dirty;
-        });
-        set({ roomList });
-        if (saved) get().pushToast({ kind: 'save', message: 'Saved' });
-    },
+    setRoomList: (roomList) => set({ roomList }),
     setJoinedPlayers: (joinedPlayers) => set({ joinedPlayers }),
     setAllRooms: (allRooms) => set({ allRooms }),
     setRoomViews: (roomViews) => set({ roomViews }),

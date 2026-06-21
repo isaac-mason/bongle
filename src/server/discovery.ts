@@ -4,7 +4,7 @@ import { TransformTrait } from '../builtins/transform';
 import * as Debug from '../core/debug';
 import { registry } from '../core/registry';
 import type { PlayerId } from '../core/client';
-import type { BinaryField, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
+import type { BinaryField, BinaryTrait, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
 import type { Resources } from '../core/resources';
 import {
     bumpFieldVersion,
@@ -535,7 +535,6 @@ export function flush(
                     clientCount: RoomsModule.getClientsInRoom(rooms, room).size,
                     sourceRoomId: room.sourceRoomId,
                     namespace: room.namespace,
-                    dirty: room.dirty,
                 });
             }
             roomListJson = JSON.stringify(infos);
@@ -792,7 +791,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const index = node.parent ? node.parent.children.indexOf(node) : 0;
 
     const wireIndex = registry.traitWireIndex;
-    const traits: Array<{ netIndex?: number; id?: string; fields: BinaryField[]; syncs: BinaryField[] }> = [];
+    const traits: BinaryTrait[] = [];
     for (const [traitSlot, instance] of node._traits) {
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
@@ -823,7 +822,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
 
 /** diff a known node against current state and emit updates. updates knowledge in-place for sent fields. */
 function diffNodeKnowledge(
-    sg: Nodes,
+    nodes: Nodes,
     node: Node,
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],

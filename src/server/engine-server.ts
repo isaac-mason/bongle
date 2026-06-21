@@ -12,7 +12,7 @@ import { buildWireIndex, registry, touch } from '../core/registry';
 import * as Scripts from '../core/scene/scripts';
 import { runBlockEventHooks } from '../core/voxels/block-hooks';
 import * as Light from '../core/voxels/light';
-import { saveVoxels } from '../core/voxels/voxel-savefile';
+import * as Save from './save';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
 import * as Clients from './clients';
@@ -119,6 +119,8 @@ export function init(opts: InitOptions) {
         metrics: Debug.createMetrics() as Debug.Metrics,
         /** seconds accumulated since the last edit-mode perf digest (see perf-report) */
         perfSince: 0,
+        /** seconds accumulated since the last auto-flush of dirty edit rooms to disk */
+        flushSince: 0,
         /** emit the per-tick perf digest to the CLI — opt-in via `bongle edit
          *  --performance-logs` (or `BONGLE_PERFORMANCE_LOGS=1`). per-tick timing is
          *  always collected for the debug panel; this only gates the stdout digest,
@@ -604,13 +606,7 @@ export function processInbox(state: EngineServer) {
                     }
 
                     case 'save_scene': {
-                        Debug.begin(state.metrics, 'save');
-                        for (const room of state.rooms.rooms.values()) {
-                            if (room.mode !== 'edit' || room.sceneId !== message.sceneId) continue;
-                            saveRoom(state, room);
-                            Rooms.setRoomDirty(state.discovery, room, false);
-                        }
-                        Debug.end(state.metrics, 'save');
+                        Save.saveScene(state, message.sceneId);
                         break;
                     }
 
@@ -796,34 +792,19 @@ export function update(state: EngineServer, delta: number) {
             }
         }
     }
-}
 
-/* ── save ── */
-
-/** serialize + persist one edit room to disk; returns whether the file changed.
- *  invoked on a manual save (the editor's `save_scene` message). */
-export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
-    if (room.mode !== 'edit') return false;
-
-    const payload = {
-        nodes: Nodes.saveSceneGraph(room.nodes),
-        voxels: saveVoxels(room.voxels),
-    };
-    const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);
-
-    // bump the scene handle version so in-process consumers (cross-room prefab
-    // readers in the same tick) see the new state immediately — the file-watcher
-    // → HMR fan-out reaches the client out-of-band.
-    if (sceneChanged) {
-        Content.populateScene(state.content, registry.blockRegistry, room.sceneId, payload, 'server');
-    }
-    return sceneChanged;
+    // auto-flush dirty edit rooms to disk on an interval (no-op when clean).
+    Save.tick(state, delta);
 }
 
 /* ── dispose ── */
 
-/** tear down the server: destroy all rooms. */
+/** tear down the server: flush any unsaved edits, then destroy all rooms. */
 export function dispose(state: EngineServer): void {
+    // final flush before exit so the last edits since the interval auto-flush
+    // aren't lost. dirty-gated + incremental, so it's a no-op when clean.
+    Save.flushDirty(state);
+
     for (const roomId of [...state.rooms.rooms.keys()]) {
         Rooms.destroyRoom(state.rooms, roomId);
     }

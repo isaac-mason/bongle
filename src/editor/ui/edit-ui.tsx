@@ -186,6 +186,15 @@ function EditUI() {
 
             if (isInputFocused()) return;
 
+            // plain backtick toggles the debug panel. in EDIT rooms the editor's
+            // onInput chord owns it (tap = toggle, hold+digit = switch tab); that
+            // input loop runs for edit players only, so play rooms toggle here.
+            if (e.key === '`' && !e.shiftKey && useEditor.getState().roomMode === 'play') {
+                e.preventDefault();
+                useClient.getState().toggleDebugOpen();
+                return;
+            }
+
             if (e.key === '`' && e.shiftKey) {
                 e.preventDefault();
                 const { room, playerEditStores, playerToView } = useEditor.getState();
@@ -219,18 +228,6 @@ function EditUI() {
         }
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, []);
-
-    // warn before leaving with unsaved edits in any room.
-    useEffect(() => {
-        const onBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (useEditor.getState().roomList.some((r) => r.dirty)) {
-                e.preventDefault();
-                e.returnValue = '';
-            }
-        };
-        window.addEventListener('beforeunload', onBeforeUnload);
-        return () => window.removeEventListener('beforeunload', onBeforeUnload);
     }, []);
 
     return (

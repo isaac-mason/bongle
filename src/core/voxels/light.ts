@@ -669,6 +669,10 @@ export function propagateAllLight(voxels: Voxels): void {
     for (const chunk of voxels.chunks.values()) {
         chunk.dirty = true;
         chunk.meshGen++;
+        // full rebake rewrites light[] for every chunk (incl. the fill(0) clear
+        // above, which bypasses setLight) — so bump the persisted-data version
+        // here to mark every chunk save-dirty.
+        chunk.version++;
         voxels.dirty.blocks.add(chunk);
     }
 

@@ -367,7 +367,6 @@ function makeLocalRoomInfo(room: ClientRoom): RoomInfo {
         clientCount: 1,
         sourceRoomId: null,
         namespace: room.namespace,
-        dirty: false,
     };
 }
 

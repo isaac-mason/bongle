@@ -261,9 +261,3 @@ export const toolBreaks3 = sound('starter:tool_breaks_3', {
 export const playerDamage = sound('starter:player_damage', {
     src: new URL('./assets/sounds/player_damage.ogg', import.meta.url),
 });
-
-/* pickup — coin blip from wobbleboxx's "Level up, power up, Coin get" pack
- * (CC0, via OpenGameArt), trimmed to a short mono hit. see NOTICE.txt. */
-export const itemPickup = sound('starter:item_pickup', {
-    src: new URL('./assets/sounds/wobbleboxx_coin.ogg', import.meta.url),
-});

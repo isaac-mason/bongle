@@ -123,6 +123,61 @@ export function saveVoxels(voxels: Voxels): SavedVoxels {
     return result;
 }
 
+// ── incremental save ────────────────────────────────────────────────
+//
+// the gzip-per-chunk in `saveVoxels` dominates flush cost on a big world.
+// `saveVoxelsIncremental` re-serializes only chunks whose persisted-data
+// `version` moved since the last flush, reusing cached bytes for the rest —
+// so an auto-flush after a small edit pays only for the chunks that changed.
+
+/** per-chunk serialized-byte cache, keyed by chunkKey. holds the bytes last
+ *  written for a chunk and the `chunk.version` they were produced at. */
+export type VoxelSaveCache = Map<string, { version: number; saved: SavedChunk }>;
+
+/** like `saveVoxels`, but reuses `cache` for chunks whose `version` is
+ *  unchanged. mutates `cache` in place: refreshes re-serialized chunks and
+ *  prunes entries for chunks that are gone or became air. */
+export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): SavedVoxels {
+    const result: SavedVoxels = { chunks: {} };
+
+    for (const [key, chunk] of voxels.chunks) {
+        if (chunk.aggregate === 0) continue;
+        const cached = cache.get(key);
+        if (cached && cached.version === chunk.version) {
+            result.chunks[key] = cached.saved; // unchanged — skip the re-gzip
+            continue;
+        }
+        const snap = repackChunkSnapshot(chunk);
+        const saved: SavedChunk = {
+            palette: snap.paletteKeys,
+            blocks: packChunkBytes(snap.data),
+            light: packChunkBytes(chunk.light),
+        };
+        result.chunks[key] = saved;
+        cache.set(key, { version: chunk.version, saved });
+    }
+
+    // prune chunks that no longer contribute (destroyed or emptied to air)
+    for (const key of cache.keys()) {
+        if (result.chunks[key] === undefined) cache.delete(key);
+    }
+
+    return result;
+}
+
+/** seed a save cache from a just-loaded scene so the first flush is already
+ *  incremental — an unedited chunk reuses its on-disk bytes verbatim. call
+ *  right after `loadVoxels` with the same payload. */
+export function seedVoxelSaveCache(voxels: Voxels, saved: SavedVoxels): VoxelSaveCache {
+    const cache: VoxelSaveCache = new Map();
+    if (!saved.chunks) return cache;
+    for (const [key, sc] of Object.entries(saved.chunks)) {
+        const chunk = voxels.chunks.get(key);
+        if (chunk) cache.set(key, { version: chunk.version, saved: sc });
+    }
+    return cache;
+}
+
 // ── load ────────────────────────────────────────────────────────────
 
 /**
@@ -197,6 +252,7 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
             light,
             dirty: true,
             meshGen: 1,
+            version: 1,
             lightDirty: false,
             lightDirtyMask: EMPTY_LIGHT_MASK,
             lightDirtyCount: 0,

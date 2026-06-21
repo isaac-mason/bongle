@@ -459,19 +459,53 @@ const availablePoints = (xp: number, levels: StatLevels): number => levelForXp(x
 const REGEN_DELAY = 3; // s without damage before health regenerates
 const RESPAWN_DELAY = 3; // s after death before respawn
 
-// ── xp orbs (slither-style litter + death drops) ────────────────────
+// ── xp orbs (death drops from gems + wizards) ───────────────────────
 const ORB_AMOUNT = 6; // xp per orb
-const ORB_TARGET = 40; // litter orbs kept scattered around the arena
-const ORB_RESPAWN_INTERVAL = 0.5; // s between litter top-ups
 const ORB_GRAB_RADIUS = 1.1; // m — an alive wizard within this collects an orb
 const ORB_MAGNET_RADIUS = 5; // m — within this (but outside grab) an orb reels toward the nearest wizard
 const ORB_MAGNET_PULL = 18; // m/s base — fly-in speed = (PULL − distance), so it accelerates as it nears (luanti-style)
-const ORB_SPAWN_AREA = 28; // m — half-extent of the square litter region around spawn
 const ORB_DROP_KEEP = 0.25; // fraction of xp the dead wizard keeps on respawn
 const ORB_DROP_SCATTER = 0.5; // fraction dropped as orbs (the rest is lost)
 const ORB_POP_UP = 4; // m/s — upward burst on a death-drop (physics scatters them)
 const ORB_POP_OUT = 3; // m/s — horizontal burst on a death-drop
 const ORB_DROP_MIN = 3; // orbs — every kill scatters at least this many, so low-xp/NPC kills still pay out
+
+// ── gems (tiered, shootable xp sources) ─────────────────────────────
+// gems are the ambient xp source (they replace free-floating litter orbs): each
+// is a destructible, slowly-spinning crystal with health. shoot one to death and
+// it shatters into a burst of the same magnet-collected xp orbs, proportional to
+// its tier. higher tiers are bigger, tougher, and pay out more — but rarer.
+type GemTier = { color: string; scale: number; halfExtent: number; health: number; xp: number; weight: number };
+const GEM_TIERS: GemTier[] = [
+    { color: '#5fd33a', scale: 0.95, halfExtent: 0.48, health: 9, xp: 12, weight: 12 }, // common — green
+    { color: '#6e9de0', scale: 1.4, halfExtent: 0.7, health: 24, xp: 36, weight: 5 }, // rare — blue
+    { color: '#a78bfa', scale: 1.85, halfExtent: 0.92, health: 60, xp: 90, weight: 1 }, // epic — purple
+];
+const GEM_TARGET = 24; // gems kept scattered around the arena
+const GEM_RESPAWN_INTERVAL = 1.5; // s between litter top-ups
+const GEM_SPAWN_AREA = 28; // m — half-extent of the square litter region around spawn
+const GEM_HOVER = 1.3; // m — float height above the ground (clears the largest tier's bob)
+const GEM_HIT_MARGIN = 0.25; // m — padding on the gem's AABB so shots are forgiving to land
+// client-only idle motion (the crystal visual is built + spun on the client, so
+// none of this is networked — the server body is a STATIC, non-rotating collider).
+const GEM_SPIN_SPEED = 1.4; // rad/s — continuous yaw
+const GEM_TILT_BASE = 0.55; // rad — constant lean so the spin reads as diagonal, not a flat turntable
+const GEM_TUMBLE_FREQ = 1.1; // rad/s — the lean rocks back and forth at this rate…
+const GEM_TUMBLE_AMP = 0.3; // rad — …by this much, for a livelier tumble
+const GEM_BOB_FREQ = 1.6; // rad/s — gentle vertical float
+const GEM_BOB_AMP = 0.12; // m
+const GEM_HP_MAX_DIST = 24; // m — hide the damage healthbar beyond this
+
+// weighted tier roll — commons frequent, epics rare.
+const GEM_WEIGHT_TOTAL = GEM_TIERS.reduce((sum, t) => sum + t.weight, 0);
+function rollGemTier(): number {
+    let r = Math.random() * GEM_WEIGHT_TOTAL;
+    for (let i = 0; i < GEM_TIERS.length; i++) {
+        r -= GEM_TIERS[i]!.weight;
+        if (r < 0) return i;
+    }
+    return 0;
+}
 
 // falling hat — scripted pendulum sway-fall on death (faithful to wizard-game).
 // outlives the respawn so you come back hatted while the old one settles.
@@ -568,6 +602,28 @@ sync(XpOrbTrait, 'amount', {
     rate: 'dirty',
 });
 
+// a destructible tiered gem — the ambient xp source you shoot. `tier` (synced
+// once) selects scale/colour/health/payout from GEM_TIERS; `current` (synced
+// dirty) drives the damage-triggered healthbar — clients derive max + "is it
+// damaged?" from the tier table. there's no killer credit: the shatter drops
+// orbs, and whoever magnets them in gets the xp.
+const GemTrait = trait('gem', { tier: 0, current: GEM_TIERS[0]!.health });
+sync(GemTrait, 'tier', {
+    schema: pack.uint8(),
+    pack: (t) => t.tier,
+    unpack: (v, t) => (t.tier = v),
+    rate: 'dirty',
+});
+// `current` drops every hit, so it must re-emit on change — 'realtime' diffs +
+// emits without explicit dirtying (like WizardTrait.current). 'dirty' would only
+// send the spawn value, so clients would never see damage and the bar never shows.
+sync(GemTrait, 'current', {
+    schema: pack.float32(),
+    pack: (t) => t.current,
+    unpack: (v, t) => (t.current = v),
+    rate: 'realtime',
+});
+
 // marker: present iff the entity is alive. removed on death, re-added on
 // respawn. the combat systems only touch entities that have it. (health itself
 // folded onto WizardTrait — every combatant is a wizard.)
@@ -588,6 +644,8 @@ const NpcTrait = trait('npc', {
 const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), fizzle: pack.boolean(), block: pack.uint32() }));
 const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32() }));
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
+// server → client: a gem shattered at `pos`; `tier` selects the burst colour/size.
+const GemDeathCommand = command('wizards.gem-death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), tier: pack.uint8() }));
 // client → server: spend an upgrade point on the stat at index `stat` (into STAT_KEYS).
 const UpgradeStat = command('wizards.upgrade', CLIENT_TO_SERVER, pack.object({ stat: pack.uint8() }));
 // server → one client: a knockback impulse for that player's own wizard. velocity is
@@ -647,6 +705,21 @@ const TrailVariants = TRAIL_MASKS.map((mask, i) =>
 
 const ImpactFx = particlePresets.spark('wizards:impact', { sprite: SparkSprite });
 const DeathFx = particlePresets.smoke('wizards:death', { sprite: SmokeSprite });
+
+// gem shatter — a chunky spark burst baked in each tier's colour (the gems are
+// flat-tinted, so a matching shard burst reads as the crystal breaking apart).
+const gemShardSprite = (id: string, hex: string) =>
+    sprite(id, {
+        src: draw(
+            (ctx) => {
+                ctx.fillStyle = hex;
+                ctx.fillRect(0, 0, 2, 2);
+            },
+            { size: [2, 2] },
+        ),
+        mipmap: false,
+    });
+const GemShatterFx = GEM_TIERS.map((t, i) => particlePresets.spark(`wizards:gem-shatter-${i}`, { sprite: gemShardSprite(`wizards:gem-shard-${i}`, t.color) }));
 
 // small deterministic 32-bit hash (two ints in) — drives the trail variant
 // pick + scatter + per-particle seed so trails are reproducible, no Math.random.
@@ -736,6 +809,55 @@ function spawnOrb(ctx: ScriptContext, x: number, y: number, z: number, amount: n
         linearVelocity: vel,
     });
     addChild(ctx.node, node);
+}
+
+// spawn a tiered gem: just a node at a fixed hover position — no physics body.
+// gems are hit by sweeping the projectile segment against their AABB analytically
+// (see the combat-damage tick); a rigid impostor wouldn't help because ray queries
+// skip the impostor layer. bodyless also means characters pass straight through for
+// free. server-authoritative; the node + GemTrait replicate, and the client builds
+// the spinning crystal + healthbar from the synced tier/current.
+function spawnGem(ctx: ScriptContext, x: number, y: number, z: number, tier: number): void {
+    const t = GEM_TIERS[tier] ?? GEM_TIERS[0]!;
+    const node = createNode({ name: 'gem' });
+    setPosition(addTrait(node, TransformTrait), [x, y, z]);
+    addTrait(node, GemTrait, { tier, current: t.health });
+    addChild(ctx.node, node);
+}
+
+// slab test: does the segment from `p` along unit dir `d` for `len` metres enter
+// the axis-aligned box centred at (cx,cy,cz) with scalar half-size `half`? returns
+// the entry fraction in [0,1] of the segment (0 if `p` starts inside), or -1 on a
+// miss. used to shoot bodyless gems without a physics ray.
+function raySegmentAabb(p: Vec3, d: Vec3, len: number, cx: number, cy: number, cz: number, half: number): number {
+    let tmin = 0;
+    let tmax = len;
+    if (d[0] !== 0) {
+        const inv = 1 / d[0];
+        let t1 = (cx - half - p[0]) * inv;
+        let t2 = (cx + half - p[0]) * inv;
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+    } else if (p[0] < cx - half || p[0] > cx + half) return -1;
+    if (d[1] !== 0) {
+        const inv = 1 / d[1];
+        let t1 = (cy - half - p[1]) * inv;
+        let t2 = (cy + half - p[1]) * inv;
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+    } else if (p[1] < cy - half || p[1] > cy + half) return -1;
+    if (d[2] !== 0) {
+        const inv = 1 / d[2];
+        let t1 = (cz - half - p[2]) * inv;
+        let t2 = (cz + half - p[2]) * inv;
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+    } else if (p[2] < cz - half || p[2] > cz + half) return -1;
+    if (tmax < tmin) return -1;
+    return tmin / len;
 }
 
 // world-space forward unit vector from a CharacterController look spherical
@@ -853,6 +975,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
 
     const projectiles = query(ctx, [ProjectileTrait, TransformTrait]);
     const targets = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
+    const gems = query(ctx, [GemTrait, TransformTrait]); // shootable xp crystals — splashed like wizards
 
     // reusable crashcat ray-query state.
     const rayCollector = createClosestCastRayCollector();
@@ -917,6 +1040,20 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             }
         }
 
+        // gems take the same splash within `damageRadius` (the projectile is swept
+        // to detonate on a gem's AABB, so a direct shot lands its centre well inside
+        // the blast). the hit pop is shared with wizards; the gems script reaps deaths.
+        for (const [gem, transform] of gems) {
+            if (gem.current <= 0) continue; // already dead this tick, awaiting reap
+            const gp = getWorldPosition(transform);
+            const ex = pos[0] - gp[0];
+            const ey = pos[1] - gp[1];
+            const ez = pos[2] - gp[2];
+            if (ex * ex + ey * ey + ez * ez > stats.damageRadius * stats.damageRadius) continue;
+            gem.current = Math.max(0, gem.current - stats.damage);
+            broadcast(ctx, DamageCommand, { pos: [gp[0], gp[1], gp[2]], amount: stats.damage });
+        }
+
         broadcast(ctx, ImpactCommand, { pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
     };
 
@@ -947,16 +1084,41 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             // hit that resolves to the owner just means "keep flying".
             rayCollector.reset();
             castRay(rigid.world, rayCollector, raySettings, pos, dir, step, rayFilter);
-            const hit = rayCollector.hit;
-            if (hit.status === CastRayStatus.COLLIDING && rigid.bodyToNode.get(hit.bodyIdB) !== projectile.ownerId) {
-                const t = hit.fraction;
+            const rigidHit = rayCollector.hit;
+            const rigidValid = rigidHit.status === CastRayStatus.COLLIDING && rigid.bodyToNode.get(rigidHit.bodyIdB) !== projectile.ownerId;
+            const tRigid = rigidValid ? rigidHit.fraction : Infinity;
+
+            // gems carry no rigid body (ray queries skip the impostor layer), so
+            // sweep this step's segment against each gem's padded AABB analytically
+            // and keep the nearest entry. a gem nearer than the rigid hit wins.
+            let tGem = Infinity;
+            for (const [gem, gemTransform] of gems) {
+                if (gem.current <= 0) continue;
+                const gc = getWorldPosition(gemTransform);
+                const half = (GEM_TIERS[gem.tier] ?? GEM_TIERS[0]!).halfExtent + GEM_HIT_MARGIN;
+                const tHit = raySegmentAabb(pos, dir, step, gc[0], gc[1], gc[2], half);
+                if (tHit >= 0 && tHit < tGem) tGem = tHit;
+            }
+
+            // detonate on whichever hit is nearer along this step.
+            if (tGem !== Infinity && tGem <= tRigid) {
+                // gem hit → white spark (block 0); handleHit's splash applies the
+                // damage to it (and any neighbours within damageRadius).
+                const hxp = pos[0] + dir[0] * step * tGem;
+                const hyp = pos[1] + dir[1] * step * tGem;
+                const hzp = pos[2] + dir[2] * step * tGem;
+                spent.push({ node: projectile._node, pos: [hxp, hyp, hzp], ownerId: projectile.ownerId, stats: projectile.stats, fizzle: false, block: 0 });
+                continue;
+            }
+            if (rigidValid) {
+                const t = tRigid;
                 const hxp = pos[0] + dir[0] * step * t;
                 const hyp = pos[1] + dir[1] * step * t;
                 const hzp = pos[2] + dir[2] * step * t;
                 // terrain hit (no body) → sample the struck block (just inside the
                 // surface, before the carve) so the client can use its dust sprite.
                 // body hits send 0 → the white spark, same as today.
-                const terrain = rigid.bodyToNode.get(hit.bodyIdB) === undefined;
+                const terrain = rigid.bodyToNode.get(rigidHit.bodyIdB) === undefined;
                 // getBlockState (numeric global state id), NOT getBlock (string key) —
                 // it's what indexes `ctx.blocks.particles[]`. air = 0.
                 const block = terrain ? getBlockState(ctx.voxels, Math.floor(hxp + dir[0] * 0.1), Math.floor(hyp + dir[1] * 0.1), Math.floor(hzp + dir[2] * 0.1)) : 0;
@@ -1122,26 +1284,16 @@ script(WorldTrait, 'upgrades', (ctx) => {
     });
 });
 
-// ── xp orbs — litter + pickup (server), sprite decorate (client) ─────
+// ── xp orbs — pickup (server), sprite decorate (client) ─────────────
+// orbs are no longer littered directly — they drop from shattered gems and dead
+// wizards. this script only reels them in and renders them.
 
 script(WorldTrait, 'xp', (ctx) => {
     if (env.server) {
         const orbs = query(ctx, [XpOrbTrait, AabbBodyTrait, TransformTrait]);
         const wizards = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
-        let topUpIn = 0;
 
-        onTick(ctx, ({ delta }) => {
-            // litter: keep ~ORB_TARGET orbs scattered, topping up on a timer.
-            topUpIn -= delta;
-            if (topUpIn <= 0) {
-                topUpIn = ORB_RESPAWN_INTERVAL;
-                if (orbs.matches.length < ORB_TARGET) {
-                    const x = PLAYER_SPAWN[0] + (Math.random() - 0.5) * 2 * ORB_SPAWN_AREA;
-                    const z = PLAYER_SPAWN[2] + (Math.random() - 0.5) * 2 * ORB_SPAWN_AREA;
-                    spawnOrb(ctx, x, groundYAt(ctx, x, z) + 0.8, z, ORB_AMOUNT, [0, 0, 0]);
-                }
-            }
-
+        onTick(ctx, () => {
             // pickup: for each orb find the nearest alive wizard within the magnet
             // radius — inside grab range it's collected, otherwise it reels toward
             // them (aimed at chest height). collection is deferred — destroying nodes
@@ -1247,6 +1399,154 @@ script(WorldTrait, 'xp', (ctx) => {
     }
 });
 
+// ── gems — litter + reap (server), spinning crystal + healthbar (client) ─
+// the ambient xp source. the server keeps ~GEM_TARGET tiered gems scattered and
+// reaps any whose health hits 0 (damage is applied in combat-damage's splash),
+// shattering them into magnet-collected orbs proportional to tier. the client
+// decorates each with a spinning, tier-coloured crystal and a healthbar that only
+// appears once the gem has been hit.
+
+script(WorldTrait, 'gems', (ctx) => {
+    if (env.server) {
+        const gems = query(ctx, [GemTrait, TransformTrait]);
+        let topUpIn = 0;
+
+        onTick(ctx, ({ delta }) => {
+            // litter: keep ~GEM_TARGET gems scattered, topping up on a timer.
+            topUpIn -= delta;
+            if (topUpIn <= 0) {
+                topUpIn = GEM_RESPAWN_INTERVAL;
+                if (gems.matches.length < GEM_TARGET) {
+                    const x = PLAYER_SPAWN[0] + (Math.random() - 0.5) * 2 * GEM_SPAWN_AREA;
+                    const z = PLAYER_SPAWN[2] + (Math.random() - 0.5) * 2 * GEM_SPAWN_AREA;
+                    spawnGem(ctx, x, groundYAt(ctx, x, z) + GEM_HOVER, z, rollGemTier());
+                }
+            }
+
+            // reap: shatter dead gems into an orb burst proportional to tier, fire
+            // the death vfx, then destroy the node (deferred — destroying mid-iter
+            // is unsafe). the orbs reuse the existing magnet-collect pickup.
+            const dead: Node[] = [];
+            for (const [gem, transform] of gems) {
+                if (gem.current > 0) continue;
+                const gp = getWorldPosition(transform);
+                const tier = GEM_TIERS[gem.tier] ?? GEM_TIERS[0]!;
+                const count = Math.max(1, Math.floor(tier.xp / ORB_AMOUNT));
+                for (let n = 0; n < count; n++) {
+                    const ang = Math.random() * Math.PI * 2;
+                    const out = 1 + Math.random() * ORB_POP_OUT;
+                    const vel: Vec3 = [Math.cos(ang) * out, ORB_POP_UP + Math.random() * 2, Math.sin(ang) * out];
+                    spawnOrb(ctx, gp[0], gp[1], gp[2], ORB_AMOUNT, vel);
+                }
+                broadcast(ctx, GemDeathCommand, { pos: [gp[0], gp[1], gp[2]], tier: gem.tier });
+                dead.push(gem._node);
+            }
+            for (const n of dead) destroyNode(n);
+        });
+    }
+
+    if (env.client) {
+        const gems = query(ctx, [GemTrait, TransformTrait]);
+        const _gemYaw = quat.create();
+        const _gemTilt = quat.create();
+        const _gemRot = quat.create();
+        const hpShown = new WeakMap<HTMLElement, number>(); // diff-gate the healthbar repaint
+
+        // a tiny square hp bar: a coloured fill (green→yellow→red) over a dark track.
+        // the track div carries its own px size so the bar shows regardless of how
+        // the HtmlTrait wrapper element is styled.
+        const paintGemBar = (el: HTMLElement, hp: number, max: number) => {
+            const pct = max > 0 ? Math.max(0, Math.min(1, hp / max)) : 0;
+            const track = document.createElement('div');
+            track.style.cssText = 'width:60px; height:9px; background:#222; border:1px solid #000; box-sizing:border-box; overflow:hidden;';
+            const fill = document.createElement('div');
+            fill.style.cssText = `height:100%; width:${pct * 100}%; background:${pct > 0.5 ? '#22c55e' : pct > 0.25 ? '#eab308' : '#dc2626'};`;
+            track.appendChild(fill);
+            el.replaceChildren(track);
+        };
+
+        // shatter burst — a tier-coloured spark spray, bigger + longer for richer tiers.
+        listen(ctx, GemDeathCommand, ({ pos, tier }) => {
+            const fx = GemShatterFx[tier] ?? GemShatterFx[0]!;
+            const t = GEM_TIERS[tier] ?? GEM_TIERS[0]!;
+            const at: Vec3 = [pos[0], pos[1], pos[2]];
+            const count = 18 + tier * 12;
+            const speed = 5 + tier * 2;
+            for (let i = 0; i < count; i++) {
+                const d = randomDir();
+                spawnParticle(ctx, fx, at, {
+                    lifetime: varyLife(1 + tier * 0.3),
+                    size: 0.07 + t.scale * 0.06,
+                    glow: 1,
+                    velX: d[0] * speed,
+                    velY: Math.abs(d[1]) * speed + 2,
+                    velZ: d[2] * speed,
+                });
+            }
+        });
+
+        onFrame(ctx, () => {
+            const time = ctx.clock.time;
+            const camPos = getWorldPosition(getTrait(resolveCamera(ctx).node, TransformTrait)!);
+            for (const [gem, transform] of gems) {
+                const gemNode = transform._node;
+                const tier = GEM_TIERS[gem.tier] ?? GEM_TIERS[0]!;
+
+                // the gem node holds the authoritative (synced) position; the crystal
+                // lives on a client-only child so it can spin + bob locally without
+                // fighting the replicated transform. it despawns with the gem node.
+                let visual = findChildByName(gemNode, 'gem-visual');
+                if (!visual) {
+                    visual = cloneModel(wizardModels.nodes.gem);
+                    visual.name = 'gem-visual';
+                    setScale(getTrait(visual, TransformTrait)!, [tier.scale, tier.scale, tier.scale]);
+                    const color = hexTint(tier.color);
+                    traverse(visual, (n) => {
+                        const mesh = getTrait(n, MeshTrait);
+                        if (mesh) setMeshTint(mesh, color);
+                    });
+                    addChild(gemNode, visual);
+                }
+                const phase = gemNode.id * 1.7; // de-sync the spin/bob between gems
+                const vt = getTrait(visual, TransformTrait)!;
+                setPosition(vt, [0, Math.sin(time * GEM_BOB_FREQ + phase) * GEM_BOB_AMP, 0]);
+                // diagonal tumble: continuous yaw, composed onto a constant lean that
+                // rocks back and forth — a livelier, off-axis spin (client-only).
+                const tilt = GEM_TILT_BASE + Math.sin(time * GEM_TUMBLE_FREQ + phase) * GEM_TUMBLE_AMP;
+                quat.setAxisAngle(_gemYaw, [0, 1, 0], time * GEM_SPIN_SPEED + phase);
+                quat.setAxisAngle(_gemTilt, [0, 0, 1], tilt);
+                quat.multiply(_gemRot, _gemYaw, _gemTilt);
+                setQuaternion(vt, _gemRot);
+
+                // healthbar — built on first damage (current < max), then shown only
+                // while the camera is in range (distant bars would just be clutter).
+                if (gem.current < tier.health) {
+                    let bar = findChildByName(gemNode, 'gem-hp');
+                    if (!bar) {
+                        bar = createNode({ name: 'gem-hp' });
+                        setPosition(addTrait(bar, TransformTrait), [0, tier.scale + 0.4, 0]);
+                        addTrait(bar, HtmlTrait, { mode: 'screen', center: true, distanceFactor: null, pointerEvents: false });
+                        addChild(gemNode, bar);
+                    }
+                    const el = getTrait(bar, HtmlTrait)!.element;
+                    if (el) {
+                        const gp = getWorldPosition(transform);
+                        const dx = gp[0] - camPos[0];
+                        const dy = gp[1] - camPos[1];
+                        const dz = gp[2] - camPos[2];
+                        const inRange = dx * dx + dy * dy + dz * dz < GEM_HP_MAX_DIST * GEM_HP_MAX_DIST;
+                        el.style.visibility = inRange ? 'visible' : 'hidden';
+                        if (inRange && hpShown.get(el) !== gem.current) {
+                            hpShown.set(el, gem.current);
+                            paintGemBar(el, gem.current, tier.health);
+                        }
+                    }
+                }
+            }
+        });
+    }
+});
+
 // ── server: NPC dummy wizards — spawn + steering ────────────────────
 // spawns a few killable dummy wizards at fixed homes (onInit), then each tick
 // steers them. pathfinding is voxelNav (in the core lib); the *steering* half
@@ -1273,7 +1573,9 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
     const CHASE_RANGE = 30; // m — only pursue a player within this
     const REPATH_INTERVAL = 0.5; // s between repaths
     const NPC_REPATHS_PER_TICK = 2; // round-robin cap: at most this many A* runs per tick (spreads + de-bunches repaths)
-    const NPC_PATH_MAX_ITERATIONS = 5000; // A* node-expansion cap — bounds the unreachable/far-goal blowup
+    const NPC_PATH_MAX_ITERATIONS = 100; // A* node-expansion cap. NPCs only path short range, so 100 is plenty;
+    //                                      hard-bounds the worst case (a far/unreachable goal can't blow a frame).
+    //                                      raise if NPCs visibly fail to reach reachable short-range goals.
     const WAYPOINT_REACHED = 0.7; // m (horizontal) to advance to the next waypoint
     const CAST_RANGE = 16; // m — within this (with a clear shot) the NPC strafes + fires
     // burst-fire as a held window: the AI just opens `casting` for a beat (the

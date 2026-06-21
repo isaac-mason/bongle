@@ -23,7 +23,6 @@ import {
     hasTrait,
     loadSceneGraph,
     removeTrait,
-    saveSceneGraph,
     setOwner,
     type Node,
     type Nodes,
@@ -33,7 +32,8 @@ import type { NodesContext } from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import type { Voxels } from '../core/voxels/voxels';
 import { createVoxels, createVoxelsAuthority, setBlock } from '../core/voxels/voxels';
-import { loadVoxels, saveVoxels } from '../core/voxels/voxel-savefile';
+import { loadVoxels, type VoxelSaveCache } from '../core/voxels/voxel-savefile';
+import * as Save from './save';
 import { formatKey } from '../core/voxels/block-registry';
 import * as Light from '../core/voxels/light';
 import * as Avatars from './avatars';
@@ -56,6 +56,17 @@ export class RoomNotFoundError extends Error {
 
 export type { RoomMode as RoomKind } from '../core/protocol';
 
+/** server-side state only edit rooms carry. lives on `Room.edit`, which is null
+ *  on play rooms — so the type forbids dirtying or persisting a runtime room. */
+export type RoomEditState = {
+    /** unsaved edits since the last flush — gates the interval auto-flush. */
+    dirty: boolean;
+    /** per-chunk serialized-byte cache for incremental voxel save: seeded on
+     *  load, refreshed on each flush, so `saveRoom` re-gzips only the chunks
+     *  whose data version moved. */
+    voxelSaveCache: VoxelSaveCache;
+};
+
 export type Room = {
     /** Unique runtime id (e.g. "room_1"). */
     id: string;
@@ -69,8 +80,9 @@ export type Room = {
     /** Players (per (client, mode)) currently in this room. */
     players: Set<PlayerId>;
 
-    /** Has unsaved edits (edit rooms only). */
-    dirty: boolean;
+    /** edit-mode-only state (unsaved-edits flag + incremental-save cache). null
+     *  on play rooms, which never persist. */
+    edit: RoomEditState | null;
 
     /** Room mode. */
     mode: RoomMode;
@@ -298,7 +310,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         sceneId: opts.sceneId,
         nodes: sceneGraph,
         players: new Set(),
-        dirty: false,
+        edit: opts.kind === 'edit' ? { dirty: false, voxelSaveCache: new Map() } : null,
         mode: opts.kind,
         sourceRoomId: opts.sourceRoomId ?? null,
         playerNodes: new Map(),
@@ -348,12 +360,11 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
  * nodes + scene graph + physics, removes every Player belonging to this
  * room (across all clients/modes), and deletes it from the registry.
  */
-/** flip a room's unsaved-edits flag, re-broadcasting the room list (which carries
- *  `dirty`) only on a real change. set true on edits, false on save. */
-export function setRoomDirty(discovery: Discovery.Discovery, room: Room, value: boolean): void {
-    if (room.dirty === value) return;
-    room.dirty = value;
-    Discovery.invalidateRoomList(discovery);
+/** flip a room's unsaved-edits flag. purely server-side: it gates the interval
+ *  auto-flush (see engine-server `update`). set true on edits, false on flush. */
+export function setRoomDirty(room: Room, value: boolean): void {
+    // no-op on play rooms (edit === null) — they never persist.
+    if (room.edit) room.edit.dirty = value;
 }
 
 export function destroyRoom(state: Rooms, roomId: string): void {
@@ -674,12 +685,13 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     let snapshotMs = 0;
     if (env.editor && room.mode === 'play' && room.sourceRoomId) {
         const sourceRoom = getRoom(state.rooms, room.sourceRoomId);
-        if (sourceRoom?.mode === 'edit') {
+        // flush the source edit room so the play room boots from its live state —
+        // but only if it's actually dirty (clean editor → no disk write), and
+        // clear dirty after since this IS a save (no lingering false-dirty).
+        if (sourceRoom?.edit?.dirty) {
             const snapT0 = performance.now();
-            ContentManager.saveScene(state.contentManager, sourceRoom.sceneId, {
-                nodes: saveSceneGraph(sourceRoom.nodes),
-                voxels: saveVoxels(sourceRoom.voxels),
-            });
+            Save.saveRoom(state, sourceRoom);
+            setRoomDirty(sourceRoom, false);
             snapshotMs = performance.now() - snapT0;
         }
     }
@@ -706,6 +718,9 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         if (sceneFile.data.voxels) {
             const desT0 = performance.now();
             loadVoxels(room.voxels, sceneFile.data.voxels, registry.blockRegistry);
+            // seed the incremental-save cache from the on-disk bytes so the
+            // first flush only re-gzips chunks edited since boot.
+            Save.seedRoom(room, sceneFile.data.voxels);
             voxDeserMs = performance.now() - desT0;
         }
         const parseT0 = performance.now();
@@ -716,10 +731,9 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         ContentManager.seedLastWrittenRaw(state.contentManager, room.sceneId, sceneFile.raw);
     } else if (env.editor && room.mode === 'edit') {
         seedStarterFloor(room);
-        ContentManager.saveScene(state.contentManager, room.sceneId, {
-            nodes: saveSceneGraph(room.nodes),
-            voxels: saveVoxels(room.voxels),
-        });
+        // initial persist of a brand-new scene (empty cache → full serialize,
+        // then seeds the cache for subsequent incremental flushes).
+        Save.saveRoom(state, room);
     }
 
     const physT0 = performance.now();

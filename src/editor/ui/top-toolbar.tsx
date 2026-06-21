@@ -318,9 +318,6 @@ function RoomTab({
                 >
                     {isPlay ? <Icons.Play size={10} /> : <Icons.Wrench size={10} />}
                     {`${isPlay ? 'play' : 'edit'}: ${info.sceneId}`}
-                    {tabMode === 'edit' && info.dirty && (
-                        <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-white border border-neutral-400" title="unsaved changes" />
-                    )}
                 </button>
             )}
 

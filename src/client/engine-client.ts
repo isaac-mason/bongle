@@ -1318,7 +1318,7 @@ export function update(state: EngineClient, delta: number) {
         Renderer.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
 
         if (env.editor) {
-            if (debugOpen && (debugTab === 'perf' || debugTab === 'logs')) {
+            if (debugOpen && (debugTab === 'summary' || debugTab === 'perf' || debugTab === 'net' || debugTab === 'logs')) {
                 const seen = new Set<string>();
                 for (const room of state.rooms.rooms.values()) {
                     if (seen.has(room.roomId)) continue;

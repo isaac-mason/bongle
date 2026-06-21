@@ -598,6 +598,9 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         save: (sceneId) => {
             const net = ctx.client!.state!.net;
             Net.send(net, { type: 'save_scene', sceneId });
+            // explicit save (Ctrl+S / tab → Save) confirms with a toast; the
+            // interval auto-flush stays silent.
+            useEditor.getState().pushToast({ kind: 'save', message: 'Saved' });
         },
         undo: () => {
             const stack = get().undoStack;

@@ -188,8 +188,8 @@ script(
         const editMutate = <T>(fn: (args: T, client: Client) => boolean | void) =>
             editGated<T>((args, client) => {
                 if (!fn(args, client)) return;
-                const { state, room } = ctx.server!;
-                _Rooms!.setRoomDirty(state.discovery, room, true);
+                const { room } = ctx.server!;
+                _Rooms!.setRoomDirty(room, true);
             });
 
         // voxel edit ops from clients
