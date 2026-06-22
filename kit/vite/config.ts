@@ -122,18 +122,33 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             preserveSymlinks: false,
         },
         optimizeDeps: {
-            // react is only reachable through `bongle` (excluded below), so
-            // vite's entry scan never discovers it and skips pre-bundling.
-            // It would then be served raw without CJS→ESM interop, breaking
-            // `import React from 'react'` (no `default` export). Force-include
-            // the react packages so they're pre-bundled with interop; every
-            // consumer (engine UI, dnd-kit, zustand, …) shares this one copy.
+            // The editor's UI deps are only reachable through `bongle`
+            // (excluded below), and vite's scanner won't crawl an excluded
+            // package (or the plugin's virtual entry) — so their pre-bundling
+            // is never triggered. The pure-CJS ones would then be served
+            // without CJS→ESM interop, breaking named/default imports
+            // (`react` has no `default`; `zustand` can't find
+            // `useSyncExternalStore`). Force-include the full browser UI dep
+            // closure so the editor pre-bundles consistently from a clean
+            // install; esbuild folds each package's CJS sub-deps (use-sync-
+            // external-store, scheduler, …) into its chunk.
+            //
+            // `@dnd-kit/*` is deliberately NOT here: it ships ESM (works raw)
+            // and, more importantly, its sibling packages share a module-level
+            // singleton (live drag state in @dnd-kit/state). Pre-bundling them
+            // as separate entries would duplicate that singleton across chunks
+            // and fork the drag state — the same hazard `exclude` guards bongle
+            // against.
             include: [
                 'react',
                 'react-dom',
                 'react-dom/client',
                 'react/jsx-runtime',
                 'react/jsx-dev-runtime',
+                'zustand',
+                '@base-ui/react',
+                'lucide-react',
+                '@tanstack/react-virtual',
             ],
             // engine + workspace deps must share the SAME module instance
             // across user code and engine code; pre-bundling would fork
