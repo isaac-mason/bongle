@@ -1,0 +1,3 @@
+[submodule "new-bongle"]
+	path = new-bongle
+	url = https://github.com/isaac-mason/new-bongle.git
