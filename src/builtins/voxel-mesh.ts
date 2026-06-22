@@ -36,9 +36,10 @@ export const VoxelMeshTrait = trait('voxel-mesh', {
     model: null as VoxelModel | null,
 
     /**
-     * per-instance tint [r, g, b, a]. client-only. rgb multiplies the
-     * albedo (white = no-op), a is opacity. [1,1,1,1] = untinted, opaque
-     * (default). [1,0,0,1] = keep red, drop green/blue.
+     * per-instance tint [r, g, b, a]. client-only. rgb is the recolour
+     * target, a the intensity (0 = untouched, 1 = full, lightness-
+     * preserving); never changes coverage. [1,1,1,1] = untinted (default).
+     * [1,0,0,1] = full red at the original brightness.
      */
     tint: [1, 1, 1, 1] as Vec4,
 

@@ -228,6 +228,54 @@ describe('discovery — realm filtering', () => {
         server.dispose();
     });
 
+    it('idle: a tick with no changes emits no scene_sync', () => {
+        const { server, discovery, net, player, resources } = setupRoom('play');
+        const n = createNode({ name: 'static' });
+        addChild(server.nodes.root, n);
+        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
+        flushUntilQuiet(discovery, server.rooms, resources); // drains the create
+        const idle = flushUntilQuiet(discovery, server.rooms, resources);
+        expect(idle.find(([, m]) => m.type === 'scene_sync')).toBeUndefined();
+        server.dispose();
+    });
+
+    it('field change on a known node emits node_trait_fields incrementally', () => {
+        const { server, discovery, net, player, resources } = setupRoom('play');
+        const n = createNode({ name: 'mover' });
+        addChild(server.nodes.root, n);
+        const t = addTrait(n, TransformTrait);
+        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
+        flushUntilQuiet(discovery, server.rooms, resources); // drains the create
+
+        setPosition(t, [10, 0, 0]); // well past the position threshold
+        const out = flushUntilQuiet(discovery, server.rooms, resources);
+        const sync = out.find(([, m]) => m.type === 'scene_sync');
+        expect(sync).toBeDefined();
+        const updates = (sync![1] as { updates: Array<{ type: string; id: number }> }).updates;
+        expect(updates.some((u) => u.type === 'node_trait_fields' && u.id === n.id)).toBe(true);
+        server.dispose();
+    });
+
+    it('play mode: non-shared→shared transition emits node_created (reveal)', () => {
+        const { server, discovery, net, player, resources } = setupRoom('play');
+        const n = createNode({ name: 'reveal-me', realm: 'server' });
+        addChild(server.nodes.root, n);
+        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
+        // not shared yet → never sent to the play client
+        const before = flushUntilQuiet(discovery, server.rooms, resources);
+        expect(before.find(([, m]) => m.type === 'scene_sync')).toBeUndefined();
+
+        setRealm(n, 'shared');
+        const after = flushUntilQuiet(discovery, server.rooms, resources);
+        const sync = after.find(([, m]) => m.type === 'scene_sync');
+        expect(sync).toBeDefined();
+        const created = (sync![1] as { updates: Array<{ type: string; id: number }> }).updates.find(
+            (u) => u.type === 'node_created' && u.id === n.id,
+        );
+        expect(created).toBeDefined();
+        server.dispose();
+    });
+
     it('add → remove → add of the same node ends as a create, no destroy', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);

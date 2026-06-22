@@ -69,7 +69,7 @@ import * as ModelAtlas from './model-atlas';
 // ── gpu structs ─────────────────────────────────────────────────────
 
 export const InstanceParams = struct('ModelInstanceParams', {
-    // tint: rgb multiplies the albedo (white = no-op), a = opacity.
+    // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
     // flash: transient overlay — rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
@@ -708,9 +708,8 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     const litRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
     const fragColor = vec4(litRgb, texColor.a).toVar('mvFragColor');
 
-    // cutout + screen-door fade: tint.a (opacity) and the dither knob both
-    // feed the shared discard.
-    const fragment = ditherDiscard(fragColor, texColor.a, vTint.w, vDither).toVar('mvFragment');
+    // cutout + screen-door fade: the dither knob feeds the shared discard.
+    const fragment = ditherDiscard(fragColor, texColor.a, vDither).toVar('mvFragment');
 
     return new Material({
         name: 'model',

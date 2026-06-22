@@ -25,9 +25,9 @@ export const MeshTrait = trait('mesh', {
     meshId: null as MeshId | null,
 
     /**
-     * Per-instance tint [r, g, b, a]. rgb multiplies the albedo (white =
-     * no-op), a is opacity. Persistent recolour: team colours, biome.
-     * Client-only.
+     * Per-instance tint [r, g, b, a]. rgb is the recolour target, a the
+     * intensity (0 = untouched, 1 = full, lightness-preserving); never
+     * changes coverage. Persistent recolour: team colours, biome. Client-only.
      */
     tint: [1, 1, 1, 1] as Vec4,
 
@@ -117,7 +117,7 @@ sync(MeshTrait, 'meshId', {
     },
 });
 
-/** set per-instance tint (rgb multiply, a = opacity) and flag the renderer
+/** set per-instance tint (rgb target, a intensity) and flag the renderer
  *  to re-upload params. */
 export function setMeshTint(t: MeshTrait, v: Vec4): void {
     vec4.copy(t.tint, v);

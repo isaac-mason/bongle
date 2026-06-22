@@ -8,7 +8,7 @@
  * `null` on the server side, so this file is only reached on the client.
  *
  * Resource model (the contract):
- *   - atlas: eager at boot. `loadResources()` fetches `audio-atlas.ogg` +
+ *   - atlas: eager at boot. `loadResources()` fetches `audio-atlas.mp3` +
  *     `audio-manifest.json` and runs one `decodeAudioData`. Every atlas
  *     clip is playable with zero latency from the first frame onward.
  *   - long clips: lazy at first play. The manifest entry is known at
@@ -41,7 +41,7 @@
  *
  * Cleanup: every frame `updateForFrame` reaps active playbacks whose
  * source ended naturally (via onended → `_ended = true`) or whose bound
- * node has been removed from the scene (`node.context === null`).
+ * node has been removed from the scene (`node.scene === null`).
  */
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
@@ -140,21 +140,27 @@ export async function loadResources(): Promise<AudioResources> {
     // view into the same shared buffer.
     if (manifest.atlas.length > 0) {
         try {
-            const atlasRes = await fetch(assetUrl('audio-atlas.ogg'));
-            if (atlasRes.ok) {
-                const bytes = await atlasRes.arrayBuffer();
-                const buffer = await context.decodeAudioData(bytes);
-                for (const e of manifest.atlas) {
-                    clips.set(e.id, {
-                        kind: 'atlas',
-                        buffer,
-                        offset: e.offset,
-                        duration: e.duration,
-                    });
-                }
+            const atlasRes = await fetch(assetUrl('audio-atlas.mp3'));
+            if (!atlasRes.ok) throw new Error(`atlas HTTP ${atlasRes.status}`);
+            const bytes = await atlasRes.arrayBuffer();
+            // decodeAudioData *detaches* its input ArrayBuffer; pass a fresh
+            // copy so a re-invocation can't be handed a detached buffer.
+            const buffer = await context.decodeAudioData(bytes.slice(0));
+            for (const e of manifest.atlas) {
+                clips.set(e.id, {
+                    kind: 'atlas',
+                    buffer,
+                    offset: e.offset,
+                    duration: e.duration,
+                });
             }
         } catch (err) {
-            console.warn('[bongle] failed to decode audio atlas:', err);
+            // a failed atlas decode silences *every* atlas sound, not one —
+            // surface it loudly rather than as a per-play warning.
+            console.error(
+                `[bongle] audio atlas failed to load — all ${manifest.atlas.length} atlas sounds will be silent:`,
+                err,
+            );
         }
     }
 
@@ -188,7 +194,7 @@ export type PlaybackHandle = {
 
 /** internal record for an in-flight one-shot. lives in `Audio.active`
  *  until `_ended` (source.onended fired) or until its bound node is
- *  removed (`node.context === null`), at which point updateForFrame stops
+ *  removed (`node.scene === null`), at which point updateForFrame stops
  *  + drops it. */
 type ActivePlayback = {
     handle: PlaybackHandle;
@@ -332,11 +338,33 @@ function startPlayback(
 ): PlaybackHandle | null {
     const { resources } = audio;
 
+    const mode = node !== null ? 'onNode' : fixedPos !== null ? 'at' : 'mono';
+    console.log(
+        `[bongle audio play] soundId=${soundId} mode=${mode} vol=${opts.volume ?? 1} loop=${opts.loop ?? false}`,
+    );
+
     const clip = resources.clips.get(soundId);
 
     if (!clip) {
-        console.warn(`[bongle] play(${soundId}): sound not loaded (declared via sound()? pipeline run?)`);
+        console.warn(`[bongle audio play] soundId=${soundId} NOT in clips map (clips has ${resources.clips.size} entries)`);
         return null;
+    }
+
+    console.log(
+        `[bongle audio play] soundId=${soundId} clip kind=${clip.kind}` +
+            (clip.kind === 'atlas' ? ` offset=${clip.offset.toFixed(3)} duration=${clip.duration.toFixed(3)}` : ` url=${clip.url}`),
+    );
+
+    if (node !== null || fixedPos !== null) {
+        const pos = fixedPos ?? readNodePosition(node!);
+        const L = audio._listenerLast;
+        const dist =
+            pos && Number.isFinite(L.px)
+                ? Math.hypot(pos[0] - L.px, pos[1] - L.py, pos[2] - L.pz).toFixed(2)
+                : 'n/a';
+        console.log(
+            `[bongle audio play] soundId=${soundId} spatial pos=${pos ? `[${pos.map((n) => n.toFixed(1)).join(',')}]` : 'null'} listener=[${L.px.toFixed(1)},${L.py.toFixed(1)},${L.pz.toFixed(1)}] dist=${dist}`,
+        );
     }
 
     // browsers gate playback on user gesture — resume here. If we're not
@@ -455,6 +483,9 @@ function startAtlasSource(
     } else {
         source.start(0, clip.offset, clip.duration);
     }
+    console.log(
+        `[bongle audio play] atlas source started: offset=${clip.offset.toFixed(3)} duration=${clip.duration.toFixed(3)} ctx.state=${ctx.state} ctx.time=${ctx.currentTime.toFixed(3)} gain=${playback.gain.gain.value}`,
+    );
 }
 
 function startStandaloneSource(

@@ -57,7 +57,7 @@ type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrai
 
 // InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
 // model-resources.ts — must stay in sync, no compiler will catch drift):
-//   [ 0..3 ]  tint     vec4f  (rgb = multiply, a = opacity)
+//   [ 0..3 ]  tint     vec4f  (rgb = target, a = intensity)
 //   [ 4..7 ]  flash    vec4f  (rgb = colour, a = strength)
 //   [ 8..11]  light    vec4f
 //   [  12  ]  glow     f32
@@ -387,8 +387,8 @@ export function update(
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
-        const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, visibility);
+        const state = aliveStates[i]!;
+        if (state.lastSeenFrame !== frameId) destroyInstance(visuals, state.trait, visibility);
     }
 
     // ── phase 3: per-instance writes + per-mesh bucket sort ─────────

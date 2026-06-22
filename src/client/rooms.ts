@@ -155,10 +155,9 @@ export type ClientRoom = {
      * either a real edit room (editorNode === playerNode) or a local-only
      * peek into a play room (editorNode is a `realm: 'client'` node).
      *
-     * the same object is plumbed into `editor: true` scripts as
-     * `ctx.client.editor`; non-editor scripts never see it. swapping the
-     * pointer (null ↔ object) is exclusively driven by the editor lens
-     * lifecycle (enter/exit local editor view).
+     * `editor: true` scripts read this lens via `ctx.client.room?.editor`.
+     * swapping the pointer (null ↔ object) is exclusively driven by the
+     * editor lens lifecycle (enter/exit local editor view).
      */
     editor: EditRoomState | null;
 
@@ -1011,6 +1010,9 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
+    console.log(
+        `[bongle room] createLocalRoom: room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
+    );
     Nodes.initSceneGraph(room.nodes);
     rooms.rooms.set(playerId, room);
     useClient.getState().setRoom(playerId, room);

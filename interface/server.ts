@@ -67,8 +67,20 @@ export type ResolvedAvatar =
           rigType?: string;
       };
 
+/** Host capability: a source of avatars for populating non-player characters.
+ *  The host owns curation — popular / random / trending / seasonal — and MAY
+ *  change strategy at any time; treat the result as unordered + non-stable and
+ *  visual-only (no usernames / PII). Bulk by design — call once, not per-NPC. */
+export type AvatarsServerDriver = {
+    /** A batch of avatars to dress NPCs in. Empty array when the host has none. */
+    sample: () => Promise<ResolvedAvatar[]>;
+};
+
 export type ServerDriver = {
     storage: StorageServerDriver;
+    /** Always present, like `storage`: a deployed host sources real avatars; dev /
+     *  edit / offline supply a fallback (`createFallbackAvatarsDriver`). */
+    avatars: AvatarsServerDriver;
 };
 
 export type ServerInitOptions = {

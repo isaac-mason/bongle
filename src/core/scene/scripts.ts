@@ -50,9 +50,8 @@ export type ControlClientState = {
  * `realm: 'client'` node carrying EditorTrait + CameraTrait).
  *
  * the existence of `room.editor` is the on/off switch for the editor lens.
- * scripts declared with `{ editor: true }` see this object as
- * `ctx.client.editor` (shared ref); non-editor scripts never see it — hard
- * wall so gameplay code can't reach into editor state.
+ * scripts declared with `{ editor: true }` also run in edit mode and read
+ * the lens via `ctx.client.room?.editor`.
  *
  * grows over time with selection / hover / gizmo state. today: just the
  * editor node pointer.
@@ -139,9 +138,6 @@ export type ClientContext = {
 
     /** the client room this script is running in */
     room?: ClientRoom;
-
-    /** editor lens state — set on `{ editor: true }` scripts; mirrors `room.editor`. */
-    editor?: EditRoomState;
 };
 
 export type ServerContext = {
@@ -895,11 +891,14 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
 
     const isEdit = node.scene?.mode === 'edit';
 
-    // editor:true scripts see the room's editor lens as ctx.client.editor.
-    let client = runtime.client;
-    if (client && def.editor) {
-        client = { ...client, editor: client.room?.editor };
-    }
+    // ctx.client is the live, shared per-room client context. The engine
+    // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
+    // instantiate (the room object doesn't exist yet at this point), so hold
+    // the reference directly — a copy here would freeze those fields as
+    // `undefined` forever, breaking isOwner / playMono / getControlNode for
+    // editor:true world systems. The editor lens is reachable via
+    // `ctx.client.room?.editor`.
+    const client = runtime.client;
 
     instance._ctx = {
         trait,

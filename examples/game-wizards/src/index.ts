@@ -5,6 +5,9 @@ import {
     addChild,
     addCharacter,
     addTrait,
+    applyAvatar,
+    randomDisplayName,
+    sampleAvatars,
     BLOCK_AIR,
     broadcast,
     chat,
@@ -12,7 +15,6 @@ import {
     CLIENT_TO_SERVER,
     cloneModel,
     command,
-    type CommandHandle,
     createNode,
     createVoxelRaycastResult,
     destroyNode,
@@ -46,6 +48,7 @@ import {
     pack,
     type ParticleHandle,
     particleUpdate,
+    playAt,
     playMono,
     query,
     raycastVoxels,
@@ -85,7 +88,9 @@ import {
     WorldTrait,
 } from 'bongle';
 import { RIG_6BONE_ARM_RIGHT, RIG_6BONE_HAND_RIGHT, RIG_6BONE_HEAD } from 'bongle/avatar/rig';
-import { blocks, particlePresets } from 'bongle/starter';
+import { blocks, particlePresets, sounds } from 'bongle/starter';
+import { floodFillGround } from './nav';
+import { generateTerrain, groundHeightAt, MAP_CENTER, MAP_SIZE } from './worldgen';
 import { degreesToRadians, mat4, quat, type Quat, vec3, type Vec3, type Vec4 } from 'mathcat';
 import { castRay, CastRayStatus, createClosestCastRayCollector, createDefaultCastRaySettings, filter as crashFilter } from 'crashcat';
 
@@ -97,9 +102,24 @@ const wizardModels = model('wizard-assets', {
     src: 'assets/wizard-game-assets.gltf',
 });
 
+// the wizard character rig/skin used for NPC bodies (players resolve their own
+// avatar). a canonical 6-bone rig, so CharacterTrait's default rigType applies.
+const wizardAvatar = model('wizard', {
+    src: 'assets/wizard.gltf',
+});
+
 script(WorldTrait, 'environment', (ctx) => {
     setEnvironment(ctx, ENVIRONMENT_OVERWORLD);
     setEnvironmentTime(ctx, 14);
+});
+
+// deterministic procedural terrain — runs once on the server at room init,
+// BEFORE the gem + npc-spawn onInits (which raycast the ground for placement),
+// so it must register ahead of those scripts. the voxel edits replicate to
+// clients; a hardcoded seed means every round's recreate rebuilds the identical map.
+script(WorldTrait, 'worldgen', (ctx) => {
+    if (!env.server) return;
+    onInit(ctx, () => generateTerrain(ctx));
 });
 
 const WizardTrait = trait('wizard', {
@@ -117,7 +137,7 @@ const WizardTrait = trait('wizard', {
     xp: 0,
     // upgradable stat LEVELS (integers); effective values derived via STAT_TABLE.
     // synced so the client derives fire cadence, max health, the hud panel, etc.
-    stats: { levels: { maxHealth: 0, regenRate: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, splashRadius: 0, knockback: 0 } as StatLevels },
+    stats: { levels: { maxHealth: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, blast: 0 } as StatLevels },
     // live health pool (folded in — every combatant is a wizard). `current` is
     // discrete + synced; max is DERIVED from the maxHealth stat (not stored). the
     // regen carry + damage bookkeeping stay server-only.
@@ -127,8 +147,9 @@ const WizardTrait = trait('wizard', {
     lastAttacker: -1,
     // server-only clock of this wizard's last spawned shot — paces the firing tick.
     lastFireTime: -999,
-    // client-side timestamp of the LOCAL player's own last predicted shot — drives
-    // the first-person viewmodel jab only, for zero-latency feedback. not synced.
+    // client-side timestamp of the LOCAL player's own last authoritative shot — set
+    // from the ProjectileCast we own (combat-vfx), drives the first-person viewmodel
+    // muzzle + recoil edge. not synced.
     lastCastTime: -999,
     // eased 0..1 arm-raise amount (client-side), toward `casting`. not synced.
     armRaise: 0,
@@ -178,13 +199,11 @@ sync(WizardTrait, 'casting', {
 sync(WizardTrait, 'stats', {
     schema: pack.object({
         maxHealth: pack.uint8(),
-        regenRate: pack.uint8(),
         moveSpeed: pack.uint8(),
         fireRate: pack.uint8(),
         damage: pack.uint8(),
         speed: pack.uint8(),
-        splashRadius: pack.uint8(),
-        knockback: pack.uint8(),
+        blast: pack.uint8(),
     }),
     pack: (t) => t.stats.levels,
     unpack: (v, t) => (t.stats.levels = v),
@@ -212,13 +231,11 @@ sync(WizardTrait, 'current', {
 function attachGear(wizardNode: Node): void {
     const staff = cloneModel(wizardModels.nodes.staff);
     staff.name = 'wizard:staff';
-    const staffTransform = getTrait(staff, TransformTrait)!;
-    // offset the grip outward (+X, the wizard's right) and forward (-Z) so the
-    // upright staff stands clear of the forearm instead of running through it
-    // — the hand sits at the bottom of the arm, so a staff straight up the
-    // hand's centre would be collinear with the forearm.
-    setPosition(staffTransform, [0.12, 0, -0.18]);
-    setQuaternion(staffTransform, quat.setAxisAngle(quat.create(), [1, 0, 0], degreesToRadians(90)));
+    // cloneModel keeps the node's authored scene-layout transform (the staff is
+    // lifted in the asset so it stands on the ground). clear it so the staff's own
+    // pivot — not that layout offset — lands at the socket. identity, not a tuning
+    // offset: the engine socket supplies the hand position + grip rotation.
+    setPosition(getTrait(staff, TransformTrait)!, [0, 0, 0]);
     addChild(findByName(wizardNode, RIG_6BONE_HAND_RIGHT)!, staff);
 
     const hat = cloneModel(wizardModels.nodes.hat);
@@ -236,9 +253,13 @@ script(WorldTrait, 'join', (ctx) => {
         [0.6, 0.15, 0.85, 1], // purple
     ];
 
+    // existing combatants to spawn the joiner clear of (the new node has no
+    // WizardTrait yet at setPosition time, so it isn't counted).
+    const wizards = query(ctx, [WizardTrait, TransformTrait]);
+
     onJoin(ctx, ({ playerNode, user }) => {
         const transform = getTrait(playerNode, TransformTrait)!;
-        setPosition(transform, PLAYER_SPAWN);
+        setPosition(transform, pickSpawnPosition(ctx, positionsOf(wizards)));
 
         addTrait(playerNode, WizardTrait, {
             color: palette[Math.floor(Math.random() * palette.length)],
@@ -302,12 +323,18 @@ script(WorldTrait, 'viewmodel', (ctx) => {
     const airMax = 0.15; // airborne lift clamp (m)
 
     const basePitch = degreesToRadians(-20); // staff laid forward along the view
-    const castThrust = 0.18; // m — forward jab on cast
-    const castPitch = degreesToRadians(28); // extra outward point on cast
-    const castTau = 0.07; // s — cast-punch decay constant
+    // continuous "channeling" pose while holding cast: the staff just rises straight
+    // up in view (no tilt), eased toward the held `casting` intent.
+    const raiseLift = 0.15; // m — lift the whole staff up while channeling (+y is up here)
+    const raiseEaseRate = 10; // 1/s — eases up while casting, down when it stops
 
     let bobBlend = 0; // eased walk amount (0..1)
     let air = 0; // eased airborne vertical offset (m); +y is down in this frame
+    let raise = 0; // eased channel raise (0..1)
+    let prevCastTime = -999; // last seen wizard.lastCastTime — edge fires the muzzle burst
+    let chargeAccum = 0; // fractional charge particles owed this frame
+    const _tip = vec3.create();
+    const _fwd = vec3.create();
 
     onFrame(ctx, ({ delta }) => {
         const { node: cameraNode } = resolveCamera(ctx);
@@ -350,20 +377,43 @@ script(WorldTrait, 'viewmodel', (ctx) => {
         const airTarget = grounded ? 0 : Math.max(-airMax, Math.min(airMax, -velocity[1] * airPerSpeed));
         air += (airTarget - air) * Math.min(delta * 10, 1);
 
-        // cast punch: a quick forward jab + outward point, decaying after each
-        // cast (in lockstep with the muzzle), layered on top of the walk bob.
         const wizard = controlNode && getTrait(controlNode, WizardTrait);
-        const punch = wizard ? Math.exp(-(ctx.clock.time - wizard.lastCastTime) / castTau) : 0;
+
+        // channel raise: ease toward the held `casting` intent — the staff lifts into
+        // a ready pose while charging, drops back when we let go.
+        const raiseTarget = wizard?.casting ? 1 : 0;
+        raise += (raiseTarget - raise) * Math.min(delta * raiseEaseRate, 1);
 
         // sway side-to-side once per stride (`sin`), dip down each footfall
-        // (`abs(sin)`, +y is down); the airborne lift + cast jab ride on top.
+        // (`abs(sin)`, +y is down); airborne lift + channel raise ride on top.
         const transform = getTrait(viewmodel, TransformTrait)!;
         setPosition(transform, [
             offset[0] + Math.sin(bobPhase) * sway * bobBlend,
-            offset[1] + Math.abs(Math.sin(bobPhase)) * bounce * bobBlend + air,
-            offset[2] - punch * castThrust,
+            offset[1] + Math.abs(Math.sin(bobPhase)) * bounce * bobBlend + air + raise * raiseLift,
+            offset[2],
         ]);
-        setQuaternion(transform, quat.setAxisAngle(_viewmodelRot, [1, 0, 0], basePitch - punch * castPitch));
+        setQuaternion(transform, quat.setAxisAngle(_viewmodelRot, [1, 0, 0], basePitch));
+
+        // first-person tip fx: the muzzle blast on each shot (the `lastCastTime` edge)
+        // and a continuous charge glow while channeling, both at the viewmodel staff
+        // tip in view. third-person viewers get these on the rig staff elsewhere.
+        if (firstPerson && wizard) {
+            vec3.transformMat4(_tip, STAFF_TIP_LOCAL, getWorldMatrix(transform));
+            if (wizard.lastCastTime !== prevCastTime) {
+                prevCastTime = wizard.lastCastTime;
+                const camQuat = getWorldQuaternion(getTrait(cameraNode, TransformTrait)!);
+                muzzleBurst(ctx, [_tip[0], _tip[1], _tip[2]], vec3.transformQuat(_fwd, [0, 0, -1], camQuat));
+            }
+            if (wizard.casting) {
+                chargeAccum += CHARGE_RATE * delta;
+                while (chargeAccum >= 1) {
+                    chargeGlow(ctx, _tip);
+                    chargeAccum -= 1;
+                }
+            } else {
+                chargeAccum = 0;
+            }
+        }
     });
 });
 
@@ -392,6 +442,7 @@ const EYE_HEIGHT = 1.5; // m — spawn origin above the caster's origin
 type ProjectileStats = { speed: number; damage: number; damageRadius: number; terrainDamageRadius: number; knockback: number };
 const DEFAULT_PROJECTILE_STATS: ProjectileStats = { speed: 18, damage: 3, damageRadius: 2, terrainDamageRadius: 1, knockback: 5 };
 const KNOCKBACK_UP = 0.4; // upward kick as a fraction of the horizontal impulse (pops grounded targets so the shove lands)
+const KNOCKBACK_MIN_UP = 3; // m/s — floor on the upward kick so every hit lifts the target off the ground, even a weak/overhead shove
 const PROJECTILE_SPIN_SPEED = 12; // rad/s — roll around the travel axis while flying
 const PROJECTILE_SPIN_AXIS: Vec3 = [0, 0, 1]; // local forward/back (node faces aim down -Z)
 // staff tip in the staff node's local space: mesh max-Y from the gltf, with the
@@ -403,12 +454,12 @@ const STAFF_TIP_LOCAL: Vec3 = [0, 1.0625, 0];
 // value is derived here as base + level*perLevel. character stats apply to the
 // wizard/controller; projectile stats snapshot into each shot at fire time.
 const STAT_TABLE = {
-    regenRate: { base: 1, perLevel: 0.5, max: 8, label: 'Health Regen', color: '#dba463' },
     maxHealth: { base: 8, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
     damage: { base: 3, perLevel: 1, max: 8, label: 'Bullet Damage', color: '#e06e6e' },
     speed: { base: 18, perLevel: 3, max: 8, label: 'Bullet Speed', color: '#6e9de0' },
-    splashRadius: { base: 2, perLevel: 0.5, max: 8, label: 'Splash', color: '#e0d56e' },
-    knockback: { base: 5, perLevel: 1.5, max: 8, label: 'Knockback', color: '#9d6ee0' },
+    // Blast: one stat, two payoffs — splash damage radius (the value below) and
+    // knockback impulse (its own stronger scale, applied in projectileStatsOf).
+    blast: { base: 2, perLevel: 0.5, max: 8, label: 'Blast', color: '#e0934a' },
     fireRate: { base: 1.5, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
     moveSpeed: { base: 4.317, perLevel: 0.4, max: 8, label: 'Movement Speed', color: '#6ee0d5' },
 } as const;
@@ -416,18 +467,41 @@ type StatKey = keyof typeof STAT_TABLE;
 const STAT_KEYS = Object.keys(STAT_TABLE) as StatKey[];
 type StatLevels = Record<StatKey, number>;
 
+// Lucide glyphs (24×24, stroke=currentColor) per stat: heart (health), sword
+// (damage), fast-forward chevrons (bullet speed), concentric rings (blast),
+// stopwatch (fire rate), footprints (move). the panel tints each to its stat
+// colour; the collapsed rail is just icon + level.
+const STAT_ICON_PATHS: Record<StatKey, string> = {
+    maxHealth: '<path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"/>',
+    damage: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/>',
+    speed: '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+    blast: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    fireRate: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+    moveSpeed:
+        '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>',
+};
+const statIconSvg = (key: StatKey): string =>
+    `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${STAT_ICON_PATHS[key]}</svg>`;
+
 // effective value of a stat at a given level.
 const lvlValue = (key: StatKey, level: number): number => STAT_TABLE[key].base + level * STAT_TABLE[key].perLevel;
 // derived effective values used at the call sites.
 const maxHealthOf = (levels: StatLevels): number => lvlValue('maxHealth', levels.maxHealth);
 const fireIntervalOf = (levels: StatLevels): number => 1 / lvlValue('fireRate', levels.fireRate);
-const TERRAIN_RADIUS = 1; // m — terrain carve radius (fixed, not a stat yet)
+// terrain destruction isn't its own stat — it's a milestone payoff of Bullet
+// Damage: nothing until L3, then craters that grow with investment (capped so a
+// maxed shooter is a wrecking ball, not a map-eraser).
+const terrainRadiusForDamage = (damageLevel: number): number => (damageLevel >= 7 ? 3 : damageLevel >= 5 ? 2 : damageLevel >= 3 ? 1 : 0);
+// knockback rides the Blast level on its own (stronger) scale — kept from the
+// old standalone Knockback stat so shoves feel exactly as they did.
+const BLAST_KNOCKBACK_BASE = 5;
+const BLAST_KNOCKBACK_PER_LEVEL = 1.5;
 const projectileStatsOf = (levels: StatLevels): ProjectileStats => ({
     speed: lvlValue('speed', levels.speed),
     damage: lvlValue('damage', levels.damage),
-    damageRadius: lvlValue('splashRadius', levels.splashRadius),
-    terrainDamageRadius: TERRAIN_RADIUS,
-    knockback: lvlValue('knockback', levels.knockback),
+    damageRadius: lvlValue('blast', levels.blast),
+    terrainDamageRadius: terrainRadiusForDamage(levels.damage),
+    knockback: BLAST_KNOCKBACK_BASE + levels.blast * BLAST_KNOCKBACK_PER_LEVEL,
 });
 
 // ── xp / levels ─────────────────────────────────────────────────────
@@ -459,10 +533,12 @@ const availablePoints = (xp: number, levels: StatLevels): number => levelForXp(x
 
 // ── health timing ───────────────────────────────────────────────────
 const REGEN_DELAY = 3; // s without damage before health regenerates
+const BASE_REGEN_RATE = 2; // hp/s — flat baseline regen (regen is no longer an upgradable stat)
 const RESPAWN_DELAY = 3; // s after death before respawn
 
 // ── xp orbs (death drops from gems + wizards) ───────────────────────
 const ORB_AMOUNT = 6; // xp per orb
+const ORB_LIFETIME = 60; // s — orbs despawn after this (generous; keeps uncollected litter from piling up)
 const ORB_GRAB_RADIUS = 1.1; // m — an alive wizard within this collects an orb
 const ORB_MAGNET_RADIUS = 5; // m — within this (but outside grab) an orb reels toward the nearest wizard
 const ORB_MAGNET_PULL = 18; // m/s base — fly-in speed = (PULL − distance), so it accelerates as it nears (luanti-style)
@@ -483,9 +559,13 @@ const GEM_TIERS: GemTier[] = [
     { color: '#6e9de0', scale: 1.4, halfExtent: 0.7, health: 24, xp: 36, weight: 5 }, // rare — blue
     { color: '#a78bfa', scale: 1.85, halfExtent: 0.92, health: 60, xp: 90, weight: 1 }, // epic — purple
 ];
-const GEM_TARGET = 24; // gems kept scattered around the arena
+// gems blanket the WHOLE arena at a fixed density (not a pile near spawn). the
+// target scales with map area, and a minimum spacing keeps them evenly spread.
+const GEM_TARGET = Math.round((MAP_SIZE * MAP_SIZE) / 420); // ≈ one gem per 420 m²
 const GEM_RESPAWN_INTERVAL = 1.5; // s between litter top-ups
-const GEM_SPAWN_AREA = 28; // m — half-extent of the square litter region around spawn
+const GEM_MARGIN = 6; // m — keep gems this far inside the map edges
+const GEM_MIN_SPACING = 12; // m — desired clearance between gems (prevents clumping)
+const GEM_PLACE_TRIES = 16; // candidate samples per gem; most-isolated wins
 const GEM_HOVER = 1.3; // m — float height above the ground (clears the largest tier's bob)
 const GEM_HIT_MARGIN = 0.25; // m — padding on the gem's AABB so shots are forgiving to land
 // client-only idle motion (the crystal visual is built + spun on the client, so
@@ -518,8 +598,6 @@ const HAT_SWING_AMPLITUDE = 0.18; // m side-to-side
 const HAT_SWING_TILT = 0.4; // rad tilt
 const HAT_SWING_DAMPING = 0.35; // 1/s envelope decay
 
-const PLAYER_SPAWN: Vec3 = [8.5, 2, 8.5];
-
 // random unit-ish direction for particle bursts.
 function randomDir(): Vec3 {
     const x = Math.random() * 2 - 1;
@@ -537,7 +615,7 @@ const varyLife = (base: number): number => base * (0.65 + Math.random() * 0.7);
 const _rotation = quat.create();
 const _orientation = quat.create();
 
-// scratch quat for the viewmodel's per-frame pose (base lay + cast punch pitch).
+// scratch quat for the viewmodel's per-frame pose (the base forward lay).
 const _viewmodelRot = quat.create();
 
 // scratch quats for the third-person cast pose (raise arm_right on top of the
@@ -570,21 +648,17 @@ const ProjectileTrait = trait('projectile', {
     // the spawn origin, kept so a mid-flight cast can be re-sent to a late joiner
     // (the sim transform has since advanced past it). clients derive from origin.
     origin: [0, 0, 0] as Vec3,
-    // client-only: `predicted` marks our OWN locally-predicted bolt (it runs the
-    // shared hit query for a zero-latency impact); `lastT` is the elapsed time it
-    // was last simulated to, so each frame sweeps only the new segment. `wallSpawn`
-    // is the smooth render-clock time (`ctx.clock.wall`) this bolt's flight is
-    // anchored to — set once from `ctx.clock.server` on first render, then the
-    // visual advances by per-frame wall delta so motion is smooth at any refresh
-    // rate (the tick clock only steps at 60Hz). -1 = not yet anchored.
-    predicted: false,
-    lastT: 0,
+    // client-only: `wallSpawn` is the smooth render-clock time (`ctx.clock.wall`)
+    // this bolt's flight is anchored to — set once from `ctx.clock.server` on first
+    // render, then the visual advances by per-frame wall delta so motion is smooth
+    // at any refresh rate (the tick clock only steps at 60Hz). -1 = not yet anchored.
     wallSpawn: -1,
 });
 
 // xp pickup. `amount` synced (dirty) so the orb node replicates to clients,
 // which decorate it with a billboard sprite (SpriteTrait isn't itself synced).
-const XpOrbTrait = trait('xp-orb', { amount: ORB_AMOUNT });
+// `spawnTime` is server-only (the server owns orbs) — drives the despawn timer.
+const XpOrbTrait = trait('xp-orb', { amount: ORB_AMOUNT, spawnTime: 0 });
 sync(XpOrbTrait, 'amount', {
     schema: pack.uint16(),
     pack: (t) => t.amount,
@@ -632,7 +706,7 @@ const NpcTrait = trait('npc', {
 // `block` = the struck block's global state id on a terrain hit (0 = body/fizzle);
 // the client uses its dust sprite for the impact.
 // `id` ties the impact to the bolt that caused it so the client destroys the
-// matching local bolt. sent to every client EXCEPT the owner (who predicted it).
+// matching local bolt. broadcast to every client including the owner (no prediction).
 const ImpactCommand = command('wizards.impact', SERVER_TO_CLIENT, pack.object({ id: pack.uint32(), pos: pack.list(pack.float32(), 3), fizzle: pack.boolean(), block: pack.uint32() }));
 const DamageCommand = command('wizards.damage', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3), amount: pack.float32(), tier: pack.int8() })); // tier ≥ 0 colours the pop as that gem; -1 for wizards
 const DeathCommand = command('wizards.death', SERVER_TO_CLIENT, pack.object({ pos: pack.list(pack.float32(), 3) }));
@@ -642,9 +716,12 @@ const GemDeathCommand = command('wizards.gem-death', SERVER_TO_CLIENT, pack.obje
 const UpgradeStat = command('wizards.upgrade', CLIENT_TO_SERVER, pack.object({ stat: pack.uint8() }));
 // a projectile was cast — the entire wire footprint of a (server-simulated) bolt.
 // clients derive its straight-line flight from these; `id` correlates the later
-// ImpactCommand. sent to every client EXCEPT the owner (who predicts it locally).
+// ImpactCommand. broadcast to EVERY client including the owner — bolts are fully
+// server-authoritative (no prediction), so the owner renders its own from this too.
+// `ownerId` lets the owner route the muzzle/recoil to its first-person viewmodel.
 const ProjectileCast = command('wizards.projectile-cast', SERVER_TO_CLIENT, pack.object({
     id: pack.uint32(),
+    ownerId: pack.uint32(),
     origin: pack.list(pack.float32(), 3),
     aim: pack.list(pack.float32(), 4),
     speed: pack.float32(),
@@ -707,6 +784,24 @@ const TrailVariants = TRAIL_MASKS.map((mask, i) =>
 
 const ImpactFx = particlePresets.spark('wizards:impact', { sprite: SparkSprite });
 const DeathFx = particlePresets.smoke('wizards:death', { sprite: SmokeSprite });
+// glowy "gathering energy" spark, emitted continuously at the staff tip while a
+// wizard channels (holds cast). white for now — the elements layer tints it later.
+const ChargeFx = particlePresets.spark('wizards:charge', { sprite: SparkSprite });
+
+// muzzle blast — a short forward spray fired on each authoritative shot (driven by
+// the server's ProjectileCast, never predicted). shared by the first-person
+// viewmodel tip and the third-person staff tip.
+const MUZZLE_COUNT = 5;
+const MUZZLE_SPEED = 8; // m/s along the fire direction
+const MUZZLE_SCATTER = 2.2; // m/s random spread
+const MUZZLE_LIFE = 0.4; // s base (varied ±35%)
+const MUZZLE_SIZE = 0.07; // m
+// channel charge glow — a low rate of small emissive sparks crackling at the tip.
+const CHARGE_RATE = 22; // particles/s while casting
+const CHARGE_SPREAD = 0.08; // m — random offset sphere around the tip
+const CHARGE_SWIRL = 0.7; // m/s — gentle random drift
+const CHARGE_LIFE = 0.25; // s base (varied ±35%)
+const CHARGE_SIZE = 0.03; // m
 
 // gem shatter — a chunky spark burst baked in each tier's colour (the gems are
 // flat-tinted, so a matching shard burst reads as the crystal breaking apart).
@@ -759,29 +854,15 @@ const PickupSound = sound('wizards:pickup', { src: 'assets/sounds/pickup.ogg' })
 
 // ── server: spawn + simulate projectiles ────────────────────────────
 
-// send a server→client command to every player EXCEPT `ownerId` — that owner has
-// already predicted the effect locally, so we keep its own shots off its wire.
-// (NPCs aren't players, so an NPC-owned shot still reaches every client.)
-function sendToOthers<S extends pack.Schema>(
-    ctx: ScriptContext,
-    players: ReturnType<typeof query<[typeof PlayerTrait]>>,
-    ownerId: number,
-    handle: CommandHandle<S, typeof SERVER_TO_CLIENT>,
-    payload: pack.SchemaType<S>,
-): void {
-    for (const [player] of players) {
-        if (player._node.id !== ownerId) send(ctx, handle, payload, player.client);
-    }
-}
-
 // monotonic projectile id (server-only) — correlates a bolt's cast + impact.
 let projectileSeq = 0;
 
 // the ProjectileCast wire payload for a bolt — built from the live shot or a trait,
-// shared by the initial send and the per-joiner re-send so they can't drift.
-function projectileCastPayload(p: { id: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number }) {
+// shared by the initial broadcast and the per-joiner re-send so they can't drift.
+function projectileCastPayload(p: { id: number; ownerId: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number }) {
     return {
         id: p.id,
+        ownerId: p.ownerId,
         origin: [p.origin[0], p.origin[1], p.origin[2]] as Vec3,
         aim: [p.aim[0], p.aim[1], p.aim[2], p.aim[3]] as Quat,
         speed: p.stats.speed,
@@ -791,9 +872,9 @@ function projectileCastPayload(p: { id: number; origin: Vec3; aim: Quat; stats: 
 
 // spawn a projectile as a `realm:'server'` node — it lives ONLY on the server (never
 // replicated) and is simulated there for authoritative hit detection. its entire
-// presence on clients is the `ProjectileCast`, sent to every client EXCEPT the owner
-// (who predicts its own bolt locally); each derives the flight + builds its visual.
-function spawnProjectile(ctx: ScriptContext, players: ReturnType<typeof query<[typeof PlayerTrait]>>, sceneRoot: Node, ownerNode: Node, origin: Vec3, aim: Quat, spawnTime: number, stats: ProjectileStats): void {
+// presence on clients is the `ProjectileCast`, broadcast to every client (including
+// the owner); each derives the flight + builds its visual.
+function spawnProjectile(ctx: ScriptContext, sceneRoot: Node, ownerNode: Node, origin: Vec3, aim: Quat, spawnTime: number, stats: ProjectileStats): void {
     const id = ++projectileSeq;
     const node = createNode({ name: 'projectile', realm: 'server' });
     const transform = addTrait(node, TransformTrait);
@@ -809,16 +890,61 @@ function spawnProjectile(ctx: ScriptContext, players: ReturnType<typeof query<[t
     });
     addChild(sceneRoot, node);
 
-    sendToOthers(ctx, players, ownerNode.id, ProjectileCast, projectileCastPayload({ id, origin, aim, stats, spawnTime }));
+    broadcast(ctx, ProjectileCast, projectileCastPayload({ id, ownerId: ownerNode.id, origin, aim, stats, spawnTime }));
 }
 
-// ground height under (x, z) via a downward voxel raycast (used to drop litter
-// just above the surface so it settles rather than spawning buried).
-const _orbRay = createVoxelRaycastResult();
-function groundYAt(ctx: ScriptContext, x: number, z: number): number {
-    raycastVoxels(_orbRay, ctx.voxels, ctx.voxels.registry, x, 64, z, 0, -1, 0, 80, 0);
-    return _orbRay.hit ? _orbRay.py : 1;
+
+// ── spawn placement ──────────────────────────────────────────────────
+// players + npcs spawn spread out (not piled on one point) so they don't
+// spawn-die. a fresh spawn samples a few ground points near the arena centre
+// and keeps the one with the most clearance from existing combatants.
+const SPAWN_RING = 26; // m — radius around MAP_CENTER spawns scatter within
+const SPAWN_SEP = 7; // m — clearance from others that's "good enough" to stop early
+const SPAWN_LIFT = 2; // m — drop-in height above ground; gravity settles them
+const SPAWN_TRIES = 24; // candidate samples per spawn
+
+// world positions of every wizard in `wizards`, minus `exclude` (the node being
+// (re)spawned) — the set a new spawn should keep clear of.
+function positionsOf(wizards: ReturnType<typeof query<[typeof WizardTrait, typeof TransformTrait]>>, exclude?: number): Vec3[] {
+    const out: Vec3[] = [];
+    for (const [, transform] of wizards) {
+        if (exclude !== undefined && transform._node.id === exclude) continue;
+        const wp = getWorldPosition(transform);
+        out.push([wp[0], wp[1], wp[2]]);
+    }
+    return out;
 }
+
+// pick a ground spawn near the arena centre, as far as possible from `occupied`.
+// uniform over the spawn disc; keeps the most-separated candidate, early-outs
+// once one clears SPAWN_SEP. y snaps to the ground (+ a small drop-in lift).
+function pickSpawnPosition(ctx: ScriptContext, occupied: Vec3[]): Vec3 {
+    let bestX = MAP_CENTER[0];
+    let bestZ = MAP_CENTER[1];
+    let bestClearance = -1;
+    for (let i = 0; i < SPAWN_TRIES; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const rad = Math.sqrt(Math.random()) * SPAWN_RING; // sqrt → uniform over the disc
+        const x = MAP_CENTER[0] + Math.cos(ang) * rad;
+        const z = MAP_CENTER[1] + Math.sin(ang) * rad;
+        let clearance = Infinity;
+        for (const p of occupied) {
+            const d = Math.hypot(x - p[0], z - p[2]);
+            if (d < clearance) clearance = d;
+        }
+        if (clearance > bestClearance) {
+            bestClearance = clearance;
+            bestX = x;
+            bestZ = z;
+        }
+        if (clearance >= SPAWN_SEP) break; // far enough from everyone — take it
+    }
+    return [bestX, groundHeightAt(ctx, bestX, bestZ) + SPAWN_LIFT, bestZ];
+}
+
+// y below which a combatant has fallen out of the world (off a map edge into the
+// void) — they take lethal "fizzle" damage and respawn. terrain floors at y=0.
+const KILL_Y = -8;
 
 // spawn an xp orb as a *voxel-only* AABB body: it falls + settles on terrain
 // (and bounces a touch) but passes through wizards (`collisionMask: 0`) and the
@@ -828,7 +954,7 @@ function groundYAt(ctx: ScriptContext, x: number, z: number): number {
 function spawnOrb(ctx: ScriptContext, x: number, y: number, z: number, amount: number, vel: Vec3): void {
     const node = createNode({ name: 'xp-orb' });
     setPosition(addTrait(node, TransformTrait), [x, y, z]);
-    addTrait(node, XpOrbTrait, { amount });
+    addTrait(node, XpOrbTrait, { amount, spawnTime: ctx.clock.time });
     addTrait(node, AabbBodyTrait, {
         halfExtents: [0.15, 0.15, 0.15],
         motionType: AabbBodyMotionType.DYNAMIC,
@@ -853,6 +979,43 @@ function spawnGem(ctx: ScriptContext, x: number, y: number, z: number, tier: num
     setPosition(addTrait(node, TransformTrait), [x, y, z]);
     addTrait(node, GemTrait, { tier, current: t.health });
     addChild(ctx.node, node);
+}
+
+// world positions of the live gems — the set a new gem should spread away from.
+function gemPositions(gems: ReturnType<typeof query<[typeof GemTrait, typeof TransformTrait]>>): Vec3[] {
+    const out: Vec3[] = [];
+    for (const [, transform] of gems) {
+        const wp = getWorldPosition(transform);
+        out.push([wp[0], wp[1], wp[2]]);
+    }
+    return out;
+}
+
+// pick a ground spot for a new gem, spread across the WHOLE map and away from
+// existing gems. samples uniformly over the (margined) arena and keeps the most-
+// isolated candidate, early-outing once one clears GEM_MIN_SPACING. returns the
+// full spawn position (y snapped to the surface + hover).
+function pickGemSpot(ctx: ScriptContext, existing: Vec3[]): Vec3 {
+    const span = MAP_SIZE - 2 * GEM_MARGIN;
+    let bestX = GEM_MARGIN + Math.random() * span;
+    let bestZ = GEM_MARGIN + Math.random() * span;
+    let bestClearance = -1;
+    for (let i = 0; i < GEM_PLACE_TRIES; i++) {
+        const x = GEM_MARGIN + Math.random() * span;
+        const z = GEM_MARGIN + Math.random() * span;
+        let clearance = Infinity;
+        for (const p of existing) {
+            const d = Math.hypot(x - p[0], z - p[2]);
+            if (d < clearance) clearance = d;
+        }
+        if (clearance > bestClearance) {
+            bestClearance = clearance;
+            bestX = x;
+            bestZ = z;
+        }
+        if (clearance >= GEM_MIN_SPACING) break; // far enough from the others — take it
+    }
+    return [bestX, groundHeightAt(ctx, bestX, bestZ) + GEM_HOVER, bestZ];
 }
 
 // slab test: does the segment from `p` along unit dir `d` for `len` metres enter
@@ -956,26 +1119,18 @@ function lookDirection(look: Vec3, out: Vec3): Vec3 {
 
 // projectiles anchor their flight to `ctx.clock.server - spawnTime`, the shared
 // server timeline both sides read (a joining client seeds it from the server in the
-// join handshake — see the engine's Clock). spawnTime is always stamped with
-// `ctx.clock.server` too: a remote bolt's is the SERVER's value (from the cast), so
-// the client — a touch behind by join latency — places it slightly in the past,
-// landing its despawn cleanly at the impact; our own predicted bolt's is the CLIENT's
-// value at the moment we fire, so it sits at the muzzle/now (zero latency). the
-// client then advances each bolt's visual by wall-clock delta for smooth RAF motion
-// (see combat-vfx) — `ctx.clock.server` itself only steps at the 60Hz tick.
+// join handshake — see the engine's Clock). spawnTime is the SERVER's clock value at
+// the cast, so a client — a touch behind by join latency — places the bolt slightly
+// in the past, landing its despawn cleanly at the authoritative impact. the client
+// then advances each bolt's visual by wall-clock delta for smooth RAF motion (see
+// combat-vfx) — `ctx.clock.server` itself only steps at the 60Hz tick.
 
 script(WorldTrait, 'combat-cast', (ctx) => {
-    // ── client: own our held cast intent; predict our own muzzle + viewmodel ──
+    // ── client: own our held cast intent. that's ALL the client does for firing —
+    // the bolt, muzzle, sound and impact are fully server-authoritative (broadcast
+    // via ProjectileCast / ImpactCommand, rendered in combat-vfx). no prediction. ──
     if (env.client) {
-        // local clock for our PREDICTED cadence (muzzle flash + viewmodel jab),
-        // paced at our own stats.fireRate — the server fires the real projectile
-        // at the same rate off the replicated `casting`, so the two stay in step.
-        let predictedFireAt = -999;
-        let predictedBoltSeq = 0; // negative ids → never clash with a server bolt id
-        const _castDir = vec3.create();
-
         onFrame(ctx, () => {
-            const now = ctx.clock.time;
             const controlNode = getControlNode(ctx);
             const selfWizard = controlNode && getTrait(controlNode, WizardTrait);
             if (!selfWizard) return;
@@ -994,47 +1149,6 @@ script(WorldTrait, 'combat-cast', (ctx) => {
             // synced look + fireRate) and spawns the shots.
             const wantsFire = holdingFire && !!document.pointerLockElement && !!controlNode && !!getTrait(controlNode, PlayerControllerTrait);
             selfWizard.casting = wantsFire; // owner-authored → replicates out
-            if (!wantsFire) return;
-
-            // predict our own cadence locally for zero-latency feel.
-            if (now - predictedFireAt < fireIntervalOf(selfWizard.stats.levels)) return;
-            predictedFireAt = now;
-            selfWizard.lastCastTime = now; // viewmodel jab
-
-            // predict our OWN bolt locally — same origin/aim formula as the server's
-            // firing tick, so the predicted path matches the authoritative one.
-            // combat-vfx renders it + runs the shared hit query (predicted=true) for a
-            // zero-latency bolt + impact; the authoritative cast/impact for it are
-            // ignored/suppressed on this client. negative id never clashes with a
-            // server bolt. damage stays server-authoritative.
-            const controller = getTrait(controlNode, CharacterControllerTrait);
-            if (controller) {
-                const dir = lookDirection(controller.input.look, _castDir);
-                const aim = quat.rotationTo(quat.create(), [0, 0, -1], dir);
-                const wp = getWorldPosition(getTrait(controlNode, TransformTrait)!);
-                const origin: Vec3 = [wp[0] + dir[0] * 1.2, wp[1] + EYE_HEIGHT + dir[1] * 1.2, wp[2] + dir[2] * 1.2];
-                spawnClientBolt(ctx, { id: --predictedBoltSeq, ownerId: controlNode.id, origin, aim, stats: projectileStatsOf(selfWizard.stats.levels), spawnTime: ctx.clock.server, predicted: true });
-            }
-
-            // muzzle flash at the world tip of the held staff, spraying along the
-            // view direction (camera forward = -Z) with a little scatter.
-            const staffNode = controlNode && findChildByName(controlNode, 'wizard:staff');
-            if (staffNode) {
-                const q = getWorldQuaternion(getTrait(resolveCamera(ctx).node, TransformTrait)!);
-                const muzzle = vec3.transformMat4(vec3.create(), STAFF_TIP_LOCAL, getWorldMatrix(getTrait(staffNode, TransformTrait)!)) as Vec3;
-                const forward = vec3.transformQuat(vec3.create(), [0, 0, -1], q);
-                for (let i = 0; i < 5; i++) {
-                    const s = randomDir();
-                    spawnParticle(ctx, ImpactFx, muzzle, {
-                        lifetime: varyLife(0.4),
-                        size: 0.07,
-                        emissive: 1,
-                        velX: forward[0] * 8 + s[0] * 2.2,
-                        velY: forward[1] * 8 + s[1] * 2.2,
-                        velZ: forward[2] * 8 + s[2] * 2.2,
-                    });
-                }
-            }
         });
 
         // knockback — the server directs an impulse to us when our wizard is hit.
@@ -1056,7 +1170,6 @@ script(WorldTrait, 'combat-cast', (ctx) => {
     // stats.fireRate and spawn the authoritative projectile along its look. ──
     if (env.server) {
         const wizards = query(ctx, [WizardTrait, CharacterControllerTrait, AliveTrait, TransformTrait]);
-        const players = query(ctx, [PlayerTrait]); // cast recipients (everyone but the shooter)
         const _fireDir = vec3.create();
 
         onTick(ctx, () => {
@@ -1073,7 +1186,7 @@ script(WorldTrait, 'combat-cast', (ctx) => {
                 const p = getWorldPosition(transform);
                 const origin: Vec3 = [p[0] + dir[0] * 1.2, p[1] + EYE_HEIGHT + dir[1] * 1.2, p[2] + dir[2] * 1.2];
                 // snapshot the wizard's current projectile stats into the shot.
-                spawnProjectile(ctx, players, ctx.node, wizard._node, origin, aim, now, projectileStatsOf(wizard.stats.levels));
+                spawnProjectile(ctx, ctx.node, wizard._node, origin, aim, now, projectileStatsOf(wizard.stats.levels));
             }
         });
     }
@@ -1085,7 +1198,6 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
     const projectiles = query(ctx, [ProjectileTrait, TransformTrait]);
     const targets = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
     const gems = query(ctx, [GemTrait, TransformTrait]); // shootable xp crystals — splashed like wizards
-    const players = query(ctx, [PlayerTrait]); // impact recipients (everyone but the shooter)
 
     // catch a joining client up on bolts already in flight: re-send each one's cast
     // (with its ORIGINAL origin + spawnTime) just to them. the seeded clock then
@@ -1107,23 +1219,26 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
     // carve a voxel sphere + splash-damage characters within `damageRadius`,
     // then tell clients where it landed.
     const handleHit = (id: number, pos: Vec3, ownerId: number, stats: ProjectileStats, block: number) => {
-        const r = Math.floor(stats.terrainDamageRadius);
-        const cx = Math.floor(pos[0]);
-        const cy = Math.floor(pos[1]);
-        const cz = Math.floor(pos[2]);
-        for (let dx = -r; dx <= r; dx++) {
-            for (let dy = -r; dy <= r; dy++) {
-                for (let dz = -r; dz <= r; dz++) {
-                    if (dx * dx + dy * dy + dz * dz > stats.terrainDamageRadius * stats.terrainDamageRadius) continue;
-                    if (getBlock(ctx.voxels, cx + dx, cy + dy, cz + dz) !== BLOCK_AIR) {
-                        setBlock(ctx.voxels, cx + dx, cy + dy, cz + dz, BLOCK_AIR);
+        // terrain carve — only above the first Bullet Damage milestone (radius 0 = none).
+        if (stats.terrainDamageRadius > 0) {
+            const r = Math.floor(stats.terrainDamageRadius);
+            const cx = Math.floor(pos[0]);
+            const cy = Math.floor(pos[1]);
+            const cz = Math.floor(pos[2]);
+            for (let dx = -r; dx <= r; dx++) {
+                for (let dy = -r; dy <= r; dy++) {
+                    for (let dz = -r; dz <= r; dz++) {
+                        if (dx * dx + dy * dy + dz * dz > stats.terrainDamageRadius * stats.terrainDamageRadius) continue;
+                        if (getBlock(ctx.voxels, cx + dx, cy + dy, cz + dz) !== BLOCK_AIR) {
+                            setBlock(ctx.voxels, cx + dx, cy + dy, cz + dz, BLOCK_AIR);
+                        }
                     }
                 }
             }
         }
 
         for (const [wiz, , transform] of targets) {
-            if (transform._node.id === ownerId) continue; // no self-damage
+            const isOwner = transform._node.id === ownerId;
             const wp = getWorldPosition(transform);
             const tx = wp[0];
             const ty = wp[1] + CHEST_OFFSET;
@@ -1133,20 +1248,38 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             const ez = pos[2] - tz;
             if (ex * ex + ey * ey + ez * ez > stats.damageRadius * stats.damageRadius) continue;
 
-            wiz.current = Math.max(0, wiz.current - stats.damage);
-            wiz.lastDamageTime = ctx.clock.time;
-            wiz.lastAttacker = ownerId;
-            broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage, tier: -1 });
+            // the shooter is shoved by their own blast (rocket-jump) but takes no self-damage.
+            if (!isOwner) {
+                wiz.current = Math.max(0, wiz.current - stats.damage);
+                wiz.lastDamageTime = ctx.clock.time;
+                wiz.lastAttacker = ownerId;
+                broadcast(ctx, DamageCommand, { pos: [tx, ty, tz], amount: stats.damage, tier: -1 });
+            }
 
-            // knockback: radial shove away from the blast + an up-kick so it lands on
-            // grounded targets (ground drag would otherwise eat a flat horizontal push).
+            // knockback. enemies get a radial horizontal shove + an up-kick so it lands
+            // on grounded targets (ground drag would eat a flat horizontal push). the
+            // shooter instead gets a full 3D shove away from their own blast — a shot at
+            // your feet launches you up, one at a nearby wall flings you off it.
             // players own their velocity → apply on their own client via a directed
             // command; the server applies it for npcs (which it owns) directly.
-            const kx = tx - pos[0];
-            const kz = tz - pos[2];
-            const klen = Math.hypot(kx, kz) || 1;
             const mag = stats.knockback;
-            const impulse: Vec3 = [(kx / klen) * mag, mag * KNOCKBACK_UP, (kz / klen) * mag];
+            let impulse: Vec3;
+            if (isOwner) {
+                const dx = tx - pos[0];
+                const dy = ty - pos[1];
+                const dz = tz - pos[2];
+                const len = Math.hypot(dx, dy, dz) || 1;
+                impulse = [(dx / len) * mag, (dy / len) * mag + mag * KNOCKBACK_UP, (dz / len) * mag];
+            } else {
+                const kx = tx - pos[0];
+                const kz = tz - pos[2];
+                const klen = Math.hypot(kx, kz) || 1;
+                impulse = [(kx / klen) * mag, mag * KNOCKBACK_UP, (kz / klen) * mag];
+            }
+            // always lift off the ground: floor the upward component so even a
+            // weak or overhead shove pops the target up rather than scrubbing
+            // along the floor (ground drag would eat a purely horizontal push).
+            impulse[1] = Math.max(impulse[1], KNOCKBACK_MIN_UP);
             const node = transform._node;
             const player = getTrait(node, PlayerTrait);
             if (player) {
@@ -1175,7 +1308,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
             broadcast(ctx, DamageCommand, { pos: [gp[0], gp[1], gp[2]], amount: stats.damage, tier: gem.tier });
         }
 
-        sendToOthers(ctx, players, ownerId, ImpactCommand, { id, pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
+        broadcast(ctx, ImpactCommand, { id, pos: [pos[0], pos[1], pos[2]], fizzle: false, block });
     };
 
     onTick(ctx, ({ delta }) => {
@@ -1211,7 +1344,7 @@ script(WorldTrait, 'combat-projectiles', (ctx) => {
         }
 
         for (const s of spent) {
-            if (s.fizzle) sendToOthers(ctx, players, s.ownerId, ImpactCommand, { id: s.id, pos: s.pos, fizzle: true, block: 0 });
+            if (s.fizzle) broadcast(ctx, ImpactCommand, { id: s.id, pos: s.pos, fizzle: true, block: 0 });
             else handleHit(s.id, s.pos, s.ownerId, s.stats, s.block);
             destroyNode(s.node);
         }
@@ -1224,7 +1357,7 @@ script(WorldTrait, 'combat-health', (ctx) => {
     if (!env.server) return;
 
     const alive = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
-    const combatants = query(ctx, [WizardTrait]); // every scoreable entity (players + npcs)
+    const combatants = query(ctx, [WizardTrait, TransformTrait]); // every scoreable entity (players + npcs); transform for spawn spacing
     const respawns: Array<{ node: Node; at: number; pos: Vec3 }> = [];
 
     onTick(ctx, ({ delta }) => {
@@ -1232,6 +1365,11 @@ script(WorldTrait, 'combat-health', (ctx) => {
         const deaths: Array<{ node: Node; pos: Vec3; attacker: number }> = [];
 
         for (const [wiz, , transform] of alive) {
+            // fell out of the world (off a map edge into the void) → lethal fizzle.
+            if (getWorldPosition(transform)[1] < KILL_Y) {
+                wiz.current = 0;
+                wiz.lastAttacker = -1; // environmental — no kill credit
+            }
             if (wiz.current <= 0) {
                 const wp = getWorldPosition(transform);
                 deaths.push({ node: transform._node, pos: [wp[0], wp[1], wp[2]], attacker: wiz.lastAttacker });
@@ -1239,8 +1377,8 @@ script(WorldTrait, 'combat-health', (ctx) => {
             }
             const max = maxHealthOf(wiz.stats.levels);
             if (wiz.current < max && now - wiz.lastDamageTime >= REGEN_DELAY) {
-                // accumulate at the derived regen rate, commit only whole hp so `current` stays discrete.
-                wiz.regenAccum += lvlValue('regenRate', wiz.stats.levels.regenRate) * delta;
+                // accumulate at the flat baseline regen rate, commit only whole hp so `current` stays discrete.
+                wiz.regenAccum += BASE_REGEN_RATE * delta;
                 if (wiz.regenAccum >= 1) {
                     const gained = Math.floor(wiz.regenAccum);
                     wiz.current = Math.min(max, wiz.current + gained);
@@ -1295,8 +1433,9 @@ script(WorldTrait, 'combat-health', (ctx) => {
             // so the orbit pins to a fixed point. both re-added on respawn.
             if (getTrait(d.node, PlayerControllerTrait)) removeTrait(d.node, PlayerControllerTrait);
             if (getTrait(d.node, CharacterControllerTrait)) removeTrait(d.node, CharacterControllerTrait);
-            const npc = getTrait(d.node, NpcTrait);
-            const pos: Vec3 = npc ? [npc.homeX, npc.homeY, npc.homeZ] : PLAYER_SPAWN;
+            // respawn spread out from everyone else (players + npcs alike), on the
+            // ground — no more piling onto a fixed point and spawn-dying.
+            const pos = pickSpawnPosition(ctx, positionsOf(combatants, d.node.id));
             respawns.push({ node: d.node, at: now + RESPAWN_DELAY, pos });
         }
 
@@ -1366,14 +1505,20 @@ script(WorldTrait, 'xp', (ctx) => {
         const wizards = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
 
         onTick(ctx, () => {
+            const now = ctx.clock.time;
             // pickup: for each orb find the nearest alive wizard within the magnet
             // radius — inside grab range it's collected, otherwise it reels toward
-            // them (aimed at chest height). collection is deferred — destroying nodes
-            // mid-iteration is unsafe.
+            // them (aimed at chest height). removal (collected/despawned) is deferred
+            // — destroying nodes mid-iteration is unsafe.
             const collected: Node[] = [];
             for (const [orb, orbBody, orbTransform] of orbs) {
-                if (!orbBody.body) continue; // body installs on the next physics step
                 const op = getWorldPosition(orbTransform);
+                // despawn: aged out, or fell out of the world (same kill plane as players).
+                if (now - orb.spawnTime > ORB_LIFETIME || op[1] < KILL_Y) {
+                    collected.push(orb._node);
+                    continue;
+                }
+                if (!orbBody.body) continue; // body installs on the next physics step
                 let target: { xp: number; _node: Node } | null = null;
                 let targetX = 0;
                 let targetY = 0;
@@ -1428,6 +1573,8 @@ script(WorldTrait, 'xp', (ctx) => {
         const BOB_AMP = 0.09; // m — local vertical float
         const PULSE_FREQ = 3.2; // rad/s — white shimmer
         let lastXp = -1; // local player's xp last frame; blip when it rises
+        let lastHealth = -1; // local player's health last frame; grunt when it drops
+        let lastLevel = -1; // local player's level last frame; chime when it rises
 
         onFrame(ctx, () => {
             const time = ctx.clock.wall; // smooth per-frame clock → no 60Hz step in the bob/pulse
@@ -1440,8 +1587,22 @@ script(WorldTrait, 'xp', (ctx) => {
             if (selfWiz) {
                 // luanti-style: randomise pitch down a little each pickup so rapid
                 // blips vary instead of machine-gunning the same sample.
-                if (lastXp >= 0 && selfWiz.xp > lastXp) playMono(ctx, PickupSound, { detune: -Math.random() * 250 });
+                if (lastXp >= 0 && selfWiz.xp > lastXp) playMono(ctx, PickupSound, { volume: 0.75, detune: -Math.random() * 250 });
                 lastXp = selfWiz.xp;
+                // grunt on taking damage — only on a health drop (regen rises,
+                // respawn jumps up, both stay silent). seeded -1 so join/initial
+                // sync doesn't trigger it.
+                if (selfWiz.current !== lastHealth) console.log(`[bongle combat] self.current ${lastHealth} -> ${selfWiz.current}`);
+                if (lastHealth >= 0 && selfWiz.current < lastHealth) {
+                    playMono(ctx, sounds.playerDamage, { detune: (Math.random() * 2 - 1) * 100 });
+                    console.log('[bongle combat] DAMAGE sound played');
+                }
+                lastHealth = selfWiz.current;
+                // level-up chime — local player only (this runs on the control
+                // node), never for other wizards. seeded -1 so join doesn't fire it.
+                const lvl = levelForXp(selfWiz.xp);
+                if (lastLevel >= 0 && lvl > lastLevel) playMono(ctx, sounds.levelUp);
+                lastLevel = lvl;
             }
 
             for (const [, transform] of orbs) {
@@ -1460,11 +1621,13 @@ script(WorldTrait, 'xp', (ctx) => {
                 const phase = orbNode.id * 1.7; // de-sync the bob/pulse between orbs
                 setPosition(getTrait(visual, TransformTrait)!, [0, Math.sin(time * BOB_FREQ + phase) * BOB_AMP, 0]);
 
-                // gentle white shimmer: mix the tint toward white + a touch of glow.
+                // gentle white shimmer: flash toward white + a touch of glow.
+                // (tint can't brighten — it preserves lightness — so the
+                // toward-white shimmer is a flash, not a tint.)
                 const pulse = Math.sin(time * PULSE_FREQ + phase) * 0.5 + 0.5; // 0..1
                 const sprite = getTrait(visual, SpriteTrait)!;
-                sprite.tint[0] = sprite.tint[1] = sprite.tint[2] = 1;
-                sprite.tint[3] = pulse * 0.25; // up to 25% toward white
+                sprite.flash[0] = sprite.flash[1] = sprite.flash[2] = 1; // white
+                sprite.flash[3] = pulse * 0.25; // up to 25% toward white
                 sprite.glow = pulse * 0.3; // slight additive glow
             }
         });
@@ -1483,15 +1646,29 @@ script(WorldTrait, 'gems', (ctx) => {
         const gems = query(ctx, [GemTrait, TransformTrait]);
         let topUpIn = 0;
 
+        // seed the full litter batch at room start so the arena has gems
+        // immediately, rather than trickling in one per GEM_RESPAWN_INTERVAL.
+        // runs after worldgen's onInit (registered earlier), so the terrain the
+        // ground-raycast reads is already in place. each gem spreads away from
+        // the ones placed so far → even coverage across the whole map.
+        onInit(ctx, () => {
+            const placed: Vec3[] = [];
+            for (let i = 0; i < GEM_TARGET; i++) {
+                const spot = pickGemSpot(ctx, placed);
+                placed.push(spot);
+                spawnGem(ctx, spot[0], spot[1], spot[2], rollGemTier());
+            }
+        });
+
         onTick(ctx, ({ delta }) => {
-            // litter: keep ~GEM_TARGET gems scattered, topping up on a timer.
+            // litter: keep ~GEM_TARGET gems scattered across the map, topping up
+            // on a timer into the most-isolated free spot.
             topUpIn -= delta;
             if (topUpIn <= 0) {
                 topUpIn = GEM_RESPAWN_INTERVAL;
                 if (gems.matches.length < GEM_TARGET) {
-                    const x = PLAYER_SPAWN[0] + (Math.random() - 0.5) * 2 * GEM_SPAWN_AREA;
-                    const z = PLAYER_SPAWN[2] + (Math.random() - 0.5) * 2 * GEM_SPAWN_AREA;
-                    spawnGem(ctx, x, groundYAt(ctx, x, z) + GEM_HOVER, z, rollGemTier());
+                    const spot = pickGemSpot(ctx, gemPositions(gems));
+                    spawnGem(ctx, spot[0], spot[1], spot[2], rollGemTier());
                 }
             }
 
@@ -1542,6 +1719,14 @@ script(WorldTrait, 'gems', (ctx) => {
             const fx = GemShatterFx[tier] ?? GemShatterFx[0]!;
             const t = GEM_TIERS[tier] ?? GEM_TIERS[0]!;
             const at: Vec3 = [pos[0], pos[1], pos[2]];
+            // shatter sound — random glass-break variant, positional with the
+            // arena falloff. higher tiers ring out lower + a touch louder.
+            const glass = [sounds.breakGlass1, sounds.breakGlass2, sounds.breakGlass3][Math.floor(Math.random() * 3)]!;
+            playAt(ctx, glass, at, {
+                falloff: { ref: 12, rolloff: 0.4 },
+                volume: 0.9 + tier * 0.15,
+                detune: -tier * 200 + (Math.random() * 2 - 1) * 120,
+            });
             const count = 18 + tier * 12;
             const speed = 5 + tier * 2;
             for (let i = 0; i < count; i++) {
@@ -1628,19 +1813,12 @@ script(WorldTrait, 'gems', (ctx) => {
 script(WorldTrait, 'combat-npcs', (ctx) => {
     if (!env.server) return;
 
-    // homes near the player spawn. spawned a little high — the character
-    // controller's gravity settles them onto the ground (same as players,
-    // who join at y=2 and fall).
-    const HOMES: Vec3[] = [
-        [4.5, 2, 8.5],
-        [12.5, 2, 8.5],
-        [8.5, 2, 12.5],
-    ];
     const NPC_COLORS: Vec4[] = [
         [0.15, 0.75, 0.3, 0.8], // green
         [0.95, 0.6, 0.1, 0.8], // orange
         [0.1, 0.7, 0.85, 0.8], // teal
     ];
+    const NPC_COUNT = NPC_COLORS.length; // dummies spawned at room init, spread apart
 
     const CHASE_RANGE = 30; // m — only pursue a player within this
     const REPATH_INTERVAL = 0.5; // s between repaths
@@ -1661,14 +1839,47 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
     const JUMP_INTERVAL_MIN = 1.5; // s — min between hops while engaged
     const JUMP_INTERVAL_MAX = 3.5; // s — max
 
+    // ── idle behaviour (no combat target) ───────────────────────────────
+    // an idle npc runs a short "activity", then rolls the next one: mostly
+    // wandering (leashed near the arena centre so it stays where players are), the
+    // odd emote for personality, and an opportunistic potshot at a nearby gem.
+    const WANDER_RADIUS = 36; // m around MAP_CENTER an idle npc roams within (the leash)
+    const WANDER_FLOOD_MAX = 300; // max cells the wander flood-fill explores (the iteration cap)
+    const WANDER_TIMEOUT = 7; // s — re-roll if a wander hasn't arrived by now (anti-stuck)
+    const GEM_NOTICE_RADIUS = 12; // m — only seek a gem this close when idle (opportunistic)
+    const SEEKGEM_TIMEOUT = 6; // s — give up chasing a gem after this
+    const HALF_PI = Math.PI / 2; // level gaze for look[2] (0 = straight down, π = straight up)
+    const GAZE_DOWN = 0.45; // look[2] while "looking around" — eyes toward the ground
+    const GAZE_UP = Math.PI * 0.95; // look[2] while shooting skyward — near-straight up
+    const IDLE_LOOK_SPEED = 1.1; // rad/s — gentle yaw sweep while "looking around"
+    const IDLE_SPIN_SPEED = 5; // rad/s — fast dizzy spin
+    const IDLE_LOOK: readonly [number, number] = [1.5, 3]; // s — emote durations [min,max]
+    const IDLE_SPIN: readonly [number, number] = [0.8, 1.6];
+    const IDLE_SHOOTUP: readonly [number, number] = [0.9, 1.4];
+    const IDLE_LOITER: readonly [number, number] = [1, 2.5];
+
+    const IdleAction = { Wander: 0, SeekGem: 1, LookAround: 2, Spin: 3, ShootUp: 4, Loiter: 5 } as const;
+    type IdleAction = (typeof IdleAction)[keyof typeof IdleAction];
+    // relative weights (occasional-seasoning feel — mostly wander, the rest sprinkled).
+    // SeekGem only enters the roll when a gem is within GEM_NOTICE_RADIUS.
+    const IDLE_BASE_WEIGHTS: [IdleAction, number][] = [
+        [IdleAction.Wander, 50],
+        [IdleAction.LookAround, 9],
+        [IdleAction.Spin, 8],
+        [IdleAction.ShootUp, 7],
+        [IdleAction.Loiter, 10],
+    ];
+    const IDLE_SEEKGEM_WEIGHT = 22;
+    const randRange = ([lo, hi]: readonly [number, number]): number => lo + Math.random() * (hi - lo);
+
     // npc leveling: each (re)spawn, scale to the players' average level ± spread
     // (floored), then spend all points down an archetype's priority order.
     const MIN_NPC_LEVEL = 1;
     const NPC_LEVEL_SPREAD = 2; // ± levels around the player average
     const NPC_ARCHETYPES: StatKey[][] = [
-        ['damage', 'maxHealth', 'moveSpeed', 'fireRate', 'regenRate', 'speed', 'splashRadius', 'knockback'], // bruiser
-        ['damage', 'speed', 'fireRate', 'knockback', 'splashRadius', 'moveSpeed', 'maxHealth', 'regenRate'], // sniper
-        ['maxHealth', 'regenRate', 'splashRadius', 'knockback', 'moveSpeed', 'damage', 'fireRate', 'speed'], // tank
+        ['damage', 'maxHealth', 'moveSpeed', 'fireRate', 'speed', 'blast'], // bruiser
+        ['damage', 'speed', 'fireRate', 'blast', 'moveSpeed', 'maxHealth'], // sniper
+        ['maxHealth', 'blast', 'moveSpeed', 'damage', 'fireRate', 'speed'], // tank
     ];
 
     const npcs = query(ctx, [NpcTrait, CharacterControllerTrait, TransformTrait]);
@@ -1676,6 +1887,7 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
     // AND other NPCs); each NPC skips itself.
     const combatants = query(ctx, [WizardTrait, AliveTrait, TransformTrait]);
     const players = query(ctx, [PlayerTrait, WizardTrait]); // for the player-level average
+    const idleGems = query(ctx, [GemTrait, TransformTrait]); // opportunistic idle targets
 
     // average level of alive players (0 if none).
     const avgPlayerLevel = (): number => {
@@ -1713,7 +1925,7 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
         }
     };
 
-    type Brain = { path: Vec3[]; waypoint: number; repathIn: number; fireWindowIn: number; firing: boolean; strafeDir: number; strafeIn: number; jumpIn: number; leveled: boolean };
+    type Brain = { path: Vec3[]; waypoint: number; repathIn: number; fireWindowIn: number; firing: boolean; strafeDir: number; strafeIn: number; jumpIn: number; leveled: boolean; idleAction: IdleAction; idleUntil: number; wanderTarget: Vec3 | null; idleSpinDir: number };
     const brains = new Map<number, Brain>();
 
     const worldToCell = (p: Vec3): Vec3 => [Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2])];
@@ -1725,9 +1937,16 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
         controller.input.jump = false;
     };
 
-    // turn to look from one world point toward another (yaw only).
-    const face = (controller: CharacterControllerTrait, fromX: number, fromZ: number, toX: number, toZ: number) => {
-        controller.input.look[1] = Math.atan2(-(toX - fromX), -(toZ - fromZ));
+    // aim the controller's look (yaw + pitch) from `eye` at a world `target` — the
+    // same `look` the player's camera drives, read by the server firing tick via
+    // lookDirection. shared by the combat aim + the idle gem potshot.
+    const aimAt = (controller: CharacterControllerTrait, eye: Vec3, target: Vec3) => {
+        const dx = target[0] - eye[0];
+        const dy = target[1] - eye[1];
+        const dz = target[2] - eye[2];
+        controller.input.look[1] = Math.atan2(-dx, -dz); // yaw
+        const dist = Math.hypot(dx, dy, dz) || 1;
+        controller.input.look[2] = Math.acos(Math.max(-1, Math.min(1, -dy / dist))); // pitch
     };
 
     // cheap sampled line-of-sight: any non-air cell between the two points
@@ -1746,11 +1965,134 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
         return true;
     };
 
+    // walk along brain.path toward `goalCell`, optionally recomputing it this tick.
+    // writes the controller's yaw/move/jump and returns 'arrived' once the path is
+    // exhausted (caller decides what's next), else 'traveling'. shared by chase +
+    // wander + gem-seek so they all use one A* + step-up walker.
+    const followPath = (brain: Brain, controller: CharacterControllerTrait, pos: Vec3, goalCell: Vec3, doRepath: boolean): 'arrived' | 'traveling' => {
+        if (doRepath) {
+            brain.path = voxelNav.findGroundPath(ctx.voxels, worldToCell(pos), goalCell, { maxIterations: NPC_PATH_MAX_ITERATIONS }) ?? [];
+            brain.waypoint = 1; // skip our own starting cell
+        }
+        while (brain.waypoint < brain.path.length) {
+            const cell = brain.path[brain.waypoint]!;
+            const hx = cell[0] + 0.5 - pos[0];
+            const hz = cell[2] + 0.5 - pos[2];
+            if (hx * hx + hz * hz > WAYPOINT_REACHED * WAYPOINT_REACHED) break;
+            brain.waypoint++;
+        }
+        if (brain.waypoint >= brain.path.length) return 'arrived';
+        const cell = brain.path[brain.waypoint]!;
+        controller.input.look[1] = Math.atan2(-(cell[0] + 0.5 - pos[0]), -(cell[2] + 0.5 - pos[2]));
+        controller.input.look[2] = HALF_PI; // level gaze while walking
+        controller.input.move[0] = 0;
+        controller.input.move[1] = 1;
+        controller.input.jump = cell[1] > Math.floor(pos[1]); // hop up steps
+        return 'traveling';
+    };
+
+    // nearest live gem within `maxDist` of `pos` (world position), or null.
+    const nearestGemWithin = (pos: Vec3, maxDist: number): Vec3 | null => {
+        let best: Vec3 | null = null;
+        let bestSq = maxDist * maxDist;
+        for (const [gem, transform] of idleGems) {
+            if (gem.current <= 0) continue;
+            const gp = getWorldPosition(transform);
+            const dx = gp[0] - pos[0];
+            const dy = gp[1] - pos[1];
+            const dz = gp[2] - pos[2];
+            const distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < bestSq) {
+                bestSq = distSq;
+                best = [gp[0], gp[1], gp[2]];
+            }
+        }
+        return best;
+    };
+
+    // wander destination: a random cell reachable on foot from `pos`, kept within
+    // WANDER_RADIUS of the arena centre (the leash). drawn from the flood-fill, so
+    // pathing to it can't fail. if the npc is boxed outside the leash, it heads to
+    // the reachable cell nearest the centre, so it drifts back. null only when
+    // genuinely boxed in (no walkable neighbours at all).
+    const pickWanderTarget = (pos: Vec3): Vec3 | null => {
+        const reachable = floodFillGround(ctx.voxels, worldToCell(pos), WANDER_FLOOD_MAX);
+        if (reachable.length <= 1) return null;
+        const distSqToCenter = (c: Vec3): number => {
+            const dx = c[0] + 0.5 - MAP_CENTER[0];
+            const dz = c[2] + 0.5 - MAP_CENTER[1];
+            return dx * dx + dz * dz;
+        };
+        const inLeash = reachable.filter((c) => distSqToCenter(c) <= WANDER_RADIUS * WANDER_RADIUS);
+        if (inLeash.length > 0) return inLeash[Math.floor(Math.random() * inLeash.length)]!;
+        // outside the leash → walk back toward the centre.
+        return reachable.reduce((best, c) => (distSqToCenter(c) < distSqToCenter(best) ? c : best), reachable[0]!);
+    };
+
+    // roll the next idle activity (weighted) and stamp its deadline + scratch onto
+    // the brain. SeekGem only competes when a gem is within notice range.
+    const pickIdleAction = (brain: Brain, pos: Vec3, now: number): void => {
+        const gemNear = nearestGemWithin(pos, GEM_NOTICE_RADIUS) !== null;
+        let total = gemNear ? IDLE_SEEKGEM_WEIGHT : 0;
+        for (const [, w] of IDLE_BASE_WEIGHTS) total += w;
+
+        let r = Math.random() * total;
+        let action: IdleAction = IdleAction.Wander;
+        if (gemNear && r < IDLE_SEEKGEM_WEIGHT) {
+            action = IdleAction.SeekGem;
+        } else {
+            if (gemNear) r -= IDLE_SEEKGEM_WEIGHT;
+            for (const [a, w] of IDLE_BASE_WEIGHTS) {
+                if (r < w) {
+                    action = a;
+                    break;
+                }
+                r -= w;
+            }
+        }
+
+        brain.idleAction = action;
+        switch (action) {
+            case IdleAction.Wander:
+                brain.wanderTarget = pickWanderTarget(pos);
+                brain.idleUntil = now + WANDER_TIMEOUT;
+                brain.path = [];
+                brain.waypoint = 0;
+                brain.repathIn = 0;
+                break;
+            case IdleAction.SeekGem:
+                brain.idleUntil = now + SEEKGEM_TIMEOUT;
+                brain.path = [];
+                brain.waypoint = 0;
+                brain.repathIn = 0;
+                break;
+            case IdleAction.LookAround:
+                brain.idleUntil = now + randRange(IDLE_LOOK);
+                break;
+            case IdleAction.Spin:
+                brain.idleSpinDir = Math.random() < 0.5 ? 1 : -1;
+                brain.idleUntil = now + randRange(IDLE_SPIN);
+                break;
+            case IdleAction.ShootUp:
+                brain.idleUntil = now + randRange(IDLE_SHOOTUP);
+                break;
+            case IdleAction.Loiter:
+                brain.idleUntil = now + randRange(IDLE_LOITER);
+                break;
+        }
+    };
+
     onInit(ctx, () => {
-        HOMES.forEach((home, i) => {
+        // spawn each dummy spread out from the ones already placed (and from the
+        // arena centre where players first appear), so they don't cluster.
+        const placed: Vec3[] = [];
+        const npcNodes: Node[] = [];
+        for (let i = 0; i < NPC_COUNT; i++) {
+            const home = pickSpawnPosition(ctx, placed);
+            placed.push(home);
             const node = createNode({ name: `npc-wizard-${i}` });
             setPosition(addTrait(node, TransformTrait), home);
-            addCharacter(node); // mounts the 6-bone rig synchronously
+            addCharacter(node, { modelId: wizardAvatar.modelId }); // wizard rig is the fallback; a platform avatar swaps in below
             // physics-grounded like a player: the server (owner of this
             // ownerless node) runs the controller sim — gravity, ground,
             // slopes. the steering below writes `input.move` / `look`;
@@ -1758,16 +2100,26 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
             addTrait(node, CharacterControllerTrait);
             addChild(ctx.node, node);
 
-            // WizardTrait drives the client-side hat tint by color and names the
-            // dummy on the board.
-            addTrait(node, WizardTrait, { color: NPC_COLORS[i % NPC_COLORS.length], name: `Dummy ${i + 1}` });
+            // plausible name (not "Dummy N") so NPCs read as people; hat tint by color.
+            addTrait(node, WizardTrait, { color: NPC_COLORS[i % NPC_COLORS.length], name: randomDisplayName() });
             attachGear(node); // staff + hat onto the rig
 
             // combat state: killable dummy that respawns at home. WizardTrait
             // carries the health pool; AliveTrait marks it killable.
             addTrait(node, AliveTrait);
             addTrait(node, NpcTrait, { homeX: home[0], homeY: home[1], homeZ: home[2], archetype: i % NPC_ARCHETYPES.length });
-        });
+            npcNodes.push(node);
+        }
+
+        // dress NPCs in real, varied avatars the platform supplies (popular/random —
+        // the host decides). one bulk sample, round-robin onto the dummies; when the
+        // platform sources none (dev/offline) they keep the wizard rig set above.
+        sampleAvatars(ctx)
+            .then((pool) => {
+                if (!pool.length) return;
+                npcNodes.forEach((node, i) => applyAvatar(ctx, node, pool[i % pool.length]!));
+            })
+            .catch(() => {}); // host error → keep the wizard fallback
     });
 
     onTick(ctx, ({ delta }) => {
@@ -1775,6 +2127,20 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
         // round-robin A* across ticks: a per-tick budget so many NPCs coming due on
         // the same tick don't all pathfind at once (the source of the tick spikes).
         let repathBudget = NPC_REPATHS_PER_TICK;
+
+        // walk a brain toward `goal`, repathing on its timer while the shared budget
+        // holds. closes over this tick's `delta` + `repathBudget`. returns followPath's
+        // 'arrived' | 'traveling'. used by chase, wander, and gem-seek alike.
+        const stepToward = (brain: Brain, controller: CharacterControllerTrait, pos: Vec3, goal: Vec3) => {
+            brain.repathIn -= delta;
+            const doRepath = brain.repathIn <= 0 && repathBudget > 0;
+            if (doRepath) {
+                repathBudget--;
+                brain.repathIn = REPATH_INTERVAL;
+            }
+            return followPath(brain, controller, pos, goal, doRepath);
+        };
+
         for (const [npc, controller, transform] of npcs) {
             // the server owns npcs, so it authors their held `casting` intent (the
             // same input the player's client authors for itself). default it closed
@@ -1795,6 +2161,10 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
                     strafeIn: 0,
                     jumpIn: Math.random() * JUMP_INTERVAL_MAX,
                     leveled: false,
+                    idleAction: IdleAction.Loiter,
+                    idleUntil: 0, // 0 → roll an idle activity on the first idle tick
+                    wanderTarget: null,
+                    idleSpinDir: 1,
                 };
                 brains.set(npc._node.id, brain);
             }
@@ -1835,7 +2205,69 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
             }
 
             if (!target) {
-                idle(controller);
+                // no combatant in range → run an idle activity. (re)roll when the
+                // current one's deadline passes; `casting` was already defaulted off.
+                if (now >= brain.idleUntil) pickIdleAction(brain, pos, now);
+
+                switch (brain.idleAction) {
+                    case IdleAction.SeekGem: {
+                        const gem = nearestGemWithin(pos, GEM_NOTICE_RADIUS * 1.5); // a little hysteresis past the notice radius
+                        if (!gem) {
+                            brain.idleUntil = 0; // gem gone → roll something else next tick
+                            idle(controller);
+                            break;
+                        }
+                        const eye: Vec3 = [pos[0], pos[1] + EYE_HEIGHT, pos[2]];
+                        const dx = gem[0] - eye[0];
+                        const dy = gem[1] - eye[1];
+                        const dz = gem[2] - eye[2];
+                        if (dx * dx + dy * dy + dz * dz < CAST_RANGE * CAST_RANGE && clearShot(eye, gem)) {
+                            // in range with a clear line → stop, aim at it, and fire.
+                            idle(controller);
+                            aimAt(controller, eye, gem);
+                            if (wiz) wiz.casting = true;
+                        } else {
+                            stepToward(brain, controller, pos, worldToCell(gem)); // walk toward it
+                        }
+                        break;
+                    }
+                    case IdleAction.Wander: {
+                        if (!brain.wanderTarget) {
+                            brain.idleUntil = 0;
+                            idle(controller);
+                            break;
+                        }
+                        if (stepToward(brain, controller, pos, worldToCell(brain.wanderTarget)) === 'arrived') {
+                            brain.idleUntil = 0; // reached it → roll the next activity
+                            idle(controller);
+                        }
+                        break;
+                    }
+                    case IdleAction.LookAround: {
+                        idle(controller);
+                        controller.input.look[1] += IDLE_LOOK_SPEED * delta; // slow sweep…
+                        controller.input.look[2] = GAZE_DOWN; // …gaze toward the ground
+                        break;
+                    }
+                    case IdleAction.Spin: {
+                        idle(controller);
+                        controller.input.look[1] += brain.idleSpinDir * IDLE_SPIN_SPEED * delta; // dizzy whirl
+                        controller.input.look[2] = HALF_PI;
+                        break;
+                    }
+                    case IdleAction.ShootUp: {
+                        idle(controller);
+                        controller.input.look[2] = GAZE_UP; // aim near-straight up
+                        if (wiz) wiz.casting = true; // celebratory fountain
+                        break;
+                    }
+                    default: {
+                        // Loiter — just stand a beat, gaze level.
+                        idle(controller);
+                        controller.input.look[2] = HALF_PI;
+                        break;
+                    }
+                }
                 continue;
             }
 
@@ -1848,12 +2280,9 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
             const toAimZ = aimPoint[2] - eye[2];
             const inCastRange = toAimX * toAimX + toAimY * toAimY + toAimZ * toAimZ < CAST_RANGE * CAST_RANGE;
             if (inCastRange && clearShot(eye, aimPoint)) {
-                // aim at the target: yaw (face) + pitch, written into the same
-                // `look` the player's camera drives. the server firing tick reads
-                // it via lookDirection — identical path for npcs and players.
-                face(controller, pos[0], pos[2], target[0], target[2]);
-                const dist = Math.hypot(toAimX, toAimY, toAimZ) || 1;
-                controller.input.look[2] = Math.acos(Math.max(-1, Math.min(1, -toAimY / dist))); // pitch
+                // aim at the target (chest) — yaw + pitch into the same `look` the
+                // server firing tick reads via lookDirection (identical for npcs + players).
+                aimAt(controller, eye, aimPoint);
 
                 // strafe sideways (facing the player → move[0] is left/right),
                 // reversing direction on a jittered timer so they weave both ways.
@@ -1881,39 +2310,10 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
                 continue;
             }
 
-            // repath on a timer toward the current nearest player — but only while the
-            // per-tick budget holds. an NPC that comes due past the budget keeps
-            // repathIn ≤ 0 and is serviced on a later tick (and resetting it then
-            // staggers it off the others, so the bunching doesn't recur).
-            brain.repathIn -= delta;
-            if (brain.repathIn <= 0 && repathBudget > 0) {
-                repathBudget--;
-                brain.repathIn = REPATH_INTERVAL;
-                brain.path = voxelNav.findGroundPath(ctx.voxels, worldToCell(pos), worldToCell(target), { maxIterations: NPC_PATH_MAX_ITERATIONS }) ?? [];
-                brain.waypoint = 1; // skip our own starting cell
-            }
-
-            // advance past waypoints we've effectively reached (horizontal).
-            while (brain.waypoint < brain.path.length) {
-                const cell = brain.path[brain.waypoint]!;
-                const hx = cell[0] + 0.5 - pos[0];
-                const hz = cell[2] + 0.5 - pos[2];
-                if (hx * hx + hz * hz > WAYPOINT_REACHED * WAYPOINT_REACHED) break;
-                brain.waypoint++;
-            }
-
-            if (brain.waypoint >= brain.path.length) {
-                idle(controller);
-                continue;
-            }
-
-            // steer toward the current waypoint: face it (yaw) and walk forward.
-            const cell = brain.path[brain.waypoint]!;
-            controller.input.look[1] = Math.atan2(-(cell[0] + 0.5 - pos[0]), -(cell[2] + 0.5 - pos[2]));
-            controller.input.move[0] = 0;
-            controller.input.move[1] = 1;
-            // jump when the waypoint steps up above our feet.
-            controller.input.jump = cell[1] > Math.floor(pos[1]);
+            // chase: path toward the nearest target (shares the per-tick A* budget;
+            // NPCs due past the budget are serviced on a later tick, which staggers
+            // them off each other). reaching the path's end still out of cast range idles.
+            if (stepToward(brain, controller, pos, worldToCell(target)) === 'arrived') idle(controller);
         }
     });
 });
@@ -1946,6 +2346,13 @@ const dustParticleFor = (sprite: SpriteHandle): ParticleHandle => {
 // ImpactCommand (remote bolts) and the client-side predicted hit (own bolts), so
 // both look identical. `block` (>0) → that block's dust sprite; else a white spark.
 function spawnImpactVfx(ctx: ScriptContext, pos: Vec3, fizzle: boolean, block: number): void {
+    // a real hit lands its impact sound here (covers both the authoritative
+    // ImpactCommand and the owner's locally-predicted hit). a fizzle just
+    // expired mid-air, so it stays silent.
+    // gentle falloff: full up close, still clearly audible across the arena.
+    // (engine default ref=1/rolloff=1 is ~1/distance — a 20m hit lands at ~5%.)
+    if (!fizzle) playAt(ctx, sounds.impact, pos, { falloff: { ref: 12, rolloff: 0.4 }, detune: (Math.random() * 2 - 1) * 120 });
+
     const dust = block > 0 ? ctx.blocks.particles[block]?.dust : undefined;
     const count = fizzle ? 3 : dust?.length ? 48 : 14; // way more debris for terrain
     const speed = fizzle ? 3 : 6.5;
@@ -1976,13 +2383,44 @@ function spawnImpactVfx(ctx: ScriptContext, pos: Vec3, fizzle: boolean, block: n
     }
 }
 
+// muzzle blast at `at` (world space) spraying along unit `forward` with scatter.
+// fired on each authoritative ProjectileCast — never predicted.
+function muzzleBurst(ctx: ScriptContext, at: Vec3, forward: Vec3): void {
+    for (let i = 0; i < MUZZLE_COUNT; i++) {
+        const s = randomDir();
+        spawnParticle(ctx, ImpactFx, at, {
+            lifetime: varyLife(MUZZLE_LIFE),
+            size: MUZZLE_SIZE,
+            emissive: 1,
+            velX: forward[0] * MUZZLE_SPEED + s[0] * MUZZLE_SCATTER,
+            velY: forward[1] * MUZZLE_SPEED + s[1] * MUZZLE_SCATTER,
+            velZ: forward[2] * MUZZLE_SPEED + s[2] * MUZZLE_SCATTER,
+        });
+    }
+}
+
+// one charge spark at `at` (world space) — a small emissive crackle with gentle
+// random drift. callers emit these at CHARGE_RATE while a wizard is channeling.
+function chargeGlow(ctx: ScriptContext, at: Vec3): void {
+    const o = randomDir();
+    const v = randomDir();
+    spawnParticle(ctx, ChargeFx, [at[0] + o[0] * CHARGE_SPREAD, at[1] + o[1] * CHARGE_SPREAD, at[2] + o[2] * CHARGE_SPREAD], {
+        lifetime: varyLife(CHARGE_LIFE),
+        size: CHARGE_SIZE,
+        glow: 1,
+        emissive: 1,
+        velX: v[0] * CHARGE_SWIRL,
+        velY: v[1] * CHARGE_SWIRL,
+        velZ: v[2] * CHARGE_SWIRL,
+    });
+}
+
 // build a client-only bolt: a `realm:'client'` ProjectileTrait node (never
-// networked) with the cloned projectile mesh. used for BOTH remote bolts (from a
-// ProjectileCast) and our own predicted bolts — they share the render + (for
-// predicted) the hit query in combat-vfx. clients derive the flight from `origin`.
+// networked) with the cloned projectile mesh. spawned from a ProjectileCast — every
+// bolt is server-authoritative now, including our own. clients derive the flight
+// from `origin` + the seeded clock and render the visual; damage stays on the server.
 const _boltDir = vec3.create();
-const _boltSegStart = vec3.create();
-function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number; predicted: boolean }): void {
+function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number; origin: Vec3; aim: Quat; stats: ProjectileStats; spawnTime: number }): void {
     const node = createNode({ name: 'bolt', realm: 'client' });
     setPosition(addTrait(node, TransformTrait), info.origin);
     addTrait(node, ProjectileTrait, {
@@ -1992,8 +2430,6 @@ function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number
         aim: [info.aim[0], info.aim[1], info.aim[2], info.aim[3]],
         stats: info.stats,
         origin: [info.origin[0], info.origin[1], info.origin[2]],
-        predicted: info.predicted,
-        lastT: 0,
     });
     const visual = cloneModel(wizardModels.nodes.projectile);
     visual.name = 'bolt:visual';
@@ -2005,33 +2441,47 @@ function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number
 script(WorldTrait, 'combat-vfx', (ctx) => {
     if (!env.client) return;
 
-    // all client bolts (remote + our predicted ones) are `realm:'client'`
-    // ProjectileTrait nodes — one query renders + simulates them uniformly.
+    // every bolt is a `realm:'client'` ProjectileTrait node (never networked) — one
+    // query renders them all uniformly, ours and others' alike.
     const clientBolts = query(ctx, [ProjectileTrait, TransformTrait]);
+    const _muzzleFwd = vec3.create();
 
-    // for the predicted hit query (our own bolts) — the same `castProjectileSegment`
-    // the server runs, against the client's identical rigid world (terrain + bodies).
-    const gems = query(ctx, [GemTrait, TransformTrait]);
-    const rayCollector = createClosestCastRayCollector();
-    const raySettings = createDefaultCastRaySettings();
-    let rayFilter: ReturnType<typeof crashFilter.forWorld> | null = null;
-
-    // a remote bolt was cast — spawn its local copy. the server only sends this to
-    // non-owners, so we never get (or have to filter out) our own predicted shots.
-    listen(ctx, ProjectileCast, ({ id, origin, aim, speed, spawnTime }) => {
+    // a bolt was cast — spawn its local copy + fire the muzzle. broadcast to everyone
+    // (no prediction), so we branch on `ownerId`: our own cast routes the muzzle to
+    // the first-person viewmodel tip (handled in `viewmodel` off `lastCastTime`) and
+    // plays the loud non-positional sound; others' casts pop a muzzle at the world
+    // origin and a positional sound that pans/falls off with distance.
+    listen(ctx, ProjectileCast, ({ id, ownerId, origin, aim, speed, spawnTime }) => {
         spawnClientBolt(ctx, {
             id,
-            ownerId: -1, // remote bolts don't run the hit query, so the owner is unused
+            ownerId,
             origin: [origin[0], origin[1], origin[2]],
             aim: [aim[0], aim[1], aim[2], aim[3]],
-            stats: { ...DEFAULT_PROJECTILE_STATS, speed }, // only `speed` is used to render a remote bolt
+            stats: { ...DEFAULT_PROJECTILE_STATS, speed }, // only `speed` is used to render a bolt
             spawnTime,
-            predicted: false,
         });
+
+        const controlNode = getControlNode(ctx);
+        if (controlNode && ownerId === controlNode.id) {
+            // our own cast: loud non-positional sound; stamp the cast edge so the
+            // viewmodel fires the muzzle + recoil at the staff tip in view.
+            const selfWizard = getTrait(controlNode, WizardTrait);
+            if (selfWizard) selfWizard.lastCastTime = ctx.clock.time;
+            playMono(ctx, sounds.cast, { volume: 0.5, detune: (Math.random() * 2 - 1) * 150 });
+            // only the third-person view needs a world-space muzzle; first person gets
+            // it at the viewmodel tip instead (avoids a doubled blast downrange).
+            if (getTrait(controlNode, PlayerControllerTrait)?.config.perspective !== 'first') {
+                muzzleBurst(ctx, [origin[0], origin[1], origin[2]], vec3.transformQuat(_muzzleFwd, [0, 0, -1], aim as Quat));
+            }
+        } else {
+            // another wizard's cast: positional sound + a world-space muzzle at its staff.
+            playAt(ctx, sounds.cast, [origin[0], origin[1], origin[2]], { volume: 0.4, falloff: { ref: 6, rolloff: 0.9 }, detune: (Math.random() * 2 - 1) * 150 });
+            muzzleBurst(ctx, [origin[0], origin[1], origin[2]], vec3.transformQuat(_muzzleFwd, [0, 0, -1], aim as Quat));
+        }
     });
 
-    // a bolt landed — destroy its local copy and play the impact. only non-owners
-    // receive this (the owner predicted the impact locally), so no self-filtering.
+    // a bolt landed — destroy its local copy and play the impact. broadcast to every
+    // client now (no prediction), so this also covers our own bolts.
     listen(ctx, ImpactCommand, ({ id, pos, fizzle, block }) => {
         for (const [bolt, transform] of clientBolts) {
             if (bolt.id === id) {
@@ -2076,23 +2526,22 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
     });
 
     // per frame: derive each client bolt's position from its cast, spin it, trail it,
-    // run the predicted hit query for our own bolts, and reap on hit/expiry. no synced
-    // positions — the whole flight is reconstructed locally from the seeded clock.
+    // and reap on expiry. no synced positions — the whole flight is reconstructed
+    // locally from the seeded clock; the server owns hits + sends the impact.
     let frameNo = 0;
     onFrame(ctx, () => {
         frameNo++;
-        rayFilter ??= crashFilter.forWorld(ctx.physics.rigid.world);
         const serverNow = ctx.clock.server; // shared timeline (anchors the flight; see below)
         const wallNow = ctx.clock.wall; // smooth per-render-frame clock (engine-provided)
         const reap: Node[] = []; // destroying mid-iteration is unsafe
         for (const [bolt, transform] of clientBolts) {
             const speed = bolt.stats.speed;
             // anchor the flight to the smooth wall clock on first sight, using
-            // `serverNow` to place it correctly along its path (a remote bolt's
-            // spawnTime is the SERVER clock, so it lands a touch in the past — despawn
-            // meets the impact; our predicted bolt's is the CLIENT clock at fire, so
-            // it's at the muzzle/now). then advance by WALL time so motion is smooth at
-            // any refresh rate — `serverNow` only steps at the 60Hz tick.
+            // `serverNow` to place it correctly along its path: the spawnTime is the
+            // SERVER clock, so on every client (a touch behind by join latency) the
+            // bolt lands slightly in the past — its despawn meets the authoritative
+            // impact. then advance by WALL time so motion is smooth at any refresh
+            // rate — `serverNow` only steps at the 60Hz tick.
             if (bolt.wallSpawn < 0) bolt.wallSpawn = wallNow - Math.max(0, serverNow - bolt.spawnTime);
             const elapsed = Math.max(0, wallNow - bolt.wallSpawn);
 
@@ -2118,31 +2567,10 @@ script(WorldTrait, 'combat-vfx', (ctx) => {
                 velZ: hashUnit(h, 3) * 1.4,
             });
 
-            // predicted (our own) bolts run the SHARED hit query over the segment
-            // travelled since last frame → zero-latency impact vfx (damage stays
-            // server-authoritative). a divergence from the server is cosmetic only.
-            if (bolt.predicted && elapsed > bolt.lastT) {
-                const sx = bolt.origin[0] + dir[0] * speed * bolt.lastT;
-                const sy = bolt.origin[1] + dir[1] * speed * bolt.lastT;
-                const sz = bolt.origin[2] + dir[2] * speed * bolt.lastT;
-                _boltSegStart[0] = sx;
-                _boltSegStart[1] = sy;
-                _boltSegStart[2] = sz;
-                const hit = castProjectileSegment(ctx, _boltSegStart, dir, speed * (elapsed - bolt.lastT), bolt.ownerId, gems, rayCollector, raySettings, rayFilter);
-                bolt.lastT = elapsed;
-                if (hit) {
-                    spawnImpactVfx(ctx, hit.point, false, hit.block);
-                    reap.push(transform._node);
-                    continue;
-                }
-            }
-
-            // expire at lifetime — predicted bolts pop a fizzle; remote bolts go
-            // silently (the authoritative ImpactCommand normally reaps them first).
-            if (elapsed > PROJECTILE_LIFETIME) {
-                if (bolt.predicted) spawnImpactVfx(ctx, [px, py, pz], true, 0);
-                reap.push(transform._node);
-            }
+            // expire at lifetime as a safety net — the authoritative ImpactCommand
+            // normally reaps a bolt first (on hit or fizzle), so this just cleans up
+            // any straggler whose impact message was dropped.
+            if (elapsed > PROJECTILE_LIFETIME) reap.push(transform._node);
         }
         for (const n of reap) destroyNode(n);
     });
@@ -2168,7 +2596,8 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
     const _npRay = createVoxelRaycastResult(); // reused for nameplate occlusion checks
 
     type Hat = { node: Node; spawnTime: number; startX: number; startY: number; startZ: number; floorY: number; baseRot: Quat };
-    const state = new Map<number, { dither: number; dead: boolean; flash: number; prevHealth: number; npSig: string; hatLevel: number }>();
+    const state = new Map<number, { dither: number; dead: boolean; flash: number; prevHealth: number; npSig: string; hatLevel: number; chargeAccum: number }>();
+    const _wvTip = vec3.create(); // scratch for the third-person staff-tip charge glow
     const hats: Hat[] = [];
 
     // red flash + glow on the body meshes only — prune the hat/staff subtrees.
@@ -2242,7 +2671,11 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
     // death dither — plus the dropped-hat sim.
     onFrame(ctx, ({ delta }) => {
         const now = ctx.clock.time;
-        const controlId = getControlNode(ctx)?.id ?? -1; // skip our own nameplate
+        const controlNode = getControlNode(ctx);
+        const controlId = controlNode?.id ?? -1; // skip our own nameplate
+        // our own wizard's tip glow is the first-person viewmodel's job (see `viewmodel`)
+        // while we're in first person; in third person the rig-staff glow below covers it.
+        const localFirstPerson = controlNode ? getTrait(controlNode, PlayerControllerTrait)?.config.perspective === 'first' : false;
         const camPos = getWorldPosition(getTrait(resolveCamera(ctx).node, TransformTrait)!);
 
         for (const [wizard, transform] of wizards) {
@@ -2251,7 +2684,7 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
             const dead = wizard.current <= 0;
             let s = state.get(node.id);
             if (!s) {
-                s = { dither: 0, dead: false, flash: 0, prevHealth: wizard.current, npSig: '', hatLevel: -1 };
+                s = { dither: 0, dead: false, flash: 0, prevHealth: wizard.current, npSig: '', hatLevel: -1, chargeAccum: 0 };
                 state.set(node.id, s);
             }
 
@@ -2295,6 +2728,24 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
                     const mesh = getTrait(n, MeshTrait);
                     if (mesh) setMeshDither(mesh, next);
                 });
+            }
+
+            // channel charge glow at the rig staff tip while this wizard casts — the
+            // same tell other players read on us, and what we see on ourselves in
+            // third person (first person routes our glow through the viewmodel instead).
+            const showCharge = wizard.casting && !dead && !(node.id === controlId && localFirstPerson);
+            if (showCharge) {
+                const staff = findChildByName(node, 'wizard:staff');
+                if (staff) {
+                    vec3.transformMat4(_wvTip, STAFF_TIP_LOCAL, getWorldMatrix(getTrait(staff, TransformTrait)!));
+                    s.chargeAccum += CHARGE_RATE * delta;
+                    while (s.chargeAccum >= 1) {
+                        chargeGlow(ctx, _wvTip);
+                        s.chargeAccum -= 1;
+                    }
+                }
+            } else {
+                s.chargeAccum = 0;
             }
 
             // nameplate (other wizards only): name + level + hp on a billboard
@@ -2437,15 +2888,18 @@ script(WorldTrait, 'hud', (ctx) => {
     panel.style.cssText = `position:absolute; top:12px; left:12px; width:240px; display:flex; flex-direction:column; gap:6px; font-family:ui-monospace,monospace; z-index:${UILayer.hud};`;
     const panelHeader = document.createElement('div');
     panelHeader.style.cssText = `align-self:center; font-weight:bold; font-size:12px; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
-    panel.append(panelHeader);
     const rowEls = STAT_KEYS.map((key, i) => {
         const color = STAT_TABLE[key].color;
         // dark rounded pill: a colour fill grows with the stat's level behind a
-        // bold outlined label; a [N] keytag and a colour-matched + button at the right.
+        // stat-colour Lucide icon + bold outlined label; a [N] keytag and a
+        // colour-matched + button at the right. collapsed, it's just icon + level.
         const pill = document.createElement('div');
         pill.style.cssText = 'position:relative; display:flex; align-items:center; height:28px; border-radius:14px; background:#383838; overflow:hidden; padding-right:3px;';
         const fill = document.createElement('div');
         fill.style.cssText = `position:absolute; left:0; top:0; bottom:0; width:0%; background:${color}; opacity:0.55;`;
+        const icon = document.createElement('span');
+        icon.innerHTML = statIconSvg(key);
+        icon.style.cssText = `position:relative; flex:none; display:flex; color:${color}; pointer-events:none; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.85));`;
         const name = document.createElement('span');
         name.textContent = STAT_TABLE[key].label;
         name.style.cssText = `position:relative; flex:1; text-align:center; padding-left:12px; font-weight:bold; font-size:13px; color:#fff; white-space:nowrap; pointer-events:none; ${HUD_OUTLINE}`;
@@ -2456,10 +2910,17 @@ script(WorldTrait, 'hud', (ctx) => {
         btn.textContent = '+';
         btn.style.cssText = `position:relative; flex:none; width:30px; height:22px; border:none; border-radius:8px; background:${color}; color:#1c1c1c; font-weight:bold; font-size:17px; line-height:1; padding:0; cursor:pointer;`;
         btn.onclick = () => send(ctx, UpgradeStat, { stat: i });
-        pill.append(fill, name, keyTag, btn);
+        // read-only counterpart shown in the same right-hand slot when there's no
+        // point to spend here: the stat's current level (or MAX at the cap).
+        const num = document.createElement('span');
+        num.style.cssText = `position:relative; flex:none; width:30px; text-align:center; font-size:12px; font-weight:bold; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
+        pill.append(fill, icon, name, keyTag, btn, num);
         panel.append(pill);
-        return { fill, btn };
+        return { pill, fill, icon, name, keyTag, btn, num };
     });
+    // header sits below the rows: showing/hiding it grows the panel downward
+    // (the panel is top-anchored) instead of shifting the stat rows.
+    panel.append(panelHeader);
 
     // number keys 1..N → upgrade the matching stat.
     const onKey = (e: KeyboardEvent) => {
@@ -2516,24 +2977,48 @@ script(WorldTrait, 'hud', (ctx) => {
             }
         }
 
-        // upgrade panel — level, points remaining, per-stat level/max + buttons.
+        // upgrade panel — hidden until the first level is earned (nothing to spend,
+        // nothing spent yet). the vertical layout is constant (row heights + gaps
+        // never change, so rows never move); only the horizontal extent collapses.
+        // with no points it's a narrow rail — each row just its stat colour + level
+        // number; when points are up it expands rightward to the full-width pills
+        // with labels, + buttons, and [N] keytags, plus the "N to spend" footer.
         const lvls = wiz ? wiz.stats.levels : null;
         const pSig = wiz && lvls ? `${levelForXp(wiz.xp)}:${availablePoints(wiz.xp, lvls)}:${STAT_KEYS.map((k) => lvls[k]).join('')}` : '';
         if (pSig !== panelSig) {
             panelSig = pSig;
-            if (!wiz || !lvls) {
+            const pts = wiz && lvls ? availablePoints(wiz.xp, lvls) : 0;
+            const spent = lvls ? sumLevels(lvls) : 0;
+            if (!wiz || !lvls || (pts === 0 && spent === 0)) {
                 panel.style.display = 'none';
             } else {
+                const expanded = pts > 0;
                 panel.style.display = 'flex'; // restore flex (not '', which reverts to block)
-                const pts = availablePoints(wiz.xp, lvls);
-                panelHeader.textContent = pts > 0 ? `${pts} point${pts === 1 ? '' : 's'} to spend` : '';
+                panel.style.width = expanded ? '240px' : '44px';
+                panelHeader.style.display = expanded ? 'block' : 'none';
+                panelHeader.textContent = expanded ? `${pts} point${pts === 1 ? '' : 's'} to spend` : '';
                 STAT_KEYS.forEach((k, i) => {
                     const statMax = STAT_TABLE[k].max;
-                    rowEls[i]!.fill.style.width = `${(lvls[k] / statMax) * 100}%`;
-                    const canUp = pts > 0 && lvls[k] < statMax;
-                    rowEls[i]!.btn.disabled = !canUp;
-                    rowEls[i]!.btn.style.opacity = canUp ? '1' : '0.35';
-                    rowEls[i]!.btn.style.cursor = canUp ? 'pointer' : 'default';
+                    const row = rowEls[i]!;
+                    const lvl = lvls![k];
+                    row.fill.style.width = `${(lvl / statMax) * 100}%`;
+                    const canUp = expanded && lvl < statMax;
+                    // collapsed: icon + level number centred on the narrow rail.
+                    // expanded: icon hugs the left, label + controls fill out the pill.
+                    row.pill.style.justifyContent = expanded ? '' : 'center';
+                    row.icon.style.marginLeft = expanded ? '10px' : '0';
+                    row.icon.style.marginRight = expanded ? '0' : '3px';
+                    row.name.style.display = expanded ? '' : 'none';
+                    row.keyTag.style.display = canUp ? '' : 'none';
+                    row.btn.style.display = canUp ? '' : 'none';
+                    row.btn.disabled = !canUp;
+                    // level number: a right-hand badge in the wide layout (maxed/idle
+                    // rows), beside the icon as the read-out on the collapsed rail.
+                    row.num.style.display = canUp ? 'none' : '';
+                    row.num.style.flex = 'none';
+                    row.num.style.width = expanded ? '30px' : 'auto';
+                    row.num.textContent = lvl >= statMax ? 'MAX' : `${lvl}`;
+                    row.pill.style.paddingRight = expanded ? '3px' : '0';
                 });
             }
         }

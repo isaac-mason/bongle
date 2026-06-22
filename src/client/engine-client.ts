@@ -631,6 +631,9 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
+    console.log(
+        `[bongle room] processJoinRoom: message.playerId=${String(message.playerId)} -> room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
+    );
     Nodes.initSceneGraph(room.nodes);
 
     if (existing) {

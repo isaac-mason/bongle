@@ -320,8 +320,8 @@ export function update(
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
-        const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, resources, visibility);
+        const state = aliveStates[i]!;
+        if (state.lastSeenFrame !== frameId) destroyInstance(visuals, state.trait, resources, visibility);
     }
 
     // ── phase 3: per-instance writes + per-sprite bucket sort ───────
@@ -365,15 +365,15 @@ export function update(
         const frameIdx = frameCount > 1
             ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount
             : 0;
-        const f = state.entry.frames[frameIdx]!;
-        const t = trait.tint;
-        const fl = trait.flash;
-        const l = trait.light;
+        const frame = state.entry.frames[frameIdx]!;
+        const tint = trait.tint;
+        const flash = trait.flash;
+        const light = trait.light;
         packTo(InstanceMaterial, instArr, slot * EXTRUDED_INSTANCE_STRIDE + EXTRUDED_INSTANCE_MATERIAL_OFFSET, {
-            uvRect: [f.u, f.v, f.w, f.h],
-            tint: [t[0], t[1], t[2], t[3]],
-            flash: [fl[0], fl[1], fl[2], fl[3]],
-            light: [l[0], l[1], l[2], l[3]],
+            uvRect: [frame.u, frame.v, frame.w, frame.h],
+            tint: [tint[0], tint[1], tint[2], tint[3]],
+            flash: [flash[0], flash[1], flash[2], flash[3]],
+            light: [light[0], light[1], light[2], light[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,

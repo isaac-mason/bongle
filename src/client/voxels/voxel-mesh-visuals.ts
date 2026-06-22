@@ -342,8 +342,8 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
     // ── phase 2: cleanup stale states ───────────────────────────────
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
-        const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) destroyInstance(visuals, s.trait, visibility);
+        const state = aliveStates[i]!;
+        if (state.lastSeenFrame !== frameId) destroyInstance(visuals, state.trait, visibility);
     }
 
     // ── phase 3: per-instance writes + bucket sort ──────────────────
@@ -514,8 +514,8 @@ export function invalidateVoxelModel(
     // update() pass re-runs the slow path with a fresh bake.
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
-        const s = aliveStates[i]!;
-        if (s.modelRef === model) destroyInstance(visuals, s.trait, visibility);
+        const state = aliveStates[i]!;
+        if (state.modelRef === model) destroyInstance(visuals, state.trait, visibility);
     }
 
     // free the entry's arena ranges + drop the cached bake.

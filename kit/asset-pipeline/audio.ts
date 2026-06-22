@@ -2,8 +2,8 @@
 //
 // reads source audio files (.wav/.mp3/.ogg/.flac) listed by `sound()`
 // declarations, partitions on `long: true` and emits:
-//   resources/client/audio-atlas.ogg          — concatenated long:false bucket
-//   resources/client/audio/{id}.ogg           — one file per long:true clip
+//   resources/client/audio-atlas.mp3           — concatenated long:false bucket
+//   resources/client/audio/{id}.mp3            — one file per long:true clip
 //   resources/client/audio-manifest.json      — both buckets, with offsets
 //   src/generated/sounds.ts                   — single barrel: all handles inline
 //
@@ -30,9 +30,14 @@
 // pull binaries via @ffmpeg-installer/ffmpeg / @ffprobe-installer/ffprobe
 // (cross-platform, no system dep, no fluent-ffmpeg wrapper).
 //
-// encoding: libopus, 48000 Hz, 96kbps for both atlas and standalone.
-// .ogg container picks up native browser support across the targets we
-// care about.
+// encoding: MP3 (libmp3lame), 48000 Hz, atlas mono. MP3 is the most
+// universally `decodeAudioData`-supported format (every browser incl.
+// Safari), and libmp3lame writes the LAME gapless header (encoder delay +
+// padding) that browsers honor — so a single-pass encode of the
+// concatenated PCM round-trips sample-exact and the atlas offsets stay
+// aligned. Opus-in-Ogg was dropped: Safari can't decode it via Web Audio
+// at all, and some Chrome setups (e.g. high output-device sample rates)
+// throw EncodingError on otherwise-valid Ogg/Opus.
 
 import { spawn } from 'node:child_process';
 import * as crypto from 'node:crypto';
@@ -60,13 +65,13 @@ if (process.platform !== 'win32') {
 
 const SAMPLE_RATE = 48000;
 const ATLAS_BITRATE = '96k';
-const STANDALONE_BITRATE = '96k';
+const STANDALONE_BITRATE = '128k';
 
 // folded into atlasHash so that a builder-format change invalidates any
 // on-disk atlas + manifest without the user having to nuke their cache.
 // bump this when the encode pipeline changes in a way that affects manifest
-// offsets or the atlas .ogg byte layout.
-const ATLAS_FORMAT_VERSION = 'v3-pcm-concat-then-encode';
+// offsets or the atlas byte layout.
+const ATLAS_FORMAT_VERSION = 'v5-pcm-concat-mp3';
 
 export type BuildAudioOptions = {
     /** absolute path to the project root. */
@@ -82,7 +87,7 @@ export type AudioManifestAtlasEntry = {
 
 export type AudioManifestStandaloneEntry = {
     id: string;
-    /** url relative to the resources/client serve root (e.g. "audio/theme.ogg"). */
+    /** url relative to the resources/client serve root (e.g. "audio/theme.mp3"). */
     url: string;
     durationSec: number;
 };
@@ -109,7 +114,7 @@ type CodegenEntry = {
 
 type Paths = {
     outDir: string;
-    atlasOgg: string;
+    atlasFile: string;
     standaloneDir: string;
     manifestPath: string;
     barrelPath: string;
@@ -119,7 +124,7 @@ function resolvePaths(projectDir: string): Paths {
     const outDir = path.join(projectDir, 'resources', 'client');
     return {
         outDir,
-        atlasOgg: path.join(outDir, 'audio-atlas.ogg'),
+        atlasFile: path.join(outDir, 'audio-atlas.mp3'),
         standaloneDir: path.join(outDir, 'audio'),
         manifestPath: path.join(outDir, 'audio-manifest.json'),
         barrelPath: path.join(projectDir, 'src', 'generated', 'sounds.ts'),
@@ -134,8 +139,8 @@ export {};
  * build the audio atlas + standalone files + sidecars + barrel from
  * soundsRegistry contents.
  *
- * iterates soundsRegistry, partitions on `long`. produces one .ogg atlas
- * for the long:false bucket plus one .ogg per long:true clip. manifest
+ * iterates soundsRegistry, partitions on `long`. produces one MP3 atlas
+ * for the long:false bucket plus one MP3 per long:true clip. manifest
  * carries hashes per bucket so a long-clip edit doesn't bust the atlas
  * cache and vice versa. duration (ffprobed during build) is baked into
  * each handle literal in the barrel so user code reads `handle.duration`
@@ -156,7 +161,7 @@ export async function buildAudio(
 
     if (all.length === 0) {
         // no sounds declared — clean up any leftover artifacts + codegen.
-        try { fs.unlinkSync(paths.atlasOgg); } catch { /* missing is fine */ }
+        try { fs.unlinkSync(paths.atlasFile); } catch { /* missing is fine */ }
         try { fs.unlinkSync(paths.manifestPath); } catch { /* missing is fine */ }
         try { fs.rmSync(paths.standaloneDir, { recursive: true, force: true }); } catch { /* */ }
         ensureDir(path.dirname(paths.barrelPath));
@@ -182,11 +187,11 @@ export async function buildAudio(
     const existing = readManifest(paths.manifestPath);
     const atlasUpToDate =
         existing?.atlasHash === atlasHash &&
-        (atlasResolved.length === 0 || fs.existsSync(paths.atlasOgg));
+        (atlasResolved.length === 0 || fs.existsSync(paths.atlasFile));
     const standaloneUpToDate =
         existing?.standaloneHash === standaloneHash &&
         standaloneResolved.every((s) =>
-            fs.existsSync(path.join(paths.standaloneDir, `${s.id}.ogg`)),
+            fs.existsSync(path.join(paths.standaloneDir, `${s.id}.mp3`)),
         );
 
     let manifest: AudioManifest;
@@ -204,7 +209,7 @@ export async function buildAudio(
         const atlasEntries: AudioManifestAtlasEntry[] =
             atlasUpToDate && existing
                 ? existing.atlas
-                : await buildAtlasOgg(atlasResolved, paths.atlasOgg);
+                : await buildAtlas(atlasResolved, paths.atlasFile);
 
         let standaloneEntries: AudioManifestStandaloneEntry[];
         if (standaloneUpToDate && existing) {
@@ -216,7 +221,7 @@ export async function buildAudio(
             const liveIds = new Set(standaloneEntries.map((e) => e.id));
             try {
                 for (const name of fs.readdirSync(paths.standaloneDir)) {
-                    const id = name.replace(/\.ogg$/, '');
+                    const id = name.replace(/\.mp3$/, '');
                     if (!liveIds.has(id)) {
                         try { fs.unlinkSync(path.join(paths.standaloneDir, name)); } catch { /* */ }
                     }
@@ -298,7 +303,7 @@ function computeBucketHash(absPaths: string[], salt = ''): string {
 
 type ResolvedSource = { id: string; src: string; long: boolean; absPath: string };
 
-async function buildAtlasOgg(
+async function buildAtlas(
     sources: ResolvedSource[],
     outPath: string,
 ): Promise<AudioManifestAtlasEntry[]> {
@@ -313,29 +318,17 @@ async function buildAtlasOgg(
         }
     }
 
-    // PCM-concat then single-pass opus encode.
+    // build one continuous PCM stream from the sources, then encode it in a
+    // single MP3 pass. doing it as ONE encode (rather than per-clip then
+    // concat) means there's exactly one block of encoder delay at the file
+    // start and one of padding at the end — both described by the LAME
+    // gapless header that browsers honor — so the decoded buffer is
+    // sample-aligned with this concatenated PCM and every clip's offset +
+    // duration (computed below from PCM sample counts) lands correctly. A
+    // per-clip-then-concat approach would scatter delay/padding mid-stream
+    // and smear the boundaries.
     //
-    // two failure modes ruled out by this shape:
-    //
-    // 1. concat-then-encode with per-source durations drifts: probed source
-    //    durations don't account for libopus' final-frame zero-padding.
-    //
-    // 2. encode-per-source then `ffmpeg -f concat -c:a copy` produces a file
-    //    whose ffprobe duration disagrees with what browsers decode. each
-    //    per-source Ogg Opus stream carries its own 312-sample pre-skip
-    //    header; the demuxer concatenates pages without reconciling granule
-    //    positions, so Chrome's decodeAudioData ends up with ~+580ms of
-    //    extra samples vs ffprobe's reported duration. manifest offsets
-    //    (built from ffprobe) then land in the wrong slice — the
-    //    wood-footstep id resolved to bytes inside water_splash.
-    //
-    // the fix: build one continuous PCM stream from the sources, encode
-    // it in a single libopus pass. there's exactly one pre-skip (file
-    // start, transparent to the decoder) and one trailing pad (file end).
-    // every clip's offset and duration are sample-accurate against the
-    // source PCM, which is what the browser decodes back to.
-    //
-    // forcing mono+s16le here unifies channel layout so the wav concat
+    // forcing mono+s16le per source unifies channel layout so the wav concat
     // demuxer's `-c:a copy` is safe regardless of source mix.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bongle-audio-'));
     try {
@@ -378,7 +371,7 @@ async function buildAtlasOgg(
             '-i', mergedWav,
             '-ac', '1',
             '-ar', String(SAMPLE_RATE),
-            '-c:a', 'libopus', '-b:a', ATLAS_BITRATE,
+            '-c:a', 'libmp3lame', '-b:a', ATLAS_BITRATE,
             outPath,
         ]);
 
@@ -408,17 +401,17 @@ async function buildStandalones(
         if (!fs.existsSync(s.absPath)) {
             throw new Error(`[bongle] sound "${s.id}" source missing: ${s.absPath}`);
         }
-        const outPath = path.join(outDir, `${s.id}.ogg`);
+        const outPath = path.join(outDir, `${s.id}.mp3`);
         const args = [
             '-y',
             '-i', s.absPath,
             '-ar', String(SAMPLE_RATE),
-            '-c:a', 'libopus', '-b:a', STANDALONE_BITRATE,
+            '-c:a', 'libmp3lame', '-b:a', STANDALONE_BITRATE,
             outPath,
         ];
         await runProcess(FFMPEG, args);
         const durationSec = await probeDurationSec(outPath);
-        entries.push({ id: s.id, url: `audio/${s.id}.ogg`, durationSec });
+        entries.push({ id: s.id, url: `audio/${s.id}.mp3`, durationSec });
     }
     return entries;
 }

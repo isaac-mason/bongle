@@ -26,5 +26,6 @@ export const BUILTIN_BASE_AVATAR_ID = 'builtin:avatar' as const;
 
 export const baseAvatar = model(BUILTIN_BASE_AVATAR_ID, {
     name: 'Player',
-    src: new URL('./player.gltf', import.meta.url),
+    // asset lives under lib/avatars/base/ alongside the other bundled avatars.
+    src: new URL('../../../avatars/base/player.gltf', import.meta.url),
 });

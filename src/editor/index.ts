@@ -44,6 +44,7 @@ import {
     type SerializedNode,
     setNodePersist,
     setPrefab,
+    setRealm,
 } from '../core/scene/nodes';
 import type { ScriptContext } from '../core/scene/scripts';
 import {
@@ -318,8 +319,9 @@ script(
                 const node = getNodeById(room.nodes, args.id);
                 if (!node) return;
                 if (node === room.nodes.root) return;
-                node.realm = args.realm as Realm;
-                bumpNodeVersion(room.nodes, node);
+                // setRealm marks the affected subtree dirty so discovery re-evaluates
+                // descendants' visibility (matters for play viewers in mixed rooms).
+                setRealm(node, args.realm as Realm);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
                 return true;
             }),

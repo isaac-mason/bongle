@@ -305,7 +305,7 @@ export type Nodes = {
      * structural change, trait add/remove, field change, or destroyed) — the set
      * the per-client scene-sync fan-out iterates instead of walking the whole tree.
      * a destroyed node is parked here too; the fan-out recognises it by
-     * `node.context === null` and emits `node_destroyed`. populated by the
+     * `node.scene === null` and emits `node_destroyed`. populated by the
      * `bump*Version` helpers + `registerSubtree` + `destroyNode` (gated on
      * `!env.client`, so it stays empty in the client bundle), drained + cleared each
      * tick by `Discovery.flush`.
@@ -494,7 +494,7 @@ export function destroyNode(nodes: Nodes, node: Node): void {
     if (node === nodes.root) return; // root node is permanent
 
     // park the node in the discovery dirty set (server-side; no-op on the client).
-    // node.context is nulled at the end of this fn, so the fan-out sees node.context
+    // node.scene is nulled at the end of this fn, so the fan-out sees node.scene
     // === null and emits node_destroyed. recurses, so each destroyed node lands
     // here. if the same node is re-added this tick it becomes live again → the
     // fan-out treats it as a create/update instead (add→remove→add correctness).
@@ -820,7 +820,7 @@ export function addTraitBySlot(
     // `setInterpolation(node, true)` — callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
-    // "addTrait happens before node.context is wired" hydration race.
+    // "addTrait happens before node.scene is wired" hydration race.
     if (traitSlot === TransformTrait._slot) {
         const t = getTrait(node, TransformTrait)!;
         t._parent = findTransformAncestor(node);

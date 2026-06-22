@@ -75,7 +75,7 @@ import type { SpriteResources } from './sprite-resources';
 
 export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     uvRect: d.vec4f,
-    // tint: rgb multiplies the albedo (white = no-op), a = opacity.
+    // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
     // flash: transient overlay — rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
@@ -471,9 +471,8 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
     const litRgb = shadeTinted(sampled.rgb, vTint, vFlash, light, vGlow, vUnlit);
     const tinted = vec4f(litRgb, sampled.a).toVar('esTinted');
 
-    // cutout + screen-door fade: tint.a (opacity) and the dither knob feed
-    // the shared discard.
-    const fragment = ditherDiscard(tinted, sampled.a, vTint.w, vDither).toVar('esFragment');
+    // cutout + screen-door fade: the dither knob feeds the shared discard.
+    const fragment = ditherDiscard(tinted, sampled.a, vDither).toVar('esFragment');
 
     const material = new Material({
         name: 'extruded-sprite-batched',

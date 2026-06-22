@@ -64,7 +64,7 @@ import { shadeTinted } from '../visuals/dsl';
 // ── gpu structs ─────────────────────────────────────────────────────
 
 export const InstanceParams = struct('VoxelMeshInstanceParams', {
-    /** rgb multiplies the albedo (white = no-op), a = opacity. */
+    /** rgb is the recolour target, a the intensity (lightness-preserving). */
     tint: d.vec4f,
     /** transient overlay — rgb is the colour, a the strength (lerp). */
     flash: d.vec4f,
@@ -264,15 +264,14 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
     const tintedRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);
     const bakedColor = vec4(tintedRgb, texColor.a).toVar('bakedColor');
 
-    // cutout + screen-door pass: tint.a (opacity) and the dither knob feed
-    // the shared discard via makePassMaterial.
+    // cutout + screen-door pass: the dither knob feeds the shared discard
+    // via makePassMaterial.
     return makePassMaterial({
         name: 'voxel-mesh-baked',
         pass: 'transparent',
         clipPos,
         fragColor: bakedColor,
         texColor,
-        opacity: vTint.w,
         dither: vDither,
     });
 }

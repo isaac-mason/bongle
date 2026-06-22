@@ -301,15 +301,15 @@ export function update(
         // ── material write (per-frame; uvRect changes for flipbooks) ──
         const frameCount = state.entry.frames.length;
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
-        const f = state.entry.frames[frameIdx]!;
-        const t = trait.tint;
-        const fl = trait.flash;
-        const l = trait.light;
+        const frame = state.entry.frames[frameIdx]!;
+        const tint = trait.tint;
+        const flash = trait.flash;
+        const light = trait.light;
         packTo(InstanceMaterial, matArr, state.slot * INSTANCE_MATERIAL_STRIDE, {
-            uvRect: [f.u, f.v, f.w, f.h],
-            tint: [t[0], t[1], t[2], t[3]],
-            flash: [fl[0], fl[1], fl[2], fl[3]],
-            light: [l[0], l[1], l[2], l[3]],
+            uvRect: [frame.u, frame.v, frame.w, frame.h],
+            tint: [tint[0], tint[1], tint[2], tint[3]],
+            flash: [flash[0], flash[1], flash[2], flash[3]],
+            light: [light[0], light[1], light[2], light[3]],
             glow: trait.glow,
             unlit: trait.unlit ? 1 : 0,
             litMin: trait.litMin,
@@ -321,9 +321,9 @@ export function update(
     // ── phase 2: cleanup stale states (trait no longer in query) ──
     const aliveStates = visuals.aliveStates;
     for (let i = aliveStates.length - 1; i >= 0; i--) {
-        const s = aliveStates[i]!;
-        if (s.lastSeenFrame !== frameId) {
-            destroyInstance(visuals, s.trait, visibility);
+        const state = aliveStates[i]!;
+        if (state.lastSeenFrame !== frameId) {
+            destroyInstance(visuals, state.trait, visibility);
             poseDirty = true;
             matDirty = true;
         }

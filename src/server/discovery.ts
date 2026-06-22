@@ -644,7 +644,7 @@ function nodeDepth(node: Node): number {
  * room — driven by the room's per-tick dirty set (nodes touched this tick), not a
  * whole-tree walk. per dirty node, the same per-client diff as before decides
  * create / update / destroy against this client's knowledge (a destroyed node is a
- * dirty node that's no longer live — `node.context === null`); the baseline for nodes
+ * dirty node that's no longer live — `node.scene === null`); the baseline for nodes
  * that never change comes from the join snapshot. reads pre-serialized trait bytes
  * from each instance's `_sync.bytes`.
  *
@@ -666,7 +666,7 @@ function buildSceneSyncUpdates(
         const known = nodeKnowledge.get(node.id);
 
         // detached at flush = destroyed this tick. (a node destroyed then re-added
-        // the same tick is live again here — node.context is set — so it flows to the
+        // the same tick is live again here — node.scene is set — so it flows to the
         // create/update path below, never here. that makes add→remove→add correct
         // with no id bookkeeping.)
         if (node.scene === null) {

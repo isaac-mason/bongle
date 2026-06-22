@@ -86,16 +86,21 @@ type CharacterState = {
      *  change — steady-state characters (loaded, out of proximity range)
      *  pay one numeric compare per frame instead of a full rig traversal. */
     appliedDither: number;
+    /** the current model's nodes that `mountRig` added on top of the enforced
+     *  skeleton (its mesh/visual nodes). `unmountRig` removes exactly these on
+     *  a swap and leaves runtime attachments (gear) alone — ownership by node
+     *  identity, not name. Per-side, runtime-only; fresh per instance. */
+    modelNodes: Set<Node>;
 };
 
 import type { ScriptContext } from '../core/scene/scripts';
 import type { Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec3 } from 'mathcat';
-import { RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
+import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
 import { baseAvatar, BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
-import { getModel } from '../api/models';
+import { ensureModel, getModel } from '../api/models';
 import { pack } from '../core/scene/pack';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
 import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
@@ -133,6 +138,9 @@ const TAU = Math.PI * 2;
 // sin(bobPhase) trough — when the camera bob is at its lowest. that's
 // the foot-plant moment in this controller's bob convention.
 const FOOT_PHASE = (3 * Math.PI) / 2;
+
+// DEBUG: frame throttle for the locomotion-loop ownership trace.
+let _locoDbgFrame = 0;
 
 // max head pitch (rad). real necks crane ~60° up / ~75° down; symmetric
 // 60° is a fine starting point — past this the head would clip into the
@@ -292,6 +300,7 @@ export const CharacterTrait = trait(
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: 0,
+            modelNodes: new Set(),
         }),
     },
     { persist: false },
@@ -362,30 +371,34 @@ script(WorldTrait, 'character', (ctx) => {
             const node = t._node;
 
             // ── rig reconciler ─────────────────────────────────────
-            // Converge `state.modelId` (fact) toward `def.modelId`
-            // (intent). Three cases:
-            //   - already matches → no-op.
-            //   - target's payload is hydrated → unmount previous (if
-            //     any), mount target, write state.
-            //   - target not loaded, nothing mounted → install
-            //     baseAvatar placeholder (always present via codegen)
-            //     so consumers have bones immediately. A later frame
-            //     will swap once the target lands.
-            // Runs on every side; both server and client need bones
-            // for `findByName(node, 'head')` and for animator ticks.
-            if (t.state.modelId !== t.modelId) {
-                const handle = getModel(ctx, t.modelId);
-                if (handle) {
-                    if (t.state.modelId !== null) unmountRig(node);
+            // Reconcile the mounted rig against LIVE payload state, not a cached
+            // fact. `getModel` returns a handle only while the target model's
+            // payload is ready *right now*, so a play/stop payload wipe (which
+            // clears Resources) self-heals on the next frame instead of getting
+            // stuck on a stale "already mounted" flag. Runs on every side; both
+            // server and client need bones for `findByName(node, 'head')` and for
+            // animator ticks.
+            const handle = getModel(ctx, t.modelId);
+            if (handle) {
+                // target ready → mount it unless it's already the mounted handle.
+                if (t.state.modelHandle !== handle) {
+                    unmountRig(node);
                     mountRig(node, handle);
                     t.state.modelId = t.modelId;
                     t.state.modelHandle = handle;
-                } else if (t.state.modelId === null) {
-                    // Target not loaded yet → placeholder. May already be
-                    // mounted (the server eager-mounts at node creation so
-                    // join hooks see bones — see `ensureCharacterRig`); this
-                    // is idempotent.
-                    ensureCharacterRig(node);
+                }
+            } else {
+                // target not ready (still loading, or its payload was wiped under
+                // us). Keep the lazy load going and show the placeholder — reverting
+                // a now-stale real model so the null→ready edge re-mounts cleanly.
+                // The player avatar pipeline also ensures on a player's behalf, but
+                // a game that sets `modelId` directly (NPCs) relies on this.
+                ensureModel(ctx, t.modelId);
+                if (t.state.modelHandle !== baseAvatar) {
+                    unmountRig(node);
+                    mountRig(node, baseAvatar);
+                    t.state.modelId = BUILTIN_BASE_AVATAR_ID;
+                    t.state.modelHandle = baseAvatar;
                 }
             }
 
@@ -452,7 +465,20 @@ script(WorldTrait, 'character', (ctx) => {
         // entirely.
         if (!env.client) return;
 
+        const dbgTick = (_locoDbgFrame++ % 60) === 0;
         for (const [t, cc, transform] of qLocomotion.matches) {
+            // DEBUG (throttled ~1/sec): log EVERY matched character before any
+            // gate — reveals whether the locally-controlled character is even
+            // in the loop, and why isOwner() is false for it.
+            if (dbgTick) {
+                const n = t._node;
+                console.log(
+                    `[bongle footstep] char isControlNode=${n === getControlNode(ctx)}` +
+                        ` isOwner=${isOwner(ctx, n)} node.owner=${String(n.owner)}` +
+                        ` playerId=${String(ctx.client?.room?.playerId)}` +
+                        ` modelId=${t.state.modelId} grounded=${cc.state.grounded}`,
+                );
+            }
             if (t.state.modelId === null) continue;
             const node = t._node;
 
@@ -478,6 +504,17 @@ script(WorldTrait, 'character', (ctx) => {
                 footBlockState !== 0 && (ctx.blocks.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
             const wasInLiquid =
                 prevFootBlockState !== 0 && (ctx.blocks.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
+
+            // DEBUG: trace the footstep gating chain for the owner. throttled
+            // by the bob-phase bucket so it's silent when standing still and
+            // ticks a few times/sec while walking.
+            if (owner && Math.floor(cc.state.bobPhase * 4) !== Math.floor(cc.state.previousBobPhase * 4)) {
+                console.log(
+                    `[bongle footstep] grounded=${cc.state.grounded} prevGrounded=${cc.state.previousGrounded}` +
+                        ` inLiquid=${inLiquid} groundBlockState=${footBlockState}` +
+                        ` bobPhase=${cc.state.bobPhase.toFixed(2)} prevBobPhase=${cc.state.previousBobPhase.toFixed(2)}`,
+                );
+            }
 
             // entry splash — fires on the bob-tick the foot-sample first
             // resolves to a liquid voxel. one-shot, independent of cadence.
@@ -515,6 +552,9 @@ script(WorldTrait, 'character', (ctx) => {
                 // `groundBlockState` while submerged).
                 const idx = Math.floor((cc.state.bobPhase - FOOT_PHASE) / TAU);
                 const prevIdx = Math.floor((cc.state.previousBobPhase - FOOT_PHASE) / TAU);
+                if (owner && idx !== prevIdx) {
+                    console.log(`[bongle footstep] cadence bucket idx=${idx} prevIdx=${prevIdx} -> ${idx > prevIdx ? 'EMIT' : 'no emit'}`);
+                }
                 if (idx > prevIdx) {
                     emitFootstep(
                         ctx,
@@ -531,7 +571,11 @@ script(WorldTrait, 'character', (ctx) => {
             }
         }
     });
-});
+    // editor: true → this presentation runs in edit mode too, so the editor lens
+    // gets the real avatar (reconciler), procedural locomotion, and the
+    // first-person POV-hide when viewing through the character (control.node ===
+    // playerNode), not just in play.
+}, { editor: true });
 
 /** Rotate the canonical `head` bone to point at `cc.look`. yaw is the
  *  delta between look-yaw and the body's yaw (which already tracks
@@ -540,12 +584,12 @@ script(WorldTrait, 'character', (ctx) => {
  *  ±HEAD_PITCH_LIMIT_RAD. composed as `Ryaw · Rpitch` so the head pitches
  *  in its own local frame after yawing — matches FPS look feel.
  *
- *  When the body bone is tilted by the sneak pose (driven by
- *  `cc.state.crouchAmount` on the controller), subtract the body's pitch
- *  from the head's local pitch so the face still aims at the world look
- *  direction. Small-angle approximation — body pitch and head yaw don't
- *  commute, but at ±28°/±60° the visual error is below the threshold of
- *  notice. */
+ *  When the waist is tilted by the sneak pose (driven by
+ *  `cc.state.crouchAmount` on the controller — in the flat rig the waist
+ *  carries head + arms + body), subtract that pitch from the head's local
+ *  pitch so the face still aims at the world look direction. Small-angle
+ *  approximation — pitch and head yaw don't commute, but at ±28°/±60° the
+ *  visual error is below the threshold of notice. */
 function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, transform: TransformTrait): void {
     const headBone = findByName(playerNode, 'head');
     if (!headBone) return;
@@ -615,31 +659,53 @@ export function addCharacter(node: Node, props?: TraitProps<CharacterTrait>): Ch
 }
 
 /**
- * Canonical 6bone parenting. waist + legs hang off `playerNode`; body
- * nests inside waist so torso rotation propagates; head + arms nest
- * inside body so they ride along. Authoring tools MUST produce this
- * hierarchy — mount copies each loaded bone's *local* TRS onto its
- * matching canonical bone, so a flat export would apply scene-space TRS
- * as if it were local-to-parent and visually shear the rig.
+ * Canonical 6bone parenting. waist hangs off `playerNode`; body, head, and
+ * arms nest under waist as independent siblings (Minecraft-style parts —
+ * each animates around its own pivot, and rotating waist carries the whole
+ * upper body). legs are their own roots off `playerNode`, so they stay
+ * planted when waist twists. Authoring tools MUST produce this hierarchy —
+ * mount copies each loaded bone's *local* TRS onto its matching canonical
+ * bone, so a mismatched hierarchy would apply scene-space TRS as if it were
+ * local-to-parent and visually shear the rig.
  *
  *     playerNode (AnimatorTrait)
  *       ├ waist
- *       │   └ body
- *       │       ├ head
- *       │       ├ arm_left
- *       │       └ arm_right
+ *       │   ├ body        (└ back)
+ *       │   ├ head
+ *       │   ├ arm_left    (└ hand_left)
+ *       │   └ arm_right   (└ hand_right)
  *       ├ leg_left
  *       └ leg_right
+ *
+ * Attach sockets (hand_*, back) are also enforced + persistent, hung off their
+ * bone. When a model doesn't author one, the engine derives its rest position
+ * from the bone's geometry (see `deriveSocketPosition`), so creators get usable
+ * mount points for free; an authored socket's TRS wins.
  */
 const RIG_6BONE_PARENT_OF: Record<string, string | null> = {
     waist: null,
     leg_left: null,
     leg_right: null,
     body: 'waist',
-    head: 'body',
-    arm_left: 'body',
-    arm_right: 'body',
+    head: 'waist',
+    arm_left: 'waist',
+    arm_right: 'waist',
+    // attach sockets — enforced + persistent; auto-derived from bone geometry
+    // when the model doesn't author them.
+    hand_left: 'arm_left',
+    hand_right: 'arm_right',
+    back: 'body',
 };
+
+// the enforced skeleton: bones + attach sockets. built once by
+// `ensureCanonicalBones`, reused across model swaps, never dropped.
+const RIG_6BONE_PERSISTENT_NODES = [...RIG_6BONE_REQUIRED_NODES, ...RIG_6BONE_ATTACH_NODES];
+
+// default grip for an engine-derived hand socket: held items sit perpendicular to
+// the arm, so an outstretched (horizontal) arm points them up and a resting (down)
+// arm points them forward. items are authored upright in their own model; authored
+// sockets keep their own rotation instead.
+const HAND_GRIP_ROTATION = quat.setAxisAngle(quat.create(), [1, 0, 0], degreesToRadians(90));
 
 /**
  * Ensure the canonical 6bone hierarchy + AnimatorTrait exist under
@@ -654,7 +720,7 @@ const RIG_6BONE_PARENT_OF: Record<string, string | null> = {
 function ensureCanonicalBones(playerNode: Node): void {
     if (!hasTrait(playerNode, AnimatorTrait)) addTrait(playerNode, AnimatorTrait);
     const byName = new Map<string, Node>();
-    for (const name of RIG_6BONE_REQUIRED_NODES) {
+    for (const name of RIG_6BONE_PERSISTENT_NODES) {
         const existing = findByName(playerNode, name);
         if (existing) {
             byName.set(name, existing);
@@ -667,7 +733,7 @@ function ensureCanonicalBones(playerNode: Node): void {
     // Attach in canonical parent order; parents always exist by the time
     // their children attach because `RIG_6BONE_PARENT_OF` is acyclic.
     // skip nodes that already have a parent (we found them via findByName).
-    for (const name of RIG_6BONE_REQUIRED_NODES) {
+    for (const name of RIG_6BONE_PERSISTENT_NODES) {
         const node = byName.get(name)!;
         if (node.parent) continue;
         const parentName = RIG_6BONE_PARENT_OF[name];
@@ -711,13 +777,55 @@ function firstUnclaimedChild(parent: Node, name: string, claimed: Set<Node>): No
  * Finally calls `Animation.invalidateRig(animator)` so the animator
  * rebuilds its parent-first bone walk against the now-populated subtree.
  */
+// derive an unauthored attach socket's local rest position from its parent
+// bone's mesh geometry. hands sit at the bottom-centre of the arm (the hand);
+// `back` at the centre of the torso's back (+Z) face — avatars face -Z. rest
+// pose is axis-aligned, so we compose local translate/scale only (no rotation).
+function deriveSocketPosition(boneNode: Node, handle: ModelHandle, socket: string): Vec3 | null {
+    const meshes = handle.meshes as Record<string, { aabb: ArrayLike<number> } | undefined>;
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let found = false;
+    const walk = (node: Node, ox: number, oy: number, oz: number, sx: number, sy: number, sz: number): void => {
+        const meshName = getTrait(node, MeshTrait)?.meshId?.meshName;
+        const aabb = meshName ? meshes[meshName]?.aabb : undefined;
+        if (aabb) {
+            found = true;
+            minX = Math.min(minX, ox + sx * aabb[0]); maxX = Math.max(maxX, ox + sx * aabb[3]);
+            minY = Math.min(minY, oy + sy * aabb[1]); maxY = Math.max(maxY, oy + sy * aabb[4]);
+            minZ = Math.min(minZ, oz + sz * aabb[2]); maxZ = Math.max(maxZ, oz + sz * aabb[5]);
+        }
+        for (const child of node.children) {
+            const t = getTrait(child, TransformTrait);
+            walk(
+                child,
+                ox + sx * (t?.position[0] ?? 0), oy + sy * (t?.position[1] ?? 0), oz + sz * (t?.position[2] ?? 0),
+                sx * (t?.scale[0] ?? 1), sy * (t?.scale[1] ?? 1), sz * (t?.scale[2] ?? 1),
+            );
+        }
+    };
+    walk(boneNode, 0, 0, 0, 1, 1, 1);
+    if (!found) return null;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const cz = (minZ + maxZ) / 2;
+    // back → centre of the rear (+Z) face; hands → bottom-centre (the hand).
+    return socket === RIG_6BONE_BACK ? [cx, cy, maxZ] : [cx, minY, cz];
+}
+
 function mountRig(playerNode: Node, handle: ModelHandle): void {
     const loadedRoot = handle.scene;
     if (!loadedRoot) return;
 
     ensureCanonicalBones(playerNode);
 
-    const canonical = new Set<string>(RIG_6BONE_REQUIRED_NODES);
+    // persistent rig nodes (bones + attach sockets) are matched by name and have
+    // their TRS copied from the loaded model; everything else is a model clone.
+    const canonical = new Set<string>(RIG_6BONE_PERSISTENT_NODES);
+    // the current model's nodes we add below are recorded on the character so
+    // `unmountRig` drops exactly these on a swap, leaving runtime attachments
+    // (gear) alone — ownership by node identity, never by name.
+    const modelNodes = getTrait(playerNode, CharacterTrait)?.state.modelNodes;
 
     // Tracks the placeholder nodes consumed this pass so a reused child (or a
     // node cloned earlier in this same pass) is never matched twice — keeps
@@ -763,6 +871,9 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
             const existing = firstUnclaimedChild(parent, childName, claimed);
             if (existing) {
                 claimed.add(existing);
+                // record as model-owned whether we cloned it now or are reusing a
+                // prior/replicated clone, so unmountRig can drop it on a swap.
+                modelNodes?.add(existing);
                 visit(loadedChild, existing);
             } else {
                 const fresh = cloneNode(loadedChild);
@@ -770,6 +881,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
                 // claim the fresh clone so a later same-named loaded sibling
                 // clones its own node instead of folding into this one.
                 claimed.add(fresh);
+                modelNodes?.add(fresh);
             }
         }
     };
@@ -783,6 +895,25 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
         : null;
     visit(loadedRoot, rootPlaceholder);
 
+    // drive any attach socket the model didn't author from its parent bone's
+    // geometry, so gear has a usable mount point without the author placing one.
+    // An authored socket was matched + TRS-copied by the visit above; skip it.
+    const handleNodes = handle.nodes as Record<string, Node | undefined>;
+    for (const socket of RIG_6BONE_ATTACH_NODES) {
+        if (handleNodes[socket]) continue;
+        const parentName = RIG_6BONE_PARENT_OF[socket];
+        const boneNode = parentName ? handleNodes[parentName] : undefined;
+        const socketNode = findByName(playerNode, socket);
+        const socketTransform = socketNode ? getTrait(socketNode, TransformTrait) : undefined;
+        if (!boneNode || !socketTransform) continue;
+        const pos = deriveSocketPosition(boneNode, handle, socket);
+        if (!pos) continue;
+        setPosition(socketTransform, pos);
+        // hands get the grip rotation so a held item sits perpendicular to the arm
+        // (an outstretched arm points it up); back stays flat (identity).
+        if (socket !== RIG_6BONE_BACK) setQuaternion(socketTransform, HAND_GRIP_ROTATION);
+    }
+
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
 
@@ -794,19 +925,21 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
 }
 
 /**
- * Reset the rig back to placeholder: drop every non-canonical child
- * under each canonical bone (and any decorative clones that got
- * parented directly to the player node), and zero out canonical bone
- * TRS to identity so a subsequent mount starts from a clean rest pose.
- * The placeholder bones themselves are never destroyed (preserving
- * node + AnimatorTrait identity across swaps).
+ * Unmount the current model: reset each canonical bone's TRS to identity and
+ * remove exactly the model's nodes recorded in `state.modelNodes` (its
+ * mesh/visual nodes). Runtime attachments (gear `addChild`'d by the game) are
+ * NOT in that set, so they survive untouched — ownership is by node identity,
+ * not by name. The canonical bones themselves are never destroyed (node +
+ * AnimatorTrait identity preserved across swaps).
  */
 function unmountRig(playerNode: Node): void {
-    const canonical = new Set<string>(RIG_6BONE_REQUIRED_NODES);
+    // persistent = bones + attach sockets; never dropped, only their TRS resets.
+    const canonical = new Set<string>(RIG_6BONE_PERSISTENT_NODES);
+    const modelNodes = getTrait(playerNode, CharacterTrait)?.state.modelNodes;
 
-    // Recurse into each canonical bone: reset its TRS to identity,
-    // recurse into any canonical sub-bones, and drop everything else
-    // (decorative clones from the prior mount).
+    // Recurse into each canonical bone: reset its TRS, recurse into canonical
+    // sub-bones, and remove only the nodes recorded as the model's. Anything
+    // else (runtime gear) is left in place.
     const resetBone = (node: Node): void => {
         const transform = getTrait(node, TransformTrait);
         if (transform) {
@@ -816,7 +949,7 @@ function unmountRig(playerNode: Node): void {
             const child = node.children[i]!;
             if (canonical.has(child.name ?? '')) {
                 resetBone(child);
-            } else {
+            } else if (modelNodes?.has(child)) {
                 removeChild(node, child);
             }
         }
@@ -826,10 +959,14 @@ function unmountRig(playerNode: Node): void {
         const child = playerNode.children[i]!;
         if (canonical.has(child.name ?? '')) {
             resetBone(child);
-        } else {
+        } else if (modelNodes?.has(child)) {
             removeChild(playerNode, child);
         }
     }
+
+    // every recorded model node is now removed (subtrees and all); clear the
+    // set so the next mount starts fresh.
+    modelNodes?.clear();
 
     const animator = getTrait(playerNode, AnimatorTrait);
     if (animator) Animation.invalidateRig(animator);
@@ -873,7 +1010,10 @@ function driveProceduralLocomotion(
 
     const swing = Math.sin(cc.state.bobPhase) * amp;
 
-    applyLimb(playerNode, 'body', cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
+    // crouch lean rides `waist` — it carries body + head + arms in the flat rig,
+    // so one tilt leans the whole upper body while the legs (separate roots) stay
+    // planted. head-look cancels this same pitch so the face keeps aiming true.
+    applyLimb(playerNode, 'waist', cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
     applyWaistCrouchDrop(playerNode, t, cc.state.crouchAmount);
 
     t.state.breathPhase = (t.state.breathPhase + delta * ARM_BREATH_RATE) % TAU;
@@ -948,10 +1088,18 @@ function emitFootstep(
     spawnDust: boolean,
 ): void {
     const footBlockState = cc.state.groundBlockState;
-    if (footBlockState === 0) return;
+    if (footBlockState === 0) {
+        console.log('[bongle footstep] emitFootstep bail: groundBlockState=0');
+        return;
+    }
 
     const sounds: BlockSoundConfig | undefined = ctx.blocks.sounds[footBlockState];
     const clips = sounds?.footstep;
+    console.log(
+        `[bongle footstep] emitFootstep: state=${footBlockState} owner=${owner}` +
+            ` hasSoundsConfig=${!!sounds} footstepClips=${clips?.length ?? 0}` +
+            ` soundsLen=${ctx.blocks.sounds.length}`,
+    );
     if (clips && clips.length > 0) {
         const clip = clips[Math.floor(Math.random() * clips.length)]!;
         const detune = (Math.random() * 2 - 1) * FOOTSTEP_DETUNE_CENTS;

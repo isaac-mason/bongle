@@ -56,9 +56,10 @@ export const RIG_6BONE_REQUIRED_NODES = [
     RIG_6BONE_LEG_RIGHT,
 ] as const;
 
-/** Optional attach-point empties. Avatars may include them; nothing
- *  breaks if they're missing. Documented here so creators have one
- *  source of truth for the names. */
+/** Attach-point sockets for gear (held items, back-mounted). The engine
+ *  builds these as persistent rig nodes and derives their rest position from
+ *  the parent bone's geometry when a model doesn't author one — so creators
+ *  get usable mount points for free; an authored node's TRS wins. */
 export const RIG_6BONE_ATTACH_NODES = [
     RIG_6BONE_BACK,
     RIG_6BONE_HAND_LEFT,

@@ -13,6 +13,7 @@ export { env } from './api/env';
 
 export type { Avatar } from './core/avatar/avatar';
 export * from './api/animation';
+export * from './api/avatars';
 export * from './api/blocks';
 export * as chat from './api/chat';
 export { client } from './api/client';

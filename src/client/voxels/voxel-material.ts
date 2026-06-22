@@ -417,12 +417,11 @@ export function makePassMaterial(opts: {
     clipPos: Node<d.vec4f>;
     fragColor: Node<d.vec4f>;
     texColor: Node<d.vec4f>;
-    // per-instance fade for the cutout pass — defaults give a pure cutout
-    // (the chunk path); voxel meshes pass tint.a and their dither knob.
-    opacity?: Node<d.f32>;
+    // per-instance screen-door fade for the cutout pass — default is a pure
+    // cutout (the chunk path); voxel meshes pass their dither knob.
     dither?: Node<d.f32>;
 }): Material {
-    const { name, pass, clipPos, fragColor, texColor, opacity, dither } = opts;
+    const { name, pass, clipPos, fragColor, texColor, dither } = opts;
 
     if (pass === 'opaque') {
         return new Material({
@@ -436,7 +435,7 @@ export function makePassMaterial(opts: {
     }
 
     if (pass === 'transparent') {
-        const fragment = ditherDiscard(fragColor, texColor.a, opacity ?? f32(1), dither ?? f32(0));
+        const fragment = ditherDiscard(fragColor, texColor.a, dither ?? f32(0));
         return new Material({
             name,
             vertex: clipPos,

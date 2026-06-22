@@ -36,6 +36,21 @@ export function getModel(ctx: ScriptContext, id: string): ModelHandle | null {
     return Resources.modelHandle(resources, id);
 }
 
+/**
+ * Kick the lazy payload load for an already-registered (bundled or
+ * runtime) model. Idempotent and safe to call every tick — it's the
+ * trigger that flips a declared `model()` from "URL known" to "bytes
+ * fetched + parsed", after which `getModel` returns non-null. Use when
+ * you reference a bundled model directly (e.g. set `CharacterTrait.modelId`
+ * on an NPC) rather than going through the player avatar pipeline, which
+ * ensures on your behalf. Warns (no-op) if the id isn't registered.
+ */
+export function ensureModel(ctx: ScriptContext, id: string): void {
+    const resources = ctx._runtime?.resources;
+    if (!resources) return;
+    Resources.ensureModel(resources, id);
+}
+
 export type LoadModelOptions = {
     /** Fetch URL the engine will pull bytes from. Pass a single string
      *  when both sides hit the same URL (the common case — public R2

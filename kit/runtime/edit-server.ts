@@ -26,7 +26,7 @@
 import path from 'node:path';
 import type { Server as HttpServer } from 'node:http';
 import { env } from 'bongle';
-import { EngineServer, createInMemoryStorageDriver } from 'bongle/engine-server';
+import { EngineServer, createFallbackAvatarsDriver, createInMemoryStorageDriver } from 'bongle/engine-server';
 import { __kit } from 'bongle/internal';
 import { attachGameTransport } from 'bongle/kit/runtime/transport';
 
@@ -61,6 +61,7 @@ export async function start(opts: StartOptions) {
         options: {},
         driver: {
             storage: createInMemoryStorageDriver(),
+            avatars: createFallbackAvatarsDriver(),
         },
     });
 

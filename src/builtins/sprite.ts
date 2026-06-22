@@ -48,8 +48,9 @@ export const SpriteTrait = trait('sprite', {
      *  loops forever; no playback enum (see file header). */
     fps: 8,
 
-    /** per-instance tint [r, g, b, a]: rgb multiplies the albedo (white =
-     *  no-op), a is opacity. default [1,1,1,1] = untinted, opaque. client-only. */
+    /** per-instance tint [r, g, b, a]: rgb is the recolour target, a the
+     *  intensity (0 = untouched, 1 = full, lightness-preserving). never
+     *  changes coverage. default [1,1,1,1] = untinted. client-only. */
     tint: [1, 1, 1, 1] as Vec4,
 
     /** transient overlay [r, g, b, a]: rgb is the colour, a the strength,

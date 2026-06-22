@@ -3,16 +3,18 @@
 // — mesh, sprite, extruded sprite, voxel mesh — needs to agree on, so they
 // can't drift apart in per-trait copies.
 
-import { add, d, Discard, f32, Fn, fract, fragCoord, If, max, mix, mul, type Node, sub, vec3f } from 'gpucat';
+import { add, d, div, dot, Discard, f32, Fn, fract, fragCoord, If, max, mix, mul, type Node, vec3f } from 'gpucat';
 
 // ── tint + flash + glow ─────────────────────────────────────────────
 //
 // The per-instance colour/lighting knobs, in one place so every trait
 // agrees on what they mean. Four orthogonal axes, each owning one thing:
 //
-//   tint  — persistent recolour. Multiplies the albedo (white = no-op),
-//           matching every other engine. `tint.a` is opacity and is applied
-//           to the fragment alpha by the caller, not here.
+//   tint  — persistent recolour, luminance-preserving. rgb is the target
+//           colour, a the intensity (0 = untouched, 1 = full); white or
+//           a = 0 is a no-op. Keeps the surface's own lightness, so it
+//           shifts colour without darkening (red tint → red, not dark red).
+//           NEVER changes coverage — fade/cutout is the `dither` axis.
 //   flash — transient overlay. Lerps toward a flat colour on top of the
 //           tint but underneath lighting (damage flash, charge-up).
 //   glow  — emission as a lighting floor in the surface's OWN colour
@@ -38,7 +40,17 @@ export function shadeTinted(
     glow: Node<d.f32>,
     unlit: Node<d.f32>,
 ): Node<d.vec3f> {
-    const tinted = mul(albedo, tint.rgb).toVar('tintedAlbedo');
+    // tint: luminance-preserving recolour. The raw multiply shifts hue but
+    // also changes brightness; rescaling it back to the albedo's own
+    // luminance keeps the shading/detail, so the recolour never darkens.
+    // tint.a is intensity (0 = untouched, 1 = full); white / a=0 is a no-op.
+    const lumWeights = vec3f(f32(0.2126), f32(0.7152), f32(0.0722)).toVar('lumWeights');
+    const lumAlbedo = dot(albedo, lumWeights).toVar('lumAlbedo');
+    const rawTint = mul(albedo, tint.rgb).toVar('rawTint');
+    const lumRaw = max(dot(rawTint, lumWeights), f32(1e-4)).toVar('lumRaw');
+    const lumScale = div(lumAlbedo, lumRaw).toVar('tintLumScale');
+    const preserved = mul(rawTint, vec3f(lumScale, lumScale, lumScale)).toVar('tintPreserved');
+    const tinted = mix(albedo, preserved, tint.w).toVar('tintedAlbedo');
     const flashed = mix(tinted, flash.rgb, flash.w).toVar('flashedAlbedo');
 
     // glow-floored scene lighting modulates the surface; unlit bypasses it.
@@ -52,21 +64,16 @@ export function shadeTinted(
 /**
  * Fragment discard shared by every albedo-based trait: a hard alpha cutout
  * (`alpha < 0.5`) plus an interleaved-gradient screen-door so partial
- * coverage fades pixelly instead of popping. Coverage combines `opacity`
- * (tint.a) and the explicit `dither` knob into one fade:
+ * coverage fades pixelly instead of popping. Coverage is owned solely by the
+ * `dither` knob:
  *
- *   fade = 1 - opacity * (1 - dither)   // 0 = solid, 1 = gone
+ *   fade = dither   // 0 = solid, 1 = gone
  *
- * Cheap (a few muls + fracts) and stays in the opaque pipeline — no sort,
- * no blend. Returns `color`, or discards the fragment. `dither = 0` and
- * `opacity = 1` give a pure cutout (the no-fade fast path).
+ * Cheap (a few fracts) and stays in the opaque pipeline — no sort, no blend.
+ * Returns `color`, or discards the fragment. `dither = 0` is a pure cutout
+ * (the no-fade fast path). Tint never feeds this — it can't gate coverage.
  */
-export function ditherDiscard(
-    color: Node<d.vec4f>,
-    alpha: Node<d.f32>,
-    opacity: Node<d.f32>,
-    dither: Node<d.f32>,
-): Node<d.vec4f> {
+export function ditherDiscard(color: Node<d.vec4f>, alpha: Node<d.f32>, dither: Node<d.f32>): Node<d.vec4f> {
     const discard = Fn(
         (c, a, fade, fragX, fragY) => {
             If(a.lessThan(f32(0.5)), () => {
@@ -91,6 +98,5 @@ export function ditherDiscard(
             ],
         },
     );
-    const fade = sub(f32(1.0), mul(opacity, sub(f32(1.0), dither))).toVar('ditherFade');
-    return discard(color, alpha, fade, fragCoord.x, fragCoord.y);
+    return discard(color, alpha, dither, fragCoord.x, fragCoord.y);
 }
