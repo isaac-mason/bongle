@@ -257,6 +257,13 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         }
     }
 
+    // Hold the banner until the persistent pipeline page has rendered +
+    // emitted every icon, so "started!" means the whole pipeline is warm, not
+    // just the dev server listening. Resolves even on a pipeline fault.
+    const stepIcons = step('rendering icons');
+    await handle.iconsRendered;
+    stepIcons.done();
+
     printReady(links);
 
     const cleanup = () => {

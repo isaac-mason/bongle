@@ -155,6 +155,7 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
         return false;
     }
 
+    const buildStart = performance.now();
     const entries: BuildEntry[] = [];
     let anyFresh = false;
 
@@ -192,7 +193,7 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     if (anyFresh) {
         const fresh = entries.filter((e) => e.fresh).length;
         const cached = entries.length - fresh;
-        console.log(`[bongle] models built: ${fresh} fresh, ${cached} cached`);
+        console.log(`[bongle] models built: ${fresh} fresh, ${cached} cached in ${(performance.now() - buildStart).toFixed(0)}ms`);
     }
 
     return anyFresh;

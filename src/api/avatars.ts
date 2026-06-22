@@ -1,22 +1,28 @@
-// api/avatars.ts — script-facing avatar sourcing + application.
+// api/avatars.ts — script-facing avatar API: source, load, assign, release.
 //
-// `sampleAvatars` pulls an opaque batch of avatars from the `ServerDriver.avatars`
-// host capability (popular / random / trending — the host owns curation and may
-// change it). `applyAvatar` dresses any
-// `CharacterTrait` node in one, reusing the runtime-model load path the player
-// avatar pipeline uses; the rig reconciler streams it in. Use for ambient NPCs
-// so they wear real, varied avatars instead of a placeholder dummy.
+//   - sampleAvatars — pull an opaque batch from the `ServerDriver.avatars` host capability
+//   - loadAvatar    — acquire + ensure a resolved avatar's model; +1 refcount (runtime; bundled = ensure-only)
+//   - assignAvatar  — point a node's CharacterTrait at an already-loaded model (no refcount)
+//   - releaseAvatar — drop the refcount; bytes freed only when the last holder releases
 //
-// Server-side: `applyAvatar` sets the synced `CharacterTrait.modelId`/`rigType`
-// and, for runtime avatars, registers the model so Discovery replicates the URLs
-// to clients — exactly the path a resolved player avatar takes.
+// `loadAvatar` MUST precede `assignAvatar` for runtime avatars: acquire registers
+// the resource entry that ensure + the rig reconciler need (bundled entries are
+// codegen-hydrated, so they can be assigned directly). Every `loadAvatar` balances
+// with exactly one `releaseAvatar` per holder; the shared per-modelId refcount means
+// a player and an NPC on the same avatar = one load, freed only when both release.
+//
+// The load/assign internals live in core/avatar/model and are shared with the engine
+// player-join path (server/avatars); this module is the script-facing surface.
 
 import type { ResolvedAvatar } from 'bongle/interface';
 import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import type { ScriptContext } from '../core/scene/scripts';
 import * as Resources from '../core/resources';
-import { getTrait, type Node } from './scene-graph';
-import { CharacterTrait, modelIdSync } from '../builtins/character';
+import { acquireAvatarModel } from '../core/avatar/model';
+
+// `assignAvatar` is shared with the engine player path, so it lives in core; surface
+// it here as part of the script-facing API.
+export { assignAvatar } from '../core/avatar/model';
 
 /**
  * Pull a batch of avatars for populating NPCs. Opaque + unordered + non-stable —
@@ -30,27 +36,20 @@ export function sampleAvatars(ctx: ScriptContext): Promise<ResolvedAvatar[]> {
 }
 
 /**
- * Dress a `CharacterTrait` node in a resolved avatar. Server-side: registers the
- * model (runtime avatars replicate to clients via Discovery) and sets the synced
- * `modelId`/`rigType`; the rig reconciler mounts it once the payload lands. No-op
- * if `node` has no `CharacterTrait` or there's no runtime resources on `ctx`.
+ * Load a resolved avatar's model (acquire + ensure) and bump its refcount (runtime;
+ * bundled = ensure-only). Returns `{ modelId, rigType }` to hand to `assignAvatar`.
+ * Balance each call with one `releaseAvatar`. Must precede `assignAvatar` for runtime
+ * avatars (acquire registers the entry the reconciler loads from).
  */
-export function applyAvatar(ctx: ScriptContext, node: Node, avatar: ResolvedAvatar): void {
+export function loadAvatar(ctx: ScriptContext, avatar: ResolvedAvatar): { modelId: string; rigType: string } {
     const resources = ctx._runtime?.resources;
-    const ch = getTrait(node, CharacterTrait);
-    if (!resources || !ch) return;
-    if (avatar.source === 'runtime') {
-        Resources.acquireRuntimeModel(resources, avatar.modelId, {
-            clientUrl: avatar.clientUrl,
-            serverUrl: avatar.serverUrl,
-            source: 'runtime',
-            hash: avatar.hash,
-        });
+    if (!resources) {
+        // No runtime resources (degenerate context) — return identity so a bundled
+        // assign still works; runtime payloads simply won't load here.
+        const rigType = avatar.source === 'runtime' ? avatar.rigType ?? RIG_TYPE_6BONE : RIG_TYPE_6BONE;
+        return { modelId: avatar.modelId, rigType };
     }
-    Resources.ensureModel(resources, avatar.modelId);
-    ch.modelId = avatar.modelId;
-    ch.rigType = avatar.source === 'runtime' ? avatar.rigType ?? RIG_TYPE_6BONE : RIG_TYPE_6BONE;
-    modelIdSync.dirty(ch);
+    return acquireAvatarModel(resources, avatar);
 }
 
 /**

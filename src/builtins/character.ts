@@ -86,6 +86,13 @@ type CharacterState = {
      *  change — steady-state characters (loaded, out of proximity range)
      *  pay one numeric compare per frame instead of a full rig traversal. */
     appliedDither: number;
+    /** extra screen-door dither a game script can drive (e.g. fading out a
+     *  dead body). `max()`'d with the proximity + loading dither in the
+     *  presentation step, so the engine stays the single writer of mesh
+     *  dither and the script's intent can't be undone by the proximity fade.
+     *  Set it via `getTrait(node, CharacterTrait).state.externalDither = v`
+     *  instead of walking the rig and calling setMeshDither yourself. */
+    externalDither: number;
     /** the current model's nodes that `mountRig` added on top of the enforced
      *  skeleton (its mesh/visual nodes). `unmountRig` removes exactly these on
      *  a swap and leaves runtime attachments (gear) alone — ownership by node
@@ -111,11 +118,12 @@ import {
     addTrait,
     cloneNode,
     createNode,
+    destroyNode,
     findByName,
     getTrait,
     hasTrait,
+    isLocalNode,
     type Node,
-    removeChild,
 } from '../api/scene-graph';
 import type { TraitProps } from '../core/scene/nodes';
 import { getControlNode, isOwner, onFrame, query, script } from '../api/scripts';
@@ -138,9 +146,6 @@ const TAU = Math.PI * 2;
 // sin(bobPhase) trough — when the camera bob is at its lowest. that's
 // the foot-plant moment in this controller's bob convention.
 const FOOT_PHASE = (3 * Math.PI) / 2;
-
-// DEBUG: frame throttle for the locomotion-loop ownership trace.
-let _locoDbgFrame = 0;
 
 // max head pitch (rad). real necks crane ~60° up / ~75° down; symmetric
 // 60° is a fine starting point — past this the head would clip into the
@@ -300,6 +305,7 @@ export const CharacterTrait = trait(
             landingCooldownRemaining: 0,
             loadingDither: 0,
             appliedDither: 0,
+            externalDither: 0,
             modelNodes: new Set(),
         }),
     },
@@ -435,8 +441,9 @@ script(WorldTrait, 'character', (ctx) => {
                 setCharacterSubtreeVisible(node, !hide);
                 // POV character can still be loading (own avatar streaming
                 // in) — apply the load dither alone; proximity fade never
-                // applies to own body.
-                finalDither = hide ? 0 : t.state.loadingDither;
+                // applies to own body. a script-driven dither (e.g. own death
+                // fade) still composes in.
+                finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
             } else {
                 setCharacterSubtreeVisible(node, true);
                 const range = t.config.proximityFadeRange;
@@ -451,7 +458,7 @@ script(WorldTrait, 'character', (ctx) => {
                     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                     proxDither = dist >= range ? 0 : 1 - dist / range;
                 }
-                finalDither = Math.max(proxDither, t.state.loadingDither);
+                finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
             }
             if (t.state.appliedDither !== finalDither) {
                 setCharacterSubtreeDither(node, finalDither);
@@ -465,20 +472,7 @@ script(WorldTrait, 'character', (ctx) => {
         // entirely.
         if (!env.client) return;
 
-        const dbgTick = (_locoDbgFrame++ % 60) === 0;
         for (const [t, cc, transform] of qLocomotion.matches) {
-            // DEBUG (throttled ~1/sec): log EVERY matched character before any
-            // gate — reveals whether the locally-controlled character is even
-            // in the loop, and why isOwner() is false for it.
-            if (dbgTick) {
-                const n = t._node;
-                console.log(
-                    `[bongle footstep] char isControlNode=${n === getControlNode(ctx)}` +
-                        ` isOwner=${isOwner(ctx, n)} node.owner=${String(n.owner)}` +
-                        ` playerId=${String(ctx.client?.room?.playerId)}` +
-                        ` modelId=${t.state.modelId} grounded=${cc.state.grounded}`,
-                );
-            }
             if (t.state.modelId === null) continue;
             const node = t._node;
 
@@ -504,17 +498,6 @@ script(WorldTrait, 'character', (ctx) => {
                 footBlockState !== 0 && (ctx.blocks.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
             const wasInLiquid =
                 prevFootBlockState !== 0 && (ctx.blocks.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
-
-            // DEBUG: trace the footstep gating chain for the owner. throttled
-            // by the bob-phase bucket so it's silent when standing still and
-            // ticks a few times/sec while walking.
-            if (owner && Math.floor(cc.state.bobPhase * 4) !== Math.floor(cc.state.previousBobPhase * 4)) {
-                console.log(
-                    `[bongle footstep] grounded=${cc.state.grounded} prevGrounded=${cc.state.previousGrounded}` +
-                        ` inLiquid=${inLiquid} groundBlockState=${footBlockState}` +
-                        ` bobPhase=${cc.state.bobPhase.toFixed(2)} prevBobPhase=${cc.state.previousBobPhase.toFixed(2)}`,
-                );
-            }
 
             // entry splash — fires on the bob-tick the foot-sample first
             // resolves to a liquid voxel. one-shot, independent of cadence.
@@ -552,9 +535,6 @@ script(WorldTrait, 'character', (ctx) => {
                 // `groundBlockState` while submerged).
                 const idx = Math.floor((cc.state.bobPhase - FOOT_PHASE) / TAU);
                 const prevIdx = Math.floor((cc.state.previousBobPhase - FOOT_PHASE) / TAU);
-                if (owner && idx !== prevIdx) {
-                    console.log(`[bongle footstep] cadence bucket idx=${idx} prevIdx=${prevIdx} -> ${idx > prevIdx ? 'EMIT' : 'no emit'}`);
-                }
                 if (idx > prevIdx) {
                     emitFootstep(
                         ctx,
@@ -742,21 +722,6 @@ function ensureCanonicalBones(playerNode: Node): void {
     }
 }
 
-/** First direct child of `parent` matching `name` that hasn't already been
- *  claimed this mount pass, or null. Used by `mountRig` to reconcile a loaded
- *  node against an already-present child (replicated or prior-frame) instead
- *  of cloning a duplicate. Direct-children only — `mountRig` matches level by
- *  level, so a deeper same-named node must not stand in for a missing direct
- *  child. The `claimed` set makes each existing child consumable at most once,
- *  so a model with repeated (or unnamed) sibling names still maps one loaded
- *  node to one mounted node rather than collapsing them. */
-function firstUnclaimedChild(parent: Node, name: string, claimed: Set<Node>): Node | null {
-    for (const child of parent.children) {
-        if (!claimed.has(child) && (child.name ?? '') === name) return child;
-    }
-    return null;
-}
-
 /**
  * Install / re-install a model's rig under `playerNode`:
  *
@@ -819,6 +784,14 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
 
     ensureCanonicalBones(playerNode);
 
+    // Who builds the model's mesh nodes: the server builds them for every node it
+    // owns and replicates them to clients; a client builds only its own local nodes.
+    // For a server-owned rig the meshes arrive via replication, so a client must NOT
+    // clone them here — doing so double-mounts them and (because avatars share mesh
+    // node names) leaves a base/loaded mix on a swap. Bones/sockets are matched +
+    // TRS-copied regardless (cheap, idempotent); only the mesh clone is gated.
+    const localAuthority = env.server || isLocalNode(playerNode);
+
     // persistent rig nodes (bones + attach sockets) are matched by name and have
     // their TRS copied from the loaded model; everything else is a model clone.
     const canonical = new Set<string>(RIG_6BONE_PERSISTENT_NODES);
@@ -826,11 +799,6 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     // `unmountRig` drops exactly these on a swap, leaving runtime attachments
     // (gear) alone — ownership by node identity, never by name.
     const modelNodes = getTrait(playerNode, CharacterTrait)?.state.modelNodes;
-
-    // Tracks the placeholder nodes consumed this pass so a reused child (or a
-    // node cloned earlier in this same pass) is never matched twice — keeps
-    // repeated / unnamed sibling names mapping one-to-one.
-    const claimed = new Set<Node>();
 
     const visit = (loaded: Node, placeholder: Node | null): void => {
         // copy loaded TRS onto the matched placeholder (if any).
@@ -859,30 +827,19 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
                 visit(loadedChild, phChild);
                 continue;
             }
-            // non-canonical child, attached under whatever placeholder bone
-            // we last matched (falls back to playerNode when the loaded root
-            // itself was non-canonical, e.g. the synthetic wrapper around a
-            // multi-root scene). Mount-if-not-already: a matching child may
-            // already exist — replicated from the server (player rigs are
-            // 'shared', so the server's mount reaches clients) or mounted a
-            // prior frame. Reuse it and reconcile its subtree rather than
-            // cloning a duplicate; only clone when there's no unclaimed match.
+            // non-canonical child (mesh / decorative bone), cloned under whatever
+            // placeholder bone we last matched (falls back to playerNode when the
+            // loaded root itself was non-canonical, e.g. the synthetic wrapper around
+            // a multi-root scene). Only the locally-authoritative side builds these —
+            // a client defers a server-owned rig's meshes to replication (see
+            // `localAuthority`). The reconciler always unmounts before mounting, so
+            // there's never an existing child to reconcile against: clone fresh and
+            // record it on `modelNodes` so unmountRig destroys exactly it on the swap.
+            if (!localAuthority) continue;
             const parent = placeholder ?? playerNode;
-            const existing = firstUnclaimedChild(parent, childName, claimed);
-            if (existing) {
-                claimed.add(existing);
-                // record as model-owned whether we cloned it now or are reusing a
-                // prior/replicated clone, so unmountRig can drop it on a swap.
-                modelNodes?.add(existing);
-                visit(loadedChild, existing);
-            } else {
-                const fresh = cloneNode(loadedChild);
-                addChild(parent, fresh);
-                // claim the fresh clone so a later same-named loaded sibling
-                // clones its own node instead of folding into this one.
-                claimed.add(fresh);
-                modelNodes?.add(fresh);
-            }
+            const fresh = cloneNode(loadedChild);
+            addChild(parent, fresh);
+            modelNodes?.add(fresh);
         }
     };
 
@@ -950,7 +907,10 @@ function unmountRig(playerNode: Node): void {
             if (canonical.has(child.name ?? '')) {
                 resetBone(child);
             } else if (modelNodes?.has(child)) {
-                removeChild(node, child);
+                // destroyNode (not removeChild) so the removal parks in the discovery
+                // dirty set and replicates as `node_destroyed` — else clients keep the
+                // old mesh nodes (replicated) and show a base/loaded mix on a swap.
+                destroyNode(child);
             }
         }
     };
@@ -960,7 +920,7 @@ function unmountRig(playerNode: Node): void {
         if (canonical.has(child.name ?? '')) {
             resetBone(child);
         } else if (modelNodes?.has(child)) {
-            removeChild(playerNode, child);
+            destroyNode(child);
         }
     }
 
@@ -1088,18 +1048,10 @@ function emitFootstep(
     spawnDust: boolean,
 ): void {
     const footBlockState = cc.state.groundBlockState;
-    if (footBlockState === 0) {
-        console.log('[bongle footstep] emitFootstep bail: groundBlockState=0');
-        return;
-    }
+    if (footBlockState === 0) return;
 
     const sounds: BlockSoundConfig | undefined = ctx.blocks.sounds[footBlockState];
     const clips = sounds?.footstep;
-    console.log(
-        `[bongle footstep] emitFootstep: state=${footBlockState} owner=${owner}` +
-            ` hasSoundsConfig=${!!sounds} footstepClips=${clips?.length ?? 0}` +
-            ` soundsLen=${ctx.blocks.sounds.length}`,
-    );
     if (clips && clips.length > 0) {
         const clip = clips[Math.floor(Math.random() * clips.length)]!;
         const detune = (Math.random() * 2 - 1) * FOOTSTEP_DETUNE_CENTS;

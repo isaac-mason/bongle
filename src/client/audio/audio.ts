@@ -338,34 +338,8 @@ function startPlayback(
 ): PlaybackHandle | null {
     const { resources } = audio;
 
-    const mode = node !== null ? 'onNode' : fixedPos !== null ? 'at' : 'mono';
-    console.log(
-        `[bongle audio play] soundId=${soundId} mode=${mode} vol=${opts.volume ?? 1} loop=${opts.loop ?? false}`,
-    );
-
     const clip = resources.clips.get(soundId);
-
-    if (!clip) {
-        console.warn(`[bongle audio play] soundId=${soundId} NOT in clips map (clips has ${resources.clips.size} entries)`);
-        return null;
-    }
-
-    console.log(
-        `[bongle audio play] soundId=${soundId} clip kind=${clip.kind}` +
-            (clip.kind === 'atlas' ? ` offset=${clip.offset.toFixed(3)} duration=${clip.duration.toFixed(3)}` : ` url=${clip.url}`),
-    );
-
-    if (node !== null || fixedPos !== null) {
-        const pos = fixedPos ?? readNodePosition(node!);
-        const L = audio._listenerLast;
-        const dist =
-            pos && Number.isFinite(L.px)
-                ? Math.hypot(pos[0] - L.px, pos[1] - L.py, pos[2] - L.pz).toFixed(2)
-                : 'n/a';
-        console.log(
-            `[bongle audio play] soundId=${soundId} spatial pos=${pos ? `[${pos.map((n) => n.toFixed(1)).join(',')}]` : 'null'} listener=[${L.px.toFixed(1)},${L.py.toFixed(1)},${L.pz.toFixed(1)}] dist=${dist}`,
-        );
-    }
+    if (!clip) return null;
 
     // browsers gate playback on user gesture — resume here. If we're not
     // called from a gesture this no-ops silently and the source plays
@@ -483,9 +457,6 @@ function startAtlasSource(
     } else {
         source.start(0, clip.offset, clip.duration);
     }
-    console.log(
-        `[bongle audio play] atlas source started: offset=${clip.offset.toFixed(3)} duration=${clip.duration.toFixed(3)} ctx.state=${ctx.state} ctx.time=${ctx.currentTime.toFixed(3)} gain=${playback.gain.gain.value}`,
-    );
 }
 
 function startStandaloneSource(

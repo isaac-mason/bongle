@@ -1,6 +1,6 @@
 import type { Client } from 'bongle/interface';
 import type { RpcDriver } from '../core/rpc';
-import * as Net from './net';
+import * as Discovery from './discovery';
 import * as Rooms from './rooms';
 
 /**
@@ -8,21 +8,25 @@ import * as Rooms from './rooms';
  * impls (sendTo / broadcast — server doesn't send to itself); listener
  * bookkeeping + dispatch lives in `core/rpc`. wrap with `Rpc.init(driver)`
  * to get an `Rpc` instance.
+ *
+ * Sends do NOT go straight to the outbox: they're queued on `discovery` and
+ * drained (by `Discovery.flushCommands`) after the per-tick scene distribution,
+ * so a command can't beat this tick's scene state (join_room / scene_sync) onto
+ * a client's ordered socket. See discovery.ts "RPC command ordering".
  */
-export function createDriver(net: Net.ServerNet, rooms: Rooms.Rooms): RpcDriver {
+const toClientMsg = (roomId: string, commandIndex: number, payload: Uint8Array) =>
+    ({ type: 'net_message' as const, direction: 'to_client' as const, roomId, commandIndex, payload });
+
+export function createDriver(rooms: Rooms.Rooms, discovery: Discovery.Discovery): RpcDriver {
     return {
         send(commandIndex, roomId, payload, client) {
             if (!client) return; // server never sends to itself
-            const room = Rooms.getRoom(rooms, roomId);
-            if (!room) return;
-            const msg = { type: 'net_message' as const, direction: 'to_client' as const, roomId, commandIndex, payload };
-            Net.send(net, client as Client, msg);
+            if (!Rooms.getRoom(rooms, roomId)) return;
+            Discovery.queueCommand(discovery, { kind: 'send', client: client as Client, msg: toClientMsg(roomId, commandIndex, payload) });
         },
         broadcast(commandIndex, roomId, payload) {
-            const room = Rooms.getRoom(rooms, roomId);
-            if (!room) return;
-            const msg = { type: 'net_message' as const, direction: 'to_client' as const, roomId, commandIndex, payload };
-            Net.broadcastToRoom(net, rooms, room, msg);
+            if (!Rooms.getRoom(rooms, roomId)) return;
+            Discovery.queueCommand(discovery, { kind: 'broadcast', roomId, msg: toClientMsg(roomId, commandIndex, payload) });
         },
     };
 }

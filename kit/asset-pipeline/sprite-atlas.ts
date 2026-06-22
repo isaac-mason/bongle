@@ -123,6 +123,7 @@ export async function buildSpriteAtlas(
         }
     }
 
+    const buildStart = performance.now();
     console.log(`[bongle] building sprite atlas (${handles.length} sprites, ${items.length} frames)...`);
 
     // load every frame's pixels in parallel so we know dimensions before
@@ -179,7 +180,7 @@ export async function buildSpriteAtlas(
     const metadata: SpriteAtlasMetadata = { atlasSize, sprites, hash };
     fs.writeFileSync(atlasJson, JSON.stringify(metadata, null, 2));
 
-    console.log(`[bongle] sprite atlas built: ${atlasSize}x${atlasSize} (${handles.length} sprites, ${items.length} frames)`);
+    console.log(`[bongle] sprite atlas built: ${atlasSize}x${atlasSize} (${handles.length} sprites, ${items.length} frames) in ${(performance.now() - buildStart).toFixed(0)}ms`);
     return true;
 }
 

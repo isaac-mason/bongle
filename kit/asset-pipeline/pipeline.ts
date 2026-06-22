@@ -125,14 +125,29 @@ export type RunPassOptions = {
     forceAll?: boolean;
 };
 
+/** Per-builder wall-clock (ms) for one pass, keyed by display label
+ *  ('draw', 'block-atlas', 'sprite-atlas', 'models', 'scenes', 'audio').
+ *  Builders run concurrently, so these overlap and won't sum to the pass
+ *  total — read them as the long pole. An absent key means the builder was
+ *  skipped (nothing dirty). */
+export type PipelinePassTimings = Record<string, number>;
+
 export async function runAssetPipelinePass(
     internal: PipelineInternal,
     opts: PipelineOpts,
     state: PipelineState,
     runOpts: RunPassOptions = {},
-): Promise<void> {
+): Promise<PipelinePassTimings> {
     const { projectDir, mode, cache } = opts;
     const { forceAll = false } = runOpts;
+    const timings: PipelinePassTimings = {};
+    const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
+        const start = performance.now();
+        return p.then((v) => {
+            timings[label] = performance.now() - start;
+            return v;
+        });
+    };
 
     const { registry } = internal;
     const blocksRev = registry.blocks.revision;
@@ -152,7 +167,7 @@ export async function runAssetPipelinePass(
     const soundsDirty = forceAll || soundsRev !== state.sounds;
     const spritesDirty = forceAll || spritesRev !== state.sprites;
 
-    if (!atlasDirty && !modelsDirty && !scenesDirty && !matchmakingDirty && !soundsDirty && !spritesDirty) return;
+    if (!atlasDirty && !modelsDirty && !scenesDirty && !matchmakingDirty && !soundsDirty && !spritesDirty) return timings;
 
     // Build the block registry first when blocks/models/scenes are dirty.
     // `buildBlockRegistry` evaluates each block's default model and, for
@@ -186,15 +201,15 @@ export async function runAssetPipelinePass(
     // both registries unconditionally; per-builder gates downstream still
     // apply.
     const bakedDraws: BakedDraws = (atlasDirty || spritesDirty)
-        ? await bakeDrawTextures(registry.blockTextures, registry.sprites, { projectDir })
+        ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { projectDir }))
         : new Map();
 
     const tasks: Promise<void>[] = [];
 
     if (moduleView) {
-        if (atlasDirty) tasks.push(buildBlockTextureAtlas(moduleView, { projectDir, bakedDraws, cache }).then(() => undefined));
-        if (modelsDirty) tasks.push(buildModels(moduleView, { projectDir, cache: state.modelsCache }).then(() => undefined));
-        if (scenesDirty) tasks.push(buildScenes(moduleView, { projectDir, mode }).then(() => undefined));
+        if (atlasDirty) tasks.push(timed('block-atlas', buildBlockTextureAtlas(moduleView, { projectDir, bakedDraws, cache })).then(() => undefined));
+        if (modelsDirty) tasks.push(timed('models', buildModels(moduleView, { projectDir, cache: state.modelsCache })).then(() => undefined));
+        if (scenesDirty) tasks.push(timed('scenes', buildScenes(moduleView, { projectDir, mode })).then(() => undefined));
     }
 
     if (soundsDirty) {
@@ -202,7 +217,7 @@ export async function runAssetPipelinePass(
         // from the partial view above — sounds aren't part of any
         // cross-domain composition like blocks/textures/models).
         tasks.push(
-            buildAudio(registry.sounds, { projectDir }).then(() => undefined),
+            timed('audio', buildAudio(registry.sounds, { projectDir })).then(() => undefined),
         );
     }
 
@@ -212,7 +227,7 @@ export async function runAssetPipelinePass(
         // of the draw-textures pass above; nullable map entries fall back
         // to magenta inside the builder.
         tasks.push(
-            buildSpriteAtlas(registry.sprites, { projectDir, bakedDraws, cache }).then(() => undefined),
+            timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { projectDir, bakedDraws, cache })).then(() => undefined),
         );
     }
 
@@ -235,6 +250,8 @@ export async function runAssetPipelinePass(
     state.matchmaking = matchmakingRev;
     state.sounds = soundsRev;
     state.sprites = spritesRev;
+
+    return timings;
 }
 
 /**

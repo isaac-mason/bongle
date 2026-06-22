@@ -154,7 +154,7 @@ import type { Browser } from 'puppeteer';
 import puppeteer from 'puppeteer';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { readArtifactHashSync } from '../cache';
-import { collectAssetSources, createPipelineState, runAssetPipelinePass } from '../asset-pipeline/pipeline';
+import { collectAssetSources, createPipelineState, type PipelinePassTimings, runAssetPipelinePass } from '../asset-pipeline/pipeline';
 import {
     type IconKind,
     type IconManifest,
@@ -167,6 +167,17 @@ import * as Orchestrator from '../pipeline/orchestrator';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
 import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from './dep-resolve';
 import { virtualEntriesPlugin } from './virtual-entries';
+
+let resolveIconsRendered: () => void = () => {};
+/** Resolves once the persistent pipeline page has finished its first full
+ *  render+emit cycle on cold start — every block/scene/prefab icon is on
+ *  disk and the headless page is warm. The dev CLI awaits this before the
+ *  ready banner so "started!" reflects the whole pipeline, not just the dev
+ *  server being up. Resolved (never rejected) even on a launch/render fault,
+ *  so a pipeline failure can't wedge the banner. One-shot per process. */
+export const iconsRendered: Promise<void> = new Promise((resolve) => {
+    resolveIconsRendered = resolve;
+});
 
 export interface BongleOptions {
     /** absolute path to the project root (the dir containing `src/`, `resources/`). */
@@ -598,16 +609,47 @@ if (import.meta.hot) {
                 // event warrants a forced re-pass.
                 let assetSrcs: Set<string> = new Set();
 
-                // First-pass gate. The editor client polls /__bongle/ready
-                // before calling EngineClient.load() so a cold dev server
-                // doesn't hand it a missing voxels-atlas.json. Flipped true
-                // after the first runNodePass completes (success or caught
-                // error — we don't want to wedge the client on a pipeline
-                // bug). `pipelineStatus` is a coarse human-readable label
-                // for the loader UI; granular per-builder progress can be
-                // added later if needed.
-                let pipelineReady = false;
+                // Editor-load gate. The editor client polls /__bongle/ready
+                // before calling EngineClient.load(); we hold it until the
+                // first *full* pipeline run is done — not just the asset pass
+                // (atlas/barrels on disk) but the headless page's first
+                // render+emit of every icon — so the editor loads into a fully
+                // warm pipeline instead of a flash of missing thumbnails.
+                // `firstPipelineRunComplete` mirrors the iconsRendered promise
+                // into a pollable flag; it resolves even on a pipeline fault,
+                // so a broken render never wedges the editor. `pipelineStatus`
+                // is a coarse human-readable label for the loader UI.
+                let firstPipelineRunComplete = false;
                 let pipelineStatus: string | null = 'Starting…';
+                void iconsRendered.then(() => {
+                    firstPipelineRunComplete = true;
+                    pipelineStatus = null;
+                });
+
+                // Cold-start phase timings, logged once the page is warm so we
+                // can see where the first run's wall-clock goes. The phases are
+                // sequential on the critical path: the launch microtask awaits
+                // the asset pass before booting the page. `firstAssetPassMs` is
+                // stamped by the first runNodePass; launch + render are timed
+                // at the page. `firstAssetTimings` breaks the asset bucket down
+                // per builder (draw/atlas/models/...) for the warm summary.
+                let firstAssetPassMs: number | null = null;
+                let firstAssetTimings: PipelinePassTimings | null = null;
+
+                // Resolves once the first asset-pipeline pass has written the
+                // generated barrels (src/generated/*.ts). The puppeteer launch
+                // awaits this so the pipeline page imports the real barrels up
+                // front, instead of loading the stale/empty ones on disk and
+                // then taking the first pass's HMR cascade mid-render. That
+                // cascade is what races the icon /emit fetches (→
+                // net::ERR_ABORTED) and forces a redundant bootId-driven
+                // re-boot on every cold start. Gated on full-pass settle
+                // (a superset — barrels and bins are emitted together per
+                // builder, so there's no cheaper codegen-only seam).
+                let markGeneratedBarrelsReady: () => void = () => {};
+                const generatedBarrelsReady = new Promise<void>((resolve) => {
+                    markGeneratedBarrelsReady = resolve;
+                });
 
                 // Orchestrator state — holds the puppeteer Page handle,
                 // applied scene hashes, last rendered artifact hashes, and
@@ -630,6 +672,7 @@ if (import.meta.hot) {
                         return;
                     }
                     nodePassRunning = true;
+                    const passStart = performance.now();
                     try {
                         do {
                             nodePassQueued = false;
@@ -641,12 +684,15 @@ if (import.meta.hot) {
                             const prevSpriteAtlasHash = readArtifactHashSync(spriteAtlasJsonPath);
                             pipelineStatus = 'Building assets…';
                             try {
-                                await runAssetPipelinePass(
+                                const timings = await runAssetPipelinePass(
                                     pipelineInternal,
                                     { projectDir, mode: 'edit', cache: true },
                                     pipelineState,
                                     { forceAll: passForceAll },
                                 );
+                                if (firstAssetTimings === null && Object.keys(timings).length > 0) {
+                                    firstAssetTimings = timings;
+                                }
                             } catch (err) {
                                 console.error('[bongle:pipeline] node-side pass failed:', err);
                             }
@@ -677,8 +723,12 @@ if (import.meta.hot) {
                         } while (nodePassQueued);
                     } finally {
                         nodePassRunning = false;
-                        pipelineStatus = null;
-                        pipelineReady = true;
+                        if (firstAssetPassMs === null) firstAssetPassMs = performance.now() - passStart;
+                        // Asset pass settled. The editor-load gate also waits
+                        // for the first icon render (firstPipelineRunComplete),
+                        // so surface that phase until iconsRendered clears it.
+                        pipelineStatus = firstPipelineRunComplete ? null : 'Rendering icons…';
+                        markGeneratedBarrelsReady();
                     }
                     // Wake the orchestrator after each settled pass —
                     // covers the case where the pass produced no atlas
@@ -690,9 +740,10 @@ if (import.meta.hot) {
                 internal.__kit.registerFlush(runNodePass);
 
                 // GET /__bongle/ready — editor client polls this before
-                // EngineClient.load() to avoid racing the first pipeline pass.
-                // Always returns 200; `ready` flips true once runNodePass has
-                // completed at least once.
+                // EngineClient.load(). `ready` flips true only once the first
+                // full pipeline run is done (asset pass + the headless page's
+                // first icon render+emit), so the editor loads into a warm
+                // pipeline. Always returns 200.
                 server.middlewares.use('/__bongle/ready', (req, res) => {
                     if (req.method !== 'GET') {
                         res.statusCode = 405;
@@ -701,7 +752,7 @@ if (import.meta.hot) {
                     }
                     res.setHeader('Content-Type', 'application/json');
                     res.setHeader('Cache-Control', 'no-cache');
-                    res.end(JSON.stringify({ ready: pipelineReady, status: pipelineStatus }));
+                    res.end(JSON.stringify({ ready: firstPipelineRunComplete, status: pipelineStatus }));
                 });
 
                 // External-asset watcher. Registry revisions only move on
@@ -895,22 +946,51 @@ if (import.meta.hot) {
                     void recoverPipeline();
                 };
 
-                // Defer to nextTick so the dev server is listening when we
-                // navigate. configureServer fires before listen() resolves.
+                // Hold the launch until the first asset-pipeline pass has
+                // written the generated barrels, so the page imports them up
+                // front rather than racing the cold-start HMR cascade (see
+                // generatedBarrelsReady above). This also subsumes the old
+                // "wait for the server to be listening" defer: the first pass
+                // is kicked from initGameEnv, which runs after server.listen().
                 queueMicrotask(async () => {
                     try {
+                        await generatedBarrelsReady;
+                        const launchStart = performance.now();
                         browser = await puppeteer.launch({ headless: true, args: launchArgs });
                         browser.on('disconnected', onBrowserDisconnected);
                         const page = await browser.newPage();
                         wirePage(page);
                         await page.goto(pageUrl, { waitUntil: 'load' });
                         orchestrator = Orchestrator.init(page, pipelineInternal, projectDir);
-                        // Kick the initial pass — the page has booted its
-                        // worker surface, but only the orchestrator drives
-                        // bootEngine + first apply + first render.
-                        void Orchestrator.scheduleRender(orchestrator);
+                        const launchMs = performance.now() - launchStart;
+                        // Kick the initial pass and await it — the page has
+                        // booted its worker surface, but only the orchestrator
+                        // drives bootEngine + first apply + render+emit of every
+                        // icon. Awaiting lets the dev CLI hold its ready banner
+                        // until the pipeline page is fully warm (iconsRendered).
+                        const renderStart = performance.now();
+                        await Orchestrator.scheduleRender(orchestrator);
+                        const renderMs = performance.now() - renderStart;
+                        const assetMs = firstAssetPassMs ?? 0;
+                        console.log(
+                            `[bongle] pipeline warm in ${(assetMs + launchMs + renderMs).toFixed(0)}ms ` +
+                                `(assets ${assetMs.toFixed(0)}ms, page launch ${launchMs.toFixed(0)}ms, ` +
+                                `first render ${renderMs.toFixed(0)}ms)`,
+                        );
+                        // Asset bucket per builder (concurrent, so overlapping —
+                        // longest pole first), so it's clear what dominates the
+                        // asset phase: draw bake, atlases, models, etc.
+                        if (firstAssetTimings) {
+                            const breakdown = Object.entries(firstAssetTimings)
+                                .sort((a, b) => b[1] - a[1])
+                                .map(([label, ms]) => `${label} ${ms.toFixed(0)}ms`)
+                                .join(', ');
+                            if (breakdown) console.log(`[bongle]   assets: ${breakdown}`);
+                        }
                     } catch (err) {
                         console.error('[bongle:pipeline] puppeteer launch failed:', err);
+                    } finally {
+                        resolveIconsRendered();
                     }
                 });
             },

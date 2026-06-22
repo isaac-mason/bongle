@@ -100,7 +100,7 @@ export function init(opts: InitOptions) {
     // server-side rpc. driver constructed by ./rpc; listener registry +
     // dispatch live in core/rpc. one shared instance across all rooms;
     // listen() scopes per-room via runtime.roomId.
-    const rpc = Rpc.init(ServerRpc.createDriver(net, rooms));
+    const rpc = Rpc.init(ServerRpc.createDriver(rooms, discovery));
 
     return {
         net,
@@ -724,6 +724,12 @@ export function update(state: EngineServer, delta: number) {
     for (const [client, message] of pending) {
         Net.send(state.net, client, message);
     }
+
+    // drain this tick's queued RPC commands AFTER scene distribution, so a
+    // command never lands before the scene state it depends on (e.g. an
+    // onJoin command arrives after the joiner's join_room → its listeners
+    // are already registered). see discovery.ts "RPC command ordering".
+    Discovery.flushCommands(state.discovery, state.net, state.rooms);
 
     // record discovery time on each room
     for (const room of state.rooms.rooms.values()) {

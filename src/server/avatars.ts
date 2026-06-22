@@ -20,8 +20,7 @@ import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import type { Avatar } from '../core/avatar/avatar';
 import type { PlayerId } from '../core/client';
 import { BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
-import { CharacterTrait, modelIdSync } from '../builtins/character';
-import { getTrait } from '../api/scene-graph';
+import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import * as Resources from '../core/resources';
 import type { ClientState } from './clients';
 import type { EngineServer } from './engine-server';
@@ -44,26 +43,11 @@ export function setClientAvatar(
     // by the matchmaker). Guards against a re-entered onClientJoin
     // double-acquiring the runtime model and leaking a refcount.
     if (cs.avatar) return;
-    if (resolved && resolved.source === 'runtime') {
-        // Runtime model — acquire + ensure the bytes so the reconciler
-        // can mount the rig once they land. Identity is known now; the
-        // payload streams in behind it.
-        Resources.acquireRuntimeModel(state.resources, resolved.modelId, {
-            clientUrl: resolved.clientUrl,
-            serverUrl: resolved.serverUrl,
-            source: 'runtime',
-            hash: resolved.hash,
-        });
-        Resources.ensureModel(state.resources, resolved.modelId);
-        cs.avatar = { modelId: resolved.modelId, rigType: resolved.rigType ?? RIG_TYPE_6BONE };
-        return;
-    }
-    // bundled / absent — the builtin (or a bundled model) is already in
-    // Resources via codegen; ensureModel keeps the payload path uniform
-    // (no-op once ready). rigType is the builtin's canonical 6bone.
-    const modelId = resolved?.modelId ?? BUILTIN_BASE_AVATAR_ID;
-    Resources.ensureModel(state.resources, modelId);
-    cs.avatar = { modelId, rigType: RIG_TYPE_6BONE };
+    // Absent (dev/edit — no matchmaker) ⇒ the builtin. `acquireAvatarModel`
+    // handles both arms: +1 refcount + ensure for runtime, ensure-only for
+    // bundled/builtin. The payload streams in behind the now-known identity.
+    const avatar: ResolvedAvatar = resolved ?? { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID };
+    cs.avatar = acquireAvatarModel(state.resources, avatar);
 }
 
 function stampPlayerCharacter(state: EngineServer, cs: ClientState, playerId: PlayerId): void {
@@ -75,11 +59,7 @@ function stampPlayerCharacter(state: EngineServer, cs: ClientState, playerId: Pl
     if (!room) return;
     const playerNode = room.playerNodes.get(playerId);
     if (!playerNode) return;
-    const ch = getTrait(playerNode, CharacterTrait);
-    if (!ch) return;
-    ch.modelId = avatar.modelId;
-    ch.rigType = avatar.rigType;
-    modelIdSync.dirty(ch);
+    assignAvatar(playerNode, avatar.modelId, avatar.rigType);
 }
 
 /**

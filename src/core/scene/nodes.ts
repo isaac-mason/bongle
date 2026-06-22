@@ -484,6 +484,22 @@ export function isReplicable(node: Node): boolean {
 }
 
 /**
+ * True iff this node was created locally on the current runtime rather than
+ * allocated by the server. The server allocates positive ids (and nodes
+ * replicated in from the server keep their positive server id); a client
+ * allocates negative ids for nodes it creates locally (see id assignment in
+ * the attach path above). So on a client this is false for server-owned
+ * (replicated-in) nodes and true for client-only ones — a true *origin* test,
+ * unlike `isReplicable` (a realm-policy test). Use it to decide who authors a
+ * node's derived content (e.g. the character rig): the server builds for its
+ * nodes, a client builds only its own local ones and otherwise defers to
+ * replication.
+ */
+export function isLocalNode(node: Node): boolean {
+    return node.id < 0;
+}
+
+/**
  * destroy a node: dispose scripts, remove from parent, recursively
  * destroy children, remove from all queries, and detach from the scene graph.
  *
@@ -1249,6 +1265,14 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
     if (node._uuid) sg._uuidToNode.delete(node._uuid);
     sg._prefabNodes.delete(node);
     sg._prefabsDirty.delete(node);
+    // a node leaving the live graph is a destroy for the discovery fan-out —
+    // symmetric with registerSubtree marking entering nodes dirty. server-only
+    // (gated inside markNodeDirty). the node ends this fn in dirtyNodes with
+    // scene === null, so the fan-out emits node_destroyed (only to clients that
+    // knew it). without this, removing a server-owned (owner === null) node via
+    // removeChild never replicated — setOwner above only dirties when the owner
+    // actually changes, which it doesn't for an already-server-owned node.
+    markNodeDirty(sg, node);
     node.scene = null;
 }
 

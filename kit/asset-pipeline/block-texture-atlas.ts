@@ -111,6 +111,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
         }
     }
 
+    const buildStart = performance.now();
     console.log(`[bongle] building texture atlas (${textures.length} tiles)...`);
 
     const columns = Math.ceil(Math.sqrt(textures.length));
@@ -180,7 +181,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
     };
     fs.writeFileSync(atlasJson, JSON.stringify(metadata, null, 2));
 
-    console.log(`[bongle] texture atlas built: ${atlasWidth}x${atlasHeight} (${textures.length} tiles)`);
+    console.log(`[bongle] texture atlas built: ${atlasWidth}x${atlasHeight} (${textures.length} tiles) in ${(performance.now() - buildStart).toFixed(0)}ms`);
 
     return true;
 }

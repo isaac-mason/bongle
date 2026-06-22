@@ -204,19 +204,55 @@ type ClientState = {
 
 /* ── discovery state ── */
 
+/** a server→client RPC command queued for this tick. drained by
+ *  `flushCommands` after scene distribution (see below). */
+type QueuedCommand =
+    | { kind: 'send'; client: Client; msg: ServerMessage }
+    | { kind: 'broadcast'; roomId: string; msg: ServerMessage };
+
 export type Discovery = {
     /** monotonic version bumped whenever the room list changes. */
     roomListVersion: number;
 
     /** per-client tracking. */
     clients: Map<Client, ClientState>;
+
+    /** RPC commands emitted this tick, drained by `flushCommands` AFTER scene
+     *  distribution so a command never beats this tick's scene state (join_room
+     *  / scene_sync) onto a client's ordered socket. */
+    commandQueue: QueuedCommand[];
 };
 
 export function init(): Discovery {
     return {
         roomListVersion: 0,
         clients: new Map(),
+        commandQueue: [],
     };
+}
+
+/* ── RPC command ordering ──────────────────────────────────────────────
+ * Server→client RPC commands are queued here (by the rpc driver) rather than
+ * written straight to the outbox, then drained by `flushCommands` right after
+ * the per-tick scene distribution. That makes "commands deliver after this
+ * tick's scene state" a global invariant: a command sent from `onJoin` lands
+ * after the joiner's `join_room`, so its listeners are already registered. */
+export function queueCommand(state: Discovery, cmd: QueuedCommand): void {
+    state.commandQueue.push(cmd);
+}
+
+export function flushCommands(state: Discovery, net: ServerNet, rooms: Rooms): void {
+    // splice a snapshot so any command emitted while draining defers to the
+    // next tick rather than mutating the array mid-iteration.
+    const batch = state.commandQueue.splice(0);
+    for (const cmd of batch) {
+        if (cmd.kind === 'send') {
+            Net.send(net, cmd.client, cmd.msg);
+        } else {
+            const room = RoomsModule.getRoom(rooms, cmd.roomId);
+            if (room) Net.broadcastToRoom(net, rooms, room, cmd.msg);
+        }
+    }
 }
 
 /* ── client lifecycle ── */

@@ -26,8 +26,18 @@
  */
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { createLogger, createRunnableDevEnvironment, defineConfig, type Logger, searchForWorkspaceRoot, type Plugin, type UserConfig } from 'vite';
+
+// Absolute path to bongle's package root, derived from this file's own
+// location (`<root>/kit/vite/config.ts`). Works whether bongle is the
+// linked workspace source or an installed node_modules package — both ship
+// `kit/` and `src/` in the same layout.
+const BONGLE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+/** Normalise to a forward-slash glob (vite's dep scanner globs want posix). */
+const toGlob = (p: string) => p.replace(/\\/g, '/');
 import { envPlugin } from '../env-plugin';
 import { bongle } from './plugin';
 
@@ -122,33 +132,26 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             preserveSymlinks: false,
         },
         optimizeDeps: {
-            // The editor's UI deps are only reachable through `bongle`
-            // (excluded below), and vite's scanner won't crawl an excluded
-            // package (or the plugin's virtual entry) — so their pre-bundling
-            // is never triggered. The pure-CJS ones would then be served
-            // without CJS→ESM interop, breaking named/default imports
-            // (`react` has no `default`; `zustand` can't find
-            // `useSyncExternalStore`). Force-include the full browser UI dep
-            // closure so the editor pre-bundles consistently from a clean
-            // install; esbuild folds each package's CJS sub-deps (use-sync-
-            // external-store, scheduler, …) into its chunk.
+            // Reproduce the monorepo's linked-package behaviour for installed
+            // consumers. When `bongle` is a workspace symlink it resolves as
+            // *source*, so vite crawls it and auto-discovers + pre-bundles the
+            // editor's whole UI dep closure (react, zustand, @dnd-kit, …) in a
+            // single optimize pass — correct CJS→ESM interop, proper @dnd-kit
+            // shared-state dedup, zero config. An *installed* `bongle` lives in
+            // node_modules and is excluded below, so vite won't crawl it and
+            // those deps stay invisible to the scanner — every `import … from
+            // 'react'` then breaks on missing interop, dep by dep.
             //
-            // `@dnd-kit/*` is deliberately NOT here: it ships ESM (works raw)
-            // and, more importantly, its sibling packages share a module-level
-            // singleton (live drag state in @dnd-kit/state). Pre-bundling them
-            // as separate entries would duplicate that singleton across chunks
-            // and fork the drag state — the same hazard `exclude` guards bongle
-            // against.
-            include: [
-                'react',
-                'react-dom',
-                'react-dom/client',
-                'react/jsx-runtime',
-                'react/jsx-dev-runtime',
-                'zustand',
-                '@base-ui/react',
-                'lucide-react',
-                '@tanstack/react-virtual',
+            // Fix without a hand-maintained `include` list: point the dep
+            // scanner straight at bongle's browser source (client/ + editor/)
+            // and the project's own src. It reads the real files — not the
+            // excluded `bongle` specifier — so it finds exactly the deps the
+            // monorepo finds. Scoped to client/ + editor/ so the scan never
+            // reaches server/pipeline code (which pulls native node deps).
+            entries: [
+                toGlob(path.join(BONGLE_ROOT, 'src/client/**/*.{ts,tsx}')),
+                toGlob(path.join(BONGLE_ROOT, 'src/editor/**/*.{ts,tsx}')),
+                toGlob(path.join(projectDir, 'src/**/*.{ts,tsx}')),
             ],
             // engine + workspace deps must share the SAME module instance
             // across user code and engine code; pre-bundling would fork

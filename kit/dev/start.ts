@@ -27,6 +27,7 @@
 import { createServer, type ViteDevServer } from 'vite';
 import { initGameEnv, type GameEnvBootResult } from './game-env';
 import { defineBongleConfig } from '../vite/config';
+import { iconsRendered } from '../vite/plugin';
 
 export type StartDevOptions = {
     projectDir: string;
@@ -42,6 +43,11 @@ export type DevHandle = {
      *  free-port probe and `listen()` — callers must log/tunnel this, not the
      *  requested value. */
     port: number;
+    /** Resolves once the persistent pipeline page has rendered + emitted
+     *  every icon on cold start (the headless page is fully warm). The CLI
+     *  awaits this before its ready banner. Resolves even on a pipeline
+     *  fault, so it never wedges startup. */
+    iconsRendered: Promise<void>;
     /** Tear down the gameServer env + the vite server. Idempotent. */
     close(): Promise<void>;
 };
@@ -76,5 +82,5 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
         try { await server.close(); } catch (err) { console.warn('[dev/start] server close failed:', err); }
     }
 
-    return { server, game, port: boundPort, close };
+    return { server, game, port: boundPort, iconsRendered, close };
 }

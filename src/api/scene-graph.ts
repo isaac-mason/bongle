@@ -11,6 +11,7 @@ export {
     findChildrenByName,
     getTrait,
     hasTrait,
+    isLocalNode,
     removeChild,
     replaceChildren,
 } from '../core/scene/nodes';
