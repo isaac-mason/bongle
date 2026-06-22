@@ -64,6 +64,8 @@
     "files": [
         "src",
         "kit",
+        "interface",
+        "avatars",
         "assets",
         "templates",
         "LICENSE",
