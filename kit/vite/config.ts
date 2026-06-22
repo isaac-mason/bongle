@@ -27,7 +27,7 @@
 
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
-import { createRunnableDevEnvironment, defineConfig, searchForWorkspaceRoot, type Plugin, type UserConfig } from 'vite';
+import { createLogger, createRunnableDevEnvironment, defineConfig, type Logger, searchForWorkspaceRoot, type Plugin, type UserConfig } from 'vite';
 import { envPlugin } from '../env-plugin';
 import { bongle } from './plugin';
 
@@ -40,11 +40,33 @@ export type BongleConfigOptions = {
     port: number;
 };
 
+// Engine + workspace deps are served raw (see `optimizeDeps.exclude`), and
+// some — notably `@dnd-kit/*`, pulled in by the editor UI — ship a
+// `//# sourceMappingURL=*.js.map` comment without the actual `.map` file.
+// Vite warns on every such transform; the warnings are cosmetic and not
+// fixable from here, so drop them while leaving every other warning intact.
+function makeLogger(): Logger {
+    const base = createLogger();
+    const suppress = (msg: unknown) => typeof msg === 'string' && msg.includes('Failed to load source map');
+    return {
+        ...base,
+        warn(msg, options) {
+            if (suppress(msg)) return;
+            base.warn(msg, options);
+        },
+        warnOnce(msg, options) {
+            if (suppress(msg)) return;
+            base.warnOnce(msg, options);
+        },
+    };
+}
+
 export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
     const { projectDir, bongleDir, port } = opts;
 
     return defineConfig({
         root: bongleDir,
+        customLogger: makeLogger(),
         // authored client static (favicon, fonts, …). resources/client is
         // served live by the bongle() plugin instead — see plugin.ts.
         publicDir: path.join(projectDir, 'public'),

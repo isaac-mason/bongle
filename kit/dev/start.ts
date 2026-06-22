@@ -37,6 +37,11 @@ export type StartDevOptions = {
 export type DevHandle = {
     server: ViteDevServer;
     game: GameEnvBootResult<unknown>;
+    /** Port the http server actually bound to. Vite's `strictPort` is off, so
+     *  this can differ from the requested port if it was taken between the
+     *  free-port probe and `listen()` — callers must log/tunnel this, not the
+     *  requested value. */
+    port: number;
     /** Tear down the gameServer env + the vite server. Idempotent. */
     close(): Promise<void>;
 };
@@ -48,6 +53,12 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
         defineBongleConfig({ projectDir, bongleDir, port }),
     );
     await server.listen();
+
+    // Source of truth for the bound port: read it off the http server rather
+    // than trusting `port`. With `strictPort` off, vite silently picks the
+    // next free port if the requested one was grabbed after our probe.
+    const address = server.httpServer?.address();
+    const boundPort = typeof address === 'object' && address ? address.port : port;
 
     // The transport attaches inside the gameServer env's boot entry
     // (`virtual:bongle/edit-server` → `runtime/edit-server.start`), so the
@@ -65,5 +76,5 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
         try { await server.close(); } catch (err) { console.warn('[dev/start] server close failed:', err); }
     }
 
-    return { server, game, close };
+    return { server, game, port: boundPort, close };
 }

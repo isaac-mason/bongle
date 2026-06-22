@@ -235,14 +235,18 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         process.exit(1);
     }
 
+    // `port` was a free-port probe; the server may have bound elsewhere if it
+    // was taken in between. Log/tunnel the port it actually listens on.
+    const boundPort = handle.port;
+
     const links: Array<{ label: string; url: string; note?: string }> = [
-        { label: 'editor', url: `http://localhost:${port}` },
+        { label: 'editor', url: `http://localhost:${boundPort}` },
     ];
 
     let tunnel: ChildProcess | null = null;
     if (opts.share) {
         const stepTunnel = step('starting cloudflared tunnel');
-        const result = await startCloudflaredTunnel(port);
+        const result = await startCloudflaredTunnel(boundPort);
         if (result.kind === 'ok') {
             stepTunnel.done();
             tunnel = result.child;
