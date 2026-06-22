@@ -122,6 +122,19 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             preserveSymlinks: false,
         },
         optimizeDeps: {
+            // react is only reachable through `bongle` (excluded below), so
+            // vite's entry scan never discovers it and skips pre-bundling.
+            // It would then be served raw without CJS→ESM interop, breaking
+            // `import React from 'react'` (no `default` export). Force-include
+            // the react packages so they're pre-bundled with interop; every
+            // consumer (engine UI, dnd-kit, zustand, …) shares this one copy.
+            include: [
+                'react',
+                'react-dom',
+                'react-dom/client',
+                'react/jsx-runtime',
+                'react/jsx-dev-runtime',
+            ],
             // engine + workspace deps must share the SAME module instance
             // across user code and engine code; pre-bundling would fork
             // the capture registries.
