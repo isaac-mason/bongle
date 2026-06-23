@@ -10,11 +10,11 @@
 import { model } from '../models/models';
 
 export const bundledAvatars = [
-    model('avatar:boy', { name: 'Boy', src: new URL('../../../avatars/boy/boy.gltf', import.meta.url) }),
-    model('avatar:girl', { name: 'Girl', src: new URL('../../../avatars/girl/girl.gltf', import.meta.url) }),
+    model('avatar:boy', { name: 'Boy', src: new URL('../../../avatars/boy/boy.glb', import.meta.url) }),
+    model('avatar:girl', { name: 'Girl', src: new URL('../../../avatars/girl/girl.glb', import.meta.url) }),
     model('avatar:penguin', {
         name: 'Penguin',
-        src: new URL('../../../avatars/blindfoldedpenguin/blindfoldedpenguin.gltf', import.meta.url),
+        src: new URL('../../../avatars/blindfoldedpenguin/blindfoldedpenguin.glb', import.meta.url),
     }),
-    model('avatar:pigeon', { name: 'Pigeon', src: new URL('../../../avatars/pigeon/pigeon.gltf', import.meta.url) }),
+    model('avatar:pigeon', { name: 'Pigeon', src: new URL('../../../avatars/pigeon/pigeon.glb', import.meta.url) }),
 ];
