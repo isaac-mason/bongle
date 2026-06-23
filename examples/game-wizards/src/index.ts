@@ -94,7 +94,6 @@ import {
 import { RIG_6BONE_ARM_RIGHT, RIG_6BONE_HAND_RIGHT, RIG_6BONE_HEAD } from 'bongle/avatar/rig';
 import { blocks, particlePresets, sounds } from 'bongle/starter';
 import { floodFillGround } from './nav';
-import { generateTerrain, groundHeightAt, MAP_CENTER, MAP_SIZE } from './worldgen';
 import { degreesToRadians, mat4, quat, type Quat, vec3, type Vec3, type Vec4 } from 'mathcat';
 import { castRay, CastRayStatus, createClosestCastRayCollector, createDefaultCastRaySettings, filter as crashFilter } from 'crashcat';
 
@@ -111,15 +110,386 @@ script(WorldTrait, 'environment', (ctx) => {
     setEnvironmentTime(ctx, 14);
 });
 
-// deterministic procedural terrain — runs once on the server at room init,
-// BEFORE the gem + npc-spawn onInits (which raycast the ground for placement),
-// so it must register ahead of those scripts. the voxel edits replicate to
-// clients; a hardcoded seed means every round's recreate rebuilds the identical map.
+// ── world generation ────────────────────────────────────────────────
+// the arena is a seeded fractal-noise heightmap. the analytic surface height is the
+// shared source of truth — spawn placement, gems, and NPCs all snap to the ground
+// through it; the `worldgen` script below paints that heightmap into voxels. fully
+// deterministic from SEED, so every room (each round's rooms.recreate) rebuilds the
+// identical map and server + client agree.
+
+// arena dimensions: a square [0, MAP_SIZE) in x/z, play centred on MAP_CENTER, y up from 0.
+const MAP_SIZE = 128;
+const MAP_CENTER: [number, number] = [MAP_SIZE / 2, MAP_SIZE / 2];
+
+// heightmap tunables.
+const SEED = 1337; // hardcoded — change for a different map
+const BASE_HEIGHT = 10; // ground floor — lowest valley surface
+const HILL_AMP = 12; // peak-to-valley swing added by the noise
+const NOISE_SCALE = 44; // blocks per noise lattice cell — bigger = broader hills
+const OCTAVES = 4; // fractal detail layers
+const PERSISTENCE = 0.5; // amplitude falloff per octave
+const LACUNARITY = 2; // frequency growth per octave
+
+// integer lattice hash → [0,1). pure function of (ix, iz, salt) — no global state,
+// so sampling order never affects the result.
+function hash2(ix: number, iz: number, salt: number): number {
+    let h = (Math.imul(ix | 0, 0x27d4eb2d) ^ Math.imul(iz | 0, 0x85ebca6b) ^ Math.imul(salt | 0, 0xc2b2ae35)) >>> 0;
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
+    h = Math.imul(h ^ (h >>> 13), 0x297a2d39) >>> 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 0x1_0000_0000;
+}
+
+// quintic smoothstep (Perlin's fade) for C2-continuous interpolation.
+const fade = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+
+// bilinearly-interpolated value noise at (x, z) on the integer lattice.
+function valueNoise(x: number, z: number, salt: number): number {
+    const x0 = Math.floor(x);
+    const z0 = Math.floor(z);
+    const u = fade(x - x0);
+    const v = fade(z - z0);
+    const v00 = hash2(x0, z0, salt);
+    const v10 = hash2(x0 + 1, z0, salt);
+    const v01 = hash2(x0, z0 + 1, salt);
+    const v11 = hash2(x0 + 1, z0 + 1, salt);
+    const a = v00 + (v10 - v00) * u;
+    const b = v01 + (v11 - v01) * u;
+    return a + (b - a) * v;
+}
+
+// fractal sum of octaves, normalised to [0,1).
+function fbm(x: number, z: number): number {
+    let amplitude = 1;
+    let frequency = 1;
+    let sum = 0;
+    let norm = 0;
+    for (let o = 0; o < OCTAVES; o++) {
+        sum += amplitude * valueNoise(x * frequency, z * frequency, SEED + o * 101);
+        norm += amplitude;
+        amplitude *= PERSISTENCE;
+        frequency *= LACUNARITY;
+    }
+    return sum / norm;
+}
+
+// surface height (top grass y) at a column — the single source of truth for where
+// the ground sits, so spawns can snap to it.
+function surfaceHeight(x: number, z: number): number {
+    return Math.floor(BASE_HEIGHT + fbm(x / NOISE_SCALE, z / NOISE_SCALE) * HILL_AMP);
+}
+
+// the canonical "what y is the ground at (x, z)?" for any spawn decision. raycasts
+// down through the live voxels — so it sees trees + (later) stamped structures, not
+// just the noise — and returns the surface y. falls back to the analytic height if
+// the ray finds nothing (off the map, or before terrain exists). the probe starts
+// above all terrain and crucially NOT on a chunk boundary: a y multiple of 16 makes
+// the DDA's first exit test resolve to t=0 → an immediate false miss.
+const _groundRay = createVoxelRaycastResult();
+const GROUND_PROBE_Y = 200.5;
+const GROUND_PROBE_DIST = 260;
+function groundHeightAt(ctx: ScriptContext, x: number, z: number): number {
+    raycastVoxels(_groundRay, ctx.voxels, ctx.voxels.registry, x, GROUND_PROBE_Y, z, 0, -1, 0, GROUND_PROBE_DIST, 0);
+    return _groundRay.hit ? _groundRay.py : surfaceHeight(x, z) + 1;
+}
+
+// the terrain pass — paints the heightmap into voxels (stone → dirt → grass, a light
+// plant scatter, and a sparse oak forest). registers BEFORE the gem + npc spawn
+// onInits (which raycast the ground), so it must come first. server-only; the voxel
+// edits replicate to clients automatically. the block palette + scatter/tree knobs
+// live in this scope since nothing outside generation needs them.
 script(WorldTrait, 'worldgen', (ctx) => {
     if (!env.server) return;
-    onInit(ctx, () => generateTerrain(ctx));
+
+    // resolved block keys (defaultKey, not raw strings).
+    const STONE = blocks.stone.defaultKey();
+    const DIRT = blocks.dirt.defaultKey();
+    const GRASS = blocks.grass.defaultKey();
+    const LOG = blocks.oakLog.defaultKey();
+    const LEAVES = blocks.oakLeaves.defaultKey();
+    const DIRT_DEPTH = 3; // dirt layers between the grass cap and stone
+
+    // surface scatter chances (per grass cell), rolled from the same seed.
+    const SCATTER = [
+        { key: blocks.grassPlant1.defaultKey(), chance: 0.06 },
+        { key: blocks.grassPlant2.defaultKey(), chance: 0.03 },
+        { key: blocks.mushroomRed.defaultKey(), chance: 0.004 },
+    ] as const;
+
+    // trees — one candidate per TREE_GRID×TREE_GRID cell (so trunks never touch),
+    // grown with probability TREE_CHANCE at a hash-jittered spot in the cell.
+    const TREE_GRID = 10; // cell size in blocks — also the minimum trunk spacing
+    const TREE_CHANCE = 0.2; // fraction of cells that actually grow a tree
+    const TREE_MIN_H = 4; // shortest trunk
+    const TREE_MAX_H = 6; // tallest trunk
+    const TREE_MARGIN = 3; // keep trunks this far from the map edge (canopy fits)
+    const SPAWN_CLEAR = 8; // radius around MAP_CENTER kept tree-free for spawns
+
+    // grow one oak at column (bx, bz): a trunk rising from the surface + a small leaf
+    // canopy, both deterministic from the column + seed so the forest is identical
+    // every run.
+    const placeTree = (bx: number, bz: number): void => {
+        const base = surfaceHeight(bx, bz);
+        const trunkH = TREE_MIN_H + Math.floor(hash2(bx, bz, SEED ^ 0x7a3) * (TREE_MAX_H - TREE_MIN_H + 1));
+        const topY = base + trunkH; // y of the topmost trunk log
+
+        for (let y = base + 1; y <= topY; y++) setBlock(ctx.voxels, bx, y, bz, LOG);
+
+        // canopy: two wide layers (radius 2, clipped corners) under two narrow ones,
+        // capped by a plus. the trunk column stays clear up to the top log.
+        for (let dy = -2; dy <= 1; dy++) {
+            const y = topY + dy;
+            const r = dy <= -1 ? 2 : 1;
+            for (let dx = -r; dx <= r; dx++) {
+                for (let dz = -r; dz <= r; dz++) {
+                    if (dx === 0 && dz === 0 && dy <= 0) continue; // don't bury the trunk
+                    if (r === 2 && Math.abs(dx) === 2 && Math.abs(dz) === 2) continue; // clip corners
+                    if (dy === 1 && Math.abs(dx) + Math.abs(dz) > 1) continue; // plus-shaped cap
+                    setBlock(ctx.voxels, bx + dx, y, bz + dz, LEAVES);
+                }
+            }
+        }
+    };
+
+    onInit(ctx, () => {
+        const voxels = ctx.voxels;
+        // fill the whole arena: a stone column up to the dirt band, the dirt band, a
+        // grass cap, then a scattered plant on top.
+        for (let x = 0; x < MAP_SIZE; x++) {
+            for (let z = 0; z < MAP_SIZE; z++) {
+                const top = surfaceHeight(x, z);
+                const dirtFrom = top - DIRT_DEPTH;
+                for (let y = 0; y < top; y++) {
+                    setBlock(voxels, x, y, z, y >= dirtFrom ? DIRT : STONE);
+                }
+                setBlock(voxels, x, top, z, GRASS);
+
+                // surface scatter — first matching roll wins, so chances don't stack.
+                const roll = hash2(x, z, SEED ^ 0x5f5f);
+                let acc = 0;
+                for (const { key, chance } of SCATTER) {
+                    acc += chance;
+                    if (roll < acc) {
+                        setBlock(voxels, x, top + 1, z, key);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // forest pass: one hash-jittered candidate per grid cell, grown with
+        // probability TREE_CHANCE; the grid guarantees a minimum trunk spacing.
+        for (let cz = 0; cz < MAP_SIZE; cz += TREE_GRID) {
+            for (let cx = 0; cx < MAP_SIZE; cx += TREE_GRID) {
+                if (hash2(cx, cz, SEED ^ 0x2ee) >= TREE_CHANCE) continue;
+                const jx = cx + 1 + Math.floor(hash2(cx, cz, SEED ^ 0x111) * (TREE_GRID - 2));
+                const jz = cz + 1 + Math.floor(hash2(cx, cz, SEED ^ 0x222) * (TREE_GRID - 2));
+                if (jx < TREE_MARGIN || jx >= MAP_SIZE - TREE_MARGIN || jz < TREE_MARGIN || jz >= MAP_SIZE - TREE_MARGIN) continue;
+                // keep the centre spawn clearing tree-free so players/npcs don't spawn in a trunk.
+                const dxC = jx - MAP_CENTER[0];
+                const dzC = jz - MAP_CENTER[1];
+                if (dxC * dxC + dzC * dzC < SPAWN_CLEAR * SPAWN_CLEAR) continue;
+                placeTree(jx, jz);
+            }
+        }
+    });
 });
 
+// ─────────────────────────────────────────────────────────────────────
+// combat core — one server-authoritative projectile, no elements yet.
+//
+// flow: click → Cast{dir} → server spawns a projectile node (auto-
+// replicates) → server integrates + collides each tick → on hit it
+// carves terrain + damages nearby health entities → broadcasts Impact /
+// Damage / Death → clients render particle vfx. health drives regen,
+// death and respawn for both players and NPC dummies.
+//
+// deliberately minimal: stats are hardcoded constants, the projectile
+// moves analytically (no physics body, tunnel-proof), and entity hits
+// are plain sphere checks. elements / tint / stat tables / status
+// effects / knockback / AI all layer on top later without touching this.
+// ─────────────────────────────────────────────────────────────────────
+
+// projectile
+const PROJECTILE_LIFETIME = 2.5; // s before it fizzles
+const CHEST_OFFSET = 1.0; // m above a character's origin (feet) — splash-damage aim point
+const EYE_HEIGHT = 1.5; // m — spawn origin above the caster's origin
+
+// per-projectile stats, carried on the trait (set once, synced). one default for
+// now; the elements / stat-table layer varies them per cast later.
+type ProjectileStats = { speed: number; damage: number; damageRadius: number; terrainDamageRadius: number; knockback: number };
+// gameplay rule (game-side, not engine): grass plants + mushrooms are placed
+// resting on a block, so carving the block out from under one kills it too.
+// matched by block key — what getBlock returns and worldgen places with.
+const SUPPORTED_DECOR_KEYS = new Set<string>([
+    blocks.grassPlant1.defaultKey(),
+    blocks.grassPlant2.defaultKey(),
+    blocks.mushroomRed.defaultKey(),
+]);
+const KNOCKBACK_UP = 0.4; // upward kick as a fraction of the horizontal impulse (pops grounded targets so the shove lands)
+const KNOCKBACK_MIN_UP = 3; // m/s — floor on the upward kick so every hit lifts the target off the ground, even a weak/overhead shove
+// staff tip in the staff node's local space: mesh max-Y from the gltf, with the
+// node origin reset to [0,0,0] by the gear script. used to place the muzzle vfx.
+const STAFF_TIP_LOCAL: Vec3 = [0, 1.0625, 0];
+
+// ── upgradable stats (diep-style) ───────────────────────────────────
+// each stat is an integer LEVEL (0..max) carried on the wizard; the effective
+// value is derived here as base + level*perLevel. character stats apply to the
+// wizard/controller; projectile stats snapshot into each shot at fire time.
+const STAT_TABLE = {
+    maxHealth: { base: 8, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
+    damage: { base: 3, perLevel: 1, max: 8, label: 'Bullet Damage', color: '#e06e6e' },
+    speed: { base: 18, perLevel: 3, max: 8, label: 'Bullet Speed', color: '#6e9de0' },
+    // Blast: one stat, two payoffs — splash damage radius (the value below) and
+    // knockback impulse (its own stronger scale, applied in projectileStatsOf).
+    blast: { base: 2, perLevel: 0.5, max: 8, label: 'Blast', color: '#e0934a' },
+    fireRate: { base: 1.5, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
+    moveSpeed: { base: 4.317, perLevel: 0.4, max: 8, label: 'Movement Speed', color: '#6ee0d5' },
+} as const;
+type StatKey = keyof typeof STAT_TABLE;
+const STAT_KEYS = Object.keys(STAT_TABLE) as StatKey[];
+type StatLevels = Record<StatKey, number>;
+
+// Lucide glyphs (24×24, stroke=currentColor) per stat: heart (health), sword
+// (damage), fast-forward chevrons (bullet speed), concentric rings (blast),
+// stopwatch (fire rate), footprints (move). the panel tints each to its stat
+// colour; the collapsed rail is just icon + level.
+const STAT_ICON_PATHS: Record<StatKey, string> = {
+    maxHealth: '<path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"/>',
+    damage: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/>',
+    speed: '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+    blast: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    fireRate: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+    moveSpeed:
+        '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>',
+};
+const statIconSvg = (key: StatKey): string =>
+    `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${STAT_ICON_PATHS[key]}</svg>`;
+
+// effective value of a stat at a given level.
+const lvlValue = (key: StatKey, level: number): number => STAT_TABLE[key].base + level * STAT_TABLE[key].perLevel;
+// derived effective values used at the call sites.
+const maxHealthOf = (levels: StatLevels): number => lvlValue('maxHealth', levels.maxHealth);
+const fireIntervalOf = (levels: StatLevels): number => 1 / lvlValue('fireRate', levels.fireRate);
+// terrain destruction isn't its own stat — it's a milestone payoff of Bullet
+// Damage: nothing until L3, then craters that grow with investment (capped so a
+// maxed shooter is a wrecking ball, not a map-eraser).
+const terrainRadiusForDamage = (damageLevel: number): number => (damageLevel >= 5 ? 2 : damageLevel >= 3 ? 1 : 0);
+// knockback rides the Blast level on its own (stronger) scale — kept from the
+// old standalone Knockback stat so shoves feel exactly as they did.
+const BLAST_KNOCKBACK_BASE = 5;
+const BLAST_KNOCKBACK_PER_LEVEL = 1.5;
+const projectileStatsOf = (levels: StatLevels): ProjectileStats => ({
+    speed: lvlValue('speed', levels.speed),
+    damage: lvlValue('damage', levels.damage),
+    damageRadius: lvlValue('blast', levels.blast),
+    terrainDamageRadius: terrainRadiusForDamage(levels.damage),
+    knockback: BLAST_KNOCKBACK_BASE + levels.blast * BLAST_KNOCKBACK_PER_LEVEL,
+});
+// the level-0 baseline shot — what an unupgraded wizard fires. derived from the stat
+// table so it can't drift from the bases. used as a reference scale for the impact /
+// trail vfx and as the stand-in stats on a replicated client bolt (only speed +
+// damage are read there); every real shot snapshots projectileStatsOf at fire time.
+const DEFAULT_PROJECTILE_STATS = projectileStatsOf({ maxHealth: 0, moveSpeed: 0, fireRate: 0, damage: 0, speed: 0, blast: 0 });
+
+// ── xp / levels ─────────────────────────────────────────────────────
+// xp accrues from orbs; each level grants one upgrade point. quadratic curve:
+// reaching level L needs XP_PER_LEVEL * L^2 total xp, so each level costs more.
+const XP_PER_LEVEL = 12;
+const levelForXp = (xp: number): number => Math.floor(Math.sqrt(xp / XP_PER_LEVEL));
+const xpForLevel = (lvl: number): number => XP_PER_LEVEL * lvl * lvl; // inverse — xp at the start of `lvl`
+
+// level → rarity tier: a colour (hat tint + nameplate badge) and a hat scale that
+// grows with level. discrete colour bands read as a power/threat tier at a glance.
+const LEVEL_TIERS: { min: number; color: string }[] = [
+    { min: 15, color: '#fbbf24' }, // gold
+    { min: 10, color: '#a78bfa' }, // purple
+    { min: 6, color: '#6e9de0' }, // blue
+    { min: 3, color: '#2dd4bf' }, // teal (green blends into grass)
+    { min: 0, color: '#bdbdbd' }, // gray
+];
+const tierColor = (level: number): string => LEVEL_TIERS.find((t) => level >= t.min)!.color;
+const tierScale = (level: number): number => 1 + Math.min(level, 20) * 0.02; // 1.0 → 1.4
+// '#rrggbb' → a mesh tint Vec4 (alpha 1 = full mix tint).
+const hexTint = (hex: string): Vec4 => {
+    const n = parseInt(hex.slice(1), 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1];
+};
+const sumLevels = (levels: StatLevels): number => STAT_KEYS.reduce((n, k) => n + levels[k], 0);
+// upgrade points still to spend = levels earned − levels allocated.
+const availablePoints = (xp: number, levels: StatLevels): number => levelForXp(xp) - sumLevels(levels);
+
+// ── health timing ───────────────────────────────────────────────────
+const REGEN_DELAY = 3; // s without damage before health regenerates
+const BASE_REGEN_RATE = 2; // hp/s — flat baseline regen, the same for everyone (not an upgradable stat)
+const RESPAWN_DELAY = 3; // s after death before respawn
+
+// ── xp orbs (death drops from gems + wizards) ───────────────────────
+const ORB_AMOUNT = 6; // xp per orb
+const ORB_LIFETIME = 60; // s — orbs despawn after this (generous; keeps uncollected litter from piling up)
+const ORB_GRAB_RADIUS = 1.1; // m — an alive wizard within this collects an orb
+const ORB_MAGNET_RADIUS = 5; // m — within this (but outside grab) an orb reels toward the nearest wizard
+const ORB_MAGNET_PULL = 18; // m/s base — fly-in speed = (PULL − distance), so it accelerates as it nears (luanti-style)
+const ORB_DROP_KEEP = 0.25; // fraction of xp the dead wizard keeps on respawn
+const ORB_DROP_SCATTER = 0.5; // fraction dropped as orbs (the rest is lost)
+const ORB_POP_UP = 4; // m/s — upward burst on a death-drop (physics scatters them)
+const ORB_POP_OUT = 3; // m/s — horizontal burst on a death-drop
+const ORB_DROP_MIN = 3; // orbs — every kill scatters at least this many, so low-xp/NPC kills still pay out
+
+// ── gems (tiered, shootable xp sources) ─────────────────────────────
+// gems are the ambient xp source (they replace free-floating litter orbs): each
+// is a destructible, slowly-spinning crystal with health. shoot one to death and
+// it shatters into a burst of the same magnet-collected xp orbs, proportional to
+// its tier. higher tiers are bigger, tougher, and pay out more — but rarer.
+type GemTier = { color: string; scale: number; halfExtent: number; health: number; xp: number; weight: number };
+const GEM_TIERS: GemTier[] = [
+    // ascending cool→hot ramp: azure → violet → magenta (no green=grass, no gold=xp).
+    { color: '#2e9bff', scale: 0.95, halfExtent: 0.48, health: 9, xp: 12, weight: 12 }, // common — azure
+    { color: '#9d5cff', scale: 1.4, halfExtent: 0.7, health: 24, xp: 36, weight: 5 }, // rare — violet
+    { color: '#ff3ea5', scale: 1.85, halfExtent: 0.92, health: 60, xp: 90, weight: 1 }, // epic — magenta
+];
+// gems blanket the WHOLE arena at a fixed density (not a pile near spawn). the
+// target scales with map area, and a minimum spacing keeps them evenly spread.
+const GEM_TARGET = Math.round((MAP_SIZE * MAP_SIZE) / 420); // ≈ one gem per 420 m²
+const GEM_RESPAWN_INTERVAL = 1.5; // s between litter top-ups
+const GEM_MARGIN = 6; // m — keep gems this far inside the map edges
+const GEM_MIN_SPACING = 12; // m — desired clearance between gems (prevents clumping)
+const GEM_PLACE_TRIES = 16; // candidate samples per gem; most-isolated wins
+const GEM_HOVER = 1.3; // m — float height above the ground (clears the largest tier's bob)
+const GEM_HIT_MARGIN = 0.25; // m — padding on the gem's AABB so shots are forgiving to land
+
+// weighted tier roll — commons frequent, epics rare.
+const GEM_WEIGHT_TOTAL = GEM_TIERS.reduce((sum, t) => sum + t.weight, 0);
+function rollGemTier(): number {
+    let r = Math.random() * GEM_WEIGHT_TOTAL;
+    for (let i = 0; i < GEM_TIERS.length; i++) {
+        r -= GEM_TIERS[i]!.weight;
+        if (r < 0) return i;
+    }
+    return 0;
+}
+
+// random unit-ish direction for particle bursts.
+function randomDir(): Vec3 {
+    const x = Math.random() * 2 - 1;
+    const y = Math.random() * 2 - 1;
+    const z = Math.random() * 2 - 1;
+    const len = Math.hypot(x, y, z) || 1;
+    return [x / len, y / len, z / len];
+}
+
+// vary a base particle lifetime ±35% so a burst doesn't all die at once.
+const varyLife = (base: number): number => base * (0.65 + Math.random() * 0.7);
+
+// reusable quats for composing a local rotation onto a base orientation — the
+// projectile spin (combat-vfx) and the falling-hat tilt (health-fx).
+const _rotation = quat.create();
+const _orientation = quat.create();
+
+// ── traits ──────────────────────────────────────────────────────────
+
+// the wizard entity — every combatant (players AND npcs) is one. it folds together
+// score, xp/level, stat levels, the held cast intent, and the health pool, so the
+// combat systems only ever query for `WizardTrait`.
 const WizardTrait = trait('wizard', {
     color: [1, 1, 1, 1] as Vec4,
     // display name + per-round score (kills/deaths). server-authored and synced
@@ -139,7 +509,7 @@ const WizardTrait = trait('wizard', {
     // live health pool (folded in — every combatant is a wizard). `current` is
     // discrete + synced; max is DERIVED from the maxHealth stat (not stored). the
     // regen carry + damage bookkeeping stay server-only.
-    current: 8, // = STAT_TABLE.maxHealth.base (level 0)
+    current: lvlValue('maxHealth', 0),
     regenAccum: 0,
     lastDamageTime: -999,
     lastAttacker: -1,
@@ -241,417 +611,6 @@ function attachGear(wizardNode: Node): void {
     setPosition(getTrait(hat, TransformTrait)!, [0, 0.5, 0]);
     addChild(findByName(wizardNode, RIG_6BONE_HEAD)!, hat);
 }
-
-script(WorldTrait, 'join', (ctx) => {
-    if (!env.server) return;
-
-    const palette: Vec4[] = [
-        [0.9, 0.1, 0.1, 1], // red
-        [0.2, 0.3, 0.95, 1], // blue
-        [0.6, 0.15, 0.85, 1], // purple
-    ];
-
-    // existing combatants to spawn the joiner clear of (the new node has no
-    // WizardTrait yet at setPosition time, so it isn't counted).
-    const wizards = query(ctx, [WizardTrait, TransformTrait]);
-
-    onJoin(ctx, ({ playerNode, user }) => {
-        const transform = getTrait(playerNode, TransformTrait)!;
-        setPosition(transform, pickSpawnPosition(ctx, positionsOf(wizards)));
-
-        addTrait(playerNode, WizardTrait, {
-            color: palette[Math.floor(Math.random() * palette.length)],
-            name: user.username || 'anon',
-        });
-        attachGear(playerNode); // staff + hat onto the rig
-
-        // combat entity: WizardTrait already carries the health pool (current
-        // defaults to base max); the AliveTrait marker gates the combat systems.
-        addTrait(playerNode, AliveTrait);
-    });
-});
-
-// ── server: round timer → map reset ─────────────────────────────────
-// every ROUND_DURATION the arena resets, with a chat countdown over the final
-// seconds. rooms.recreate boots a fresh room from the same on-disk scene
-// (pristine terrain + fresh NPCs/environment) and moves every player into it,
-// then destroys this one. the successor runs this same script, so the timer
-// restarts on its own — a perpetual round loop.
-const ROUND_DURATION = 15 * 60; // s — 15 minutes between map changes
-const COUNTDOWN_FROM = 10; // s — chat countdown before the map changes
-
-// server → joining client: the moment the map changes, on the shared server timeline
-// (ctx.clock.server, which both sides read). sent ONCE per join — the client derives a
-// smooth countdown locally (endsAt − clock.server), no per-second churn or sync.
-const RoundInfo = command('wizards.round-info', SERVER_TO_CLIENT, pack.object({ endsAt: pack.float64() }));
-
-script(WorldTrait, 'round-timer', (ctx) => {
-    if (!env.server) return;
-
-    const players = query(ctx, [PlayerTrait]);
-    let endsAt = 0; // absolute server-clock end time; 0 = unarmed (room empty)
-    let lastShown = -1; // last whole second announced, so we post once per second
-
-    // first joiner into an empty/lapsed room arms a fresh round; then tell the
-    // joiner the current end. use the `client` the join event hands us — always
-    // present — rather than a PlayerTrait lookup, which can be undefined this
-    // early and silently skip the send (leaving the HUD clock frozen).
-    onJoin(ctx, ({ client }) => {
-        const now = ctx.clock.server;
-        if (endsAt <= now) endsAt = now + ROUND_DURATION;
-        send(ctx, RoundInfo, { endsAt }, client);
-    });
-
-    onTick(ctx, () => {
-        const now = ctx.clock.server;
-        // idle while empty — matchmaking reaps empty rooms; the next join re-arms.
-        if (players.matches.length === 0) {
-            endsAt = 0;
-            lastShown = -1;
-            return;
-        }
-        if (endsAt <= 0) endsAt = now + ROUND_DURATION; // safety: arm if somehow unset with players present
-        const remaining = endsAt - now;
-
-        // "Map changing in N..." once per second over the final COUNTDOWN_FROM s.
-        if (remaining <= COUNTDOWN_FROM && remaining > 0) {
-            const sec = Math.ceil(remaining);
-            if (sec !== lastShown) {
-                lastShown = sec;
-                chat.message(ctx, `Map changing in ${sec}...`);
-            }
-        }
-
-        if (remaining > 0) return;
-        rooms.recreate(ctx);
-    });
-});
-
-script(WorldTrait, 'viewmodel', (ctx) => {
-    if (!env.client) return;
-
-    const offset: Vec3 = [0.35, -0.5, -0.55];
-    const sway = 0.05; // horizontal walk bob (m) at full speed
-    const bounce = 0.05; // vertical footfall dip (m)
-    const speedRef = 5; // walk speed (m/s) for full bob amplitude
-    const airPerSpeed = 0.02; // airborne lift (m) per (m/s) of vertical velocity
-    const airMax = 0.15; // airborne lift clamp (m)
-
-    const basePitch = degreesToRadians(-20); // staff laid forward along the view
-    // continuous "channeling" pose while holding cast: the staff just rises straight
-    // up in view (no tilt), eased toward the held `casting` intent.
-    const raiseLift = 0.15; // m — lift the whole staff up while channeling (+y is up here)
-    const raiseEaseRate = 10; // 1/s — eases up while casting, down when it stops
-
-    let bobBlend = 0; // eased walk amount (0..1)
-    let air = 0; // eased airborne vertical offset (m); +y is down in this frame
-    let raise = 0; // eased channel raise (0..1)
-    let prevCastTime = -999; // last seen wizard.lastCastTime — edge fires the muzzle burst
-    let chargeAccum = 0; // fractional charge particles owed this frame
-    const _tip = vec3.create();
-    const _fwd = vec3.create();
-
-    onFrame(ctx, ({ delta }) => {
-        const { node: cameraNode } = resolveCamera(ctx);
-
-        // build the viewmodel once, under whichever camera is current.
-        let viewmodel = findChildByName(cameraNode, 'viewmodel:staff');
-        if (!viewmodel) {
-            viewmodel = cloneModel(wizardModels.nodes.staff);
-            viewmodel.name = 'viewmodel:staff';
-            const transform = getTrait(viewmodel, TransformTrait)!;
-            setPosition(transform, offset);
-            setScale(transform, [0.5, 0.5, 0.5]);
-            // lay the staff forward along the view instead of standing it up.
-            setQuaternion(transform, quat.setAxisAngle(quat.create(), [1, 0, 0], basePitch));
-            // floor the light so the held item stays readable in shadow.
-            traverse(viewmodel, (node) => {
-                const mesh = getTrait(node, MeshTrait);
-                if (mesh) setMeshLitMin(mesh, 0.35);
-            });
-            addChild(cameraNode, viewmodel);
-        }
-
-        // visible only to the local player, only in first person.
-        const controlNode = getControlNode(ctx);
-        const playerController = controlNode && getTrait(controlNode, PlayerControllerTrait);
-        const firstPerson = !!playerController && playerController.config.perspective === 'first';
-        traverse(viewmodel, (node) => {
-            const mesh = getTrait(node, MeshTrait);
-            if (mesh) mesh.visible = firstPerson;
-        });
-
-        const characterController = controlNode && getTrait(controlNode, CharacterControllerTrait);
-        if (!characterController) return;
-        const { velocity, grounded, bobPhase } = characterController.state;
-
-        // walk bob eases in with ground speed; airborne lift tracks vertical
-        // velocity (clamped). both ease so stopping / landing don't snap.
-        const speed = Math.hypot(velocity[0], velocity[2]);
-        bobBlend += ((grounded ? Math.min(speed / speedRef, 1) : 0) - bobBlend) * Math.min(delta * 8, 1);
-        const airTarget = grounded ? 0 : Math.max(-airMax, Math.min(airMax, -velocity[1] * airPerSpeed));
-        air += (airTarget - air) * Math.min(delta * 10, 1);
-
-        const wizard = controlNode && getTrait(controlNode, WizardTrait);
-
-        // channel raise: ease toward the held `casting` intent — the staff lifts into
-        // a ready pose while charging, drops back when we let go.
-        const raiseTarget = wizard?.casting ? 1 : 0;
-        raise += (raiseTarget - raise) * Math.min(delta * raiseEaseRate, 1);
-
-        // sway side-to-side once per stride (`sin`), dip down each footfall
-        // (`abs(sin)`, +y is down); airborne lift + channel raise ride on top.
-        const transform = getTrait(viewmodel, TransformTrait)!;
-        setPosition(transform, [
-            offset[0] + Math.sin(bobPhase) * sway * bobBlend,
-            offset[1] + Math.abs(Math.sin(bobPhase)) * bounce * bobBlend + air + raise * raiseLift,
-            offset[2],
-        ]);
-        setQuaternion(transform, quat.setAxisAngle(_viewmodelRot, [1, 0, 0], basePitch));
-
-        // first-person tip fx: the muzzle blast on each shot (the `lastCastTime` edge)
-        // and a continuous charge glow while channeling, both at the viewmodel staff
-        // tip in view. third-person viewers get these on the rig staff elsewhere.
-        if (firstPerson && wizard) {
-            vec3.transformMat4(_tip, STAFF_TIP_LOCAL, getWorldMatrix(transform));
-            if (wizard.lastCastTime !== prevCastTime) {
-                prevCastTime = wizard.lastCastTime;
-                const camQuat = getWorldQuaternion(getTrait(cameraNode, TransformTrait)!);
-                muzzleBurst(ctx, [_tip[0], _tip[1], _tip[2]], vec3.transformQuat(_fwd, [0, 0, -1], camQuat));
-            }
-            if (wizard.casting) {
-                chargeAccum += CHARGE_RATE * delta;
-                while (chargeAccum >= 1) {
-                    chargeGlow(ctx, _tip);
-                    chargeAccum -= 1;
-                }
-            } else {
-                chargeAccum = 0;
-            }
-        }
-    });
-});
-
-// ─────────────────────────────────────────────────────────────────────
-// combat core — one server-authoritative projectile, no elements yet.
-//
-// flow: click → Cast{dir} → server spawns a projectile node (auto-
-// replicates) → server integrates + collides each tick → on hit it
-// carves terrain + damages nearby health entities → broadcasts Impact /
-// Damage / Death → clients render particle vfx. health drives regen,
-// death and respawn for both players and NPC dummies.
-//
-// deliberately minimal: stats are hardcoded constants, the projectile
-// moves analytically (no physics body, tunnel-proof), and entity hits
-// are plain sphere checks. elements / tint / stat tables / status
-// effects / knockback / AI all layer on top later without touching this.
-// ─────────────────────────────────────────────────────────────────────
-
-// projectile
-const PROJECTILE_LIFETIME = 2.5; // s before it fizzles
-const CHEST_OFFSET = 1.0; // m above a character's origin (feet) — splash-damage aim point
-const EYE_HEIGHT = 1.5; // m — spawn origin above the caster's origin
-
-// per-projectile stats, carried on the trait (set once, synced). one default for
-// now; the elements / stat-table layer varies them per cast later.
-type ProjectileStats = { speed: number; damage: number; damageRadius: number; terrainDamageRadius: number; knockback: number };
-const DEFAULT_PROJECTILE_STATS: ProjectileStats = { speed: 18, damage: 3, damageRadius: 2, terrainDamageRadius: 1, knockback: 5 };
-// gameplay rule (game-side, not engine): grass plants + mushrooms are placed
-// resting on a block, so carving the block out from under one kills it too.
-// matched by block key — what getBlock returns and worldgen places with.
-const SUPPORTED_DECOR_KEYS = new Set<string>([
-    blocks.grassPlant1.defaultKey(),
-    blocks.grassPlant2.defaultKey(),
-    blocks.mushroomRed.defaultKey(),
-]);
-const KNOCKBACK_UP = 0.4; // upward kick as a fraction of the horizontal impulse (pops grounded targets so the shove lands)
-const KNOCKBACK_MIN_UP = 3; // m/s — floor on the upward kick so every hit lifts the target off the ground, even a weak/overhead shove
-const PROJECTILE_SPIN_SPEED = 12; // rad/s — roll around the travel axis while flying
-const PROJECTILE_SPIN_AXIS: Vec3 = [0, 0, 1]; // local forward/back (node faces aim down -Z)
-// staff tip in the staff node's local space: mesh max-Y from the gltf, with the
-// node origin reset to [0,0,0] by the gear script. used to place the muzzle vfx.
-const STAFF_TIP_LOCAL: Vec3 = [0, 1.0625, 0];
-
-// ── upgradable stats (diep-style) ───────────────────────────────────
-// each stat is an integer LEVEL (0..max) carried on the wizard; the effective
-// value is derived here as base + level*perLevel. character stats apply to the
-// wizard/controller; projectile stats snapshot into each shot at fire time.
-const STAT_TABLE = {
-    maxHealth: { base: 8, perLevel: 2, max: 8, label: 'Max Health', color: '#e06ec6' },
-    damage: { base: 3, perLevel: 1, max: 8, label: 'Bullet Damage', color: '#e06e6e' },
-    speed: { base: 18, perLevel: 3, max: 8, label: 'Bullet Speed', color: '#6e9de0' },
-    // Blast: one stat, two payoffs — splash damage radius (the value below) and
-    // knockback impulse (its own stronger scale, applied in projectileStatsOf).
-    blast: { base: 2, perLevel: 0.5, max: 8, label: 'Blast', color: '#e0934a' },
-    fireRate: { base: 1.5, perLevel: 0.6, max: 8, label: 'Fire Rate', color: '#8ce06e' },
-    moveSpeed: { base: 4.317, perLevel: 0.4, max: 8, label: 'Movement Speed', color: '#6ee0d5' },
-} as const;
-type StatKey = keyof typeof STAT_TABLE;
-const STAT_KEYS = Object.keys(STAT_TABLE) as StatKey[];
-type StatLevels = Record<StatKey, number>;
-
-// Lucide glyphs (24×24, stroke=currentColor) per stat: heart (health), sword
-// (damage), fast-forward chevrons (bullet speed), concentric rings (blast),
-// stopwatch (fire rate), footprints (move). the panel tints each to its stat
-// colour; the collapsed rail is just icon + level.
-const STAT_ICON_PATHS: Record<StatKey, string> = {
-    maxHealth: '<path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"/>',
-    damage: '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/>',
-    speed: '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
-    blast: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
-    fireRate: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
-    moveSpeed:
-        '<path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/>',
-};
-const statIconSvg = (key: StatKey): string =>
-    `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${STAT_ICON_PATHS[key]}</svg>`;
-
-// effective value of a stat at a given level.
-const lvlValue = (key: StatKey, level: number): number => STAT_TABLE[key].base + level * STAT_TABLE[key].perLevel;
-// derived effective values used at the call sites.
-const maxHealthOf = (levels: StatLevels): number => lvlValue('maxHealth', levels.maxHealth);
-const fireIntervalOf = (levels: StatLevels): number => 1 / lvlValue('fireRate', levels.fireRate);
-// terrain destruction isn't its own stat — it's a milestone payoff of Bullet
-// Damage: nothing until L3, then craters that grow with investment (capped so a
-// maxed shooter is a wrecking ball, not a map-eraser).
-const terrainRadiusForDamage = (damageLevel: number): number => (damageLevel >= 5 ? 2 : damageLevel >= 3 ? 1 : 0);
-// knockback rides the Blast level on its own (stronger) scale — kept from the
-// old standalone Knockback stat so shoves feel exactly as they did.
-const BLAST_KNOCKBACK_BASE = 5;
-const BLAST_KNOCKBACK_PER_LEVEL = 1.5;
-const projectileStatsOf = (levels: StatLevels): ProjectileStats => ({
-    speed: lvlValue('speed', levels.speed),
-    damage: lvlValue('damage', levels.damage),
-    damageRadius: lvlValue('blast', levels.blast),
-    terrainDamageRadius: terrainRadiusForDamage(levels.damage),
-    knockback: BLAST_KNOCKBACK_BASE + levels.blast * BLAST_KNOCKBACK_PER_LEVEL,
-});
-
-// ── xp / levels ─────────────────────────────────────────────────────
-// xp accrues from orbs; each level grants one upgrade point. quadratic curve:
-// reaching level L needs XP_PER_LEVEL * L^2 total xp, so each level costs more.
-const XP_PER_LEVEL = 12;
-const levelForXp = (xp: number): number => Math.floor(Math.sqrt(xp / XP_PER_LEVEL));
-const xpForLevel = (lvl: number): number => XP_PER_LEVEL * lvl * lvl; // inverse — xp at the start of `lvl`
-
-// level → rarity tier: a colour (hat tint + nameplate badge) and a hat scale that
-// grows with level. discrete colour bands read as a power/threat tier at a glance.
-const LEVEL_TIERS: { min: number; color: string }[] = [
-    { min: 15, color: '#fbbf24' }, // gold
-    { min: 10, color: '#a78bfa' }, // purple
-    { min: 6, color: '#6e9de0' }, // blue
-    { min: 3, color: '#2dd4bf' }, // teal (green blends into grass)
-    { min: 0, color: '#bdbdbd' }, // gray
-];
-const tierColor = (level: number): string => LEVEL_TIERS.find((t) => level >= t.min)!.color;
-const tierScale = (level: number): number => 1 + Math.min(level, 20) * 0.02; // 1.0 → 1.4
-// '#rrggbb' → a mesh tint Vec4 (alpha 1 = full mix tint).
-const hexTint = (hex: string): Vec4 => {
-    const n = parseInt(hex.slice(1), 16);
-    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1];
-};
-const sumLevels = (levels: StatLevels): number => STAT_KEYS.reduce((n, k) => n + levels[k], 0);
-// upgrade points still to spend = levels earned − levels allocated.
-const availablePoints = (xp: number, levels: StatLevels): number => levelForXp(xp) - sumLevels(levels);
-
-// ── health timing ───────────────────────────────────────────────────
-const REGEN_DELAY = 3; // s without damage before health regenerates
-const BASE_REGEN_RATE = 2; // hp/s — flat baseline regen (regen is no longer an upgradable stat)
-const RESPAWN_DELAY = 3; // s after death before respawn
-
-// ── xp orbs (death drops from gems + wizards) ───────────────────────
-const ORB_AMOUNT = 6; // xp per orb
-const ORB_LIFETIME = 60; // s — orbs despawn after this (generous; keeps uncollected litter from piling up)
-const ORB_GRAB_RADIUS = 1.1; // m — an alive wizard within this collects an orb
-const ORB_MAGNET_RADIUS = 5; // m — within this (but outside grab) an orb reels toward the nearest wizard
-const ORB_MAGNET_PULL = 18; // m/s base — fly-in speed = (PULL − distance), so it accelerates as it nears (luanti-style)
-const ORB_DROP_KEEP = 0.25; // fraction of xp the dead wizard keeps on respawn
-const ORB_DROP_SCATTER = 0.5; // fraction dropped as orbs (the rest is lost)
-const ORB_POP_UP = 4; // m/s — upward burst on a death-drop (physics scatters them)
-const ORB_POP_OUT = 3; // m/s — horizontal burst on a death-drop
-const ORB_DROP_MIN = 3; // orbs — every kill scatters at least this many, so low-xp/NPC kills still pay out
-
-// ── gems (tiered, shootable xp sources) ─────────────────────────────
-// gems are the ambient xp source (they replace free-floating litter orbs): each
-// is a destructible, slowly-spinning crystal with health. shoot one to death and
-// it shatters into a burst of the same magnet-collected xp orbs, proportional to
-// its tier. higher tiers are bigger, tougher, and pay out more — but rarer.
-type GemTier = { color: string; scale: number; halfExtent: number; health: number; xp: number; weight: number };
-const GEM_TIERS: GemTier[] = [
-    // ascending cool→hot ramp: azure → violet → magenta (no green=grass, no gold=xp).
-    { color: '#2e9bff', scale: 0.95, halfExtent: 0.48, health: 9, xp: 12, weight: 12 }, // common — azure
-    { color: '#9d5cff', scale: 1.4, halfExtent: 0.7, health: 24, xp: 36, weight: 5 }, // rare — violet
-    { color: '#ff3ea5', scale: 1.85, halfExtent: 0.92, health: 60, xp: 90, weight: 1 }, // epic — magenta
-];
-// gems blanket the WHOLE arena at a fixed density (not a pile near spawn). the
-// target scales with map area, and a minimum spacing keeps them evenly spread.
-const GEM_TARGET = Math.round((MAP_SIZE * MAP_SIZE) / 420); // ≈ one gem per 420 m²
-const GEM_RESPAWN_INTERVAL = 1.5; // s between litter top-ups
-const GEM_MARGIN = 6; // m — keep gems this far inside the map edges
-const GEM_MIN_SPACING = 12; // m — desired clearance between gems (prevents clumping)
-const GEM_PLACE_TRIES = 16; // candidate samples per gem; most-isolated wins
-const GEM_HOVER = 1.3; // m — float height above the ground (clears the largest tier's bob)
-const GEM_HIT_MARGIN = 0.25; // m — padding on the gem's AABB so shots are forgiving to land
-// client-only idle motion (the crystal visual is built + spun on the client, so
-// none of this is networked — the server body is a STATIC, non-rotating collider).
-const GEM_SPIN_SPEED = 1.4; // rad/s — continuous yaw
-const GEM_TILT_BASE = 0.55; // rad — constant lean so the spin reads as diagonal, not a flat turntable
-const GEM_TUMBLE_FREQ = 1.1; // rad/s — the lean rocks back and forth at this rate…
-const GEM_TUMBLE_AMP = 0.3; // rad — …by this much, for a livelier tumble
-const GEM_BOB_FREQ = 1.6; // rad/s — gentle vertical float
-const GEM_BOB_AMP = 0.12; // m
-const GEM_HP_MAX_DIST = 24; // m — hide the damage healthbar beyond this
-
-// weighted tier roll — commons frequent, epics rare.
-const GEM_WEIGHT_TOTAL = GEM_TIERS.reduce((sum, t) => sum + t.weight, 0);
-function rollGemTier(): number {
-    let r = Math.random() * GEM_WEIGHT_TOTAL;
-    for (let i = 0; i < GEM_TIERS.length; i++) {
-        r -= GEM_TIERS[i]!.weight;
-        if (r < 0) return i;
-    }
-    return 0;
-}
-
-// falling hat — scripted pendulum sway-fall on death (faithful to wizard-game).
-// outlives the respawn so you come back hatted while the old one settles.
-const HAT_LIFETIME = 6; // s before the dropped hat despawns
-const HAT_FALL_SPEED = 0.6; // m/s descent
-const HAT_SWING_FREQ = 2.8; // pendulum rad/s
-const HAT_SWING_AMPLITUDE = 0.18; // m side-to-side
-const HAT_SWING_TILT = 0.4; // rad tilt
-const HAT_SWING_DAMPING = 0.35; // 1/s envelope decay
-
-// random unit-ish direction for particle bursts.
-function randomDir(): Vec3 {
-    const x = Math.random() * 2 - 1;
-    const y = Math.random() * 2 - 1;
-    const z = Math.random() * 2 - 1;
-    const len = Math.hypot(x, y, z) || 1;
-    return [x / len, y / len, z / len];
-}
-
-// vary a base particle lifetime ±35% so a burst doesn't all die at once.
-const varyLife = (base: number): number => base * (0.65 + Math.random() * 0.7);
-
-// reusable quats for composing a local rotation onto a base orientation — the
-// projectile spin (combat-vfx) and the falling-hat tilt (health-fx).
-const _rotation = quat.create();
-const _orientation = quat.create();
-
-// scratch quat for the viewmodel's per-frame pose (the base forward lay).
-const _viewmodelRot = quat.create();
-
-// scratch quats for the third-person cast pose (raise arm_right on top of the
-// procedural swing — see the wizard-visuals script).
-const _castArmRaise = quat.create();
-const _castArmPose = quat.create();
-
-// damage flash — red body flash + glow pulse to 1 then back to 0 on taking a hit.
-const DAMAGE_FLASH_DURATION = 0.2; // s
-const FLASH_TINT: Vec4 = [1, 0, 0, 0]; // red; alpha (flash strength) set per use
-
-// ── traits ──────────────────────────────────────────────────────────
 
 // a live projectile. `spawnTime` / `aim` / `stats` are synced so the trait (and
 // node) replicates to clients for the trail + spin visuals. `ownerId` is
@@ -815,20 +774,9 @@ const DeathFx = particlePresets.smoke('wizards:death', { sprite: SmokeSprite });
 // wizard channels (holds cast). white for now — the elements layer tints it later.
 const ChargeFx = particlePresets.spark('wizards:charge', { sprite: SparkSprite });
 
-// muzzle blast — a short forward spray fired on each authoritative shot (driven by
-// the server's ProjectileCast, never predicted). shared by the first-person
-// viewmodel tip and the third-person staff tip.
-const MUZZLE_COUNT = 5;
-const MUZZLE_SPEED = 8; // m/s along the fire direction
-const MUZZLE_SCATTER = 2.2; // m/s random spread
-const MUZZLE_LIFE = 0.4; // s base (varied ±35%)
-const MUZZLE_SIZE = 0.07; // m
-// channel charge glow — a low rate of small emissive sparks crackling at the tip.
+// charge-glow emission rate — shared by the viewmodel + wizard-visuals tip loops
+// and chargeGlow itself; the per-particle look lives inside chargeGlow.
 const CHARGE_RATE = 22; // particles/s while casting
-const CHARGE_SPREAD = 0.08; // m — random offset sphere around the tip
-const CHARGE_SWIRL = 0.7; // m/s — gentle random drift
-const CHARGE_LIFE = 0.25; // s base (varied ±35%)
-const CHARGE_SIZE = 0.03; // m
 
 // gem shatter — a chunky spark burst baked in each tier's colour (the gems are
 // flat-tinted, so a matching shard burst reads as the crystal breaking apart).
@@ -1147,6 +1095,92 @@ function lookDirection(look: Vec3, out: Vec3): Vec3 {
     out[2] = -Math.cos(theta) * sinPhi;
     return out;
 }
+
+// ── server: player join → spawn ─────────────────────────────────────
+script(WorldTrait, 'join', (ctx) => {
+    if (!env.server) return;
+
+    const palette: Vec4[] = [
+        [0.9, 0.1, 0.1, 1], // red
+        [0.2, 0.3, 0.95, 1], // blue
+        [0.6, 0.15, 0.85, 1], // purple
+    ];
+
+    // existing combatants to spawn the joiner clear of (the new node has no
+    // WizardTrait yet at setPosition time, so it isn't counted).
+    const wizards = query(ctx, [WizardTrait, TransformTrait]);
+
+    onJoin(ctx, ({ playerNode, user }) => {
+        const transform = getTrait(playerNode, TransformTrait)!;
+        setPosition(transform, pickSpawnPosition(ctx, positionsOf(wizards)));
+
+        addTrait(playerNode, WizardTrait, {
+            color: palette[Math.floor(Math.random() * palette.length)],
+            name: user.username || 'anon',
+        });
+        attachGear(playerNode); // staff + hat onto the rig
+
+        // combat entity: WizardTrait already carries the health pool (current
+        // defaults to base max); the AliveTrait marker gates the combat systems.
+        addTrait(playerNode, AliveTrait);
+    });
+});
+
+// ── server: round timer → map reset ─────────────────────────────────
+// every ROUND_DURATION the arena resets, with a chat countdown over the final
+// seconds. rooms.recreate boots a fresh room from the same on-disk scene
+// (pristine terrain + fresh NPCs/environment) and moves every player into it,
+// then destroys this one. the successor runs this same script, so the timer
+// restarts on its own — a perpetual round loop.
+const ROUND_DURATION = 15 * 60; // s — 15 minutes between map changes
+const COUNTDOWN_FROM = 10; // s — chat countdown before the map changes
+
+// server → joining client: the moment the map changes, on the shared server timeline
+// (ctx.clock.server, which both sides read). sent ONCE per join — the client derives a
+// smooth countdown locally (endsAt − clock.server), no per-second churn or sync.
+const RoundInfo = command('wizards.round-info', SERVER_TO_CLIENT, pack.object({ endsAt: pack.float64() }));
+
+script(WorldTrait, 'round-timer', (ctx) => {
+    if (!env.server) return;
+
+    const players = query(ctx, [PlayerTrait]);
+    let endsAt = 0; // absolute server-clock end time; 0 = unarmed (room empty)
+    let lastShown = -1; // last whole second announced, so we post once per second
+
+    // first joiner into an empty/lapsed room arms a fresh round; then tell the
+    // joiner the current end. use the `client` the join event hands us — always
+    // present — rather than a PlayerTrait lookup, which can be undefined this
+    // early and silently skip the send (leaving the HUD clock frozen).
+    onJoin(ctx, ({ client }) => {
+        const now = ctx.clock.server;
+        if (endsAt <= now) endsAt = now + ROUND_DURATION;
+        send(ctx, RoundInfo, { endsAt }, client);
+    });
+
+    onTick(ctx, () => {
+        const now = ctx.clock.server;
+        // idle while empty — matchmaking reaps empty rooms; the next join re-arms.
+        if (players.matches.length === 0) {
+            endsAt = 0;
+            lastShown = -1;
+            return;
+        }
+        if (endsAt <= 0) endsAt = now + ROUND_DURATION; // safety: arm if somehow unset with players present
+        const remaining = endsAt - now;
+
+        // "Map changing in N..." once per second over the final COUNTDOWN_FROM s.
+        if (remaining <= COUNTDOWN_FROM && remaining > 0) {
+            const sec = Math.ceil(remaining);
+            if (sec !== lastShown) {
+                lastShown = sec;
+                chat.message(ctx, `Map changing in ${sec}...`);
+            }
+        }
+
+        if (remaining > 0) return;
+        rooms.recreate(ctx);
+    });
+});
 
 // projectiles anchor their flight to `ctx.clock.server - spawnTime`, the shared
 // server timeline both sides read (a joining client seeds it from the server in the
@@ -1556,8 +1590,8 @@ script(WorldTrait, 'upgrades', (ctx) => {
 });
 
 // ── xp orbs — pickup (server), sprite decorate (client) ─────────────
-// orbs are no longer littered directly — they drop from shattered gems and dead
-// wizards. this script only reels them in and renders them.
+// orbs drop from shattered gems and dead wizards (gems are the ambient source).
+// this script only reels them in (server) and renders them (client).
 
 script(WorldTrait, 'xp', (ctx) => {
     if (env.server) {
@@ -1652,10 +1686,8 @@ script(WorldTrait, 'xp', (ctx) => {
                 // grunt on taking damage — only on a health drop (regen rises,
                 // respawn jumps up, both stay silent). seeded -1 so join/initial
                 // sync doesn't trigger it.
-                if (selfWiz.current !== lastHealth) console.log(`[bongle combat] self.current ${lastHealth} -> ${selfWiz.current}`);
                 if (lastHealth >= 0 && selfWiz.current < lastHealth) {
                     playMono(ctx, sounds.playerDamage, { detune: (Math.random() * 2 - 1) * 100 });
-                    console.log('[bongle combat] DAMAGE sound played');
                 }
                 lastHealth = selfWiz.current;
                 // level-up chime — local player only (this runs on the control
@@ -1755,6 +1787,16 @@ script(WorldTrait, 'gems', (ctx) => {
     }
 
     if (env.client) {
+        // client-only idle motion: the crystal visual is built + spun here, so none of
+        // this is networked — the server body is a STATIC, non-rotating collider.
+        const GEM_SPIN_SPEED = 1.4; // rad/s — continuous yaw
+        const GEM_TILT_BASE = 0.55; // rad — constant lean so the spin reads as diagonal, not a flat turntable
+        const GEM_TUMBLE_FREQ = 1.1; // rad/s — the lean rocks back and forth at this rate…
+        const GEM_TUMBLE_AMP = 0.3; // rad — …by this much, for a livelier tumble
+        const GEM_BOB_FREQ = 1.6; // rad/s — gentle vertical float
+        const GEM_BOB_AMP = 0.12; // m
+        const GEM_HP_MAX_DIST = 24; // m — hide the damage healthbar beyond this
+
         const gems = query(ctx, [GemTrait, TransformTrait]);
         const _gemYaw = quat.create();
         const _gemTilt = quat.create();
@@ -2391,6 +2433,116 @@ script(WorldTrait, 'combat-npcs', (ctx) => {
     });
 });
 
+// ── client: first-person viewmodel ──────────────────────────────────
+// the held staff under the camera: walk-bob, a channel-raise while casting, and the
+// muzzle/charge tip fx for the local player's own shots (third-person viewers get
+// these on the rig staff in wizard-visuals).
+script(WorldTrait, 'viewmodel', (ctx) => {
+    if (!env.client) return;
+
+    const offset: Vec3 = [0.35, -0.5, -0.55];
+    const sway = 0.05; // horizontal walk bob (m) at full speed
+    const bounce = 0.05; // vertical footfall dip (m)
+    const speedRef = 5; // walk speed (m/s) for full bob amplitude
+    const airPerSpeed = 0.02; // airborne lift (m) per (m/s) of vertical velocity
+    const airMax = 0.15; // airborne lift clamp (m)
+
+    const basePitch = degreesToRadians(-20); // staff laid forward along the view
+    // continuous "channeling" pose while holding cast: the staff just rises straight
+    // up in view (no tilt), eased toward the held `casting` intent.
+    const raiseLift = 0.15; // m — lift the whole staff up while channeling (+y is up here)
+    const raiseEaseRate = 10; // 1/s — eases up while casting, down when it stops
+
+    let bobBlend = 0; // eased walk amount (0..1)
+    let air = 0; // eased airborne vertical offset (m); +y is down in this frame
+    let raise = 0; // eased channel raise (0..1)
+    let prevCastTime = -999; // last seen wizard.lastCastTime — edge fires the muzzle burst
+    let chargeAccum = 0; // fractional charge particles owed this frame
+    const _tip = vec3.create();
+    const _fwd = vec3.create();
+    const _viewmodelRot = quat.create(); // scratch for the per-frame staff pose
+
+    onFrame(ctx, ({ delta }) => {
+        const { node: cameraNode } = resolveCamera(ctx);
+
+        // build the viewmodel once, under whichever camera is current.
+        let viewmodel = findChildByName(cameraNode, 'viewmodel:staff');
+        if (!viewmodel) {
+            viewmodel = cloneModel(wizardModels.nodes.staff);
+            viewmodel.name = 'viewmodel:staff';
+            const transform = getTrait(viewmodel, TransformTrait)!;
+            setPosition(transform, offset);
+            setScale(transform, [0.5, 0.5, 0.5]);
+            // lay the staff forward along the view instead of standing it up.
+            setQuaternion(transform, quat.setAxisAngle(quat.create(), [1, 0, 0], basePitch));
+            // floor the light so the held item stays readable in shadow.
+            traverse(viewmodel, (node) => {
+                const mesh = getTrait(node, MeshTrait);
+                if (mesh) setMeshLitMin(mesh, 0.35);
+            });
+            addChild(cameraNode, viewmodel);
+        }
+
+        // visible only to the local player, only in first person.
+        const controlNode = getControlNode(ctx);
+        const playerController = controlNode && getTrait(controlNode, PlayerControllerTrait);
+        const firstPerson = !!playerController && playerController.config.perspective === 'first';
+        traverse(viewmodel, (node) => {
+            const mesh = getTrait(node, MeshTrait);
+            if (mesh) mesh.visible = firstPerson;
+        });
+
+        const characterController = controlNode && getTrait(controlNode, CharacterControllerTrait);
+        if (!characterController) return;
+        const { velocity, grounded, bobPhase } = characterController.state;
+
+        // walk bob eases in with ground speed; airborne lift tracks vertical
+        // velocity (clamped). both ease so stopping / landing don't snap.
+        const speed = Math.hypot(velocity[0], velocity[2]);
+        bobBlend += ((grounded ? Math.min(speed / speedRef, 1) : 0) - bobBlend) * Math.min(delta * 8, 1);
+        const airTarget = grounded ? 0 : Math.max(-airMax, Math.min(airMax, -velocity[1] * airPerSpeed));
+        air += (airTarget - air) * Math.min(delta * 10, 1);
+
+        const wizard = controlNode && getTrait(controlNode, WizardTrait);
+
+        // channel raise: ease toward the held `casting` intent — the staff lifts into
+        // a ready pose while charging, drops back when we let go.
+        const raiseTarget = wizard?.casting ? 1 : 0;
+        raise += (raiseTarget - raise) * Math.min(delta * raiseEaseRate, 1);
+
+        // sway side-to-side once per stride (`sin`), dip down each footfall
+        // (`abs(sin)`, +y is down); airborne lift + channel raise ride on top.
+        const transform = getTrait(viewmodel, TransformTrait)!;
+        setPosition(transform, [
+            offset[0] + Math.sin(bobPhase) * sway * bobBlend,
+            offset[1] + Math.abs(Math.sin(bobPhase)) * bounce * bobBlend + air + raise * raiseLift,
+            offset[2],
+        ]);
+        setQuaternion(transform, quat.setAxisAngle(_viewmodelRot, [1, 0, 0], basePitch));
+
+        // first-person tip fx: the muzzle blast on each shot (the `lastCastTime` edge)
+        // and a continuous charge glow while channeling, both at the viewmodel staff
+        // tip in view. third-person viewers get these on the rig staff elsewhere.
+        if (firstPerson && wizard) {
+            vec3.transformMat4(_tip, STAFF_TIP_LOCAL, getWorldMatrix(transform));
+            if (wizard.lastCastTime !== prevCastTime) {
+                prevCastTime = wizard.lastCastTime;
+                const camQuat = getWorldQuaternion(getTrait(cameraNode, TransformTrait)!);
+                muzzleBurst(ctx, [_tip[0], _tip[1], _tip[2]], vec3.transformQuat(_fwd, [0, 0, -1], camQuat));
+            }
+            if (wizard.casting) {
+                chargeAccum += CHARGE_RATE * delta;
+                while (chargeAccum >= 1) {
+                    chargeGlow(ctx, _tip);
+                    chargeAccum -= 1;
+                }
+            } else {
+                chargeAccum = 0;
+            }
+        }
+    });
+});
+
 // ── client: impact / death / damage / trail particles ───────────────
 
 // for a terrain hit we reuse the block's auto-derived dust SPRITE, but in our own
@@ -2466,6 +2618,11 @@ function spawnImpactVfx(ctx: ScriptContext, pos: Vec3, fizzle: boolean, block: n
 // muzzle blast at `at` (world space) spraying along unit `forward` with scatter.
 // fired on each authoritative ProjectileCast — never predicted.
 function muzzleBurst(ctx: ScriptContext, at: Vec3, forward: Vec3): void {
+    const MUZZLE_COUNT = 5;
+    const MUZZLE_SPEED = 8; // m/s along the fire direction
+    const MUZZLE_SCATTER = 2.2; // m/s random spread
+    const MUZZLE_LIFE = 0.4; // s base (varied ±35%)
+    const MUZZLE_SIZE = 0.07; // m
     for (let i = 0; i < MUZZLE_COUNT; i++) {
         const s = randomDir();
         spawnParticle(ctx, ImpactFx, at, {
@@ -2482,6 +2639,10 @@ function muzzleBurst(ctx: ScriptContext, at: Vec3, forward: Vec3): void {
 // one charge spark at `at` (world space) — a small emissive crackle with gentle
 // random drift. callers emit these at CHARGE_RATE while a wizard is channeling.
 function chargeGlow(ctx: ScriptContext, at: Vec3): void {
+    const CHARGE_SPREAD = 0.08; // m — random offset sphere around the tip
+    const CHARGE_SWIRL = 0.7; // m/s — gentle random drift
+    const CHARGE_LIFE = 0.25; // s base (varied ±35%)
+    const CHARGE_SIZE = 0.03; // m
     const o = randomDir();
     const v = randomDir();
     spawnParticle(ctx, ChargeFx, [at[0] + o[0] * CHARGE_SPREAD, at[1] + o[1] * CHARGE_SPREAD, at[2] + o[2] * CHARGE_SPREAD], {
@@ -2536,6 +2697,10 @@ function spawnClientBolt(ctx: ScriptContext, info: { id: number; ownerId: number
 
 script(WorldTrait, 'combat-vfx', (ctx) => {
     if (!env.client) return;
+
+    // purely-visual bolt spin (the node faces its aim down -Z; this rolls it).
+    const PROJECTILE_SPIN_SPEED = 12; // rad/s — roll around the travel axis while flying
+    const PROJECTILE_SPIN_AXIS: Vec3 = [0, 0, 1]; // local forward/back
 
     // every bolt is a `realm:'client'` ProjectileTrait node (never networked) — one
     // query renders them all uniformly, ours and others' alike.
@@ -2685,7 +2850,23 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
 
     const wizards = query(ctx, [WizardTrait, TransformTrait]);
 
+    // damage flash — red body flash + glow pulse to 1 then back to 0 on taking a hit.
+    const DAMAGE_FLASH_DURATION = 0.2; // s
+    const FLASH_TINT: Vec4 = [1, 0, 0, 0]; // red; alpha (flash strength) set per use
+
+    // falling hat — scripted pendulum sway-fall on death; outlives the respawn so you
+    // come back hatted while the old one settles.
+    const HAT_LIFETIME = 6; // s before the dropped hat despawns
+    const HAT_FALL_SPEED = 0.6; // m/s descent
+    const HAT_SWING_FREQ = 2.8; // pendulum rad/s
+    const HAT_SWING_AMPLITUDE = 0.18; // m side-to-side
+    const HAT_SWING_TILT = 0.4; // rad tilt
+    const HAT_SWING_DAMPING = 0.35; // 1/s envelope decay
+
     const armRaiseAngle = degreesToRadians(80); // arm_right local X — staff lifts toward the aim at full raise
+    // scratch quats for the third-person cast pose (raise arm_right on top of the procedural swing).
+    const _castArmRaise = quat.create();
+    const _castArmPose = quat.create();
     const raiseEaseRate = 8; // 1/s — arm eases up while casting / down when it stops
     const FADE_SPEED = 6; // 1/s — death dither lerp (~0.5s in/out)
     const NAMEPLATE_MAX_DIST = 30; // m — hide nameplates beyond this
@@ -2816,8 +2997,8 @@ script(WorldTrait, 'wizard-visuals', (ctx) => {
 
             // dither the character out (dead) / back in (alive). hand the eased
             // value to CharacterTrait so the engine composes it (max) with its
-            // own proximity/POV dither — one owner of the mesh dither, so
-            // walking near a dead body no longer un-hides it.
+            // death is the only thing that drives the mesh dither, so walking near a
+            // dead body leaves its fade alone (proximity/POV never un-hides it).
             const target = dead ? 1 : 0;
             if (s.dither !== target) {
                 let next = s.dither + (target - s.dither) * Math.min(delta * FADE_SPEED, 1);
