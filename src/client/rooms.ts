@@ -1078,7 +1078,7 @@ export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     Environment.dispose(room.environment);
     // env GPU buffers are engine-global (state.renderer.environmentResources)
     // — not disposed here; they live for the lifetime of the engine.
-    Audio.dispose(room.audio);
+    if (room.audio) Audio.dispose(room.audio);
     room.disposeCanvasTouchListeners();
     room.viewport.remove();
     room.canvasTarget.dispose();
@@ -1146,76 +1146,6 @@ export function setActivePlayer(
     if (!room.local) {
         Net.send(net, { type: 'set_active_room', playerId });
     }
-}
-
-/* ── Offline rooms ──────────────────────────────────────────────── */
-
-/**
- * create a fully-formed ClientRoom for offline rendering (icon atlas tasks).
- * mirrors `startLocalRoom` (synthetic ids, synthesized player node) but
- * skips viewport mount + scene-graph init — the offline-renderer drives
- * the room directly and never registers it in the rooms map. mode is hardcoded to
- * play so prefab.tick stamps voxels into the world.
- *
- * the room's default render pipeline is unused — offline tasks build
- * their own RenderPipeline per pass via `Renderer.createOfflinePipeline`
- * with a transparent clear so atlas tiles composite cleanly. the env is
- * disabled up-front (sky mesh hidden, voxel skyBrightness pinned) so it
- * doesn't bleed into icon renders.
- */
-export function createOfflineRoom(state: EngineClient): ClientRoom {
-    const localId = state.rooms.nextLocalId++;
-    const playerId: PlayerId = -(localId + 1);
-    const roomId = `${LOCAL_ROOM_PREFIX}offline-${localId}`;
-
-    const { nodes, voxels, physics, clock, scriptRuntime, chat } = newRoomCore({
-        resources: state.resources,
-        rpc: state.rpc,
-        roomId,
-        playerMode: 'play',
-        roomMode: 'play',
-    });
-
-    // synthetic player node — required by ClientRoom contract but unused
-    // by the offline renderer (no input or movement runs).
-    const playerNode = synthesizePlayerNode(nodes, playerId, 0, 'offline-player');
-
-    const room = createRoomCore({
-        clientId: 0,
-        playerId,
-        sceneId: '__offline__',
-        roomId,
-        playerMode: 'play',
-        roomMode: 'play',
-        namespace: 'offline',
-        local: true,
-        net: state.net,
-        rpc: state.rpc,
-        renderer: state.renderer,
-        resources: state.resources,
-        modelResources: state.modelResources,
-        voxelResources: state.voxelResources,
-        voxelMeshResources: state.voxelMeshResources,
-        spriteResources: state.spriteResources,
-        extrudedSpriteResources: state.extrudedSpriteResources,
-        particleResources: state.particleResources,
-        cloudResources: state.cloudResources,
-        shadowResources: state.shadowResources,
-        audioResources: state.audioResources,
-        nodes: nodes,
-        voxels,
-        physics,
-        clock,
-        scriptRuntime,
-        chat,
-        playerNode,
-    });
-
-    // offline renderer has no live client room and runs no initSceneGraph;
-    // attach the host trait directly (its env onInit simply no-ops).
-    attachWorldTrait(room.nodes.root);
-
-    return room;
 }
 
 /**

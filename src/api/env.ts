@@ -11,6 +11,9 @@
  *   debug overlays, editor scripts) can be gated behind this flag and
  *   stripped in production builds.
  *
+ * The asset pipeline does NOT use a flag — it's a separate engine entry
+ * (`EngineAssetPipeline`), not a headless variant of the client.
+ *
  * Note: there is no `env.edit` or `env.play`. Mode is per-room and
  * available on the script context as `ctx.mode`.
  */

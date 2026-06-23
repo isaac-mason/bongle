@@ -57,7 +57,7 @@ export type Settings = {
     voxelMainThreadRemeshBudget: number;
     /** size of the mesh worker pool. 0 disables workers entirely (every
      *  remesh runs on the main thread synchronously — useful for tests and
-     *  the offline-renderer path). */
+     *  the asset-pipeline path). */
     voxelWorkerCount: number;
     /** per-worker FIFO queue depth. Worker drains its queue with no
      *  postMessage round-trip between jobs. Total worker-pool in-flight

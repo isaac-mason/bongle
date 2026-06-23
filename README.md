@@ -12,6 +12,27 @@ it powers [bongle.io](https://bongle.io), and is available here as free open sou
 - 🌐 server-authorative multiplayer with distributed entity ownership
 - 🔗 "share" functionality powered by cloudflared, so you can playtest with anyone in the world
 
+## Example games
+
+Want a complete game to learn from or remix? These are full multiplayer games built on bongle, each in its own repo so you can fork it and make it your own.
+
+- [bongle-wizard-game](https://github.com/isaac-mason/bongle-wizard-game), a multiplayer wizard arena.
+
+## Engine examples
+
+Smaller, feature-level demos live in [`./examples/`](./examples), each isolating one part of the engine so you can see how it works in a few files. Clone this repo recursively (see below) and run any of them with `npm install && npm run edit`.
+
+- [`audio`](./examples/audio), the script-facing audio API: non-positional one-shots, pitch-shifting, and spatial sources that follow a node.
+- [`blocks`](./examples/blocks), defining custom voxel blocks, textures, and presets.
+- [`dom-ui`](./examples/dom-ui), in-world UI with the HtmlTrait and CanvasTrait.
+- [`persistent-data`](./examples/persistent-data), saving player progress with the storage API.
+- [`rooms`](./examples/rooms), multiple scenes and matchmaking across rooms.
+- [`sprites`](./examples/sprites), sprite and particle primitives in billboard, y-billboard, and world modes.
+- [`terrain`](./examples/terrain), procedural terrain generation.
+- [`voxel-model`](./examples/voxel-model), building voxel-model shapes with flood-fill lighting.
+
+The [`performance-*`](./examples) folders are benchmark scenes (chunks, lighting, meshing, physics, terrain) rather than tutorials.
+
 ## Getting Started
 
 > NOTE: bongle is in early development and is not yet published to npm. Install directly from this repo:

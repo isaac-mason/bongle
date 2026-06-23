@@ -55,13 +55,13 @@ importers:
         version: 3.2.3
       crashcat:
         specifier: github:isaac-mason/crashcat#dev
-        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/9523be267fd2855655917ec534b8d6c2737b07f8
+        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/9c9db395e76316e7621a5b0bdf58d4c9fddf0bcb
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: github:isaac-mason/gpucat#main
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05
+        specifier: github:isaac-mason/gpucat#54ee728
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -76,7 +76,7 @@ importers:
         version: 0.25.0
       packcat:
         specifier: github:isaac-mason/packcat#dev
-        version: https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f
+        version: https://codeload.github.com/isaac-mason/packcat/tar.gz/a12d099860b576f8e31441938d8dee6771f64e66
       puppeteer:
         specifier: ^24.40.0
         version: 24.40.0(typescript@5.9.3)
@@ -98,6 +98,9 @@ importers:
       vite:
         specifier: ^8.0.2
         version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.2)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.22.3)
+      webgpu:
+        specifier: ^0.4.0
+        version: 0.4.0
       ws:
         specifier: ^8.18.0
         version: 8.20.0
@@ -165,6 +168,10 @@ importers:
       bongle:
         specifier: link:../..
         version: link:../..
+    devDependencies:
+      webgpu:
+        specifier: 0.4.0
+        version: 0.4.0
 
   examples/dom-ui:
     dependencies:
@@ -1540,6 +1547,9 @@ packages:
   '@vitest/utils@3.2.4':
     resolution: {integrity: sha512-fB2V0JFrQSMsCo9HiSq3Ezpdv4iYaXRG1Sx8edX3MwxfyNn83mKiGzOcH+Fkxt4MHxr3y42fQi1oeAInqgX2QA==}
 
+  '@webgpu/types@0.1.70':
+    resolution: {integrity: sha512-LFiNHHKMvmAEvwVew3JLJmTdShhbdwRFSImUshGhE2mGE8ybQzIo63l5uRp+YKnNx+8Qno8Kf6gN+DKMreIJCA==}
+
   abbrev@1.1.1:
     resolution: {integrity: sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q==}
 
@@ -1828,8 +1838,8 @@ packages:
       typescript:
         optional: true
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/9523be267fd2855655917ec534b8d6c2737b07f8:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/9523be267fd2855655917ec534b8d6c2737b07f8}
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/9c9db395e76316e7621a5b0bdf58d4c9fddf0bcb:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/9c9db395e76316e7621a5b0bdf58d4c9fddf0bcb}
     version: 0.0.4
     peerDependencies:
       three: '>=0.182.0'
@@ -2124,8 +2134,8 @@ packages:
     resolution: {integrity: sha512-sSs4inE1FB2YQiymcmTv6NWENryABjUNPeWhOvmn4SjtKybglsyPZxFB3U1/+L1bYi0rNZDqCLlHyLYDl1Pq5A==}
     engines: {node: '>=8'}
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -2614,8 +2624,8 @@ packages:
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
 
-  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/a12d099860b576f8e31441938d8dee6771f64e66:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/a12d099860b576f8e31441938d8dee6771f64e66}
     version: 0.3.0
 
   pacote@15.2.0:
@@ -3226,6 +3236,9 @@ packages:
 
   webdriver-bidi-protocol@0.4.1:
     resolution: {integrity: sha512-ARrjNjtWRRs2w4Tk7nqrf2gBI0QXWuOmMCx2hU+1jUt6d00MjMxURrhxhGbrsoiZKJrhTSTzbIrc554iKI10qw==}
+
+  webgpu@0.4.0:
+    resolution: {integrity: sha512-F5pimn3Aoi0zWjuRdiVs5TnrUwSzD2lESBohsIUsqyitWkGRQlXU2fhV6ycXlQTa1bvAf3sjqiUpBEpmSQ5ptA==}
 
   whatwg-mimetype@3.0.0:
     resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
@@ -4297,6 +4310,8 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
+  '@webgpu/types@0.1.70': {}
+
   abbrev@1.1.1: {}
 
   abort-controller@3.0.0:
@@ -4596,7 +4611,7 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/9523be267fd2855655917ec534b8d6c2737b07f8:
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/9c9db395e76316e7621a5b0bdf58d4c9fddf0bcb:
     dependencies:
       mathcat: 0.0.12
 
@@ -4921,7 +4936,7 @@ snapshots:
       merge2: 1.4.1
       slash: 3.0.0
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13:
     dependencies:
       mathcat: 0.0.12
 
@@ -5429,7 +5444,7 @@ snapshots:
 
   package-json-from-dist@1.0.1: {}
 
-  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/d65e0c1f07e90add09ec05a01027b3792d12807f: {}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/a12d099860b576f8e31441938d8dee6771f64e66: {}
 
   pacote@15.2.0:
     dependencies:
@@ -6188,6 +6203,13 @@ snapshots:
       - yaml
 
   webdriver-bidi-protocol@0.4.1: {}
+
+  webgpu@0.4.0:
+    dependencies:
+      '@webgpu/types': 0.1.70
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   whatwg-mimetype@3.0.0: {}
 

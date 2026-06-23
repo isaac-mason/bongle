@@ -1,11 +1,11 @@
 /**
- * Pipeline orchestrator — Node-side driver for the puppeteer worker page.
+ * Pipeline orchestrator — Node-side driver for the asset-pipeline worker.
  *
- * Holds applied state per page-load (boot id, applied scene hashes, last
- * rendered artifact hashes) and dispatches RPC verbs to
- * `window.__bongle_worker` exposed by `kit/runtime/pipeline.ts`. Replaces
- * the browser-side flush handler + REST polling + HMR custom events from
- * the previous architecture. See plan-pipeline-orchestrator.md.
+ * Holds applied state per worker boot (boot id, applied scene hashes, last
+ * rendered artifact hashes) and dispatches verbs through the `WorkerHandle`
+ * (the in-process `EngineAssetPipeline` surface; see
+ * `kit/pipeline/local-pipeline.ts`). Transport-agnostic — the orchestrator
+ * never knows the worker is in-process.
  *
  * Convention: `init(...) → State` + standalone fns taking state, matching
  * Registry / Content / EngineClient.
@@ -13,10 +13,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Page } from 'puppeteer';
 import type { ScenePayload } from 'bongle/internal';
 import { readArtifactHashSync } from '../cache';
 import type { PipelineInternal } from '../asset-pipeline/pipeline';
+import type { WorkerHandle } from './worker-handle';
 import {
     computeBlockIconsHash,
     computePrefabIconHashes,
@@ -24,7 +24,7 @@ import {
 } from './icon-hashes';
 
 export type State = {
-    page: Page;
+    worker: WorkerHandle;
     internal: PipelineInternal;
     projectDir: string;
     /** sceneId → on-disk bytes-hash of the .scene.json last applied to the
@@ -45,9 +45,9 @@ export type State = {
     queued: boolean;
 };
 
-export function init(page: Page, internal: PipelineInternal, projectDir: string): State {
+export function init(worker: WorkerHandle, internal: PipelineInternal, projectDir: string): State {
     return {
-        page,
+        worker,
         internal,
         projectDir,
         appliedSceneHashes: new Map(),
@@ -67,10 +67,10 @@ export function init(page: Page, internal: PipelineInternal, projectDir: string)
  *
  *  This is the ONLY trigger the asset pipeline calls. Atlas changes,
  *  scene-file writes, and registry-driven inputs all route through here;
- *  the pass itself decides whether a page reload is needed (atlas hash
+ *  the pass itself decides whether a worker re-boot is needed (atlas hash
  *  moved since last boot) before dispatching any verbs. That makes the
- *  reload race-free: it can only happen with the lock held, before any
- *  in-flight fetch/render exists. */
+ *  re-boot race-free: it can only happen with the lock held, before any
+ *  in-flight render exists. */
 export async function scheduleRender(s: State): Promise<void> {
     if (s.busy) {
         s.queued = true;
@@ -93,28 +93,28 @@ export async function scheduleRender(s: State): Promise<void> {
 
 async function runOnePass(s: State): Promise<void> {
     // 1. Wait for the worker surface to be exposed (post-userEntry import).
-    await waitForWorkerReady(s.page);
+    await s.worker.ready();
 
-    // 2. Atlas-staleness reload check. The worker loads the TextureArray
-    //    once at boot, so an atlas-bytes change requires a page reload to
-    //    pick up the new tiles. We do this BEFORE dispatching any verbs so
-    //    no in-flight fetch can race the reload. After reload, bootId
-    //    rotates and the next step's mismatch branch re-boots + wipes.
+    // 2. Atlas-staleness re-boot check. The worker loads the TextureArray
+    //    once at boot, so an atlas-bytes change requires a re-boot to pick
+    //    up the new tiles. We do this BEFORE dispatching any verbs so nothing
+    //    in-flight can race it. After re-boot, bootId rotates and the next
+    //    step's mismatch branch re-boots + wipes.
     const atlasHashBefore = readArtifactHashSync(
         path.join(s.projectDir, 'resources', 'client', 'voxels-atlas.json'),
     );
     if (atlasHashBefore && s.lastBootAtlasHash !== null && atlasHashBefore !== s.lastBootAtlasHash) {
         try {
-            await s.page.reload({ waitUntil: 'load' });
+            await s.worker.reload();
         } catch (err) {
-            console.warn('[bongle:orchestrator] page.reload failed:', err);
+            console.warn('[bongle:orchestrator] worker reload failed:', err);
         }
-        await waitForWorkerReady(s.page);
+        await s.worker.ready();
     }
 
-    // 3. Detect page reload (atlas-driven above, or any external cause)
+    // 3. Detect worker reload (atlas-driven above, or any external cause)
     //    via bootId. New id ⇒ wipe applied state + re-boot the engine.
-    const bootId = await callWorker<string>(s.page, '__GET_bootId');
+    const bootId = await s.worker.bootId();
     if (bootId !== s.lastBootId) {
         if (!atlasHashBefore) {
             // First pipeline pass hasn't landed an atlas yet. Schedule a
@@ -122,7 +122,7 @@ async function runOnePass(s: State): Promise<void> {
             // once an atlas exists.
             return;
         }
-        await callWorker(s.page, 'bootEngine');
+        await s.worker.call('bootEngine');
         s.lastBootId = bootId;
         s.lastBootAtlasHash = atlasHashBefore;
         s.appliedSceneHashes.clear();
@@ -134,7 +134,7 @@ async function runOnePass(s: State): Promise<void> {
     // 4. Drain registry pendingChanges so any HMR-delivered upserts that
     //    landed on the worker between the last pass and this one reach the
     //    engine before we render against it.
-    await callWorker(s.page, 'applyRegistryChanges');
+    await s.worker.call('applyRegistryChanges');
 
     // 5. Scene deltas — walk content/scenes/**, hash bytes per file. Disk
     //    is the source of truth for the scene corpus (the gameServer's
@@ -149,28 +149,28 @@ async function runOnePass(s: State): Promise<void> {
     const deltas = current.filter((x) => s.appliedSceneHashes.get(x.id) !== x.bytesHash);
 
     // 6. Apply deltas one verb at a time; drain at the end.
-    for (const id of cleared) await callWorker(s.page, 'clearScene', id);
-    for (const { id, payload } of deltas) await callWorker(s.page, 'applyScene', id, payload);
+    for (const id of cleared) await s.worker.call('clearScene', id);
+    for (const { id, payload } of deltas) await s.worker.call('applyScene', id, payload);
     if (cleared.length || deltas.length) {
-        await callWorker(s.page, 'applyRegistryChanges');
+        await s.worker.call('applyRegistryChanges');
     }
 
     // 7. Render verbs — Node decides via hash.
     const blockHash = computeBlockIconsHash(s.internal, atlasHashBefore);
     if (blockHash !== s.lastBlockIconsHash) {
-        await callWorker(s.page, 'renderBlockIcons', blockHash);
+        await s.worker.call('renderBlockIcons', blockHash);
     }
     // hashes gate dispatch in-memory (no on-disk sidecar); the worker just
     // renders + writes the PNG, so the hash never leaves Node.
     const prefabHashes = computePrefabIconHashes(s.internal, atlasHashBefore);
     for (const { id, hash } of prefabHashes) {
         if (s.lastPrefabIconHashes.get(id) === hash) continue;
-        await callWorker(s.page, 'renderPrefabIcon', id);
+        await s.worker.call('renderPrefabIcon', id);
     }
     const sceneHashes = computeSceneIconHashes(s.internal, atlasHashBefore, current);
     for (const { id, hash } of sceneHashes) {
         if (s.lastSceneIconHashes.get(id) === hash) continue;
-        await callWorker(s.page, 'renderSceneIcon', id);
+        await s.worker.call('renderSceneIcon', id);
     }
 
     // 8. Mid-flight rebuild check. If the asset pipeline rewrote the atlas
@@ -200,39 +200,6 @@ async function runOnePass(s: State): Promise<void> {
     }
     for (const { id, hash } of prefabHashes) s.lastPrefabIconHashes.set(id, hash);
     for (const { id, hash } of sceneHashes) s.lastSceneIconHashes.set(id, hash);
-}
-
-const WORKER_READY_TIMEOUT_MS = 30_000;
-const WORKER_READY_STEP_MS = 50;
-
-async function waitForWorkerReady(page: Page): Promise<void> {
-    const start = Date.now();
-    while (Date.now() - start < WORKER_READY_TIMEOUT_MS) {
-        const ready = await page
-            .evaluate(() => (globalThis as unknown as { __bongle_worker_ready?: boolean }).__bongle_worker_ready === true)
-            .catch(() => false);
-        if (ready) return;
-        await new Promise((r) => setTimeout(r, WORKER_READY_STEP_MS));
-    }
-    throw new Error('[bongle:orchestrator] worker did not become ready in time');
-}
-
-/** Dispatch a verb on `window.__bongle_worker`. Args must JSON-serialize. */
-async function callWorker<T = void>(page: Page, verb: string, ...args: unknown[]): Promise<T> {
-    return page.evaluate(
-        async (verbName, verbArgs) => {
-            const w = (globalThis as unknown as {
-                __bongle_worker?: Record<string, unknown>;
-            }).__bongle_worker;
-            if (!w) throw new Error('__bongle_worker missing');
-            if (verbName === '__GET_bootId') return w.bootId as unknown;
-            const fn = w[verbName];
-            if (typeof fn !== 'function') throw new Error(`unknown verb ${verbName}`);
-            return (fn as (...a: unknown[]) => unknown).apply(w, verbArgs);
-        },
-        verb,
-        args,
-    ) as Promise<T>;
 }
 
 /** Walk `content/scenes/**` and produce `{ id, bytesHash, payload }` for

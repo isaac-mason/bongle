@@ -1,14 +1,15 @@
 /**
- * Icon-artifact writer. Inputs come from the persistent-puppeteer page via
- * POST /__bongle/pipeline/emit — the page renders RGBA into a RenderTarget,
- * reads it back into a Uint8Array, and POSTs that buffer + a manifest header.
+ * Icon-artifact writer. Inputs come from the in-process pipeline worker
+ * (EngineAssetPipeline): it renders RGBA into a RenderTarget, reads it back
+ * into a Uint8Array, and passes that buffer + manifest to these writers
+ * (via `local-pipeline`'s ctx).
  *
  * Two output shapes:
  *   - block-icons → a packed `voxels-icons.{png,json}` atlas (many tiny,
- *     bounded icons; one request + one texture + coords JSON).
+ *     bounded icons; one texture + coords JSON).
  *   - scenes + prefabs → one PNG per subject under `<group>/<id>.icon.png`,
- *     plus a `<group>-icons.json` hash map the page reads back for gating
- *     (few, large, id-addressed icons; loaded lazily by direct URL).
+ *     plus a `<group>-icons.json` hash map the orchestrator reads back for
+ *     gating (few, large, id-addressed icons; loaded lazily by direct URL).
  */
 
 import fs from 'node:fs';

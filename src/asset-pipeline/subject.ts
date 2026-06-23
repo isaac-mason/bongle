@@ -1,15 +1,15 @@
-// shared offline-renderer machinery for rendering a populated room into a
+// shared asset-pipeline machinery for rendering a populated room into a
 // single 256² icon tile. scene-icon and prefab-icon differ only in how they
 // SEED the room (deserialize a scene's voxels + nodes vs. tick a prefab
 // anchor); everything after — preload models, wait for referenced models +
 // GPU upload, light, frame, render, read back — is identical and lives here.
 
 import type { ComputeDispatch } from 'gpucat';
-import type { EngineClient } from '../client/engine-client';
+import type { State } from './engine';
 import * as ModelResources from '../client/models/model-resources';
 import { meshInfoIndexOf } from '../client/models/model-resources';
 import * as ModelVisuals from '../client/models/model-visuals';
-import type { ClientRoom } from '../client/rooms';
+import type { AssetPipelineRoom } from './rooms';
 import * as Renderer from '../client/renderer';
 import * as VoxelMeshVisuals from '../client/voxels/voxel-mesh-visuals';
 import * as VoxelVisuals from '../client/voxels/voxel-visuals';
@@ -58,7 +58,7 @@ export async function waitFor(predicate: () => boolean, label: string, timeoutMs
  * `renderPopulatedRoom` only covers MeshTraits that already exist in the
  * room, which isn't true until tick has instantiated them.
  */
-export async function preloadAllModels(state: EngineClient): Promise<void> {
+export async function preloadAllModels(state: State): Promise<void> {
     const ids = Array.from(state.resources.models.keys());
     if (ids.length === 0) return;
     for (const id of ids) Resources.ensureModel(state.resources, id);
@@ -68,7 +68,7 @@ export async function preloadAllModels(state: EngineClient): Promise<void> {
             return true;
         }, `all models (${ids.length})`);
     } catch (e) {
-        console.warn('[offline-renderer] preloadAllModels:', e);
+        console.warn('[asset-pipeline] preloadAllModels:', e);
     }
     ModelResources.update(state.modelResources, state.resources);
     await new Promise((r) => setTimeout(r, TEXTURE_SETTLE_MS));
@@ -87,7 +87,7 @@ const MAX_PREFAB_TICKS = 16;
  * drain in a bounded loop. Without this, a scene/prefab that embeds a prefab
  * (which embeds a prefab…) renders with the inner levels un-instantiated.
  */
-export function tickPrefabsToFixpoint(room: ClientRoom, state: EngineClient): void {
+export function tickPrefabsToFixpoint(room: AssetPipelineRoom, state: State): void {
     let guard = 0;
     do {
         Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
@@ -105,8 +105,8 @@ export function tickPrefabsToFixpoint(room: ClientRoom, state: EngineClient): vo
  * `label` is woven into wait-timeout diagnostics (the subject id).
  */
 export async function renderPopulatedRoom(
-    state: EngineClient,
-    room: ClientRoom,
+    state: State,
+    room: AssetPipelineRoom,
     session: SnapshotSession,
     label: string,
 ): Promise<Uint8Array | null> {
@@ -134,7 +134,7 @@ export async function renderPopulatedRoom(
                 return true;
             }, `models for "${label}"`);
         } catch (e) {
-            console.warn(`[offline-renderer] "${label}":`, e);
+            console.warn(`[asset-pipeline] "${label}":`, e);
         }
 
         // upload payloads to GPU pools (atlas + meshInfo + geometry).
@@ -149,7 +149,7 @@ export async function renderPopulatedRoom(
                 return true;
             }, `meshInfo for "${label}"`);
         } catch (e) {
-            console.warn(`[offline-renderer] "${label}":`, e);
+            console.warn(`[asset-pipeline] "${label}":`, e);
         }
 
         // give image decode + atlas blit a beat to land before rendering.
@@ -161,7 +161,7 @@ export async function renderPopulatedRoom(
     Transforms.computeWorldTransforms(room.nodes);
     Interpolation.interpolate(room.interpolation, 1.0, null);
 
-    // force fully-lit voxels: no light propagation runs in the offline-renderer,
+    // force fully-lit voxels: no light propagation runs in the asset-pipeline,
     // so without this every stamped voxel renders pitch-black. 0xFFFF =
     // packLight(15, 15, 15, 15) — max sky + max RGB across every voxel.
     for (const chunk of room.voxels.chunks.values()) {
@@ -231,7 +231,7 @@ const _worldAabb: Box3 = box3.create();
  *
  * Returns null if there's nothing to render.
  */
-function computeSceneAabb(room: ClientRoom, state: EngineClient): [number, number, number, number, number, number] | null {
+function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, number, number, number, number, number] | null {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     let any = false;

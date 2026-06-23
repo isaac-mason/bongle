@@ -39,7 +39,7 @@ const M = 8;
 function setup() {
     const server = createTestServer({ mode: 'play' });
     const discovery = Discovery.init();
-    const resources = Resources.init(async () => new Uint8Array(), 'server');
+    const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
     const net = Net.init();
 
     const movers: Array<{ pos: number[] }> = [];

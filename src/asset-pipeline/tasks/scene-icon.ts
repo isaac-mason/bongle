@@ -11,8 +11,8 @@
 // Always-render now: hash-gating + iteration over the scene set lives in the
 // orchestrator (one PNG per scene).
 
-import type { EngineClient } from '../../client/engine-client';
-import { createOfflineRoom, disposeRoom } from '../../client/rooms';
+import type { State } from '../engine';
+import { createRoom, disposeRoom } from '../rooms';
 import { addChild, deserializeNode } from '../../core/scene/nodes';
 import { loadVoxels } from '../../core/voxels/voxel-savefile';
 import { registry as engineRegistry } from '../../core/registry';
@@ -26,7 +26,7 @@ export type SceneIconResult = {
     pxSize: number;
 };
 
-export async function runSceneIcon(state: EngineClient, id: string): Promise<SceneIconResult> {
+export async function runSceneIcon(state: State, id: string): Promise<SceneIconResult> {
     const handleEntry = engineRegistry.scenes.byId.get(id);
     if (!handleEntry) {
         return { pixels: new Uint8Array(0), pxSize: SUBJECT_ICON_PX };
@@ -38,7 +38,7 @@ export async function runSceneIcon(state: EngineClient, id: string): Promise<Sce
         | null;
     if (!payload) return { pixels: new Uint8Array(0), pxSize: SUBJECT_ICON_PX };
 
-    const room = createOfflineRoom(state);
+    const room = createRoom(state);
     await state.voxelResources.atlasReady;
     await waitFor(() => room.modelVisuals.cullCompute !== null, 'cull computes');
     await preloadAllModels(state);
@@ -63,7 +63,7 @@ export async function runSceneIcon(state: EngineClient, id: string): Promise<Sce
         console.warn(`[scene-icon] "${id}" render failed — skipping:`, e);
     } finally {
         endSnapshotSession(session);
-        disposeRoom(state, room);
+        disposeRoom(room);
     }
 
     return { pixels: pixels ?? new Uint8Array(0), pxSize: SUBJECT_ICON_PX };

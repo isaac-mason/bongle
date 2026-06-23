@@ -36,13 +36,12 @@
  *          rooms preserve live instances across the edit.
  *      Rooms, connections, GPU device, and play-mode state survive rung 3.
  *
- *   4. **Page reload.** Only the puppeteer pipeline page reloads — at the
+ *   4. **Worker re-boot.** Only the asset-pipeline worker re-boots — at the
  *      top of each orchestrator pass (`kit/pipeline/orchestrator.ts`), if
  *      the on-disk atlas hash differs from the hash the worker booted
- *      against, the page is reloaded so its GPU TextureArray picks up
- *      fresh tiles before the next icon render (see concern 4 below).
- *      The main client should never hit this rung — landing here is a
- *      regression.
+ *      against, EngineAssetPipeline re-boots so its GPU TextureArray picks
+ *      up fresh tiles before the next icon render (see concern 4 below).
+ *      The main client never hits this rung — landing here is a regression.
  *
  * Four concerns, one plugin factory:
  *
@@ -97,14 +96,14 @@
  *         re-`populateScene`s its own already-current state on every
  *         spurious watcher wake.
  *
- *     The pipeline page runs out-of-band: scene-icon rendering needs
+ *     The asset pipeline runs out-of-band: scene-icon rendering needs
  *     every authored scene including undeclared ones, but flooding the
  *     editor channel with big undeclared-scene payloads on each edit
  *     causes jank. Instead the Node-side orchestrator walks
  *     `content/scenes/**` itself, diffs against its applied set, and
- *     pushes scene payloads into the puppeteer worker over its RPC
- *     surface. `fire()` here just calls a wake hook the pipeline plugin
- *     installed; no HMR channel for undeclared scenes.
+ *     applies scene payloads to the in-process pipeline worker directly.
+ *     `fire()` here just calls a wake hook the pipeline plugin installed;
+ *     no HMR channel for undeclared scenes.
  *
  *  4. **Asset pipeline.** Two coordinated halves:
  *
@@ -118,51 +117,37 @@
  *        the pipeline reads, and the same flush microtask coalesces engine
  *        + pipeline work.
  *
- *      - **Browser-side.** A persistent puppeteer instance opens the dev
- *        server's `/pipeline.html` (served as a virtual shell by
- *        `bongle:virtual-entries`) once at `configureServer` and keeps it
- *        alive for the dev session. The page is a normal client (env.client)
- *        but never mounts its canvas, never opens the /game WS — it just
- *        boots an EngineClient against `virtual:bongle/user-src` and
- *        exposes a dumb RPC surface on `window.__bongle_worker`
- *        (`bootEngine`, `applyScene`, `clearScene`,
- *        `applyRegistryChanges`, `renderBlockIcons`/`renderPrefabIcon`/
- *        `renderSceneIcon`). It makes zero rendering decisions.
+ *      - **In-process render.** The `pipeline` runnable env's runner imports
+ *        `virtual:bongle/pipeline-worker` — a DOM-less EngineAssetPipeline
+ *        boot entry against `virtual:bongle/user-src` — in this process.
+ *        `kit/pipeline/local-pipeline.ts` creates the Dawn device + the
+ *        disk/sharp `ResourceLoader` and boots it, exposing a verb surface
+ *        (`bootEngine`, `applyScene`, `clearScene`, `applyRegistryChanges`,
+ *        `renderBlockIcons`/`renderPrefabIcon`/`renderSceneIcon`). It makes
+ *        zero rendering decisions.
  *
  *      - **Orchestrator.** Node-side
  *        (`kit/pipeline/orchestrator.ts`) holds all the policy: hash
  *        gating against the gameServer registries, scene-corpus diffing,
- *        bootId tracking, busy/queued lock. Drives the worker over
- *        `page.evaluate` RPC and is woken by the scene watcher, the
- *        Node-side pass, and atlas changes. Worker POSTs raw RGBA +
- *        manifest JSON to `/__bongle/pipeline/emit`; this plugin
- *        sharp-encodes PNGs onto `resources/client/`.
+ *        bootId tracking, busy/queued lock. Drives the worker through the
+ *        `WorkerHandle` (a direct in-process call) and is woken by the scene
+ *        watcher, the Node-side pass, and atlas changes. The worker writes
+ *        sharp-encoded PNGs onto `resources/client/` directly (no HTTP).
  *
  *    No cross-env await: atlas/icons race in parallel on each user-src
  *    edit. After the Node pass writes a new atlas, the live client
  *    receives `bongle:block-texture-atlas-updated` so
  *    `EngineClient.refreshBlockResources` re-pulls and remeshes; the
  *    orchestrator's next pass observes the hash drift at the top of
- *    `runOnePass` and reloads the puppeteer page in-lock before
- *    dispatching any verbs.
+ *    `runOnePass` and re-boots the worker in-lock before dispatching verbs.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import MagicString from 'magic-string';
-import type { Browser } from 'puppeteer';
-import puppeteer from 'puppeteer';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { readArtifactHashSync } from '../cache';
 import { collectAssetSources, createPipelineState, type PipelinePassTimings, runAssetPipelinePass } from '../asset-pipeline/pipeline';
-import {
-    type IconKind,
-    type IconManifest,
-    PREFAB_ICONS,
-    SCENE_ICONS,
-    writeIconArtifact,
-    writePerIdIcon,
-} from '../asset-pipeline/icons-write';
 import * as Orchestrator from '../pipeline/orchestrator';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
 import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from './dep-resolve';
@@ -191,15 +176,6 @@ export function bongle(opts: BongleOptions): Plugin[] {
     const bongleDir = path.resolve(opts.bongleDir);
     const userSrcDir = path.join(projectDir, 'src') + path.sep;
     const resourcesDir = path.join(projectDir, 'resources', 'client');
-
-    // Persistent puppeteer instance, alive across the dev session. The
-    // pipeline page is opened once in configureServer, holds an EngineClient
-    // that re-renders icons on every settled HMR cascade, and POSTs results
-    // back through /__bongle/pipeline/emit. Closed in closeBundle.
-    let browser: Browser | null = null;
-    // set in closeBundle so the page-crash / browser-disconnect recovery
-    // handlers don't try to relaunch while the dev server is tearing down.
-    let shuttingDown = false;
 
     // Per-module symbol table, keyed by Rollup's normalised module id
     // (query string stripped). The capture transform populates this on
@@ -556,22 +532,22 @@ if (import.meta.hot) {
             //    matchmaking config on pipeline state).
             //    Cheap on no-op edits (each builder hash-gates internally).
             //
-            //  • A persistent puppeteer browser holds the dev server's
-            //    `/pipeline.html` (virtual shell) page open. The page boots a dumb RPC worker
-            //    (`window.__bongle_worker`) — it makes no rendering decisions.
+            //  • The in-process pipeline worker (`kit/pipeline/local-pipeline.ts`)
+            //    runs EngineAssetPipeline in the `pipeline` runnable env's
+            //    runner — a dumb verb surface that makes no rendering decisions.
             //
             //  • The Node-side orchestrator (`kit/pipeline/orchestrator.ts`)
-            //    drives the worker over `page.evaluate`: hash-gates against
+            //    drives the worker through its `WorkerHandle`: hash-gates against
             //    the gameServer registries, diffs the scene corpus against
             //    its applied set, and sequences boot/apply/render verbs.
             //    Woken by the scene watcher, the Node-side pass, and atlas
             //    changes.
             //
             // No cross-env await — atlas and icons race in parallel on each
-            // edit. After an atlas change the orchestrator reloads the
-            // puppeteer page (fresh GPU TextureArray on the next render)
-            // and the plugin emits `bongle:block-texture-atlas-updated`
-            // to the live editor client (refreshBlockResources + remesh).
+            // edit. After an atlas change the orchestrator re-boots the
+            // worker (fresh GPU TextureArray on the next render) and the
+            // plugin emits `bongle:block-texture-atlas-updated` to the live
+            // editor client (refreshBlockResources + remesh).
             name: 'bongle:pipeline',
             async configureServer(server) {
                 const gameServerEnv = server.environments.gameServer as RunnableDevEnvironment | undefined;
@@ -637,8 +613,8 @@ if (import.meta.hot) {
                 let firstAssetTimings: PipelinePassTimings | null = null;
 
                 // Resolves once the first asset-pipeline pass has written the
-                // generated barrels (src/generated/*.ts). The puppeteer launch
-                // awaits this so the pipeline page imports the real barrels up
+                // generated barrels (src/generated/*.ts). The pipeline boot
+                // awaits this so the runner imports the real barrels up
                 // front, instead of loading the stale/empty ones on disk and
                 // then taking the first pass's HMR cascade mid-render. That
                 // cascade is what races the icon /emit fetches (→
@@ -651,10 +627,10 @@ if (import.meta.hot) {
                     markGeneratedBarrelsReady = resolve;
                 });
 
-                // Orchestrator state — holds the puppeteer Page handle,
-                // applied scene hashes, last rendered artifact hashes, and
-                // the worker's bootId. Initialized after the page is
-                // launched (below); until then `orchestrator` is null and
+                // Orchestrator state — holds the worker handle, applied scene
+                // hashes, last rendered artifact hashes, and the worker's
+                // bootId. Initialized after the worker boots (below); until
+                // then `orchestrator` is null and
                 // wake hooks no-op.
                 let orchestrator: Orchestrator.State | null = null;
                 const scheduleOrchestrator = () => {
@@ -704,11 +680,11 @@ if (import.meta.hot) {
                             const newSpriteAtlasHash = readArtifactHashSync(spriteAtlasJsonPath);
                             // Atlas changed → tell the live editor client
                             // so EngineClient.refreshBlockResources re-pulls
-                            // the atlas + remeshes voxels. The puppeteer
-                            // page picks up the change via the orchestrator's
-                            // at-the-top reload check (step 2 of runOnePass);
-                            // the scheduleOrchestrator() call below kicks
-                            // that pass off after the pipeline pass settles.
+                            // the atlas + remeshes voxels. The worker picks up
+                            // the change via the orchestrator's at-the-top
+                            // re-boot check (step 2 of runOnePass); the
+                            // scheduleOrchestrator() call below kicks that
+                            // pass off after the pipeline pass settles.
                             if (newAtlasHash && newAtlasHash !== prevAtlasHash) {
                                 server.environments.client?.hot.send('bongle:block-texture-atlas-updated', { hash: newAtlasHash });
                             }
@@ -778,203 +754,26 @@ if (import.meta.hot) {
                 server.watcher.on('add', onAssetChange);
                 server.watcher.on('unlink', onAssetChange);
 
-                // POST /__bongle/pipeline/emit — worker submits icon results.
-                // Query params: kind=block-icons|scene-icon|prefab-icon;
-                // per-id kinds also carry id, px.
-                // block-icons (a packed atlas) frames its sidecar manifest at
-                // the head of the body — [uint32 LE len][manifest JSON][pixels]
-                // — since the coords map outgrows HTTP header limits. scene-icon
-                // + prefab-icon are one raw-RGBA PNG body per subject. The
-                // orchestrator hash-gates render dispatch in-memory, so the
-                // worker only ever POSTs renders that need writing.
-                server.middlewares.use('/__bongle/pipeline/emit', async (req, res) => {
-                    if (req.method !== 'POST') {
-                        res.statusCode = 405;
-                        res.end();
-                        return;
-                    }
-                    const url = new URL(req.url ?? '/', 'http://localhost');
-                    const kind = url.searchParams.get('kind') as IconKind | 'scene-icon' | 'prefab-icon' | null;
-                    if (kind !== 'block-icons' && kind !== 'scene-icon' && kind !== 'prefab-icon') {
-                        res.statusCode = 400;
-                        res.end('kind must be block-icons|scene-icon|prefab-icon');
-                        return;
-                    }
-                    if (kind === 'scene-icon' || kind === 'prefab-icon') {
-                        const id = url.searchParams.get('id');
-                        const pxSize = Number(url.searchParams.get('px') ?? '0');
-                        if (!id || !pxSize) {
-                            res.statusCode = 400;
-                            res.end(`${kind} requires id, px params`);
-                            return;
-                        }
-                        const group = kind === 'scene-icon' ? SCENE_ICONS : PREFAB_ICONS;
-                        const chunks: Buffer[] = [];
-                        for await (const chunk of req) chunks.push(chunk as Buffer);
-                        const body = Buffer.concat(chunks);
-                        const pixels = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-                        try {
-                            await writePerIdIcon(resourcesDir, group, id, pxSize, pixels);
-                            server.environments.client?.hot.send('bongle:icons-ready', { kind, id });
-                            res.statusCode = 204;
-                            res.end();
-                        } catch (err) {
-                            console.error(`[bongle:pipeline] write ${kind} failed:`, err);
-                            res.statusCode = 500;
-                            res.end(String(err));
-                        }
-                        return;
-                    }
-                    // block-icons: manifest is framed at the head of the body
-                    // (see emitIconAtlas) — its coords map outgrows HTTP header
-                    // limits (→ 431). Layout: [uint32 LE len][manifest JSON][pixels].
-                    const chunks: Buffer[] = [];
-                    for await (const chunk of req) chunks.push(chunk as Buffer);
-                    const body = Buffer.concat(chunks);
-                    if (body.byteLength < 4) {
-                        res.statusCode = 400;
-                        res.end('block-icons body too short');
-                        return;
-                    }
-                    const manifestLen = body.readUInt32LE(0);
-                    let manifest: IconManifest;
-                    try {
-                        manifest = JSON.parse(body.subarray(4, 4 + manifestLen).toString('utf8')) as IconManifest;
-                    } catch {
-                        res.statusCode = 400;
-                        res.end('block-icons manifest is not valid JSON');
-                        return;
-                    }
-                    const pixels = new Uint8Array(
-                        body.buffer,
-                        body.byteOffset + 4 + manifestLen,
-                        body.byteLength - 4 - manifestLen,
-                    );
-                    try {
-                        await writeIconArtifact(resourcesDir, kind, manifest, pixels);
-                        // editor's loadEditorAssets() listens for this to
-                        // retry its boot-time fetch when icons hadn't been
-                        // emitted yet on cold start.
-                        server.environments.client?.hot.send('bongle:icons-ready', { kind });
-                        res.statusCode = 204;
-                        res.end();
-                    } catch (err) {
-                        console.error(`[bongle:pipeline] write ${kind} failed:`, err);
-                        res.statusCode = 500;
-                        res.end(String(err));
-                    }
-                });
-
-                // Launch puppeteer + open the page. `bongle:virtual-entries`
-                // serves the shell from memory at /pipeline.html on the dev
-                // server's host:port.
-                const cfgServer = server.config.server;
-                const port = cfgServer.port ?? 3000;
-                const host = (typeof cfgServer.host === 'string' && cfgServer.host !== '0.0.0.0' && cfgServer.host !== 'true')
-                    ? cfgServer.host
-                    : '127.0.0.1';
-                const pageUrl = `http://${host}:${port}/pipeline.html`;
-
-                const launchArgs = [
-                    '--enable-unsafe-webgpu',
-                    '--use-angle=metal',
-                    '--ignore-gpu-blocklist',
-                    '--no-sandbox',
-                ];
-
-                // Wire diagnostics + crash recovery onto a freshly-opened page.
-                // The renderer/GPU process can die after a long edit session
-                // (accumulated WebGPU work); `page.on('error')` is the only
-                // signal for that and is otherwise unhandled, so the crash is
-                // invisible and every later pass just times out waiting for the
-                // worker. Reloading revives the same Page handle — the
-                // orchestrator's `bootId` mismatch then re-boots the engine.
-                const wirePage = (page: import('puppeteer').Page) => {
-                    page.on('console', (msg) => {
-                        const type = msg.type();
-                        if (type === 'error' || type === 'warn') {
-                            console.log(`[pipeline-page ${type}] ${msg.text()}`);
-                        }
-                    });
-                    page.on('pageerror', (err: unknown) => {
-                        console.log(`[pipeline-page pageerror] ${err instanceof Error ? err.message : String(err)}`);
-                    });
-                    page.on('requestfailed', (req) => {
-                        console.log(`[pipeline-page requestfailed] ${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`);
-                    });
-                    page.on('response', (res) => {
-                        if (res.status() >= 400) {
-                            console.log(`[pipeline-page http ${res.status()}] ${res.url()}`);
-                        }
-                    });
-                    page.on('error', (err: unknown) => {
-                        console.error(
-                            `[bongle:pipeline] pipeline page crashed: ${err instanceof Error ? err.message : String(err)} — reloading`,
-                        );
-                        void recoverPipeline();
-                    });
-                };
-
-                // Single-flight recovery. A page crash reloads in place (Page
-                // handle survives); a full browser disconnect relaunches Chrome
-                // and re-inits the orchestrator against the new page.
-                let recovering = false;
-                const recoverPipeline = async () => {
-                    if (recovering || shuttingDown) return;
-                    recovering = true;
-                    try {
-                        if (browser && browser.connected && orchestrator) {
-                            await orchestrator.page.reload({ waitUntil: 'load' });
-                        } else {
-                            browser = await puppeteer.launch({ headless: true, args: launchArgs });
-                            browser.on('disconnected', onBrowserDisconnected);
-                            const page = await browser.newPage();
-                            wirePage(page);
-                            await page.goto(pageUrl, { waitUntil: 'load' });
-                            orchestrator = Orchestrator.init(page, pipelineInternal, projectDir);
-                        }
-                        if (orchestrator) void Orchestrator.scheduleRender(orchestrator);
-                    } catch (err) {
-                        console.error('[bongle:pipeline] pipeline recovery failed:', err);
-                    } finally {
-                        recovering = false;
-                    }
-                };
-                const onBrowserDisconnected = () => {
-                    if (shuttingDown) return;
-                    console.error('[bongle:pipeline] puppeteer browser disconnected — relaunching');
-                    void recoverPipeline();
-                };
-
-                // Hold the launch until the first asset-pipeline pass has
-                // written the generated barrels, so the page imports them up
-                // front rather than racing the cold-start HMR cascade (see
-                // generatedBarrelsReady above). This also subsumes the old
-                // "wait for the server to be listening" defer: the first pass
-                // is kicked from initGameEnv, which runs after server.listen().
+                // Bring up the in-process Node asset pipeline once the generated
+                // barrels exist (the pipeline runner imports them up front). Runs
+                // in this process via the `pipeline` runnable env — no puppeteer,
+                // no fork. The first pass is kicked + awaited so the CLI holds its
+                // ready banner until every icon is warm (iconsRendered).
                 queueMicrotask(async () => {
                     try {
                         await generatedBarrelsReady;
-                        const launchStart = performance.now();
-                        browser = await puppeteer.launch({ headless: true, args: launchArgs });
-                        browser.on('disconnected', onBrowserDisconnected);
-                        const page = await browser.newPage();
-                        wirePage(page);
-                        await page.goto(pageUrl, { waitUntil: 'load' });
-                        orchestrator = Orchestrator.init(page, pipelineInternal, projectDir);
-                        const launchMs = performance.now() - launchStart;
-                        // Kick the initial pass and await it — the page has
-                        // booted its worker surface, but only the orchestrator
-                        // drives bootEngine + first apply + render+emit of every
-                        // icon. Awaiting lets the dev CLI hold its ready banner
-                        // until the pipeline page is fully warm (iconsRendered).
+                        const { initLocalPipeline } = await import('../pipeline/local-pipeline');
+                        const bootStart = performance.now();
+                        const handle = await initLocalPipeline(server, projectDir);
+                        orchestrator = Orchestrator.init(handle, pipelineInternal, projectDir);
+                        const bootMs = performance.now() - bootStart;
                         const renderStart = performance.now();
                         await Orchestrator.scheduleRender(orchestrator);
                         const renderMs = performance.now() - renderStart;
                         const assetMs = firstAssetPassMs ?? 0;
                         console.log(
-                            `[bongle] pipeline warm in ${(assetMs + launchMs + renderMs).toFixed(0)}ms ` +
-                                `(assets ${assetMs.toFixed(0)}ms, page launch ${launchMs.toFixed(0)}ms, ` +
+                            `[bongle] pipeline warm in ${(assetMs + bootMs + renderMs).toFixed(0)}ms ` +
+                                `(assets ${assetMs.toFixed(0)}ms, boot ${bootMs.toFixed(0)}ms, ` +
                                 `first render ${renderMs.toFixed(0)}ms)`,
                         );
                         // Asset bucket per builder (concurrent, so overlapping —
@@ -988,23 +787,11 @@ if (import.meta.hot) {
                             if (breakdown) console.log(`[bongle]   assets: ${breakdown}`);
                         }
                     } catch (err) {
-                        console.error('[bongle:pipeline] puppeteer launch failed:', err);
+                        console.error('[bongle:pipeline] pipeline init failed:', err);
                     } finally {
                         resolveIconsRendered();
                     }
                 });
-            },
-
-            async closeBundle() {
-                shuttingDown = true;
-                if (browser) {
-                    try {
-                        await browser.close();
-                    } catch {
-                        // browser may already be gone — fine
-                    }
-                    browser = null;
-                }
             },
         },
 

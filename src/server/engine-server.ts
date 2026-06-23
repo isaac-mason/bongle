@@ -84,14 +84,16 @@ export function init(opts: InitOptions) {
     // of process cwd. Runtime-source models (avatars) carry absolute
     // https URLs (R2) — branch on scheme.
     const resources = Resources.init(
-        (url) => {
-            if (url.startsWith('http:') || url.startsWith('https:')) {
-                return fetch(url).then(async (r) => {
-                    if (!r.ok) throw new Error(`fetch ${url}: ${r.status}`);
-                    return new Uint8Array(await r.arrayBuffer());
-                });
-            }
-            return fs.readFile(ResourceManager.resolveModelBin(resourceManager, url));
+        {
+            loadBytes: (url) => {
+                if (url.startsWith('http:') || url.startsWith('https:')) {
+                    return fetch(url).then(async (r) => {
+                        if (!r.ok) throw new Error(`fetch ${url}: ${r.status}`);
+                        return new Uint8Array(await r.arrayBuffer());
+                    });
+                }
+                return fs.readFile(ResourceManager.resolveModelBin(resourceManager, url));
+            },
         },
         'server',
     );

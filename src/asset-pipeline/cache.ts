@@ -1,4 +1,4 @@
-// Shared helpers for hash-gating offline-renderer tasks.
+// Shared helpers for hash-gating asset-pipeline tasks.
 //
 // Each task computes a deterministic hash of its inputs (registry slices,
 // prefab defs, scene payloads, atlas hash, etc.), fetches the existing

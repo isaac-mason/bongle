@@ -62,6 +62,7 @@ import {
 } from 'gpucat';
 import type { Model } from '../../core/models/model';
 import type { ModelPayload, Resources } from '../../core/resources';
+import type { ResourceLoader } from '../../core/resource-loader';
 import { EnvConfig } from '../environment';
 import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 import * as ModelAtlas from './model-atlas';
@@ -476,7 +477,7 @@ export function update(modelResources: ModelResources, resources: Resources): vo
         if (payload.state !== 'ready') continue;
         if (modelResources.uploaded.has(modelId)) continue;
         if (!payload.model) continue;
-        upload(modelResources, modelId, payload.model, payload);
+        upload(modelResources, resources.loader, modelId, payload.model, payload);
         payload.model = null;
     }
 
@@ -507,7 +508,7 @@ export function dispose(modelResources: ModelResources): void {
  * Untextured meshes (no `image`) are pinned to the reserved white pixel
  * so tint + lighting still apply.
  */
-function upload(resources: ModelResources, modelId: string, model: Model, _payload: ModelPayload): void {
+function upload(resources: ModelResources, loader: ResourceLoader, modelId: string, model: Model, _payload: ModelPayload): void {
     const meshNames: string[] = [];
     const meshes = Array.from(model.meshesByName.values());
 
@@ -538,42 +539,62 @@ function upload(resources: ModelResources, modelId: string, model: Model, _paylo
 
     // decode + blit images in parallel, then patch UVs of meshes whose
     // image ref points at this entry.
+    // allocate the atlas region, blit, mark dirty, and patch the UVs of every
+    // mesh that references this image. Shared by the browser (createImageBitmap)
+    // and headless (injected decoder) decode paths.
+    const place = (
+        img: (typeof images)[number],
+        atlasKey: string,
+        width: number,
+        height: number,
+        blit: (region: { x: number; y: number; w: number; h: number }) => void,
+    ): void => {
+        const region = ModelAtlas.allocate(resources.atlas, width, height, atlasKey);
+        if (!region) {
+            console.warn(`[ModelResources] atlas overflow uploading "${modelId}" image`);
+            return;
+        }
+        blit(region);
+        ModelAtlas.markDirty(resources.atlas);
+
+        const size = resources.atlas.size;
+        const uvOffset: [number, number] = [region.x / size, region.y / size];
+        const uvScale: [number, number] = [region.w / size, region.h / size];
+        for (const m of meshes) {
+            if (m.image !== img) continue;
+            const meshKey = `${modelId}/${m.name}`;
+            const slot = meshInfoIndexOf(resources.meshInfo, meshKey);
+            if (slot === null) continue;
+            const existing = resources.meshInfo.entries[slot];
+            if (!existing) continue;
+            writeMeshInfo(resources.meshInfo, meshKey, { ...existing, uvOffset, uvScale });
+        }
+    };
+
     for (let i = 0; i < images.length; i++) {
         const img = images[i]!;
-        const blob = new Blob([img.bytes as BlobPart], { type: img.mimeType });
         const atlasKey = `${modelId}/img/${i}`;
-        createImageBitmap(blob)
-            .then((bitmap) => {
-                const region = ModelAtlas.allocate(resources.atlas, bitmap.width, bitmap.height, atlasKey);
-                if (!region) {
-                    console.warn(`[ModelResources] atlas overflow uploading "${modelId}" image ${i}`);
+        const decodeImage = loader.decodeImage;
+        if (decodeImage) {
+            // asset pipeline: injected decoder (sharp) → RGBA, blit raw bytes.
+            decodeImage(img.bytes, img.mimeType)
+                .then(({ width, height, rgba }) => {
+                    place(img, atlasKey, width, height, (region) => blitRgbaToAtlas(resources.atlas, region, rgba));
+                })
+                .catch((err) => {
+                    console.error(`[ModelResources] decodeImage failed for "${modelId}" image ${i}:`, err);
+                });
+        } else {
+            const blob = new Blob([img.bytes as BlobPart], { type: img.mimeType });
+            createImageBitmap(blob)
+                .then((bitmap) => {
+                    place(img, atlasKey, bitmap.width, bitmap.height, (region) => blitBitmapToAtlas(resources.atlas, region, bitmap));
                     bitmap.close();
-                    return;
-                }
-                blitBitmapToAtlas(resources.atlas, region, bitmap);
-                bitmap.close();
-                ModelAtlas.markDirty(resources.atlas);
-
-                const size = resources.atlas.size;
-                const uvOffset: [number, number] = [region.x / size, region.y / size];
-                const uvScale: [number, number] = [region.w / size, region.h / size];
-                for (const m of meshes) {
-                    if (m.image !== img) continue;
-                    const meshKey = `${modelId}/${m.name}`;
-                    const slot = meshInfoIndexOf(resources.meshInfo, meshKey);
-                    if (slot === null) continue;
-                    const existing = resources.meshInfo.entries[slot];
-                    if (!existing) continue;
-                    writeMeshInfo(resources.meshInfo, meshKey, {
-                        ...existing,
-                        uvOffset,
-                        uvScale,
-                    });
-                }
-            })
-            .catch((err) => {
-                console.error(`[ModelResources] image decode failed for "${modelId}" image ${i}:`, err);
-            });
+                })
+                .catch((err) => {
+                    console.error(`[ModelResources] image decode failed for "${modelId}" image ${i}:`, err);
+                });
+        }
     }
 }
 
@@ -611,6 +632,25 @@ function blitBitmapToAtlas(
         const srcOff = row * region.w * 4;
         const dstOff = (region.y + row) * stride + region.x * 4;
         atlas.pixels.set(imgData.data.subarray(srcOff, srcOff + region.w * 4), dstOff);
+    }
+}
+
+/**
+ * Blit tightly-packed RGBA8 pixels (region.w × region.h) into the atlas's CPU
+ * pixel buffer at `region`. The headless counterpart of `blitBitmapToAtlas` —
+ * the injected decoder already returns raw bytes, so no canvas readback.
+ */
+function blitRgbaToAtlas(
+    atlas: ModelAtlas.ModelAtlas,
+    region: { x: number; y: number; w: number; h: number },
+    data: Uint8Array,
+): void {
+    const stride = atlas.size * 4;
+    const rowBytes = region.w * 4;
+    for (let row = 0; row < region.h; row++) {
+        const srcOff = row * rowBytes;
+        const dstOff = (region.y + row) * stride + region.x * 4;
+        atlas.pixels.set(data.subarray(srcOff, srcOff + rowBytes), dstOff);
     }
 }
 

@@ -96,7 +96,6 @@ import { EditorServerTrait, EditorTrait } from './editor-trait';
 import { isInputFocused } from './input';
 import { activeBlockKeyOf } from './inventory';
 import * as NodeBodies from './node-bodies';
-import { isPipelinePageMarked } from './pipeline-marker';
 import { createPointerState, disposePointerState, pointerFlush } from './pointer-state';
 import { parsePattern } from './scene/pattern';
 import { findCategoryByTool, TOOL_CATEGORIES } from './tool-categories';
@@ -1342,14 +1341,6 @@ export async function registerServer(_state: EngineServer): Promise<void> {
 let iconsReadyWired = false;
 
 function loadEditorAssets(): void {
-    // pipeline-page short-circuit: that page *produces* icon artifacts, so
-    // its boot-time fetch would race the first render pass, hit Vite's SPA
-    // fallback, and print a JSON parse warning on every cold start. The
-    // marker lives in its own module (pipeline-marker.ts) so __kit.ts can
-    // wire `__kit.pipeline` without dragging the full editor (and the
-    // client UI graph it pulls in) into the gameServer env's bundle.
-    if (isPipelinePageMarked()) return;
-
     // Cold-start race: the editor's boot-time fetch can beat the kit's first
     // block-icon render, in which case the artifact isn't on disk yet and
     // Vite's SPA fallback returns `index.html`. `bongle:icons-ready` (sent by
@@ -1369,10 +1360,14 @@ function loadEditorAssets(): void {
         // ready` retry above re-runs this once block-icons finishes writing.
         // Parsing a 404 body would throw "Unexpected end of JSON input".
         .then((r) => (r.ok ? r.json() : null))
-        .then((json: { iconPx: number; cols: number; rows: number; states: Record<string, [number, number]> } | null) => {
+        .then((json: { hash?: string; iconPx: number; cols: number; rows: number; states: Record<string, [number, number]> } | null) => {
             if (!json) return;
+            // cache-bust the atlas PNG by content hash. A texture-only edit
+            // keeps the same coords + url, so without this the browser keeps
+            // the already-painted (stale) CSS background-image on HMR.
+            const bust = json.hash ? `?v=${json.hash}` : '';
             useEditor.setState({
-                blockIconAtlasUrl: assetUrl('voxels-icons.png'),
+                blockIconAtlasUrl: assetUrl('voxels-icons.png') + bust,
                 blockIconCoords: json.states,
                 blockIconPx: json.iconPx,
                 blockIconCols: json.cols,

@@ -4,9 +4,8 @@
  * Orchestration is intentionally thin: prime the user's generated-stubs
  * barrels, then hand off to `startDevServer` (which owns the Vite dev
  * server, the gameServer env's runner, and — via the `bongle:pipeline`
- * plugin entry — both the Node-side asset pipeline and the
- * persistent-puppeteer page that renders icons). The dev server's HTML
- * shells (`/`, `/pipeline.html`) and every kit boot module are served as
+ * plugin entry — the in-process Node asset pipeline that renders icons).
+ * The dev server's HTML shell (`/`) and every kit boot module are served as
  * virtuals by `bongle:virtual-entries`; nothing kit-side gets written to
  * `<project>/.bongle/` at startup beyond the user's own
  * `src/generated/*` barrels. No bun subprocess, no IPC, no manual src/

@@ -12,14 +12,14 @@
 
 import { env } from 'bongle';
 import { client } from 'bongle/interface';
-import { EngineClient } from 'bongle/engine-client';
+import { EngineClient, browserResourceLoader } from 'bongle/engine-client';
 
 export default client({
     init: (driver) => {
         env.client = true;
         env.server = false;
         env.editor = false;
-        return EngineClient.init({ mode: 'play', driver });
+        return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader });
     },
     load: async (state) => {
         // Mount the play-mode React UI shell before load() — the

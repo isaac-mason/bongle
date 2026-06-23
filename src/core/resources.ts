@@ -17,6 +17,7 @@ import type { ClipChannel, ClipChannels, ClipDef, MeshId, ModelHandle } from './
 import { type Model, type ModelMesh, toModel } from './models/model';
 import { unpack } from './models/model-bin';
 import { gltfUnpack } from './models/model-glb';
+import type { ResourceLoader } from './resource-loader';
 
 // ── cached model ────────────────────────────────────────────────────
 
@@ -127,19 +128,20 @@ export type Resources = {
     models: Map<string, ResourceModel>;
     /** keyed by user-chosen modelId string. lazy load state + parsed bin. */
     modelPayloads: Map<string, ModelPayload>;
-    /** host-supplied byte loader — fetch on the client, fs.readFile / fetch
-     *  on the server. Receives the side-picked URL. */
-    loadBytes: ModelBytesLoader;
+    /** environment resource-I/O — byte loading (fetch on the client, fs/fetch
+     *  on the server, disk in the asset pipeline) plus the optional image
+     *  decoder the asset pipeline injects. See `ResourceLoader`. */
+    loader: ResourceLoader;
     /** which side this Resources instance runs on. Picks `clientUrl` vs
      *  `serverUrl` in `ensureModel`. Set once at init. */
     side: ResourcesSide;
 };
 
-export function init(loadBytes: ModelBytesLoader, side: ResourcesSide): Resources {
+export function init(loader: ResourceLoader, side: ResourcesSide): Resources {
     return {
         models: new Map(),
         modelPayloads: new Map(),
-        loadBytes,
+        loader,
         side,
     };
 }
@@ -286,7 +288,7 @@ export function ensureModel(resources: Resources, modelId: string): void {
 
     const url = resources.side === 'client' ? entry.clientUrl : entry.serverUrl;
     const source = entry.source;
-    resources.loadBytes(url)
+    resources.loader.loadBytes(url)
         .then((bytes) => (source === 'runtime' ? gltfUnpack(modelId, bytes) : toModel(modelId, unpack(bytes))))
         .then((model) => {
             _onPayloadReady(resources, modelId, model);

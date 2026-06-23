@@ -26,7 +26,7 @@
  */
 
 import { env } from 'bongle';
-import { EngineClient } from 'bongle/engine-client';
+import { EngineClient, browserResourceLoader } from 'bongle/engine-client';
 import * as EngineEditor from 'bongle/engine-editor';
 import { __kit } from 'bongle/internal';
 // Deep import: this is the editor-only entrypoint (already coupled to
@@ -83,6 +83,7 @@ export async function start(opts: StartOptions) {
             matchmake() {},
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         },
+        resourceLoader: browserResourceLoader,
     });
 
     // EditorScript + commands land in the registry before load()'s

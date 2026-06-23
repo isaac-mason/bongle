@@ -70,7 +70,9 @@ import {
     createVoxelTextureArray,
     fetchBlockTextureAtlasMetadata,
     loadBlockTextureAtlasIntoTextureArray,
+    writeBlockTextureAtlasIntoTextureArray,
 } from './voxel-texture-array';
+import type { Resources } from '../../core/resources';
 
 export const PASSES: readonly VoxelPass[] = ['opaque', 'transparent', 'translucent'];
 
@@ -935,7 +937,7 @@ export type VoxelResources = {
     atlasHash: string | null;
     /** registry.texAnimData this struct was built against. */
     texAnimData: Float32Array;
-    /** off-thread mesh worker pool. null on offline-renderer paths where
+    /** off-thread mesh worker pool. null on asset-pipeline paths where
      *  the synchronous remesh loop is preferred (callers pass workerCount=0). */
     meshDispatcher: MeshDispatcher | null;
     /** queue of completed worker jobs, drained at the top of
@@ -998,6 +1000,42 @@ export function init(
     };
 }
 
+/** Load the atlas manifest. Client fetches it (assetUrl); the asset pipeline
+ *  reads it off disk via the injected loader. */
+async function loadAtlasMeta(resources: Resources): Promise<BlockTextureAtlasMetadata | null> {
+    if (resources.loader.decodeImage) {
+        try {
+            const bytes = await resources.loader.loadBytes('voxels-atlas.json');
+            return JSON.parse(new TextDecoder().decode(bytes)) as BlockTextureAtlasMetadata;
+        } catch (e) {
+            console.warn('[voxel-resources] atlas manifest load failed:', e);
+            return null;
+        }
+    }
+    return fetchBlockTextureAtlasMetadata();
+}
+
+/** Decode + write the atlas pixels into the array texture. Client takes the
+ *  browser fetch+canvas path verbatim; the asset pipeline reads disk bytes and
+ *  decodes via its injected `decodeImage` (sharp) → RGBA. The pipeline's
+ *  `decodeImage` returns pre-decoded bytes, so sharp never overlaps the Dawn
+ *  compute compile kicked in `load`. */
+async function writeAtlasPixels(
+    res: VoxelResources,
+    textureNames: string[],
+    meta: BlockTextureAtlasMetadata,
+    resources: Resources,
+): Promise<void> {
+    const decodeImage = resources.loader.decodeImage;
+    if (decodeImage) {
+        const bytes = await resources.loader.loadBytes('voxels-atlas.png');
+        const { rgba } = await decodeImage(bytes, 'image/png');
+        writeBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, rgba);
+        return;
+    }
+    return loadBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta);
+}
+
 /** Async side of construction: pre-warms the expansion compute pipeline,
  *  fetches the atlas manifest, kicks off the atlas pixel upload (settles
  *  `res.atlasReady`), and spawns the mesh worker pool. `meta` may be passed
@@ -1008,30 +1046,52 @@ export async function load(
     registry: BlockRegistry,
     workerCount: number,
     workerQueueDepth: number,
+    resources: Resources,
     renderer?: WebGPURenderer,
     meta?: BlockTextureAtlasMetadata | null,
 ): Promise<void> {
-    if (renderer) {
-        // pre-warm — non-blocking from the caller's POV (compileCompute is a
-        // gpucat pre-warm; the node is usable immediately, this just primes
-        // the pipeline cache).
-        void renderer.compileCompute(res.expandSlices);
+    // Compile the cull compute pipeline (awaited at the end so the first render
+    // never binds a still-null cached pipeline). Timing relative to the atlas
+    // load differs by environment:
+    //  - client (no `decodeImage`): kick it up front and let the atlas
+    //    fetch+canvas run fire-and-forget alongside it — non-blocking, unchanged.
+    //  - asset pipeline (`decodeImage` present): the atlas decode is sharp
+    //    (libvips) native work that segfaults if it overlaps a Dawn pipeline
+    //    compile, so await the atlas FIRST, then compile. The pipeline isn't
+    //    latency-sensitive, so serial is fine.
+    // Either way consumers gate on `res.atlasReady`.
+    const serializeAtlasBeforeCompute = resources.loader.decodeImage != null;
+
+    let computeReady: Promise<void> = Promise.resolve();
+    if (!serializeAtlasBeforeCompute && renderer) {
+        computeReady = renderer.compileCompute(res.expandSlices);
     }
 
-    const resolvedMeta = meta !== undefined ? meta : await fetchBlockTextureAtlasMetadata();
-    res.atlasHash = resolvedMeta?.hash ?? null;
-    if (resolvedMeta) {
-        loadBlockTextureAtlasIntoTextureArray(res.atlas, registry.textures, resolvedMeta)
-            .then(() => {
-                console.log('[voxel-resources] atlas loaded successfully');
-                res._resolveAtlasReady();
-            })
-            .catch((e) => {
-                console.warn('[voxel-resources] atlas load failed:', e);
-                res._resolveAtlasReady();
-            });
-    } else {
-        res._resolveAtlasReady();
+    {
+        const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(resources);
+        res.atlasHash = resolvedMeta?.hash ?? null;
+        const atlasWrite = resolvedMeta
+            ? writeAtlasPixels(res, registry.textures, resolvedMeta, resources)
+            : Promise.resolve();
+        if (serializeAtlasBeforeCompute) {
+            await atlasWrite.catch((e) => console.warn('[voxel-resources] atlas load failed:', e));
+            res._resolveAtlasReady();
+        } else {
+            atlasWrite
+                .then(() => {
+                    console.log('[voxel-resources] atlas loaded');
+                    res._resolveAtlasReady();
+                })
+                .catch((e) => {
+                    console.warn('[voxel-resources] atlas load failed:', e);
+                    res._resolveAtlasReady();
+                });
+        }
+    }
+
+    // pipeline: now safe to compile — the atlas sharp decode has finished.
+    if (serializeAtlasBeforeCompute && renderer) {
+        computeReady = renderer.compileCompute(res.expandSlices);
     }
 
     if (workerCount > 0 && typeof Worker !== 'undefined') {
@@ -1051,6 +1111,8 @@ export async function load(
         setMeshRegistry(meshDispatcher, registry);
         res.meshDispatcher = meshDispatcher;
     }
+
+    await computeReady;
 }
 
 /** Build new resources, or reuse `prev` if the atlas + animation metadata
@@ -1062,9 +1124,10 @@ export async function refresh(
     budget: VoxelArenaBudget,
     workerCount: number,
     workerQueueDepth: number,
+    resources: Resources,
     renderer?: WebGPURenderer,
 ): Promise<{ resources: VoxelResources; changed: boolean }> {
-    const meta = await fetchBlockTextureAtlasMetadata();
+    const meta = await loadAtlasMeta(resources);
     if (
         prev &&
         meta !== null &&
@@ -1080,9 +1143,9 @@ export async function refresh(
         return { resources: prev, changed: false };
     }
     if (prev) dispose(prev);
-    const resources = init(registry, env, budget);
-    await load(resources, registry, workerCount, workerQueueDepth, renderer, meta);
-    return { resources, changed: true };
+    const built = init(registry, env, budget);
+    await load(built, registry, workerCount, workerQueueDepth, resources, renderer, meta);
+    return { resources: built, changed: true };
 }
 
 function f32Equal(a: Float32Array, b: Float32Array): boolean {

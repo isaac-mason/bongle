@@ -1,5 +1,5 @@
 /**
- * Node-side icon-hash computation. Lifted from inside the offline-renderer
+ * Node-side icon-hash computation. Lifted from inside the asset-pipeline
  * task fns so the orchestrator can hash-gate render verbs before dispatching
  * them. The task fns now always render; gating lives exclusively here.
  *

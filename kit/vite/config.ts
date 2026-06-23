@@ -1,19 +1,22 @@
 /**
  * kit/vite/config.ts — Vite UserConfig factory for `bongle edit`.
  *
- * Two named environments via Vite 6's Environment API:
+ * Three named environments via Vite's Environment API:
  *   • `client`         — browser bundle. default web env. user code + engine
  *                        client sources live here.
  *   • `gameServer`     — `createRunnableDevEnvironment`. node-side runner
- *                        loaded by `kit/src/dev/game-env.ts`. Hosts the
+ *                        loaded by `kit/dev/game-env.ts`. Hosts the
  *                        EngineServer; receives WS upgrades via the
  *                        `/game` transport. Also hosts the asset-pipeline
- *                        flush handler registered by the `bongle:pipeline`
- *                        plugin — gameServer-local registries already hold
- *                        every declarative entry the pipeline reads, so
- *                        there's no need for a third env.
+ *                        flush handler (atlas/models/scenes codegen) registered
+ *                        by the `bongle:pipeline` plugin.
+ *   • `pipeline`       — `createRunnableDevEnvironment`. the in-process Node
+ *                        asset pipeline: its runner imports
+ *                        `virtual:bongle/pipeline-worker` and drives
+ *                        EngineAssetPipeline to render icons offscreen
+ *                        (kit/pipeline/local-pipeline.ts). DOM-less.
  *
- * The `bongle()` plugin is shared across both envs — every user-src file
+ * The `bongle()` plugin is shared across the envs — every user-src file
  * gets the same push/pop/decideReload transform regardless of which env
  * evaluates it. Each env's runtime separately calls
  * `__kit.registerFlush(...)` at boot, so the same `__kit.flush()` call
@@ -94,11 +97,12 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                 },
             })),
             // Per-env envPlugin instances — `applyToEnvironment` scopes each
-            // substitution set to its own env's module graph. The persistent-
-            // puppeteer page is a regular client (env.client=true) loaded by
-            // the bongle:pipeline plugin's browser; no third env needed.
+            // substitution set to its own env's module graph.
             envPlugin({ client: true, server: false, editor: true }, 'client'),
             envPlugin({ client: false, server: true, editor: true }, 'gameServer'),
+            // The in-process Node asset pipeline is a CLIENT (env.client) — it
+            // runs EngineAssetPipeline in the `pipeline` runnable env's runner.
+            envPlugin({ client: true, server: false, editor: true }, 'pipeline'),
             ...bongle({ projectDir, bongleDir }),
         ],
         server: {
@@ -159,7 +163,7 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             exclude: [
                 'bongle',
                 'bongle/engine-client',
-                'bongle/offline-renderer',
+                'bongle/engine-asset-pipeline',
                 'bongle/internal',
                 'bongle/interface',
                 'gpucat',
@@ -192,6 +196,24 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                         'packcat',
                         'crashcat',
                     ],
+                },
+                dev: {
+                    createEnvironment(name, config) {
+                        return createRunnableDevEnvironment(name, config, {
+                            runnerOptions: { hmr: { logger: false } },
+                        });
+                    },
+                },
+            },
+            // The Node asset pipeline runs in-process via this runnable env (like
+            // gameServer). Resolved for node + bundles the engine so user code +
+            // engine share one module instance / capture registry. Its runner
+            // imports `virtual:bongle/pipeline-worker` and drives
+            // EngineAssetPipeline; `kit/pipeline/local-pipeline.ts` boots it.
+            pipeline: {
+                resolve: {
+                    conditions: ['node'],
+                    noExternal: ['bongle', /^@bongle\//, 'gpucat', 'mathcat', 'packcat', 'crashcat'],
                 },
                 dev: {
                     createEnvironment(name, config) {

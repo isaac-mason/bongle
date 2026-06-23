@@ -32,9 +32,9 @@
             "import": "./src/engine-editor.ts",
             "default": "./src/engine-editor.ts"
         },
-        "./offline-renderer": {
-            "import": "./src/offline-renderer/index.ts",
-            "default": "./src/offline-renderer/index.ts"
+        "./engine-asset-pipeline": {
+            "import": "./src/engine-asset-pipeline.ts",
+            "default": "./src/engine-asset-pipeline.ts"
         },
         "./internal": {
             "import": "./src/internal.ts",
@@ -93,19 +93,19 @@
         "canvas": "^3.2.3",
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",
-        "gpucat": "github:isaac-mason/gpucat#main",
+        "gpucat": "github:isaac-mason/gpucat#54ee728",
         "lucide-react": "^1.7.0",
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
         "meshoptimizer": "^0.25.0",
         "packcat": "github:isaac-mason/packcat#dev",
-        "puppeteer": "^24.40.0",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
         "sharp": "^0.34.5",
         "skia-canvas": "^3.0.0",
         "tsx": "^4.20.6",
         "vite": "^8.0.2",
+        "webgpu": "^0.4.0",
         "ws": "^8.18.0",
         "zustand": "^5.0.12"
     },
@@ -136,7 +136,6 @@
         "@ffprobe-installer/darwin-arm64",
         "canvas",
         "esbuild",
-        "puppeteer",
         "sharp",
         "skia-canvas"
     ]

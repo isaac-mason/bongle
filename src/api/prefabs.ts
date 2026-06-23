@@ -15,7 +15,7 @@
  *
  *   // args is { schema, default } — default is required when args is set.
  *   // it's used: (1) when callers omit args, (2) for inspector pre-fill,
- *   // (3) for the offline-renderer prefab preview tiles.
+ *   // (3) for the asset-pipeline prefab preview tiles.
  *   const Mage = prefab('mage', {
  *       type: 'nodes',
  *       deps: [MageScene],
@@ -79,7 +79,7 @@ export type PrefabHandle<Args = unknown> = {
     dependency: { registry: 'prefabs'; id: string };
     readonly type: PrefabType;
     readonly argsSchema: Schema;
-    /** default args value — read by the editor for pre-fill, by the offline-renderer for preview, and by `createPrefab` when caller omits args. */
+    /** default args value — read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
     readonly defaultArgs: Args;
     readonly node: { realm?: Realm } | undefined;
     readonly __args: Args;

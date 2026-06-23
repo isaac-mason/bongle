@@ -28,7 +28,7 @@ function writeBootstrap(bongleDir: string, sceneId: string): { entryHtml: string
 import { env } from 'bongle'
 import '../src/generated'
 import '../src/index'
-import { EngineClient } from 'bongle/engine-client'
+import { EngineClient, browserResourceLoader } from 'bongle/engine-client'
 
 env.client = true
 env.server = false
@@ -40,6 +40,7 @@ const state = EngineClient.init({
         matchmake() {},
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
     },
+    resourceLoader: browserResourceLoader,
 })
 // Mount the play-mode UI shell before load() — the React Viewport
 // component owns the canvas, and the resize callback in load() needs

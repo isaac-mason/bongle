@@ -306,6 +306,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
         state.voxelBudget,
         Performance.settingsForTier(state.performance).voxelWorkerCount,
         Performance.settingsForTier(state.performance).voxelWorkerQueueDepth,
+        state.resources,
         state.renderer.renderer,
     );
     state.voxelResources = nextRes;

@@ -43,7 +43,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             );
         }
         case 'prefab': {
-            // per-prefab PNG written by the offline-renderer prefab-icon task.
+            // per-prefab PNG written by the asset-pipeline prefab-icon task.
             // missing-file (cold start, hash gate) renders as a broken img;
             // ok for now — the placeholder fallback only fires when the
             // prefabId itself is empty.
@@ -62,7 +62,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             );
         }
         case 'blueprint': {
-            // per-scene PNG written by the offline-renderer scene-icon task.
+            // per-scene PNG written by the asset-pipeline scene-icon task.
             // missing-file (cold start, hash gate) renders as a broken img;
             // ok for now — the placeholder fallback only fires when the
             // sceneId itself is empty.

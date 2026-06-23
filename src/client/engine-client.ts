@@ -11,6 +11,7 @@ import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
 import { buildWireIndex, registry, type WireIndex } from '../core/registry';
 import * as Resources from '../core/resources';
+import type { ResourceLoader } from '../core/resource-loader';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
 import * as Nodes from '../core/scene/nodes';
@@ -19,7 +20,6 @@ import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
-import { assetUrl } from './asset-url';
 import * as Audio from './audio/audio';
 import * as CloudResources from './cloud-resources';
 import * as Device from './device';
@@ -64,6 +64,13 @@ export type InitOptions = {
      * supplied: assemblers construct one at boot.
      */
     driver: ClientDriver;
+    /**
+     * The environment's resource-loading bag — byte loading (model bins, atlas
+     * PNGs, …) plus the optional image decoder. Browser boot templates pass
+     * `browserResourceLoader`; the asset pipeline passes a disk + sharp loader.
+     * Required so engine-client owns no environment-specific I/O.
+     */
+    resourceLoader: ResourceLoader;
 };
 
 // Re-export the registry-dispatch entry so the client boot template can call
@@ -78,10 +85,9 @@ export { mountPlayUI } from './ui/play-ui';
 export function init(opts: InitOptions) {
     const mode = opts.mode;
 
-    // domElement hosts the React UI root and is mounted in `load()`.
-    // We attach it to document.body here so the host doesn't have to;
-    // dispose() detaches it.
-    const domElement: HTMLDivElement = document.createElement('div');
+    // domElement hosts the React UI root and is mounted in `load()`. We attach
+    // it to document.body here so the host doesn't have to; dispose() detaches it.
+    const domElement = document.createElement('div');
     document.body.appendChild(domElement);
 
     const renderer = Renderer.init();
@@ -93,20 +99,10 @@ export function init(opts: InitOptions) {
 
     const content = Content.init();
 
-    // client-side bins ship as siblings of the bundle entry —
-    // `handle.bin.client` is a relative URL (`models/<id>.<hash>.client.bin`)
-    // and `assetUrl()` resolves it against the bundle's deployed location
-    // in prod or the dev server origin in dev.
-    const resources = Resources.init(async (url) => {
-        // Bundled bins ship as bundle siblings (relative URLs resolved
-        // via assetUrl). Runtime-source URLs (avatars) arrive absolute
-        // and bypass the rewrite — fetch handles both transparently
-        // once we skip assetUrl for absolute http(s) values.
-        const resolved = url.startsWith('http:') || url.startsWith('https:') ? url : assetUrl(url);
-        const r = await fetch(resolved);
-        if (!r.ok) throw new Error(`fetch ${resolved}: ${r.status}`);
-        return new Uint8Array(await r.arrayBuffer());
-    }, 'client');
+    // The caller supplies the asset loader for its environment — browser boot
+    // templates pass `fetchResourceLoader`, the Node pipeline worker reads off
+    // disk. engine-client stays agnostic about where the bytes come from.
+    const resources = Resources.init(opts.resourceLoader, 'client');
 
     // client-side rpc. driver constructed by ./rpc; listener registry +
     // dispatch live in core/rpc. one shared instance across all rooms;
@@ -196,7 +192,7 @@ export function init(opts: InitOptions) {
         /** per-room voxel arena/section sizing — derived from `performance`
          *  once at boot. threaded into every `VoxelVisuals.init` call so
          *  rooms allocate identical-sized arenas regardless of who creates
-         *  them (server-joined, local, offline-renderer). */
+         *  them (server-joined, local, asset-pipeline). */
         voxelBudget: null! as VoxelArenaBudget,
         /** last value sent in `debug_subscribe` — re-sent only on edge
          *  transitions, not every frame. */
@@ -364,6 +360,7 @@ export async function load(state: EngineClient) {
         registry.blockRegistry,
         settings.voxelWorkerCount,
         settings.voxelWorkerQueueDepth,
+        state.resources,
         state.renderer.renderer,
     );
 
@@ -373,7 +370,7 @@ export async function load(state: EngineClient) {
         voxelLoadPromise,
     ]);
 
-    state.audioResources = audioResources;
+    state.audioResources = audioResources!;
 
     // Both extruded-sprite and particle materials captured a TextureNode
     // against `state.spriteResources.atlas` *as it was during init()* —
@@ -1377,7 +1374,7 @@ export function dispose(state: EngineClient): void {
     state.rooms.activePlayerId = null;
     useClient.setState({ rooms: new Map(), activePlayerId: null });
 
-    Input.disposeInputManager(state.inputManager);
+    if (state.inputManager) Input.disposeInputManager(state.inputManager);
     if (state.shadowResources) ShadowResources.dispose(state.shadowResources);
     if (state.cloudResources) CloudResources.dispose(state.cloudResources);
     if (state.voxelMeshResources) VoxelMeshResources.dispose(state.voxelMeshResources);
@@ -1386,5 +1383,5 @@ export function dispose(state: EngineClient): void {
     if (state.extrudedSpriteResources) ExtrudedSpriteResources.dispose(state.extrudedSpriteResources);
     if (state.spriteResources) SpriteResources.dispose(state.spriteResources);
     Renderer.dispose(state.renderer);
-    state.domElement.remove();
+    state.domElement?.remove();
 }

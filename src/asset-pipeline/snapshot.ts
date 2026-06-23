@@ -1,5 +1,5 @@
 // snapshot — render-target + readback primitive shared by every
-// offline-renderer icon task. owns the per-tile gpucat RenderTarget and the
+// asset-pipeline icon task. owns the per-tile gpucat RenderTarget and the
 // readback into a tightly-packed RGBA8 buffer. the caller drives the actual
 // render call between begin and captureTile, so this module stays agnostic
 // of how the render is performed (bare gpucat scene/camera vs. a room's

@@ -7,7 +7,7 @@
 // cache file. Cold-start wipes simply delete the artifact files.
 //
 // Browser-side tasks use the matching `fetchManifestHash` helper in
-// engine/src/offline-renderer/cache.ts; same convention, different
+// engine/src/asset-pipeline/cache.ts; same convention, different
 // runtime.
 
 import * as fs from 'node:fs';

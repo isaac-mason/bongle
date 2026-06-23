@@ -72,7 +72,7 @@ function ackAllFulls(discovery: Discovery.Discovery, out: Array<[Client, { type:
 function setupRoom(mode: 'edit' | 'play') {
     const server = createTestServer({ mode });
     const discovery = Discovery.init();
-    const resources = Resources.init(async () => new Uint8Array(), 'server');
+    const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
     Discovery.addClient(discovery, FAKE_CLIENT);
     const net = Net.init();
     const player = Rooms.joinRoom(server.rooms, FAKE_CLIENT, server.room.id, server.room.mode);

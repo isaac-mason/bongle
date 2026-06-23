@@ -7,8 +7,8 @@
  *   virtual:bongle/edit-client
  *   virtual:bongle/edit-server     (game-env.ts imports this through the
  *                                   gameServer runner and calls boot(ctx))
- *   virtual:bongle/pipeline        (HTML script-src target for the
- *                                   puppeteer pipeline page)
+ *   virtual:bongle/pipeline-worker (the in-process asset-pipeline boot entry;
+ *                                   the pipeline env's runner imports it)
  *   virtual:bongle/build-client    (lib.entry for `bongle build` client)
  *   virtual:bongle/build-server    (lib.entry for `bongle build` server)
  *   virtual:bongle/user-src        (dynamic-imported by edit/pipeline
@@ -29,11 +29,10 @@
  * build virtuals static-import user-src to keep ESM init order
  * predictable.
  *
- * HTML shells: `configureServer` adds connect middleware that intercepts
- * `/`, `/index.html`, and `/pipeline.html` and responds with inline HTML
- * passed through `server.transformIndexHtml()` (so Vite's HMR client
- * script gets injected). No on-disk index.html / pipeline.html needed
- * under bongleDir.
+ * HTML shell: `configureServer` adds connect middleware that intercepts
+ * `/` and `/index.html` and responds with inline HTML passed through
+ * `server.transformIndexHtml()` (so Vite's HMR client script gets injected).
+ * No on-disk index.html needed under bongleDir.
  *
  * Plugin is shared between dev (via the bongle() plugin array) and
  * build (added to runBuild's plugins). resolveId/load run in both
@@ -62,25 +61,13 @@ const INDEX_HTML = `<!doctype html>
 </html>
 `;
 
-const PIPELINE_HTML = `<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>bongle pipeline</title>
-</head>
-<body>
-    <script type="module" src="/@id/virtual:bongle/pipeline"></script>
-</body>
-</html>
-`;
-
 const PREFIX = 'virtual:bongle/';
 const RESOLVED_PREFIX = '\0' + PREFIX;
 
 const NAMES = new Set([
     'edit-client',
     'edit-server',
-    'pipeline',
+    'pipeline-worker',
     'build-client',
     'build-server',
     'user-src',
@@ -124,10 +111,12 @@ export function boot(ctx) {
     });
 }
 `;
-                case 'pipeline':
+                case 'pipeline-worker':
                     return /* js */ `
-import { start } from 'bongle/kit/runtime/pipeline';
-await start({ userEntry: () => import('virtual:bongle/user-src') });
+import { boot as bootImpl } from 'bongle/kit/runtime/pipeline-node';
+export function boot(ctx) {
+    return bootImpl({ ...ctx, userEntry: () => import('virtual:bongle/user-src') });
+}
 `;
                 case 'build-client':
                     return /* js */ `
@@ -163,7 +152,6 @@ if (import.meta.hot) {
                 const url = req.url?.split('?')[0];
                 let html: string | null = null;
                 if (url === '/' || url === '/index.html') html = INDEX_HTML;
-                else if (url === '/pipeline.html') html = PIPELINE_HTML;
                 if (html === null) return next();
                 try {
                     const transformed = await server.transformIndexHtml(req.url ?? '/', html);

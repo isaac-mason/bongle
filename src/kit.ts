@@ -28,7 +28,6 @@
 import { __addDeps } from './core/capture/dep-wrap';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import { __decideReload, __popModule, __pushModule } from './core/capture/module-scope';
-import { markPipelinePage } from './editor/pipeline-marker';
 import { _registerModelHandle } from './core/models/models';
 import { _registerScenePayload } from './api/scenes';
 import { _registerSoundHandle } from './core/sounds/sounds';
@@ -43,9 +42,4 @@ export const __kit = {
     registerModel: _registerModelHandle,
     registerScene: _registerScenePayload,
     registerSound: _registerSoundHandle,
-    /** Called by the kit pipeline-page template to declare its role.
-     *  The page produces icon artifacts, so it must not also consume them
-     *  (the boot-time fetch races the first render pass and prints a
-     *  JSON-parse warning on every cold start). */
-    pipeline: markPipelinePage,
 };

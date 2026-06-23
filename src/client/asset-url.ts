@@ -16,6 +16,8 @@
 // `import.meta.env.PROD` is replaced at build time by Vite, so each
 // shipped bundle ends up with only the relevant branch.
 
+import type { ResourceLoader } from '../core/resource-loader';
+
 const env = (import.meta as { env?: { PROD?: boolean } }).env;
 
 export function assetUrl(rel: string): string {
@@ -25,3 +27,24 @@ export function assetUrl(rel: string): string {
     }
     return `/${stripped}`;
 }
+
+/**
+ * Default browser byte loader: fetch a bin by `assetUrl(url)` (or verbatim if
+ * it's already an absolute http(s) URL, e.g. runtime-source avatars).
+ */
+export const fetchResourceLoader = async (url: string): Promise<Uint8Array> => {
+    const resolved = url.startsWith('http:') || url.startsWith('https:') ? url : assetUrl(url);
+    const r = await fetch(resolved);
+    if (!r.ok) throw new Error(`fetch ${resolved}: ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+};
+
+/**
+ * The browser's `ResourceLoader` bag passed to `EngineClient.init`. Byte loading
+ * only — no `decodeImage`, so the texture loaders take their DOM image path. The
+ * asset pipeline (`src/asset-pipeline`) supplies a different loader (disk +
+ * sharp `decodeImage`).
+ */
+export const browserResourceLoader: ResourceLoader = {
+    loadBytes: fetchResourceLoader,
+};

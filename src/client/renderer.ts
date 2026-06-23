@@ -62,6 +62,21 @@ export function init(): Renderer {
     return { renderer, environmentResources, pipeline };
 }
 
+/**
+ * Headless construction for the asset pipeline (`src/asset-pipeline`). Renders
+ * into an offscreen RenderTarget against a caller-supplied Dawn device +
+ * adapter — no canvas swapchain, no window dimension reads. The env GPU buffers
+ * + render pipeline build identically to the browser `init()`; this just swaps
+ * the surface. There is no `setSize`: the asset pipeline sizes per-pass
+ * RenderTargets itself (see offline snapshot sessions).
+ */
+export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): Renderer {
+    const renderer = new WebGPURenderer({ antialias: true, headless: true, device: gpu.device, adapter: gpu.adapter, format: 'rgba8unorm' });
+    const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
+    const pipeline = createRenderPipeline(renderer);
+    return { renderer, environmentResources, pipeline };
+}
+
 /** async device handshake. all GPU objects defer their real work until now. */
 export async function load(state: Renderer): Promise<void> {
     await state.renderer.init();

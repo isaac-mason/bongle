@@ -13,11 +13,11 @@
 // hash-gates calls; this fn just produces pixels.
 
 import { type ComputeDispatch, OrthographicCamera } from 'gpucat';
-import type { EngineClient } from '../../client/engine-client';
+import type { State } from '../engine';
 import { applyConfig, flushActive } from '../../client/environment';
 import { PRESETS } from '../../api/environment';
 import * as Renderer from '../../client/renderer';
-import { createOfflineRoom, disposeRoom } from '../../client/rooms';
+import { createRoom, disposeRoom } from '../rooms';
 import * as VoxelResources from '../../client/voxels/voxel-resources';
 import * as VoxelVisuals from '../../client/voxels/voxel-visuals';
 import { MODEL_NONE } from '../../core/voxels/block-registry';
@@ -49,7 +49,7 @@ export type BlockIconAtlasResult = {
     rows: number;
 };
 
-export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlasResult> {
+export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult> {
     const registry = engineRegistry.blockRegistry;
     const renderer = state.renderer.renderer;
 
@@ -78,12 +78,12 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
     // lit env at noon instead crushes the two visible side faces, which
     // sit perpendicular to the overhead sun, down to ~0.3-0.4.) disabling
     // the env also hides the sky + cloud meshes so they don't bleed in.
-    const iconRoom = createOfflineRoom(state);
+    const iconRoom = createRoom(state);
     applyConfig(iconRoom.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
     flushActive(iconRoom.environment);
 
     if (renderableStates.length === 0) {
-        disposeRoom(state, iconRoom);
+        disposeRoom(iconRoom);
         return {
             pixels: new Uint8Array(0),
             atlasWidth: 0,
@@ -177,7 +177,7 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
     } finally {
         pipeline.dispose();
         endSnapshotSession(session);
-        disposeRoom(state, iconRoom);
+        disposeRoom(iconRoom);
     }
 
     return { pixels: atlasPixels, atlasWidth, atlasHeight, coords, iconPx: ICON_PX, cols, rows };

@@ -10,8 +10,8 @@
 // Always-render now: hash-gating + iteration over the prefab set lives in
 // the orchestrator (one PNG per prefab, like scenes — no atlas).
 
-import type { EngineClient } from '../../client/engine-client';
-import { createOfflineRoom, disposeRoom } from '../../client/rooms';
+import type { State } from '../engine';
+import { createRoom, disposeRoom } from '../rooms';
 import { addChild, createNode, createPrefabConfig } from '../../core/scene/nodes';
 import { registry as engineRegistry } from '../../core/registry';
 import { beginSnapshotSession, endSnapshotSession } from '../snapshot';
@@ -26,14 +26,14 @@ export type PrefabIconResult = {
 
 /** Render a single prefab's icon. Returns empty pixels if the prefab isn't
  *  registered, Prefab.tick throws, or there's nothing to render. */
-export async function runPrefabIcon(state: EngineClient, id: string): Promise<PrefabIconResult> {
+export async function runPrefabIcon(state: State, id: string): Promise<PrefabIconResult> {
     const entry = engineRegistry.prefabs.byId.get(id);
     if (!entry) {
         return { pixels: new Uint8Array(0), pxSize: SUBJECT_ICON_PX };
     }
     const def = entry.payload;
 
-    const room = createOfflineRoom(state);
+    const room = createRoom(state);
     await state.voxelResources.atlasReady;
     await waitFor(() => room.modelVisuals.cullCompute !== null, 'cull computes');
     await preloadAllModels(state);
@@ -57,7 +57,7 @@ export async function runPrefabIcon(state: EngineClient, id: string): Promise<Pr
         }
     } finally {
         endSnapshotSession(session);
-        disposeRoom(state, room);
+        disposeRoom(room);
     }
 
     return { pixels: pixels ?? new Uint8Array(0), pxSize: SUBJECT_ICON_PX };

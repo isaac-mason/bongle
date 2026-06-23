@@ -118,7 +118,7 @@ const MAIN_THREAD_REMESH_RADIUS_CHUNKS = 2;
  * global arena packer.
  *
  * Two modes:
- * - `cameraPos === undefined` (offline-renderer): every dirty chunk
+ * - `cameraPos === undefined` (asset-pipeline): every dirty chunk
  *   meshes synchronously in one pass, no caps.
  * - `cameraPos !== undefined` (live client): dirty chunks sort by
  *   distance² from camera (with starvation boost). A candidate runs on

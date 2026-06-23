@@ -11,7 +11,7 @@
 //
 // rebuild is gated by the `hash` field in voxels-atlas.json — the
 // artifact IS the cache marker, no separate cache file. Same convention
-// the offline-renderer icon tasks use; cold-start wipe just deletes the
+// the asset-pipeline icon tasks use; cold-start wipe just deletes the
 // artifact files. Missing source textures get a magenta placeholder tile.
 //
 // DrawSource frames (procedural / composed block textures) are baked
