@@ -26,7 +26,14 @@ Running the above will scaffold a minimal project and start the editor on `http:
 
 From there, you can edit the game code in `src/`, and see your changes live in the editor.
 
-If you'd rather poke around without scaffolding, clone this repo and run any of the projects in [`./examples/`](./examples).
+If you'd rather poke around without scaffolding, clone this repo and run any of the projects in [`./examples/`](./examples). Clone recursively so the submodules come along:
+
+```sh
+git clone --recurse-submodules https://github.com/isaac-mason/bongle.git
+cd bongle
+```
+
+Already cloned without `--recurse-submodules`? Run `git submodule update --init --recursive`.
 
 ### Start from the new-bongle template
 
