@@ -95,6 +95,11 @@ async function runOnePass(s: State): Promise<void> {
     // 1. Wait for the worker surface to be exposed (post-userEntry import).
     await s.worker.ready();
 
+    // per-pass timing — render runs on the dev-server event loop (in-process),
+    // so surfacing each HMR re-render's cost is how we'd notice editor jank.
+    const passStart = performance.now();
+    let rebooted = false;
+
     // 2. Atlas-staleness re-boot check. The worker loads the TextureArray
     //    once at boot, so an atlas-bytes change requires a re-boot to pick
     //    up the new tiles. We do this BEFORE dispatching any verbs so nothing
@@ -106,6 +111,7 @@ async function runOnePass(s: State): Promise<void> {
     if (atlasHashBefore && s.lastBootAtlasHash !== null && atlasHashBefore !== s.lastBootAtlasHash) {
         try {
             await s.worker.reload();
+            rebooted = true;
         } catch (err) {
             console.warn('[bongle:orchestrator] worker reload failed:', err);
         }
@@ -123,6 +129,7 @@ async function runOnePass(s: State): Promise<void> {
             return;
         }
         await s.worker.call('bootEngine');
+        rebooted = true;
         s.lastBootId = bootId;
         s.lastBootAtlasHash = atlasHashBefore;
         s.appliedSceneHashes.clear();
@@ -156,9 +163,14 @@ async function runOnePass(s: State): Promise<void> {
     }
 
     // 7. Render verbs — Node decides via hash.
+    let blockRendered = false;
+    let prefabsRendered = 0;
+    let scenesRendered = 0;
+
     const blockHash = computeBlockIconsHash(s.internal, atlasHashBefore);
     if (blockHash !== s.lastBlockIconsHash) {
         await s.worker.call('renderBlockIcons', blockHash);
+        blockRendered = true;
     }
     // hashes gate dispatch in-memory (no on-disk sidecar); the worker just
     // renders + writes the PNG, so the hash never leaves Node.
@@ -166,11 +178,24 @@ async function runOnePass(s: State): Promise<void> {
     for (const { id, hash } of prefabHashes) {
         if (s.lastPrefabIconHashes.get(id) === hash) continue;
         await s.worker.call('renderPrefabIcon', id);
+        prefabsRendered++;
     }
     const sceneHashes = computeSceneIconHashes(s.internal, atlasHashBefore, current);
     for (const { id, hash } of sceneHashes) {
         if (s.lastSceneIconHashes.get(id) === hash) continue;
         await s.worker.call('renderSceneIcon', id);
+        scenesRendered++;
+    }
+
+    // Per-pass timing. Skip no-op passes (hash-gated — nothing rendered or
+    // re-booted) so this only fires when there's real work to report.
+    if (rebooted || blockRendered || prefabsRendered || scenesRendered) {
+        const parts: string[] = [];
+        if (rebooted) parts.push('reboot');
+        if (blockRendered) parts.push('block-icons');
+        if (prefabsRendered) parts.push(`${prefabsRendered} prefab${prefabsRendered > 1 ? 's' : ''}`);
+        if (scenesRendered) parts.push(`${scenesRendered} scene${scenesRendered > 1 ? 's' : ''}`);
+        console.log(`[bongle:pipeline] ${parts.join(' + ')} in ${(performance.now() - passStart).toFixed(0)}ms`);
     }
 
     // 8. Mid-flight rebuild check. If the asset pipeline rewrote the atlas
