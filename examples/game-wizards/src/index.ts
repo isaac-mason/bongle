@@ -35,6 +35,7 @@ import {
     getWorldPosition,
     getWorldQuaternion,
     HtmlTrait,
+    isMobile,
     isMouseDown,
     listen,
     MeshTrait,
@@ -1170,26 +1171,27 @@ script(WorldTrait, 'combat-cast', (ctx) => {
             const mk = ctx.client?.input?.mouseKeyboard;
             const touch = ctx.client?.input?.touch;
 
-            // desktop fires on held LMB (with pointer lock). first click (no lock yet)
-            // grabs the pointer instead of firing.
-            const mouseFire = !!mk && isMouseDown(mk, 'left');
-            if (mouseFire && !document.pointerLockElement) {
-                ctx.client?.domElement?.requestPointerLock?.();
-            }
-
-            // touch fires while a finger is held anywhere on the RIGHT half — the same
-            // finger the player-controller aims with (canvasLook reserves the right
-            // half), so drag-to-aim and cast are one gesture. canvas touches are
-            // touch-only, so this never triggers from the mouse.
+            // scan canvas touches once. `anyTouch`: a finger is driving — so we ignore
+            // the synthetic mouse-down the browser fires alongside touch (otherwise it
+            // would grab pointer lock and fight the look-drag). `rightTouch`: a finger
+            // held on the RIGHT half is the cast intent — the same finger the controller
+            // aims with (canvasLook reserves the right half), so aim + cast are one drag.
+            let anyTouch = false;
             let rightTouch = false;
             if (touch) {
                 const halfWidth = (ctx.client?.state?.viewport.width ?? 0) / 2;
                 for (const t of getCanvasTouches(touch).values()) {
-                    if (t.startX > halfWidth) {
-                        rightTouch = true;
-                        break;
-                    }
+                    anyTouch = true;
+                    if (t.startX > halfWidth) rightTouch = true;
                 }
+            }
+
+            // desktop fires on held LMB (with pointer lock); first click (no lock yet)
+            // grabs the pointer instead of firing. suppressed while a finger is down so
+            // touch's synthetic mouse events never request lock mid-drag.
+            const mouseFire = !!mk && isMouseDown(mk, 'left') && !anyTouch;
+            if (mouseFire && !document.pointerLockElement) {
+                ctx.client?.domElement?.requestPointerLock?.();
             }
 
             // fire only while alive — the PlayerController is gone while dead, so gate
@@ -2941,6 +2943,7 @@ script(WorldTrait, 'hud', (ctx) => {
     if (!viewport) return;
 
     const wizards = query(ctx, [WizardTrait]);
+    const mobile = isMobile(ctx); // compact, touch-friendly HUD on phones
 
     // the round end (server clock), pushed once by the server on join. the network
     // hop means this listener is registered before the message lands.
@@ -2951,17 +2954,17 @@ script(WorldTrait, 'hud', (ctx) => {
 
     // top-centre: round countdown (mm:ss), turns red over the final seconds.
     const clock = document.createElement('div');
-    clock.style.cssText = `position:absolute; top:12px; left:50%; transform:translateX(-50%); background:#383838; border-radius:10px; padding:5px 14px; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:16px; font-weight:bold; color:#fff; pointer-events:none; z-index:${UILayer.hud}; ${HUD_OUTLINE}`;
+    clock.style.cssText = `position:absolute; top:${mobile ? 8 : 12}px; left:50%; transform:translateX(-50%); background:#383838; border-radius:${mobile ? 8 : 10}px; padding:${mobile ? '3px 9px' : '5px 14px'}; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:${mobile ? 12 : 16}px; font-weight:bold; color:#fff; pointer-events:none; z-index:${UILayer.hud}; ${HUD_OUTLINE}`;
 
     // bottom-centre: rounded health + xp pill bars, matching the stat panel — a
     // dark pill with a coloured fill behind a centred, outlined label.
     const makeBar = (fillColor: string) => {
         const wrap = document.createElement('div');
-        wrap.style.cssText = 'position:relative; width:300px; height:24px; border-radius:12px; background:#383838; overflow:hidden;';
+        wrap.style.cssText = `position:relative; width:${mobile ? 190 : 300}px; height:${mobile ? 18 : 24}px; border-radius:${mobile ? 9 : 12}px; background:#383838; overflow:hidden;`;
         const fill = document.createElement('div');
         fill.style.cssText = `position:absolute; left:0; top:0; bottom:0; width:0%; background:${fillColor};`;
         const label = document.createElement('div');
-        label.style.cssText = `position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold; color:#fff; ${HUD_OUTLINE}`;
+        label.style.cssText = `position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:${mobile ? 10 : 12}px; font-weight:bold; color:#fff; ${HUD_OUTLINE}`;
         wrap.append(fill, label);
         return { wrap, fill, label };
     };
@@ -2974,7 +2977,7 @@ script(WorldTrait, 'hud', (ctx) => {
 
     // leaderboard (top-right): a dark rounded panel with a Name | K | D table.
     const board = document.createElement('div');
-    board.style.cssText = `position:absolute; top:12px; right:12px; min-width:180px; background:#383838; border-radius:10px; padding:6px 10px 8px; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:12px; color:#fff; pointer-events:none; z-index:${UILayer.hud}; ${HUD_OUTLINE}`;
+    board.style.cssText = `position:absolute; top:${mobile ? 8 : 12}px; right:${mobile ? 8 : 12}px; min-width:${mobile ? 110 : 180}px; background:#383838; border-radius:${mobile ? 8 : 10}px; padding:${mobile ? '4px 7px 5px' : '6px 10px 8px'}; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:${mobile ? 9 : 12}px; color:#fff; pointer-events:none; z-index:${UILayer.hud}; ${HUD_OUTLINE}`;
     const boardTitle = document.createElement('div');
     boardTitle.textContent = 'SCORES';
     boardTitle.style.cssText = 'text-align:center; font-weight:bold; margin-bottom:5px;';
@@ -3014,8 +3017,12 @@ script(WorldTrait, 'hud', (ctx) => {
         keyTag.style.cssText = `position:relative; margin:0 6px; font-size:11px; color:#fff; pointer-events:none; ${HUD_OUTLINE}`;
         const btn = document.createElement('button');
         btn.textContent = '+';
-        btn.style.cssText = `position:relative; flex:none; width:30px; height:22px; border:none; border-radius:8px; background:${color}; color:#1c1c1c; font-weight:bold; font-size:17px; line-height:1; padding:0; cursor:pointer;`;
+        btn.style.cssText = `position:relative; flex:none; width:30px; height:22px; border:none; border-radius:8px; background:${color}; color:#1c1c1c; font-weight:bold; font-size:17px; line-height:1; padding:0; cursor:pointer; pointer-events:auto;`;
         btn.onclick = () => send(ctx, UpgradeStat, { stat: i });
+        // mobile: the whole chip is the tap target (big + thumb-friendly). server
+        // rejects the upgrade when there are no points, so an idle tap is harmless;
+        // we still gate interactivity via pointer-events in the update below.
+        if (mobile) pill.onclick = () => send(ctx, UpgradeStat, { stat: i });
         // read-only counterpart shown in the same right-hand slot when there's no
         // point to spend here: the stat's current level (or MAX at the cap).
         const num = document.createElement('span');
@@ -3109,6 +3116,40 @@ script(WorldTrait, 'hud', (ctx) => {
             const spent = lvls ? sumLevels(lvls) : 0;
             if (!wiz || !lvls || (pts === 0 && spent === 0)) {
                 panel.style.display = 'none';
+            } else if (mobile) {
+                // mobile: a compact 2-column grid of stat chips (icon + level). with a
+                // point available, the whole chip is a big tap target that upgrades that
+                // stat (outlined in the stat colour); otherwise it's read-only.
+                panel.style.display = 'grid';
+                panel.style.gridTemplateColumns = 'repeat(2, 90px)';
+                panel.style.gap = '4px';
+                panel.style.width = 'auto';
+                panelHeader.style.display = pts > 0 ? 'block' : 'none';
+                panelHeader.style.gridColumn = '1 / -1';
+                panelHeader.textContent = pts > 0 ? `${pts} point${pts === 1 ? '' : 's'} to spend` : '';
+                STAT_KEYS.forEach((k, i) => {
+                    const statMax = STAT_TABLE[k].max;
+                    const row = rowEls[i]!;
+                    const lvl = lvls![k];
+                    const canUp = pts > 0 && lvl < statMax;
+                    row.fill.style.width = `${(lvl / statMax) * 100}%`;
+                    row.pill.style.height = '34px';
+                    row.pill.style.justifyContent = 'center';
+                    row.pill.style.paddingRight = '0';
+                    row.pill.style.cursor = canUp ? 'pointer' : 'default';
+                    row.pill.style.pointerEvents = canUp ? 'auto' : 'none';
+                    row.pill.style.outline = canUp ? `2px solid ${STAT_TABLE[k].color}` : '';
+                    row.pill.style.outlineOffset = '-2px';
+                    row.icon.style.marginLeft = '0';
+                    row.icon.style.marginRight = '5px';
+                    row.name.style.display = 'none';
+                    row.keyTag.style.display = 'none';
+                    row.btn.style.display = 'none';
+                    row.num.style.display = '';
+                    row.num.style.flex = 'none';
+                    row.num.style.width = 'auto';
+                    row.num.textContent = lvl >= statMax ? 'MAX' : `${lvl}`;
+                });
             } else {
                 const expanded = pts > 0;
                 panel.style.display = 'flex'; // restore flex (not '', which reverts to block)
@@ -3151,7 +3192,7 @@ script(WorldTrait, 'hud', (ctx) => {
                 cell('K', 'font-weight:bold; text-align:center; color:#9be88a;'),
                 cell('D', 'font-weight:bold; text-align:center; color:#e88a8a;'),
                 ...rows.flatMap((w) => [
-                    cell(w.name || '…', 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:130px;'),
+                    cell(w.name || '…', `white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:${mobile ? 80 : 130}px;`),
                     cell(`${w.kills}`, 'text-align:center;'),
                     cell(`${w.deaths}`, 'text-align:center;'),
                 ]),

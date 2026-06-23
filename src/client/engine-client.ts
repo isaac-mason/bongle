@@ -632,8 +632,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
-    // attach after client.room/.state are wired so host-script onInit (e.g.
-    // setEnvironment) sees the live room; initSceneGraph below fires it.
+    // host-script onInit reads client.room/.state (wired above); initSceneGraph fires it.
     attachWorldTrait(room.nodes.root);
     console.log(
         `[bongle room] processJoinRoom: message.playerId=${String(message.playerId)} -> room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,

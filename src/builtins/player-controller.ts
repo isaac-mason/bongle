@@ -36,7 +36,7 @@ import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-ra
 import { warn } from '../api/debug';
 import { env } from '../api/env';
 import { getCanvasTouches, getJoystick, type Input, isKeyDown, isKeyJustDown, isTouchButtonDown } from '../api/input';
-import { isMobile } from '../api/mobile';
+import { isMobile, isTouchDevice } from '../api/mobile';
 import { createJoystick, createTouchButton } from '../api/mobile-controls';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
@@ -801,6 +801,12 @@ script(
 
         const onCanvasClick = (): void => {
             if (!ctx.trait.controls.enabled) return;
+            // pointer lock is the desktop mouse-look affordance; touch devices look via
+            // canvasLook (drag), and locking the pointer on a tap breaks that — plus
+            // pointer-lock + touch is undefined in browsers. so never lock on a touch
+            // device. (the `click` event is a plain MouseEvent in Chromium, so we can't
+            // tell touch from mouse per-event — gate on the device instead.)
+            if (isTouchDevice(ctx)) return;
             if (!document.pointerLockElement) {
                 ctx.client?.domElement.requestPointerLock();
             }
