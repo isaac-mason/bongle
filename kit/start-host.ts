@@ -56,7 +56,7 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
-    const adapter = ((await import(pathToFileURL(opts.serverEntry).href)) as { default: ServerApp<unknown> }).default;
+    const adapter = ((await import(/* @vite-ignore */ pathToFileURL(opts.serverEntry).href)) as { default: ServerApp<unknown> }).default;
 
     const state = adapter.init({
         options: {},

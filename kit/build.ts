@@ -122,13 +122,13 @@ async function runAssetPipelineInProcess(opts: {
     // Physics module's evaluation registers built-in physics resources;
     // historically imported first by the asset-pipeline subprocess entry,
     // preserve the ordering here.
-    await import(path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
+    await import(/* @vite-ignore */ path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
 
     // Evaluate the user module — `block()`, `model()`, `matchmaking()`, …
     // upsert into the typed registries in bongle/internal. Imports the
     // user source directly off disk; no generated wrapper file.
-    await import(path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
-    await import(path.join(opts.projectDir, 'src', 'index.ts'));
+    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
+    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
 
     const internal = (await import('bongle/internal')) as unknown as PipelineInternal;
     const state = createPipelineState();

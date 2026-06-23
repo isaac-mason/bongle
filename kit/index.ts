@@ -109,4 +109,7 @@ Flags:
     }
 }
 
-main();
+// Top-level await (not fire-and-forget) so the bin shim's module runner
+// resolves only once the command has fully completed — otherwise it would
+// tear down the Vite server mid-build.
+await main();

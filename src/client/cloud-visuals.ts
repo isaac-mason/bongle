@@ -100,7 +100,8 @@ export function update(
     // frustum planes — same math as the old WGSL cull.
     frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
 
-    const masterEnabled = cfg.enabled && cfg.clouds.enabled;
+    const enabled = cfg.enabled && cfg.clouds.enabled;
+
     const cloudsDensity = cfg.clouds.density;
     const windDirX = cfg.clouds.wind[0];
     const windDirY = cfg.clouds.wind[1];
@@ -122,7 +123,7 @@ export function update(
     const shapes = resources.shapes;
     let count = 0;
 
-    if (masterEnabled) {
+    if (enabled) {
         for (let id = 0; id < M_CLOUD_INSTANCES; id++) {
             const gridX = id % GRID_DIM;
             const gridZ = (id / GRID_DIM) | 0;

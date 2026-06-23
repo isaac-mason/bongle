@@ -89,9 +89,9 @@ async function runAssetPipelineInProcess(opts: {
     bongleDir: string;
     engineRoot: string;
 }): Promise<void> {
-    await import(path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
-    await import(path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
-    await import(path.join(opts.projectDir, 'src', 'index.ts'));
+    await import(/* @vite-ignore */ path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
+    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
+    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
     const internal = (await import('bongle/internal')) as unknown as PipelineInternal;
     await runAssetPipelinePass(internal, { projectDir: opts.projectDir, mode: 'play', cache: false }, createPipelineState());
 }
