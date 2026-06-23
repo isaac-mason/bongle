@@ -1143,6 +1143,31 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * path that needs every instance re-run — even unchanged scripts can become
  * structurally invalid if a trait field they depend on moved indices.
  */
+/**
+ * Mirror a `registry.scripts` removal into the owning trait def. `script()`
+ * only ever upserts into a trait's `scripts[]`/`scriptsById`, so a `script()`
+ * call deleted from source has no effect on a trait def that outlives the
+ * edit — a built-in trait (def in an engine module) or any trait defined in a
+ * *different* file than the removed `script()`. The registry detects the
+ * deletion (drops the key on the owning module's reload) and emits a
+ * `{ kind: 'removed' }` change; dispatch drains that change and calls this so
+ * the def stops listing the orphan. With the def corrected, the normal
+ * `applyTraitSwap` lookup disposes the live instance and
+ * `instantiateTraitScripts` won't re-create it. `scripts[]` slots are
+ * positional, so rebuild + reindex from the surviving entries.
+ */
+export function pruneRemovedScript(def: ScriptDef): void {
+    const traitDef = registry.traits.byId.get(def.traitId)?.payload;
+    if (!traitDef || !traitDef.scriptsById.delete(def.scriptId)) return;
+    const remaining = [...traitDef.scriptsById.values()]
+        .sort((a, b) => a.index - b.index)
+        .map((entry) => entry.reg);
+    traitDef.scripts = remaining;
+    remaining.forEach((reg, index) => {
+        traitDef.scriptsById.set(reg.scriptId, { reg, index });
+    });
+}
+
 export function applyTraitSwap(
     runtime: NodesContext,
     dirtyScriptIds: ReadonlySet<string> | null = null,

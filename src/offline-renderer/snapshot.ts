@@ -36,9 +36,10 @@ export function beginSnapshotSession(renderer: WebGPURenderer, pxSize: number): 
         samples: 1,
     });
     const originalTarget = renderer.renderTarget;
-    // Renderer.clearColor defaults to [0,0,0,1] opaque black; block-icons
-    // uses `renderer.render(scene, camera)` directly so the target gets
-    // cleared with that. Force transparent for icon tiles, restore on end.
+    // Renderer.clearColor defaults to [0,0,0,1] opaque black. Force
+    // transparent for icon tiles (restore on end) as a defensive default —
+    // current callers render through `createOfflinePipeline`, whose pass sets
+    // its own [0,0,0,0] clear, but this keeps any bare-render caller honest.
     const originalClearColor: [number, number, number, number] = [
         renderer.clearColor[0],
         renderer.clearColor[1],

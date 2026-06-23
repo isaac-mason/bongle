@@ -26,7 +26,9 @@ import {
 } from './nodes';
 import { prop } from './prop';
 import { packSceneGraph, unpackSceneGraph } from './scene-pack';
-import { query as scriptQuery, script } from './scripts';
+import { __popModule, __pushModule } from '../capture/module-scope';
+import { registry } from '../registry';
+import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, query as scriptQuery, script } from './scripts';
 import { control, trait, type TraitType } from './traits';
 
 /* ── test traits ── */
@@ -799,6 +801,81 @@ describe('query — acquireQuery / releaseQuery', () => {
         expect(sg.queries.size).toBe(before + 1);
         releaseQuery(sg, q);
         expect(sg.queries.size).toBe(before);
+    });
+});
+
+/* ── script removal on reload (deleted script() call) ── */
+
+describe('script removal on reload', () => {
+    it('prunes a removed script from its trait def, disposing the instance, with no re-creation', () => {
+        const sg = server.nodes;
+        const runtime = TEST_SCRIPT_RUNTIME;
+
+        let initCount = 0;
+        let disposeCount = 0;
+
+        // trait def created independent of the script's module — the built-in /
+        // cross-file case where the def outlives the edited file.
+        const HmrTrait = trait('test/hmr-removal');
+
+        // a "module" declares the script. editor:true so its hooks run in the
+        // test server's edit-mode runtime.
+        const mod = 'file:///test/hmr-module.ts';
+        const prev = __pushModule(mod);
+        script(
+            HmrTrait,
+            'sys',
+            (ctx) => {
+                onInit(ctx, () => {
+                    initCount++;
+                });
+                onDispose(ctx, () => {
+                    disposeCount++;
+                });
+            },
+            { editor: true },
+        );
+        __popModule(prev);
+
+        const node = createNode({ name: 'hmr-a' });
+        addChild(sg.root, node);
+        addTrait(node, HmrTrait);
+
+        expect(initCount).toBe(1);
+        expect(HmrTrait._def.scriptsById.has('sys')).toBe(true);
+        expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys')).toBe(true);
+
+        // the add was already flushed in a real session; isolate the removal.
+        registry.scripts.pendingChanges.length = 0;
+
+        // module re-evaluates WITHOUT the script() call → registry emits 'removed'.
+        const prev2 = __pushModule(mod);
+        __popModule(prev2);
+
+        // drive the dispatch data path: prune removed defs, then swap.
+        const dirty = new Set<string>();
+        for (const ch of registry.scripts.pendingChanges) {
+            dirty.add(ch.handle.id);
+            if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+        }
+        registry.scripts.pendingChanges.length = 0;
+        applyTraitSwap(runtime, dirty);
+
+        // instance disposed (onDispose fired) and the def no longer lists it.
+        expect(disposeCount).toBe(1);
+        expect(HmrTrait._def.scriptsById.has('sys')).toBe(false);
+        expect(HmrTrait._def.scripts.some((s) => s.scriptId === 'sys')).toBe(false);
+        expect(runtime.instances.get(node.id)?.has('test/hmr-removal.sys') ?? false).toBe(false);
+
+        // def-prune (not just instance disposal) means a fresh node carrying the
+        // trait does NOT resurrect the deleted script.
+        const node2 = createNode({ name: 'hmr-b' });
+        addChild(sg.root, node2);
+        addTrait(node2, HmrTrait);
+        expect(initCount).toBe(1);
+
+        destroyNode(sg, node);
+        destroyNode(sg, node2);
     });
 });
 

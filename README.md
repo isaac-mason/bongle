@@ -28,6 +28,18 @@ From there, you can edit the game code in `src/`, and see your changes live in t
 
 If you'd rather poke around without scaffolding, clone this repo and run any of the projects in [`./examples/`](./examples).
 
+### Start from the new-bongle template
+
+[new-bongle](https://github.com/isaac-mason/new-bongle) is a ready-made starter project. Open it in the cloud with one click:
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/isaac-mason/new-bongle)
+
+It boots a container, installs dependencies, and starts the editor (forwarded on `:3002`). You can also clone it and run `npm install && npm run edit` locally.
+
+## Making characters and models
+
+[bongle-blockbench](https://github.com/isaac-mason/bongle-blockbench) is a build of [Blockbench](https://www.blockbench.net/) set up for authoring bongle characters and models. It starts you from the canonical character rig, validates the rig as you work, and exports an engine-ready glTF in one click. Use it online, or install it into the Blockbench desktop app.
+
 ## CLI Reference
 
 ```sh

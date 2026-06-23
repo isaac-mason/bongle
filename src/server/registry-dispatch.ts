@@ -42,7 +42,7 @@ import * as Content from '../core/content';
 import { bumpVersion, logPendingChanges, registry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/nodes';
-import { applyTraitSwap } from '../core/scene/scripts';
+import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import * as ContentManager from './content-manager';
 import type { EngineServer } from './engine-server';
@@ -75,8 +75,14 @@ export function applyRegistryChanges(state: EngineServer): void {
     const dirtyPrefabIds = dirtyByRegistry.get('prefabs') ?? new Set<string>();
     const dirtyScriptIds = dirtyByRegistry.get('scripts') ?? new Set<string>();
     // direct script-store changes feed the same applyTraitSwap path — keys
-    // already match `ScriptDef.key` (`${traitId}.${scriptId}`).
-    for (const ch of registry.scripts.pendingChanges) dirtyScriptIds.add(ch.handle.id);
+    // already match `ScriptDef.key` (`${traitId}.${scriptId}`). a removed
+    // script (its `script()` call deleted from source) is pruned from the
+    // owning trait def here so applyTraitSwap disposes the live instance and
+    // instantiateTraitScripts can't resurrect it — see pruneRemovedScript.
+    for (const ch of registry.scripts.pendingChanges) {
+        dirtyScriptIds.add(ch.handle.id);
+        if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+    }
 
     // capture the OLD wire-index id lists before any branch drains. lazy
     // getters return cached arrays keyed on `revision`; once draining bumps

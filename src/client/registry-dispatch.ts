@@ -45,7 +45,7 @@ import { useEditor } from '../editor/editor-store';
 import { bumpVersion, logPendingChanges, registry, type KindStore } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/nodes';
-import { applyTraitSwap } from '../core/scene/scripts';
+import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import type { EngineClient } from './engine-client';
 import * as Net from './net';
@@ -102,8 +102,14 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const dirtyPrefabIds = dirtyByRegistry.get('prefabs') ?? new Set<string>();
     const dirtyScriptIds = dirtyByRegistry.get('scripts') ?? new Set<string>();
     // direct script-store changes feed the same applyTraitSwap path — keys
-    // already match `ScriptDef.key` (`${traitId}.${scriptId}`).
-    for (const ch of registry.scripts.pendingChanges) dirtyScriptIds.add(ch.handle.id);
+    // already match `ScriptDef.key` (`${traitId}.${scriptId}`). a removed
+    // script (its `script()` call deleted from source) is pruned from the
+    // owning trait def here so applyTraitSwap disposes the live instance and
+    // instantiateTraitScripts can't resurrect it — see pruneRemovedScript.
+    for (const ch of registry.scripts.pendingChanges) {
+        dirtyScriptIds.add(ch.handle.id);
+        if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+    }
 
     // editor HMR toasts — one per kind with pending changes, plus one
     // for script-instance swaps reaching via DepGraph (when trait body

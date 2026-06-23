@@ -676,13 +676,13 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // initSceneGraph fires onInit/onEnter for instances registered during populate.
     control.node = playerNode;
 
-    // WorldTrait — scene-scoped script host on root. attach after
-    // `scriptRuntime.client` is assigned and `control.node` is seeded so
-    // the factory's ctx captures a real client ref (script ctx snapshots
-    // `runtime.client` at instantiation; if it were undefined here,
-    // getControlNode(ctx) would return null forever and POV-gated work
-    // like first-person body hiding wouldn't fire).
-    attachWorldTrait(nodes.root);
+    // NOTE: WorldTrait is NOT attached here. attachWorldTrait runs addTrait,
+    // which fires the host scripts' onInit immediately — but `client.room`
+    // (and `.state`) aren't wired until the caller runs, AFTER this returns.
+    // A WorldTrait `onInit` that reads `ctx.client.room` (e.g. setEnvironment)
+    // would no-op. Callers attach it after wiring `client.room`/`.state` and
+    // before `initSceneGraph`. (`runtime.client` ref + `control.node` are
+    // already set here, so the factory still captures a real client ref.)
 
     const syncSnapshots = Replication.createSyncSnapshots();
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, opts.voxelResources);
@@ -1010,6 +1010,9 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
+    // attach after client.room/.state are wired so host-script onInit (e.g.
+    // setEnvironment) sees the live room; initSceneGraph below fires it.
+    attachWorldTrait(room.nodes.root);
     console.log(
         `[bongle room] createLocalRoom: room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
@@ -1209,6 +1212,11 @@ export function createOfflineRoom(state: EngineClient): ClientRoom {
         chat,
         playerNode,
     });
+
+    // offline renderer doesn't wire client.room or run initSceneGraph; attach
+    // the host trait directly (matches prior createRoomCore behaviour). env
+    // onInit no-ops here as before — there's no live client room to render to.
+    attachWorldTrait(room.nodes.root);
 
     return room;
 }

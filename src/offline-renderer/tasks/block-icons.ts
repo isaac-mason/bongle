@@ -16,6 +16,7 @@ import { type ComputeDispatch, OrthographicCamera } from 'gpucat';
 import type { EngineClient } from '../../client/engine-client';
 import { applyConfig, flushActive } from '../../client/environment';
 import { PRESETS } from '../../api/environment';
+import * as Renderer from '../../client/renderer';
 import { createOfflineRoom, disposeRoom } from '../../client/rooms';
 import * as VoxelResources from '../../client/voxels/voxel-resources';
 import * as VoxelVisuals from '../../client/voxels/voxel-visuals';
@@ -124,6 +125,14 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
     const packer = state.voxelResources.arenas.packer;
     const meshOutput = createMeshOutput();
 
+    // Render through the shared offline pipeline (scenePass → fxaa →
+    // renderOutput) rather than a bare `renderer.render()`. renderOutput
+    // applies the same ACES tonemap + linear→sRGB encode the on-screen view
+    // uses; without it, the linear shader output lands in the snapshot's
+    // rgba8unorm target verbatim and the PNG reads far too dark. The camera
+    // is constant across every block, so one pipeline serves the whole atlas.
+    const pipeline = Renderer.createOfflinePipeline(state.renderer, iconRoom.scene, camera);
+
     try {
         for (let i = 0; i < renderableStates.length; i++) {
             const { key } = renderableStates[i]!;
@@ -161,11 +170,12 @@ export async function runBlockIcons(state: EngineClient): Promise<BlockIconAtlas
 
             iconRoom.scene.updateWorldMatrix();
             if (dispatches.length > 0) renderer.compute(dispatches);
-            renderer.render(iconRoom.scene, camera);
+            pipeline.render();
 
             blitTile(atlasPixels, atlasWidth, await captureTile(session), ICON_PX, col, row);
         }
     } finally {
+        pipeline.dispose();
         endSnapshotSession(session);
         disposeRoom(state, iconRoom);
     }

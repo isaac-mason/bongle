@@ -1,5 +1,6 @@
 import type { ClientDriver, JsonValue } from 'bongle/interface';
 import { env } from 'bongle';
+import { attachWorldTrait } from '../builtins/world';
 import * as Chat from './chat';
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
@@ -631,6 +632,9 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
+    // attach after client.room/.state are wired so host-script onInit (e.g.
+    // setEnvironment) sees the live room; initSceneGraph below fires it.
+    attachWorldTrait(room.nodes.root);
     console.log(
         `[bongle room] processJoinRoom: message.playerId=${String(message.playerId)} -> room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
