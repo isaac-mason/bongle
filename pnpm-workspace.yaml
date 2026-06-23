@@ -2,6 +2,7 @@ packages:
   - engine
   - interface
   - examples/*
+  - games/*
 
 minimumReleaseAge: 10080
 
@@ -17,5 +18,9 @@ onlyBuiltDependencies:
   - sharp
   - skia-canvas
 
+# Local game submodules (games/*) depend on the engine via
+# `bongle: github:isaac-mason/bongle#main` so they stay fork-clean. Inside
+# this workspace, swap that for the local engine at the repo root so engine
+# changes are picked up live without a per-game edit.
 overrides:
-  gpucat: link:../../gpucat
+  bongle: link:.

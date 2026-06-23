@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  gpucat: link:../../gpucat
+  bongle: link:.
 
 importers:
 
@@ -60,8 +60,8 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: link:../../gpucat
-        version: link:../../gpucat
+        specifier: github:isaac-mason/gpucat#main
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -157,103 +157,103 @@ importers:
   examples/audio:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/blocks:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/dom-ui:
     dependencies:
       bongle:
-        specifier: workspace:*
-        version: link:../..
-
-  examples/game-circus-obby:
-    dependencies:
-      bongle:
-        specifier: workspace:*
-        version: link:../..
-
-  examples/game-wizards:
-    dependencies:
-      bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-animated-meshes:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-chunks:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-lighting:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-meshes:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-physics-aabb-body:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-physics-rigid-body:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/performance-terrain:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/persistent-data:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/rooms:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/sprites:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/terrain:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
         version: link:../..
 
   examples/voxel-model:
     dependencies:
       bongle:
-        specifier: workspace:*
+        specifier: link:../..
+        version: link:../..
+
+  games/circus-obby:
+    dependencies:
+      bongle:
+        specifier: link:../..
+        version: link:../..
+
+  games/wizard-game:
+    dependencies:
+      bongle:
+        specifier: link:../..
         version: link:../..
 
 packages:
@@ -2123,6 +2123,10 @@ packages:
   globby@10.0.1:
     resolution: {integrity: sha512-sSs4inE1FB2YQiymcmTv6NWENryABjUNPeWhOvmn4SjtKybglsyPZxFB3U1/+L1bYi0rNZDqCLlHyLYDl1Pq5A==}
     engines: {node: '>=8'}
+
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05}
+    version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -4916,6 +4920,10 @@ snapshots:
       ignore: 5.3.2
       merge2: 1.4.1
       slash: 3.0.0
+
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/8e647e1c01994dfd90be570e360f0b4eb530fb05:
+    dependencies:
+      mathcat: 0.0.12
 
   graceful-fs@4.2.11: {}
 
