@@ -1,6 +1,7 @@
 {
     "name": "bongle",
     "version": "0.0.0-alpha.1",
+    "license": "MIT",
     "type": "module",
     "sideEffects": [
         "src/index.ts",
