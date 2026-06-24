@@ -356,6 +356,38 @@ export function groundShortcut(walkable: Walkable): Shortcut {
     };
 }
 
+// ── reachability (flood-fill) ───────────────────────────────────────
+// the dual of pathfinding: instead of "is there a path A→B", "which cells can I
+// reach from A". shares the movement models, so every returned cell is genuinely
+// path-reachable — handy for picking a provably-reachable target (e.g. NPC wander)
+// without a path query that can fail.
+
+/** breadth-first expansion of every cell reachable from `start` under a movement
+ *  model's `actions`. `start` is included; order is roughly nearest-first. flood-fill
+ *  is otherwise unbounded, so `maxCells` caps the expansion (raise for larger regions,
+ *  lower to bound cost). */
+export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxCells: number): Vec3[] {
+    const queue: Vec3[] = [start];
+    const seen = new Set<string>([key(start[0], start[1], start[2])]);
+    let head = 0;
+    while (head < queue.length && queue.length < maxCells) {
+        const cell = queue[head++]!;
+        for (const step of actions(voxels, cell[0], cell[1], cell[2])) {
+            const k = key(step.x, step.y, step.z);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            queue.push([step.x, step.y, step.z]);
+        }
+    }
+    return queue;
+}
+
+/** cells reachable on foot from `start` (the `landMovement` model) — the flood-fill
+ *  companion to `findGroundPath`. `options` forwards to `landMovement`. */
+export function floodFillLand(voxels: Voxels, start: Vec3, maxCells: number, options?: { size?: Vec3; walkable?: Walkable }): Vec3[] {
+    return floodFill(voxels, start, landMovement(options).actions, maxCells);
+}
+
 // ── swept-box voxel trace (skishore/wave) ───────────────────────────
 // fixed-point sweep of a unit box; used only to precompute the diagonal cell
 // sequence the shortcut check walks. self-contained, voxel-data-free.
