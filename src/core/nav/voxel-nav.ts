@@ -28,20 +28,20 @@ function flagsAt(voxels: Voxels, x: number, y: number, z: number): number {
 }
 
 /** may a navigating agent occupy this single cell? (BLOCK_FLAG_PATHFINDABLE) */
-export function isPassable(voxels: Voxels, x: number, y: number, z: number): boolean {
+function isPassable(voxels: Voxels, x: number, y: number, z: number): boolean {
     return (flagsAt(voxels, x, y, z) & BLOCK_FLAG_PATHFINDABLE) !== 0;
 }
 
 /** is this cell solid enough to stand on / support an agent above it?
  *  (BLOCK_FLAG_COLLISION) */
-export function isSupport(voxels: Voxels, x: number, y: number, z: number): boolean {
+function isSupport(voxels: Voxels, x: number, y: number, z: number): boolean {
     return (flagsAt(voxels, x, y, z) & BLOCK_FLAG_COLLISION) !== 0;
 }
 
 // ── walkability (footprint = cell + size, all in cells) ─────────────
 
 /** every cell of the `size` box with min corner `(x, y, z)` is passable. */
-export function isClear(voxels: Voxels, x: number, y: number, z: number, size: Vec3): boolean {
+function isClear(voxels: Voxels, x: number, y: number, z: number, size: Vec3): boolean {
     for (let dy = 0; dy < size[1]; dy++) {
         for (let dx = 0; dx < size[0]; dx++) {
             for (let dz = 0; dz < size[2]; dz++) {
@@ -55,7 +55,7 @@ export function isClear(voxels: Voxels, x: number, y: number, z: number, size: V
 /** land-standing: the `size` box is clear AND every column beneath its
  *  footprint is supported (solid directly below the feet). `(x, y, z)` is the
  *  feet/min corner; the default caller passes a 2-high box. */
-export function isWalkable(voxels: Voxels, x: number, y: number, z: number, size: Vec3): boolean {
+function isWalkable(voxels: Voxels, x: number, y: number, z: number, size: Vec3): boolean {
     for (let dx = 0; dx < size[0]; dx++) {
         for (let dz = 0; dz < size[2]; dz++) {
             if (!isSupport(voxels, x + dx, y - 1, z + dz)) return false;
@@ -66,31 +66,26 @@ export function isWalkable(voxels: Voxels, x: number, y: number, z: number, size
 
 /** strategy: can the agent stand/be at this cell? scalar args so the A* inner
  *  loop allocates nothing. slot a different impl in for fly / swim / wall. */
-export type Walkable = (voxels: Voxels, x: number, y: number, z: number) => boolean;
+type Walkable = (voxels: Voxels, x: number, y: number, z: number) => boolean;
 
 /** land agent — needs ground support. default body is 1×2×1 (2 blocks high). */
-export function landWalkable(size: Vec3 = [1, 2, 1]): Walkable {
+function landWalkable(size: Vec3 = [1, 2, 1]): Walkable {
     return (voxels, x, y, z) => isWalkable(voxels, x, y, z, size);
-}
-
-/** flying/swimming agent — just needs a clear body box, no support. */
-export function flyWalkable(size: Vec3 = [1, 2, 1]): Walkable {
-    return (voxels, x, y, z) => isClear(voxels, x, y, z, size);
 }
 
 // ── movement model (the slot-in "actions") ─────────────────────────
 
 /** one candidate offset for the fixed-move case — input to `gridActions`. */
-export type Move = { offset: Vec3; cost: number };
+type Move ={ offset: Vec3; cost: number };
 
 /** a reachable neighbour cell (a resolved move) yielded by `Actions`. */
 export type Step = { x: number; y: number; z: number; cost: number };
 
-/** the pluggable move generator: expand a cell into its reachable neighbours.
- *  the candidate move set AND per-cell walkability both live here, so movement
- *  can be context-dependent (ladders, liquids, variable cost). build the common
- *  fixed-offset case with `gridActions`, or write your own. returns a fresh
- *  array per call (matches the source sketch; pathfinding isn't a hot path). */
+/** the pluggable successor function `findPath`/`floodFill` search over: expand a
+ *  cell into its reachable neighbour `Step`s. the candidate moves AND per-cell
+ *  walkability both live here, so movement can be context-dependent (ladders,
+ *  liquids, variable cost). returns a fresh array per call (pathfinding isn't a
+ *  hot path). */
 export type Actions = (voxels: Voxels, x: number, y: number, z: number) => Step[];
 
 /** admissible-ish distance estimate between two cells. */
@@ -98,17 +93,12 @@ export type Heuristic = (fromX: number, fromY: number, fromZ: number, toX: numbe
 
 /** line-of-sight test used by the smoother: can the agent travel `from`→`to`
  *  directly (skipping intermediate waypoints)? */
-export type Shortcut = (voxels: Voxels, from: Vec3, to: Vec3) => boolean;
-
-export type MovementModel = {
-    actions: Actions;
-    heuristic: Heuristic;
-};
+type Shortcut = (voxels: Voxels, from: Vec3, to: Vec3) => boolean;
 
 /** build an `Actions` from a fixed candidate offset set + a walkability test —
  *  the common case (land / fly). each offset landing on a walkable cell becomes
  *  a reachable step. */
-export function gridActions(moves: readonly Move[], walkable: Walkable): Actions {
+function gridActions(moves: readonly Move[], walkable: Walkable): Actions {
     return (voxels, x, y, z) => {
         const steps: Step[] = [];
         for (const move of moves) {
@@ -123,7 +113,7 @@ export function gridActions(moves: readonly Move[], walkable: Walkable): Actions
 
 /** euclidean distance — fast, slightly non-admissible with unit-cost diagonals
  *  (favours speed over strict optimality, matching the source sketch). */
-export const euclidean: Heuristic = (fromX, fromY, fromZ, toX, toY, toZ) =>
+const euclidean: Heuristic = (fromX, fromY, fromZ, toX, toY, toZ) =>
     Math.hypot(fromX - toX, fromY - toY, fromZ - toZ);
 
 // 12 land moves: 4 cardinals × {flat, step-up +1, step-down −1}. unit cost.
@@ -136,13 +126,10 @@ const LAND_OFFSETS: Vec3[] = [
 
 const LAND_MOVES: readonly Move[] = LAND_OFFSETS.map((offset) => ({ offset, cost: 1 }));
 
-/** ground-walking model: 12 land moves, land walkability (2-high default),
- *  euclidean heuristic. pass `walkable` to override the standing check
- *  (footprint, hazards, ...). pair with `groundShortcut` + `smoothPath` for
- *  natural paths, or just use `findGroundPath`. */
-export function landMovement(options?: { size?: Vec3; walkable?: Walkable }): MovementModel {
-    const walkable = options?.walkable ?? landWalkable(options?.size ?? [1, 2, 1]);
-    return { actions: gridActions(LAND_MOVES, walkable), heuristic: euclidean };
+/** the default land-agent successor: 12 land moves over land walkability. pass a
+ *  `walkable` to share one footprint check with `groundShortcut` (smoothing). */
+function landActions(walkable: Walkable = landWalkable()): Actions {
+    return gridActions(LAND_MOVES, walkable);
 }
 
 // ── A* ──────────────────────────────────────────────────────────────
@@ -156,48 +143,40 @@ type Node = {
     f: number;
 };
 
-// min-heap over nodes keyed by f. pure push/pop (no external mutation), so the
-// heap invariant always holds.
-class NodeHeap {
-    private nodes: Node[] = [];
+// min-heap of nodes keyed by f, as a plain array mutated only through `heapPush` /
+// `heapPop` — so the heap invariant always holds. read `.length` for the size.
+type NodeHeap = Node[];
 
-    get size(): number {
-        return this.nodes.length;
+function heapPush(heap: NodeHeap, node: Node): void {
+    heap.push(node);
+    let i = heap.length - 1;
+    while (i > 0) {
+        const parent = (i - 1) >> 1;
+        if (heap[parent]!.f <= heap[i]!.f) break;
+        [heap[parent], heap[i]] = [heap[i]!, heap[parent]!];
+        i = parent;
     }
+}
 
-    push(node: Node): void {
-        const nodes = this.nodes;
-        nodes.push(node);
-        let i = nodes.length - 1;
-        while (i > 0) {
-            const parent = (i - 1) >> 1;
-            if (nodes[parent]!.f <= nodes[i]!.f) break;
-            [nodes[parent], nodes[i]] = [nodes[i]!, nodes[parent]!];
-            i = parent;
+function heapPop(heap: NodeHeap): Node {
+    const top = heap[0]!;
+    const last = heap.pop()!;
+    if (heap.length > 0) {
+        heap[0] = last;
+        let i = 0;
+        const n = heap.length;
+        for (;;) {
+            const left = 2 * i + 1;
+            const right = 2 * i + 2;
+            let smallest = i;
+            if (left < n && heap[left]!.f < heap[smallest]!.f) smallest = left;
+            if (right < n && heap[right]!.f < heap[smallest]!.f) smallest = right;
+            if (smallest === i) break;
+            [heap[smallest], heap[i]] = [heap[i]!, heap[smallest]!];
+            i = smallest;
         }
     }
-
-    pop(): Node {
-        const nodes = this.nodes;
-        const top = nodes[0]!;
-        const last = nodes.pop()!;
-        if (nodes.length > 0) {
-            nodes[0] = last;
-            let i = 0;
-            const n = nodes.length;
-            for (;;) {
-                const left = 2 * i + 1;
-                const right = 2 * i + 2;
-                let smallest = i;
-                if (left < n && nodes[left]!.f < nodes[smallest]!.f) smallest = left;
-                if (right < n && nodes[right]!.f < nodes[smallest]!.f) smallest = right;
-                if (smallest === i) break;
-                [nodes[smallest], nodes[i]] = [nodes[i]!, nodes[smallest]!];
-                i = smallest;
-            }
-        }
-        return top;
-    }
+    return top;
 }
 
 const key = (x: number, y: number, z: number): string => `${x},${y},${z}`;
@@ -212,18 +191,21 @@ export type FindPathOptions = {
     maxIterations?: number;
     /** frontier scoring. default 'shortest'. */
     searchType?: SearchType;
+    /** distance estimate for A* (default euclidean). */
+    heuristic?: Heuristic;
 };
 
 /**
- * find a walkable path of voxel cells from `start` to `goal`, or null. raw —
- * no smoothing (apply `smoothPath` after, or use `findGroundPath`).
+ * find a path of cells from `start` to `goal` under the successor function
+ * `actions`, or null. raw — no smoothing (use `findGroundPath` for smoothed ground
+ * paths). heuristic defaults to euclidean (override via `options.heuristic`).
  *
  * uses lazy deletion: a cheaper route to an open cell pushes a fresh node and
  * stale duplicates are skipped on pop (closed check) — correct without
  * decrease-key bookkeeping.
  */
-export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, options?: FindPathOptions): Vec3[] | null {
-    const goalNode = search(voxels, start, goal, model, options);
+export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Vec3[] | null {
+    const goalNode = search(voxels, start, goal, actions, options);
     return goalNode ? reconstruct(goalNode) : null;
 }
 
@@ -231,41 +213,34 @@ export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, model: Movemen
  * batteries-included ground pathfinding for the common case: a default 1×2×1
  * land agent, A*, and swept-box shortcut smoothing. `options` forwards to the
  * underlying `findPath` — pass `maxIterations` to bound the search (essential for
- * AI repathing toward possibly-unreachable goals) or `searchType: 'greedy'`. it's
- * otherwise exactly —
+ * AI repathing toward possibly-unreachable goals) or `searchType: 'greedy'`.
  *
- * ```ts
- * const walkable = landWalkable();
- * const path = findPath(voxels, start, goal, landMovement({ walkable }), options);
- * return path && smoothPath(voxels, path, groundShortcut(walkable));
- * ```
- *
- * so for a different agent size, no smoothing, or fly/swim/ladder movement,
- * compose those inner APIs directly.
+ * for other movement (fly/swim/ladder, a different agent size), write a successor
+ * `Actions` function and call `findPath` directly.
  */
 export function findGroundPath(voxels: Voxels, start: Vec3, goal: Vec3, options?: FindPathOptions): Vec3[] | null {
     const walkable = landWalkable();
-    const path = findPath(voxels, start, goal, landMovement({ walkable }), options);
+    const path = findPath(voxels, start, goal, landActions(walkable), options);
     return path ? smoothPath(voxels, path, groundShortcut(walkable)) : null;
 }
 
-function search(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, options?: FindPathOptions): Node | null {
+function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Node | null {
     const [gx, gy, gz] = goal;
     const maxIterations = options?.maxIterations ?? Infinity;
     const greedy = options?.searchType === 'greedy';
-    const { actions, heuristic } = model;
+    const heuristic = options?.heuristic ?? euclidean;
 
-    const open = new NodeHeap();
+    const open: NodeHeap = [];
     const gScore = new Map<string, number>();
     const closed = new Set<string>();
 
     const h0 = heuristic(start[0], start[1], start[2], gx, gy, gz);
-    open.push({ x: start[0], y: start[1], z: start[2], parent: null, g: 0, f: h0 });
+    heapPush(open, { x: start[0], y: start[1], z: start[2], parent: null, g: 0, f: h0 });
     gScore.set(key(start[0], start[1], start[2]), 0);
 
     let iterations = 0;
-    while (open.size > 0) {
-        const current = open.pop();
+    while (open.length > 0) {
+        const current = heapPop(open);
         const ck = key(current.x, current.y, current.z);
         if (closed.has(ck)) continue; // stale duplicate from lazy deletion
 
@@ -284,7 +259,7 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, model: MovementModel, o
             gScore.set(nk, g);
 
             const h = heuristic(step.x, step.y, step.z, gx, gy, gz);
-            open.push({ x: step.x, y: step.y, z: step.z, parent: current, g, f: greedy ? h : g + h });
+            heapPush(open, { x: step.x, y: step.y, z: step.z, parent: current, g, f: greedy ? h : g + h });
         }
     }
 
@@ -307,7 +282,7 @@ function reconstruct(node: Node): Vec3[] {
  *  directly (per `shortcut`) from the last kept cell to the one after it.
  *  never shortcuts across an upward hop — a waypoint whose predecessor is
  *  lower (a +Y step) is preserved so the agent still jumps it. */
-export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Vec3[] {
+function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Vec3[] {
     if (path.length < 3) return path;
     const out: Vec3[] = [path[0]!];
     let prevIndex = 0;
@@ -327,7 +302,7 @@ export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Ve
 /** swept-box line-of-sight with gravity descent over a precomputed diagonal
  *  trace — the standard ground smoother. won't shortcut uphill. closes over the
  *  walkability test (use the same one the path was found with). */
-export function groundShortcut(walkable: Walkable): Shortcut {
+function groundShortcut(walkable: Walkable): Shortcut {
     return (voxels, from, to) => {
         if (from[1] < to[1]) return false; // no uphill shortcut
 
@@ -362,15 +337,15 @@ export function groundShortcut(walkable: Walkable): Shortcut {
 // path-reachable — handy for picking a provably-reachable target (e.g. NPC wander)
 // without a path query that can fail.
 
-/** breadth-first expansion of every cell reachable from `start` under a movement
- *  model's `actions`. `start` is included; order is roughly nearest-first. flood-fill
- *  is otherwise unbounded, so `maxCells` caps the expansion (raise for larger regions,
- *  lower to bound cost). */
-export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxCells: number): Vec3[] {
+/** breadth-first expansion of every cell reachable from `start` under the successor
+ *  `actions`. `start` is included; order is roughly nearest-first. flood-fill is
+ *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
+ *  `findPath` takes); the result includes the frontier discovered up to that bound. */
+export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[] {
     const queue: Vec3[] = [start];
     const seen = new Set<string>([key(start[0], start[1], start[2])]);
     let head = 0;
-    while (head < queue.length && queue.length < maxCells) {
+    while (head < queue.length && head < maxIterations) {
         const cell = queue[head++]!;
         for (const step of actions(voxels, cell[0], cell[1], cell[2])) {
             const k = key(step.x, step.y, step.z);
@@ -382,10 +357,10 @@ export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxCell
     return queue;
 }
 
-/** cells reachable on foot from `start` (the `landMovement` model) — the flood-fill
- *  companion to `findGroundPath`. `options` forwards to `landMovement`. */
-export function floodFillLand(voxels: Voxels, start: Vec3, maxCells: number, options?: { size?: Vec3; walkable?: Walkable }): Vec3[] {
-    return floodFill(voxels, start, landMovement(options).actions, maxCells);
+/** cells reachable on foot from `start` (default 1×2×1 land agent) — the flood-fill
+ *  companion to `findGroundPath`. */
+export function floodFillLand(voxels: Voxels, start: Vec3, maxIterations: number): Vec3[] {
+    return floodFill(voxels, start, landActions(), maxIterations);
 }
 
 // ── swept-box voxel trace (skishore/wave) ───────────────────────────

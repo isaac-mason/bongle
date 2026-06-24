@@ -6,8 +6,9 @@
  *   - `voxelNav` — grid A* over the voxel cells (see core/nav/voxel-nav).
  *   - `meshNav` — mesh-based navigation (future, separate top-level namespace).
  *
- * usage: `import { voxelNav } from 'bongle'` →
- * `voxelNav.findPath(voxels, start, goal, voxelNav.landMovement())`.
+ * usage: `import { voxelNav } from 'bongle'` → `voxelNav.findGroundPath(voxels,
+ * start, goal)` for ground agents, or `voxelNav.findPath(voxels, start, goal,
+ * actions)` with a custom successor function for other movement.
  */
 
 export * as voxelNav from '../core/nav/voxel-nav';

@@ -29,11 +29,13 @@ describe('voxelNav.floodFill', () => {
         }
     });
 
-    it('caps expansion at maxCells', () => {
-        // interior start expands to its 4 neighbours, then the cap stops it: 1 + 4 = 5.
+    it('caps work at maxIterations', () => {
+        // 5 expansions on a 10×10 grid: bounded, nowhere near flooding all 100 cells.
         const cells = voxelNav.floodFill(noVoxels, [5, 5, 0], gridActions(10), 5);
-        expect(cells).toHaveLength(5);
-        expect(cells.length).toBeLessThan(100); // did NOT flood the whole 10×10 grid
+        expect(cells.length).toBeGreaterThanOrEqual(5); // expanded cells + their frontier
+        expect(cells.length).toBeLessThan(100); // did NOT flood the whole grid
+        const uniq = new Set(cells.map((c) => `${c[0]},${c[1]},${c[2]}`));
+        expect(uniq.size).toBe(cells.length); // still no revisits
     });
 
     it('never revisits a cell', () => {
@@ -41,5 +43,21 @@ describe('voxelNav.floodFill', () => {
         const uniq = new Set(cells.map((c) => `${c[0]},${c[1]},${c[2]}`));
         expect(uniq.size).toBe(cells.length);
         expect(cells).toHaveLength(25); // full 5×5 grid, no duplicates
+    });
+});
+
+describe('voxelNav.findPath', () => {
+    it('finds a shortest path over a successor function', () => {
+        const path = voxelNav.findPath(noVoxels, [0, 0, 0], [4, 4, 0], gridActions(5));
+        expect(path).not.toBeNull();
+        expect(path![0]).toEqual([0, 0, 0]);
+        expect(path![path!.length - 1]).toEqual([4, 4, 0]);
+        expect(path).toHaveLength(9); // 8 steps on a 4-connected grid → 9 cells
+    });
+
+    it('returns null when the goal is unreachable', () => {
+        // goal off the grid: the successor never yields it, the open set drains → null.
+        const path = voxelNav.findPath(noVoxels, [0, 0, 0], [9, 9, 0], gridActions(5), { maxIterations: 100 });
+        expect(path).toBeNull();
     });
 });
