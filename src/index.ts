@@ -39,7 +39,6 @@ export * from './api/scenes';
 export * from './api/scripts';
 export * from './api/sounds';
 export * from './api/sprites';
-export * from './api/time';
 export * from './api/particles';
 export * from './api/audio';
 export { gameStorage, userStorage } from './api/storage';

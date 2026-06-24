@@ -1,7 +1,7 @@
 /**
  * per-room game clock. monotonic seconds, advanced by the engine's tick
  * loop — paused implicitly when no tick fires (tab hidden, paused engine,
- * etc.). read by scripts via `getTime(ctx)`; reaches into the room handle
+ * etc.). read by scripts via `ctx.clock.time`; reaches into the room handle
  * exposed on ClientContext / ServerContext.
  *
  * a tiny module rather than a free scalar on each room: gives the concept
@@ -23,11 +23,13 @@ export type Clock = {
      *  placing server-stamped events (e.g. a projectile's spawn time). also fixed
      *  cadence. use this (not `time`) for anything compared across the wire. */
     server: number;
-    /** smooth render time (seconds): advances every RENDER FRAME by the real frame
-     *  delta on the client, so per-frame visuals (spins, bobs, derived motion) are
-     *  smooth at any refresh rate rather than stepping at the 60Hz tick. on the
-     *  SERVER it just equals `time` (no render frames). local to each side — for
-     *  client-only visuals; not comparable across the wire. */
+    /** smooth render time (seconds): advances every RENDER FRAME by the REAL frame
+     *  delta — UNCLAMPED, unlike the integrator delta, so it never loses time to the
+     *  stall clamp and tracks true elapsed across hitches/backgrounding. per-frame
+     *  visuals (spins, bobs, derived motion) read it for smoothness at any refresh
+     *  rate, and it's the client's local base for `server`-clock sync (see ClockSync).
+     *  on the SERVER it just equals `time`. local to each side — not comparable across
+     *  the wire. */
     wall: number;
     /** client-side continuous-sync state for `server` (see ClockSync). unused on
      *  the server and on local rooms — there `server` just dead-reckons via `tick`. */

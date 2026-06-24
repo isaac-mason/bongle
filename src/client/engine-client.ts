@@ -479,12 +479,11 @@ function processInbox(state: EngineClient): void {
                     break;
 
                 case 'server_clock': {
-                    // a server-clock push — fold it into the room's estimate. recvTime
-                    // is on the same local-monotonic base we read `server` from
-                    // (performance.now), so the offset is render-behind by one-way latency.
-                    const recvTime = performance.now() / 1000;
+                    // a server-clock push — fold it into the room's estimate. recvTime is
+                    // the room's render clock (`wall`, advanced up front this frame): the
+                    // same base syncServer reads, so the offset is coherent and render-behind.
                     for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
-                        Clock.observeSample(room.clock, message.serverClock, recvTime);
+                        Clock.observeSample(room.clock, message.serverClock, room.clock.wall);
                     }
                     break;
                 }
@@ -1075,8 +1074,16 @@ export function clearScene(state: EngineClient, id: string): void {
 const MAX_DELTA_S = 0.2;
 
 export function update(state: EngineClient, delta: number) {
+    // one inbound dt, used two ways: clamped for integrators (physics/animation) so a
+    // stall can't produce a runaway step; raw for `wall` (the smooth render clock +
+    // server-clock sync), which must keep TRUE elapsed time and not lose it to the clamp.
+    const wallDelta = delta;
     if (delta > MAX_DELTA_S) delta = MAX_DELTA_S;
     Debug.begin(state.metrics, 'tick');
+
+    // advance each room's render clock up front (raw delta) so message receipt
+    // (processInbox) and the per-frame reads below share one coherent `now`.
+    for (const room of state.rooms.rooms.values()) Clock.advanceWall(room.clock, wallDelta);
 
     /* process inbox */
     processInbox(state);
@@ -1098,22 +1105,15 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
-    // local-monotonic base for clock-sync — performance.now is unaffected by the
-    // render-delta clamp / tick accumulator, so it's the stable reference both the
-    // ping RTT and the synced `server` value are measured against.
-    const nowMonotonic = performance.now() / 1000;
-
     // per-frame update — input polling, camera binding, etc. every room gets
     // a per-frame pass; inactive rooms continue advancing scripts/animations.
     for (const room of state.rooms.rooms.values()) {
-        // advance the smooth render clock by the real frame delta so per-frame
-        // visuals (onFrame) move smoothly between the 60Hz fixed ticks.
-        Clock.advanceWall(room.clock, delta);
-
         // slew `server` toward the latest server-clock push — before onFrame reads
         // it. no-op until the first push lands (and on local rooms, which get none),
         // where `server` rides the join seed via the fixed tick (see core/clock).
-        Clock.syncServer(room.clock, nowMonotonic, delta);
+        // `wall` (advanced up front this frame) is the local base: real elapsed,
+        // clamp-immune, and the same base processInbox stamped arrivals with.
+        Clock.syncServer(room.clock, room.clock.wall, delta);
 
         Debug.begin(room.clientMetrics, 'on-update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);

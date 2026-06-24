@@ -102,7 +102,7 @@ export type ClientRoom = {
     physics: Physics.Physics;
 
     /** per-room game clock (monotonic seconds). advanced by engine-client's
-     *  fixed-tick loop; pauses when no tick fires. read via `getTime(ctx)`. */
+     *  fixed-tick loop; pauses when no tick fires. read via `ctx.clock.time`. */
     clock: Clock.Clock;
 
     /** per-room client-side chat: command registry, line buffer, UI

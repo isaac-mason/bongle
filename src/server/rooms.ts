@@ -103,7 +103,7 @@ export type Room = {
     physics: Physics.Physics;
 
     /** per-room game clock (monotonic seconds). advanced once per server
-     *  tick; pauses when ticks don't fire. read via `getTime(ctx)`. */
+     *  tick; pauses when ticks don't fire. read via `ctx.clock.time`. */
     clock: Clock.Clock;
 
     /** per-room animation state — caches the [AnimatorTrait] query consumed by
