@@ -652,7 +652,7 @@ export function update(state: EngineServer, delta: number) {
         // their own locked to it (~10Hz; batched into the per-tick packet, so no extra
         // ws frame). clients render one-way latency behind it — see core/clock.
         if (room.tick % CLOCK_PUSH_INTERVAL_TICKS === 0) {
-            Net.broadcastToRoom(state.net, state.rooms, room, { type: 'server_clock', roomId: room.roomId, serverClock: room.clock.server });
+            Net.broadcastToRoom(state.net, state.rooms, room, { type: 'server_clock', roomId: room.id, serverClock: room.clock.server });
         }
 
         Debug.begin(room.metrics, 'nodes/update');
