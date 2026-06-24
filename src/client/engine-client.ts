@@ -478,6 +478,17 @@ function processInbox(state: EngineClient): void {
                     processJoinRoom(state, message);
                     break;
 
+                case 'server_clock': {
+                    // a server-clock push — fold it into the room's estimate. recvTime
+                    // is on the same local-monotonic base we read `server` from
+                    // (performance.now), so the offset is render-behind by one-way latency.
+                    const recvTime = performance.now() / 1000;
+                    for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
+                        Clock.observeSample(room.clock, message.serverClock, recvTime);
+                    }
+                    break;
+                }
+
                 case 'activate_room':
                     processActivateRoom(state, message);
                     break;
@@ -1087,12 +1098,23 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
+    // local-monotonic base for clock-sync — performance.now is unaffected by the
+    // render-delta clamp / tick accumulator, so it's the stable reference both the
+    // ping RTT and the synced `server` value are measured against.
+    const nowMonotonic = performance.now() / 1000;
+
     // per-frame update — input polling, camera binding, etc. every room gets
     // a per-frame pass; inactive rooms continue advancing scripts/animations.
     for (const room of state.rooms.rooms.values()) {
         // advance the smooth render clock by the real frame delta so per-frame
         // visuals (onFrame) move smoothly between the 60Hz fixed ticks.
         Clock.advanceWall(room.clock, delta);
+
+        // slew `server` toward the latest server-clock push — before onFrame reads
+        // it. no-op until the first push lands (and on local rooms, which get none),
+        // where `server` rides the join seed via the fixed tick (see core/clock).
+        Clock.syncServer(room.clock, nowMonotonic, delta);
+
         Debug.begin(room.clientMetrics, 'on-update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');

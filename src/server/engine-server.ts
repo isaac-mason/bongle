@@ -626,6 +626,11 @@ export function processInbox(state: EngineServer) {
     inbox.clear();
 }
 
+/** push each room's `server` clock to its clients every N ticks (~10Hz at 60Hz) —
+ *  plenty for tracking a slowly-drifting clock, cheap enough to ride the per-tick
+ *  packet. clients filter + slew onto it (see core/clock). */
+const CLOCK_PUSH_INTERVAL_TICKS = 6;
+
 export function update(state: EngineServer, delta: number) {
     Debug.begin(state.metrics, 'tick');
 
@@ -642,6 +647,13 @@ export function update(state: EngineServer, delta: number) {
         room.tick++;
         Clock.tick(room.clock, delta);
         Clock.advanceWall(room.clock, delta); // server has no render frames — wall tracks time
+
+        // push this room's authoritative `server` clock to its clients so they keep
+        // their own locked to it (~10Hz; batched into the per-tick packet, so no extra
+        // ws frame). clients render one-way latency behind it — see core/clock.
+        if (room.tick % CLOCK_PUSH_INTERVAL_TICKS === 0) {
+            Net.broadcastToRoom(state.net, state.rooms, room, { type: 'server_clock', roomId: room.roomId, serverClock: room.clock.server });
+        }
 
         Debug.begin(room.metrics, 'nodes/update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.metrics);

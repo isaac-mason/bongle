@@ -556,6 +556,21 @@ export const Pong = pack.object({
     type: pack.literal('pong'),
 });
 
+/** Server → client clock-sync push. The server stamps a room's authoritative
+ *  `server` clock and batches this into the per-tick packet it already sends, so
+ *  every arrival is a fresh sample the client slews its own `server` onto (one-way
+ *  latency behind — see core/clock ClockSync). Per-room: a server hosts many rooms,
+ *  each with its own clock, so the sample carries the `roomId` it belongs to. */
+export const ServerClock = pack.object({
+    type: pack.literal('server_clock'),
+    /** the room this `server` clock value belongs to. */
+    roomId: pack.string(),
+    /** the room's authoritative `server` clock (seconds) at send. */
+    serverClock: pack.float64(),
+});
+
+export type ServerClock = pack.SchemaType<typeof ServerClock>;
+
 /**
  * Server instructs client to join a room. Sent on initial join, scene
  * switch, play start, and play stop. The client tears down current state
@@ -830,6 +845,7 @@ export const DEBUG_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>([
 
 export const ServerMessage = pack.union('type', [
     Pong,
+    ServerClock,
     JoinRoom,
     ActivateRoom,
     RoomList,
