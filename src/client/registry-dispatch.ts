@@ -115,7 +115,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // for script-instance swaps reaching via DepGraph (when trait body
     // didn't change but a producer did). gated on env.editor so shipped
     // builds skip the store churn.
-    if (env.editor) pushHmrToasts(allStores, dirtyScriptIds);
+    if (env.editor) pushHmrToasts(allStores as readonly KindStore<unknown>[], dirtyScriptIds);
 
     // capture the OLD wire-index id lists before any branch drains. lazy
     // getters return cached arrays keyed on `revision`; once draining bumps

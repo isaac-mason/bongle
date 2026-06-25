@@ -840,6 +840,7 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     play: () => {},
     openScene: () => {},
     renameScene: () => {},
+    save: () => {},
     deleteScene: () => {},
     undo: () => {},
     redo: () => {},

@@ -54,7 +54,7 @@ export function createTestServer(opts: TestServerOptions = {}): TestServer {
         sceneId: 'test',
         kind: opts.mode ?? 'edit',
         rpc,
-        resources: Resources.init(async () => new Uint8Array(), 'server'),
+        resources: Resources.init({ loadBytes: async () => new Uint8Array() }, 'server'),
     });
 
     if (opts.scene) {

@@ -44,13 +44,13 @@ describe('kcc environmental mechanics', () => {
         });
         block('vines', {
             model: () => ({ type: 'cube', textures: { all: { texture: 'vines' } } }),
-            cull: CullType.TRANSPARENT,
+            cull: CullType.NONE,
             collision: false,
             climbable: true,
         });
         block('water', {
             model: () => ({ type: 'cube', textures: { all: { texture: 'water' } } }),
-            cull: CullType.TRANSPARENT,
+            cull: CullType.NONE,
             collision: false,
             liquid: { viscosity: 0.5 },
         });

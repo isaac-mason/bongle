@@ -17,7 +17,7 @@ import { addChild, deserializeNode } from '../../core/scene/nodes';
 import { loadVoxels } from '../../core/voxels/voxel-savefile';
 import { registry as engineRegistry } from '../../core/registry';
 import { beginSnapshotSession, endSnapshotSession } from '../snapshot';
-import { preloadAllModels, renderPopulatedRoom, SUBJECT_ICON_PX, tickPrefabsToFixpoint, waitFor } from '../subject';
+import { preloadAllModels, renderPopulatedRoom, SUBJECT_ICON_PX, tickPrefabsToFixpoint } from '../subject';
 
 export type SceneIconResult = {
     /** tightly-packed RGBA8 bytes, length = SUBJECT_ICON_PX² × 4. empty when

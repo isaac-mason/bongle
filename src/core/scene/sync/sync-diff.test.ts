@@ -16,7 +16,7 @@ const codec = {
     },
 } as never;
 const def = (rate: unknown, pack: (inst: never) => unknown) => ({ rate, pack, authority: 'server' }) as never;
-const syncState = (): TraitSyncState => ({ dirty: new Uint32Array(1), bytes: [], values: [] });
+const syncState = (): TraitSyncState => ({ dirty: new Uint32Array(1), bytes: [], values: [], versions: new Float64Array(1), traitVersion: 0 });
 
 describe('syncMetric', () => {
     it('distance is euclidean', () => {

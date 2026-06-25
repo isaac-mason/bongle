@@ -37,6 +37,7 @@ import { registry } from '../../src/core/registry';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
+import { createFallbackAvatarsDriver } from '../../src/server/avatars-fallback';
 
 // ── types ───────────────────────────────────────────────────────────
 
@@ -229,6 +230,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
         resourcesDir,
         driver: {
             storage: createInMemoryStorageDriver(),
+            avatars: createFallbackAvatarsDriver(),
         },
     });
     await EngineServerModule.load(server);
@@ -253,6 +255,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
 
             const clientState = EngineClientModule.init({
                 mode: 'play',
+                resourceLoader: { loadBytes: async () => new Uint8Array() },
                 driver: {
                     matchmake: () => {},
                     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },

@@ -116,7 +116,7 @@ describe('block hook observers (e2e)', () => {
             });
             const Gameplay = trait('gameplay', {}, { persist: false });
             script(Gameplay, 'session', (ctx) => {
-                onBlockStateChange(ctx, Lamp, onState);
+                onBlockStateChange(ctx, Lamp as never, onState);
                 onJoin(ctx, () => {});
             });
             addTrait(root, Gameplay);

@@ -815,7 +815,7 @@ export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirectio
 ): void {
     const runtime = ctx._runtime;
     if (!runtime) return;
-    Rpc.send(runtime.rpc, registry.commandWireIndex, handle, data, runtime.roomId, client);
+    Rpc.send(runtime.rpc, registry.commandWireIndex, handle, data as never, runtime.roomId, client);
 }
 
 export function broadcast(
