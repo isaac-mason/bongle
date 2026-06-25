@@ -1155,7 +1155,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  */
 export function pruneRemovedScript(def: ScriptDef): void {
     const traitDef = registry.traits.byId.get(def.traitId)?.payload;
-    if (!traitDef || !traitDef.scriptsById.delete(def.scriptId)) return;
+    if (!traitDef?.scriptsById.delete(def.scriptId)) return;
     const remaining = [...traitDef.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
     traitDef.scripts = remaining;
     remaining.forEach((reg, index) => {

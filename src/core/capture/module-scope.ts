@@ -284,7 +284,7 @@ export type ReloadDecision = 'initial' | 'patch' | 'invalidate';
 
 export function __decideReload(id: string): ReloadDecision {
     const pair = snapshots.get(normalizeModuleId(id));
-    if (!pair || !pair.previous) return 'initial';
+    if (!pair?.previous) return 'initial';
     return diffSnapshots(pair.previous, pair.current) ? 'patch' : 'invalidate';
 }
 

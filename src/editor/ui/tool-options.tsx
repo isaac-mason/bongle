@@ -642,7 +642,7 @@ function falloffPath(fn: (t: number) => number, w: number, h: number, samples = 
         const t = Math.abs(x01 * 2 - 1);
         const x = x01 * w;
         const y = h - fn(t) * h;
-        d += (i === 0 ? 'M' : 'L') + x.toFixed(2) + ',' + y.toFixed(2) + ' ';
+        d += `${(i === 0 ? 'M' : 'L') + x.toFixed(2)},${y.toFixed(2)} `;
     }
     return d.trim();
 }

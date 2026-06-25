@@ -119,8 +119,8 @@ type Target = { voxels: boolean; nodes: boolean };
 
 /** resolve target flags against the sticky selectTarget (positive wins on conflict). */
 function resolveTarget(flags: Record<string, boolean>, sticky: SelectTarget): Target {
-    const voxels = flags['voxels'] ? true : flags['no-voxels'] ? false : sticky !== 'nodes';
-    const nodes = flags['nodes'] ? true : flags['no-nodes'] ? false : sticky !== 'voxels';
+    const voxels = flags.voxels ? true : flags['no-voxels'] ? false : sticky !== 'nodes';
+    const nodes = flags.nodes ? true : flags['no-nodes'] ? false : sticky !== 'voxels';
     return { voxels, nodes };
 }
 
@@ -151,17 +151,17 @@ function compose(
     scratch: Selection.Selection,
     flags: Record<string, boolean>,
 ): Selection.Selection {
-    if (flags['add']) {
+    if (flags.add) {
         const next = Selection.clone(current);
         Selection.merge(next, scratch);
         return next;
     }
-    if (flags['sub']) {
+    if (flags.sub) {
         const next = Selection.clone(current);
         Selection.subtract(next, scratch);
         return next;
     }
-    if (flags['int']) {
+    if (flags.int) {
         const next = Selection.clone(current);
         Selection.intersect(next, scratch);
         return next;
@@ -460,7 +460,7 @@ export function installSelectionChatCommands(
         },
         ({ args, flags }) => {
             const n = Math.max(0, Math.floor((args.n as number | undefined) ?? 0));
-            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS['all']!;
+            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS.all!;
             const target = resolveTarget(flags, store.getState().selectTarget);
             const sel = store.getState().selection;
             if (Selection.isEmpty(sel)) {
@@ -485,7 +485,7 @@ export function installSelectionChatCommands(
         },
         ({ args, flags }) => {
             const n = Math.max(0, Math.floor((args.n as number | undefined) ?? 0));
-            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS['all']!;
+            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS.all!;
             const target = resolveTarget(flags, store.getState().selectTarget);
             const sel = store.getState().selection;
             if (Selection.isEmpty(sel)) {
@@ -513,7 +513,7 @@ export function installSelectionChatCommands(
                 emit('nothing to outset');
                 return;
             }
-            const next = grow(sel, n, DIR_TOKENS['all']!);
+            const next = grow(sel, n, DIR_TOKENS.all!);
             commitTransformed(next, target);
             emit(`outset by ${n}`);
         },
@@ -534,7 +534,7 @@ export function installSelectionChatCommands(
                 emit('nothing to inset');
                 return;
             }
-            const next = shrink(sel, n, DIR_TOKENS['all']!);
+            const next = shrink(sel, n, DIR_TOKENS.all!);
             commitTransformed(next, target);
             emit(`inset by ${n}`);
         },
@@ -555,7 +555,7 @@ export function installSelectionChatCommands(
             // shift uses a single direction; collapse multi-axis dirs (all/vert)
             // by summing their first component — practically callers will use a
             // single-axis token. error if user passed a multi-axis one.
-            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS['up']!;
+            const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS.up!;
             if (dirs.length !== 1) {
                 emit('shift requires a single-axis direction (use up/down/n/s/e/w)');
                 return;

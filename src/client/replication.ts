@@ -39,7 +39,7 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, 
     // per-instance snapshot.
     if (tracked.size > 0) {
         for (const node of tracked) {
-            if (!owned || !owned.has(node)) {
+            if (!owned?.has(node)) {
                 resetOwnerSnapshot(node);
                 tracked.delete(node);
             }

@@ -174,7 +174,7 @@ export function loadSceneRaw(state: ContentManager, sceneId: string): { data: Sc
     } catch {
         return null;
     }
-    if (!parsed || !parsed.nodes || !parsed.nodes.root) return null;
+    if (!parsed?.nodes?.root) return null;
     if (parsed.version !== SCENE_FILE_VERSION) {
         throw new Error(
             `[content-manager] scene "${sceneId}" has unknown version ${parsed.version} (expected ${SCENE_FILE_VERSION}) — refusing to load`,

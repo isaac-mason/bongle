@@ -203,7 +203,7 @@ export type ParseState = {
 /** does any registered command name start with `<head> `? compound lookup
  *  hits this when token 0 is the head of a subcommand family. */
 function hasCompoundHead(cmds: ChatCommands, head: string): boolean {
-    const prefix = head + ' ';
+    const prefix = `${head} `;
     for (const name of cmds.specs.keys()) {
         if (name.startsWith(prefix)) return true;
     }
@@ -266,7 +266,7 @@ export function parseLine(cmds: ChatCommands | null, input: string, cursor: numb
     let cmd: CommandSpec | null = null;
     let cmdTokenCount = 1;
     if (cmds && headName) {
-        const compoundName = tokens[1] && !tokens[1].isFlag ? headName + ' ' + tokens[1].value : null;
+        const compoundName = tokens[1] && !tokens[1].isFlag ? `${headName} ${tokens[1].value}` : null;
         if (compoundName && cmds.specs.has(compoundName)) {
             cmdName = compoundName;
             cmd = cmds.specs.get(compoundName)!;
@@ -358,7 +358,7 @@ export function suggestAt(cmds: ChatCommands | null, state: ParseState): Suggest
         // `text` is just the suffix — the chat UI replaces the current token
         // without a leading '/', so the result is `/select box`.
         const head = state.tokens[0]?.value ?? '';
-        const prefix = head + ' ';
+        const prefix = `${head} `;
         const partial = state.tokens[1]?.value ?? '';
         const subs = [...cmds.specs.values()].filter((c) => c.name.startsWith(prefix));
         return fuzzyRank(partial, subs, (c) => c.name.slice(prefix.length)).map(({ item: cmd }) => ({

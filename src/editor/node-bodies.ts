@@ -224,7 +224,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
         const existing = nodeToBody.get(nodeId);
 
         // ── steady state: cached local AABB + version short-circuit ──
-        if (existing && existing.localAabb) {
+        if (existing?.localAabb) {
             if (existing.lastVersion === transform._version) {
                 // rig root hasn't moved since last sync — body already in place.
                 continue;

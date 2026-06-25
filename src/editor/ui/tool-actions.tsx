@@ -146,7 +146,7 @@ export function ToolActions() {
                         label="transform"
                         icon={Icons.Move}
                         disabled={!hasSelectionOrHover}
-                        onClick={() => cutMove && cutMove()}
+                        onClick={() => cutMove?.()}
                         slashCmd="//cut"
                     />
                     <ActionBtn

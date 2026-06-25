@@ -117,7 +117,7 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Ar
     }
 
     // clear existing root traits + script instances (scripts re-instantiate from traits)
-    if (runtime && runtime.instances) {
+    if (runtime?.instances) {
         const rootInstances = runtime.instances.get(root.id);
         if (rootInstances) {
             for (const instance of rootInstances.values()) disposeScriptInstance(instance);

@@ -454,7 +454,7 @@ function SceneTile({
                     style={{
                         width: '100%',
                         height: '100%',
-                        backgroundImage: `url(${assetUrl('scenes/' + sceneId + '.icon.png')})`,
+                        backgroundImage: `url(${assetUrl(`scenes/${sceneId}.icon.png`)})`,
                         backgroundSize: 'contain',
                         backgroundRepeat: 'no-repeat',
                         backgroundPosition: 'center',

@@ -1806,12 +1806,7 @@ function moveShape(
             // contact as a wall this frame.
             if (_moveShape_sweepContact.aabbBodyId !== -1) {
                 const pushTarget = aabbWorld.bodies.get(_moveShape_sweepContact.aabbBodyId);
-                if (
-                    pushTarget &&
-                    pushTarget.pushable &&
-                    !pushTarget.sensor &&
-                    pushTarget.motionType === AabbPhysics.MotionType.DYNAMIC
-                ) {
+                if (pushTarget?.pushable && !pushTarget.sensor && pushTarget.motionType === AabbPhysics.MotionType.DYNAMIC) {
                     const vAn = _moveShape_velocity[0] * nX + _moveShape_velocity[1] * nY + _moveShape_velocity[2] * nZ;
                     const vBn =
                         pushTarget.linearVelocity[0] * nX + pushTarget.linearVelocity[1] * nY + pushTarget.linearVelocity[2] * nZ;

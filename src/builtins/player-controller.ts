@@ -1100,7 +1100,7 @@ script(
             // around after the POV moves elsewhere.
             if (getControlNode(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
-            if (!cc || !cc.input.noclip) return;
+            if (!cc?.input.noclip) return;
             const transform = getTrait(ctx.node, TransformTrait);
             if (!transform) return;
             tickPlayerNoclip(ctx.trait, cc, transform, ctx.physics, delta);

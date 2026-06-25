@@ -103,7 +103,7 @@ describe('door placement', () => {
         const w = runPlace(floorCtx(5, 0, 5, Math.PI), {
             '6,0,5': 'test:door[facing=north,half=lower,hinge=left,open=false]',
         });
-        expect(parseKey(w.get('5,0,5')!)!.props['hinge']).toBe('right');
+        expect(parseKey(w.get('5,0,5')!)!.props.hinge).toBe('right');
     });
 });
 
@@ -116,14 +116,14 @@ describe('door rotate / flip', () => {
 
     it('flip x: facing mirrors, hinge swaps left↔right (chiral)', () => {
         const p = parseKey(flipBlockKey('test:door[facing=east,half=lower,hinge=left,open=false]', 'x', registry))!.props;
-        expect(p['facing']).toBe('west');
-        expect(p['hinge']).toBe('right');
+        expect(p.facing).toBe('west');
+        expect(p.hinge).toBe('right');
     });
 
     it('flip y: half swaps lower↔upper, hinge unchanged', () => {
         const p = parseKey(flipBlockKey('test:door[facing=north,half=lower,hinge=left,open=false]', 'y', registry))!.props;
-        expect(p['half']).toBe('upper');
-        expect(p['hinge']).toBe('left');
+        expect(p.half).toBe('upper');
+        expect(p.hinge).toBe('left');
     });
 });
 

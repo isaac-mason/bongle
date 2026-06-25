@@ -276,7 +276,7 @@ function wakeSleepingNeighbors(world: World, body: Body): void {
                     const otherId = bucket[i]!;
                     if (otherId === body.id) continue;
                     const other = world.bodies.get(otherId);
-                    if (!other || !other._asleep) continue;
+                    if (!other?._asleep) continue;
                     if (other.motionType === MotionType.STATIC) continue;
                     markBodyActive(world, other);
                 }
@@ -1188,8 +1188,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         // gated by `minBounceVelocity`. for pushable dynamic AabbBodies we
         // split a mass-aware normal impulse so the obstacle wakes and picks
         // up momentum next tick.
-        const otherPushable =
-            bestOther !== null && bestOther.pushable && !bestOther.sensor && bestOther.motionType === MotionType.DYNAMIC;
+        const otherPushable = bestOther?.pushable && !bestOther.sensor && bestOther.motionType === MotionType.DYNAMIC;
 
         const vAn = body.linearVelocity[0] * bestNX + body.linearVelocity[1] * bestNY + body.linearVelocity[2] * bestNZ;
         const vBn = bestOther

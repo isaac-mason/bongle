@@ -283,7 +283,7 @@ function buildCloudCpu(): CloudCpuBuild {
         // pathological case: a shape's hash gated everything out. unlikely
         // with current params but cheap to handle — emit an empty range so
         // its slots draw nothing (instanceCount=0 in the indirect entry).
-        if (!mesh || !mesh.normals) {
+        if (!mesh?.normals) {
             shapes.push({
                 indexStart: indexOffset,
                 indexCount: 0,

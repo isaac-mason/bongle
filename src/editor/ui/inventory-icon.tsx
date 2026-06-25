@@ -53,7 +53,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
                     style={{
                         width: size,
                         height: size,
-                        backgroundImage: `url(${assetUrl('prefabs/' + item.prefabId + '.icon.png')})`,
+                        backgroundImage: `url(${assetUrl(`prefabs/${item.prefabId}.icon.png`)})`,
                         backgroundSize: `${size}px ${size}px`,
                         backgroundRepeat: 'no-repeat',
                         imageRendering: 'auto',
@@ -72,7 +72,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
                     style={{
                         width: size,
                         height: size,
-                        backgroundImage: `url(${assetUrl('scenes/' + item.sceneId + '.icon.png')})`,
+                        backgroundImage: `url(${assetUrl(`scenes/${item.sceneId}.icon.png`)})`,
                         backgroundSize: `${size}px ${size}px`,
                         backgroundRepeat: 'no-repeat',
                         imageRendering: 'auto',

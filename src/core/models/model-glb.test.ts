@@ -57,9 +57,9 @@ function makeRichGlb(): Uint8Array {
         0,
         1, // identity
         0,
-        0.7071,
+        Math.SQRT1_2,
         0,
-        0.7071, // 90° around Y
+        Math.SQRT1_2, // 90° around Y
     ]);
 
     // ── image: 4 bytes of fake PNG payload

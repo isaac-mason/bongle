@@ -188,7 +188,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
         if (img.bufferView !== undefined) {
             bytes = sliceBufferView(bufferViews, bin, img.bufferView).slice();
             mimeType = img.mimeType ?? 'image/png';
-        } else if (img.uri !== undefined && img.uri.startsWith('data:')) {
+        } else if (img.uri?.startsWith('data:')) {
             const decoded = decodeDataUri(img.uri);
             bytes = decoded.bytes;
             mimeType = img.mimeType ?? decoded.mimeType ?? 'image/png';

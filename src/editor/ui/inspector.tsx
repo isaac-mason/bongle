@@ -536,7 +536,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
                     style={{
                         width: thumbSize,
                         height: thumbSize,
-                        backgroundImage: `url(${assetUrl('prefabs/' + id + '.icon.png')})`,
+                        backgroundImage: `url(${assetUrl(`prefabs/${id}.icon.png`)})`,
                         backgroundSize: `${thumbSize}px ${thumbSize}px`,
                         backgroundRepeat: 'no-repeat',
                     }}
@@ -906,7 +906,7 @@ function AddPrefabAction({ node }: { node: Node }) {
                 style={{
                     width: thumbSize,
                     height: thumbSize,
-                    backgroundImage: `url(${assetUrl('prefabs/' + id + '.icon.png')})`,
+                    backgroundImage: `url(${assetUrl(`prefabs/${id}.icon.png`)})`,
                     backgroundSize: `${thumbSize}px ${thumbSize}px`,
                     backgroundRepeat: 'no-repeat',
                 }}

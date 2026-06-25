@@ -140,15 +140,15 @@ describe('stair chirality under flip', () => {
     it('inner_left + flip-x with facing=east: facing→west, shape→inner_right', () => {
         const flipped = flipBlockKey('test:stairs[facing=east,half=bottom,shape=inner_left]', 'x', registry);
         const parsed = parseKey(flipped)!;
-        expect(parsed.props['facing']).toBe('west');
-        expect(parsed.props['shape']).toBe('inner_right');
+        expect(parsed.props.facing).toBe('west');
+        expect(parsed.props.shape).toBe('inner_right');
     });
 
     it('inner_right + flip-z with facing=north: facing→south, shape→inner_left', () => {
         const flipped = flipBlockKey('test:stairs[facing=north,half=bottom,shape=inner_right]', 'z', registry);
         const parsed = parseKey(flipped)!;
-        expect(parsed.props['facing']).toBe('south');
-        expect(parsed.props['shape']).toBe('inner_left');
+        expect(parsed.props.facing).toBe('south');
+        expect(parsed.props.shape).toBe('inner_left');
     });
 
     it('outer_left + flip-x with facing=north: facing stays north, shape→outer_right', () => {
@@ -156,8 +156,8 @@ describe('stair chirality under flip', () => {
         // mirror still swaps left ↔ right.
         const flipped = flipBlockKey('test:stairs[facing=north,half=bottom,shape=outer_left]', 'x', registry);
         const parsed = parseKey(flipped)!;
-        expect(parsed.props['facing']).toBe('north');
-        expect(parsed.props['shape']).toBe('outer_right');
+        expect(parsed.props.facing).toBe('north');
+        expect(parsed.props.shape).toBe('outer_right');
     });
 });
 
@@ -226,9 +226,9 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
             }),
         );
         const parsed = parseKey(key)!;
-        expect(parsed.props['facing']).toBe('north');
-        expect(parsed.props['half']).toBe('bottom');
-        expect(parsed.props['shape']).toBe('straight');
+        expect(parsed.props.facing).toBe('north');
+        expect(parsed.props.half).toBe('bottom');
+        expect(parsed.props.shape).toBe('straight');
     });
 
     it('stairs wall click (east normal) → facing=east, half from hitY', () => {
@@ -242,8 +242,8 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
             }),
         );
         const parsed = parseKey(key)!;
-        expect(parsed.props['facing']).toBe('east');
-        expect(parsed.props['half']).toBe('top');
+        expect(parsed.props.facing).toBe('east');
+        expect(parsed.props.half).toBe('top');
     });
 
     it('trapdoor wall click → facing=normal, half from hitY, open=false', () => {
@@ -257,8 +257,8 @@ describe('place hooks (stairs / slab / trapdoor)', () => {
             }),
         );
         const parsed = parseKey(key)!;
-        expect(parsed.props['facing']).toBe('north');
-        expect(parsed.props['half']).toBe('bottom');
-        expect(parsed.props['open']).toBe('false');
+        expect(parsed.props.facing).toBe('north');
+        expect(parsed.props.half).toBe('bottom');
+        expect(parsed.props.open).toBe('false');
     });
 });

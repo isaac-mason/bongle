@@ -13,7 +13,7 @@
 // once and prints peak-used-before-OOM, which `bench` can't report.
 
 import { bench, describe } from 'vitest';
-import { createOffsetAllocator, type OAHandle, type OffsetAllocator, oaAllocate, oaFree } from './offset-allocator';
+import { createOffsetAllocator, type OAHandle, oaAllocate, oaFree } from './offset-allocator';
 import { arenaAlloc, arenaFree, createQuadArena, type QuadArena } from './voxel-resources';
 
 // ── workload ───────────────────────────────────────────────────────

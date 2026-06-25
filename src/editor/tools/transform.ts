@@ -1803,7 +1803,7 @@ export function isInPlacement(state: TransformToolState): boolean {
  */
 export function computeTransformHasVoxels(state: TransformToolState, nodes: Nodes): boolean {
     const store = state.store.getState();
-    if (state.placement && state.placement.blueprint.hasVoxels) return true;
+    if (state.placement?.blueprint.hasVoxels) return true;
     const room = useEditor.getState().room;
     if (!room) return false;
     for (const id of store.selection.nodes) {
@@ -2198,7 +2198,7 @@ const _grabRotRight: Vec3 = [1, 0, 0];
  */
 export function applyRotateDelta(state: TransformToolState, dx: number, dy: number, camera: PerspectiveCamera): void {
     const grab = state.grab;
-    if (!grab || !grab.rotating) return;
+    if (!grab?.rotating) return;
     if (dx === 0 && dy === 0) return;
 
     // yaw around world-Y

@@ -98,7 +98,7 @@ export function formatPerfDigest(tickMetrics: Debug.Metrics, roomMetrics: Debug.
                 .filter((x) => x.max >= MIN_MS)
                 .sort((a, b) => b.max - a.max)
                 .slice(0, TOP_SCRIPTS);
-            if (scripts.length) line += '  ' + scripts.map((x) => `·${x.name} ${ms(x.avg)}/${ms(x.max)}`).join(' ');
+            if (scripts.length) line += `  ${scripts.map((x) => `·${x.name} ${ms(x.avg)}/${ms(x.max)}`).join(' ')}`;
         }
         lines.push(line);
     }

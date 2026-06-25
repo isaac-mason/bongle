@@ -201,7 +201,7 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
         const cx = parseInt(parts[0]!, 10);
         const cy = parseInt(parts[1]!, 10);
         const cz = parseInt(parts[2]!, 10);
-        if (isNaN(cx) || isNaN(cy) || isNaN(cz)) continue;
+        if (Number.isNaN(cx) || Number.isNaN(cy) || Number.isNaN(cz)) continue;
 
         // decode blocks from base64+gzip
         const data = unpackChunkBytes(sc.blocks);

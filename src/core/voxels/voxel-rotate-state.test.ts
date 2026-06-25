@@ -129,7 +129,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         const block = singleBlock(rotated);
         const parsed = parseKey(block.key)!;
         expect(parsed.blockId).toBe('test:stairs');
-        expect(parsed.props['facing']).toBe('west');
+        expect(parsed.props.facing).toBe('west');
     });
 
     it('stair facing cycles N→W→S→E under repeated 90° Y CW', () => {
@@ -139,7 +139,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         for (let i = 0; i < 4; i++) {
             v = rotateVoxelsByQuat(v, quatY(90), v.registry);
             const parsed = parseKey(singleBlock(v).key)!;
-            expect(parsed.props['facing']).toBe(cycle[i + 1]);
+            expect(parsed.props.facing).toBe(cycle[i + 1]);
         }
     });
 
@@ -175,7 +175,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         for (let i = 0; i < 4; i++) {
             expect(found[i]!.wz).toBe(i);
             const parsed = parseKey(found[i]!.key)!;
-            expect(parsed.props['facing']).toBe('west');
+            expect(parsed.props.facing).toBe('west');
         }
     });
 

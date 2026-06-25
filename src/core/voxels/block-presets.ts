@@ -1316,7 +1316,7 @@ export function door(id: string, textures: { top: TextureRef; bottom: TextureRef
             const [rdx, rdz] = FACING_DELTA[rotateFacing4(facing, false)];
             const right = parseKey(io.get(x + rdx, y, z + rdz));
             const hinge: 'left' | 'right' =
-                right && right.blockId === handle.id && right.props['facing'] === facing ? 'right' : 'left';
+                right && right.blockId === handle.id && right.props.facing === facing ? 'right' : 'left';
             io.set(x, y, z, handle.stateKey({ facing, half: 'lower', hinge, open: false }));
             io.set(x, y + 1, z, handle.stateKey({ facing, half: 'upper', hinge, open: false }));
         },
