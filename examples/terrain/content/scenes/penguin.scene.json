@@ -3,13 +3,11 @@
   "nodes": {
     "root": {
       "realm": "shared",
-      "uuid": "fe383483-59e5-47d1-9732-1e6a62b152cc",
       "name": "Root",
       "traits": [],
       "children": [
         {
           "realm": "inherit",
-          "uuid": "30df358f-a481-4ba2-94ab-fdbda47968f2",
           "name": "Penguin",
           "traits": [
             {
@@ -37,7 +35,6 @@
           "children": [
             {
               "realm": "inherit",
-              "uuid": "0303c12f-8148-4e7a-b4d3-247d3ae0a5ed",
               "name": "Penguin Model",
               "traits": [],
               "children": [],

@@ -3,7 +3,6 @@
   "nodes": {
     "root": {
       "realm": "shared",
-      "uuid": "97527100-5015-4094-b419-ac211631efc5",
       "name": "Root",
       "traits": [],
       "children": []

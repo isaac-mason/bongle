@@ -3,7 +3,6 @@
   "nodes": {
     "root": {
       "realm": "shared",
-      "uuid": "00000000-0000-0000-0000-000000000001",
       "name": "Root",
       "traits": [
         {
@@ -13,7 +12,6 @@
       "children": [
         {
           "realm": "inherit",
-          "uuid": "9c8f137a-fef1-4303-9973-b3ab6ac3e3ba",
           "name": "Prefab house",
           "traits": [
             {
@@ -46,7 +44,6 @@
         },
         {
           "realm": "inherit",
-          "uuid": "cc437fb0-08d8-47b4-80b8-819edd9479dd",
           "name": "Prefabulous",
           "traits": [
             {
@@ -79,7 +76,6 @@
         },
         {
           "realm": "inherit",
-          "uuid": "1831986a-15b2-4cb9-8ca1-ab69dc811487",
           "name": "New Node",
           "traits": [
             {
