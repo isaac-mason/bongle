@@ -22,5 +22,5 @@
         "allowSyntheticDefaultImports": true
     },
     "include": ["./src", "./tst"],
-    "exclude": ["./dist", "**/*.bench.ts"]
+    "exclude": ["./dist", "**/*.bench.ts", "**/*-bench.ts"]
 }

@@ -119,7 +119,7 @@ function localIndex(x: number, y: number, z: number, dx: number, dz: number): nu
     return (y * dz + z) * dx + x;
 }
 
-function fillPresence(voxels: Voxels, boundsMin: Vec3, dx: number, dy: number, dz: number, out: Uint8Array): void {
+function fillPresence(voxels: Voxels, boundsMin: Vec3, dx: number, _dy: number, dz: number, out: Uint8Array): void {
     const bx0 = boundsMin[0];
     const by0 = boundsMin[1];
     const bz0 = boundsMin[2];

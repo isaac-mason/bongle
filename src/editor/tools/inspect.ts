@@ -27,7 +27,7 @@ import { isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../cli
 import { isInputFocused } from '../input';
 import * as Selector from '../selector';
 import { getBlock } from '../../core/voxels/voxels';
-import { getNodeById, getTrait, isAncestorOf } from '../../core/scene/nodes';
+import { getTrait, isAncestorOf } from '../../core/scene/nodes';
 import type { Node } from '../../core/scene/nodes';
 import { TransformTrait } from '../../builtins/transform';
 import { INSPECT_KEYS } from '../editor-controls';

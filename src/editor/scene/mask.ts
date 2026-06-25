@@ -139,18 +139,6 @@ export function suggestMask(
         else if (ch === ']' || ch === '}') depth--;
         else if (depth === 0 && (ch === ' ' || ch === ',')) tokenStart = i + 1;
     }
-    let tokenEnd = text.length;
-    let d = depth;
-    for (let i = cursor; i < text.length; i++) {
-        const ch = text[i]!;
-        if (ch === '[' || ch === '{') d++;
-        else if (ch === ']' || ch === '}') d--;
-        else if (d === 0 && (ch === ' ' || ch === ',')) {
-            tokenEnd = i;
-            break;
-        }
-    }
-
     // is this token the start of a component (preceded by space or BOL)?
     // OR-list items (preceded by `,`) only accept block ids — no `!`/`#`/`%`.
     const prevCh = tokenStart > 0 ? text[tokenStart - 1] : '';

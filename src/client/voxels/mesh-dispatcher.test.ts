@@ -14,7 +14,6 @@ import {
     disposeMeshDispatcher,
     enqueueMesh,
     isInFlight,
-    type MeshDispatcher,
     type MeshDispatcherResult,
     setMeshRegistry,
     type WorkerLike,

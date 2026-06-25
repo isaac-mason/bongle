@@ -134,9 +134,9 @@ function project(
 
 // project a free vector (rotation only, no translation). returns screen-space delta per unit.
 function projectVec(
-    a0: number, a1: number, a2: number,
-    a3: number, a4: number, a5: number,
-    a6: number, a7: number, a8: number,
+    a0: number, a1: number, _a2: number,
+    a3: number, a4: number, _a5: number,
+    a6: number, a7: number, _a8: number,
     vx: number, vy: number, vz: number,
     scale: number,
 ): [number, number] {

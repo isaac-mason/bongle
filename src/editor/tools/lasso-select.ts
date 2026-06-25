@@ -63,7 +63,7 @@ function pointInPolygon(pts: ReadonlyArray<readonly [number, number]>, x: number
 }
 
 // project world point to NDC. returns false when behind camera. fills _ndc.
-function projectWorldToNdc(camera: PerspectiveCamera, w: Vec3): boolean {
+function projectWorldToNdc(_camera: PerspectiveCamera, w: Vec3): boolean {
     // detect behind-camera via clip-space w before perspective divide
     const m = _vp;
     const clipW = m[3]! * w[0] + m[7]! * w[1] + m[11]! * w[2] + m[15]!;

@@ -5,7 +5,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aabbs } from './block-collider';
 import { box } from './block-model';
 import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_SELECTION } from './block-registry';
-import { CullType, MaterialType } from './blocks';
+import { CullType } from './blocks';
 import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
 import { createChunk, createVoxels, setChunkBlock } from './voxels';

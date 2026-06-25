@@ -48,7 +48,7 @@ export function dispose(state: PrefabVisuals): void {
 export function update(
     state: PrefabVisuals,
     sg: Nodes,
-    runtime: NodesContext,
+    _runtime: NodesContext,
     registry: BlockRegistry,
 ): void {
     if (sg.roomMode !== 'edit') return;

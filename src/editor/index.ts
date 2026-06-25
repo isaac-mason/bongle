@@ -46,7 +46,6 @@ import {
     setPrefab,
     setRealm,
 } from '../core/scene/nodes';
-import type { ScriptContext } from '../core/scene/scripts';
 import {
     isOwner,
     listen,

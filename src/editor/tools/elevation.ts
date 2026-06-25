@@ -37,7 +37,6 @@ import type {
     ElevationOptions,
 } from '../edit-room-store';
 import * as Selection from '../../core/scene/selection';
-import { buildShape } from '../scene/shapes';
 import type { VoxelOp } from '../blueprint';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
 import { samplePattern } from '../scene/pattern';

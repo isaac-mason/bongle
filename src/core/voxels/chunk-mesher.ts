@@ -407,36 +407,6 @@ const FACE_CORNER_EDGES = new Uint8Array([
     1, 2,  0, 2,  0, 3,  1, 3,
 ]);
 
-/** Per (face, corner) slab-stride deltas for the 3 AO/light neighbours of
- *  a face corner: `{s1 (edgeA), s2 (edgeB), diagonal (= s1 + s2)}`.
- *  Deltas are relative to the **face cell** (cell beyond the face plane
- *  for cube faces, or inset position for non-cube quads). Layout:
- *  `face * 12 + corner * 3 + {0,1,2}`. Derived at module load from
- *  `FACE_CORNER_EDGES` + `FACE_EDGE_OFFSETS` so there's one source of
- *  truth for edge-share semantics — the recipe path bakes these deltas
- *  directly into per-corner records so relight skips the
- *  `FACE_CORNER_EDGES` → `FACE_EDGE_OFFSETS` indirection. */
-const AO_OFFSETS = /* @__PURE__ */ (() => {
-    const t = new Int16Array(6 * 4 * 3);
-    for (let f = 0; f < 6; f++) {
-        for (let c = 0; c < 4; c++) {
-            const eA = FACE_CORNER_EDGES[f * 8 + c * 2]!;
-            const eB = FACE_CORNER_EDGES[f * 8 + c * 2 + 1]!;
-            const s1 = FACE_EDGE_OFFSETS[f * 4 + eA]!;
-            const s2 = FACE_EDGE_OFFSETS[f * 4 + eB]!;
-            t[f * 12 + c * 3]     = s1;
-            t[f * 12 + c * 3 + 1] = s2;
-            t[f * 12 + c * 3 + 2] = s1 + s2;
-        }
-    }
-    return t;
-})();
-
-/** compute vertex AO using the 0fps formula — returns 0-3 index */
-function vertexAO(side1: number, side2: number, corner: number): number {
-    if (side1 === 1 && side2 === 1) return 0;
-    return 3 - (side1 + side2 + corner);
-}
 
 // ── light packing for vertex attribute ──────────────────────────────
 //

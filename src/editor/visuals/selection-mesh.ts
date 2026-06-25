@@ -250,7 +250,7 @@ export function buildSelectionGeometry(sel: Selection.Selection): Geometry | nul
     const tight = Selection.bounds(sel);
     if (!tight) return null;
 
-    const { occ, wpr, rowStride, slabStride, minX, minY, minZ, SX, SY, SZ } = dense;
+    const { occ, rowStride, slabStride, minX, minY, minZ, SX, SY, SZ } = dense;
 
     // dense lookup probe — closed over the populated buffer. ~5 ns per
     // call vs ~440 ns for Selection.has; greedy mesher calls this 12×

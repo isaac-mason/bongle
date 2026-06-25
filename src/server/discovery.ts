@@ -892,7 +892,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
 
 /** diff a known node against current state and emit updates. updates knowledge in-place for sent fields. */
 function diffNodeKnowledge(
-    nodes: Nodes,
+    _nodes: Nodes,
     node: Node,
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],

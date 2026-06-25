@@ -22,7 +22,6 @@ import {
     destroyNode,
     hasTrait,
     loadSceneGraph,
-    removeTrait,
     setOwner,
     type Node,
     type Nodes,

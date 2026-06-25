@@ -160,7 +160,7 @@ export type EditorStore = {
     setNetSimRttMs: (ms: number) => void;
 };
 
-export const useEditor = create<EditorStore>((set, get) => ({
+export const useEditor = create<EditorStore>((set, _get) => ({
     /* ── initial state ── */
     mode: 'edit',
     roomMode: 'edit',

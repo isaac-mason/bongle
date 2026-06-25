@@ -26,7 +26,7 @@ import { type ClientRoom } from '../client/rooms';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import * as Actions from './actions';
-import { activeBlockKeyOf, type HotbarSlot } from './inventory';
+import { type HotbarSlot } from './inventory';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
 import { copySelectionToSystemClipboard } from './clipboard';

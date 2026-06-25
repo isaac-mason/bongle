@@ -329,7 +329,7 @@ function walkReplicable(
  * create a node from packed data and add it to the scene graph.
  * shared between unpackSceneGraph and applySceneSyncUpdate('node_created').
  */
-function applyNodeCreated(sg: Nodes, runtime: NodesContext, pn: PackedNode, traitWireIndex: WireIndex): void {
+function applyNodeCreated(sg: Nodes, _runtime: NodesContext, pn: PackedNode, traitWireIndex: WireIndex): void {
     const parent = getNodeById(sg, pn.parentId);
     if (!parent) return;
 

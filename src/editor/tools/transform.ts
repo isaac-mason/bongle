@@ -836,7 +836,7 @@ export function enterPlacement(
     isCut: boolean,
     cutReverseOps: VoxelOp[] | null,
     nodes: Nodes,
-    ctx: ScriptContext,
+    _ctx: ScriptContext,
 ): void {
     // bail if already in placement
     if (state.placement) return;
