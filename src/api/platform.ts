@@ -20,14 +20,14 @@ export const platform = {
      *  or is skipped (or immediately when there's no portal). */
     commercialBreak(ctx: ScriptContext): Promise<void> {
         const client = ctx.client;
-        if (!client) throw new Error('[bongle] platform.commercialBreak: client-only');
+        if (!client?.state) throw new Error('[bongle] platform.commercialBreak: client-only');
         return whileAdActive(client.state, () => client.state.driver.platform.commercialBreak());
     },
     /** Offer an opt-in rewarded ad. Resolves whether the reward was earned
      *  (false when there's no portal). */
     rewardedBreak(ctx: ScriptContext): Promise<boolean> {
         const client = ctx.client;
-        if (!client) throw new Error('[bongle] platform.rewardedBreak: client-only');
+        if (!client?.state) throw new Error('[bongle] platform.rewardedBreak: client-only');
         return whileAdActive(client.state, () => client.state.driver.platform.rewardedBreak());
     },
 };

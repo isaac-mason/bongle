@@ -13,7 +13,7 @@ import { env } from './env';
 /** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. */
 export function isTouchDevice(ctx: ScriptContext): boolean {
     if (!env.client) return false;
-    return ctx.client?.state.device.touch ?? false;
+    return ctx.client?.state?.device.touch ?? false;
 }
 
 const MOBILE_VIEWPORT_BREAKPOINT_PX = 768;

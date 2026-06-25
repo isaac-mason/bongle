@@ -394,6 +394,7 @@ export type CreateRoomOptions = {
         roomMode: RoomMode;
         namespace: string;
         packedNodes: Uint8Array;
+        serverClockTime: number;
     };
     net: Net.ClientNet;
     rpc: NodesContext['rpc'];
@@ -1045,9 +1046,9 @@ export function stopLocalRoom(state: EngineClient, roomId: string): void {
     // startLocalRoom so this room disappears from roomList too.
     const store = useEditor.getState();
     store.setRoomList(store.roomList.filter((r) => r.id !== room.roomId));
-    syncJoinedPlayers(state);
-    if (state.activePlayerId === room.playerId) {
-        state.activePlayerId = null;
+    syncJoinedPlayers(state.rooms);
+    if (state.rooms.activePlayerId === room.playerId) {
+        state.rooms.activePlayerId = null;
         useClient.getState().setActivePlayerId(null);
     }
 }

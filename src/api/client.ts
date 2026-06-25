@@ -17,7 +17,8 @@ export const client = {
             joinData?: Record<string, JsonValue>;
         },
     ): void {
-        if (!ctx.client) throw new Error('[bongle] client.matchmake: client-only');
-        ctx.client.state.driver.matchmake(opts);
+        const client = ctx.client;
+        if (!client?.state) throw new Error('[bongle] client.matchmake: client-only');
+        client.state.driver.matchmake(opts);
     },
 };
