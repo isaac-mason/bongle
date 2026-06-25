@@ -1,3 +1,4 @@
+import type { Vec3 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
 import * as nav from './voxel-nav';
 
@@ -76,7 +77,7 @@ describe('nav.findPath', () => {
 
 describe('nav.smoothPath', () => {
     // a flat path (no y-hops); shortcut stubbed (it ignores voxels here).
-    const flat: number[][] = [
+    const flat: Vec3[] = [
         [0, 0, 0],
         [1, 0, 0],
         [2, 0, 0],
@@ -97,7 +98,7 @@ describe('nav.smoothPath', () => {
     });
 
     it('returns paths shorter than 3 untouched', () => {
-        const two: number[][] = [
+        const two: Vec3[] = [
             [0, 0, 0],
             [1, 0, 0],
         ];
