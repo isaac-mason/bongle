@@ -1473,7 +1473,7 @@ export function deserializeNode(data: SerializedNode): Node {
     for (const st of data.traits) {
         const def = registry.traits.byId.get(st.id)?.payload;
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? `#${node.id}`}" — preserving raw data`);
+            console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone — _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
             node._unresolvedTraits.set(st.id, {
@@ -1491,7 +1491,7 @@ export function deserializeNode(data: SerializedNode): Node {
         instance._node = node;
         node._traits.set(def.slot, instance);
         bitset.add(node._bitset, def.slot);
-        refreshTraitIssues(node, def, instance, `node "${data.name ?? `#${node.id}`}"`);
+        refreshTraitIssues(node, def, instance, `node "${data.name ?? '(unnamed)'}"`);
     }
 
     for (let i = 0; i < data.children.length; i++) {
