@@ -159,9 +159,8 @@ export function loadScene(state: ContentManager, sceneId: string): ScenePayload 
 
 /**
  * load a scene and return the parsed payload plus the raw file bytes.
- * callers that need to dedupe future watcher events against the actual
- * on-disk content (rather than a re-serialized snapshot, which can drift)
- * seed `_lastWritten` with `raw`.
+ * callers seed `_lastWritten` with `raw` so the first flush after a load
+ * skips a redundant identical write (and its dev file-watcher echo).
  */
 export function loadSceneRaw(
     state: ContentManager,
@@ -191,11 +190,11 @@ export function loadSceneRaw(
 // ── save ────────────────────────────────────────────────────────────
 
 /**
- * seed the _lastWritten cache with the exact raw bytes currently on disk.
- * used after reloading from disk: subsequent watcher events read the file
- * and compare against this string to detect external edits — seeding with a
- * re-serialized snapshot would drift from the real file content and trigger
- * a watcher → reload loop on every fs event for the directory.
+ * seed the `_lastWritten` dedup cache with the exact raw bytes for a scene
+ * (typically just read off disk, or the payload we just applied to a handle).
+ * lets the first flush after a load/apply skip a redundant identical write —
+ * and the dev file-watcher echo that write would otherwise cause. seed with
+ * real bytes (not a re-serialized snapshot) so the comparison is exact.
  */
 export function seedLastWrittenRaw(state: ContentManager, sceneId: string, raw: string): void {
     state._lastWritten.set(sceneId, raw);
@@ -203,14 +202,13 @@ export function seedLastWrittenRaw(state: ContentManager, sceneId: string, raw: 
 
 /**
  * save a scene to disk.
- * stores the written content so the file watcher can distinguish
- * our writes from external edits.
  *
- * before writing, verifies the on-disk content matches what we last wrote.
- * if it has drifted, an external edit landed that we haven't processed yet
- * — bail and let the watcher's reload path pick it up. prevents the flush
- * cycle from clobbering an llm-applied edit that arrived between the edit
- * and the watcher event.
+ * the edit room is the single authoritative writer for its scene, so this just
+ * writes the room's state — it does not reconcile against the on-disk file.
+ * `_lastWritten` lets us skip an identical re-write (and the dev file-watcher
+ * echo it would trigger). external edits to a scene that a live edit room owns
+ * are intentionally overwritten by the room's next flush; agentic/external
+ * authoring will go through the editor action API, not the filesystem.
  */
 export function saveScene(state: ContentManager, sceneId: string, payload: ScenePayload): boolean {
     const filePath = scenePath(state, sceneId);
@@ -219,11 +217,6 @@ export function saveScene(state: ContentManager, sceneId: string, payload: Scene
     const content = JSON.stringify(file, null, 2);
     const prev = state._lastWritten.get(sceneId);
     if (content === prev) return false; // no change — skip disk write entirely
-
-    if (prev !== undefined && fs.existsSync(filePath)) {
-        const onDisk = fs.readFileSync(filePath, 'utf-8');
-        if (onDisk !== prev) return false; // external edit pending — let the watcher handle it
-    }
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     state._lastWritten.set(sceneId, content);

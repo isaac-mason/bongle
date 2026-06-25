@@ -329,10 +329,10 @@ export async function load(state: EngineServer) {
     // walk declared scenes and apply each handle's authored `_payload` (set
     // by the codegen barrel's `_registerScenePayload` at module-eval, drained
     // by `scene()`). `applyScenePayload` also seeds ContentManager's
-    // `_lastWritten` so subsequent file writes can dedupe their watcher
-    // events against the actual disk bytes. a handle with `_payload === null`
-    // is declared but has no file on disk yet — the codegen layer already
-    // warned at build time; handle stays empty.
+    // `_lastWritten` so a subsequent identical flush is skipped (no redundant
+    // write or dev-watcher echo). a handle with `_payload === null` is declared
+    // but has no file on disk yet — the codegen layer already warned at build
+    // time; handle stays empty.
     for (const [sceneId, h] of registry.scenes.byId) {
         const handle = h.payload;
         if (!handle._payload) continue;
@@ -367,8 +367,8 @@ export async function load(state: EngineServer) {
 
 /**
  * apply an authored scene payload: stamp it onto the handle's `_payload`,
- * seed `ContentManager._lastWritten` so the editor's own writes dedupe
- * against their own watcher events, then `populateScene`. invoked by:
+ * seed `ContentManager._lastWritten` so an identical flush is skipped (no
+ * redundant write or dev-watcher echo), then `populateScene`. invoked by:
  *   - `load()` at boot for every declared handle whose `_payload` was
  *     seeded by the codegen barrel.
  *   - the boot template's `bongle:scene-update` HMR listener for live
