@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import * as voxelNav from './voxel-nav';
+import * as nav from './voxel-nav';
 
 // floodFill only forwards `voxels` to `actions`, so the BFS can be exercised with a
 // stub Actions over a synthetic grid — no Voxels world needed.
-const noVoxels = null as unknown as Parameters<typeof voxelNav.floodFill>[0];
+const noVoxels = null as unknown as Parameters<typeof nav.floodFill>[0];
 
 // 4-connected open grid in the z-plane, bounded to [0, n)².
-const gridActions = (n: number): voxelNav.Actions => (_voxels, x, y, z) => {
-    const steps: voxelNav.Step[] = [];
+const gridActions = (n: number): nav.Actions => (_voxels, x, y, z) => {
+    const steps: nav.Step[] = [];
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nx = x + dx;
         const ny = y + dy;
@@ -19,9 +19,9 @@ const gridActions = (n: number): voxelNav.Actions => (_voxels, x, y, z) => {
 const has = (cells: readonly number[][], c: number[]): boolean =>
     cells.some((x) => x[0] === c[0] && x[1] === c[1] && x[2] === c[2]);
 
-describe('voxelNav.floodFill', () => {
+describe('nav.floodFill', () => {
     it('returns every reachable cell, with start first', () => {
-        const cells = voxelNav.floodFill(noVoxels, [1, 1, 0], gridActions(3), 100);
+        const cells = nav.floodFill(noVoxels, [1, 1, 0], gridActions(3), 100);
         expect(cells).toHaveLength(9); // full 3×3 grid
         expect(cells[0]).toEqual([1, 1, 0]); // start included, nearest-first
         for (const corner of [[0, 0, 0], [2, 0, 0], [0, 2, 0], [2, 2, 0]]) {
@@ -31,7 +31,7 @@ describe('voxelNav.floodFill', () => {
 
     it('caps work at maxIterations', () => {
         // 5 expansions on a 10×10 grid: bounded, nowhere near flooding all 100 cells.
-        const cells = voxelNav.floodFill(noVoxels, [5, 5, 0], gridActions(10), 5);
+        const cells = nav.floodFill(noVoxels, [5, 5, 0], gridActions(10), 5);
         expect(cells.length).toBeGreaterThanOrEqual(5); // expanded cells + their frontier
         expect(cells.length).toBeLessThan(100); // did NOT flood the whole grid
         const uniq = new Set(cells.map((c) => `${c[0]},${c[1]},${c[2]}`));
@@ -39,16 +39,16 @@ describe('voxelNav.floodFill', () => {
     });
 
     it('never revisits a cell', () => {
-        const cells = voxelNav.floodFill(noVoxels, [2, 2, 0], gridActions(5), 1000);
+        const cells = nav.floodFill(noVoxels, [2, 2, 0], gridActions(5), 1000);
         const uniq = new Set(cells.map((c) => `${c[0]},${c[1]},${c[2]}`));
         expect(uniq.size).toBe(cells.length);
         expect(cells).toHaveLength(25); // full 5×5 grid, no duplicates
     });
 });
 
-describe('voxelNav.findPath', () => {
+describe('nav.findPath', () => {
     it('finds a shortest path over a successor function', () => {
-        const path = voxelNav.findPath(noVoxels, [0, 0, 0], [4, 4, 0], gridActions(5));
+        const path = nav.findPath(noVoxels, [0, 0, 0], [4, 4, 0], gridActions(5));
         expect(path).not.toBeNull();
         expect(path![0]).toEqual([0, 0, 0]);
         expect(path![path!.length - 1]).toEqual([4, 4, 0]);
@@ -57,7 +57,7 @@ describe('voxelNav.findPath', () => {
 
     it('returns null when the goal is unreachable', () => {
         // goal off the grid: the successor never yields it, the open set drains → null.
-        const path = voxelNav.findPath(noVoxels, [0, 0, 0], [9, 9, 0], gridActions(5), { maxIterations: 100 });
+        const path = nav.findPath(noVoxels, [0, 0, 0], [9, 9, 0], gridActions(5), { maxIterations: 100 });
         expect(path).toBeNull();
     });
 });
