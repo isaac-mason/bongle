@@ -266,7 +266,7 @@ export function update(
     for (const [trait, _transform] of visuals._query) {
         const sprite = trait.sprite;
         if (!sprite) {
-            if (trait._state !== null) destroyInstance(visuals, trait);
+            if (trait._state !== null) destroyInstance(visuals, trait, resources, visibility);
             continue;
         }
 

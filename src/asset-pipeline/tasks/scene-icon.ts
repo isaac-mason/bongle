@@ -40,7 +40,6 @@ export async function runSceneIcon(state: State, id: string): Promise<SceneIconR
 
     const room = createRoom(state);
     await state.voxelResources.atlasReady;
-    await waitFor(() => room.modelVisuals.cullCompute !== null, 'cull computes');
     await preloadAllModels(state);
 
     const session = beginSnapshotSession(state.renderer.renderer, SUBJECT_ICON_PX);

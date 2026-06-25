@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
 import { activeBlockKeyOf } from '../inventory';
+import { parsePattern } from '../scene/pattern';
 import * as Selection from '../../core/scene/selection';
 
 type ActionEntry = {
@@ -31,13 +32,13 @@ export function VoxelActions() {
                 label: 'Fill',
                 kbd: 'F',
                 enabled: () => hasSelection && hasBlock,
-                run: () => fill(activeBlockKey),
+                run: () => fill(parsePattern(activeBlockKey)),
             },
             {
                 label: 'Replace',
                 kbd: 'G',
                 enabled: () => hasSelection && hasBlock,
-                run: () => replace(activeBlockKey),
+                run: () => replace(parsePattern(activeBlockKey)),
             },
             {
                 label: 'Delete',

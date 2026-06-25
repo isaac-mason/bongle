@@ -159,7 +159,7 @@ export async function renderPopulatedRoom(
     // populate world transforms + interpolated matrices for ModelVisuals.
     Interpolation.snapshot(room.interpolation);
     Transforms.computeWorldTransforms(room.nodes);
-    Interpolation.interpolate(room.interpolation, 1.0, null);
+    Interpolation.interpolate(room.interpolation, 1.0, 0);
 
     // force fully-lit voxels: no light propagation runs in the asset-pipeline,
     // so without this every stamped voxel renders pitch-black. 0xFFFF =
