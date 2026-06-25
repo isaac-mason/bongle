@@ -143,7 +143,6 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
             if (typeof (value as Record<string, unknown>).meshName !== 'string')
                 push(issues, [...path, 'meshName'], `expected string`);
             return;
-        case 'node':
         case 'prefab':
         case 'block':
             if (typeof value !== 'string')

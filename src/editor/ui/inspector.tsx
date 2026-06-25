@@ -3,8 +3,8 @@ import { type EulerOrder, euler, type Quat, quat } from 'mathcat';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
 import { IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
 import type { Node, Realm } from '../../core/scene/nodes';
-import { createPrefabConfig, filter as filterNodes, getNodeById } from '../../core/scene/nodes';
-import type { BlockRefSchema, NodeRefSchema, PrefabRefSchema, Schema } from '../../core/scene/prop/prop';
+import { createPrefabConfig, getNodeById } from '../../core/scene/nodes';
+import type { BlockRefSchema, PrefabRefSchema, Schema } from '../../core/scene/prop/prop';
 import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/prop';
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
@@ -518,27 +518,6 @@ function MeshEditor({
     );
 }
 
-function NodeRefEditor({ value, schema, onChange }: { value: string; schema: NodeRefSchema; onChange: (v: string) => void }) {
-    const room = useEditor((s) => s.room);
-    const sceneRevision = useEditRoom((s) => s.sceneRevision);
-    void sceneRevision;
-    if (!room) return null;
-    const nodes = filterNodes(room.nodes, schema.requires ?? []);
-    const items: SearchableSelectItem<string>[] = [
-        { id: '', label: 'none' },
-        ...nodes.filter((n) => n._uuid !== null).map((n) => ({ id: n._uuid!, label: n.name ?? `node ${n.id}` })),
-    ];
-    return (
-        <SearchableSelect<string>
-            items={items}
-            value={value}
-            onSelect={(id) => onChange(id)}
-            placeholder="search nodes…"
-            emptyLabel="none"
-        />
-    );
-}
-
 function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRefSchema; onChange: (v: string) => void }) {
     const room = useEditor((s) => s.room);
     if (!room) return null;
@@ -718,8 +697,6 @@ function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: un
             return <RecordEditor value={(value as Record<string, unknown>) ?? {}} schema={schema} onChange={onChange} />;
         case 'mesh':
             return <MeshEditor value={(value as { modelId: string; meshName: string } | null) ?? null} onChange={onChange} />;
-        case 'node':
-            return <NodeRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
         case 'prefab':
             return <PrefabRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
         case 'block':

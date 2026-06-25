@@ -10,7 +10,6 @@ import {
     deserializeNode,
     destroyNode,
     findAncestor,
-    getNodeByUUID,
     getTrait,
     isReplicable,
     loadSceneGraph,
@@ -459,42 +458,6 @@ describe('findAncestor', () => {
         expect(result).not.toBeNull();
         expect(result![0]._node).toBe(worldB);
         expect(result![0].gravity).toBe(-20);
-    });
-});
-
-/* ── getNodeByUuid ── */
-
-describe('getNodeByUuid', () => {
-    it('looks up a node by its uuid', () => {
-        const sg = setup();
-        const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
-
-        expect(node._uuid).not.toBeNull();
-        const found = getNodeByUUID(sg, node._uuid!);
-        expect(found).toBe(node);
-    });
-
-    it('returns undefined for unknown uuid', () => {
-        const sg = setup();
-        expect(getNodeByUUID(sg, 'nonexistent')).toBeUndefined();
-    });
-
-    it('removes uuid mapping when node is destroyed', () => {
-        const sg = setup();
-        const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
-        const uuid = node._uuid!;
-        expect(uuid).not.toBeNull();
-
-        destroyNode(sg, node);
-        expect(getNodeByUUID(sg, uuid)).toBeUndefined();
-    });
-
-    it('tracks root node uuid', () => {
-        const sg = setup();
-        const found = getNodeByUUID(sg, sg.root._uuid!);
-        expect(found).toBe(sg.root);
     });
 });
 

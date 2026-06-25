@@ -1,5 +1,3 @@
-import type { ConditionArgs } from '../nodes';
-
 export type BooleanSchema = {
     type: 'boolean';
 };
@@ -94,11 +92,6 @@ export type MeshSchema = {
     type: 'mesh';
 };
 
-export type NodeRefSchema = {
-    type: 'node';
-    requires?: ConditionArgs[];
-};
-
 export type PrefabRefSchema = {
     type: 'prefab';
 };
@@ -135,7 +128,6 @@ export type Schema =
     | OptionalSchema
     | NullishSchema
     | MeshSchema
-    | NodeRefSchema
     | PrefabRefSchema
     | BlockRefSchema;
 
@@ -213,7 +205,6 @@ export type SchemaType<S extends Schema, Depth extends keyof NextDepth = 15> =
     S extends OptionalSchema ? SchemaType<S['of'], DecrementDepth<Depth>> | undefined :
     S extends NullishSchema ? SchemaType<S['of'], DecrementDepth<Depth>> | null | undefined :
     S extends UnionSchema ? SchemaType<S['variants'][number], DecrementDepth<Depth>> :
-    S extends NodeRefSchema ? string :
     S extends PrefabRefSchema ? string :
     S extends BlockRefSchema ? string :
     never;
@@ -287,9 +278,6 @@ export const union = <K extends string, V extends ObjectSchema[]>(
 });
 
 export const mesh = (): MeshSchema => ({ type: 'mesh' });
-
-export const node = (opts?: { requires?: ConditionArgs[] }): NodeRefSchema =>
-    opts?.requires ? { type: 'node', requires: opts.requires } : { type: 'node' };
 
 export const prefab = (): PrefabRefSchema => ({ type: 'prefab' });
 

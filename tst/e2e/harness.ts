@@ -150,9 +150,6 @@ function captureOrRestoreBaseline(): void {
 
 const DEFAULT_DT = 1 / 60;
 
-/** stable uuid for the default scene root. matches what tests previously hardcoded. */
-const ROOT_UUID = '00000000-0000-0000-0000-000000000001';
-
 /**
  * create a test harness. flow:
  *   - sets env flags for module-eval (server context)
@@ -193,7 +190,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
     env.editor = false;
 
     // ── 2. build root node + run user setup ─────────────────────
-    const root = Nodes.createNode({ name: 'Root', uuid: ROOT_UUID });
+    const root = Nodes.createNode({ name: 'Root' });
     const data = await setup(root);
 
     // ── 3. serialize root tree to disk for the real loader ──────

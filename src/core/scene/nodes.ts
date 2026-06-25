@@ -34,14 +34,6 @@ export type Node = {
     /** runtime-only numeric ID, assigned by the scene graph's incrementing counter. not persisted. */
     id: number;
 
-    /**
-     * persistent UUID, stored in scene files for cross-references.
-     * null until needed. assigned at attach time for persist:true nodes in edit-mode
-     * scene graphs (or explicitly set when deserializing from disk).
-     * non-persistent / play-mode nodes never get one — they're identified by runtime id.
-     */
-    _uuid: string | null;
-
     /** optional name — a non-unique label. */
     name: string | undefined;
 
@@ -124,7 +116,7 @@ export type Node = {
     _prefabState: PrefabState | null;
 };
 
-/* uuid */
+/* uuid — retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
 
 export function generateUuid(): string {
     // use crypto.randomUUID if available (modern browsers + Node 19+),
@@ -140,10 +132,9 @@ export function generateUuid(): string {
     });
 }
 
-function createNodeObject(name?: string, id?: number, uuid?: string, persist?: boolean, realm?: Realm): Node {
+function createNodeObject(name?: string, id?: number, persist?: boolean, realm?: Realm): Node {
     return {
         id: id ?? 0,
-        _uuid: uuid ?? null,
         name: name ?? undefined,
         parent: null,
         children: [],
@@ -240,9 +231,6 @@ export type Nodes = {
     /** node ID → node */
     _idToNode: Map<number, Node>;
 
-    /** node UUID → node */
-    _uuidToNode: Map<string, Node>;
-
     /**
      * playerId → live nodes whose `owner === playerId`. maintained by
      * `setOwner` plus the detach paths (`destroyNode` / `unregisterSubtree`).
@@ -338,7 +326,6 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
         _nextNodeId: 1,
         _nextClientNodeId: -1,
         _idToNode: new Map(),
-        _uuidToNode: new Map(),
         playerIdToOwnedNodes: new Map(),
         _versions: { counter: 0 },
         _prefabNodes: new Set(),
@@ -349,14 +336,12 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
     };
 
     // create root node — always present, cannot be destroyed.
-    // root always gets a uuid up front (it's persisted in every scene file).
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
-    const root = createNodeObject('Root', undefined, generateUuid(), undefined, 'shared');
+    const root = createNodeObject('Root', undefined, undefined, 'shared');
     root.id = sg._nextNodeId++;
     root.scene = sg;
     sg.nodes.add(root);
     sg._idToNode.set(root.id, root);
-    sg._uuidToNode.set(root._uuid!, root);
     sg.root = root;
 
     return sg;
@@ -368,8 +353,6 @@ export type CreateNodeOptions = {
     name?: string;
     /** provide a runtime numeric ID (e.g. when unpacking from network). auto-assigned if omitted. */
     id?: number;
-    /** provide a persistent UUID (e.g. when deserializing). auto-generated if omitted. */
-    uuid?: string;
     /** whether this node is saved to scene files. default: true. */
     persist?: boolean;
     /**
@@ -392,7 +375,7 @@ export type CreateNodeOptions = {
  * `'shared'`) to override.
  */
 export function createNode(options?: CreateNodeOptions): Node {
-    return createNodeObject(options?.name, options?.id, options?.uuid, options?.persist, options?.realm);
+    return createNodeObject(options?.name, options?.id, options?.persist, options?.realm);
 }
 
 /**
@@ -400,13 +383,6 @@ export function createNode(options?: CreateNodeOptions): Node {
  */
 export function getNodeById(sg: Nodes, id: number): Node | undefined {
     return sg._idToNode.get(id);
-}
-
-/**
- * look up a node by its persistent UUID. returns undefined if not found.
- */
-export function getNodeByUUID(sg: Nodes, uuid: string): Node | undefined {
-    return sg._uuidToNode.get(uuid);
 }
 
 /**
@@ -456,11 +432,11 @@ export function setOwner(sg: Nodes, node: Node, owner: PlayerId | null): void {
 export function setRealm(node: Node, realm: Realm): void {
     if (node.realm === realm) return;
     node.realm = realm;
-    const sg = node.scene;
-    if (!sg) return;
+    const scene = node.scene;
+    if (!scene) return;
     const subtree: Node[] = [];
     collectSubtree(node, subtree);
-    for (const n of subtree) bumpNodeVersion(sg, n);
+    for (const n of subtree) bumpNodeVersion(scene, n);
 }
 
 /**
@@ -550,7 +526,6 @@ export function destroyNode(nodes: Nodes, node: Node): void {
     setOwner(nodes, node, null);
     nodes.nodes.delete(node);
     nodes._idToNode.delete(node.id);
-    if (node._uuid) nodes._uuidToNode.delete(node._uuid);
     nodes._prefabNodes.delete(node);
     nodes._prefabsDirty.delete(node);
     const t = getTrait(node, TransformTrait);
@@ -649,13 +624,13 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
         updateChildTransformPointers(node, t);
     }
 
-    const nodes = node.scene;
+    const scene = node.scene;
 
-    if (nodes) {
-        bumpNodeVersion(nodes, node);
-        reindex(nodes, node);
-        if (nodes.runtime) {
-            const created = instantiateTraitScripts(nodes.runtime, node, instance, handle._def);
+    if (scene) {
+        bumpNodeVersion(scene, node);
+        reindex(scene, node);
+        if (scene.runtime) {
+            const created = instantiateTraitScripts(scene.runtime, node, instance, handle._def);
             for (const i of created) initScriptInstance(i);
             if (node.parent) {
                 for (const i of created) {
@@ -738,14 +713,14 @@ function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase)
 }
 
 export function removeTrait(node: Node, handle: TraitHandle): void {
-    const sg = node.scene;
+    const scene = node.scene;
     const traitSlot = handle._slot;
     if (traitSlot === undefined) return;
 
     if (bitset.has(node._bitset, traitSlot)) {
         // dispose scripts before clearing trait state — onExit fires while
         // the trait value is still resolvable.
-        if (sg?.runtime) disposeTraitScripts(sg.runtime, node, handle._def);
+        if (scene?.runtime) disposeTraitScripts(scene.runtime, node, handle._def);
 
         // maintain parent transform pointers — children that pointed to this
         // transform now inherit this transform's own parent
@@ -757,10 +732,10 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
 
         // update bitset so queries see the node as no longer matching
         bitset.remove(node._bitset, traitSlot);
-        if (sg) {
-            bumpNodeVersion(sg, node);
+        if (scene) {
+            bumpNodeVersion(scene, node);
             // reindex this node — callbacks fire while trait value still in _traits
-            reindex(sg, node);
+            reindex(scene, node);
         }
         // now safe to delete the value
         node._traits.delete(traitSlot);
@@ -784,12 +759,12 @@ export function hasTrait(node: Node, handle: TraitHandle): boolean {
  * and other engine code that works with numeric indices directly.
  */
 export function removeTraitBySlot(node: Node, traitSlot: number): void {
-    const nodes = node.scene;
+    const scene = node.scene;
 
     if (bitset.has(node._bitset, traitSlot)) {
-        if (nodes?.runtime) {
+        if (scene?.runtime) {
             const def = registry.traitsBySlot.get(traitSlot);
-            if (def) disposeTraitScripts(nodes.runtime, node, def);
+            if (def) disposeTraitScripts(scene.runtime, node, def);
         }
 
         // maintain parent transform pointers
@@ -797,16 +772,16 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
             const t = getTrait(node, TransformTrait)!;
             const ancestor = t._parent ?? null;
             updateChildTransformPointers(node, ancestor);
-            if (nodes) {
-                nodes._transformDirty.delete(t);
-                nodes._interpolating.delete(t);
+            if (scene) {
+                scene._transformDirty.delete(t);
+                scene._interpolating.delete(t);
             }
         }
 
         bitset.remove(node._bitset, traitSlot);
-        if (nodes) {
-            bumpNodeVersion(nodes, node);
-            reindex(nodes, node);
+        if (scene) {
+            bumpNodeVersion(scene, node);
+            reindex(scene, node);
         }
         node._traits.delete(traitSlot);
     }
@@ -821,7 +796,7 @@ export function addTraitBySlot(
     traitSlot: number,
     props?: Record<string, unknown>,
 ): TraitBase | null {
-    const nodes = node.scene;
+    const scene = node.scene;
 
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return null;
@@ -843,13 +818,13 @@ export function addTraitBySlot(
         updateChildTransformPointers(node, t);
     }
 
-    if (nodes) {
-        bumpNodeVersion(nodes, node);
-        reindex(nodes, node);
+    if (scene) {
+        bumpNodeVersion(scene, node);
+        reindex(scene, node);
     }
 
-    if (nodes?.runtime) {
-        const created = instantiateTraitScripts(nodes.runtime, node, instance, def);
+    if (scene?.runtime) {
+        const created = instantiateTraitScripts(scene.runtime, node, instance, def);
         for (const i of created) initScriptInstance(i);
         if (node.parent) {
             for (const i of created) {
@@ -913,7 +888,7 @@ export function hasNodeIssues(node: Node): boolean {
 
 /**
  * recompute and store issues for a trait, logging a console warning per
- * issue. label is prepended to the warning (e.g. node uuid or scene path)
+ * issue. label is prepended to the warning (e.g. node name or scene path)
  * so the source of the bad data is identifiable in mixed logs.
  */
 export function refreshTraitIssues(node: Node, def: TraitDef, instance: TraitBase, label?: string): Issue[] {
@@ -1038,12 +1013,12 @@ export function reparent(node: Node, newParent: Node): void {
         throw new Error(`cannot reparent to a detached parent`);
     }
 
-    const sg = newParent.scene;
+    const scene = newParent.scene;
     const oldParent = node.parent;
 
     // fire onExit before detaching — old parent is still set
-    if (oldParent && node.scene !== null && sg.runtime) {
-        fireExitHooks(sg.runtime, node, oldParent);
+    if (oldParent && node.scene !== null && scene.runtime) {
+        fireExitHooks(scene.runtime, node, oldParent);
     }
 
     if (node.parent) {
@@ -1054,16 +1029,16 @@ export function reparent(node: Node, newParent: Node): void {
 
     // if node was detached, register it now (also fires onInit + onEnter + marks dirty)
     if (node.scene === null) {
-        registerSubtree(sg, node);
+        registerSubtree(scene, node);
     } else {
         // already in-tree reparent: fire onEnter with the new parent.
-        if (sg.runtime) fireEnterHooks(sg.runtime, node, newParent);
+        if (scene.runtime) fireEnterHooks(scene.runtime, node, newParent);
         // mark the whole moved subtree for discovery: reparenting can flip
         // effective relevance (e.g. moving under a non-shared parent), and
         // descendants inherit it — the per-client fan-out must re-evaluate them.
         const moved: Node[] = [];
         collectSubtree(node, moved);
-        for (const n of moved) bumpNodeVersion(sg, n);
+        for (const n of moved) bumpNodeVersion(scene, n);
     }
 
     // update parent transform pointers for the moved subtree
@@ -1096,11 +1071,11 @@ export function replaceChildren(root: Node, node: Node): void {
     if (node.parent !== root) {
         throw new Error('replaceChildren: node must be a direct child of root');
     }
-    const sg = root.scene;
+    const scene = root.scene;
     for (const child of root.children.slice()) {
         if (child === node) continue;
-        if (sg) {
-            destroyNode(sg, child);
+        if (scene) {
+            destroyNode(scene, child);
         } else {
             // detached — just unlink
             child.parent = null;
@@ -1173,26 +1148,6 @@ function registerSubtree(sg: Nodes, node: Node): void {
         }
         sg._idToNode.set(n.id, n);
 
-        // lazy uuid: only persist:true edit-mode nodes get one. play-mode rooms
-        // and non-persistent nodes (client-locals, prefab children, etc.) skip
-        // both generation and indexing.
-        if (!n._uuid && n.persist && sg.mode === 'edit') {
-            let uuid = generateUuid();
-            while (sg._uuidToNode.has(uuid)) uuid = generateUuid();
-            n._uuid = uuid;
-        }
-        if (n._uuid) {
-            // collision (e.g. cached prefab subtree re-instantiated, or load
-            // restoring a uuid that's already in flight): regenerate so the
-            // index stays unique. only matters in edit-mode persist subtrees.
-            if (n.persist && sg.mode === 'edit') {
-                while (sg._uuidToNode.has(n._uuid) && sg._uuidToNode.get(n._uuid) !== n) {
-                    n._uuid = generateUuid();
-                }
-            }
-            sg._uuidToNode.set(n._uuid, n);
-        }
-
         for (const q of sg.queries.values()) {
             if (nodeMatchesQuery(n, q) && !q.nodeToIndex.has(n)) {
                 addNodeToQuery(q, n);
@@ -1262,7 +1217,6 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
     setOwner(sg, node, null);
     sg.nodes.delete(node);
     sg._idToNode.delete(node.id);
-    if (node._uuid) sg._uuidToNode.delete(node._uuid);
     sg._prefabNodes.delete(node);
     sg._prefabsDirty.delete(node);
     // a node leaving the live graph is a destroy for the discovery fan-out —
@@ -1410,8 +1364,6 @@ export type SerializedTrait = {
 
 export type SerializedNode = {
     realm: Realm;
-    /** persistent uuid. omitted on nodes that never received one (non-persist or play-mode). */
-    uuid?: string;
     name: string | undefined;
     traits: SerializedTrait[];
     children: SerializedNode[];
@@ -1489,7 +1441,6 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
 
     return {
         realm: node.realm,
-        uuid: node._uuid ?? undefined,
         name: node.name,
         persist: node.persist === false ? false : undefined,
         traits: serializedTraits,
@@ -1511,7 +1462,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
  * - if a trait id is not registered, it is stashed as unresolved (preserving json data).
  */
 export function deserializeNode(data: SerializedNode): Node {
-    const node = createNodeObject(data.name, 0, data.uuid, data.persist !== false);
+    const node = createNodeObject(data.name, 0, data.persist !== false);
 
     // clone — node.prefab.args is mutable and the source data is often a cached
     // resource (prefab scene cache, scene file cache) shared across instantiations.
@@ -1522,7 +1473,7 @@ export function deserializeNode(data: SerializedNode): Node {
     for (const st of data.traits) {
         const def = registry.traits.byId.get(st.id)?.payload;
         if (!def) {
-            console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? data.uuid}" — preserving raw data`);
+            console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? `#${node.id}`}" — preserving raw data`);
             // clone — _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
             node._unresolvedTraits.set(st.id, {
@@ -1540,7 +1491,7 @@ export function deserializeNode(data: SerializedNode): Node {
         instance._node = node;
         node._traits.set(def.slot, instance);
         bitset.add(node._bitset, def.slot);
-        refreshTraitIssues(node, def, instance, `node "${data.name ?? data.uuid}"`);
+        refreshTraitIssues(node, def, instance, `node "${data.name ?? `#${node.id}`}"`);
     }
 
     for (let i = 0; i < data.children.length; i++) {
@@ -1559,10 +1510,6 @@ export function deserializeNode(data: SerializedNode): Node {
  *
  * source node may be detached.
  *
- * uuids are dropped on the clone — attach time decides whether a fresh uuid is
- * needed (only persist:true edit-mode subtrees get one). this means the common
- * case (clone → attach as persist:false) does zero uuid work.
- *
  * controls (editor + persisted state) are deep-copied via per-control packcat
  * codecs (`getControlCodecs`). runtime-only fields reset to defaults on the
  * clone — systems re-derive them on first tick (e.g. RigidBodyTrait.body
@@ -1573,7 +1520,7 @@ export function deserializeNode(data: SerializedNode): Node {
  * realm on the clone can assign `clone.realm = ...` before `addChild`.
  */
 export function cloneNode(source: Node): Node {
-    const clone = createNodeObject(source.name, 0, undefined, source.persist, source.realm);
+    const clone = createNodeObject(source.name, 0, source.persist, source.realm);
     clone.prefab = source.prefab;
 
     for (const [traitSlot, sourceInstance] of source._traits) {
@@ -1668,7 +1615,7 @@ export function saveSceneGraph(sg: Nodes): SerializedSceneGraph {
 /**
  * load a scene graph from serialized JSON data (from disk).
  * clears existing children of root and replaces them with the loaded scene.
- * root traits, scripts, uuid, and name are restored from the saved data.
+ * root traits, scripts, and name are restored from the saved data.
  *
  * if sg.runtime is set, script instances are created and initialized as nodes
  * are added. set sg.runtime before calling this function if you want live scripts.
@@ -1697,13 +1644,6 @@ export function loadSceneGraph(sg: Nodes, data: SerializedSceneGraph): void {
     root._bitset = bitset.init();
     root._unresolvedTraits.clear();
     root._traitIssues.clear();
-
-    // restore root uuid
-    if (rootData.uuid) {
-        if (root._uuid) sg._uuidToNode.delete(root._uuid);
-        root._uuid = rootData.uuid;
-        sg._uuidToNode.set(root._uuid, root);
-    }
 
     // restore root name
     root.name = rootData.name;
@@ -2111,42 +2051,25 @@ export type PrefabState = {
 export function setPrefab(node: Node, config: PrefabConfig | null): void {
     node.prefab = config;
     node._prefabState = null;
-    const sg = node.scene;
-    if (!sg) return;
+    const scene = node.scene;
+    if (!scene) return;
     if (config) {
-        sg._prefabNodes.add(node);
-        sg._prefabsDirty.add(node);
+        scene._prefabNodes.add(node);
+        scene._prefabsDirty.add(node);
     } else {
-        sg._prefabNodes.delete(node);
-        sg._prefabsDirty.delete(node);
+        scene._prefabNodes.delete(node);
+        scene._prefabsDirty.delete(node);
     }
 }
 
 /**
- * flip a live node's `persist` flag and keep the uuid index in sync.
- *
- * persist:false nodes don't carry a uuid (createNodeObject path); flipping a
- * runtime-instantiated child (e.g. prefab output) to persist:true is meaningless
- * for scene save until we mint one. flipping back to persist:false drops the
- * uuid from the index but leaves it on the node — round-trip preserves identity
- * if the caller flips back without destroying the node.
- *
- * use this rather than mutating `node.persist` directly when the node is
- * already attached to a scene graph.
+ * flip a live node's `persist` flag — controls whether the node is written to
+ * scene files. use this rather than mutating `node.persist` directly when the
+ * node is already attached to a scene graph.
  */
 export function setNodePersist(node: Node, persist: boolean): void {
     if (node.persist === persist) return;
     node.persist = persist;
-    const sg = node.scene;
-    if (!sg) return;
-    if (persist && !node._uuid && sg.mode === 'edit') {
-        let uuid = generateUuid();
-        while (sg._uuidToNode.has(uuid)) uuid = generateUuid();
-        node._uuid = uuid;
-        sg._uuidToNode.set(uuid, node);
-    } else if (!persist && node._uuid) {
-        if (sg._uuidToNode.get(node._uuid) === node) sg._uuidToNode.delete(node._uuid);
-    }
 }
 
 /**

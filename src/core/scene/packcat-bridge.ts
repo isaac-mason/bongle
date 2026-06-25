@@ -323,10 +323,9 @@ export function propToPack(schema: PropSchema): PackcatSchema | null {
                     meshName: p.string(),
                 }),
             );
-        case 'node':
         case 'prefab':
         case 'block':
-            // refs serialize as bare strings (UUID / id / block-key). wrap with
+            // refs serialize as bare strings (prefab id / block-key). wrap with
             // nullable() at the schema level if "unset" needs to roundtrip.
             return p.string();
         default:

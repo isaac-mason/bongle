@@ -127,7 +127,6 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
      * link for HMR.
      */
     root: Node;
-    byUuid: (uuid: string) => Node | null;
     all: () => Node[];
     /**
      * fresh empty voxel canvas for `fn` to populate (for `type: 'voxels'`
@@ -139,17 +138,12 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
 };
 
 export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): PrefabApplyContext {
-    // snapshot existing children before user fn runs — byUuid/all reflect
-    // whatever was there pre-fn. (today this is empty since reconcile
-    // tears down before expand; kept for forward compat.)
+    // snapshot existing children before user fn runs — `all` reflects whatever
+    // was there pre-fn. (today this is empty since reconcile tears down before
+    // expand; kept for forward compat.)
     const snapshot = collectInstantiatedNodes(root.children);
-    const byUuid = new Map<string, Node>();
-    for (const node of snapshot) {
-        if (node._uuid) byUuid.set(node._uuid, node);
-    }
     return {
         root,
-        byUuid: (uuid: string) => byUuid.get(uuid) ?? null,
         all: () => snapshot,
         voxels,
     };
