@@ -75,7 +75,9 @@
     "scripts": {
         "test": "vitest run",
         "bench": "vitest bench --run",
-        "typecheck": "tsgo -p tsconfig.json"
+        "typecheck": "tsgo -p tsconfig.json",
+        "lint": "biome check src tst",
+        "lint:fix": "biome check --write src tst"
     },
     "dependencies": {
         "@dnd-kit/abstract": "^0.3.2",
