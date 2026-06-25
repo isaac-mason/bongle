@@ -16,9 +16,7 @@ const noop = () => {};
 function deepStub(label = 'stub'): any {
     // use a function as the proxy target so the stub is callable
     const cache: Record<string | symbol, any> = {};
-    const fn = function () {
-        return deepStub(`${label}()`);
-    };
+    const fn = () => deepStub(`${label}()`);
     return new Proxy(fn, {
         get(_t, prop) {
             if (prop === Symbol.toPrimitive) return () => `[${label}]`;

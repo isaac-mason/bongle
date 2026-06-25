@@ -9,13 +9,13 @@
 // authored code is rejected — only the editor's Admin path bypasses
 // this gate.
 
-import type { Client } from 'bongle/interface';
 import { env } from 'bongle';
+import type { Client } from 'bongle/interface';
+import * as ClientRooms from '../client/rooms';
 import type { PlayerMode } from '../core/protocol';
 import type { ScriptContext } from '../core/scene/scripts';
 import * as Net from '../server/net';
 import * as ServerRooms from '../server/rooms';
-import * as ClientRooms from '../client/rooms';
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 

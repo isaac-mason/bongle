@@ -41,21 +41,21 @@
 import { env } from 'bongle';
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { useEditor } from '../editor/editor-store';
-import { bumpVersion, logPendingChanges, registry, type KindStore } from '../core/registry';
+import { bumpVersion, type KindStore, logPendingChanges, registry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/nodes';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
+import { useEditor } from '../editor/editor-store';
 import type { EngineClient } from './engine-client';
 import * as Net from './net';
 import * as ParticleResources from './particles/particle-resources';
+import * as Performance from './performance';
 import * as ExtrudedSpriteResources from './sprites/extruded-sprite-resources';
 import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
 import * as SpriteResources from './sprites/sprite-resources';
 import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
-import * as Performance from './performance';
 import * as VoxelResources from './voxels/voxel-resources';
 import * as VoxelVisuals from './voxels/voxel-visuals';
 

@@ -5,7 +5,6 @@
 // mutates voxels via setBlock, ticks the server, asserts the
 // callbacks fired with the right classification.
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     addTrait,
     block,
@@ -18,6 +17,7 @@ import {
     setBlock,
     trait,
 } from 'bongle';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
 describe('block hook observers (e2e)', () => {

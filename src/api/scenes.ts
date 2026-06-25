@@ -17,12 +17,12 @@
 // the scene, the handle stays empty (`version: 0`, empty node, null voxels).
 
 import { recordScene } from '../core/capture/module-scope';
-import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../core/registry';
 import type { ScenePayload } from '../core/content/scene-store';
+import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../core/registry';
 import { createSceneHandle, type SceneHandle, type SceneOptions } from '../core/scene/scene-handle';
 
-export type { SceneHandle, SceneOptions };
 export { cloneVoxels, copyVoxels } from '../core/voxels/voxels';
+export type { SceneHandle, SceneOptions };
 
 /**
  * declare a scene resource at module scope. returns a stable handle whose

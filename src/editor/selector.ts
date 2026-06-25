@@ -7,15 +7,15 @@
 // efficient spatial queries instead of iterating all nodes manually.
 // voxel hits still use the DDA voxel raycast.
 
+import { CastRayStatus, createAllCastRayCollector, createDefaultCastRaySettings, castRay as queryCastRay } from 'crashcat';
 import type { Vec3 } from 'mathcat';
-import { castRay as queryCastRay, createDefaultCastRaySettings, createAllCastRayCollector, CastRayStatus } from 'crashcat';
-import { raycastVoxels, createVoxelRaycastResult } from '../core/voxels/voxel-raycast';
-import type { Voxels } from '../core/voxels/voxels';
+import type { Physics } from '../core/physics/physics';
 import type { Node, Nodes } from '../core/scene/nodes';
 import { getNodeById } from '../core/scene/nodes';
+import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
+import type { Voxels } from '../core/voxels/voxels';
 import type { NodeBodies } from './node-bodies';
 import { nodeIdForBody } from './node-bodies';
-import type { Physics } from '../core/physics/physics';
 
 // ── hit types ───────────────────────────────────────────────────────
 

@@ -9,16 +9,16 @@
 // uses the shared PointerState for click detection and editor.hoverVoxel
 // for the seed voxel (raycast runs once per frame in editor/index.ts).
 
-import { AIR } from '../../core/voxels/block-registry';
+import type { Input } from '../../client/input';
+import { isKeyDown } from '../../client/input';
+import * as Selection from '../../core/scene/selection';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
+import { AIR } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
 import { getBlockState } from '../../core/voxels/voxels';
+import type { EditRoomStoreApi, MagicSelectOptions } from '../edit-room-store';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown } from '../pointer-state';
-import type { EditRoomStoreApi, MagicSelectOptions } from '../edit-room-store';
-import { isKeyDown } from '../../client/input';
-import type { Input } from '../../client/input';
-import * as Selection from '../../core/scene/selection';
 
 // ── neighbour generation ───────────────────────────────────────────
 //

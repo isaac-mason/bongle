@@ -1,18 +1,18 @@
 import * as Icons from 'lucide-react';
 import { type EulerOrder, euler, type Quat, quat } from 'mathcat';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
+import { assetUrl } from '../../client/asset-url';
 import { IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
+import { registry } from '../../core/registry';
 import type { Node, Realm } from '../../core/scene/nodes';
 import { createPrefabConfig, getNodeById } from '../../core/scene/nodes';
 import type { BlockRefSchema, PrefabRefSchema, Schema } from '../../core/scene/prop/prop';
 import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/prop';
+import * as Selection from '../../core/scene/selection';
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
-import { registry } from '../../core/registry';
-import { assetUrl } from '../../client/asset-url';
-import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
-import * as Selection from '../../core/scene/selection';
+import { useEditor } from '../editor-store';
 
 function useTraits(): TraitDef[] {
     return [...registry.traits.byId.values()].map((h) => h.payload);

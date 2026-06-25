@@ -15,15 +15,14 @@
  */
 import { CameraTrait } from '../builtins/camera';
 import { FlyControllerTrait } from '../builtins/fly-controller';
-import { TransformTrait } from '../builtins/transform';
-import * as Rpc from '../core/rpc';
+import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
+import * as Rpc from '../core/rpc';
 import * as Nodes from '../core/scene/nodes';
 import { getTrait } from '../core/scene/nodes';
-import { setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
-import { EditorTrait } from '../editor/editor-trait';
 import { useEditor } from '../editor/editor-store';
+import { EditorTrait } from '../editor/editor-trait';
 import { buildRoomViews, type ClientRoom, getControlCamera, seedCameraRef, setControlNode } from './rooms';
 
 /**

@@ -10,8 +10,8 @@ import {
     ContextMenuSeparator,
     ContextMenuTrigger,
 } from '../../client/ui/components';
-import { useEditor } from '../editor-store';
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { nodeMenuEntries } from './node-menu';
 import { TreeItem, TreeItemOverlay } from './tree-item';
 import {

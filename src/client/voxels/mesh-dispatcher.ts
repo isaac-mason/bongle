@@ -29,16 +29,16 @@
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { serializeBlockRegistryForWorker } from '../../core/voxels/block-registry-serde';
 import {
+    buildSlabsIntoBuffers,
     type ChunkMeshResult,
     MAX_QUADS_PER_PASS,
     QUAD_STRIDE_U32S,
     SLAB_BLOCKS_BYTES,
     SLAB_LIGHT_BYTES,
-    buildSlabsIntoBuffers,
 } from '../../core/voxels/chunk-mesher';
+import type { MeshWorkerInMsg, MeshWorkerOutMsg } from '../../core/voxels/mesh-worker';
 import type { Chunk, Voxels } from '../../core/voxels/voxels';
 import { chunkKey } from '../../core/voxels/voxels';
-import type { MeshWorkerInMsg, MeshWorkerOutMsg } from '../../core/voxels/mesh-worker';
 
 /** minimal Worker surface the dispatcher needs. Both real `Worker` and
  *  `MessagePort` (used by the in-process test) satisfy this shape.

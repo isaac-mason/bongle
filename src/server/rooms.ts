@@ -1,15 +1,15 @@
-import type { Client, JsonValue } from 'bongle/interface';
-import type { PlayerId } from '../core/client';
 import { env, PlayerTrait, TransformTrait } from 'bongle';
+import type { Client, JsonValue } from 'bongle/interface';
 import { addCharacter } from '../builtins/character';
 import { CharacterControllerTrait } from '../builtins/character-controller';
 import { PlayerControllerTrait } from '../builtins/player-controller';
 import { attachWorldTrait } from '../builtins/world';
-import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
+import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
+import * as Content from '../core/content';
+import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type { PlayerMode, RoomMode } from '../core/protocol';
-import * as Content from '../core/content';
 import { registry } from '../core/registry';
 import type * as Resources from '../core/resources';
 import * as Animation from '../core/scene/animation';
@@ -22,25 +22,25 @@ import {
     destroyNode,
     hasTrait,
     loadSceneGraph,
-    setOwner,
     type Node,
     type Nodes,
+    setOwner,
 } from '../core/scene/nodes';
-import * as Scripts from '../core/scene/scripts';
 import type { NodesContext } from '../core/scene/scripts';
+import * as Scripts from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
-import type { Voxels } from '../core/voxels/voxels';
-import { createVoxels, createVoxelsAuthority, setBlock } from '../core/voxels/voxels';
-import { loadVoxels, type VoxelSaveCache } from '../core/voxels/voxel-savefile';
-import * as Save from './save';
 import { formatKey } from '../core/voxels/block-registry';
 import * as Light from '../core/voxels/light';
+import { loadVoxels, type VoxelSaveCache } from '../core/voxels/voxel-savefile';
+import type { Voxels } from '../core/voxels/voxels';
+import { createVoxels, createVoxelsAuthority, setBlock } from '../core/voxels/voxels';
 import * as Avatars from './avatars';
-import * as Chat from './chat';
 import type { ChatServer } from './chat';
-import * as Discovery from './discovery';
+import * as Chat from './chat';
 import * as ContentManager from './content-manager';
+import * as Discovery from './discovery';
 import type { EngineServer } from './engine-server';
+import * as Save from './save';
 
 /* ── Errors ─────────────────────────────────────────────────────── */
 

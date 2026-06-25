@@ -852,8 +852,8 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
                     // walk down removing sky=15 column light using neighbor refs
                     let curChunk = chunk;
                     let curLy = ly - 1;
-                    let curLx = lx;
-                    let curLz = lz;
+                    const curLx = lx;
+                    const curLz = lz;
                     while (true) {
                         // cross chunk boundary downward if needed
                         if (curLy < 0) {
@@ -892,8 +892,8 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
 
                         let curChunk = chunk;
                         let curLy = ly - 1;
-                        let curLx = lx;
-                        let curLz = lz;
+                        const curLx = lx;
+                        const curLz = lz;
                         while (true) {
                             if (curLy < 0) {
                                 const below = curChunk.neighbors[DIR_DOWN];

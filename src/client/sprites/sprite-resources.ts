@@ -59,8 +59,8 @@ import {
 } from 'gpucat';
 import type { TextureNode } from 'gpucat/dist/nodes/nodes';
 import { assetUrl } from '../asset-url';
-import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 import { EnvConfig } from '../environment';
+import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 
 // ── sidecar shape (must match kit/src/asset-pipeline/sprite-atlas.ts) ──
 

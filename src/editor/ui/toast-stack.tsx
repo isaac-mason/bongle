@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useEditor, type Toast } from '../editor-store';
+import { type Toast, useEditor } from '../editor-store';
 
 const VISIBLE_MS = 2500;
 const FADE_MS = 250;

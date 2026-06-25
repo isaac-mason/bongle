@@ -1,10 +1,10 @@
 import { useCallback, useRef } from 'react';
-import { CollapsiblePane } from './panes/collapsible-pane';
-import { HierarchyPane } from './panes/hierarchy-pane';
-import { ToolSpacePane, useToolPaneTitle } from './panes/tool-space-pane';
 import { ActiveBlockPane } from './panes/active-block-pane';
-import { HistoryPane } from './panes/history-pane';
+import { CollapsiblePane } from './panes/collapsible-pane';
 import { DebugPane } from './panes/debug-pane';
+import { HierarchyPane } from './panes/hierarchy-pane';
+import { HistoryPane } from './panes/history-pane';
+import { ToolSpacePane, useToolPaneTitle } from './panes/tool-space-pane';
 
 type ResizeHandleProps = {
     onResize: (dx: number) => void;

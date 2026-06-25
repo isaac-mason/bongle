@@ -26,6 +26,7 @@
 // indexCount to a clip-space degenerate so smaller shapes draw as
 // fewer triangles within the same draw call.
 
+import type { Geometry } from 'gpucat';
 import {
     abs,
     add,
@@ -34,12 +35,12 @@ import {
     clamp,
     cos,
     createIndirectBuffer,
-    d,
     Discard,
-    dot,
     DrawIndirect,
-    f32,
+    d,
+    dot,
     Fn,
+    f32,
     fract,
     fragCoord,
     GpuBuffer,
@@ -57,12 +58,11 @@ import {
     storage,
     struct,
     sub,
+    varying,
     vec3f,
     vec4f,
-    varying,
     vertexIndex,
 } from 'gpucat';
-import type { Geometry } from 'gpucat';
 import { srgbBytesToLinear } from '../core/color';
 import { buildCloudUberGeometry, type CloudShapeMeta } from './cloud-shapes';
 import { EnvConfig, type EnvironmentResources } from './environment';

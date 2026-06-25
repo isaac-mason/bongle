@@ -1,13 +1,13 @@
+import * as Icons from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import * as Icons from 'lucide-react';
 import { setEditorEnabledForRoom } from '../../client/editor';
 import { useClient } from '../../client/ui/client-store';
 import '../../client/ui/editor.css';
-import { Viewport } from '../../client/ui/viewport';
-import { useEditor } from '../editor-store';
-import { useEditRoom } from '../edit-room-store';
 import { ChatPanel, useChatPanel } from '../../client/ui/chat-panel';
+import { Viewport } from '../../client/ui/viewport';
+import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { FlySpeedIndicator } from './fly-speed-indicator';
 import { Hotbar } from './hotbar';
 import { InventoryItemIcon } from './inventory-icon';
@@ -350,9 +350,9 @@ export function mountEditUI(container: HTMLElement): Root {
     return root;
 }
 
+export { useClient } from '../../client/ui/client-store';
+export { useEditRoom } from '../edit-room-store';
 // keep these re-exports — script consumers and pane components import the
 // stores from here for convenience (matches the prior `client/ui/ui.tsx`
 // surface).
 export { useEditor } from '../editor-store';
-export { useEditRoom } from '../edit-room-store';
-export { useClient } from '../../client/ui/client-store';

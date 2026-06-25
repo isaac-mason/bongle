@@ -3,9 +3,9 @@
 // off-by-one / shift / chunk-coord mistakes in the dense-bitmask path.
 
 import { describe, expect, test } from 'vitest';
-import { buildSelectionGeometry, buildMeshEdgeSegments } from './selection-mesh';
 import * as Selection from '../../core/scene/selection';
 import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
+import { buildMeshEdgeSegments, buildSelectionGeometry } from './selection-mesh';
 
 // reference edge classifier — the original per-voxel + Selection.has +
 // Map<string, Set<number>> implementation. compared against the

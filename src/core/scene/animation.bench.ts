@@ -33,11 +33,10 @@
 //     overhead elsewhere we haven't isolated.
 //   - Each A/B delta is a direct $-figure win/loss for that refactor.
 
-import { bench, describe } from 'vitest';
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { bench, describe } from 'vitest';
+import { composeWorldMatrix, TransformTrait } from '../../builtins/transform';
 import type { ClipChannel } from '../models/handle';
-import { TransformTrait } from '../../builtins/transform';
-import { composeWorldMatrix } from '../../builtins/transform';
 import { addChild, addTrait, createNode, createSceneGraph } from './nodes';
 
 const LAYER_STRIDE = 13;
@@ -139,7 +138,7 @@ function buildChannels(boneCount: number, channelCount: number, frameCount = 30)
 // ── mirrors of animation.ts hot helpers (kept verbatim) ─────────────
 
 function findKeyLow(times: ArrayLike<number>, kc: number, time: number, last: number): number {
-    let lo = last < 0 ? 0 : last >= kc - 1 ? kc - 2 : last;
+    const lo = last < 0 ? 0 : last >= kc - 1 ? kc - 2 : last;
     if (times[lo]! <= time && time < times[lo + 1]!) return lo;
     if (lo + 2 < kc) {
         if (time < times[lo + 2]! && times[lo + 1]! <= time) return lo + 1;

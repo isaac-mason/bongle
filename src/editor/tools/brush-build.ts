@@ -8,17 +8,17 @@
 // accumulated Selection through `applyStamp` (the same mask/pattern machinery
 // as /set) and wrap the resulting ops in one undoable action per stroke.
 
+import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
-import { VoxelEditCommand } from '../commands';
 import type { Voxels } from '../../core/voxels/voxels';
-import type { PointerState } from '../pointer-state';
-import type { Input } from '../../client/input';
-import type { EditRoomStoreApi } from '../edit-room-store';
-import { applyStamp } from './brush-apply';
-import { useEditor } from '../editor-store';
 import type { VoxelOp } from '../blueprint';
-import { advanceBrushStroke, createBrushStrokeState, type BrushStrokeState } from './utils/brush';
+import { VoxelEditCommand } from '../commands';
+import type { EditRoomStoreApi } from '../edit-room-store';
+import { useEditor } from '../editor-store';
+import type { PointerState } from '../pointer-state';
+import { applyStamp } from './brush-apply';
+import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
 // per-room state contract. the shared stroke harness is nested under `brush`
 // so a brush-specific field can be added later as a sibling (no intersection,

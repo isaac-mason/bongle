@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
     _internal,
+    createOffsetAllocator,
     OA_UNUSED,
     type OAHandle,
     type OffsetAllocator,
-    createOffsetAllocator,
     oaAllocate,
     oaAllocationSize,
     oaFree,

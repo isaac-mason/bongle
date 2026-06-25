@@ -13,11 +13,17 @@
 //      on commit, ghost positions are materialized as voxel ops + real nodes.
 //      on cancel, ghosts are destroyed and cut ops are reversed.
 
-import { box, dof, MotionType, rigidBody, type BodyId } from 'crashcat';
+import { type BodyId, box, dof, MotionType, rigidBody } from 'crashcat';
 import type { PerspectiveCamera } from 'gpucat';
 import { Object3D, type Scene, TransformControls } from 'gpucat';
-import { box3, type Box3, type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { TransformTrait } from '../../builtins/transform';
+import { type Box3, box3, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import {
+    getVisualWorldPosition,
+    getVisualWorldQuaternion,
+    markTransformDirty,
+    setPosition,
+    TransformTrait,
+} from '../../builtins/transform';
 import { createVoxelModel, VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import type { Input, MouseKeyboardInput } from '../../client/input';
 import { isKeyJustDown } from '../../client/input';
@@ -30,7 +36,7 @@ import { addChild, addTrait, createNode, deserializeNode, destroyNode, getNodeBy
 import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
-import { getVisualWorldPosition, getVisualWorldQuaternion, markTransformDirty, setPosition } from '../../builtins/transform';
+import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { setTraitProps } from '../actions';
@@ -38,11 +44,10 @@ import type { Blueprint as BlueprintData, VoxelOp } from '../blueprint';
 import * as Blueprint from '../blueprint';
 import { readNudgeDelta, snapCardinal, yawFromQuat } from '../camera';
 import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand, VoxelEditCommand } from '../commands';
-import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import type { EditRoomStoreApi } from '../edit-room-store';
+import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { unionSubtreeWorldAabb } from '../node-aabb';
-import * as Selection from '../../core/scene/selection';
 
 // ── types ──────────────────────────────────────────────────────────
 

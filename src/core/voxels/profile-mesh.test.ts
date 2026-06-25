@@ -16,7 +16,7 @@ import * as blockModel from './block-model';
 import { buildBlockRegistry } from './block-registry';
 import { type BlockDef, type BlockQuad, type BlockTextureDef, CullType, MaterialType } from './blocks';
 import { buildMeshInput, createMeshOutput, meshChunk } from './chunk-mesher';
-import { type Chunk, CHUNK_SIZE, createChunk, createVoxels, setChunkBlock, type Voxels } from './voxels';
+import { CHUNK_SIZE, type Chunk, createChunk, createVoxels, setChunkBlock, type Voxels } from './voxels';
 
 const SHOULD_RUN = process.env.PROFILE_MESH === '1';
 

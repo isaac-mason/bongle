@@ -20,7 +20,7 @@ import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
-import { control, trait, type TraitType } from '../api/traits';
+import { control, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
 import { TransformTrait } from './transform';

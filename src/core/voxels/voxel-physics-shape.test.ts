@@ -24,8 +24,8 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aabbs } from './block-collider';
 import { box } from './block-model';
 import { CullType } from './blocks';
-import { createVoxelPhysicsShape, type VoxelPhysicsShape, voxelPhysicsShapeDef } from './voxel-physics-shape';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
+import { createVoxelPhysicsShape, type VoxelPhysicsShape, voxelPhysicsShapeDef } from './voxel-physics-shape';
 import { createChunk, createVoxels, setChunkBlock } from './voxels';
 
 // ── test helpers ────────────────────────────────────────────────────

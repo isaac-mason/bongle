@@ -1,6 +1,6 @@
 import type { Client, User } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
-import { type WireIndex } from '../core/registry';
+import type { WireIndex } from '../core/registry';
 
 export type ClientState = {
     id: Client;

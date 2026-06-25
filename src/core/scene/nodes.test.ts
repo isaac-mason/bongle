@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createTestServer } from '../../../tst/integration/server-integration-test';
+import { __popModule, __pushModule } from '../capture/module-scope';
+import { registry } from '../registry';
 import {
     acquireQuery,
     addChild,
@@ -25,10 +27,8 @@ import {
 } from './nodes';
 import { prop } from './prop';
 import { packSceneGraph, unpackSceneGraph } from './scene-pack';
-import { __popModule, __pushModule } from '../capture/module-scope';
-import { registry } from '../registry';
-import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, query as scriptQuery, script } from './scripts';
-import { control, trait, type TraitType } from './traits';
+import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, script, query as scriptQuery } from './scripts';
+import { control, type TraitType, trait } from './traits';
 
 /* ── test traits ── */
 

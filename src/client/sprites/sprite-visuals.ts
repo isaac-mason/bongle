@@ -30,13 +30,12 @@ import { type Camera, createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, pa
 import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { SpriteTrait } from '../../builtins/sprite';
-import { TransformTrait } from '../../builtins/transform';
+import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { type Nodes, query } from '../../core/scene/nodes';
-import { getVisualWorldMatrix } from '../../builtins/transform';
-import * as Visibility from '../visibility';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
+import * as Visibility from '../visibility';
 import {
     CENTER_BIT,
     INSTANCE_MATERIAL_STRIDE,

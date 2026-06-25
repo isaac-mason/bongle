@@ -3,14 +3,14 @@
 // covers two-cell placement (never a half-door), double-door hinge, chiral
 // rotate/flip, and get/setDoorOpen across both halves.
 
-import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import { buildBlockRegistry, parseKey } from './block-registry';
-import type { BlockDef, BlockHandle, BlockPlaceCtx, BlockQuad, BlockTextureDef, PlaceIO } from './blocks';
-import { cube, door, getDoorOpen, setDoorOpen } from './block-presets';
-import { rotateBlockKey, flipBlockKey } from './block-transform';
-import { createVoxels, setBlock } from './voxels';
+import { beforeAll, describe, expect, it } from 'vitest';
 import * as blockModel from './block-model';
+import { cube, door, getDoorOpen, setDoorOpen } from './block-presets';
+import { buildBlockRegistry, parseKey } from './block-registry';
+import { flipBlockKey, rotateBlockKey } from './block-transform';
+import type { BlockDef, BlockHandle, BlockPlaceCtx, BlockQuad, BlockTextureDef, PlaceIO } from './blocks';
+import { createVoxels, setBlock } from './voxels';
 
 const topTex: BlockTextureDef = {
     id: 'door-top',

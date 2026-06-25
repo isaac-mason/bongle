@@ -19,8 +19,8 @@ import { vec3 } from 'mathcat';
 import type { RotAxis } from './block-orient';
 import type { BlockRegistry } from './block-registry';
 import { rotateBlockKey } from './block-transform';
-import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock } from './voxels';
 import type { Voxels } from './voxels';
+import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock } from './voxels';
 
 // scratch vec3 for basis projection — avoids allocations in the hot path
 const _scratch: Vec3 = [0, 0, 0];

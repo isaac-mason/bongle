@@ -1,6 +1,6 @@
 import { recordCommand } from './capture/module-scope';
-import { get, registry, upsert, type WireIndex } from './registry';
 import type { NetMessage } from './protocol';
+import { get, registry, upsert, type WireIndex } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 

@@ -8,7 +8,7 @@
 
 import { describe, it } from 'vitest';
 
-import { createOffsetAllocator, oaAllocate, oaFree, type OAHandle } from './offset-allocator';
+import { createOffsetAllocator, type OAHandle, oaAllocate, oaFree } from './offset-allocator';
 
 const CAPACITY_SLOTS = 100_000;
 const SMALL_MIN = 1;

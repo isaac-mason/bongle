@@ -4,7 +4,7 @@ import { registry } from '../registry';
 import { createNode } from './nodes';
 import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
 import { prop } from './prop';
-import { type TraitType, buildTraitInstance, control, sync, trait } from './traits';
+import { buildTraitInstance, control, sync, type TraitType, trait } from './traits';
 
 const TEST_NODE = createNode({ name: 'test' });
 

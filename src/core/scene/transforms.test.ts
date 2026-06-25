@@ -1,26 +1,11 @@
-import { mat4, type Mat4, quat, type Quat, vec3, type Vec3 } from 'mathcat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
-import { TransformTrait } from '../../builtins/transform';
-import {
-    addChild,
-    addTrait,
-    createNode,
-    createSceneGraph,
-    deserializeNode,
-    getTrait,
-    removeTrait,
-    reparent,
-    serializeNode,
-} from './nodes';
 import {
     computeWorldTransforms,
     getVisualWorldPosition,
     getVisualWorldQuaternion,
     getVisualWorldScale,
     getWorldMatrix,
-    TRANSFORM_DIRTY_ALL,
-    TRANSFORM_DIRTY_WORLD_MATRIX,
-    TRANSFORM_DIRTY_WORLD_TRS,
     getWorldPosition,
     getWorldQuaternion,
     getWorldScale,
@@ -33,10 +18,25 @@ import {
     setScale,
     setWorldPosition,
     setWorldQuaternion,
+    TRANSFORM_DIRTY_ALL,
+    TRANSFORM_DIRTY_WORLD_MATRIX,
+    TRANSFORM_DIRTY_WORLD_TRS,
+    TransformTrait,
     worldToLocalPosition,
     worldToLocalQuaternion,
 } from '../../builtins/transform';
 import { init as initInterpolation, interpolate, snapshot } from '../../client/interpolation';
+import {
+    addChild,
+    addTrait,
+    createNode,
+    createSceneGraph,
+    deserializeNode,
+    getTrait,
+    removeTrait,
+    reparent,
+    serializeNode,
+} from './nodes';
 
 /* ── helpers ── */
 

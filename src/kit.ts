@@ -25,11 +25,11 @@
  * layer would just be noise.
  */
 
+import { _registerScenePayload } from './api/scenes';
 import { __addDeps } from './core/capture/dep-wrap';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import { __decideReload, __popModule, __pushModule } from './core/capture/module-scope';
 import { _registerModelHandle } from './core/models/models';
-import { _registerScenePayload } from './api/scenes';
 import { _registerSoundHandle } from './core/sounds/sounds';
 
 export const __kit = {

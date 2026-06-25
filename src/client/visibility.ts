@@ -18,8 +18,8 @@
 
 import { type Camera, type Frustum, frustum } from 'gpucat';
 import { type Box3, box3 } from 'mathcat';
-import type { TransformTrait } from '../builtins/transform';
 import { getVisualWorldMatrix } from '../api/transforms';
+import type { TransformTrait } from '../builtins/transform';
 import * as Dbvt from './dbvt';
 
 /**

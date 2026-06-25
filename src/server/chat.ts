@@ -11,14 +11,13 @@
  */
 
 import type { Client } from 'bongle/interface';
-import * as ChatCommands from '../core/chat-commands';
 import type { CommandInvocation } from '../core/chat-commands';
+import * as ChatCommands from '../core/chat-commands';
 import * as Profanity from '../core/profanity';
 import type { Clients } from './clients';
-import * as Net from './net';
-import type { Rooms } from './rooms';
-import type { Room } from './rooms';
 import type { ServerNet } from './net';
+import * as Net from './net';
+import type { Room, Rooms } from './rooms';
 
 export type ChatBroadcastKind = 'message' | 'system' | 'error' | 'input';
 

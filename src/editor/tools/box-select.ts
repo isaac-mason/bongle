@@ -20,15 +20,15 @@
 // when selectTarget is 'nodes' or 'all', the committed AABB is used to query the
 // crashcat broadphase for editor node bodies.
 
-import { isKeyDown } from '../../client/input';
 import type { Input } from '../../client/input';
-import type { EditRoomStoreApi, SelectionBehavior, SelectTarget } from '../edit-room-store';
-import type { NodeBodies } from '../node-bodies';
+import { isKeyDown } from '../../client/input';
 import type { Physics } from '../../core/physics/physics';
 import type { ScriptContext } from '../../core/scene/scripts';
+import * as Selection from '../../core/scene/selection';
+import type { EditRoomStoreApi, SelectionBehavior, SelectTarget } from '../edit-room-store';
+import type { NodeBodies } from '../node-bodies';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown } from '../pointer-state';
-import * as Selection from '../../core/scene/selection';
 import { rebuildNodeSelection } from '../scene/node-selection';
 
 // scratch region used to host the box's voxel rasterisation when querying

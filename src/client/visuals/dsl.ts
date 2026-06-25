@@ -3,7 +3,7 @@
 // — mesh, sprite, extruded sprite, voxel mesh — needs to agree on, so they
 // can't drift apart in per-trait copies.
 
-import { add, d, div, dot, Discard, f32, Fn, fract, fragCoord, If, max, mix, mul, type Node, vec3f } from 'gpucat';
+import { add, Discard, d, div, dot, Fn, f32, fract, fragCoord, If, max, mix, mul, type Node, vec3f } from 'gpucat';
 
 // ── tint + flash + glow ─────────────────────────────────────────────
 //

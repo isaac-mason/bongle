@@ -9,25 +9,26 @@
  * look up the per-trait serdes for unpacking.
  */
 
-import { registry, resolveTraitWireRef, type WireIndex } from '../registry';
 import type { BinaryField, BinaryTrait, PackedNode, RoomMode, SceneSyncUpdate } from '../protocol';
-import { decodePrefabConfig, encodePrefabConfig } from './nodes';
 import { packPackedSceneGraph, unpackPackedSceneGraph } from '../protocol';
+import { registry, resolveTraitWireRef, type WireIndex } from '../registry';
 import {
     addChild,
     addTraitBySlot,
     bumpNodeVersion,
     createNode,
+    decodePrefabConfig,
     destroyNode,
+    encodePrefabConfig,
     getNodeById,
     type Node,
+    type Nodes,
     type Realm,
     removeTraitBySlot,
     reorderChild,
     reparent,
     setOwner,
     setPrefab,
-    type Nodes,
 } from './nodes';
 import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
 import { disposeScriptInstance, type NodesContext } from './scripts';

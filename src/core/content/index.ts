@@ -23,5 +23,5 @@ export function init(): Content {
     return { payloads: new Map() };
 }
 
-export { clearScene, populateScene } from './scene-store';
 export type { ScenePayload } from './scene-store';
+export { clearScene, populateScene } from './scene-store';

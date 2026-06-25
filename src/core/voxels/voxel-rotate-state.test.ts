@@ -11,15 +11,15 @@
 // (+X → -Z under axis='y'). a facing vector `north` (-Z) therefore rotates
 // to `west` (-X) under one CW Y turn, cycling N → W → S → E → N.
 
-import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import { quat } from 'mathcat';
 import type { Quat } from 'mathcat';
+import { quat } from 'mathcat';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { column, fence, stairs } from './block-presets';
 import { buildBlockRegistry, parseKey } from './block-registry';
-import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
-import { column, stairs, fence } from './block-presets';
-import { createVoxels, setBlock } from './voxels';
+import type { BlockDef, BlockHandle, BlockTextureDef } from './blocks';
 import { rotateVoxelsByQuat } from './voxel-rotate';
+import { createVoxels, setBlock } from './voxels';
 
 beforeAll(() => {
     registerAllShapes();

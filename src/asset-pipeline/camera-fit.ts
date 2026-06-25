@@ -5,8 +5,8 @@
 // the angle (30° elevation, 45° azimuth) and CAM_DIST match block-icons.ts
 // — keep them in sync if either is tuned.
 
-import type { Vec3 } from 'mathcat';
 import { OrthographicCamera } from 'gpucat';
+import type { Vec3 } from 'mathcat';
 
 const ISO_ELEV = Math.PI / 6; // 30°
 const ISO_AZIM = Math.PI / 4; // 45°

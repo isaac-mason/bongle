@@ -10,10 +10,9 @@
 // carries the source coords + subAabbIndex so the controller can attribute
 // ground / contacts back to a specific voxel for debug + ground velocity.
 
-import { sweepAabbVsAabb, type SweepResult } from '../math/aabb-sweep';
-import { BLOCK_FLAG_COLLISION, SHAPE_AABBS } from './block-registry';
-import { AIR, MISSING } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, voxelIndex, type Voxels } from './voxels';
+import { type SweepResult, sweepAabbVsAabb } from '../math/aabb-sweep';
+import { AIR, BLOCK_FLAG_COLLISION, MISSING, SHAPE_AABBS } from './block-registry';
+import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
 
 /** result of a voxel sweep. mutated in place. */
 export type VoxelSweepHit = {

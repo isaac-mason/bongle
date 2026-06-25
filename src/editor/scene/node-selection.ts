@@ -11,10 +11,10 @@
  * shape-vs-AABB intersection is intentionally skipped — origin-point-in-set
  * is the contract; it tracks voxel selection exactly across all shape kinds.
  */
-import { broadphase, type BodyVisitor, type RigidBody } from 'crashcat';
+import { type BodyVisitor, broadphase, type RigidBody } from 'crashcat';
 import type { Box3 } from 'mathcat';
-import { TransformTrait } from '../../builtins/transform';
 import { getVisualWorldMatrix } from '../../api/transforms';
+import { TransformTrait } from '../../builtins/transform';
 import type { Physics } from '../../core/physics/physics';
 import { getNodeById, getTrait } from '../../core/scene/nodes';
 import type { ScriptContext } from '../../core/scene/scripts';

@@ -12,10 +12,10 @@
 // instance's `_sync` arrays, indexed by slice — so this is array indexing, not
 // keyed side-map lookups.
 
+import { bytesEqual } from '../../utils/bytes';
 import type { Node } from '../nodes';
 import type { SyncCodec } from '../packcat-bridge';
 import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
-import { bytesEqual } from '../../utils/bytes';
 
 // reusable scratch for the byte-diff path. `packInto` writes here instead of
 // allocating a fresh Uint8Array per slice per tick — we only copy out (alloc)

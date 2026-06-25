@@ -22,19 +22,19 @@
 // base64-encoded — palette indices repeat heavily so gzip typically buys
 // a 5–10× reduction on disk and over HMR.
 
-import { gzipSync, gunzipSync } from 'fflate';
+import { gunzipSync, gzipSync } from 'fflate';
 import type { BlockRegistry } from './block-registry';
 import { resolveKey } from './block-registry';
 import {
     CHUNK_SIZE,
     CHUNK_VOLUME,
     type Chunk,
-    EMPTY_LIGHT_MASK,
-    type Voxels,
     chunkKey,
+    EMPTY_LIGHT_MASK,
     linkChunkNeighbors,
     rebuildColumns,
     repackChunkSnapshot,
+    type Voxels,
 } from './voxels';
 
 // ── save file format ────────────────────────────────────────────────

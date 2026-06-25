@@ -17,25 +17,25 @@
 //
 // each break/place is a single undoable action.
 
-import type { ScriptContext } from '../../core/scene/scripts';
-import { send } from '../../core/scene/scripts';
-import { VoxelEditCommand } from '../commands';
-import type { Voxels } from '../../core/voxels/voxels';
-import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
-import type { PlaceIO } from '../../core/voxels/blocks';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
-import { parseKey } from '../../core/voxels/block-registry';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown } from '../pointer-state';
-import type { EditRoomStoreApi } from '../edit-room-store';
-import { useEditor } from '../editor-store';
-import { isMouseJustDown, isMouseTap } from '../../client/input';
-import type { Input } from '../../client/input';
-import type { TransformToolState } from './transform';
-import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
-import { pitchFromQuat, yawFromQuat } from '../camera';
 import type { PerspectiveCamera } from 'gpucat';
 import type { Quat, Vec3 } from 'mathcat';
+import type { Input } from '../../client/input';
+import { isMouseJustDown, isMouseTap } from '../../client/input';
+import type { ScriptContext } from '../../core/scene/scripts';
+import { send } from '../../core/scene/scripts';
+import type { BlockRegistry } from '../../core/voxels/block-registry';
+import { parseKey } from '../../core/voxels/block-registry';
+import type { PlaceIO } from '../../core/voxels/blocks';
+import type { Voxels } from '../../core/voxels/voxels';
+import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
+import { pitchFromQuat, yawFromQuat } from '../camera';
+import { VoxelEditCommand } from '../commands';
+import type { EditRoomStoreApi } from '../edit-room-store';
+import { useEditor } from '../editor-store';
+import type { PointerState } from '../pointer-state';
+import { pointerJustDown } from '../pointer-state';
+import type { TransformToolState } from './transform';
+import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
 
 type Op = { wx: number; wy: number; wz: number; key: string };
 

@@ -1,20 +1,17 @@
 // ── light propagation tests ─────────────────────────────────────────
 
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { BlockRegistry } from './block-registry';
 import { type buildBlockRegistry, resolveKey } from './block-registry';
-import { loadVoxels, saveVoxels } from './voxel-savefile';
 import { CullType, MaterialType } from './blocks';
-import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
 import {
-    type ChunkMeshResult,
     buildMeshInput,
+    type ChunkMeshResult,
     createMeshOutput,
     meshChunk,
     QUAD_LIGHT_OFFSET,
     QUAD_STRIDE_U32S,
 } from './chunk-mesher';
-import type { BlockRegistry } from './block-registry';
-import type { Chunk, Voxels } from './voxels';
 import {
     flushPendingLight,
     getBlue,
@@ -31,6 +28,9 @@ import {
     updateLightBatch,
     updateLightOnBlockChange,
 } from './light';
+import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
+import { loadVoxels, saveVoxels } from './voxel-savefile';
+import type { Chunk, Voxels } from './voxels';
 import {
     CHUNK_SIZE,
     chunkKey,

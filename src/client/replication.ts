@@ -7,9 +7,9 @@
  * the server's diff system uses).
  */
 
-import { registry } from '../core/registry';
 import type { PlayerId } from '../core/client';
 import type { BinaryField } from '../core/protocol';
+import { registry } from '../core/registry';
 import type { Node, Nodes } from '../core/scene/nodes';
 import { getSyncCodecs } from '../core/scene/packcat-bridge';
 import { diffSyncSlice } from '../core/scene/sync/sync-diff';

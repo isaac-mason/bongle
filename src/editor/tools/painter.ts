@@ -10,22 +10,22 @@
 // size 0 collapses the stamp to a single voxel — that's the classic
 // 1-voxel paint behaviour, no separate mode needed.
 
+import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
-import { VoxelEditCommand } from '../commands';
+import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
-import { useEditor } from '../editor-store';
-import type { EditRoomStoreApi } from '../edit-room-store';
-import { activeBlockKeyOf } from '../inventory';
-import type { Input } from '../../client/input';
 import type { VoxelOp } from '../blueprint';
-import * as Selection from '../../core/scene/selection';
+import { VoxelEditCommand } from '../commands';
+import type { EditRoomStoreApi } from '../edit-room-store';
+import { useEditor } from '../editor-store';
+import { activeBlockKeyOf } from '../inventory';
+import type { PointerState } from '../pointer-state';
+import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../pointer-state';
 import { buildShape } from '../scene/shapes';
-import { applyStamp } from './brush-apply';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
+import { applyStamp } from './brush-apply';
 
 const OPS_PER_PACKET = 4096;
 

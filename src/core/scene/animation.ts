@@ -1,13 +1,18 @@
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { env } from '../../api/env';
+import { AnimatorTrait } from '../../builtins/animator';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';
-import { AnimatorTrait } from '../../builtins/animator';
-import { TransformTrait } from '../../builtins/transform';
-import { env } from '../../api/env';
+import {
+    composeWorldMatrix,
+    getWorldMatrix,
+    TRANSFORM_DIRTY_ALL,
+    TRANSFORM_DIRTY_WORLD_MATRIX,
+    TransformTrait,
+} from '../../builtins/transform';
 import type { ClipChannel, ClipChannels, ClipDef } from '../models/handle';
 import * as Resources from '../resources';
 import { addTrait, findChildByName, getTrait, type Node, type Nodes, query } from './nodes';
-import { composeWorldMatrix, getWorldMatrix, TRANSFORM_DIRTY_ALL, TRANSFORM_DIRTY_WORLD_MATRIX } from '../../builtins/transform';
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -1090,7 +1095,7 @@ const _scratchQuatRef: Quat = quat.create();
  * clamps; this helper assumes `kc >= 2` and `times[0] < time < times[kc-1]`.
  */
 function findKeyLow(times: ArrayLike<number>, kc: number, time: number, last: number): number {
-    let lo = last < 0 ? 0 : last >= kc - 1 ? kc - 2 : last;
+    const lo = last < 0 ? 0 : last >= kc - 1 ? kc - 2 : last;
 
     // same interval as last tick? overwhelmingly common at steady playback.
     if (times[lo]! <= time && time < times[lo + 1]!) return lo;

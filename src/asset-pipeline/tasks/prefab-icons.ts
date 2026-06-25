@@ -10,10 +10,10 @@
 // Always-render now: hash-gating + iteration over the prefab set lives in
 // the orchestrator (one PNG per prefab, like scenes — no atlas).
 
+import { registry as engineRegistry } from '../../core/registry';
+import { addChild, createNode, createPrefabConfig } from '../../core/scene/nodes';
 import type { State } from '../engine';
 import { createRoom, disposeRoom } from '../rooms';
-import { addChild, createNode, createPrefabConfig } from '../../core/scene/nodes';
-import { registry as engineRegistry } from '../../core/registry';
 import { beginSnapshotSession, endSnapshotSession } from '../snapshot';
 import { preloadAllModels, renderPopulatedRoom, SUBJECT_ICON_PX, tickPrefabsToFixpoint } from '../subject';
 

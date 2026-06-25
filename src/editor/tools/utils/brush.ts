@@ -13,12 +13,12 @@
 // reference-eq dirty check (a fresh Selection ref is the repaint signal)
 // matches the selection-mesh rebuilder.
 
-import * as Selection from '../../../core/scene/selection';
-import type { PointerState } from '../../pointer-state';
-import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../../pointer-state';
 import type { Input } from '../../../client/input';
+import * as Selection from '../../../core/scene/selection';
 import type { EditRoomStoreApi } from '../../edit-room-store';
-import { buildShape, type BrushShape } from '../../scene/shapes';
+import type { PointerState } from '../../pointer-state';
+import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../../pointer-state';
+import { type BrushShape, buildShape } from '../../scene/shapes';
 
 /** per-room brush-stroke state. created once per edit room in EditorScript
  *  onInit and threaded into the tool's update fn — never module-scoped, so

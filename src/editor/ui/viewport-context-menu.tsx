@@ -8,8 +8,8 @@
 // events, so it can't be opened programmatically with a known coordinate —
 // hence DropdownMenu, which anchors to its trigger's bounding box.)
 
-import { useCallback, useMemo } from 'react';
 import * as Icons from 'lucide-react';
+import { useCallback, useMemo } from 'react';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -17,12 +17,12 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '../../client/ui/components';
-import { useEditor } from '../editor-store';
+import * as Selection from '../../core/scene/selection';
 import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { parsePattern } from '../scene/pattern';
 import { nodeMenuEntries } from './node-menu';
-import * as Selection from '../../core/scene/selection';
 
 export function ViewportContextMenu() {
     const menu = useEditRoom((s) => s.viewportContextMenu);

@@ -1,13 +1,12 @@
-import { useCallback, useMemo, useState } from 'react';
 import * as Icons from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import * as Selection from '../../core/scene/selection';
 import type { TransformMode } from '../edit-room-store';
 import { useEditRoom } from '../edit-room-store';
-import * as Selection from '../../core/scene/selection';
+import { formatKeyLabel, INSPECT_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { parsePattern } from '../scene/pattern';
-import { INSPECT_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';
-import { formatKeyLabel } from '../editor-controls';
 
 /**
  * context- and tool-aware action buttons.

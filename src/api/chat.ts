@@ -20,7 +20,8 @@
  */
 
 import { env } from 'bongle';
-import * as ChatCommands from '../core/chat-commands';
+import type { MessageHandler } from '../client/chat';
+import * as ClientChat from '../client/chat';
 import type {
     ArgType,
     CommandHandle,
@@ -30,12 +31,11 @@ import type {
     ParseResult,
     Suggestion,
 } from '../core/chat-commands';
-import * as ClientChat from '../client/chat';
-import type { MessageHandler } from '../client/chat';
-import * as ServerChat from '../server/chat';
+import * as ChatCommands from '../core/chat-commands';
 import type { ScriptContext } from '../core/scene/scripts';
+import * as ServerChat from '../server/chat';
 
-export type { CommandHandle, CommandSpec, CommandInvocation, ArgType, ParseResult, Suggestion, MessageHandler };
+export type { ArgType, CommandHandle, CommandInvocation, CommandSpec, MessageHandler, ParseResult, Suggestion };
 
 function commandsOf(ctx: ScriptContext): ChatCommands.ChatCommands | null {
     if (env.client && ctx.client?.room) return ctx.client.room.chat.commands;

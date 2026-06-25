@@ -3,6 +3,8 @@
 // don't have to assemble the shape + model + cull + collision themselves.
 // drop down to block() directly when a preset doesn't fit.
 
+import * as blockShape from './block-collider';
+import * as blockModel from './block-model';
 import {
     AIR,
     BLOCK_FLAG_COLLISION,
@@ -12,14 +14,12 @@ import {
     BLOCK_FLAG_WALL,
     parseKey,
 } from './block-registry';
-import * as blockShape from './block-collider';
-import * as blockModel from './block-model';
 import * as blockState from './block-state';
 import {
-    block,
     type BlockHandle,
     type BlockQuad,
     type BlockSoundConfig,
+    block,
     type CubeTextures,
     CullType,
     MaterialType,
@@ -44,18 +44,19 @@ import {
  * blending (stained glass cube).
  */
 type PresetOptions = { name?: string; sounds?: BlockSoundConfig; material?: MaterialType };
-import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
+
 import {
-    type Facing4,
-    FACING4_STEPS,
-    FACING4_ORDER,
+    axisFromPlaceCtx,
     FACING4_FLIP_X,
     FACING4_FLIP_Z,
-    rotateFacing4,
+    FACING4_ORDER,
+    FACING4_STEPS,
+    type Facing4,
     facing4FromPlaceCtx,
     halfFromPlaceCtx,
-    axisFromPlaceCtx,
+    rotateFacing4,
 } from './block-place';
+import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
 
 // ── cube ────────────────────────────────────────────────────────────
 //

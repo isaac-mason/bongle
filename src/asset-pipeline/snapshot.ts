@@ -11,7 +11,7 @@
 // session's RenderTarget — the caller restores pre-session state via
 // `endSnapshotSession`.
 
-import { readPixels, RenderTarget, type WebGPURenderer } from 'gpucat';
+import { RenderTarget, readPixels, type WebGPURenderer } from 'gpucat';
 
 export type SnapshotSession = {
     renderer: WebGPURenderer;

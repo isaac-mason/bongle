@@ -1,9 +1,9 @@
 import { registry } from '../../../core/registry';
-import { useEditor } from '../../editor-store';
-import { useEditRoom } from '../../edit-room-store';
-import { activeBlockKeyOf } from '../../inventory';
 import { formatKey, parseKey } from '../../../core/voxels/block-registry';
 import type { BlockStateDef } from '../../../core/voxels/block-state';
+import { useEditRoom } from '../../edit-room-store';
+import { useEditor } from '../../editor-store';
+import { activeBlockKeyOf } from '../../inventory';
 
 function stateLabel(states: BlockStateDef, localIndex: number): string {
     const props = states.props;

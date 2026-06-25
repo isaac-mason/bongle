@@ -52,8 +52,8 @@ import {
     storage,
     struct,
     sub,
-    u32,
     texture,
+    u32,
     varying,
     vec2f,
     vec3f,
@@ -61,8 +61,8 @@ import {
     vec4f,
 } from 'gpucat';
 import type { Model } from '../../core/models/model';
-import type { ModelPayload, Resources } from '../../core/resources';
 import type { ResourceLoader } from '../../core/resource-loader';
+import type { ModelPayload, Resources } from '../../core/resources';
 import { EnvConfig } from '../environment';
 import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 import * as ModelAtlas from './model-atlas';

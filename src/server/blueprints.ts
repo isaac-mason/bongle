@@ -9,8 +9,8 @@
 // can pick a free `blueprint-NNN`), name validation, and the
 // `ContentManager.saveScene` call site for blueprint writes.
 
-import * as ContentManager from './content-manager';
 import type { ScenePayload } from '../core/content/scene-store';
+import * as ContentManager from './content-manager';
 
 const BLUEPRINT_PREFIX = 'blueprints/';
 const NAME_RE = /^[a-z0-9][a-z0-9\-_]*$/;

@@ -15,14 +15,14 @@
  */
 
 import { create } from 'zustand';
+import type { ClientRoom, RoomView, RoomViewId } from '../client/rooms';
 import type { PlayerId } from '../core/client';
 import type { ScenePayload } from '../core/content/scene-store';
 import type { PlayerMode, RoomInfo } from '../core/protocol';
 import type { Resources } from '../core/resources';
-import type { ClientRoom, RoomView, RoomViewId } from '../client/rooms';
+import type { EditRoomStoreApi } from './edit-room-store';
 import { HOTBAR_SIZE, type HotbarSlot } from './inventory';
 import { loadHotbar, saveHotbar } from './preferences';
-import type { EditRoomStoreApi } from './edit-room-store';
 
 /** Transient HMR / status notification shown briefly in the top-left of
  *  the editor viewport. Pushed from `applyRegistryChanges` for each

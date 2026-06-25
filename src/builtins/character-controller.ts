@@ -24,6 +24,12 @@
 import { rigidBody } from 'crashcat';
 import type { Quat, Spherical, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec2, vec3 } from 'mathcat';
+import { pack } from '../api/pack';
+import type { Physics } from '../api/physics';
+import { getTrait } from '../api/scene-graph';
+import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scripts';
+import { sync, type TraitType, trait } from '../api/traits';
+import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import * as vcc from '../core/physics/vcc';
 import {
@@ -31,17 +37,11 @@ import {
     BLOCK_FLAG_COLLISION,
     BLOCK_FLAG_LIQUID,
     BLOCK_FLAG_SNEAK_GUARD,
-    SHAPE_AABBS,
     type BlockRegistry,
+    SHAPE_AABBS,
 } from '../core/voxels/block-registry';
-import { getBlockState, type Voxels } from '../core/voxels/voxels';
 import { unpackVoxelHitInfo } from '../core/voxels/voxel-physics-shape';
-import { pack } from '../api/pack';
-import type { Physics } from '../api/physics';
-import { getTrait } from '../api/scene-graph';
-import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scripts';
-import { sync, trait, type TraitType } from '../api/traits';
-import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
+import { getBlockState, type Voxels } from '../core/voxels/voxels';
 import { TransformTrait } from './transform';
 
 // ── character shape ──────────────────────────────────────────────────

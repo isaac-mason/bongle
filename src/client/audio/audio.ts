@@ -45,10 +45,9 @@
  */
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
-import { TransformTrait } from '../../builtins/transform';
+import { getVisualWorldMatrix, getVisualWorldPosition, TransformTrait } from '../../builtins/transform';
 import type { Node, Nodes as NodesType } from '../../core/scene/nodes';
 import * as Nodes from '../../core/scene/nodes';
-import { getVisualWorldMatrix, getVisualWorldPosition } from '../../builtins/transform';
 import { assetUrl } from '../asset-url';
 
 /* ── manifest types (mirror of asset-pipeline/audio.ts) ────────────── */

@@ -4,14 +4,14 @@
 // the test exercises the production onNeighbourUpdate logic against
 // the runBlockHooks driver, not a hand-copy of it.
 
-import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import { AIR, buildBlockRegistry } from './block-registry';
-import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
-import { cube, fence, pane } from './block-presets';
-import { runNeighbourRecompute } from './block-hooks';
-import { clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from './voxels';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { SetBlockFlags } from './block-flags';
+import { runNeighbourRecompute } from './block-hooks';
+import { cube, fence, pane } from './block-presets';
+import { AIR, buildBlockRegistry } from './block-registry';
+import type { BlockDef, BlockHandle, BlockTextureDef } from './blocks';
+import { clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from './voxels';
 
 beforeAll(() => {
     registerAllShapes();

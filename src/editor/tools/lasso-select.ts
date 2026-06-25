@@ -15,21 +15,21 @@
 // `Object.is` comparisons in selectors detect the change.
 
 import type { PerspectiveCamera } from 'gpucat';
-import { mat4, vec3, type Vec3 } from 'mathcat';
-import { isKeyDown } from '../../client/input';
-import type { Input } from '../../client/input';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
-import type { Voxels } from '../../core/voxels/voxels';
-import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
+import { mat4, type Vec3, vec3 } from 'mathcat';
 import { getVisualWorldMatrix } from '../../api/transforms';
+import { TransformTrait } from '../../builtins/transform';
+import type { Input } from '../../client/input';
+import { isKeyDown } from '../../client/input';
 import type { Nodes } from '../../core/scene/nodes';
 import { getNodeById, getTrait } from '../../core/scene/nodes';
-import { TransformTrait } from '../../builtins/transform';
+import * as Selection from '../../core/scene/selection';
+import type { BlockRegistry } from '../../core/voxels/block-registry';
+import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
+import type { Voxels } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import type { NodeBodies } from '../node-bodies';
 import type { PointerState } from '../pointer-state';
 import { pointerHeld, pointerJustDown, pointerJustUp } from '../pointer-state';
-import * as Selection from '../../core/scene/selection';
 
 const MIN_NDC_DELTA = 0.004; // ~ a few pixels at typical resolutions
 const SAMPLE_GRID_RES = 96; // samples across the polygon's NDC bbox

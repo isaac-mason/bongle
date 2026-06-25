@@ -6,8 +6,8 @@
  * `getJoystick` / `isTouchButtonDown` predicates by the same id.
  */
 
-import type { ScriptContext } from '../api/scripts';
 import { warn } from '../api/debug';
+import type { ScriptContext } from '../api/scripts';
 import type { JoystickState, TouchButtonState, TouchInput } from './input';
 
 /* ── shared helpers ──────────────────────────────────────────────── */

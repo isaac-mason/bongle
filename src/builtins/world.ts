@@ -31,9 +31,9 @@
 // Per-instance lifecycle that doesn't benefit from batching (one-shot
 // onInit setup tied to a specific node) stays on the data trait.
 
-import { addTrait, hasTrait } from '../core/scene/nodes';
 import type { Node } from '../core/scene/nodes';
-import { trait, type TraitType } from '../core/scene/traits';
+import { addTrait, hasTrait } from '../core/scene/nodes';
+import { type TraitType, trait } from '../core/scene/traits';
 
 export const WorldTrait = trait('world', {}, { persist: false });
 

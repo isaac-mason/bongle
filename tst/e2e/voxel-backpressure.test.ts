@@ -6,8 +6,8 @@
 // voxel_ack → handleVoxelAck. (server-side caps/gates are unit-tested in
 // discovery.test.ts; this covers the client ack seam those can't reach.)
 
-import { afterEach, describe, expect, it } from 'vitest';
 import { block, setBlock } from 'bongle';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
 describe('voxel backpressure (e2e)', () => {

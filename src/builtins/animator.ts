@@ -5,8 +5,8 @@
 // surface is re-exported as a single `Animation` namespace in
 // api/animation.ts (clip, play, stop, crossFadeTo, tick, ...).
 
-import { type TraitType, trait } from '../core/scene/traits';
 import type { AnimatorState } from '../api/animation';
+import { type TraitType, trait } from '../core/scene/traits';
 
 export const AnimatorTrait = trait('animator', {
     /**

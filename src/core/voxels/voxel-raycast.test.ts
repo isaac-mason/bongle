@@ -6,8 +6,8 @@ import { aabbs } from './block-collider';
 import { box } from './block-model';
 import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_SELECTION } from './block-registry';
 import { CullType } from './blocks';
-import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
+import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
 import { createChunk, createVoxels, setChunkBlock } from './voxels';
 
 // ── tests ───────────────────────────────────────────────────────────

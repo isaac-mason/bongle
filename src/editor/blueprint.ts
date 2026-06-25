@@ -11,19 +11,19 @@
 // usage: import * as Blueprint from './blueprint'
 
 import type { Quat, Vec3 } from 'mathcat';
+import { TransformTrait } from '../builtins/transform';
+import type { ScenePayload } from '../core/content/scene-store';
 import { registry as kindRegistry } from '../core/registry';
 import type { Nodes, PrefabConfig, SerializedNode } from '../core/scene/nodes';
 import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/nodes';
 import { expandPrefab } from '../core/scene/prefab';
 import type { NodesContext } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
 import type { BlockRegistry } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
+import { loadVoxels, type SavedVoxels, saveVoxels } from '../core/voxels/voxel-savefile';
 import type { Voxels } from '../core/voxels/voxels';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, getBlock, setBlock } from '../core/voxels/voxels';
-import { saveVoxels, loadVoxels, type SavedVoxels } from '../core/voxels/voxel-savefile';
-import { TransformTrait } from '../builtins/transform';
-import * as Selection from '../core/scene/selection';
-import type { ScenePayload } from '../core/content/scene-store';
 import { useEditor } from './editor-store';
 
 // ── types ──────────────────────────────────────────────────────────

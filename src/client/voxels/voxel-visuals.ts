@@ -29,7 +29,7 @@ import type { Box3, Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
-import { type Chunk, CHUNK_SIZE, chunkKey, type Voxels } from '../../core/voxels/voxels';
+import { CHUNK_SIZE, type Chunk, chunkKey, type Voxels } from '../../core/voxels/voxels';
 import { enqueueMesh, isInFlight } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {

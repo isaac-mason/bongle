@@ -19,27 +19,26 @@
  * selection/hover/etc.
  */
 
-import { create, useStore, type StoreApi } from 'zustand';
 import type { Vec3 } from 'mathcat';
+import { create, type StoreApi, useStore } from 'zustand';
 import * as Net from '../client/net';
-import { type ClientRoom } from '../client/rooms';
+import type { ClientRoom } from '../client/rooms';
+import type { PrefabConfig, Realm } from '../core/scene/nodes';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
 import * as Actions from './actions';
-import { type HotbarSlot } from './inventory';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
 import { copySelectionToSystemClipboard } from './clipboard';
 import { SaveBlueprintCommand, VoxelEditCommand } from './commands';
 import { useEditor } from './editor-store';
-import * as Selection from '../core/scene/selection';
-import { PivotPreset } from './tools/transform';
-import * as TransformTool from './tools/transform';
-import type { TransformToolState } from './tools/transform';
-import type { PrefabConfig, Realm } from '../core/scene/nodes';
+import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
 import type { Pattern } from './scene/pattern';
 import type { BrushShape } from './scene/shapes';
+import type { PivotPreset, TransformToolState } from './tools/transform';
+import * as TransformTool from './tools/transform';
 import type { Rgba } from './visuals/editor-colors';
 
 export type ControlMode = 'fly' | 'orbit' | 'character';

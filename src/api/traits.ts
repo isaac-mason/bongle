@@ -1,3 +1,4 @@
+export { syncMetric, syncRate } from '../core/scene/sync/sync-rate';
 export type {
     ControlDef,
     SyncDef,
@@ -14,4 +15,3 @@ export type {
     TraitType,
 } from '../core/scene/traits';
 export { control, sync, trait } from '../core/scene/traits';
-export { syncMetric, syncRate } from '../core/scene/sync/sync-rate';

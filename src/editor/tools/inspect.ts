@@ -8,29 +8,28 @@
 
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import { vec3 } from 'mathcat';
-import type { ClientContext } from '../../core/scene/scripts';
+import { TransformTrait } from '../../builtins/transform';
+import { isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
-import type { ScriptContext } from '../../core/scene/scripts';
+import type { Node } from '../../core/scene/nodes';
+import { getTrait, isAncestorOf } from '../../core/scene/nodes';
+import type { ClientContext, ScriptContext } from '../../core/scene/scripts';
+import * as Selection from '../../core/scene/selection';
+import { getBlock } from '../../core/voxels/voxels';
+import type { EditRoomStoreApi } from '../edit-room-store';
+import { INSPECT_KEYS } from '../editor-controls';
+import { useEditor } from '../editor-store';
+import { isInputFocused } from '../input';
 import type { NodeBodies } from '../node-bodies';
-import type { TransformToolState } from './transform';
-import * as TransformTool from './transform';
-import type { State as PivotPoint } from '../visuals/pivot-point';
-import * as PivotPointMod from '../visuals/pivot-point';
 import type { PointerState } from '../pointer-state';
 import { pointerFlush, pointerHeld, pointerJustDown, pointerJustUp } from '../pointer-state';
-import { updateSelectionMeshes } from '../visuals/selection-mesh';
-import type { SelectionMeshState } from '../visuals/selection-mesh';
-import * as Selection from '../../core/scene/selection';
-import { useEditor } from '../editor-store';
-import type { EditRoomStoreApi } from '../edit-room-store';
-import { isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
-import { isInputFocused } from '../input';
 import * as Selector from '../selector';
-import { getBlock } from '../../core/voxels/voxels';
-import { getTrait, isAncestorOf } from '../../core/scene/nodes';
-import type { Node } from '../../core/scene/nodes';
-import { TransformTrait } from '../../builtins/transform';
-import { INSPECT_KEYS } from '../editor-controls';
+import type { State as PivotPoint } from '../visuals/pivot-point';
+import * as PivotPointMod from '../visuals/pivot-point';
+import type { SelectionMeshState } from '../visuals/selection-mesh';
+import { updateSelectionMeshes } from '../visuals/selection-mesh';
+import type { TransformToolState } from './transform';
+import * as TransformTool from './transform';
 
 /**
  * resolve which node to actually select when clicking a node.

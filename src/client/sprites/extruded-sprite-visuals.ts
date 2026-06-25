@@ -39,8 +39,8 @@
 
 import {
     createIndirectBuffer,
-    d,
     DrawIndexedIndirect,
+    d,
     Geometry,
     GpuBuffer,
     layoutStrideOf,
@@ -51,13 +51,12 @@ import {
 import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
-import { TransformTrait } from '../../builtins/transform';
+import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { getTrait, type Nodes, query } from '../../core/scene/nodes';
-import { getVisualWorldMatrix } from '../../builtins/transform';
-import * as Visibility from '../visibility';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
+import * as Visibility from '../visibility';
 import {
     acquireGeometry,
     EXTRUDED_INSTANCE_MATERIAL_OFFSET,

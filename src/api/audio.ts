@@ -22,10 +22,10 @@
  * …) belongs in a trait layer if/when we add one.
  */
 
+import * as Audio from '../client/audio/audio';
 import type { Node } from '../core/scene/nodes';
 import type { ScriptContext } from '../core/scene/scripts';
 import type { SoundHandle } from '../core/sounds/sounds';
-import * as Audio from '../client/audio/audio';
 
 export type PlaybackHandle = Audio.PlaybackHandle;
 export type PlayOpts = Audio.PlayOpts;

@@ -28,16 +28,16 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { CharacterControllerTrait, env, TransformTrait, type TraitType } from 'bongle';
+import { CharacterControllerTrait, env, type TraitType, TransformTrait } from 'bongle';
 import * as EngineClientModule from '../../src/client/engine-client';
 import * as ClientNet from '../../src/client/net';
 import type * as ClientRooms from '../../src/client/rooms';
-import * as Nodes from '../../src/core/scene/nodes';
 import { registry } from '../../src/core/registry';
+import * as Nodes from '../../src/core/scene/nodes';
+import { createFallbackAvatarsDriver } from '../../src/server/avatars-fallback';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
-import { createFallbackAvatarsDriver } from '../../src/server/avatars-fallback';
 
 // ── types ───────────────────────────────────────────────────────────
 

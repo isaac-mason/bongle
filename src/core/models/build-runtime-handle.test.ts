@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MeshTrait } from '../../builtins/mesh';
-import { getTrait } from '../scene/nodes';
 import { TransformTrait } from '../../builtins/transform';
+import { getTrait } from '../scene/nodes';
 import { createEmptyHandle, hydrateRuntimeHandle } from './build-runtime-handle';
 import type { Model, ModelNode } from './model';
 

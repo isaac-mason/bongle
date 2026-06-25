@@ -1,12 +1,12 @@
-import type { Client } from 'bongle/interface';
 import { block } from 'bongle';
+import type { Client } from 'bongle/interface';
 import { describe, expect, it } from 'vitest';
 import { createTestServer } from '../../tst/integration/server-integration-test';
-import { unpackPackedSceneGraph, unpackServerMessage } from '../core/protocol';
-import * as Debug from '../core/debug';
-import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../core/scene/nodes';
 import { setPosition, TransformTrait } from '../builtins/transform';
+import * as Debug from '../core/debug';
+import { unpackPackedSceneGraph, unpackServerMessage } from '../core/protocol';
 import * as Resources from '../core/resources';
+import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../core/scene/nodes';
 import { setBlock } from '../core/voxels/voxels';
 import * as Discovery from './discovery';
 import * as Net from './net';

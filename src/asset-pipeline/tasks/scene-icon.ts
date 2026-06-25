@@ -11,11 +11,11 @@
 // Always-render now: hash-gating + iteration over the scene set lives in the
 // orchestrator (one PNG per scene).
 
-import type { State } from '../engine';
-import { createRoom, disposeRoom } from '../rooms';
+import { registry as engineRegistry } from '../../core/registry';
 import { addChild, deserializeNode } from '../../core/scene/nodes';
 import { loadVoxels } from '../../core/voxels/voxel-savefile';
-import { registry as engineRegistry } from '../../core/registry';
+import type { State } from '../engine';
+import { createRoom, disposeRoom } from '../rooms';
 import { beginSnapshotSession, endSnapshotSession } from '../snapshot';
 import { preloadAllModels, renderPopulatedRoom, SUBJECT_ICON_PX, tickPrefabsToFixpoint } from '../subject';
 

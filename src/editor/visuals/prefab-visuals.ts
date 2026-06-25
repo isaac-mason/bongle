@@ -9,14 +9,13 @@
 //
 // usage: import * as PrefabVisuals from './prefab-visuals'
 
-import { quat, type Quat } from 'mathcat';
-import { TransformTrait } from '../../builtins/transform';
-import { VoxelModel, VoxelMeshTrait } from '../../builtins/voxel-mesh';
+import { type Quat, quat } from 'mathcat';
+import { markTransformDirty, TransformTrait } from '../../builtins/transform';
+import { VoxelMeshTrait, VoxelModel } from '../../builtins/voxel-mesh';
 import { registry as kindRegistry } from '../../core/registry';
 import { addChild, addTrait, createNode, destroyNode, getTrait, type Node, type Nodes } from '../../core/scene/nodes';
 import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { NodesContext } from '../../core/scene/scripts';
-import { markTransformDirty } from '../../builtins/transform';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { rotateVoxelsByQuat } from '../../core/voxels/voxel-rotate';
 

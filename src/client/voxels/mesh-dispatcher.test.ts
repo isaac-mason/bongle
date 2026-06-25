@@ -6,8 +6,17 @@
 // explicitly (processWorker → deliverToMain) so invariants like
 // queue depth + pool size can be inspected mid-protocol.
 
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+    createWorkerState,
+    handleMessage,
+    type MeshWorkerInMsg,
+    type MeshWorkerOutMsg,
+    type WorkerState,
+} from '../../core/voxels/mesh-worker';
+import { buildTestRegistry, resetVoxelRegistry } from '../../core/voxels/test-helpers';
+import { createChunk, createVoxels, setChunkBlock } from '../../core/voxels/voxels';
 import {
     createMeshDispatcher,
     dispatcherStats,
@@ -18,15 +27,6 @@ import {
     setMeshRegistry,
     type WorkerLike,
 } from './mesh-dispatcher';
-import {
-    type MeshWorkerInMsg,
-    type MeshWorkerOutMsg,
-    type WorkerState,
-    createWorkerState,
-    handleMessage,
-} from '../../core/voxels/mesh-worker';
-import { buildTestRegistry, resetVoxelRegistry } from '../../core/voxels/test-helpers';
-import { createChunk, createVoxels, setChunkBlock } from '../../core/voxels/voxels';
 
 beforeAll(() => {
     registerAllShapes();

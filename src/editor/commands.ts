@@ -1,5 +1,5 @@
-import { pack } from '../core/scene/pack';
 import { CLIENT_TO_SERVER, command } from '../core/rpc';
+import { pack } from '../core/scene/pack';
 
 /* ── scene mutation commands ── */
 

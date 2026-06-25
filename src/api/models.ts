@@ -14,8 +14,8 @@
 // iframes, in-process tools) can drive it directly without a server
 // roundtrip.
 
-import * as Resources from '../core/resources';
 import type { ModelHandle } from '../core/models/handle';
+import * as Resources from '../core/resources';
 import type { ScriptContext } from '../core/scene/scripts';
 
 /**

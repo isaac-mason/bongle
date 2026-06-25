@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as Debug from '../../core/debug';
 import { type DepGraphSnapshot, getDepGraphVersion, snapshotDepGraph } from '../../core/capture/dep-graph';
+import * as Debug from '../../core/debug';
 import type { ClientRoom } from '../rooms';
-import { availableDebugTabs, type DebugTab, useClient } from './client-store';
 import { UILayer } from '../ui-layers';
+import { availableDebugTabs, type DebugTab, useClient } from './client-store';
 import DepsGraph from './deps-graph';
 
 // ─── shared widget chrome (used by logs/deps tabs) ──────────────────────────

@@ -16,10 +16,10 @@
 // in this package's package.json) tree-shake declarations a game
 // doesn't reference.
 
-export * as blocks from './blocks';
+export * as blockSoundPresets from './block-sound-presets';
 export * as blockTextures from './block-textures';
+export * as blocks from './blocks';
 export * as models from './models';
+export * as particlePresets from './particle-presets';
 export * as sounds from './sounds';
 export * as sprites from './sprites';
-export * as blockSoundPresets from './block-sound-presets';
-export * as particlePresets from './particle-presets';

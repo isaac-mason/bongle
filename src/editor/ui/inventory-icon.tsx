@@ -7,9 +7,9 @@
  */
 
 import { memo } from 'react';
+import { assetUrl } from '../../client/asset-url';
 import { useEditor } from '../editor-store';
 import type { InventoryItem } from '../inventory';
-import { assetUrl } from '../../client/asset-url';
 
 type Props = {
     item: InventoryItem;

@@ -3,16 +3,16 @@
 // extracts the clipboard event logic from index.ts so that onInit stays thin.
 // handlers are created once on init and registered via document.addEventListener.
 
+import type { ClientRoom } from '../client/rooms';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
+import * as Blueprint from './blueprint';
+import { VoxelEditCommand } from './commands';
+import type { EditRoomStoreApi } from './edit-room-store';
+import { isInputFocused } from './input';
 import type { TransformToolState } from './tools/transform';
 import * as TransformTool from './tools/transform';
-import type { ClientRoom } from '../client/rooms';
-import * as Blueprint from './blueprint';
-import * as Selection from '../core/scene/selection';
-import type { EditRoomStoreApi } from './edit-room-store';
-import { VoxelEditCommand } from './commands';
-import { isInputFocused } from './input';
 
 export type ClipboardHandlers = {
     onCopy: (e: ClipboardEvent) => void;

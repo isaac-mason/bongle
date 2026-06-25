@@ -6,7 +6,6 @@
 //   - liquid swim (gravity replaced by liquidSink, jump ascends)
 //   - material friction (ice slides further after input release)
 
-import { afterEach, describe, expect, it } from 'vitest';
 import {
     addTrait,
     block,
@@ -14,15 +13,16 @@ import {
     CharacterControllerTrait,
     CullType,
     getTrait,
+    type Node,
     onJoin,
     PlayerControllerTrait,
     removeTrait,
     script,
     setBlock,
-    trait,
     TransformTrait,
-    type Node,
+    trait,
 } from 'bongle';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
 describe('kcc environmental mechanics', () => {

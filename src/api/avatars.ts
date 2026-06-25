@@ -14,11 +14,11 @@
 // The load/assign internals live in core/avatar/model and are shared with the engine
 // player-join path (server/avatars); this module is the script-facing surface.
 
-import type { ResolvedAvatar } from 'bongle/interface';
 import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
-import type { ScriptContext } from '../core/scene/scripts';
-import * as Resources from '../core/resources';
+import type { ResolvedAvatar } from 'bongle/interface';
 import { acquireAvatarModel } from '../core/avatar/model';
+import * as Resources from '../core/resources';
+import type { ScriptContext } from '../core/scene/scripts';
 
 // `assignAvatar` is shared with the engine player path, so it lives in core; surface
 // it here as part of the script-facing API.

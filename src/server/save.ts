@@ -13,7 +13,7 @@ import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import { registry } from '../core/registry';
 import * as Nodes from '../core/scene/nodes';
-import { saveVoxelsIncremental, seedVoxelSaveCache, type SavedVoxels } from '../core/voxels/voxel-savefile';
+import { type SavedVoxels, saveVoxelsIncremental, seedVoxelSaveCache } from '../core/voxels/voxel-savefile';
 import * as ContentManager from './content-manager';
 import type { EngineServer } from './engine-server';
 import * as Rooms from './rooms';

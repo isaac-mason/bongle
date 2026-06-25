@@ -6,8 +6,8 @@
 // the hover raycast runs once per frame in editor/index.ts and writes
 // editor.hoverVoxel — tools read that for hit voxel position.
 
-import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../client/input';
 import type { Input } from '../client/input';
+import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../client/input';
 
 export type PointerState = {
     // mouse position in NDC space, updated via canvas mousemove

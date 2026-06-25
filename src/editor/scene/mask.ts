@@ -20,11 +20,12 @@
  * `adjacent`, `state`, `expression`, `biome`, `clipboard`, `region` as
  * needed by extending the type + matching in `parseMask` / `testMask`.
  */
+
+import { fuzzyRank } from '../../core/utils/fuzzy';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { splitTopLevel } from './pattern';
-import { fuzzyRank } from '../../core/utils/fuzzy';
 
 export type BlockMatch = {
     blockId: string;

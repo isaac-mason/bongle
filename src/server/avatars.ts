@@ -15,12 +15,12 @@
  * builtin) are codegen-hydrated already.
  */
 
-import type { ResolvedAvatar } from 'bongle/interface';
 import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
+import type { ResolvedAvatar } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
+import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { PlayerId } from '../core/client';
 import { BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
-import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import * as Resources from '../core/resources';
 import type { ClientState } from './clients';
 import type { EngineServer } from './engine-server';

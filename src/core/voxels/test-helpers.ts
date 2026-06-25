@@ -7,8 +7,8 @@
 // in `beforeEach` so test files don't cross-pollute.
 
 import { registry } from '../registry';
-import type { BlockStateDef, PropsDef } from './block-state';
 import type { BlockRegistry } from './block-registry';
+import type { BlockStateDef, PropsDef } from './block-state';
 import { type BlockHandle, type BlockOptions, block, blockTexture } from './blocks';
 
 type AnyStore = {

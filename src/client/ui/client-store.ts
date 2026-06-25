@@ -7,8 +7,8 @@
 
 import { create } from 'zustand';
 import { env } from '../../api/env';
-import type * as Debug from '../../core/debug';
 import type { PlayerId } from '../../core/client';
+import type * as Debug from '../../core/debug';
 import type { ClientRoom } from '../rooms';
 
 /** debug panel tab. 'logs' and 'deps' are editor-only and filtered out of

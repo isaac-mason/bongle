@@ -16,6 +16,8 @@
  * the singleton itself is the read surface.
  */
 
+import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
+import { onModulePop, onModulePush, owningModule } from './capture/module-scope';
 import { DEFAULT_MATCHMAKING_CONFIG, type MatchmakingConfig } from './matchmaking';
 import type { ModelHandle } from './models/handle';
 import type { ParticleHandle } from './particles/particles';
@@ -28,9 +30,7 @@ import type { ControlDef, SyncDef, TraitDef } from './scene/traits';
 import type { SoundHandle } from './sounds/sounds';
 import type { SpriteHandle } from './sprites/sprites';
 import { type BlockRegistry, buildBlockRegistry } from './voxels/block-registry';
-import { type BlockDef, type BlockHandle, BlockModel, type BlockTextureDef, collectModelTextureIds } from './voxels/blocks';
-import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
-import { onModulePop, onModulePush, owningModule } from './capture/module-scope';
+import { type BlockDef, type BlockHandle, type BlockModel, type BlockTextureDef, collectModelTextureIds } from './voxels/blocks';
 
 /* ── primitive types ────────────────────────────────────────────── */
 

@@ -10,10 +10,10 @@
  * `subscribe(chat, fn)` for re-renders.
  */
 
-import * as ChatCommands from '../core/chat-commands';
 import type { CommandHandler, CommandInvocation } from '../core/chat-commands';
-import * as Net from './net';
+import * as ChatCommands from '../core/chat-commands';
 import type { ClientNet } from './net';
+import * as Net from './net';
 
 export type ChatLineKind = 'message' | 'system' | 'error' | 'input';
 

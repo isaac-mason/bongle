@@ -1,26 +1,26 @@
-import { useRef, useState, useMemo } from 'react';
-import { useEditor } from '../editor-store';
-import { useEditRoom } from '../edit-room-store';
+import { useMemo, useRef, useState } from 'react';
 import * as Selection from '../../core/scene/selection';
 import type {
     ElevationFalloff,
     ElevationMode,
-    SelectTarget,
-    SelectionBehavior,
     MagicSelectCompare,
+    SelectionBehavior,
+    SelectorMode,
+    SelectTarget,
     TransformMode,
     TransformSpace,
-    SelectorMode,
 } from '../edit-room-store';
-import type { PivotPreset } from '../tools/transform';
+import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
-import { parsePattern, suggestPattern } from '../scene/pattern';
 import { parseMask, suggestMask } from '../scene/mask';
+import { parsePattern, suggestPattern } from '../scene/pattern';
 import type { BrushShape } from '../scene/shapes';
 import { loadElevationImage } from '../tools/elevation';
-import { ExprInput } from './expr-input';
+import type { PivotPreset } from '../tools/transform';
 import { NumberInput } from './components/number-input';
 import { Range } from './components/range';
+import { ExprInput } from './expr-input';
 
 // ── shared helpers ─────────────────────────────────────────────────
 

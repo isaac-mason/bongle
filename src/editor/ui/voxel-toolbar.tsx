@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import { useEditor } from '../editor-store';
+import * as Selection from '../../core/scene/selection';
 import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
 import { parsePattern } from '../scene/pattern';
-import * as Selection from '../../core/scene/selection';
 
 type ActionEntry = {
     label: string;

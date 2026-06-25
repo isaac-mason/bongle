@@ -1,7 +1,6 @@
-import type { ClientDriver, JsonValue } from 'bongle/interface';
 import { env } from 'bongle';
+import type { ClientDriver, JsonValue } from 'bongle/interface';
 import { attachWorldTrait } from '../builtins/world';
-import * as Chat from './chat';
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
@@ -10,8 +9,8 @@ import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
 import { buildWireIndex, registry, type WireIndex } from '../core/registry';
-import * as Resources from '../core/resources';
 import type { ResourceLoader } from '../core/resource-loader';
+import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
 import * as Nodes from '../core/scene/nodes';
@@ -21,6 +20,7 @@ import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
 import * as Audio from './audio/audio';
+import * as Chat from './chat';
 import * as CloudResources from './cloud-resources';
 import * as Device from './device';
 import * as DomUi from './dom-ui';
@@ -50,7 +50,7 @@ import * as Visibility from './visibility';
 import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
 import * as VoxelResources from './voxels/voxel-resources';
-import { voxelArenaBudgetForTier, type VoxelArenaBudget } from './voxels/voxel-resources';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from './voxels/voxel-resources';
 import * as VoxelVisuals from './voxels/voxel-visuals';
 
 export type InitOptions = {

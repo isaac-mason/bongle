@@ -19,9 +19,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ScenePayload } from '../core/content/scene-store';
 import type { SerializedSceneGraph } from '../core/scene/nodes';
 import type { SavedChunk } from '../core/voxels/voxel-savefile';
-import type { ScenePayload } from '../core/content/scene-store';
 
 export type { ScenePayload };
 

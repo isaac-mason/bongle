@@ -14,8 +14,8 @@
 
 import type { Box3 } from 'mathcat';
 import { MeshTrait } from '../../builtins/mesh';
-import { addChild, addTrait, createNode, type Node } from '../scene/nodes';
 import { TransformTrait } from '../../builtins/transform';
+import { addChild, addTrait, createNode, type Node } from '../scene/nodes';
 import type { ClipDef, MeshId, ModelHandle } from './handle';
 import type { Model, ModelNode } from './model';
 

@@ -8,13 +8,13 @@
  * write `createJoystick(ctx, ...)` unconditionally.
  */
 
-import { env } from './env';
 import {
     type CreateJoystickOpts,
     type CreateTouchButtonOpts,
     createJoystickImpl,
     createTouchButtonImpl,
 } from '../client/mobile-controls';
+import { env } from './env';
 import type { ScriptContext } from './scripts';
 
 export type { CreateJoystickOpts, CreateTouchButtonOpts };

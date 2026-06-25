@@ -1,34 +1,33 @@
 import fs from 'node:fs/promises';
-import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import { env } from 'bongle';
+import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
+import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
+import { buildWireIndex, clearPendingChanges, registry, touch } from '../core/registry';
+import * as Resources from '../core/resources';
+import * as Rpc from '../core/rpc';
+import * as Animation from '../core/scene/animation';
 import * as Nodes from '../core/scene/nodes';
 import * as Prefab from '../core/scene/prefab';
-import * as Animation from '../core/scene/animation';
-import { buildWireIndex, registry, touch } from '../core/registry';
+import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import * as Scripts from '../core/scene/scripts';
 import { runBlockEventHooks } from '../core/voxels/block-hooks';
 import * as Light from '../core/voxels/light';
-import * as Save from './save';
+import type * as EditorModule from '../editor/index';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
 import * as Clients from './clients';
+import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
 import * as Net from './net';
 import { formatPerfDigest, PERF_EMIT_INTERVAL_S } from './perf-report';
-import * as Rooms from './rooms';
-import * as Rpc from '../core/rpc';
-import * as ServerRpc from './rpc';
-import * as ContentManager from './content-manager';
 import * as ResourceManager from './resource-manager';
-import * as Content from '../core/content';
-import * as Resources from '../core/resources';
-import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
-import type * as EditorModule from '../editor/index';
-import { clearPendingChanges } from '../core/registry';
+import * as Rooms from './rooms';
+import * as ServerRpc from './rpc';
+import * as Save from './save';
 
 // Re-export the registry-dispatch entry so consumers (kit boot entries,
 // kit internals) can call `EngineServer.applyRegistryChanges(state)`

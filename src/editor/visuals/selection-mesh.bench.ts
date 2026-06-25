@@ -17,10 +17,10 @@
 // pattern, and a "combined" bench that mimics one updateSelectionMeshes
 // pass over the committed selection (fill + outline + edges).
 
-import { bench, describe } from 'vitest';
 import { LineSegmentsGeometry } from 'gpucat';
-import { buildMeshEdgeSegments, buildOutlineSegments, buildSelectionGeometry } from './selection-mesh';
+import { bench, describe } from 'vitest';
 import * as Selection from '../core/scene/selection';
+import { buildMeshEdgeSegments, buildOutlineSegments, buildSelectionGeometry } from './selection-mesh';
 
 // ── scenario builders ───────────────────────────────────────────────
 

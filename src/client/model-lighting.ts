@@ -9,9 +9,9 @@
 // mesh subtree to decide visibility + a centroid. Off-screen models pay the
 // sample; the meshes themselves are still frustum-culled downstream.
 
+import { getVisualWorldMatrix } from '../api/transforms';
 import { ModelTrait } from '../builtins/model';
 import { TransformTrait } from '../builtins/transform';
-import { getVisualWorldMatrix } from '../api/transforms';
 import type { Nodes } from '../core/scene/nodes';
 import { query } from '../core/scene/nodes';
 import { sampleVoxelLight } from '../core/voxels/light';

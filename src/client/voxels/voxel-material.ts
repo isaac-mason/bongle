@@ -81,6 +81,7 @@ import {
     storage,
     sub,
     u32,
+    uniform,
     Var,
     varying,
     vec2f,
@@ -88,7 +89,6 @@ import {
     vec4,
     vec4f,
     vertexIndex,
-    uniform,
 } from 'gpucat';
 import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 

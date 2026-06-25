@@ -1,22 +1,22 @@
 // ── chunk mesher tests ──────────────────────────────────────────────
 
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registry } from '../registry';
-import { blockTexture, CullType, MaterialType } from './blocks';
 import { stairs } from './block-presets';
+import type { BlockRegistry } from './block-registry';
+import { blockTexture, CullType, MaterialType } from './blocks';
 import {
-    type ChunkMeshResult,
-    type PassMesh,
     buildMeshInput,
+    type ChunkMeshResult,
     createMeshOutput,
     meshChunk,
+    type PassMesh,
     QUAD_LIGHT_OFFSET,
     QUAD_STRIDE_U32S,
 } from './chunk-mesher';
-import type { BlockRegistry } from './block-registry';
-import type { Chunk, Voxels } from './voxels';
 import { buildTestRegistry, defineTestBlock, resetVoxelRegistry } from './test-helpers';
+import type { Chunk, Voxels } from './voxels';
 import { createChunk, createVoxels, setChunkBlock, voxelIndex } from './voxels';
 
 // ── test helpers ────────────────────────────────────────────────────

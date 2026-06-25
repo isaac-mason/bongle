@@ -1,5 +1,7 @@
 import { MaterialCombineMode, MotionQuality, MotionType, type RigidBody } from 'crashcat';
+
 export { MaterialCombineMode, MotionQuality, MotionType } from 'crashcat';
+
 import { type Vec3, vec3 } from 'mathcat';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';

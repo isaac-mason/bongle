@@ -7,10 +7,10 @@
 // out of `engine-client.ts` keeps the runtime entry free of `env.editor`
 // UI conditionals — composition lives in the template, not the core.
 
+import * as api from 'bongle';
 import type { EngineClient } from './client/engine-client';
 import * as Editor from './editor/index';
 import { mountEditUI } from './editor/ui/edit-ui';
-import * as api from 'bongle';
 
 export async function setup(state: EngineClient): Promise<void> {
     Editor.registerClient(state);

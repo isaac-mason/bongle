@@ -1,7 +1,8 @@
 import { AabbBodyTrait } from '../../builtins/aabb-body';
 import { ContactsTrait } from '../../builtins/contacts';
+import { setInterpolation } from '../../builtins/transform';
 import type { PlayerId } from '../client';
-import * as Resources from '../resources';
+import type * as Resources from '../resources';
 import type { Nodes } from '../scene/nodes';
 import {
     addTrait,
@@ -13,7 +14,6 @@ import {
     runOnPostPhysicsStep,
     runOnPrePhysicsStep,
 } from '../scene/nodes';
-import { setInterpolation } from '../../builtins/transform';
 import type { BlockRegistry } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';

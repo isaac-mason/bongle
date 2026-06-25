@@ -18,7 +18,7 @@ import { SetBlockFlags } from './block-flags';
 import { runNeighbourRecompute } from './block-hooks';
 import { BLOCK_FLAG_FENCE, buildBlockRegistry } from './block-registry';
 import * as bs from './block-state';
-import { block, type BlockDef, type BlockTextureDef, CullType, MaterialType } from './blocks';
+import { type BlockDef, type BlockTextureDef, block, CullType, MaterialType } from './blocks';
 import {
     CHUNK_SIZE,
     CHUNK_VOLUME,

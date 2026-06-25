@@ -1,9 +1,9 @@
 import { type Vec3, vec3 } from 'mathcat';
-import * as AabbPhysics from '../core/physics/aabb-physics';
-import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
 import { control, sync, syncRate, type TraitType, trait } from '../api/traits';
+import * as AabbPhysics from '../core/physics/aabb-physics';
+import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 
 // lightweight axis-aligned body trait. wraps an `AabbPhysics.Body` from the
 // `AabbPhysics.World` and routes its contacts through `ContactsTrait` fan-out.

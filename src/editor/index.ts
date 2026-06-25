@@ -1,4 +1,3 @@
-import type { Client } from 'bongle/interface';
 import {
     CameraRefTrait,
     CharacterControllerTrait,
@@ -9,19 +8,21 @@ import {
     resetInterpolation,
     TransformTrait,
 } from 'bongle';
+import type { Client } from 'bongle/interface';
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import type { Quat, Spherical, Vec3 } from 'mathcat';
 import { quat, spherical, vec3 } from 'mathcat';
 import * as chat from '../api/chat';
-import * as ClientChat from '../client/chat';
+import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import { assetUrl } from '../client/asset-url';
-import { initBlueprints } from './blueprints';
+import * as ClientChat from '../client/chat';
 import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { getControlCamera, setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/client-store';
+import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
 import {
     addChild,
@@ -58,16 +59,15 @@ import {
     script,
 } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
-import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../builtins/transform';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { runNeighbourRecompute } from '../core/voxels/block-hooks';
 import { propagateAllLight } from '../core/voxels/light';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { setBlock } from '../core/voxels/voxels';
-import type { EngineServer } from '../server/engine-server';
 import * as Blueprints from '../server/blueprints';
-import type { ScenePayload } from '../core/content/scene-store';
+import type { EngineServer } from '../server/engine-server';
 import { setTraitProps } from './actions';
+import { initBlueprints } from './blueprints';
 import { readNudgeDelta } from './camera';
 import { installEditorChatCommands } from './chat-commands';
 import { installSelectionChatCommands } from './chat-selection';
@@ -99,14 +99,14 @@ import { createPointerState, disposePointerState, pointerFlush } from './pointer
 import { parsePattern } from './scene/pattern';
 import { findCategoryByTool, TOOL_CATEGORIES } from './tool-categories';
 import { clearBoxSelect, updateBoxSelect } from './tools/box-select';
+import { createBrushState, updateBrush } from './tools/brush-build';
+import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
 import { updateBuild } from './tools/build';
+import { createElevationState, updateElevation } from './tools/elevation';
 import { openViewportContextMenu, updateInspect } from './tools/inspect';
 import { clearLassoStroke, updateLassoSelect } from './tools/lasso-select';
 import { updateMagicSelect } from './tools/magic-select';
 import { createPainterState, updatePainter } from './tools/painter';
-import { createBrushState, updateBrush } from './tools/brush-build';
-import { createBrushSelectState, updateBrushSelect } from './tools/brush-select';
-import { createElevationState, updateElevation } from './tools/elevation';
 import { createSmoothState, updateSmooth } from './tools/smooth';
 import * as TransformTool from './tools/transform';
 import * as ChunkBoundsVisuals from './visuals/chunk-bounds-visuals';

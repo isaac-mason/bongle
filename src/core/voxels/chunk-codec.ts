@@ -23,8 +23,8 @@
 // the client, and RLE alone captures most of the win for low-entropy
 // light data. see notes above encodeLight for the wire format.
 
-import { CHUNK_VOLUME } from './voxels';
 import { deflateSync, inflateSync } from 'fflate';
+import { CHUNK_VOLUME } from './voxels';
 
 // ── RLE ─────────────────────────────────────────────────────────────
 //

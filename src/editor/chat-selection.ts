@@ -16,22 +16,23 @@
  * (origin-in-region), so node selection automatically tracks the voxel set
  * across expand / contract / shift.
  */
+
+import type { ChatClient } from '../client/chat';
+import * as ClientChat from '../client/chat';
 import type { ArgType, CommandHandler, CommandSpec, Suggestion } from '../core/chat-commands';
 import * as ChatCommands from '../core/chat-commands';
-import * as ClientChat from '../client/chat';
-import type { ChatClient } from '../client/chat';
 import type { Physics } from '../core/physics/physics';
 import { registry } from '../core/registry';
-import * as Selection from '../core/scene/selection';
 import type { ScriptContext } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
 import { fuzzyRank } from '../core/utils/fuzzy';
 import { parseKey } from '../core/voxels/block-registry';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlock, toChunkCoord } from '../core/voxels/voxels';
 import type { EditRoomStoreApi, SelectTarget } from './edit-room-store';
 import type { NodeBodies } from './node-bodies';
-import { parseMask, testMask, type Mask } from './scene/mask';
+import { type Mask, parseMask, testMask } from './scene/mask';
 import { rebuildNodeSelection } from './scene/node-selection';
-import { buildShape, type BrushShape } from './scene/shapes';
+import { type BrushShape, buildShape } from './scene/shapes';
 
 // ── direction tokens ───────────────────────────────────────────────
 
@@ -414,7 +415,7 @@ export function installSelectionChatCommands(
         let current = sel;
         const scratch = Selection.create();
         for (const [dx, dy, dz] of dirs) {
-            let eroded = Selection.clone(current);
+            const eroded = Selection.clone(current);
             for (let i = 1; i <= n; i++) {
                 scratch.chunks.clear();
                 scratch.nodes.clear();

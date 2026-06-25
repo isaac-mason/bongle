@@ -12,8 +12,8 @@
  * keeps it reusable for any future grammar-typed field (e.g. selectors).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { registry } from '../../core/registry';
 
 export type ExprSuggestion = { text: string; label?: string; detail?: string };

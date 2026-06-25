@@ -49,6 +49,7 @@ import {
     vertexIndex,
 } from 'gpucat';
 import { QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { shadeTinted } from '../visuals/dsl';
 import {
     buildEnvSky,
     buildVoxelFragment,
@@ -59,7 +60,6 @@ import {
     pickCornerIdx,
     unpackVoxelLight,
 } from './voxel-material';
-import { shadeTinted } from '../visuals/dsl';
 
 // ── gpu structs ─────────────────────────────────────────────────────
 

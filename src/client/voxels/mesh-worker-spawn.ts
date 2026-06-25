@@ -9,8 +9,8 @@
 // construction (the deployed client iframe runs at origin='null', so it
 // can't OOTB load a CDN-hosted worker script directly).
 
-import MeshWorker from './mesh-worker.entry?worker&inline';
 import type { WorkerLike } from './mesh-dispatcher';
+import MeshWorker from './mesh-worker.entry?worker&inline';
 
 export function spawnMeshWorker(): WorkerLike {
     return new MeshWorker() as WorkerLike;

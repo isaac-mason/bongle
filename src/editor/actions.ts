@@ -14,8 +14,7 @@
 
 import type { Quat } from 'mathcat';
 import { TransformTrait } from '../builtins/transform';
-import type { ScriptContext } from '../core/scene/scripts';
-import { send } from '../core/scene/scripts';
+import { registry } from '../core/registry';
 import {
     addChild,
     addTraitBySlot,
@@ -27,32 +26,29 @@ import {
     getTrait,
     isAncestorOf,
     type Node,
+    type Nodes,
     type PrefabConfig,
+    type Realm,
     removeTraitBySlot,
     reorderChild,
     reparent,
-    type Nodes,
-    type Realm,
-    serializeNode,
     type SerializedTrait,
+    serializeNode,
     setPrefab,
 } from '../core/scene/nodes';
+import type { ScriptContext } from '../core/scene/scripts';
+import { send } from '../core/scene/scripts';
+import * as Selection from '../core/scene/selection';
 import { rotateVoxelsByQuat } from '../core/voxels/voxel-rotate';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, getBlock, type Voxels } from '../core/voxels/voxels';
 import type { VoxelOp } from './blueprint';
-import type { EditRoomState, ElevationMode } from './edit-room-store';
-import { testMask, type Mask } from './scene/mask';
-import { samplePattern, type Pattern } from './scene/pattern';
-import { runSmooth } from './tools/smooth';
-import { useEditor } from './editor-store';
-import * as Selection from '../core/scene/selection';
 import {
     AddTraitCommand,
     CreateNodeCommand,
     DestroyNodeCommand,
     RemoveTraitCommand,
-    ReparentCommand,
     ReorderCommand,
+    ReparentCommand,
     SetNameCommand,
     SetNodePersistCommand,
     SetPrefabCommand,
@@ -60,7 +56,11 @@ import {
     SetTraitCommand,
     VoxelEditCommand,
 } from './commands';
-import { registry } from '../core/registry';
+import type { EditRoomState, ElevationMode } from './edit-room-store';
+import { useEditor } from './editor-store';
+import { type Mask, testMask } from './scene/mask';
+import { type Pattern, samplePattern } from './scene/pattern';
+import { runSmooth } from './tools/smooth';
 
 /* ── voxel actions ── */
 

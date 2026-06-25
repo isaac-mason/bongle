@@ -19,16 +19,16 @@
 // the module does NOT use userData on the rigid body — instead it maintains
 // a bidirectional map: bodyId ↔ nodeId.
 
-import { box, rigidBody, filter as filterMod, MotionType, type BodyId, type BoxShape, type Filter } from 'crashcat';
-import { box3, type Box3, type Mat4, mat4, type Vec3 } from 'mathcat';
+import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
+import { type Box3, box3, type Mat4, mat4, type Vec3 } from 'mathcat';
+import { getVisualWorldMatrix } from '../api/transforms';
+import { PlayerTrait } from '../builtins/player';
+import { TransformTrait } from '../builtins/transform';
 import type { Physics } from '../core/physics/physics';
 import { OBJECT_LAYER_EDITOR_NODES, settings } from '../core/physics/physics';
 import type { Resources } from '../core/resources';
-import type { Nodes, Node } from '../core/scene/nodes';
+import type { Node, Nodes } from '../core/scene/nodes';
 import { getNodeById, getTrait, isAncestorOf, query } from '../core/scene/nodes';
-import { TransformTrait } from '../builtins/transform';
-import { getVisualWorldMatrix } from '../api/transforms';
-import { PlayerTrait } from '../builtins/player';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { unionSubtreeWorldAabb } from './node-aabb';
 

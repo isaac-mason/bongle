@@ -23,9 +23,8 @@
 
 import { type Camera, createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, type Scene } from 'gpucat';
 import { ShadowCasterTrait } from '../../builtins/shadow-caster';
-import { TransformTrait } from '../../builtins/transform';
+import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { type Nodes, query } from '../../core/scene/nodes';
-import { getVisualWorldMatrix } from '../../builtins/transform';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
 import type { Voxels } from '../../core/voxels/voxels';
 import { SHADOW_INSTANCE_STRIDE, ShadowInstance, type ShadowResources } from './shadow-resources';

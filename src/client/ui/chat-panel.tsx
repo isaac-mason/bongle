@@ -20,10 +20,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
-import * as ChatCommands from '../../core/chat-commands';
 import type { ParseState, Suggestion } from '../../core/chat-commands';
-import * as ClientChat from '../chat';
+import * as ChatCommands from '../../core/chat-commands';
 import type { ChatClient, ChatLine } from '../chat';
+import * as ClientChat from '../chat';
 import { useRoom } from './client-store';
 
 const HISTORY_LIMIT = 50;

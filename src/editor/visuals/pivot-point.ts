@@ -4,7 +4,7 @@
 // shown whenever the transform tool is active and a selection exists.
 // hidden when no selection / not in transform mode.
 
-import { createSphereGeometry, Mesh, Material, vec4f, positionClip, type Scene } from 'gpucat';
+import { createSphereGeometry, Material, Mesh, positionClip, type Scene, vec4f } from 'gpucat';
 import type { Vec3 } from 'mathcat';
 import { PIVOT_DOT } from './editor-colors';
 

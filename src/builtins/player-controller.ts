@@ -30,24 +30,24 @@ import {
 } from 'gpucat';
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
-import type * as vcc from '../core/physics/vcc';
-import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
-import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { warn } from '../api/debug';
 import { env } from '../api/env';
 import { getCanvasTouches, getJoystick, type Input, isKeyDown, isKeyJustDown, isTouchButtonDown } from '../api/input';
 import { isMobile, isTouchDevice } from '../api/mobile';
 import { createJoystick, createTouchButton } from '../api/mobile-controls';
+import type { Physics } from '../api/physics';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
 import { control, type TraitType, trait } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { UILayer } from '../client/ui-layers';
+import type * as vcc from '../core/physics/vcc';
+import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
+import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { type CameraTrait, resolveCamera } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
-import { Physics } from '../api/physics';
-import { UILayer } from '../client/ui-layers';
 
 // ── perspective ───────────────────────────────────────────────────────
 

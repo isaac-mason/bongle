@@ -1,15 +1,15 @@
 // editor/camera.ts — camera math helpers and focus-node utility.
 
-import { box3, mat4, quat, type Quat, type Vec3 } from 'mathcat';
-import { getTrait, getNodeById } from '../core/scene/nodes';
-import type { ClientRoom } from '../client/rooms';
-import { CameraRefTrait } from '../builtins/camera';
-import { TransformTrait } from '../builtins/transform';
+import { box3, mat4, type Quat, quat, type Vec3 } from 'mathcat';
 import { getVisualWorldMatrix, getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
+import { CameraRefTrait } from '../builtins/camera';
 import { MeshTrait } from '../builtins/mesh';
-import type { Resources } from '../core/resources';
+import { TransformTrait } from '../builtins/transform';
 import type { Input } from '../client/input';
 import { isKeyJustDown } from '../client/input';
+import type { ClientRoom } from '../client/rooms';
+import type { Resources } from '../core/resources';
+import { getNodeById, getTrait } from '../core/scene/nodes';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { NUDGE_KEYS } from './editor-controls';
 

@@ -1,10 +1,10 @@
 import { createWorld, registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import * as AabbPhysics from './aabb-physics';
-import { settings as physicsSettings } from './physics';
+import type { BlockDef } from '../voxels/blocks';
 import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from '../voxels/test-helpers';
 import { createChunk, createVoxels, linkChunkNeighbors, setChunkBlock } from '../voxels/voxels';
-import type { BlockDef } from '../voxels/blocks';
+import * as AabbPhysics from './aabb-physics';
+import { settings as physicsSettings } from './physics';
 
 beforeAll(() => {
     registerAllShapes();

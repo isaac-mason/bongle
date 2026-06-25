@@ -21,13 +21,13 @@ import * as VoxelMeshResources from '../client/voxels/voxel-mesh-resources';
 import * as VoxelResources from '../client/voxels/voxel-resources';
 import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../client/voxels/voxel-resources';
 import * as Content from '../core/content';
-import { registry } from '../core/registry';
 import * as Registry from '../core/registry';
+import { registry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import { type BlockIconAtlasResult, runBlockIcons } from './tasks/block-icons';
 import { type PrefabIconResult, runPrefabIcon } from './tasks/prefab-icons';
-import { type SceneIconResult, runSceneIcon } from './tasks/scene-icon';
+import { runSceneIcon, type SceneIconResult } from './tasks/scene-icon';
 
 export type { BlockIconAtlasResult } from './tasks/block-icons';
 export type { PrefabIconResult } from './tasks/prefab-icons';

@@ -6,9 +6,9 @@
 // subtree contributes no AABB.
 
 import { type Box3, box3 } from 'mathcat';
+import { getVisualWorldMatrix } from '../api/transforms';
 import { MeshTrait } from '../builtins/mesh';
 import { TransformTrait } from '../builtins/transform';
-import { getVisualWorldMatrix } from '../api/transforms';
 import { VoxelMeshTrait } from '../builtins/voxel-mesh';
 import type { Resources } from '../core/resources';
 import type { Node } from '../core/scene/nodes';

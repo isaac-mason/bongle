@@ -1,7 +1,7 @@
+import { ModelTrait } from '../builtins/model';
 import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/nodes';
 import * as Nodes from '../core/scene/nodes';
 import type { TraitBase } from '../core/scene/traits';
-import { ModelTrait } from '../builtins/model';
 
 export type { Node, Realm } from '../core/scene/nodes';
 export {

@@ -1,8 +1,7 @@
 import { PerspectiveCamera } from 'gpucat';
 import { box3, mat4 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
-import { TransformTrait } from '../builtins/transform';
-import { setPosition } from '../builtins/transform';
+import { setPosition, TransformTrait } from '../builtins/transform';
 import { addChild, addTrait, createNode, createSceneGraph } from '../core/scene/nodes';
 import * as Visibility from './visibility';
 

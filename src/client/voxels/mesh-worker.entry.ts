@@ -6,7 +6,7 @@
 // `core/voxels/mesh-worker.ts` so unit tests can drive `handleMessage`
 // directly without spawning a worker.
 
-import { type MeshWorkerInMsg, type MeshWorkerOutMsg, createWorkerState, handleMessage } from '../../core/voxels/mesh-worker';
+import { createWorkerState, handleMessage, type MeshWorkerInMsg, type MeshWorkerOutMsg } from '../../core/voxels/mesh-worker';
 
 const state = createWorkerState();
 

@@ -10,13 +10,13 @@
 // you reflect the world horizontally. facing only flips when it has a
 // component along the mirror axis (e.g. facing=east under flip-x).
 
-import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import { buildBlockRegistry, parseKey } from './block-registry';
-import { type BlockDef, type BlockHandle, type BlockPlaceCtx, type BlockTextureDef } from './blocks';
-import { column, fence, ladder, slab, stairs, trapdoor } from './block-presets';
-import { rotateBlockKey, flipBlockKey } from './block-transform';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { RotAxis } from './block-orient';
+import { column, fence, ladder, slab, stairs, trapdoor } from './block-presets';
+import { buildBlockRegistry, parseKey } from './block-registry';
+import { flipBlockKey, rotateBlockKey } from './block-transform';
+import type { BlockDef, BlockHandle, BlockPlaceCtx, BlockTextureDef } from './blocks';
 
 const oakTex: BlockTextureDef = {
     id: 'oak',

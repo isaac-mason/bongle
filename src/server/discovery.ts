@@ -1,10 +1,10 @@
 import type { Client } from 'bongle/interface';
 import { PlayerTrait } from '../builtins/player';
-import { TransformTrait } from '../builtins/transform';
-import * as Debug from '../core/debug';
-import { registry } from '../core/registry';
+import { getWorldPosition, TransformTrait } from '../builtins/transform';
 import type { PlayerId } from '../core/client';
+import * as Debug from '../core/debug';
 import type { BinaryField, BinaryTrait, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
+import { registry } from '../core/registry';
 import type { Resources } from '../core/resources';
 import {
     bumpFieldVersion,
@@ -21,7 +21,6 @@ import { packSceneGraph } from '../core/scene/scene-pack';
 import { captureValue, diffSyncSlice, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
-import { getWorldPosition } from '../builtins/transform';
 import { encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,

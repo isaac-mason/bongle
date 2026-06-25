@@ -11,15 +11,15 @@
 // only — the preview always shows the full shape so the user sees the brush
 // footprint, and the mask just narrows which cells actually get selected.
 
-import type { ScriptContext } from '../../core/scene/scripts';
-import type { Voxels } from '../../core/voxels/voxels';
-import type { PointerState } from '../pointer-state';
 import type { Input } from '../../client/input';
 import { isKeyDown } from '../../client/input';
-import type { EditRoomStoreApi } from '../edit-room-store';
+import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
+import type { Voxels } from '../../core/voxels/voxels';
+import type { EditRoomStoreApi } from '../edit-room-store';
+import type { PointerState } from '../pointer-state';
 import { testMask } from '../scene/mask';
-import { advanceBrushStroke, createBrushStrokeState, type BrushStrokeState } from './utils/brush';
+import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
 // per-room state contract. the shared stroke harness is nested under `brush`
 // so a select-specific field can be added later as a sibling (no intersection,

@@ -24,25 +24,25 @@
 
 import type { Scene } from 'gpucat';
 import { createIndirectBuffer, DrawIndexedIndirect, d, Geometry, GpuBuffer, layoutStrideOf, Mesh } from 'gpucat';
-import type * as Environment from '../environment';
-import * as Resources from '../../core/resources';
-import type { MeshId } from '../../core/models/handle';
-import type { Node, Nodes } from '../../core/scene/nodes';
-import { query, getTrait } from '../../core/scene/nodes';
 import { box3 } from 'mathcat';
-import { TransformTrait } from '../../builtins/transform';
+import { env } from '../../api/env';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';
+import { TransformTrait } from '../../builtins/transform';
+import type { MeshId } from '../../core/models/handle';
+import * as Resources from '../../core/resources';
+import type { Node, Nodes } from '../../core/scene/nodes';
+import { getTrait, query } from '../../core/scene/nodes';
+import type * as Environment from '../environment';
 import * as Visibility from '../visibility';
-import { env } from '../../api/env';
 import {
     type MeshInfoEntry,
-    meshInfoIndexOf,
-    ModelInstance,
     MODEL_INSTANCE_PARAMS_OFFSET_F32,
     MODEL_INSTANCE_STRIDE,
+    ModelInstance,
     type ModelResources,
+    meshInfoIndexOf,
 } from './model-resources';
 
 type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrait]>>;

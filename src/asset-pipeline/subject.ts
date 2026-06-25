@@ -5,27 +5,27 @@
 // GPU upload, light, frame, render, read back — is identical and lives here.
 
 import type { ComputeDispatch } from 'gpucat';
-import type { State } from './engine';
+import { type Box3, box3, type Mat4 } from 'mathcat';
+import { getVisualWorldMatrix } from '../api/transforms';
+import { MeshTrait } from '../builtins/mesh';
+import * as Transforms from '../builtins/transform';
+import { TransformTrait } from '../builtins/transform';
+import { VoxelMeshTrait } from '../builtins/voxel-mesh';
+import * as Interpolation from '../client/interpolation';
 import * as ModelResources from '../client/models/model-resources';
 import { meshInfoIndexOf } from '../client/models/model-resources';
 import * as ModelVisuals from '../client/models/model-visuals';
-import type { AssetPipelineRoom } from './rooms';
 import * as Renderer from '../client/renderer';
 import * as VoxelMeshVisuals from '../client/voxels/voxel-mesh-visuals';
 import * as VoxelVisuals from '../client/voxels/voxel-visuals';
-import { MeshTrait } from '../builtins/mesh';
-import { TransformTrait } from '../builtins/transform';
-import { VoxelMeshTrait } from '../builtins/voxel-mesh';
-import { getVisualWorldMatrix } from '../api/transforms';
-import { AIR, MISSING } from '../core/voxels/block-registry';
-import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Resources from '../core/resources';
 import { query } from '../core/scene/nodes';
 import * as Prefab from '../core/scene/prefab';
-import * as Interpolation from '../client/interpolation';
-import * as Transforms from '../builtins/transform';
-import { box3, type Box3, type Mat4 } from 'mathcat';
+import { AIR, MISSING } from '../core/voxels/block-registry';
+import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import { fitOrthoIsometric } from './camera-fit';
+import type { State } from './engine';
+import type { AssetPipelineRoom } from './rooms';
 import { captureTile, type SnapshotSession } from './snapshot';
 
 export const SUBJECT_ICON_PX = 256;

@@ -22,22 +22,22 @@
 // disc footprint. this keeps the raycast surface frozen for the whole
 // stroke so the cursor never climbs the hill it's building.
 
+import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
-import { VoxelEditCommand } from '../commands';
+import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
-import type { PointerState } from '../pointer-state';
-import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
-import type { Input } from '../../client/input';
-import type { EditRoomStoreApi, ElevationFalloff, ElevationImage, ElevationOptions } from '../edit-room-store';
-import * as Selection from '../../core/scene/selection';
 import type { VoxelOp } from '../blueprint';
-import { BRUSH_TINTS } from '../visuals/editor-colors';
-import { samplePattern } from '../scene/pattern';
-import { testMask } from '../scene/mask';
+import { VoxelEditCommand } from '../commands';
+import type { EditRoomStoreApi, ElevationFalloff, ElevationImage, ElevationOptions } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
+import type { PointerState } from '../pointer-state';
+import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../pointer-state';
+import { testMask } from '../scene/mask';
+import { samplePattern } from '../scene/pattern';
+import { BRUSH_TINTS } from '../visuals/editor-colors';
 
 const OPS_PER_PACKET = 4096;
 

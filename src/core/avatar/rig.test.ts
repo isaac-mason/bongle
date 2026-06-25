@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import {
     RIG_6BONE_LOCOMOTION_CLIPS,
     RIG_6BONE_REQUIRED_NODES,
@@ -7,6 +6,7 @@ import {
     type RigSceneView,
     validateRig6Bone,
 } from 'bongle/avatar/rig';
+import { describe, expect, it } from 'vitest';
 
 // Small builder so each test reads as a tree literal rather than an
 // imperative chain of pushes.

@@ -9,7 +9,7 @@
 // owns the self-exclusion filter (rejects the controller's own inner
 // body by id) and the layer filter.
 
-import { type BodyId, type BodyVisitor, type Filter, type RigidBody, type World, broadphase, filter } from 'crashcat';
+import { type BodyId, type BodyVisitor, broadphase, type Filter, filter, type RigidBody, type World } from 'crashcat';
 import type { Box3, Vec3 } from 'mathcat';
 import { OBJECT_LAYER_VOXELS } from './physics';
 

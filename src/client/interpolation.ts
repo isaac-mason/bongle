@@ -32,19 +32,19 @@
  * client-only: interpolation is a rendering-smoothing concern.
  */
 
-import { mat4, type Mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { RigidBodyTrait } from '../builtins/rigid-body';
-import { TransformTrait } from '../builtins/transform';
-import { getTrait, type Nodes } from '../core/scene/nodes';
 import {
     getWorldMatrix,
     hasTransformedParent,
     markInterpolatedDescendantsDirty,
     TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
     TRANSFORM_DIRTY_INTERPOLATED_TRS,
+    type TransformTrait,
     updateInterpolatedWorldTransform,
 } from '../builtins/transform';
 import type { PlayerId } from '../core/client';
+import { getTrait, type Nodes } from '../core/scene/nodes';
 
 export { resetInterpolation, setInterpolation } from '../builtins/transform';
 

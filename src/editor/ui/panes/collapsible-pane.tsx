@@ -1,6 +1,6 @@
 import * as Icons from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 type CollapsiblePaneProps = {
     title: string;

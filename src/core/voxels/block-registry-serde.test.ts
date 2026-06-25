@@ -7,17 +7,17 @@
 //      partial registry produces byte-identical quad buffers + face
 //      counts vs. running against the source registry.
 
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import type { BlockRegistry } from './block-registry';
-import { blockTexture, CullType, MaterialType } from './blocks';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { stairs } from './block-presets';
-import { type ChunkMeshResult, type PassMesh, buildMeshInput, createMeshOutput, meshChunk } from './chunk-mesher';
+import type { BlockRegistry } from './block-registry';
 import {
     type DeserializedBlockRegistry,
     deserializeBlockRegistryForWorker,
     serializeBlockRegistryForWorker,
 } from './block-registry-serde';
+import { blockTexture, CullType, MaterialType } from './blocks';
+import { buildMeshInput, type ChunkMeshResult, createMeshOutput, meshChunk, type PassMesh } from './chunk-mesher';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
 import { createChunk, createVoxels, setChunkBlock } from './voxels';
 

@@ -19,10 +19,11 @@
  * clipboard, typeApply, stateApply) by extending the type and matching them
  * in `parsePattern` / `samplePattern`.
  */
+
+import { fuzzyRank } from '../../core/utils/fuzzy';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR } from '../../core/voxels/voxels';
-import { fuzzyRank } from '../../core/utils/fuzzy';
 
 export type BlockSpec = {
     blockId: string;

@@ -18,8 +18,8 @@
 // actual flush.
 
 import { bench, describe } from 'vitest';
-import { buildBlockRegistry } from './block-registry';
 import { SetBlockFlags } from './block-flags';
+import { buildBlockRegistry } from './block-registry';
 import { type BlockDef, type BlockTextureDef, CullType, MaterialType } from './blocks';
 import { flushPendingLight, propagateAllLight, updateLightBatch } from './light';
 import { CHUNK_SIZE, createVoxels, createVoxelsAuthority, ensureChunk, setBlock, type Voxels } from './voxels';

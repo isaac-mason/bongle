@@ -11,9 +11,9 @@ import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { getBlock } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
-import { samplePattern } from '../scene/pattern';
-import { testMask } from '../scene/mask';
 import type { BrushOptions } from '../edit-room-store';
+import { testMask } from '../scene/mask';
+import { samplePattern } from '../scene/pattern';
 
 /** walk `stamp` and append a forward/reverse op for every cell that
  *  passes `opts.mask` and actually changes block key. `active` is the

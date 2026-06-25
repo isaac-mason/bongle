@@ -15,22 +15,22 @@
 
 import type { Quat } from 'mathcat';
 import { collapseTransformIntoChildren, getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
-import { registry, type PrefabDef, type PrefabType } from '../registry';
+import { type PrefabDef, type PrefabType, registry } from '../registry';
 import type { Resources } from '../resources';
-import { rotateVoxelsByQuat } from '../voxels/voxel-rotate';
 import { SetBlockFlags } from '../voxels/block-flags';
+import { rotateVoxelsByQuat } from '../voxels/voxel-rotate';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock, type Voxels } from '../voxels/voxels';
 import {
     bumpNodeVersion,
     destroyNode,
     getTrait,
+    type Node,
+    type Nodes,
+    type Realm,
     removeTrait,
     reorderChild,
     reparent,
     setPrefab,
-    type Node,
-    type Nodes,
-    type Realm,
 } from './nodes';
 import { logScriptError } from './script-errors';
 import type { NodesContext } from './scripts';

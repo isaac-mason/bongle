@@ -1,8 +1,8 @@
-import { createMulberry32Generator, type Vec3, type Vec2 } from 'mathcat';
+import { createMulberry32Generator, type Vec2, type Vec3 } from 'mathcat';
 import { recordBlock, recordBlockTexture } from '../capture/module-scope';
-import { registry, upsert } from '../registry';
 import { particleUpdate } from '../particles/particle-update';
 import { type ParticleHandle, particle } from '../particles/particles';
+import { registry, upsert } from '../registry';
 import type { SoundHandle } from '../sounds/sounds';
 import { draw, type ImageSource, type NormalizedImageSource, normalizeImageSource } from '../sprites/draw';
 import { sprite } from '../sprites/sprites';

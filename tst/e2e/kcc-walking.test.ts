@@ -4,8 +4,8 @@
 // attaches a character controller, walks forward, and asserts the
 // character stays on the ground without jittering.
 
-import { describe, expect, it, afterEach } from 'vitest';
-import { addTrait, block, CharacterControllerTrait, getTrait, onJoin, script, setBlock, trait, TransformTrait } from 'bongle';
+import { addTrait, block, CharacterControllerTrait, getTrait, onJoin, script, setBlock, TransformTrait, trait } from 'bongle';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 
 describe('kcc walking', () => {

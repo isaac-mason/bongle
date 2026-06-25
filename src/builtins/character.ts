@@ -100,19 +100,14 @@ type CharacterState = {
     modelNodes: Set<Node>;
 };
 
-import type { ScriptContext } from '../core/scene/scripts';
+import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import type { Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec3 } from 'mathcat';
-import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
-import { wrapPi } from '../core/math/angles';
-import type { ModelHandle } from '../core/models/handle';
-import { baseAvatar, BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
-import { ensureModel, getModel } from '../api/models';
-import { pack } from '../core/scene/pack';
-import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
-import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
 import { Animation } from '../api/animation';
+import { playAt, playMono } from '../api/audio';
 import { env } from '../api/env';
+import { ensureModel, getModel } from '../api/models';
+import { spawnParticle } from '../api/particles';
 import {
     addChild,
     addTrait,
@@ -125,18 +120,23 @@ import {
     isLocalNode,
     type Node,
 } from '../api/scene-graph';
-import type { TraitProps } from '../core/scene/nodes';
 import { getControlNode, isOwner, onFrame, query, script } from '../api/scripts';
-import { sync, trait, type TraitType } from '../api/traits';
+import { sync, type TraitType, trait } from '../api/traits';
 import { setPosition, setQuaternion, setTransform } from '../api/transforms';
-import { playAt, playMono } from '../api/audio';
-import { spawnParticle } from '../api/particles';
+import { wrapPi } from '../core/math/angles';
+import type { ModelHandle } from '../core/models/handle';
+import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
+import type { TraitProps } from '../core/scene/nodes';
+import { pack } from '../core/scene/pack';
+import type { ScriptContext } from '../core/scene/scripts';
+import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
+import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
 import { AnimatorTrait } from './animator';
+import { getControlCamera } from './camera';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
 import { MeshTrait, setMeshDither } from './mesh';
 import { ModelTrait } from './model';
-import { getControlCamera } from './camera';
 import { OrbitControllerTrait } from './orbit-controller';
 import { PlayerControllerTrait } from './player-controller';
 import { TransformTrait } from './transform';

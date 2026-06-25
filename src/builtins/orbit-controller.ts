@@ -16,12 +16,12 @@
  * attach to open with a specific view.
  */
 
-import { mat4, type Spherical, spherical, quat, type Vec3, vec3 } from 'mathcat';
+import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
 import { env } from '../api/env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
-import { trait, type TraitType } from '../api/traits';
+import { type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
 import { TransformTrait } from './transform';

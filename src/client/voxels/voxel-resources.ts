@@ -21,8 +21,8 @@ import {
     BufferLifecycle,
     createIndirectBuffer,
     createStorageBuffer,
-    d,
     DrawIndirect,
+    d,
     Fn,
     Geometry,
     GpuBuffer,
@@ -35,20 +35,20 @@ import {
     struct,
     workgroupId,
 } from 'gpucat';
+import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
 import type { Box3, Vec3 } from 'mathcat';
-
+import type { Resources } from '../../core/resources';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import {
     type ChunkMeshResult,
+    createMeshOutput,
     type MeshOutput,
     type PassMesh,
     QUAD_STRIDE_U32S,
-    createMeshOutput,
 } from '../../core/voxels/chunk-mesher';
 import { CHUNK_SIZE } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
 import * as Performance from '../performance';
-import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
 import {
     createMeshDispatcher,
     disposeMeshDispatcher,
@@ -56,8 +56,7 @@ import {
     type MeshDispatcherResult,
     setMeshRegistry,
 } from './mesh-dispatcher';
-
-import { createOffsetAllocator, oaAllocate, oaFree, oaStorageReport, type OffsetAllocator } from './offset-allocator';
+import { createOffsetAllocator, type OffsetAllocator, oaAllocate, oaFree, oaStorageReport } from './offset-allocator';
 import { createQuadMaterial, type VoxelPass } from './voxel-material';
 import {
     type BlockTextureAtlasMetadata,
@@ -66,7 +65,6 @@ import {
     loadBlockTextureAtlasIntoTextureArray,
     writeBlockTextureAtlasIntoTextureArray,
 } from './voxel-texture-array';
-import type { Resources } from '../../core/resources';
 
 export const PASSES: readonly VoxelPass[] = ['opaque', 'transparent', 'translucent'];
 

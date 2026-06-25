@@ -1,8 +1,8 @@
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aabbs, type BlockShape, cube } from './block-collider';
-import { createVoxelSweepHit, sweepAabbVsVoxels } from './voxel-aabb-sweep';
 import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from './test-helpers';
+import { createVoxelSweepHit, sweepAabbVsVoxels } from './voxel-aabb-sweep';
 import {
     CHUNK_SIZE,
     createChunk,

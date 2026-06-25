@@ -14,7 +14,7 @@ import {
     query,
 } from './nodes';
 import { prop } from './prop';
-import { control, sync, trait, type TraitType } from './traits';
+import { control, sync, type TraitType, trait } from './traits';
 
 /* ── test traits ── */
 

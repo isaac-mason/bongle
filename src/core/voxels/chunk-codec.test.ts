@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { decodeChunk, decodeLight, encodeChunk, encodeLight, rleDecode, rleEncode } from './chunk-codec';
 import { CHUNK_VOLUME } from './voxels';
-import { rleEncode, rleDecode, encodeChunk, decodeChunk, encodeLight, decodeLight } from './chunk-codec';
 
 describe('rleEncode / rleDecode', () => {
     it('empty input', () => {

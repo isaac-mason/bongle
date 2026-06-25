@@ -14,9 +14,9 @@ export { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
 export type { AABB, BlockShape, BlockShapeAabbs, BlockShapeCube } from '../core/voxels/block-collider';
 export * as blockShape from '../core/voxels/block-collider';
 export * as blockModel from '../core/voxels/block-model';
-export * as blockPreset from '../core/voxels/block-presets';
 // directional placement utils — for user-defined directional blocks' `place`.
 export * as blockPlace from '../core/voxels/block-place';
+export * as blockPreset from '../core/voxels/block-presets';
 // door operations (also reachable via blockPreset.*) — top-level since they're
 // operations on a placed door, not preset factories.
 export { getDoorOpen, setDoorOpen } from '../core/voxels/block-presets';
@@ -40,10 +40,10 @@ export type {
     BlockHandle,
     BlockModel,
     BlockOptions,
+    BlockQuad,
     BlockSoundConfig,
     BlockTextureDef,
     BlockTextureOptions,
-    BlockQuad,
     CubeModel,
     CubeTextures,
     CustomModel,

@@ -6,8 +6,8 @@
  * into the slot and clears the carry. right-click clears a slot.
  */
 
-import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { HOTBAR_SIZE, type HotbarSlot, inventoryItemDisplay } from '../inventory';
 import { InventoryItemIcon } from './inventory-icon';
 

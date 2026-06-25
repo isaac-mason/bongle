@@ -18,8 +18,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { assetUrl } from '../../client/asset-url';
 import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
 import { depId, registry } from '../../core/registry';
-import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
+import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
 import { InventoryItemIcon } from './inventory-icon';
 

@@ -32,28 +32,27 @@ import type { Scene } from 'gpucat';
 import {
     BufferLifecycle,
     createIndirectBuffer,
-    d,
     DrawIndirect,
+    d,
+    Geometry,
     GpuBuffer,
     layoutStrideOf,
     Mesh,
-    Geometry,
     packTo,
 } from 'gpucat';
 import { type Box3, box3, type Vec3, vec3 } from 'mathcat';
-
+import { getVisualWorldMatrix } from '../../api/transforms';
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
-import { getVisualWorldMatrix } from '../../api/transforms';
-import { buildMeshInput, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
-import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Node, Nodes } from '../../core/scene/nodes';
 import { getTrait, query } from '../../core/scene/nodes';
-import * as Visibility from '../visibility';
-import type * as Environment from '../environment';
+import { buildMeshInput, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { sampleVoxelLight } from '../../core/voxels/light';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
 import type { Voxels } from '../../core/voxels/voxels';
+import type * as Environment from '../environment';
+import * as Visibility from '../visibility';
 import {
     CHUNK_INFO_STRIDE,
     ChunkInfo,

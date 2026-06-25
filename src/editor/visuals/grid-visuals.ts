@@ -3,7 +3,7 @@
 // draws a fixed grid on the Y=0 plane with minor (1-unit) and major (10-unit)
 // lines, plus colored axis lines (red=X, blue=Z).
 
-import { LineSegmentsGeometry, LineSegments, LineMaterial, vec4f, type Scene } from 'gpucat';
+import { LineMaterial, LineSegments, LineSegmentsGeometry, type Scene, vec4f } from 'gpucat';
 
 // ── state ──────────────────────────────────────────────────────────
 

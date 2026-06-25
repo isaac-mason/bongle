@@ -37,8 +37,8 @@
 // directly with a stub `post` function — see mesh-dispatcher.test.ts.
 
 import type { BlockRegistry } from './block-registry';
-import { type ChunkMeshResult, type MeshOutput, installSlabsAndBuildMeshInput, meshChunk } from './chunk-mesher';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
+import { type ChunkMeshResult, installSlabsAndBuildMeshInput, type MeshOutput, meshChunk } from './chunk-mesher';
 
 export type MeshWorkerInMsg =
     | { cmd: 'initRegistry'; version: number; buf: ArrayBuffer }

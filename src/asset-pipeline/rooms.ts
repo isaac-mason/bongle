@@ -18,7 +18,7 @@
 import { Scene } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { attachWorldTrait } from '../builtins/world';
-import * as CloudResources from '../client/cloud-resources';
+import type * as CloudResources from '../client/cloud-resources';
 import * as Environment from '../client/environment';
 import * as Interpolation from '../client/interpolation';
 import type * as ModelResources from '../client/models/model-resources';
