@@ -106,7 +106,6 @@ function DepsGraph({ snapshot, selected, onSelect }: Props) {
             }}
             onClick={() => onSelect(null)}
         >
-            {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops click-through only; mouse-driven debug graph */}
             <svg
                 width={width}
                 height={contentH}
