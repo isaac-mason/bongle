@@ -370,7 +370,7 @@ export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
         ] as const,
         normal: mirrorNormalX(q.normal),
         texture: q.texture,
-        uvs: [q.uvs[3], q.uvs[2], q.uvs[1], q.uvs[0]] as const,
+        uvs: q.uvs ? ([q.uvs[3], q.uvs[2], q.uvs[1], q.uvs[0]] as const) : undefined,
         cullFace: mirrorCullFaceX(q.cullFace),
         material: q.material,
     }));

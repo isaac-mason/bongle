@@ -14,7 +14,7 @@ import * as crashcat from 'crashcat';
 import type { Vec3 } from 'mathcat';
 import { AIR, MISSING } from './block-registry';
 import { CHUNK_SIZE, type Voxels, voxelIndex } from './voxels';
-import type { VoxelModel } from '../../client/voxels/voxel-model';
+import type { VoxelModel } from './voxel-model';
 
 /**
  * build a static compound shape for `model` — one axis-aligned box per

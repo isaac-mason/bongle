@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Voxels } from './voxels';
+import type { Voxels } from '../../core/voxels/voxels';
 import { parsePattern, samplePattern, splitTopLevel } from './pattern';
 
 // current pattern kinds (`block`, `random`) don't read voxels/pos. pass a

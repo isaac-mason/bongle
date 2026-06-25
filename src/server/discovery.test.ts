@@ -36,7 +36,7 @@ function fullCoords(out: Array<[Client, { type: string }]>): Array<{ cx: number;
     const coords: Array<{ cx: number; cy: number; cz: number }> = [];
     for (const [, m] of out) {
         if (m.type !== 'voxel_chunk_full') continue;
-        const f = m as { cx: number; cy: number; cz: number };
+        const f = m as unknown as { cx: number; cy: number; cz: number };
         coords.push({ cx: f.cx, cy: f.cy, cz: f.cz });
     }
     return coords;
@@ -55,7 +55,7 @@ function ackAllFulls(discovery: Discovery.Discovery, out: Array<[Client, { type:
     const groups = new Map<string, { client: Client; playerId: number; full: Array<{ cx: number; cy: number; cz: number }> }>();
     for (const [client, m] of out) {
         if (m.type !== 'voxel_chunk_full') continue;
-        const f = m as { playerId: number; cx: number; cy: number; cz: number };
+        const f = m as unknown as { playerId: number; cx: number; cy: number; cz: number };
         const gk = `${client}:${f.playerId}`;
         let g = groups.get(gk);
         if (!g) {

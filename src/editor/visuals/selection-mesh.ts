@@ -342,7 +342,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
     const tight = Selection.bounds(sel);
     if (!tight) return null;
 
-    const { occ, wpr, rowStride, slabStride, minX, minY, minZ } = dense;
+    const { occ, rowStride, slabStride, minX, minY, minZ } = dense;
 
     // tight local bounds (voxel coords) — set bits live in [lxMin..lxMax] etc.
     const lxMin = tight.min[0] - minX;

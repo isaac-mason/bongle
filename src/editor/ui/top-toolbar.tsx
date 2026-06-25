@@ -96,8 +96,8 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                     label="Save"
                     onClose={onClose}
                     onClick={() => {
-                        const { playerId, playerEditStores } = useEditor.getState();
-                        playerEditStores[playerId]?.getState().save(info.sceneId);
+                        const { room, playerEditStores } = useEditor.getState();
+                        if (room) playerEditStores[room.playerId]?.getState().save(info.sceneId);
                     }}
                 />
             )}

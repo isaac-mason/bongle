@@ -360,7 +360,7 @@ export function HierarchyPanel() {
     const sharedEntries =
         contextNode !== null
             ? nodeMenuEntries({
-                  node: contextInMultiSelect ? null : contextNode,
+                  node: contextInMultiSelect ? null : (contextNode ?? null),
                   multiCount: sharedMultiCount,
                   actions: {
                       focus: () => {

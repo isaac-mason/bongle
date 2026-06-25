@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { type EdgeAxis, isCubeEdgeActive } from './voxel-active-edges';
+import type { BlockShape } from './block-collider';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
 import { createChunk, createVoxels, setChunkBlock, type Voxels } from './voxels';
 

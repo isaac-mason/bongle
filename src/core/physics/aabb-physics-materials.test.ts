@@ -4,6 +4,7 @@ import * as AabbPhysics from './aabb-physics';
 import { settings as physicsSettings } from './physics';
 import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from '../voxels/test-helpers';
 import { createChunk, createVoxels, linkChunkNeighbors, setChunkBlock } from '../voxels/voxels';
+import type { BlockDef } from '../voxels/blocks';
 
 beforeAll(() => {
     registerAllShapes();
