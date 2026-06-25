@@ -117,9 +117,9 @@ function EulerInputs({ value, order, onChange }: { value: number[]; order: Euler
     const focusedRef = useRef(false);
     const [draft, setDraft] = useState<[string, string, string]>(draftFromValue);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: re-sync the draft only on external value/order changes, not on every draftFromValue re-creation
     useEffect(() => {
         if (!focusedRef.current) setDraft(draftFromValue());
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [value, order]);
 
     const commit = (current: [string, string, string]) => {
@@ -424,7 +424,6 @@ function defaultForSchema(schema: Schema): unknown {
             return null;
         case 'mesh':
             return null;
-        case 'node':
         case 'prefab':
         case 'block':
             return '';
@@ -487,6 +486,7 @@ function MeshEditor({
     const meshes: Array<{ modelId: string; meshName: string }> = [];
     if (resources) {
         for (const [modelId, entry] of resources.models) {
+            if (!entry.handle) continue;
             for (const meshName of Object.keys(entry.handle.meshes)) {
                 meshes.push({ modelId, meshName });
             }
