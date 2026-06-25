@@ -12,12 +12,12 @@ import { rotateBlockKey, flipBlockKey } from './block-transform';
 import { createVoxels, setBlock } from './voxels';
 import * as blockModel from './block-model';
 
-const topTex: BlockTextureDef = { id: 'door-top', frames: ['door-top.png'], fps: 1, interpolate: false };
-const botTex: BlockTextureDef = { id: 'door-bot', frames: ['door-bot.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false };
+const topTex: BlockTextureDef = { id: 'door-top', dependency: { registry: 'blockTextures', id: 'door-top' }, frames: ['door-top.png'], fps: 1, interpolate: false };
+const botTex: BlockTextureDef = { id: 'door-bot', dependency: { registry: 'blockTextures', id: 'door-bot' }, frames: ['door-bot.png'], fps: 1, interpolate: false };
+const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
 
-const doorHandle = door('test:door', { top: topTex, bottom: botTex });
-const stoneHandle = cube('test:stone', { all: { texture: stoneTex } });
+const doorHandle = door('test:door', { top: topTex, bottom: botTex }) as BlockHandle;
+const stoneHandle = cube('test:stone', { all: { texture: stoneTex } }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [doorHandle.id, doorHandle._def],

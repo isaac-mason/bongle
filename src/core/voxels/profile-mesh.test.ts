@@ -22,7 +22,7 @@ const SHOULD_RUN = process.env.PROFILE_MESH === '1';
 
 const SINGLE_STATE = { props: {}, totalStates: 1, encode: () => 0, decode: () => ({}) };
 function texDef(id: string): BlockTextureDef {
-    return { id, frames: [`textures/${id}.png`], fps: 1, interpolate: false };
+    return { id, dependency: { registry: 'blockTextures', id }, frames: [`textures/${id}.png`], fps: 1, interpolate: false };
 }
 
 function buildBenchRegistry() {
@@ -84,6 +84,7 @@ function buildBenchRegistry() {
         textures.set(b.texId, tex);
         const def: BlockDef = {
             id: b.id,
+            name: b.id,
             states: SINGLE_STATE as any,
             model: b.model ? () => b.model!(tex) : () => ({ type: 'cube' as const, textures: { all: { texture: tex } } }),
             cull: b.cull ?? CullType.SOLID,

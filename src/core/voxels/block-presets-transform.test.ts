@@ -19,16 +19,16 @@ import { rotateBlockKey, flipBlockKey } from './block-transform';
 import type { RotAxis } from './block-orient';
 
 
-const oakTex: BlockTextureDef = { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false };
-const oakEndTex: BlockTextureDef = { id: 'oak-end', frames: ['oak-end.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false };
+const oakTex: BlockTextureDef = { id: 'oak', dependency: { registry: 'blockTextures', id: 'oak' }, frames: ['oak.png'], fps: 1, interpolate: false };
+const oakEndTex: BlockTextureDef = { id: 'oak-end', dependency: { registry: 'blockTextures', id: 'oak-end' }, frames: ['oak-end.png'], fps: 1, interpolate: false };
+const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
 
-const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } });
-const slabHandle = slab('test:slab', { all: { texture: stoneTex } });
-const ladderHandle = ladder('test:ladder', oakTex);
-const trapdoorHandle = trapdoor('test:trapdoor', { all: { texture: oakTex } });
-const columnHandle = column('test:column', { end: oakEndTex, side: oakTex });
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } });
+const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } }) as BlockHandle;
+const slabHandle = slab('test:slab', { all: { texture: stoneTex } }) as BlockHandle;
+const ladderHandle = ladder('test:ladder', oakTex) as BlockHandle;
+const trapdoorHandle = trapdoor('test:trapdoor', { all: { texture: oakTex } }) as BlockHandle;
+const columnHandle = column('test:column', { end: oakEndTex, side: oakTex }) as BlockHandle;
+const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [stairHandle.id, stairHandle._def],

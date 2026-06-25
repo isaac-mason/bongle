@@ -18,20 +18,20 @@ import type { Quat } from 'mathcat';
 import { buildBlockRegistry, parseKey } from './block-registry';
 import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
 import { column, stairs, fence } from './block-presets';
-import { createVoxels, getBlock, setBlock } from './voxels';
+import { createVoxels, setBlock } from './voxels';
 import { rotateVoxelsByQuat } from './voxel-rotate';
 
 beforeAll(() => {
     registerAllShapes();
 });
 
-const oakTex: BlockTextureDef = { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false };
-const oakEndTex: BlockTextureDef = { id: 'oak-end', frames: ['oak-end.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false };
+const oakTex: BlockTextureDef = { id: 'oak', dependency: { registry: 'blockTextures', id: 'oak' }, frames: ['oak.png'], fps: 1, interpolate: false };
+const oakEndTex: BlockTextureDef = { id: 'oak-end', dependency: { registry: 'blockTextures', id: 'oak-end' }, frames: ['oak-end.png'], fps: 1, interpolate: false };
+const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
 
-const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } });
-const columnHandle = column('test:column', { end: oakEndTex, side: oakTex });
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } });
+const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } }) as BlockHandle;
+const columnHandle = column('test:column', { end: oakEndTex, side: oakTex }) as BlockHandle;
+const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [stairHandle.id, stairHandle._def],

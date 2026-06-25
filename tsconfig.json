@@ -3,7 +3,7 @@
         "target": "ES2022",
         "useDefineForClassFields": true,
         "module": "ES2022",
-        "lib": ["ES2022", "DOM"],
+        "lib": ["ES2024", "DOM"],
         "moduleResolution": "bundler",
         "jsx": "react-jsx",
         "strict": true,
@@ -22,5 +22,5 @@
         "allowSyntheticDefaultImports": true
     },
     "include": ["./src", "./tst"],
-    "exclude": ["./dist"]
+    "exclude": ["./dist", "**/*.bench.ts"]
 }

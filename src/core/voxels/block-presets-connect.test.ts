@@ -6,11 +6,11 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerAllShapes } from 'crashcat';
-import { buildBlockRegistry } from './block-registry';
+import { AIR, buildBlockRegistry } from './block-registry';
 import { type BlockDef, type BlockHandle, type BlockTextureDef } from './blocks';
 import { cube, fence, pane } from './block-presets';
 import { runNeighbourRecompute } from './block-hooks';
-import { AIR, clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from './voxels';
+import { clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from './voxels';
 import { SetBlockFlags } from './block-flags';
 
 beforeAll(() => {
@@ -19,13 +19,13 @@ beforeAll(() => {
 
 // ── shared registry ─────────────────────────────────────────────────
 
-const glassTex: BlockTextureDef = { id: 'glass', frames: ['glass.png'], fps: 1, interpolate: false };
-const oakTex: BlockTextureDef = { id: 'oak', frames: ['oak.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', frames: ['stone.png'], fps: 1, interpolate: false };
+const glassTex: BlockTextureDef = { id: 'glass', dependency: { registry: 'blockTextures', id: 'glass' }, frames: ['glass.png'], fps: 1, interpolate: false };
+const oakTex: BlockTextureDef = { id: 'oak', dependency: { registry: 'blockTextures', id: 'oak' }, frames: ['oak.png'], fps: 1, interpolate: false };
+const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
 
-const paneHandle = pane('test:pane', { all: { texture: glassTex } });
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } });
-const stoneHandle = cube('test:stone', { all: { texture: stoneTex } });
+const paneHandle = pane('test:pane', { all: { texture: glassTex } }) as BlockHandle;
+const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
+const stoneHandle = cube('test:stone', { all: { texture: stoneTex } }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [paneHandle.id, paneHandle._def],

@@ -1017,7 +1017,7 @@ describe('snapshot', () => {
         setPosition(t, vec3.fromValues(1, 2, 3));
         setQuaternion(t, rotY90());
 
-        snapshot(initInterpolation(sg));
+        snapshot(initInterpolation(sg, 1));
 
         // snapshot drain copied the post-mutation pose into prev
         expectVec3Near(t.prevPosition, vec3.fromValues(1, 2, 3));
@@ -1058,7 +1058,7 @@ describe('interpolate', () => {
         });
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 20, 30));
@@ -1121,12 +1121,12 @@ describe('interpolate', () => {
             position: vec3.fromValues(0, 0, 0),
         });
 
-        snapshot(initInterpolation(sg));
+        snapshot(initInterpolation(sg, 1));
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 1, 1);
+        interpolate(initInterpolation(sg, 1), 1, 1);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 0, 0));
     });
@@ -1142,7 +1142,7 @@ describe('interpolate', () => {
         setInterpolation(node, true);
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         const expected: Mat4 = mat4.create();
@@ -1201,7 +1201,7 @@ describe('interpolate', () => {
         });
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         const ct = getTrait(child, TransformTrait)!;
         // nested non-owned uses current local directly, composed with parent world
@@ -1217,13 +1217,13 @@ describe('interpolate', () => {
             position: vec3.fromValues(0, 0, 0),
         });
 
-        snapshot(initInterpolation(sg));
+        snapshot(initInterpolation(sg, 1));
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 100, 0, 0);
         t.teleport = 1; // trigger teleport
 
         computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg), 0.5, 1);
+        interpolate(initInterpolation(sg, 1), 0.5, 1);
 
         // should snap to current, not lerp
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(100, 0, 0));
@@ -1239,8 +1239,8 @@ describe('interpolate', () => {
 
         // run interpolate over a scene with no Interp nodes — should not
         // touch this node's _interpolated bit.
-        snapshot(initInterpolation(sg));
-        interpolate(initInterpolation(sg), 0.5, null);
+        snapshot(initInterpolation(sg, 1));
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
@@ -1259,7 +1259,7 @@ describe('interpolate', () => {
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
 
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         expect(t._interpolated).toBe(1);
     });
@@ -1285,7 +1285,7 @@ describe('interpolate', () => {
         expect(ct._interpolated).toBe(0);
         expect(gct._interpolated).toBe(0);
 
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         expect(ct._interpolated).toBe(1);
         expect(gct._interpolated).toBe(1);
@@ -1316,7 +1316,7 @@ describe('interpolate', () => {
         // directly, which still exercises the parent-matrix boundary.
         setPosition(ct, vec3.fromValues(3, 0, 0));
 
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         // parent never participated — bit stays 0, boundary takes the
         // parent.worldMatrix branch.
@@ -1356,7 +1356,7 @@ describe('interpolate', () => {
         addChild(sg.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
         setInterpolation(node, true);
-        interpolate(initInterpolation(sg), 0.5, null);
+        interpolate(initInterpolation(sg, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(1);
