@@ -37,6 +37,7 @@ function ToggleBtn({
 }) {
     return (
         <button
+            type="button"
             onClick={onClick}
             disabled={disabled}
             className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
@@ -662,13 +663,14 @@ function FalloffButton({
     const h = 20;
     return (
         <button
+            type="button"
             onClick={onClick}
             className={`flex flex-col items-center gap-0.5 px-1 py-1 rounded transition-colors ${
                 active ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
             }`}
         >
             <span className="text-[10px] font-mono leading-none">{label}</span>
-            <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block">
+            <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="block" aria-hidden="true">
                 <path
                     d={falloffPath(fn, w, h)}
                     fill="none"
@@ -799,6 +801,7 @@ export function ElevationOptions() {
             <Row label="heightmap">
                 <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
                 <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
                     className="px-2 py-0.5 text-[10px] font-mono rounded text-neutral-400 hover:text-neutral-200"
@@ -807,6 +810,7 @@ export function ElevationOptions() {
                 </button>
                 {heightmap && (
                     <button
+                        type="button"
                         onClick={() => setElevationOptions({ heightmap: null, heightmapError: null })}
                         className="px-1.5 py-0.5 text-[10px] font-mono rounded text-neutral-500 hover:text-neutral-200"
                         title="clear heightmap"
@@ -862,6 +866,7 @@ function PivotRow() {
         const active = preset === 'min' ? isMin : false; // approximate; good enough for min
         return (
             <button
+                type="button"
                 title={`pivot ${label} (${hint})`}
                 onClick={() => setPreset(preset)}
                 className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${

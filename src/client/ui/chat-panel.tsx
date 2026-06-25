@@ -104,6 +104,7 @@ export function ChatPanel() {
     const [now, setNow] = useState(() => Date.now());
     const newestTs = lines.length > 0 ? lines[lines.length - 1]!.ts : 0;
     const hasActiveRecent = !isOpen && newestTs > 0 && Date.now() - newestTs < RECENT_LIFETIME_MS;
+    // biome-ignore lint/correctness/useExhaustiveDependencies: ticks only while a recent line is live; setNow is a stable setter
     useEffect(() => {
         if (!hasActiveRecent) return;
         const id = setInterval(() => setNow(Date.now()), 250);
@@ -127,6 +128,7 @@ export function ChatPanel() {
     }, [isOpen]);
 
     // pin history to bottom when open + whenever a new line arrives.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length is a re-pin trigger, not read in the body
     useEffect(() => {
         if (!isOpen) return;
         const el = historyScrollRef.current;
@@ -288,6 +290,7 @@ export function ChatPanel() {
                         <div className="text-neutral-400">no messages yet.</div>
                     ) : (
                         openHistory.map((l, i) => (
+                            // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
                             <div key={`${l.ts}-${i}`} className={`${lineColor(l.kind)} whitespace-pre-wrap`}>
                                 {formatLine(l)}
                             </div>
@@ -299,6 +302,7 @@ export function ChatPanel() {
                     <div className="max-w-md flex flex-col gap-0.5 text-[12px] font-mono">
                         {recentClosed.map((l, i) => (
                             <div
+                                // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
                                 key={`${l.ts}-${i}`}
                                 style={{ opacity: recentOpacity(l) }}
                                 className={`bg-black/50 px-2 py-0.5 ${lineColor(l.kind)} whitespace-pre-wrap`}
@@ -313,8 +317,9 @@ export function ChatPanel() {
             {isOpen && suggestions.length > 0 && (
                 <div className="pointer-events-auto max-w-md bg-black/70 text-[12px] font-mono max-h-48 overflow-y-auto">
                     {suggestions.map((sug, i) => (
+                        // biome-ignore lint/a11y/noStaticElementInteractions: suggestion option; keyboard nav is handled at the input level
                         <div
-                            key={`${sug.text}-${i}`}
+                            key={sug.text}
                             className={`flex items-baseline justify-between px-2 py-0.5 cursor-pointer ${
                                 i === selectedIndex ? 'bg-white/20 text-white' : 'text-neutral-200 hover:bg-white/10'
                             }`}
@@ -382,6 +387,7 @@ function Signature({ parsed }: { parsed: ParseState }) {
             <div>
                 <span className="text-white">/{parsed.cmd.name}</span>{' '}
                 {argLabels.map((label, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: command arg labels are positional
                     <span key={i} className={i === parsed.activeArgIndex ? 'text-white font-bold' : 'text-neutral-400'}>
                         {label}{' '}
                     </span>

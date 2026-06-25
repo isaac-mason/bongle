@@ -28,6 +28,7 @@ export function Hotbar() {
             <div className="flex gap-1 bg-white/90 border border-neutral-200 rounded-sm shadow-md p-1 backdrop-blur-sm">
                 {hotbar.map((slot, i) => (
                     <Slot
+                        // biome-ignore lint/suspicious/noArrayIndexKey: hotbar slots are positional (slot index is the identity)
                         key={i}
                         index={i}
                         slot={slot}

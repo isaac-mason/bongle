@@ -79,6 +79,7 @@ export function SearchableSelect<T extends string | number = string>({
         }
     }, [open]);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: reset the highlight only when the query changes; setActiveIndex is a stable setter
     useEffect(() => {
         setActiveIndex(0);
     }, [query]);
@@ -97,6 +98,7 @@ export function SearchableSelect<T extends string | number = string>({
             </PopoverTrigger>
             <PopoverContent className={`flex flex-col min-w-[180px] p-1 ${contentClassName ?? ''}`}>
                 <input
+                    // biome-ignore lint/a11y/noAutofocus: intentionally focus the search field when the popover opens
                     autoFocus
                     type="text"
                     value={query}

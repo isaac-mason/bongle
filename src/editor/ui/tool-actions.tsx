@@ -190,6 +190,7 @@ function ActionBtn({
 }) {
     const [hovered, setHovered] = useState(false);
     return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: hover wrapper for a tooltip, not an interactive control
         <div className="relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
             <button
                 type="button"

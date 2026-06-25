@@ -659,6 +659,7 @@ function LogColumn({ label, logs }: { label: string; logs: Debug.Logs | null }) 
                                 const tag = entry.source ? `[${entry.source.traitId}#${entry.source.nodeId}]` : '[engine]';
                                 return (
                                     <div
+                                        // biome-ignore lint/suspicious/noArrayIndexKey: virtualized log rows keyed by absolute index
                                         key={startIdx + i}
                                         style={{
                                             height: LOG_ROW_H,

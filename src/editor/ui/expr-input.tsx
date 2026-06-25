@@ -177,7 +177,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                             {suggestions.map((sug, i) => (
                                 <button
                                     type="button"
-                                    key={`${sug.text}-${i}`}
+                                    key={sug.text}
                                     className={`w-full flex items-baseline justify-between text-left px-1.5 py-0.5 cursor-pointer ${
                                         i === selectedIndex
                                             ? 'bg-neutral-700 text-white'

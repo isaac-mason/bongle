@@ -424,6 +424,7 @@ export function HierarchyPanel() {
             </div>
             <ContextMenu>
                 <ContextMenuTrigger asChild>
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions: right-click context-menu trigger region */}
                     <div ref={scrollRef} className="p-1 overflow-y-auto flex-1" onContextMenu={handleContextMenuTrigger}>
                         <DragDropProvider
                             onDragStart={(event) => {

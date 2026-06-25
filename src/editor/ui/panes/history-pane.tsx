@@ -26,6 +26,7 @@ export function HistoryPane() {
         <div className="flex flex-col py-1">
             {undoItems.map((a, i) => (
                 <button
+                    // biome-ignore lint/suspicious/noArrayIndexKey: undo history entries are positional (stack index is the identity)
                     key={`undo-${i}`}
                     type="button"
                     onClick={() => {
@@ -47,6 +48,7 @@ export function HistoryPane() {
 
             {redoItems.map((a, i) => (
                 <button
+                    // biome-ignore lint/suspicious/noArrayIndexKey: redo history entries are positional (stack index is the identity)
                     key={`redo-${i}`}
                     type="button"
                     onClick={() => {

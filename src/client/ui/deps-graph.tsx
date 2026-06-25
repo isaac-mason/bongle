@@ -95,6 +95,8 @@ function DepsGraph({ snapshot, selected, onSelect }: Props) {
     const rowY = (i: number) => i * (ROW_H + ROW_GAP);
 
     return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: debug graph background (click-to-deselect)
+        // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-driven debug graph
         <div
             style={{
                 width: '100%',
@@ -104,10 +106,12 @@ function DepsGraph({ snapshot, selected, onSelect }: Props) {
             }}
             onClick={() => onSelect(null)}
         >
+            {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops click-through only; mouse-driven debug graph */}
             <svg
                 width={width}
                 height={contentH}
                 style={{ display: 'block', margin: '12px auto' }}
+                aria-hidden="true"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* arcs: producer right edge -> selected left edge */}
@@ -198,6 +202,7 @@ function Item({
     const c = colorFor(registry);
     const clipId = `clip-${keyStr.replace(/[^a-z0-9]/gi, '_')}`;
     return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: clickable node in a mouse-driven debug graph
         <g
             transform={`translate(${x} ${y})`}
             style={{ cursor: 'pointer' }}
