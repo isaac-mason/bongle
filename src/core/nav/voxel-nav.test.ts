@@ -61,3 +61,23 @@ describe('nav.findPath', () => {
         expect(path).toBeNull();
     });
 });
+
+describe('nav.smoothPath', () => {
+    // a flat path (no y-hops); shortcut stubbed (it ignores voxels here).
+    const flat: number[][] = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]];
+
+    it('collapses to endpoints when every segment is line-of-sight', () => {
+        const out = nav.smoothPath(noVoxels, flat, () => true);
+        expect(out).toEqual([[0, 0, 0], [3, 0, 0]]);
+    });
+
+    it('keeps every waypoint when nothing is line-of-sight', () => {
+        const out = nav.smoothPath(noVoxels, flat, () => false);
+        expect(out).toEqual(flat);
+    });
+
+    it('returns paths shorter than 3 untouched', () => {
+        const two: number[][] = [[0, 0, 0], [1, 0, 0]];
+        expect(nav.smoothPath(noVoxels, two, () => true)).toBe(two);
+    });
+});
