@@ -184,7 +184,7 @@ script(
         // editGated; on a body that actually mutated (returns true — guard
         // early-returns don't), flag the room dirty (broadcast to clients via the
         // room list). wraps the mutating listeners below.
-        const editMutate = <T>(fn: (args: T, client: Client) => boolean | void) =>
+        const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
             editGated<T>((args, client) => {
                 if (!fn(args, client)) return;
                 const { room } = ctx.server!;

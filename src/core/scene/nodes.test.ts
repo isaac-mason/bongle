@@ -37,7 +37,6 @@ const Tag = trait('test/tag');
 const Physics = trait('test/physics', {
     gravity: -9.8,
 });
-type Physics = TraitType<typeof Physics>;
 control(Physics, 'gravity', {
     schema: prop.number(),
     get: (t) => t.gravity,
@@ -81,7 +80,6 @@ control(Transform, 'y', {
 const Renderer = trait('test/renderer', {
     visible: true,
 });
-type Renderer = TraitType<typeof Renderer>;
 control(Renderer, 'visible', {
     schema: prop.boolean(),
     get: (t) => t.visible,

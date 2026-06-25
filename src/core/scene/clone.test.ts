@@ -33,7 +33,6 @@ control(Marker, 'value', {
 const VecMarker = trait('clone/vec-marker', {
     position: () => vec3.create(),
 });
-type VecMarker = TraitType<typeof VecMarker>;
 control(VecMarker, 'position', {
     schema: prop.vec3(),
     get: (t) => t.position,
@@ -45,7 +44,6 @@ control(VecMarker, 'position', {
 const SyncMarker = trait('clone/sync-marker', {
     health: 100,
 });
-type SyncMarker = TraitType<typeof SyncMarker>;
 sync(SyncMarker, 'health', {
     schema: pack.float32(),
     pack: (t) => t.health,

@@ -231,9 +231,13 @@ function applyPredictionInterpolation(transform: TransformTrait): void {
         vec3.copy(transform.interpolatedWorldScale, transform.scale);
     } else {
         const parent = transform._parent as TransformTrait;
-        const parentMat = parent._interpolated
-            ? (updateInterpolatedWorldTransform(parent), parent.interpolatedWorldMatrix)
-            : getWorldMatrix(parent);
+        let parentMat: Mat4;
+        if (parent._interpolated) {
+            updateInterpolatedWorldTransform(parent);
+            parentMat = parent.interpolatedWorldMatrix;
+        } else {
+            parentMat = getWorldMatrix(parent);
+        }
         mat4.fromRotationTranslationScale(_interpLocalMat, transform.quaternion, transform.position, transform.scale);
         mat4.multiply(_authWorldMat, parentMat, _interpLocalMat);
         mat4.decompose(_authWorldQuat, _authWorldPos, _authWorldScale, _authWorldMat);

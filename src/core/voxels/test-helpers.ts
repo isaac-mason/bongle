@@ -37,6 +37,7 @@ export function resetVoxelRegistry(): void {
     clearStore(registry.particles as unknown as AnyStore);
 }
 
+// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default (matches block()'s signature)
 export type TestBlockSpec<P extends PropsDef = {}> = BlockOptions<P> & {
     id: string;
     /** convenience: when set (and `model` is omitted), registers a
@@ -47,6 +48,7 @@ export type TestBlockSpec<P extends PropsDef = {}> = BlockOptions<P> & {
 };
 
 /** declare one test block via the real `blockTexture()` + `block()`. */
+// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default (matches block()'s signature)
 export function defineTestBlock<const P extends PropsDef = {}>(spec: TestBlockSpec<P>): BlockHandle<P> {
     const { id, texId, ...opts } = spec;
     if (texId !== undefined) {

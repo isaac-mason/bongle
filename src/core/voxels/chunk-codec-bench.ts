@@ -128,28 +128,6 @@ const B_splitNoDeflate: Codec = {
     },
 };
 
-// C. split + deflate EACH stream
-const C_splitDeflateEach: Codec = {
-    name: 'C split + deflate each',
-    run(data, light) {
-        const { sky, rgb } = splitLight(light);
-        const dC = deflateSync(u16Bytes(rleEncode(data)));
-        const sC = deflateSync(u16Bytes(rleEncode(sky)));
-        const rC = deflateSync(u16Bytes(rleEncode(rgb)));
-        return {
-            bytes: dC.length + sC.length + rC.length + 6,
-            decode() {
-                const dd = rleDecode(new Uint16Array(inflateSync(dC).buffer), CHUNK_VOLUME);
-                const ss = rleDecode(new Uint16Array(inflateSync(sC).buffer), CHUNK_VOLUME);
-                const rr = rleDecode(new Uint16Array(inflateSync(rC).buffer), CHUNK_VOLUME);
-                const l = new Uint16Array(CHUNK_VOLUME);
-                for (let i = 0; i < CHUNK_VOLUME; i++) l[i] = (ss[i]! << 12) | rr[i]!;
-                return { data: dd, light: l };
-            },
-        };
-    },
-};
-
 // D. split + ONE deflate over concatenated RLE streams (one inflate on decode)
 const D_splitDeflateOnce: Codec = {
     name: 'D split + single deflate (concat)',

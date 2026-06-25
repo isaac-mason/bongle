@@ -102,7 +102,7 @@ function buildRig(boneCount: number): {
 }
 
 /** build N channels with realistic 30-frame LINEAR keyframes, mix of T/R/S. */
-function buildChannels(boneCount: number, channelCount: number, frameCount = 30): ClipChannel[] {
+function buildChannels(_boneCount: number, channelCount: number, frameCount = 30): ClipChannel[] {
     const channels: ClipChannel[] = [];
     const types: Array<'translation' | 'rotation' | 'scale'> = ['translation', 'rotation', 'scale'];
     for (let c = 0; c < channelCount; c++) {

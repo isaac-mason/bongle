@@ -125,7 +125,7 @@ function stringify(value: unknown): string {
     const t = typeof value;
     if (t === 'string') return `s:${value}`;
     if (t === 'number' || t === 'boolean' || t === 'bigint') return `${t[0]}:${String(value)}`;
-    if (t === 'function') return `f:${(value as Function).toString()}`;
+    if (t === 'function') return `f:${(value as (...args: unknown[]) => unknown).toString()}`;
     if (t !== 'object') return `?:${String(value)}`;
 
     if (Array.isArray(value)) {

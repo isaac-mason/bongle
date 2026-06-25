@@ -810,6 +810,7 @@ const EMPTY_STATES = bs.create({});
  *
  * returns a handle used for getting global state ids in gameplay code.
  */
+// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default — it stays assignable to BlockHandle<PropsDef>, which Record<string, never> does not
 export function block<const P extends PropsDef = {}>(id: string, options: BlockOptions<P> = {}): BlockHandle<P> {
     const states = (options.states ?? EMPTY_STATES) as BlockStateDef<P>;
     const cull = options.cull ?? CullType.SOLID;
