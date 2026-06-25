@@ -162,9 +162,7 @@ const TYPE_COMPONENTS: Record<GltfAccessor['type'], number> = {
  * convention for declared models.
  */
 export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
-    const { json, bin } = looksLikeGlb(bytes)
-        ? parseGlbContainer(bytes)
-        : parseGltfJson(bytes);
+    const { json, bin } = looksLikeGlb(bytes) ? parseGlbContainer(bytes) : parseGltfJson(bytes);
 
     const root = JSON.parse(json) as GltfRoot;
 
@@ -195,9 +193,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
             bytes = decoded.bytes;
             mimeType = img.mimeType ?? decoded.mimeType ?? 'image/png';
         } else {
-            throw new Error(
-                `gltfUnpack: image[${i}] has no bufferView and no data: URI (external URIs unsupported)`,
-            );
+            throw new Error(`gltfUnpack: image[${i}] has no bufferView and no data: URI (external URIs unsupported)`);
         }
         const mi: ModelImage = { mimeType, bytes };
         outImages.push(mi);
@@ -476,7 +472,12 @@ function readAccessor(
     views: GltfBufferView[],
     bin: Uint8Array,
     idx: number,
-): { array: Float32Array | Uint8Array | Uint16Array | Uint32Array; count: number; componentType: number; type: GltfAccessor['type'] } {
+): {
+    array: Float32Array | Uint8Array | Uint16Array | Uint32Array;
+    count: number;
+    componentType: number;
+    type: GltfAccessor['type'];
+} {
     const a = accessors[idx];
     if (!a) throw new Error(`gltfUnpack: accessor[${idx}] missing`);
     if (a.sparse !== undefined) {
@@ -519,10 +520,18 @@ function readAccessor(
                 const o = srcOff + c * compSize;
                 const dstIdx = i * components + c;
                 switch (a.componentType) {
-                    case GL_FLOAT: (array as Float32Array)[dstIdx] = src.getFloat32(o, true); break;
-                    case GL_UNSIGNED_INT: (array as Uint32Array)[dstIdx] = src.getUint32(o, true); break;
-                    case GL_UNSIGNED_SHORT: (array as Uint16Array)[dstIdx] = src.getUint16(o, true); break;
-                    case GL_UNSIGNED_BYTE: (array as Uint8Array)[dstIdx] = src.getUint8(o); break;
+                    case GL_FLOAT:
+                        (array as Float32Array)[dstIdx] = src.getFloat32(o, true);
+                        break;
+                    case GL_UNSIGNED_INT:
+                        (array as Uint32Array)[dstIdx] = src.getUint32(o, true);
+                        break;
+                    case GL_UNSIGNED_SHORT:
+                        (array as Uint16Array)[dstIdx] = src.getUint16(o, true);
+                        break;
+                    case GL_UNSIGNED_BYTE:
+                        (array as Uint8Array)[dstIdx] = src.getUint8(o);
+                        break;
                     default:
                         throw new Error(`gltfUnpack: accessor[${idx}] componentType ${a.componentType} not in supported subset`);
                 }
@@ -549,16 +558,18 @@ function readAccessor(
     return { array, count: a.count, componentType: a.componentType, type: a.type };
 }
 
-function makeTypedArray(
-    componentType: number,
-    length: number,
-): Float32Array | Uint8Array | Uint16Array | Uint32Array {
+function makeTypedArray(componentType: number, length: number): Float32Array | Uint8Array | Uint16Array | Uint32Array {
     switch (componentType) {
-        case GL_FLOAT: return new Float32Array(length);
-        case GL_UNSIGNED_INT: return new Uint32Array(length);
-        case GL_UNSIGNED_SHORT: return new Uint16Array(length);
-        case GL_UNSIGNED_BYTE: return new Uint8Array(length);
-        default: throw new Error(`gltfUnpack: unsupported componentType ${componentType}`);
+        case GL_FLOAT:
+            return new Float32Array(length);
+        case GL_UNSIGNED_INT:
+            return new Uint32Array(length);
+        case GL_UNSIGNED_SHORT:
+            return new Uint16Array(length);
+        case GL_UNSIGNED_BYTE:
+            return new Uint8Array(length);
+        default:
+            throw new Error(`gltfUnpack: unsupported componentType ${componentType}`);
     }
 }
 
@@ -599,8 +610,12 @@ function extractMesh(
     let baseVertex = 0;
     let image: ModelImage | null = null;
 
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+    let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
 
     for (const prim of mesh.primitives) {
         const posIdx = prim.attributes.POSITION;
@@ -692,10 +707,17 @@ function extractClip(
 
         let property: 'translation' | 'rotation' | 'scale';
         switch (ch.target.path) {
-            case 'translation': property = 'translation'; break;
-            case 'rotation': property = 'rotation'; break;
-            case 'scale': property = 'scale'; break;
-            default: continue; // skip 'weights' (morph targets)
+            case 'translation':
+                property = 'translation';
+                break;
+            case 'rotation':
+                property = 'rotation';
+                break;
+            case 'scale':
+                property = 'scale';
+                break;
+            default:
+                continue; // skip 'weights' (morph targets)
         }
 
         const sampler = anim.samplers[ch.sampler];
@@ -727,8 +749,12 @@ function extractClip(
  */
 function computeModelAabb(sceneNodes: ModelNode[]): Box3 {
     const worldByNode = new Map<ModelNode, ReturnType<typeof mat4.create>>();
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+    let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
 
     for (const node of sceneNodes) {
         const local = mat4.fromRotationTranslationScale(mat4.create(), node.quaternion, node.position, node.scale);
@@ -742,9 +768,9 @@ function computeModelAabb(sceneNodes: ModelNode[]): Box3 {
         // transform the 8 corners of the mesh's local AABB and expand
         const [loX, loY, loZ, hiX, hiY, hiZ] = mesh.aabb;
         for (let c = 0; c < 8; c++) {
-            const x = (c & 1) ? hiX : loX;
-            const y = (c & 2) ? hiY : loY;
-            const z = (c & 4) ? hiZ : loZ;
+            const x = c & 1 ? hiX : loX;
+            const y = c & 2 ? hiY : loY;
+            const z = c & 4 ? hiZ : loZ;
             const wx = world[0] * x + world[4] * y + world[8] * z + world[12];
             const wy = world[1] * x + world[5] * y + world[9] * z + world[13];
             const wz = world[2] * x + world[6] * y + world[10] * z + world[14];

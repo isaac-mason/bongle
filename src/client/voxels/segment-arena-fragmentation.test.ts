@@ -8,12 +8,7 @@
 
 import { describe, it } from 'vitest';
 
-import {
-    createOffsetAllocator,
-    oaAllocate,
-    oaFree,
-    type OAHandle,
-} from './offset-allocator';
+import { createOffsetAllocator, oaAllocate, oaFree, type OAHandle } from './offset-allocator';
 
 const CAPACITY_SLOTS = 100_000;
 const SMALL_MIN = 1;
@@ -25,8 +20,10 @@ const SMALL_FRACTION = 0.7;
 function makeRng(seed: number): () => number {
     let s = seed | 0;
     return () => {
-        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
-        return ((s >>> 0) / 0xffffffff);
+        s ^= s << 13;
+        s ^= s >>> 17;
+        s ^= s << 5;
+        return (s >>> 0) / 0xffffffff;
     };
 }
 
@@ -51,7 +48,10 @@ function ffAlloc(a: FirstFit, slots: number): number | null {
         if (r.length < slots) continue;
         const start = r.start;
         if (r.length === slots) a.free.splice(i, 1);
-        else { r.start += slots; r.length -= slots; }
+        else {
+            r.start += slots;
+            r.length -= slots;
+        }
         a.used += slots;
         return start;
     }
@@ -120,13 +120,11 @@ describe('fragmentation profile (peak used at first OOM)', () => {
                     free();
                 }
             }
-            const pct = firstOomUsed >= 0
-                ? ((firstOomUsed / CAPACITY_SLOTS) * 100).toFixed(1)
-                : 'n/a';
+            const pct = firstOomUsed >= 0 ? ((firstOomUsed / CAPACITY_SLOTS) * 100).toFixed(1) : 'n/a';
             // eslint-disable-next-line no-console
             console.log(
                 `[${name}] ops=${OPS} allocs=${allocCount} OOMs=${oomCount}` +
-                ` firstOOM=${firstOomAt} (used=${firstOomUsed}/${CAPACITY_SLOTS}, ${pct}%)`,
+                    ` firstOOM=${firstOomAt} (used=${firstOomUsed}/${CAPACITY_SLOTS}, ${pct}%)`,
             );
         };
 

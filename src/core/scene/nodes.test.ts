@@ -90,9 +90,13 @@ control(Renderer, 'visible', {
     },
 });
 
-const EphemeralTrait = trait('test/ephemeral-trait', {
-    value: 42,
-}, { persist: false });
+const EphemeralTrait = trait(
+    'test/ephemeral-trait',
+    {
+        value: 42,
+    },
+    { persist: false },
+);
 control(EphemeralTrait, 'value', {
     schema: prop.number(),
     get: (t) => t.value,

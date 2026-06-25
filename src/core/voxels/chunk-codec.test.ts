@@ -1,13 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CHUNK_VOLUME } from './voxels';
-import {
-    rleEncode,
-    rleDecode,
-    encodeChunk,
-    decodeChunk,
-    encodeLight,
-    decodeLight,
-} from './chunk-codec';
+import { rleEncode, rleDecode, encodeChunk, decodeChunk, encodeLight, decodeLight } from './chunk-codec';
 
 describe('rleEncode / rleDecode', () => {
     it('empty input', () => {
@@ -226,9 +219,9 @@ describe('encodeLight / decodeLight', () => {
         const light = new Uint16Array(CHUNK_VOLUME);
         for (let i = 0; i < CHUNK_VOLUME; i++) {
             // arbitrary rgb pattern — gradient that creates a few distinct runs
-            const r = (i & 0xf);
-            const g = ((i >> 4) & 0xf);
-            const b = ((i >> 8) & 0xf);
+            const r = i & 0xf;
+            const g = (i >> 4) & 0xf;
+            const b = (i >> 8) & 0xf;
             light[i] = (r << 8) | (g << 4) | b;
         }
         const { sky, rgb } = encodeLight(light);

@@ -162,10 +162,7 @@ export function loadScene(state: ContentManager, sceneId: string): ScenePayload 
  * callers seed `_lastWritten` with `raw` so the first flush after a load
  * skips a redundant identical write (and its dev file-watcher echo).
  */
-export function loadSceneRaw(
-    state: ContentManager,
-    sceneId: string,
-): { data: ScenePayload; raw: string } | null {
+export function loadSceneRaw(state: ContentManager, sceneId: string): { data: ScenePayload; raw: string } | null {
     const filePath = scenePath(state, sceneId);
     if (!fs.existsSync(filePath)) return null;
 
@@ -254,9 +251,7 @@ export function renameScene(state: ContentManager, oldSceneId: string, newSceneI
         state._lastWritten.delete(oldSceneId);
     }
 
-    state.entries = state.entries.map((e) =>
-        e.sceneId === oldSceneId ? { ...e, sceneId: newSceneId } : e,
-    );
+    state.entries = state.entries.map((e) => (e.sceneId === oldSceneId ? { ...e, sceneId: newSceneId } : e));
     if (!state.entries.some((e) => e.sceneId === newSceneId)) {
         state.entries.push({ sceneId: newSceneId });
     }

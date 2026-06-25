@@ -106,10 +106,7 @@ export function openViewportContextMenu(
     const editorNode = room.editor?.editorNode;
     const nodeHit = hits.find(
         (h): h is Selector.NodeHit =>
-            h.kind === 'node' &&
-            h.node !== playerNode &&
-            !isAncestorOf(playerNode, h.node) &&
-            h.node !== editorNode,
+            h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
     );
     const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
     const voxelWins = voxelHit !== undefined && (nodeHit === undefined || voxelHit.distance < nodeHit.distance);
@@ -175,11 +172,7 @@ export function updateInspect(
     // inspect/transform suppress the voxel tool path entirely: clear hover,
     // brush, in-progress box-select, and drop any voxel chunks while keeping
     // the node selection intact.
-    const dirty =
-        s.hoverVoxel !== null ||
-        s.boxSelect !== undefined ||
-        s.brush !== null ||
-        s.selection.chunks.size > 0;
+    const dirty = s.hoverVoxel !== null || s.boxSelect !== undefined || s.brush !== null || s.selection.chunks.size > 0;
     if (dirty) {
         store.setState((cur) => ({
             hoverVoxel: null,
@@ -188,10 +181,7 @@ export function updateInspect(
             lastHoverVoxel: hoverVoxelAtFrame ?? cur.lastHoverVoxel,
             boxSelect: undefined,
             brush: null,
-            selection:
-                cur.selection.chunks.size > 0
-                    ? { chunks: new Map(), nodes: cur.selection.nodes }
-                    : cur.selection,
+            selection: cur.selection.chunks.size > 0 ? { chunks: new Map(), nodes: cur.selection.nodes } : cur.selection,
         }));
         updateSelectionMeshes(meshState, store.getState());
     }
@@ -287,10 +277,7 @@ export function updateInspect(
             const editorNode = room.editor?.editorNode;
             const nodeHit = hits.find(
                 (h): h is Selector.NodeHit =>
-                    h.kind === 'node' &&
-                    h.node !== playerNode &&
-                    !isAncestorOf(playerNode, h.node) &&
-                    h.node !== editorNode,
+                    h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
             );
             if (nodeHit) {
                 // grab always targets the topmost transform-bearing ancestor —
@@ -357,10 +344,7 @@ export function updateInspect(
         // distance arbitrate which one wins when both are present.
         const nodeHit = hits.find(
             (h): h is Selector.NodeHit =>
-                h.kind === 'node' &&
-                h.node !== playerNode &&
-                !isAncestorOf(playerNode, h.node) &&
-                h.node !== editorNode,
+                h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
         );
         const voxelHit = hits.find((h): h is Selector.VoxelHit => h.kind === 'voxel');
 
@@ -439,14 +423,7 @@ export function updateInspect(
                 }
             }
         } else if (activeTool === 'transform') {
-            TransformTool.handleTransformKeys(
-                mk,
-                client.input,
-                camera.quaternion,
-                transformToolState,
-                room.nodes,
-                ctx,
-            );
+            TransformTool.handleTransformKeys(mk, client.input, camera.quaternion, transformToolState, room.nodes, ctx);
         }
     }
 

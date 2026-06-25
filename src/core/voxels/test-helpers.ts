@@ -54,9 +54,7 @@ export function defineTestBlock<const P extends PropsDef = {}>(spec: TestBlockSp
     }
     const model =
         opts.model ??
-        (texId !== undefined
-            ? () => ({ type: 'cube' as const, textures: { all: { texture: texId } } })
-            : undefined);
+        (texId !== undefined ? () => ({ type: 'cube' as const, textures: { all: { texture: texId } } }) : undefined);
     return block(id, { ...(opts as BlockOptions<P>), model, states: opts.states as BlockStateDef<P> | undefined });
 }
 

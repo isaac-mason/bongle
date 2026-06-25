@@ -40,10 +40,8 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
                 push(issues, path, `expected number, got ${describe(value)}`);
                 return;
             }
-            if (schema.min !== undefined && value < schema.min)
-                push(issues, path, `${value} < min ${schema.min}`, 'warn');
-            if (schema.max !== undefined && value > schema.max)
-                push(issues, path, `${value} > max ${schema.max}`, 'warn');
+            if (schema.min !== undefined && value < schema.min) push(issues, path, `${value} < min ${schema.min}`, 'warn');
+            if (schema.max !== undefined && value > schema.max) push(issues, path, `${value} > max ${schema.max}`, 'warn');
             return;
         case 'vector2':
         case 'vector3':
@@ -59,8 +57,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
             }
             for (let i = 0; i < Math.min(value.length, len); i++) {
                 const v = value[i];
-                if (typeof v !== 'number' || Number.isNaN(v))
-                    push(issues, [...path, i], `expected number, got ${describe(v)}`);
+                if (typeof v !== 'number' || Number.isNaN(v)) push(issues, [...path, i], `expected number, got ${describe(v)}`);
             }
             return;
         }
@@ -114,8 +111,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
                 push(issues, path, `expected one of ${allowed.join(', ')}, got ${describe(value)}`);
                 return;
             }
-            if (!allowed.includes(value))
-                push(issues, path, `expected one of ${allowed.join(', ')}, got ${describe(value)}`);
+            if (!allowed.includes(value)) push(issues, path, `expected one of ${allowed.join(', ')}, got ${describe(value)}`);
             return;
         }
         case 'nullable':
@@ -145,8 +141,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
             return;
         case 'prefab':
         case 'block':
-            if (typeof value !== 'string')
-                push(issues, path, `expected ${schema.type} ref (string), got ${describe(value)}`);
+            if (typeof value !== 'string') push(issues, path, `expected ${schema.type} ref (string), got ${describe(value)}`);
             return;
         case 'union': {
             if (!isPlainObject(value)) {
@@ -159,11 +154,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
                 return litSchema && litSchema.type === 'literal' && litSchema.value === discriminator;
             });
             if (!variant) {
-                push(
-                    issues,
-                    path,
-                    `union discriminator '${schema.key}'=${describe(discriminator)} doesn't match any variant`,
-                );
+                push(issues, path, `union discriminator '${schema.key}'=${describe(discriminator)} doesn't match any variant`);
                 return;
             }
             walk(variant, value, path, issues);

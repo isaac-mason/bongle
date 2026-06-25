@@ -56,9 +56,7 @@ export type MatchmakingOptions = {
 export function matchmaking(opts: MatchmakingOptions = {}): MatchmakingConfig {
     const maxPlayers = opts.maxPlayers ?? DEFAULT_MATCHMAKING_CONFIG.maxPlayers;
     if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > HARD_MAX_PLAYERS_PER_ROOM) {
-        throw new Error(
-            `matchmaking({ maxPlayers }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`,
-        );
+        throw new Error(`matchmaking({ maxPlayers }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`);
     }
 
     const config: MatchmakingConfig = {

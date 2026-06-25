@@ -581,7 +581,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         /* ── room cmds ── */
         play: () => {
             const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'play', sceneId: room.sceneId, sourceRoomId: room.roomId, gameOptions: "{}", joinData: "{}" });
+            Net.send(net, { type: 'play', sceneId: room.sceneId, sourceRoomId: room.roomId, gameOptions: '{}', joinData: '{}' });
         },
         openScene: (sceneId) => {
             const net = ctx.client!.state!.net;
@@ -805,8 +805,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setAirDistance: (d) => set({ airDistance: d }),
         setMagicSelectOptions: (opts) => set((s) => ({ magicSelectOptions: { ...s.magicSelectOptions, ...opts } })),
         setLassoOptions: (opts) => set((s) => ({ lassoOptions: { ...s.lassoOptions, ...opts } })),
-        setBrushSelectOptions: (opts) =>
-            set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
+        setBrushSelectOptions: (opts) => set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
         setBrushOptions: (opts) => set((s) => ({ brushOptions: { ...s.brushOptions, ...opts } })),
         setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
         setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
@@ -820,11 +819,10 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             }),
         cycleActiveSlot: (delta) =>
             set((s) => {
-                const next = ((s.activeSlotIndex + delta) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
+                const next = (((s.activeSlotIndex + delta) % HOTBAR_SIZE) + HOTBAR_SIZE) % HOTBAR_SIZE;
                 return { activeSlotIndex: next };
             }),
-        toggleLibrary: () =>
-            set((s) => ({ libraryOpen: !s.libraryOpen, carriedItem: s.libraryOpen ? null : s.carriedItem })),
+        toggleLibrary: () => set((s) => ({ libraryOpen: !s.libraryOpen, carriedItem: s.libraryOpen ? null : s.carriedItem })),
         setLibraryOpen: (libraryOpen) => set({ libraryOpen, ...(libraryOpen ? {} : { carriedItem: null }) }),
         setCarriedItem: (carriedItem) => set({ carriedItem }),
         setHoveredInventoryItem: (hoveredInventoryItem) => set({ hoveredInventoryItem }),
@@ -899,8 +897,7 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setAirDistance: (d) => set({ airDistance: d }),
     setMagicSelectOptions: (opts) => set((s) => ({ magicSelectOptions: { ...s.magicSelectOptions, ...opts } })),
     setLassoOptions: (opts) => set((s) => ({ lassoOptions: { ...s.lassoOptions, ...opts } })),
-    setBrushSelectOptions: (opts) =>
-        set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
+    setBrushSelectOptions: (opts) => set((s) => ({ brushSelectOptions: { ...s.brushSelectOptions, ...opts } })),
     setBrushOptions: (opts) => set((s) => ({ brushOptions: { ...s.brushOptions, ...opts } })),
     setPaintOptions: (opts) => set((s) => ({ paintOptions: { ...s.paintOptions, ...opts } })),
     setSmoothOptions: (opts) => set((s) => ({ smoothOptions: { ...s.smoothOptions, ...opts } })),
@@ -913,7 +910,7 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
         }),
     cycleActiveSlot: (delta) =>
         set((s) => {
-            const next = ((s.activeSlotIndex + delta) % HOTBAR_SIZE + HOTBAR_SIZE) % HOTBAR_SIZE;
+            const next = (((s.activeSlotIndex + delta) % HOTBAR_SIZE) + HOTBAR_SIZE) % HOTBAR_SIZE;
             return { activeSlotIndex: next };
         }),
     toggleLibrary: () => set((s) => ({ libraryOpen: !s.libraryOpen })),

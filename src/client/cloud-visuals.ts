@@ -86,12 +86,7 @@ function hash2f(x: number, y: number): number {
 const STRIDE4 = COMPACTED_CLOUD_INSTANCE_STRIDE / 4;
 const M_CLOUD_INSTANCES = GRID_DIM * GRID_DIM;
 
-export function update(
-    _visuals: CloudVisuals,
-    resources: CloudResources,
-    env: Environment.Environment,
-    camera: Camera,
-): void {
+export function update(_visuals: CloudVisuals, resources: CloudResources, env: Environment.Environment, camera: Camera): void {
     const cfg = env.config;
     const cp = camera.position;
     const windTime = (performance.now() - resources.windStartMs) / 1000;
@@ -115,8 +110,8 @@ export function update(
 
     const windOffX = windDirX * windTime * WIND_SCALE;
     const windOffZ = windDirY * windTime * WIND_SCALE;
-    const nearestI = Math.floor(((cp[0] + windOffX) / gridSpacing) + 0.5);
-    const nearestJ = Math.floor(((cp[2] + windOffZ) / gridSpacing) + 0.5);
+    const nearestI = Math.floor((cp[0] + windOffX) / gridSpacing + 0.5);
+    const nearestJ = Math.floor((cp[2] + windOffZ) / gridSpacing + 0.5);
 
     const arr = resources.compactedInstanceData;
     const arrU32 = new Uint32Array(arr.buffer, arr.byteOffset, arr.length);
@@ -203,10 +198,7 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
     return t * t * (3 - 2 * t);
 }
 
-function aabbInFrustum(
-    minX: number, minY: number, minZ: number,
-    maxX: number, maxY: number, maxZ: number,
-): boolean {
+function aabbInFrustum(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): boolean {
     for (let i = 0; i < 6; i++) {
         const p = _cpuFrustum[i]!;
         const nx = p.normal[0];

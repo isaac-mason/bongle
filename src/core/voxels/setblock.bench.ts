@@ -312,23 +312,20 @@ describe('setBlock + onNeighbourUpdate (fence state recompute)', () => {
     bench('place 16x16 grid, BULK + one drain', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
-        for (let z = 0; z < 16; z++)
-            for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
+        for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
         runNeighbourRecompute(voxels);
     });
 
     bench('place 16x16 grid, DEFAULT (inline drain per op)', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
-        for (let z = 0; z < 16; z++)
-            for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY);
+        for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY);
     });
 
     bench('break 1 fence in a 16x16 grid (DEFAULT, ripple to 4 neighbours)', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
-        for (let z = 0; z < 16; z++)
-            for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
+        for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
         runNeighbourRecompute(voxels);
         voxels.authority!.changes.ops.length = 0;
 

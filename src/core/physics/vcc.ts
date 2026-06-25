@@ -683,11 +683,8 @@ export function destroy(world: World, vcc: VCC): void {
  *  penetration test — callers gate the swap themselves (e.g. only on
  *  fully-eased crouch). */
 export function resize(world: World, vcc: VCC, halfExtents: Vec3): void {
-    if (
-        vcc.halfExtents[0] === halfExtents[0]
-        && vcc.halfExtents[1] === halfExtents[1]
-        && vcc.halfExtents[2] === halfExtents[2]
-    ) return;
+    if (vcc.halfExtents[0] === halfExtents[0] && vcc.halfExtents[1] === halfExtents[1] && vcc.halfExtents[2] === halfExtents[2])
+        return;
     vcc.halfExtents[0] = halfExtents[0];
     vcc.halfExtents[1] = halfExtents[1];
     vcc.halfExtents[2] = halfExtents[2];

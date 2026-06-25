@@ -293,8 +293,7 @@ describe('meshChunk', () => {
                 } else {
                     // tied AO — light tiebreaker (<=). Mask channel nibbles
                     // out of bits 28+ to match `applyDiagFlipBit`.
-                    const sum = (w: number) =>
-                        (w & 0xf) + ((w >>> 8) & 0xf) + ((w >>> 16) & 0xf) + ((w >>> 24) & 0xf);
+                    const sum = (w: number) => (w & 0xf) + ((w >>> 8) & 0xf) + ((w >>> 16) & 0xf) + ((w >>> 24) & 0xf);
                     const lm02 = sum(l0a) + sum(l2a);
                     const lm13 = sum(l1a) + sum(l3a);
                     expect(actual).toBe(lm02 <= lm13 ? 0 : 1);
@@ -316,7 +315,7 @@ describe('meshChunk', () => {
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
 
             for (const ba of cubeFaceBuckets(a!, 'opaque')) {
-                const bb = cubeFaceBuckets(b!, 'opaque').find(x => x.quadCount === ba.quadCount)!;
+                const bb = cubeFaceBuckets(b!, 'opaque').find((x) => x.quadCount === ba.quadCount)!;
                 for (let i = 0; i < ba.quadCount * 4; i++) {
                     expect(cornerLight(bb, i)).toBe(cornerLight(ba, i));
                 }
@@ -336,7 +335,7 @@ describe('meshChunk', () => {
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
 
             for (const ba of cubeFaceBuckets(a!, 'translucent')) {
-                const bb = cubeFaceBuckets(b!, 'translucent').find(x => x.quadCount === ba.quadCount)!;
+                const bb = cubeFaceBuckets(b!, 'translucent').find((x) => x.quadCount === ba.quadCount)!;
                 for (let i = 0; i < ba.quadCount * 4; i++) {
                     expect(cornerLight(bb, i)).toBe(cornerLight(ba, i));
                 }
@@ -476,7 +475,10 @@ describe('meshChunk', () => {
                 const a1 = (meta >>> 4) & 0xf;
                 const a2 = (meta >>> 8) & 0xf;
                 const a3 = (meta >>> 12) & 0xf;
-                if (!(a0 === a1 && a1 === a2 && a2 === a3)) { sawAoVariation = true; break; }
+                if (!(a0 === a1 && a1 === a2 && a2 === a3)) {
+                    sawAoVariation = true;
+                    break;
+                }
             }
             expect(sawAoVariation).toBe(true);
         });
@@ -544,7 +546,7 @@ describe('meshChunk', () => {
             expect(a).not.toBeNull();
 
             for (const ba of cubeFaceBuckets(a!, 'opaque')) {
-                const bb = cubeFaceBuckets(b!, 'opaque').find(x => x.quadCount === ba.quadCount)!;
+                const bb = cubeFaceBuckets(b!, 'opaque').find((x) => x.quadCount === ba.quadCount)!;
                 for (let i = 0; i < ba.quadCount * 4; i++) {
                     expect(cornerLight(bb, i)).toBe(cornerLight(ba, i));
                 }

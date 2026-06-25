@@ -26,10 +26,7 @@ describe('parseMask', () => {
     it('space-separated → intersection', () => {
         expect(parseMask('stone #existing')).toEqual({
             kind: 'and',
-            masks: [
-                { kind: 'blocks', blocks: [{ blockId: 'stone' }] },
-                { kind: 'existing' },
-            ],
+            masks: [{ kind: 'blocks', blocks: [{ blockId: 'stone' }] }, { kind: 'existing' }],
         });
     });
 

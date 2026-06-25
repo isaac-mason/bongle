@@ -10,19 +10,10 @@
 // carries the source coords + subAabbIndex so the controller can attribute
 // ground / contacts back to a specific voxel for debug + ground velocity.
 
-import {
-    sweepAabbVsAabb,
-    type SweepResult,
-} from '../math/aabb-sweep';
+import { sweepAabbVsAabb, type SweepResult } from '../math/aabb-sweep';
 import { BLOCK_FLAG_COLLISION, SHAPE_AABBS } from './block-registry';
 import { AIR, MISSING } from './block-registry';
-import {
-    CHUNK_BITS,
-    CHUNK_SIZE,
-    chunkKey,
-    voxelIndex,
-    type Voxels,
-} from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, chunkKey, voxelIndex, type Voxels } from './voxels';
 
 /** result of a voxel sweep. mutated in place. */
 export type VoxelSweepHit = {
@@ -107,12 +98,12 @@ export function sweepAabbVsVoxels(
     out.sign = 0;
 
     // swept envelope in world coords (entire path of the moving box).
-    const minX = (dx >= 0 ? mcX - mhX : mcX - mhX + dx);
-    const maxX = (dx >= 0 ? mcX + mhX + dx : mcX + mhX);
-    const minY = (dy >= 0 ? mcY - mhY : mcY - mhY + dy);
-    const maxY = (dy >= 0 ? mcY + mhY + dy : mcY + mhY);
-    const minZ = (dz >= 0 ? mcZ - mhZ : mcZ - mhZ + dz);
-    const maxZ = (dz >= 0 ? mcZ + mhZ + dz : mcZ + mhZ);
+    const minX = dx >= 0 ? mcX - mhX : mcX - mhX + dx;
+    const maxX = dx >= 0 ? mcX + mhX + dx : mcX + mhX;
+    const minY = dy >= 0 ? mcY - mhY : mcY - mhY + dy;
+    const maxY = dy >= 0 ? mcY + mhY + dy : mcY + mhY;
+    const minZ = dz >= 0 ? mcZ - mhZ : mcZ - mhZ + dz;
+    const maxZ = dz >= 0 ? mcZ + mhZ + dz : mcZ + mhZ;
 
     // expand by one cell — catches blocks whose face is exactly at the
     // envelope boundary (grazing) without false negatives from float error.
@@ -147,11 +138,21 @@ export function sweepAabbVsVoxels(
                     // (Minetest's CONTENT_IGNORE rule). once the chunk
                     // streams in (full or empty), this branch is skipped.
                     sweepAabbVsAabb(
-                        mcX, mcY, mcZ,
-                        mhX, mhY, mhZ,
-                        dx, dy, dz,
-                        cwx, cwy, cwz,
-                        cwx + CHUNK_SIZE, cwy + CHUNK_SIZE, cwz + CHUNK_SIZE,
+                        mcX,
+                        mcY,
+                        mcZ,
+                        mhX,
+                        mhY,
+                        mhZ,
+                        dx,
+                        dy,
+                        dz,
+                        cwx,
+                        cwy,
+                        cwz,
+                        cwx + CHUNK_SIZE,
+                        cwy + CHUNK_SIZE,
+                        cwz + CHUNK_SIZE,
                         _scratch,
                     );
                     if (_scratch.axis !== -1 && _scratch.toi < bestTOI) {
@@ -208,17 +209,24 @@ export function sweepAabbVsVoxels(
                             if (cid === 0) {
                                 // cube fast path: unit cell box.
                                 sweepAabbVsAabb(
-                                    mcX, mcY, mcZ,
-                                    mhX, mhY, mhZ,
-                                    dx, dy, dz,
-                                    wx, wy, wz,
-                                    wx + 1, wy + 1, wz + 1,
+                                    mcX,
+                                    mcY,
+                                    mcZ,
+                                    mhX,
+                                    mhY,
+                                    mhZ,
+                                    dx,
+                                    dy,
+                                    dz,
+                                    wx,
+                                    wy,
+                                    wz,
+                                    wx + 1,
+                                    wy + 1,
+                                    wz + 1,
                                     _scratch,
                                 );
-                                if (
-                                    _scratch.axis !== -1 &&
-                                    _scratch.toi < bestTOI
-                                ) {
+                                if (_scratch.axis !== -1 && _scratch.toi < bestTOI) {
                                     bestTOI = _scratch.toi;
                                     out.toi = _scratch.toi;
                                     out.axis = _scratch.axis;
@@ -255,17 +263,24 @@ export function sweepAabbVsVoxels(
                                     const bMaxY = wy + b[4];
                                     const bMaxZ = wz + b[5];
                                     sweepAabbVsAabb(
-                                        mcX, mcY, mcZ,
-                                        mhX, mhY, mhZ,
-                                        dx, dy, dz,
-                                        bMinX, bMinY, bMinZ,
-                                        bMaxX, bMaxY, bMaxZ,
+                                        mcX,
+                                        mcY,
+                                        mcZ,
+                                        mhX,
+                                        mhY,
+                                        mhZ,
+                                        dx,
+                                        dy,
+                                        dz,
+                                        bMinX,
+                                        bMinY,
+                                        bMinZ,
+                                        bMaxX,
+                                        bMaxY,
+                                        bMaxZ,
                                         _scratch,
                                     );
-                                    if (
-                                        _scratch.axis !== -1 &&
-                                        _scratch.toi < bestTOI
-                                    ) {
+                                    if (_scratch.axis !== -1 && _scratch.toi < bestTOI) {
                                         bestTOI = _scratch.toi;
                                         out.toi = _scratch.toi;
                                         out.axis = _scratch.axis;

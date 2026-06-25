@@ -58,7 +58,11 @@ const Y_BODY_CENTER = 0.55;
 // integer 3D hash → [0,1). mulberry-ish; cheap and good enough for a
 // one-shot init-time fill.
 function hash3i(x: number, y: number, z: number, seed: number): number {
-    let n = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(z | 0, 2147483647) + Math.imul(seed | 0, 2654435761);
+    let n =
+        Math.imul(x | 0, 374761393) +
+        Math.imul(y | 0, 668265263) +
+        Math.imul(z | 0, 2147483647) +
+        Math.imul(seed | 0, 2654435761);
     n = (n ^ (n >>> 13)) >>> 0;
     n = Math.imul(n, 1274126177) >>> 0;
     n = (n ^ (n >>> 16)) >>> 0;
@@ -80,11 +84,26 @@ type BlobField = {
 };
 const BLOB_STRIDE = 9;
 
-function writeBlob(data: Float32Array, idx: number, cx: number, cy: number, cz: number, rx: number, ry: number, rz: number): void {
+function writeBlob(
+    data: Float32Array,
+    idx: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    rx: number,
+    ry: number,
+    rz: number,
+): void {
     const o = idx * BLOB_STRIDE;
-    data[o]     = cx;  data[o + 1] = cy;  data[o + 2] = cz;
-    data[o + 3] = rx;  data[o + 4] = ry;  data[o + 5] = rz;
-    data[o + 6] = 1 / rx; data[o + 7] = 1 / ry; data[o + 8] = 1 / rz;
+    data[o] = cx;
+    data[o + 1] = cy;
+    data[o + 2] = cz;
+    data[o + 3] = rx;
+    data[o + 4] = ry;
+    data[o + 5] = rz;
+    data[o + 6] = 1 / rx;
+    data[o + 7] = 1 / ry;
+    data[o + 8] = 1 / rz;
 }
 
 function generateBlobs(shapeIdx: number): BlobField {
@@ -94,9 +113,16 @@ function generateBlobs(shapeIdx: number): BlobField {
 
     // primary central blob — anchors the body, big enough to overlap
     // all satellites so the union reads as one cloud not many.
-    writeBlob(data, cursor++,
-        CLOUD_DIM_X * 0.5, CLOUD_DIM_Y * Y_BODY_CENTER, CLOUD_DIM_Z * 0.5,
-        CLOUD_DIM_X * 0.32, CLOUD_DIM_Y * 0.42, CLOUD_DIM_Z * 0.32);
+    writeBlob(
+        data,
+        cursor++,
+        CLOUD_DIM_X * 0.5,
+        CLOUD_DIM_Y * Y_BODY_CENTER,
+        CLOUD_DIM_Z * 0.5,
+        CLOUD_DIM_X * 0.32,
+        CLOUD_DIM_Y * 0.42,
+        CLOUD_DIM_Z * 0.32,
+    );
 
     // satellites — wide xy-range, narrow y-range so they stay in the
     // body band. each gets a few micro-blobs jittered around its
@@ -106,7 +132,7 @@ function generateBlobs(shapeIdx: number): BlobField {
         const ox = (hash3i(s, 1, 0, 0) * 2 - 1) * 0.42;
         const oy = (hash3i(s, 2, 0, 0) * 2 - 1) * 0.22;
         const oz = (hash3i(s, 3, 0, 0) * 2 - 1) * 0.42;
-        const r  = 0.18 + hash3i(s, 4, 0, 0) * 0.14;
+        const r = 0.18 + hash3i(s, 4, 0, 0) * 0.14;
 
         const scx = CLOUD_DIM_X * (0.5 + ox);
         const scy = CLOUD_DIM_Y * (Y_BODY_CENTER + oy);
@@ -125,11 +151,9 @@ function generateBlobs(shapeIdx: number): BlobField {
             const dx = hash3i(ms, 5, 0, 0) * 2 - 1;
             const dy = (hash3i(ms, 6, 0, 0) * 2 - 1) * 0.6 + 0.25;
             const dz = hash3i(ms, 7, 0, 0) * 2 - 1;
-            const mr = 0.30 + hash3i(ms, 8, 0, 0) * 0.25;
+            const mr = 0.3 + hash3i(ms, 8, 0, 0) * 0.25;
 
-            writeBlob(data, cursor++,
-                scx + dx * srx, scy + dy * sry, scz + dz * srz,
-                srx * mr, sry * mr, srz * mr);
+            writeBlob(data, cursor++, scx + dx * srx, scy + dy * sry, scz + dz * srz, srx * mr, sry * mr, srz * mr);
         }
     }
 
@@ -350,13 +374,14 @@ export function buildCloudUberGeometry(): CloudUberGeometry {
     // shape.indexCount.
     const lastShape = shapes[shapes.length - 1]!;
     const requiredIndexLen = lastShape.indexStart + maxIndexCount;
-    const paddedIndices = indices.length >= requiredIndexLen
-        ? indices
-        : (() => {
-            const padded = new Uint32Array(requiredIndexLen);
-            padded.set(indices);
-            return padded;
-        })();
+    const paddedIndices =
+        indices.length >= requiredIndexLen
+            ? indices
+            : (() => {
+                  const padded = new Uint32Array(requiredIndexLen);
+                  padded.set(indices);
+                  return padded;
+              })();
 
     const geometry = new gpu.Geometry();
     geometry.drawRange = { start: 0, count: maxIndexCount };

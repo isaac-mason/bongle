@@ -51,10 +51,10 @@ export function ToolActions() {
     }, [activeBlockKey, replace]);
 
     const isSelectionTool =
-        activeTool === 'box-select'
-        || activeTool === 'magic-select'
-        || activeTool === 'lasso-select'
-        || activeTool === 'brush-select';
+        activeTool === 'box-select' ||
+        activeTool === 'magic-select' ||
+        activeTool === 'lasso-select' ||
+        activeTool === 'brush-select';
     const isBuildOrPaint = activeTool === 'build' || activeTool === 'paint' || activeTool === 'brush';
     const isInspect = activeTool === 'inspect';
     const isTransform = activeTool === 'transform';
@@ -164,16 +164,12 @@ export function ToolActions() {
                         onClick={onReplace}
                         slashCmd="//replace <from> <to>"
                     />
-                    <ActionBtn
-                        label="delete"
-                        icon={Icons.Scissors}
-                        disabled={!hasSelection}
-                        onClick={del}
-                        slashCmd="//set air"
-                    />
+                    <ActionBtn label="delete" icon={Icons.Scissors} disabled={!hasSelection} onClick={del} slashCmd="//set air" />
                 </>
             )}
-            {(isSelectionTool || isBuildOrPaint) && <ActionBtn label="pick" icon={Icons.Pipette} disabled={!canPick} onClick={pick} />}
+            {(isSelectionTool || isBuildOrPaint) && (
+                <ActionBtn label="pick" icon={Icons.Pipette} disabled={!canPick} onClick={pick} />
+            )}
         </div>
     );
 }
@@ -195,11 +191,7 @@ function ActionBtn({
 }) {
     const [hovered, setHovered] = useState(false);
     return (
-        <div
-            className="relative"
-            onMouseEnter={() => setHovered(true)}
-            onMouseLeave={() => setHovered(false)}
-        >
+        <div className="relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
             <button
                 type="button"
                 disabled={disabled}
@@ -248,8 +240,8 @@ function GizmoModeBtn({
                 disabled
                     ? 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'
                     : active
-                    ? 'bg-neutral-800 border-neutral-800 text-white cursor-pointer'
-                    : 'bg-white border-neutral-300 text-neutral-700 hover:bg-neutral-100 cursor-pointer'
+                      ? 'bg-neutral-800 border-neutral-800 text-white cursor-pointer'
+                      : 'bg-white border-neutral-300 text-neutral-700 hover:bg-neutral-100 cursor-pointer'
             }`}
         >
             <Icon size={12} />

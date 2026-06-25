@@ -13,15 +13,7 @@
 // subsystem so the pool owner stays a pure data module — no scene/Renderer
 // imports leak in.
 
-import {
-    createPlaneGeometry,
-    d,
-    type Geometry,
-    GpuBuffer,
-    Mesh,
-    packTo,
-    type Scene,
-} from 'gpucat';
+import { createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, packTo, type Scene } from 'gpucat';
 import type { Vec4 } from 'mathcat';
 import type { ParticleHandle, ParticlePool } from '../../core/particles/particles';
 import { sampleVoxelLight } from '../../core/voxels/light';
@@ -171,7 +163,10 @@ export function update(visuals: ParticleVisuals, pool: ParticlePool, voxels: Vox
         // the floor saturates, so the sampled voxel light is irrelevant —
         // skip the sample.
         if (glowValue >= 1) {
-            _light[0] = 0; _light[1] = 0; _light[2] = 0; _light[3] = 0;
+            _light[0] = 0;
+            _light[1] = 0;
+            _light[2] = 0;
+            _light[3] = 0;
         } else {
             sampleVoxelLight(voxels, posX[i]!, posY[i]!, posZ[i]!, _light);
         }
@@ -213,12 +208,7 @@ const _resolved: ResolvedFrame = { u: 0, v: 0, w: 0, h: 0, frameW: 1, frameH: 1 
  *  mode. Returns null when the sprite isn't in the atlas yet (lazy load
  *  / atlas swap mid-flight). Single-frame sprites degenerate to "frame 0"
  *  in all modes. */
-function resolveFrame(
-    resources: SpriteResources,
-    handle: ParticleHandle,
-    age: number,
-    lifetime: number,
-): ResolvedFrame | null {
+function resolveFrame(resources: SpriteResources, handle: ParticleHandle, age: number, lifetime: number): ResolvedFrame | null {
     const entry = resources.frames.get(handle.sprite.spriteId);
     if (!entry) return null;
 

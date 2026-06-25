@@ -55,10 +55,10 @@ const rgb = srgbBytesToLinear;
  * the sun direction); the LUT itself only carries the ambient sky tone.
  */
 const OVERWORLD: SkyStop[] = [
-    { t: 0.00, zenith: rgb(12,  16,  40),  horizon: rgb(20,  26,  56),  nadir: rgb(4,  4,  14)  },
-    { t: 0.25, zenith: rgb(65,  70,  115), horizon: rgb(95,  110, 160), nadir: rgb(20, 18, 30)  },
-    { t: 0.50, zenith: rgb(97,  181, 245), horizon: rgb(144, 211, 246), nadir: rgb(60, 70, 88)  },
-    { t: 0.75, zenith: rgb(65,  70,  115), horizon: rgb(95,  110, 160), nadir: rgb(20, 18, 30)  },
+    { t: 0.0, zenith: rgb(12, 16, 40), horizon: rgb(20, 26, 56), nadir: rgb(4, 4, 14) },
+    { t: 0.25, zenith: rgb(65, 70, 115), horizon: rgb(95, 110, 160), nadir: rgb(20, 18, 30) },
+    { t: 0.5, zenith: rgb(97, 181, 245), horizon: rgb(144, 211, 246), nadir: rgb(60, 70, 88) },
+    { t: 0.75, zenith: rgb(65, 70, 115), horizon: rgb(95, 110, 160), nadir: rgb(20, 18, 30) },
 ];
 
 /**

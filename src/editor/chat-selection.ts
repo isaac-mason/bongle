@@ -51,8 +51,18 @@ const DIR_TOKENS: Record<string, readonly DirectionVec[]> = {
     e: [[1, 0, 0]],
     west: [[-1, 0, 0]],
     w: [[-1, 0, 0]],
-    vert: [[0, 1, 0], [0, -1, 0]],
-    all: [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]],
+    vert: [
+        [0, 1, 0],
+        [0, -1, 0],
+    ],
+    all: [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+    ],
 };
 
 const DirectionArg: ArgType<readonly DirectionVec[]> = {
@@ -83,7 +93,10 @@ const Vec3Arg: ArgType<Vec3> = {
     parse: (s) => {
         // tolerate a trailing comma (`5,0,5,`) and surrounding whitespace; an
         // empty component (`5,,5`) is an error — Number('') is 0, not NaN.
-        const parts = s.replace(/,+$/, '').split(',').map((p) => p.trim());
+        const parts = s
+            .replace(/,+$/, '')
+            .split(',')
+            .map((p) => p.trim());
         if (parts.length !== 3 || parts.some((p) => p === '')) {
             return { ok: false, error: `expected x,y,z (got: ${s})` };
         }
@@ -132,7 +145,11 @@ const SHAPE_FLAGS = [...ALGEBRA_FLAGS, ...TARGET_FLAGS];
  * Always returns a fresh Selection reference (callers rely on identity
  * change for reactivity).
  */
-function compose(current: Selection.Selection, scratch: Selection.Selection, flags: Record<string, boolean>): Selection.Selection {
+function compose(
+    current: Selection.Selection,
+    scratch: Selection.Selection,
+    flags: Record<string, boolean>,
+): Selection.Selection {
     if (flags['add']) {
         const next = Selection.clone(current);
         Selection.merge(next, scratch);
@@ -358,13 +375,10 @@ export function installSelectionChatCommands(
         },
     );
 
-    install(
-        { name: '/desel', description: 'clear the current selection', args: [] },
-        () => {
-            store.setState({ selection: Selection.create() });
-            emit('selection cleared');
-        },
-    );
+    install({ name: '/desel', description: 'clear the current selection', args: [] }, () => {
+        store.setState({ selection: Selection.create() });
+        emit('selection cleared');
+    });
 
     // ── region modifiers ───────────────────────────────────────────
 
@@ -561,29 +575,26 @@ export function installSelectionChatCommands(
 
     // ── introspection ──────────────────────────────────────────────
 
-    install(
-        { name: '/size', description: 'report the selection bounds + voxel/node counts', args: [] },
-        () => {
-            const sel = store.getState().selection;
-            const b = Selection.bounds(sel);
-            const v = Selection.countVoxels(sel);
-            const n = sel.nodes.size;
-            if (!b && n === 0) {
-                emit('selection is empty');
-                return;
-            }
-            const lines: string[] = [];
-            if (b) {
-                const [minX, minY, minZ] = b.min;
-                const [maxX, maxY, maxZ] = b.max;
-                const [dx, dy, dz] = b.dimensions;
-                lines.push(`bounds: (${minX}, ${minY}, ${minZ}) → (${maxX}, ${maxY}, ${maxZ})`);
-                lines.push(`size: ${dx} × ${dy} × ${dz} (${v} voxels)`);
-            }
-            if (n > 0) lines.push(`nodes: ${n}`);
-            ClientChat.appendLine(chat, { kind: 'system', text: lines.join('\n') });
-        },
-    );
+    install({ name: '/size', description: 'report the selection bounds + voxel/node counts', args: [] }, () => {
+        const sel = store.getState().selection;
+        const b = Selection.bounds(sel);
+        const v = Selection.countVoxels(sel);
+        const n = sel.nodes.size;
+        if (!b && n === 0) {
+            emit('selection is empty');
+            return;
+        }
+        const lines: string[] = [];
+        if (b) {
+            const [minX, minY, minZ] = b.min;
+            const [maxX, maxY, maxZ] = b.max;
+            const [dx, dy, dz] = b.dimensions;
+            lines.push(`bounds: (${minX}, ${minY}, ${minZ}) → (${maxX}, ${maxY}, ${maxZ})`);
+            lines.push(`size: ${dx} × ${dy} × ${dz} (${v} voxels)`);
+        }
+        if (n > 0) lines.push(`nodes: ${n}`);
+        ClientChat.appendLine(chat, { kind: 'system', text: lines.join('\n') });
+    });
 
     install(
         {
@@ -603,28 +614,24 @@ export function installSelectionChatCommands(
         },
     );
 
-    install(
-        { name: '/distr', description: 'list block frequencies in the current selection', args: [] },
-        () => {
-            const counts = new Map<string, number>();
-            const sel = store.getState().selection;
-            Selection.forEach(sel, (wx, wy, wz) => {
-                const key = getBlock(ctx.voxels, wx, wy, wz);
-                if (key === BLOCK_AIR) return;
-                const parsed = parseKey(key);
-                if (!parsed) return;
-                counts.set(parsed.blockId, (counts.get(parsed.blockId) ?? 0) + 1);
-            });
-            const total = [...counts.values()].reduce((a, b) => a + b, 0);
-            if (total === 0) {
-                emit('selection has no non-air voxels');
-                return;
-            }
-            const lines = [...counts.entries()]
-                .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-                .map(([id, n]) => `${id}: ${n} (${((n / total) * 100).toFixed(1)}%)`);
-            ClientChat.appendLine(chat, { kind: 'system', text: lines.join('\n') });
-        },
-    );
+    install({ name: '/distr', description: 'list block frequencies in the current selection', args: [] }, () => {
+        const counts = new Map<string, number>();
+        const sel = store.getState().selection;
+        Selection.forEach(sel, (wx, wy, wz) => {
+            const key = getBlock(ctx.voxels, wx, wy, wz);
+            if (key === BLOCK_AIR) return;
+            const parsed = parseKey(key);
+            if (!parsed) return;
+            counts.set(parsed.blockId, (counts.get(parsed.blockId) ?? 0) + 1);
+        });
+        const total = [...counts.values()].reduce((a, b) => a + b, 0);
+        if (total === 0) {
+            emit('selection has no non-air voxels');
+            return;
+        }
+        const lines = [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([id, n]) => `${id}: ${n} (${((n / total) * 100).toFixed(1)}%)`);
+        ClientChat.appendLine(chat, { kind: 'system', text: lines.join('\n') });
+    });
 }
-

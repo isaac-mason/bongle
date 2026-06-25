@@ -96,10 +96,7 @@ export function applyRegistryChanges(state: EngineServer): void {
     // server has no atlas / GPU work — chunks just remesh on next tick. read
     // the rebuilt registry once via the lazy `blockRegistry` getter so every
     // room points at the same instance.
-    if (
-        registry.blocks.pendingChanges.length > 0 ||
-        registry.blockTextures.pendingChanges.length > 0
-    ) {
+    if (registry.blocks.pendingChanges.length > 0 || registry.blockTextures.pendingChanges.length > 0) {
         const blockRegistry = registry.blockRegistry;
         for (const room of state.rooms.rooms.values()) {
             room.voxels.registry = blockRegistry;
@@ -170,18 +167,8 @@ export function applyRegistryChanges(state: EngineServer): void {
                 );
                 continue;
             }
-            ContentManager.seedLastWrittenRaw(
-                state.contentManager,
-                sceneId,
-                ContentManager.serializeScenePayload(payload),
-            );
-            Content.populateScene(
-                state.content,
-                registry.blockRegistry,
-                sceneId,
-                payload,
-                'server',
-            );
+            ContentManager.seedLastWrittenRaw(state.contentManager, sceneId, ContentManager.serializeScenePayload(payload));
+            Content.populateScene(state.content, registry.blockRegistry, sceneId, payload, 'server');
         }
         registry.scenes.pendingChanges.length = 0;
     }

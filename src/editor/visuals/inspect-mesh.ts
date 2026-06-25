@@ -76,7 +76,12 @@ function getNodeAABB(node: Node, resources: Resources, out: Box3): boolean {
 // 12 edges of the aabb as flat [x,y,z, x,y,z, ...] for LineSegmentsGeometry.
 
 function appendBoxSegments(b: Box3, out: number[]): void {
-    const x0 = b[0], y0 = b[1], z0 = b[2], x1 = b[3], y1 = b[4], z1 = b[5];
+    const x0 = b[0],
+        y0 = b[1],
+        z0 = b[2],
+        x1 = b[3],
+        y1 = b[4],
+        z1 = b[5];
     // 4 bottom, 4 top, 4 vertical edges
     out.push(
         // bottom face

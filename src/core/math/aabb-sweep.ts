@@ -218,11 +218,7 @@ export function sweepAabbVsAabb(
     }
     if (signY !== 0) {
         const dt = tEnterY - tEnter;
-        if (
-            axis === AXIS_NONE ||
-            dt > TIE_EPS ||
-            (Math.abs(dt) <= TIE_EPS && shouldPreferOnTie(AXIS_Y, Math.abs(dy)))
-        ) {
+        if (axis === AXIS_NONE || dt > TIE_EPS || (Math.abs(dt) <= TIE_EPS && shouldPreferOnTie(AXIS_Y, Math.abs(dy)))) {
             tEnter = tEnterY;
             axis = AXIS_Y;
             sign = signY;
@@ -231,11 +227,7 @@ export function sweepAabbVsAabb(
     }
     if (signZ !== 0) {
         const dt = tEnterZ - tEnter;
-        if (
-            axis === AXIS_NONE ||
-            dt > TIE_EPS ||
-            (Math.abs(dt) <= TIE_EPS && shouldPreferOnTie(AXIS_Z, Math.abs(dz)))
-        ) {
+        if (axis === AXIS_NONE || dt > TIE_EPS || (Math.abs(dt) <= TIE_EPS && shouldPreferOnTie(AXIS_Z, Math.abs(dz)))) {
             tEnter = tEnterZ;
             axis = AXIS_Z;
             sign = signZ;

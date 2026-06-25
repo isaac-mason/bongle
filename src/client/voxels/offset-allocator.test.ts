@@ -192,7 +192,10 @@ describe('OOM behaviour', () => {
         let oom = false;
         for (let i = 0; i < 100; i++) {
             const h = oaAllocate(a, 16);
-            if (!h) { oom = true; break; }
+            if (!h) {
+                oom = true;
+                break;
+            }
             handles.push(h);
         }
         expect(oom).toBe(true);
@@ -252,7 +255,9 @@ describe('randomised alloc/free stress', () => {
         // Seeded PRNG (xorshift32) for determinism.
         let seed = 0xc0ffee;
         const rand = () => {
-            seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+            seed ^= seed << 13;
+            seed ^= seed >>> 17;
+            seed ^= seed << 5;
             return (seed >>> 0) / 0xffffffff;
         };
 

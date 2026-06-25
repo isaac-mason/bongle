@@ -27,77 +27,81 @@ export function createVoxelModel(voxels: Voxels): VoxelModel {
     return new VoxelModel(voxels);
 }
 
-export const VoxelMeshTrait = trait('voxel-mesh', {
-    /**
-     * the VoxelModel to render. runtime-only, not persisted.
-     * set this to assign a voxel model; null = nothing to render.
-     * multiple traits can reference the same VoxelModel (shared geometry).
-     */
-    model: null as VoxelModel | null,
+export const VoxelMeshTrait = trait(
+    'voxel-mesh',
+    {
+        /**
+         * the VoxelModel to render. runtime-only, not persisted.
+         * set this to assign a voxel model; null = nothing to render.
+         * multiple traits can reference the same VoxelModel (shared geometry).
+         */
+        model: null as VoxelModel | null,
 
-    /**
-     * per-instance tint [r, g, b, a]. client-only. rgb is the recolour
-     * target, a the intensity (0 = untouched, 1 = full, lightness-
-     * preserving); never changes coverage. [1,1,1,1] = untinted (default).
-     * [1,0,0,1] = full red at the original brightness.
-     */
-    tint: [1, 1, 1, 1] as Vec4,
+        /**
+         * per-instance tint [r, g, b, a]. client-only. rgb is the recolour
+         * target, a the intensity (0 = untouched, 1 = full, lightness-
+         * preserving); never changes coverage. [1,1,1,1] = untinted (default).
+         * [1,0,0,1] = full red at the original brightness.
+         */
+        tint: [1, 1, 1, 1] as Vec4,
 
-    /**
-     * transient overlay [r, g, b, a]: rgb is the colour, a the strength,
-     * applied as `mix(surface, rgb, a)` over the tint but under lighting.
-     * [0,0,0,0] = none (default). client-only.
-     */
-    flash: [0, 0, 0, 0] as Vec4,
+        /**
+         * transient overlay [r, g, b, a]: rgb is the colour, a the strength,
+         * applied as `mix(surface, rgb, a)` over the tint but under lighting.
+         * [0,0,0,0] = none (default). client-only.
+         */
+        flash: [0, 0, 0, 0] as Vec4,
 
-    /**
-     * per-instance light [sky, r, g, b], each 0-1. client-only.
-     *
-     * auto-sampled each frame by the renderer from the room's voxel light
-     * grid at the node's world position, so voxel meshes shade like the
-     * voxels around them. combined in-shader as a floor on the per-corner
-     * `meshLight` so a moving instance never goes darker than its origin
-     * cell — useful while baked-mesh per-corner light is still placeholder
-     * or for instances drifting between cells.
-     */
-    light: [0, 0, 0, 0] as Vec4,
+        /**
+         * per-instance light [sky, r, g, b], each 0-1. client-only.
+         *
+         * auto-sampled each frame by the renderer from the room's voxel light
+         * grid at the node's world position, so voxel meshes shade like the
+         * voxels around them. combined in-shader as a floor on the per-corner
+         * `meshLight` so a moving instance never goes darker than its origin
+         * cell — useful while baked-mesh per-corner light is still placeholder
+         * or for instances drifting between cells.
+         */
+        light: [0, 0, 0, 0] as Vec4,
 
-    /**
-     * emissive glow intensity 0-1. client-only.
-     * added to final color for hit effects etc.
-     */
-    glow: 0,
+        /**
+         * emissive glow intensity 0-1. client-only.
+         * added to final color for hit effects etc.
+         */
+        glow: 0,
 
-    /**
-     * skip voxel + sun lighting entirely; render the texture flat.
-     * useful for icon/preview rendering. client-only.
-     */
-    unlit: false,
+        /**
+         * skip voxel + sun lighting entirely; render the texture flat.
+         * useful for icon/preview rendering. client-only.
+         */
+        unlit: false,
 
-    /**
-     * minimum voxel-light floor 0-1. applied as
-     * `voxelLight = max(voxelLight, vec3(litMin))` so a mesh stays readable
-     * in dim areas without going fully unlit. 0 = no floor (default).
-     */
-    litMin: 0,
+        /**
+         * minimum voxel-light floor 0-1. applied as
+         * `voxelLight = max(voxelLight, vec3(litMin))` so a mesh stays readable
+         * in dim areas without going fully unlit. 0 = no floor (default).
+         */
+        litMin: 0,
 
-    /**
-     * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
-     * Fragments drop via `discard` against an interleaved-gradient
-     * threshold — stays in the opaque pipeline, no sort/blend. client-only.
-     */
-    dither: 0,
+        /**
+         * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
+         * Fragments drop via `discard` against an interleaved-gradient
+         * threshold — stays in the opaque pipeline, no sort/blend. client-only.
+         */
+        dither: 0,
 
-    /**
-     * whether this voxel mesh renders. false = skip; the slot stays
-     * allocated so toggling is cheap. client-only.
-     */
-    visible: true,
+        /**
+         * whether this voxel mesh renders. false = skip; the slot stays
+         * allocated so toggling is cheap. client-only.
+         */
+        visible: true,
 
-    /** renderer-internal allocation state (includes the frustum-cull entry —
-     *  see `VoxelMeshState.cull`). */
-    _state: null as VoxelMeshState | null,
-}, { persist: false });
+        /** renderer-internal allocation state (includes the frustum-cull entry —
+         *  see `VoxelMeshState.cull`). */
+        _state: null as VoxelMeshState | null,
+    },
+    { persist: false },
+);
 
 /** instance type for VoxelMeshTrait */
 export type VoxelMeshTrait = TraitType<typeof VoxelMeshTrait>;

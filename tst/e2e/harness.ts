@@ -101,9 +101,20 @@ type StoreSnap = {
 };
 
 const STORE_NAMES = [
-    'blockTextures', 'blocks', 'models', 'traits', 'controls', 'sync',
-    'scripts', 'commands', 'scenes', 'prefabs', 'sounds', 'sprites',
-    'particles', 'matchmaking',
+    'blockTextures',
+    'blocks',
+    'models',
+    'traits',
+    'controls',
+    'sync',
+    'scripts',
+    'commands',
+    'scenes',
+    'prefabs',
+    'sounds',
+    'sprites',
+    'particles',
+    'matchmaking',
 ] as const;
 
 let baseline: Record<string, StoreSnap> | null = null;
@@ -287,12 +298,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
 
             clients.push(testClient);
 
-            EngineServerModule.onClientJoin(
-                server,
-                clientId,
-                { id: `user-${clientId}`, username: `test-${clientId}` },
-                {},
-            );
+            EngineServerModule.onClientJoin(server, clientId, { id: `user-${clientId}`, username: `test-${clientId}` }, {});
 
             return testClient;
         },

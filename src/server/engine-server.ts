@@ -165,13 +165,7 @@ export function onClientJoin(
     // both peers built from the same source, so the client's outbound
     // tables match ours at connect time. subsequent `wire_table` messages
     // from this client refresh these as its HMR cycles diverge ours.
-    Clients.onJoin(
-        state.clients,
-        clientId,
-        user,
-        registry.traitWireIndex,
-        registry.commandWireIndex,
-    );
+    Clients.onJoin(state.clients, clientId, user, registry.traitWireIndex, registry.commandWireIndex);
 
     // sync wire tables before any packed payload reaches the client.
     // client and server build their `traitWireIndex` from module-load
@@ -379,11 +373,7 @@ export function applyScenePayload(state: EngineServer, id: string, payload: Cont
     const handle = registry.scenes.byId.get(id)?.payload;
     if (!handle) return;
     handle._payload = payload;
-    ContentManager.seedLastWrittenRaw(
-        state.contentManager,
-        id,
-        ContentManager.serializeScenePayload(payload),
-    );
+    ContentManager.seedLastWrittenRaw(state.contentManager, id, ContentManager.serializeScenePayload(payload));
     Content.populateScene(state.content, registry.blockRegistry, id, payload, 'server');
     touch(registry.scenes, id);
 }
@@ -572,7 +562,7 @@ export function processInbox(state: EngineServer) {
                         const totalMs = performance.now() - t0;
                         console.log(
                             `[room-start] play sceneId=${sceneId} created=${createdRoom} ` +
-                            `create=${createMs.toFixed(1)}ms join=${joinMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
+                                `create=${createMs.toFixed(1)}ms join=${joinMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
                         );
                         break;
                     }
@@ -652,7 +642,11 @@ export function update(state: EngineServer, delta: number) {
         // their own locked to it (~10Hz; batched into the per-tick packet, so no extra
         // ws frame). clients render one-way latency behind it — see core/clock.
         if (room.tick % CLOCK_PUSH_INTERVAL_TICKS === 0) {
-            Net.broadcastToRoom(state.net, state.rooms, room, { type: 'server_clock', roomId: room.id, serverClock: room.clock.server });
+            Net.broadcastToRoom(state.net, state.rooms, room, {
+                type: 'server_clock',
+                roomId: room.id,
+                serverClock: room.clock.server,
+            });
         }
 
         Debug.begin(room.metrics, 'nodes/update');

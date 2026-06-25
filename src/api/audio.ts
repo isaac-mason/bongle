@@ -34,11 +34,7 @@ export type Falloff = Audio.Falloff;
 
 /** non-positional play — output goes straight to the room's master gain.
  *  use for UI sounds, music, and anything else that shouldn't pan. */
-export function playMono(
-    ctx: ScriptContext,
-    sound: SoundHandle,
-    opts?: PlayOpts,
-): PlaybackHandle | null {
+export function playMono(ctx: ScriptContext, sound: SoundHandle, opts?: PlayOpts): PlaybackHandle | null {
     const room = ctx.client?.room;
     if (!room) return null;
     return Audio.playMono(room.audio, sound.soundId, opts);
@@ -60,12 +56,7 @@ export function playAt(
 /** play following a scene node — panner position refreshes every frame
  *  from the node's interpolated world transform. cancels automatically
  *  when the node is removed from the scene graph. */
-export function playOnNode(
-    ctx: ScriptContext,
-    sound: SoundHandle,
-    node: Node,
-    opts?: SpatialOpts,
-): PlaybackHandle | null {
+export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, opts?: SpatialOpts): PlaybackHandle | null {
     const room = ctx.client?.room;
     if (!room) return null;
     return Audio.playOnNode(room.audio, sound.soundId, node, opts);

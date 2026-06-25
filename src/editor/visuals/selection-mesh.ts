@@ -13,7 +13,21 @@
 //   brush:     cyan tint — used for hovered block (idle), wip box-select, future brush shapes.
 //   hover outline: white aabb outline around the single hovered block (separate from brush mesh).
 
-import { createIndexBuffer, createVertexBuffer, d, Geometry, LineMaterial, LineSegmentsGeometry, Material, Mesh, positionClip, type Scene, Uniform, uniform, vec4f } from 'gpucat';
+import {
+    createIndexBuffer,
+    createVertexBuffer,
+    d,
+    Geometry,
+    LineMaterial,
+    LineSegmentsGeometry,
+    Material,
+    Mesh,
+    positionClip,
+    type Scene,
+    Uniform,
+    uniform,
+    vec4f,
+} from 'gpucat';
 import * as Selection from '../../core/scene/selection';
 import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
 import { CHUNK_BITS, CHUNK_VOLUME } from '../../core/voxels/voxels';
@@ -594,14 +608,7 @@ export function buildOutlineSegments(sel: Selection.Selection): number[] | null 
  * for LineSegmentsGeometry. coords are passed through verbatim — callers
  * apply any expansion they need before calling.
  */
-export function aabbOutlineSegments(
-    x0: number,
-    y0: number,
-    z0: number,
-    x1: number,
-    y1: number,
-    z1: number,
-): number[] {
+export function aabbOutlineSegments(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number[] {
     return [
         // bottom face
         x0,
@@ -688,31 +695,70 @@ export function aabbOutlineSegments(
  * synthesize the box directly. brush material has cullMode:'none', so
  * winding doesn't matter.
  */
-export function buildAabbBoxGeometry(
-    x0: number,
-    y0: number,
-    z0: number,
-    x1: number,
-    y1: number,
-    z1: number,
-): Geometry {
+export function buildAabbBoxGeometry(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): Geometry {
     const positions = new Float32Array([
-        x0, y0, z0,
-        x1, y0, z0,
-        x1, y1, z0,
-        x0, y1, z0,
-        x0, y0, z1,
-        x1, y0, z1,
-        x1, y1, z1,
-        x0, y1, z1,
+        x0,
+        y0,
+        z0,
+        x1,
+        y0,
+        z0,
+        x1,
+        y1,
+        z0,
+        x0,
+        y1,
+        z0,
+        x0,
+        y0,
+        z1,
+        x1,
+        y0,
+        z1,
+        x1,
+        y1,
+        z1,
+        x0,
+        y1,
+        z1,
     ]);
     const indices = new Uint32Array([
-        0, 1, 2, 0, 2, 3, // -Z
-        4, 6, 5, 4, 7, 6, // +Z
-        0, 3, 7, 0, 7, 4, // -X
-        1, 5, 6, 1, 6, 2, // +X
-        0, 4, 5, 0, 5, 1, // -Y
-        3, 2, 6, 3, 6, 7, // +Y
+        0,
+        1,
+        2,
+        0,
+        2,
+        3, // -Z
+        4,
+        6,
+        5,
+        4,
+        7,
+        6, // +Z
+        0,
+        3,
+        7,
+        0,
+        7,
+        4, // -X
+        1,
+        5,
+        6,
+        1,
+        6,
+        2, // +X
+        0,
+        4,
+        5,
+        0,
+        5,
+        1, // -Y
+        3,
+        2,
+        6,
+        3,
+        6,
+        7, // +Y
     ]);
     const geo = new Geometry();
     geo.setBuffer('position', createVertexBuffer(d.vec3f, positions));
@@ -929,12 +975,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                 getBrushEdgesMaterial(),
             );
         } else {
-            setMesh(
-                meshState,
-                'brushMesh',
-                state.brush ? buildSelectionGeometry(state.brush) : null,
-                getBrushMaterial(),
-            );
+            setMesh(meshState, 'brushMesh', state.brush ? buildSelectionGeometry(state.brush) : null, getBrushMaterial());
             setOutlineMesh(
                 meshState,
                 'brushEdges',

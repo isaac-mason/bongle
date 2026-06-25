@@ -104,10 +104,16 @@ function isIdentityTRS(mn: ModelNode): boolean {
     const [qx, qy, qz, qw] = mn.quaternion;
     const [sx, sy, sz] = mn.scale;
     return (
-        Math.abs(px) < TRS_EPS && Math.abs(py) < TRS_EPS && Math.abs(pz) < TRS_EPS &&
-        Math.abs(qx) < TRS_EPS && Math.abs(qy) < TRS_EPS && Math.abs(qz) < TRS_EPS &&
+        Math.abs(px) < TRS_EPS &&
+        Math.abs(py) < TRS_EPS &&
+        Math.abs(pz) < TRS_EPS &&
+        Math.abs(qx) < TRS_EPS &&
+        Math.abs(qy) < TRS_EPS &&
+        Math.abs(qz) < TRS_EPS &&
         Math.abs(qw - 1) < TRS_EPS &&
-        Math.abs(sx - 1) < TRS_EPS && Math.abs(sy - 1) < TRS_EPS && Math.abs(sz - 1) < TRS_EPS
+        Math.abs(sx - 1) < TRS_EPS &&
+        Math.abs(sy - 1) < TRS_EPS &&
+        Math.abs(sz - 1) < TRS_EPS
     );
 }
 

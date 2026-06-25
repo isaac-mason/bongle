@@ -424,135 +424,135 @@ export function HierarchyPanel() {
             </div>
             <ContextMenu>
                 <ContextMenuTrigger asChild>
-                    <div
-                        ref={scrollRef}
-                        className="p-1 overflow-y-auto flex-1"
-                        onContextMenu={handleContextMenuTrigger}
-                    >
-                <DragDropProvider
-                    onDragStart={(event) => {
-                        const { source } = event.operation;
-                        if (!source) return;
+                    <div ref={scrollRef} className="p-1 overflow-y-auto flex-1" onContextMenu={handleContextMenuTrigger}>
+                        <DragDropProvider
+                            onDragStart={(event) => {
+                                const { source } = event.operation;
+                                if (!source) return;
 
-                        isDragging.current = true;
+                                isDragging.current = true;
 
-                        const item = flattenedItems.find(({ id }) => id === String(source.id));
-                        if (!item) return;
+                                const item = flattenedItems.find(({ id }) => id === String(source.id));
+                                if (!item) return;
 
-                        // store the source item's initial depth
-                        initialDepth.current = item.depth;
+                                // store the source item's initial depth
+                                initialDepth.current = item.depth;
 
-                        setFlattenedItems((items) => {
-                            sourceChildren.current = [];
+                                setFlattenedItems((items) => {
+                                    sourceChildren.current = [];
 
-                            // get all descendants of the source item
-                            const descendants = getDescendantIds(items, source.id);
+                                    // get all descendants of the source item
+                                    const descendants = getDescendantIds(items, source.id);
 
-                            return items
-                                .filter((item) => {
-                                    if (descendants.has(item.id)) {
-                                        sourceChildren.current.push(item);
-                                        return false;
+                                    return items
+                                        .filter((item) => {
+                                            if (descendants.has(item.id)) {
+                                                sourceChildren.current.push(item);
+                                                return false;
+                                            }
+                                            return true;
+                                        })
+                                        .map((item, index) => ({ ...item, index }));
+                                });
+                            }}
+                            onDragOver={(event, manager) => {
+                                const { source, target } = event.operation;
+
+                                event.preventDefault();
+
+                                if (source && target && source.id !== target.id) {
+                                    setFlattenedItems((items) => {
+                                        const offsetLeft = manager.dragOperation.transform.x;
+                                        const dragDepth = getDragDepth(offsetLeft, INDENTATION);
+                                        const projectedDepth = initialDepth.current + dragDepth;
+
+                                        const { depth, parentId } = getProjection(items, target.id, projectedDepth);
+
+                                        const sortedItems = move(items, event);
+                                        return sortedItems.map((item, index) =>
+                                            item.id === String(source.id)
+                                                ? { ...item, depth, parentId, index }
+                                                : { ...item, index },
+                                        );
+                                    });
+                                }
+                            }}
+                            onDragMove={(event, manager) => {
+                                if (event.defaultPrevented) return;
+
+                                const { source, target } = event.operation;
+
+                                if (source && target) {
+                                    const offsetLeft = manager.dragOperation.transform.x;
+                                    const dragDepth = getDragDepth(offsetLeft, INDENTATION);
+                                    const projectedDepth = initialDepth.current + dragDepth;
+
+                                    const { depth, parentId } = getProjection(flattenedItems, source.id, projectedDepth);
+
+                                    const currentData = source.data as { depth?: number; parentId?: string | null } | undefined;
+
+                                    if (currentData?.depth !== depth || currentData?.parentId !== parentId) {
+                                        setFlattenedItems((items) =>
+                                            items.map((item) =>
+                                                item.id === String(source.id) ? { ...item, depth, parentId } : item,
+                                            ),
+                                        );
                                     }
-                                    return true;
-                                })
-                                .map((item, index) => ({ ...item, index }));
-                        });
-                    }}
-                    onDragOver={(event, manager) => {
-                        const { source, target } = event.operation;
+                                }
+                            }}
+                            onDragEnd={(event) => {
+                                isDragging.current = false;
 
-                        event.preventDefault();
+                                if (event.canceled) {
+                                    // reset to scene graph state
+                                    setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
+                                    return;
+                                }
 
-                        if (source && target && source.id !== target.id) {
-                            setFlattenedItems((items) => {
-                                const offsetLeft = manager.dragOperation.transform.x;
-                                const dragDepth = getDragDepth(offsetLeft, INDENTATION);
-                                const projectedDepth = initialDepth.current + dragDepth;
+                                // compute reparent instructions and dispatch each one
+                                const instructions = computeReorderOps(sceneGraph, flattenedItems, sourceChildren.current);
+                                sourceChildren.current = [];
 
-                                const { depth, parentId } = getProjection(items, target.id, projectedDepth);
+                                for (const instr of instructions) {
+                                    reparentNode(instr.nodeId, instr.parentId, instr.index);
+                                }
 
-                                const sortedItems = move(items, event);
-                                return sortedItems.map((item, index) =>
-                                    item.id === String(source.id) ? { ...item, depth, parentId, index } : { ...item, index },
-                                );
-                            });
-                        }
-                    }}
-                    onDragMove={(event, manager) => {
-                        if (event.defaultPrevented) return;
-
-                        const { source, target } = event.operation;
-
-                        if (source && target) {
-                            const offsetLeft = manager.dragOperation.transform.x;
-                            const dragDepth = getDragDepth(offsetLeft, INDENTATION);
-                            const projectedDepth = initialDepth.current + dragDepth;
-
-                            const { depth, parentId } = getProjection(flattenedItems, source.id, projectedDepth);
-
-                            const currentData = source.data as { depth?: number; parentId?: string | null } | undefined;
-
-                            if (currentData?.depth !== depth || currentData?.parentId !== parentId) {
-                                setFlattenedItems((items) =>
-                                    items.map((item) => (item.id === String(source.id) ? { ...item, depth, parentId } : item)),
-                                );
-                            }
-                        }
-                    }}
-                    onDragEnd={(event) => {
-                        isDragging.current = false;
-
-                        if (event.canceled) {
-                            // reset to scene graph state
-                            setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
-                            return;
-                        }
-
-                        // compute reparent instructions and dispatch each one
-                        const instructions = computeReorderOps(sceneGraph, flattenedItems, sourceChildren.current);
-                        sourceChildren.current = [];
-
-                        for (const instr of instructions) {
-                            reparentNode(instr.nodeId, instr.parentId, instr.index);
-                        }
-
-                        // rebuild from the now-mutated scene graph
-                        setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
-                    }}
-                >
-                    <ul
-                        ref={listRef}
-                        className="list-none m-0 p-0 relative"
-                        style={{ height: totalSize }}
-                        onKeyDown={handleListKeyDown}
-                    >
-                        {virtualRows.map((vr) => {
-                            const item = flattenedItems[vr.index];
-                            return (
-                                <TreeItem
-                                    key={item.id}
-                                    item={item}
-                                    virtualStart={vr.start}
-                                    isRenaming={renamingNodeId === item.nodeId}
-                                    onSelect={handleSelect}
-                                    onToggleCollapse={toggleCollapse}
-                                    onRemove={handleRemove}
-                                    onCommitRename={handleCommitRename}
-                                    onCancelRename={handleCancelRename}
-                                    onStartRename={handleStartRename}
-                                />
-                            );
-                        })}
-                    </ul>
-                    <DragOverlay>
-                        {(source) => {
-                            const item = flattenedItems.find(({ id }) => id === String(source.id));
-                            if (!item) return null;
-                            return <TreeItemOverlay item={item} childCount={sourceChildren.current.length} />;
-                        }}
-                    </DragOverlay>
-                </DragDropProvider>
+                                // rebuild from the now-mutated scene graph
+                                setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
+                            }}
+                        >
+                            <ul
+                                ref={listRef}
+                                className="list-none m-0 p-0 relative"
+                                style={{ height: totalSize }}
+                                onKeyDown={handleListKeyDown}
+                            >
+                                {virtualRows.map((vr) => {
+                                    const item = flattenedItems[vr.index];
+                                    return (
+                                        <TreeItem
+                                            key={item.id}
+                                            item={item}
+                                            virtualStart={vr.start}
+                                            isRenaming={renamingNodeId === item.nodeId}
+                                            onSelect={handleSelect}
+                                            onToggleCollapse={toggleCollapse}
+                                            onRemove={handleRemove}
+                                            onCommitRename={handleCommitRename}
+                                            onCancelRename={handleCancelRename}
+                                            onStartRename={handleStartRename}
+                                        />
+                                    );
+                                })}
+                            </ul>
+                            <DragOverlay>
+                                {(source) => {
+                                    const item = flattenedItems.find(({ id }) => id === String(source.id));
+                                    if (!item) return null;
+                                    return <TreeItemOverlay item={item} childCount={sourceChildren.current.length} />;
+                                }}
+                            </DragOverlay>
+                        </DragDropProvider>
                     </div>
                 </ContextMenuTrigger>
                 {contextNode && (

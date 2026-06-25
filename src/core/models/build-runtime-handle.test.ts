@@ -46,7 +46,11 @@ function makeMinimalModel(): Model {
     };
     root.children = [head, arm];
 
-    const nodesByName = new Map<string, ModelNode>([['avatar_root', root], ['head', head], ['arm', arm]]);
+    const nodesByName = new Map<string, ModelNode>([
+        ['avatar_root', root],
+        ['head', head],
+        ['arm', arm],
+    ]);
     const meshesByName = new Map([['HeadMesh', headMesh]]);
 
     return {

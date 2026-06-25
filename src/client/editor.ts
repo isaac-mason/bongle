@@ -45,16 +45,28 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
     }
     const { rpc, roomId } = room.scriptRuntime;
     if (enabled) {
-        Rpc.send(rpc, registry.commandWireIndex, AddTraitCommand, {
-            id: room.playerNode.id,
-            traitId: EditorTrait._id,
-            props: undefined,
-        }, roomId);
+        Rpc.send(
+            rpc,
+            registry.commandWireIndex,
+            AddTraitCommand,
+            {
+                id: room.playerNode.id,
+                traitId: EditorTrait._id,
+                props: undefined,
+            },
+            roomId,
+        );
     } else {
-        Rpc.send(rpc, registry.commandWireIndex, RemoveTraitCommand, {
-            id: room.playerNode.id,
-            traitId: EditorTrait._id,
-        }, roomId);
+        Rpc.send(
+            rpc,
+            registry.commandWireIndex,
+            RemoveTraitCommand,
+            {
+                id: room.playerNode.id,
+                traitId: EditorTrait._id,
+            },
+            roomId,
+        );
     }
 }
 

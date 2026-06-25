@@ -315,9 +315,11 @@ export function resetTouchInput(t: TouchInput): void {
         touch.justStarted = false;
         touch.longPressed = false;
         // latch long-press once it crosses the threshold without drifting.
-        if (!touch._longPressLatched
-            && now - touch.downAt >= LONG_PRESS_MIN_MS
-            && touch._maxDriftSq < LONG_PRESS_MAX_DRIFT_PX_SQ) {
+        if (
+            !touch._longPressLatched &&
+            now - touch.downAt >= LONG_PRESS_MIN_MS &&
+            touch._maxDriftSq < LONG_PRESS_MAX_DRIFT_PX_SQ
+        ) {
             touch.longPressed = true;
             touch._longPressLatched = true;
         }
@@ -585,7 +587,17 @@ export function createInputManager(): InputManager {
             // next press registers as a fresh just-down.
             if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
                 for (const code of mk._keyState.keys()) {
-                    if (code === 'MetaLeft' || code === 'MetaRight' || code === 'ControlLeft' || code === 'ControlRight' || code === 'ShiftLeft' || code === 'ShiftRight' || code === 'AltLeft' || code === 'AltRight') continue;
+                    if (
+                        code === 'MetaLeft' ||
+                        code === 'MetaRight' ||
+                        code === 'ControlLeft' ||
+                        code === 'ControlRight' ||
+                        code === 'ShiftLeft' ||
+                        code === 'ShiftRight' ||
+                        code === 'AltLeft' ||
+                        code === 'AltRight'
+                    )
+                        continue;
                     mk._keyState.set(code, false);
                 }
             }

@@ -163,9 +163,7 @@ export function submit(chat: ChatClient, line: string): void {
         }
         if (ChatCommands.hasLocalListener(chat.commands, parsed.cmd.name)) {
             const inv: CommandInvocation = { args: parsed.argValues, flags: parsed.flagValues };
-            ChatCommands.dispatchLocal(chat.commands, parsed.cmd, inv, (text) =>
-                appendLine(chat, { kind: 'error', text }),
-            );
+            ChatCommands.dispatchLocal(chat.commands, parsed.cmd, inv, (text) => appendLine(chat, { kind: 'error', text }));
             return;
         }
         chat.outbox.push(trimmed);

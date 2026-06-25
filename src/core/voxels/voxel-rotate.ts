@@ -38,22 +38,32 @@ const _scratch: Vec3 = [0, 0, 0];
  */
 export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: BlockRegistry): Voxels {
     // basis projection → integer rotation matrix columns
-    _scratch[0] = 1; _scratch[1] = 0; _scratch[2] = 0;
+    _scratch[0] = 1;
+    _scratch[1] = 0;
+    _scratch[2] = 0;
     vec3.transformQuat(_scratch, _scratch, q);
-    const rx0 = Math.round(_scratch[0]), rx1 = Math.round(_scratch[1]), rx2 = Math.round(_scratch[2]);
+    const rx0 = Math.round(_scratch[0]),
+        rx1 = Math.round(_scratch[1]),
+        rx2 = Math.round(_scratch[2]);
 
-    _scratch[0] = 0; _scratch[1] = 1; _scratch[2] = 0;
+    _scratch[0] = 0;
+    _scratch[1] = 1;
+    _scratch[2] = 0;
     vec3.transformQuat(_scratch, _scratch, q);
-    const ry0 = Math.round(_scratch[0]), ry1 = Math.round(_scratch[1]), ry2 = Math.round(_scratch[2]);
+    const ry0 = Math.round(_scratch[0]),
+        ry1 = Math.round(_scratch[1]),
+        ry2 = Math.round(_scratch[2]);
 
-    _scratch[0] = 0; _scratch[1] = 0; _scratch[2] = 1;
+    _scratch[0] = 0;
+    _scratch[1] = 0;
+    _scratch[2] = 1;
     vec3.transformQuat(_scratch, _scratch, q);
-    const rz0 = Math.round(_scratch[0]), rz1 = Math.round(_scratch[1]), rz2 = Math.round(_scratch[2]);
+    const rz0 = Math.round(_scratch[0]),
+        rz1 = Math.round(_scratch[1]),
+        rz2 = Math.round(_scratch[2]);
 
     // identity fast-path
-    if (rx0 === 1 && rx1 === 0 && rx2 === 0 &&
-        ry0 === 0 && ry1 === 1 && ry2 === 0 &&
-        rz0 === 0 && rz1 === 0 && rz2 === 1) {
+    if (rx0 === 1 && rx1 === 0 && rx2 === 0 && ry0 === 0 && ry1 === 1 && ry2 === 0 && rz0 === 0 && rz1 === 0 && rz2 === 1) {
         return voxels;
     }
 
@@ -62,7 +72,9 @@ export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: BlockRegis
     // first pass: collect non-air voxels, remap positions, find AABB
     type Entry = { nx: number; ny: number; nz: number; key: string };
     const entries: Entry[] = [];
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
 
     for (const chunk of voxels.chunks.values()) {
         if (chunk.aggregate === 0) continue;
@@ -120,9 +132,15 @@ export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: BlockRegis
 // later combinations producing the same matrix are skipped.
 
 function matKey(
-    a00: number, a10: number, a20: number,
-    a01: number, a11: number, a21: number,
-    a02: number, a12: number, a22: number,
+    a00: number,
+    a10: number,
+    a20: number,
+    a01: number,
+    a11: number,
+    a21: number,
+    a02: number,
+    a12: number,
+    a22: number,
 ): string {
     return `${a00},${a10},${a20},${a01},${a11},${a21},${a02},${a12},${a22}`;
 }
@@ -131,19 +149,33 @@ function matKey(
 // derived to match the existing block-collider / blueprint convention:
 //   R_Y_CW:  +X → -Z, +Y → +Y, +Z → +X
 //   R_X_CW:  +X → +X, +Y → -Z, +Z → +Y
-const R_Y_CW = [ [0, 0, 1], [0, 1, 0], [-1, 0, 0] ];
-const R_X_CW = [ [1, 0, 0], [0, 0, 1], [0, -1, 0] ];
+const R_Y_CW = [
+    [0, 0, 1],
+    [0, 1, 0],
+    [-1, 0, 0],
+];
+const R_X_CW = [
+    [1, 0, 0],
+    [0, 0, 1],
+    [0, -1, 0],
+];
 
 function matmul(a: number[][], b: number[][]): number[][] {
-    const out = [[0,0,0],[0,0,0],[0,0,0]];
-    for (let i = 0; i < 3; i++)
-        for (let j = 0; j < 3; j++)
-            for (let k = 0; k < 3; k++) out[i]![j] += a[i]![k]! * b[k]![j]!;
+    const out = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0],
+    ];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) out[i]![j] += a[i]![k]! * b[k]![j]!;
     return out;
 }
 
 function powMat(r: number[][], n: number): number[][] {
-    let out = [[1,0,0],[0,1,0],[0,0,1]];
+    let out = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ];
     for (let i = 0; i < n; i++) out = matmul(r, out);
     return out;
 }
@@ -151,20 +183,26 @@ function powMat(r: number[][], n: number): number[][] {
 const CUBE_ROTATIONS: Map<string, readonly RotAxis[]> = (() => {
     const out = new Map<string, readonly RotAxis[]>();
     for (let a = 0; a < 4; a++)
-    for (let b = 0; b < 4; b++)
-    for (let c = 0; c < 4; c++) {
-        const m = matmul(powMat(R_Y_CW, c), matmul(powMat(R_X_CW, b), powMat(R_Y_CW, a)));
-        const key = matKey(
-            m[0]![0]!, m[1]![0]!, m[2]![0]!,
-            m[0]![1]!, m[1]![1]!, m[2]![1]!,
-            m[0]![2]!, m[1]![2]!, m[2]![2]!,
-        );
-        if (out.has(key)) continue;
-        const seq: RotAxis[] = [];
-        for (let i = 0; i < a; i++) seq.push('y');
-        for (let i = 0; i < b; i++) seq.push('x');
-        for (let i = 0; i < c; i++) seq.push('y');
-        out.set(key, seq);
-    }
+        for (let b = 0; b < 4; b++)
+            for (let c = 0; c < 4; c++) {
+                const m = matmul(powMat(R_Y_CW, c), matmul(powMat(R_X_CW, b), powMat(R_Y_CW, a)));
+                const key = matKey(
+                    m[0]![0]!,
+                    m[1]![0]!,
+                    m[2]![0]!,
+                    m[0]![1]!,
+                    m[1]![1]!,
+                    m[2]![1]!,
+                    m[0]![2]!,
+                    m[1]![2]!,
+                    m[2]![2]!,
+                );
+                if (out.has(key)) continue;
+                const seq: RotAxis[] = [];
+                for (let i = 0; i < a; i++) seq.push('y');
+                for (let i = 0; i < b; i++) seq.push('x');
+                for (let i = 0; i < c; i++) seq.push('y');
+                out.set(key, seq);
+            }
     return out;
 })();

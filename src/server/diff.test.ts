@@ -1,14 +1,6 @@
 import * as p from 'packcat';
 import { describe, expect, it } from 'vitest';
-import {
-    addChild,
-    addTrait,
-    createNode,
-    createSceneGraph,
-    destroyNode,
-    getTrait,
-    removeTrait,
-} from '../core/scene/nodes';
+import { addChild, addTrait, createNode, createSceneGraph, destroyNode, getTrait, removeTrait } from '../core/scene/nodes';
 import { prop } from '../core/scene/prop';
 import { control, sync, trait } from '../core/scene/traits';
 import { runDiffDetection } from './discovery';
@@ -88,7 +80,6 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Health);
 
-
         runDiffDetection(sg);
         const versionAfterInit = node._sync.version;
 
@@ -105,7 +96,6 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, Position);
 
-
         runDiffDetection(sg);
         const versionAfterInit = node._sync.version;
 
@@ -120,7 +110,6 @@ describe('diff detection', () => {
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
-
 
         runDiffDetection(sg);
         const v1 = node._sync.version;
@@ -141,7 +130,6 @@ describe('diff detection', () => {
         addChild(sg.root, node);
         addTrait(node, DiffTag);
 
-
         runDiffDetection(sg);
         runDiffDetection(sg);
 
@@ -154,7 +142,6 @@ describe('diff detection', () => {
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Position); // @sync only, no @property
-
 
         runDiffDetection(sg);
         const v1 = node._sync.version;
@@ -173,7 +160,6 @@ describe('diff detection', () => {
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
-
 
         runDiffDetection(sg);
         const v1 = node._sync.version;

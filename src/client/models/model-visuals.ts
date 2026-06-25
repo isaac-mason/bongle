@@ -23,15 +23,7 @@
 //     some bucket this frame"; no per-instance visible u32 to write.
 
 import type { Scene } from 'gpucat';
-import {
-    createIndirectBuffer,
-    DrawIndexedIndirect,
-    d,
-    Geometry,
-    GpuBuffer,
-    layoutStrideOf,
-    Mesh,
-} from 'gpucat';
+import { createIndirectBuffer, DrawIndexedIndirect, d, Geometry, GpuBuffer, layoutStrideOf, Mesh } from 'gpucat';
 import type * as Environment from '../environment';
 import * as Resources from '../../core/resources';
 import type { MeshId } from '../../core/models/handle';
@@ -439,12 +431,7 @@ export function update(
             const lg = light[1]!;
             const lb = light[2]!;
             const la = light[3]!;
-            if (
-                lr !== state.lastLightR ||
-                lg !== state.lastLightG ||
-                lb !== state.lastLightB ||
-                la !== state.lastLightA
-            ) {
+            if (lr !== state.lastLightR || lg !== state.lastLightG || lb !== state.lastLightB || la !== state.lastLightA) {
                 state.lastLightR = lr;
                 state.lastLightG = lg;
                 state.lastLightB = lb;
@@ -486,11 +473,7 @@ export function update(
         //    (image-decode patch landed → new uvOffset/uvScale), OR a
         //    light delta detected above. ──
         const meshVersion = meshTrait._version;
-        if (
-            meshVersion !== state.paramsVersionAtUpload ||
-            entry !== state.entryRefAtUpload ||
-            lightDirty
-        ) {
+        if (meshVersion !== state.paramsVersionAtUpload || entry !== state.entryRefAtUpload || lightDirty) {
             const po = slotBase + MODEL_INSTANCE_PARAMS_OFFSET_F32;
             const tint = meshTrait.tint;
             const flash = meshTrait.flash;

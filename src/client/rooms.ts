@@ -559,12 +559,7 @@ function newRoomCore(opts: {
  * by the local and offline room paths (the wire path receives a serialised
  * player node from the server and just queries for it).
  */
-function synthesizePlayerNode(
-    nodes: Nodes.Nodes,
-    playerId: PlayerId,
-    clientId: number,
-    name?: string,
-): Nodes.Node {
+function synthesizePlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, clientId: number, name?: string): Nodes.Node {
     const playerNode = Nodes.createNode({ name: name ?? `player:${playerId}`, persist: false });
     Nodes.addChild(nodes.root, playerNode);
     Nodes.setOwner(nodes, playerNode, playerId);
@@ -583,9 +578,7 @@ function findPlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, roomId: string):
     for (const [trait] of Nodes.query(nodes, [PlayerTrait])) {
         if (trait.playerId === playerId) return trait._node!;
     }
-    throw new Error(
-        `[bongle] failed to find player node for player ${playerId} in room ${roomId}`,
-    );
+    throw new Error(`[bongle] failed to find player node for player ${playerId} in room ${roomId}`);
 }
 
 function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
@@ -669,7 +662,12 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // shadow). the env GPU buffers in `environmentResources` are engine-
     // global; this Environment's `applyTime`/`applyConfig` mutate the
     // shadow only and flush to GPU when the room is active.
-    const environment: Environment.Environment = Environment.init(scene, environmentResources, ENVIRONMENT_DEFAULT, opts.cloudResources);
+    const environment: Environment.Environment = Environment.init(
+        scene,
+        environmentResources,
+        ENVIRONMENT_DEFAULT,
+        opts.cloudResources,
+    );
 
     // per-room audio coordinator. master gain + active-playback set are
     // owned by the room (disposeRoom tears them down); the underlying
@@ -704,11 +702,26 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // paint order is set by UILayer z-index, not by DOM order.
     viewport.appendChild(touchOverlay);
 
-    const spriteVisuals: SpriteVisuals.SpriteVisuals = SpriteVisuals.init(scene, nodes, opts.spriteResources, environmentResources);
-    const extrudedSpriteVisuals: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals = ExtrudedSpriteVisuals.init(scene, nodes, opts.extrudedSpriteResources, environmentResources);
+    const spriteVisuals: SpriteVisuals.SpriteVisuals = SpriteVisuals.init(
+        scene,
+        nodes,
+        opts.spriteResources,
+        environmentResources,
+    );
+    const extrudedSpriteVisuals: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals = ExtrudedSpriteVisuals.init(
+        scene,
+        nodes,
+        opts.extrudedSpriteResources,
+        environmentResources,
+    );
     const shadowVisuals: ShadowVisuals.ShadowVisuals = ShadowVisuals.init(scene, nodes, opts.shadowResources);
     const particles = Particles.init();
-    const particleVisuals: ParticleVisuals.ParticleVisuals = ParticleVisuals.init(scene, opts.spriteResources, opts.particleResources, environmentResources);
+    const particleVisuals: ParticleVisuals.ParticleVisuals = ParticleVisuals.init(
+        scene,
+        opts.spriteResources,
+        opts.particleResources,
+        environmentResources,
+    );
 
     const visibility = Visibility.init();
     const modelLighting = ModelLighting.init(nodes);
@@ -784,11 +797,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * relies on `unpackSceneGraph` clearing existing children + script
  * instances before rebuilding.
  */
-export function resyncRoom(
-    room: ClientRoom,
-    message: CreateRoomOptions['message'],
-    inboundTraitWireIndex: WireIndex,
-): void {
+export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inboundTraitWireIndex: WireIndex): void {
     unpackSceneGraph(room.nodes, room.scriptRuntime, message.packedNodes, inboundTraitWireIndex);
 
     // unpackSceneGraph clears root._traits and rebuilds from the wire,

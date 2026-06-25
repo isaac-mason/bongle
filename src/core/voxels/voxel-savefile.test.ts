@@ -2,13 +2,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
-import {
-    loadVoxels,
-    saveVoxels,
-    saveVoxelsIncremental,
-    seedVoxelSaveCache,
-    type VoxelSaveCache,
-} from './voxel-savefile';
+import { loadVoxels, saveVoxels, saveVoxelsIncremental, seedVoxelSaveCache, type VoxelSaveCache } from './voxel-savefile';
 import { BLOCK_AIR, CHUNK_SIZE, createVoxels, setBlock } from './voxels';
 
 beforeEach(() => resetVoxelRegistry());

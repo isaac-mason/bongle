@@ -117,9 +117,7 @@ export type DefragMove = {
  * out of scope here).
  */
 export function defrag(atlas: ModelAtlas): { moved: DefragMove[] } {
-    const old = Array.from(atlas.regions.entries()).sort(
-        ([, a], [, b]) => Math.max(b.w, b.h) - Math.max(a.w, a.h),
-    );
+    const old = Array.from(atlas.regions.entries()).sort(([, a], [, b]) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
     const oldPixels = new Uint8Array(atlas.pixels); // snapshot for blit source
 
     atlas.regions.clear();

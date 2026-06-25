@@ -232,8 +232,12 @@ const _worldAabb: Box3 = box3.create();
  * Returns null if there's nothing to render.
  */
 function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, number, number, number, number, number] | null {
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+    let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
     let any = false;
 
     // voxels — tight per-voxel scan.
@@ -245,7 +249,9 @@ function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, numbe
                 for (let x = 0; x < CHUNK_SIZE; x++) {
                     const stateId = palette[data[voxelIndex(x, y, z)]!]!;
                     if (stateId === AIR || stateId === MISSING) continue;
-                    const vx = wx + x, vy = wy + y, vz = wz + z;
+                    const vx = wx + x,
+                        vy = wy + y,
+                        vz = wz + z;
                     if (vx < minX) minX = vx;
                     if (vy < minY) minY = vy;
                     if (vz < minZ) minZ = vz;

@@ -1146,7 +1146,12 @@ describe('interpolate', () => {
 
         const t = getTrait(node, TransformTrait)!;
         const expected: Mat4 = mat4.create();
-        mat4.fromRotationTranslationScale(expected, t.interpolatedWorldQuaternion, t.interpolatedWorldPosition, t.interpolatedWorldScale);
+        mat4.fromRotationTranslationScale(
+            expected,
+            t.interpolatedWorldQuaternion,
+            t.interpolatedWorldPosition,
+            t.interpolatedWorldScale,
+        );
         expectMat4Near(t.interpolatedWorldMatrix, expected);
     });
 

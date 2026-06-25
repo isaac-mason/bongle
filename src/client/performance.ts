@@ -70,7 +70,7 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelViewChunkRadius: 4,
         voxelArenaDesiredMB: 16,
         voxelMaxSections: 256,
-        voxelArenaMaxAllocs: 2048,    // 256 × 3 passes × 2 ≈ 1536 → 2048
+        voxelArenaMaxAllocs: 2048, // 256 × 3 passes × 2 ≈ 1536 → 2048
         voxelMainThreadRemeshBudget: 1,
         voxelWorkerCount: 1,
         voxelWorkerQueueDepth: 4,
@@ -79,7 +79,7 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelViewChunkRadius: 6,
         voxelArenaDesiredMB: 64,
         voxelMaxSections: 1024,
-        voxelArenaMaxAllocs: 8192,    // 1024 × 3 × 2 ≈ 6144 → 8192
+        voxelArenaMaxAllocs: 8192, // 1024 × 3 × 2 ≈ 6144 → 8192
         voxelMainThreadRemeshBudget: 1,
         voxelWorkerCount: 2,
         voxelWorkerQueueDepth: 3,
@@ -88,9 +88,10 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelViewChunkRadius: 12,
         voxelArenaDesiredMB: 96,
         voxelMaxSections: 2048,
-        voxelArenaMaxAllocs: 16384,   // 2048 × 3 × 2 ≈ 12288 → 16384
+        voxelArenaMaxAllocs: 16384, // 2048 × 3 × 2 ≈ 12288 → 16384
         voxelMainThreadRemeshBudget: 1,
-        voxelWorkerCount: typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 4,
+        voxelWorkerCount:
+            typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 4,
         voxelWorkerQueueDepth: 3,
     },
 };

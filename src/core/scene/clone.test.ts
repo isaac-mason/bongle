@@ -173,7 +173,7 @@ describe('cloneNode', () => {
         expect(cloneSync.health).toBe(100);
     });
 
-it('addChild after clone wakes the subtree (registered, queryable)', () => {
+    it('addChild after clone wakes the subtree (registered, queryable)', () => {
         const source = build3LevelTree('Source');
         const clone = cloneNode(source);
         const sizeBefore = TEST_NODES.nodes.size;

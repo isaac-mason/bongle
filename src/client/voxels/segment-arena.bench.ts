@@ -14,19 +14,8 @@
 
 import { bench, describe } from 'vitest';
 
-import {
-    arenaAlloc,
-    arenaFree,
-    createQuadArena,
-    type QuadArena,
-} from './voxel-resources';
-import {
-    createOffsetAllocator,
-    oaAllocate,
-    oaFree,
-    type OAHandle,
-    type OffsetAllocator,
-} from './offset-allocator';
+import { arenaAlloc, arenaFree, createQuadArena, type QuadArena } from './voxel-resources';
+import { createOffsetAllocator, oaAllocate, oaFree, type OAHandle, type OffsetAllocator } from './offset-allocator';
 
 // ── workload ───────────────────────────────────────────────────────
 //
@@ -43,8 +32,10 @@ const SMALL_FRACTION = 0.7;
 function makeRng(seed: number): () => number {
     let s = seed | 0;
     return () => {
-        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
-        return ((s >>> 0) / 0xffffffff);
+        s ^= s << 13;
+        s ^= s >>> 17;
+        s ^= s << 5;
+        return (s >>> 0) / 0xffffffff;
     };
 }
 
@@ -73,7 +64,10 @@ function ffAlloc(a: FirstFit, slots: number): number | null {
         if (r.length < slots) continue;
         const start = r.start;
         if (r.length === slots) a.free.splice(i, 1);
-        else { r.start += slots; r.length -= slots; }
+        else {
+            r.start += slots;
+            r.length -= slots;
+        }
         a.used += slots;
         return start;
     }
@@ -109,9 +103,7 @@ function ffFree(a: FirstFit, start: number, slots: number): void {
 // replays it from a fresh allocator state so we measure the algorithm,
 // not the PRNG or the size mix.
 
-type Op =
-    | { kind: 'alloc'; size: number; id: number }
-    | { kind: 'free'; id: number };
+type Op = { kind: 'alloc'; size: number; id: number } | { kind: 'free'; id: number };
 
 function buildChurnScript(opCount: number, seed: number): Op[] {
     const rand = makeRng(seed);
@@ -149,7 +141,10 @@ describe('allocator algorithm — per-op throughput', () => {
                 if (start !== null) live.set(op.id, { start, size: op.size });
             } else {
                 const seg = live.get(op.id);
-                if (seg) { ffFree(a, seg.start, seg.size); live.delete(op.id); }
+                if (seg) {
+                    ffFree(a, seg.start, seg.size);
+                    live.delete(op.id);
+                }
             }
         }
     });
@@ -164,7 +159,10 @@ describe('allocator algorithm — per-op throughput', () => {
                 if (h) live.set(op.id, h);
             } else {
                 const h = live.get(op.id);
-                if (h) { oaFree(a, h); live.delete(op.id); }
+                if (h) {
+                    oaFree(a, h);
+                    live.delete(op.id);
+                }
             }
         }
     });
@@ -186,10 +184,15 @@ describe('SegmentArena — per-op throughput', () => {
                 try {
                     const start = arenaAlloc(arena, op.size);
                     live.set(op.id, { start, size: op.size });
-                } catch { /* OOM — skip */ }
+                } catch {
+                    /* OOM — skip */
+                }
             } else {
                 const seg = live.get(op.id);
-                if (seg) { arenaFree(arena, seg.start); live.delete(op.id); }
+                if (seg) {
+                    arenaFree(arena, seg.start);
+                    live.delete(op.id);
+                }
             }
         }
         // dispose to free GpuBuffer typed arrays between iterations

@@ -96,12 +96,7 @@ export function unlisten(rpc: Rpc, commandId: string, entry: ListenerEntry): voi
  * stale `CommandHandle.serdes` captured in user closures is not consulted
  * on the dispatch path.
  */
-export function dispatchNetMessage(
-    rpc: Rpc,
-    commandWireIndex: WireIndex,
-    message: NetMessage,
-    from: unknown | undefined,
-): void {
+export function dispatchNetMessage(rpc: Rpc, commandWireIndex: WireIndex, message: NetMessage, from: unknown | undefined): void {
     const commandId = commandWireIndex.indexToId[message.commandIndex];
     if (commandId === undefined) return;
     const def = get(registry.commands, commandId);

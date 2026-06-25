@@ -137,18 +137,14 @@ function DepsGraph({ snapshot, selected, onSelect }: Props) {
                 <ColumnLabel x={xSelected + COL_W / 2} label="selected" />
                 <ColumnLabel x={xConsumers + COL_W / 2} label={`consumers · ${neighbors.consumers.length}`} />
 
-                {neighbors.producers.length === 0 && (
-                    <Placeholder x={0} y={centerY} label="— none —" />
-                )}
+                {neighbors.producers.length === 0 && <Placeholder x={0} y={centerY} label="— none —" />}
                 {neighbors.producers.map((p, i) => (
                     <Item key={`p:${p}`} x={0} y={rowY(i)} keyStr={p} onClick={() => onSelect(p)} />
                 ))}
 
                 <Item x={xSelected} y={centerY} keyStr={selected} selected onClick={() => onSelect(null)} />
 
-                {neighbors.consumers.length === 0 && (
-                    <Placeholder x={xConsumers} y={centerY} label="— none —" />
-                )}
+                {neighbors.consumers.length === 0 && <Placeholder x={xConsumers} y={centerY} label="— none —" />}
                 {neighbors.consumers.map((c, i) => (
                     <Item key={`c:${c}`} x={xConsumers} y={rowY(i)} keyStr={c} onClick={() => onSelect(c)} />
                 ))}
@@ -164,13 +160,7 @@ function arcPath(x1: number, y1: number, x2: number, y2: number): string {
 
 function ColumnLabel({ x, label }: { x: number; label: string }) {
     return (
-        <text
-            x={x}
-            y={-2}
-            textAnchor="middle"
-            fill="#666"
-            style={{ font: 'bold 9px Helvetica,Arial,sans-serif' }}
-        >
+        <text x={x} y={-2} textAnchor="middle" fill="#666" style={{ font: 'bold 9px Helvetica,Arial,sans-serif' }}>
             {label}
         </text>
     );
@@ -216,13 +206,7 @@ function Item({
                 onClick();
             }}
         >
-            <rect
-                width={COL_W}
-                height={ROW_H}
-                fill={selected ? c : '#181818'}
-                stroke={c}
-                strokeWidth={1}
-            />
+            <rect width={COL_W} height={ROW_H} fill={selected ? c : '#181818'} stroke={c} strokeWidth={1} />
             <clipPath id={clipId}>
                 <rect width={COL_W - 8} height={ROW_H} />
             </clipPath>

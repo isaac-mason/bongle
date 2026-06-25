@@ -73,13 +73,7 @@ export function broadcast(chat: ChatServer, msg: ChatBroadcastMsg): void {
  *
  * called once per server frame per room from the room tick loop.
  */
-export function tick(
-    chat: ChatServer,
-    net: ServerNet,
-    rooms: Rooms,
-    room: Room,
-    clients: Clients,
-): void {
+export function tick(chat: ChatServer, net: ServerNet, rooms: Rooms, room: Room, clients: Clients): void {
     for (let i = 0; i < chat.inbox.length; i++) {
         const entry = chat.inbox[i]!;
         processInputEntry(chat, entry, clients);

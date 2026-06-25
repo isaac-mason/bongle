@@ -3,7 +3,16 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aabbs, type BlockShape, cube } from './block-collider';
 import { createVoxelSweepHit, sweepAabbVsVoxels } from './voxel-aabb-sweep';
 import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from './test-helpers';
-import { CHUNK_SIZE, createChunk, createEmptyChunk, createVoxels, EMPTY_DATA, EMPTY_LIGHT, linkChunkNeighbors, setChunkBlock } from './voxels';
+import {
+    CHUNK_SIZE,
+    createChunk,
+    createEmptyChunk,
+    createVoxels,
+    EMPTY_DATA,
+    EMPTY_LIGHT,
+    linkChunkNeighbors,
+    setChunkBlock,
+} from './voxels';
 
 beforeAll(() => {
     registerAllShapes();
@@ -38,8 +47,12 @@ function place(voxels: ReturnType<typeof makeVoxels>['voxels'], wx: number, wy: 
 // existing chunks are left alone.
 function stubArea(
     voxels: ReturnType<typeof makeVoxels>['voxels'],
-    cxMin: number, cyMin: number, czMin: number,
-    cxMax: number, cyMax: number, czMax: number,
+    cxMin: number,
+    cyMin: number,
+    czMin: number,
+    cxMax: number,
+    cyMax: number,
+    czMax: number,
 ) {
     for (let cz = czMin; cz <= czMax; cz++) {
         for (let cy = cyMin; cy <= cyMax; cy++) {
@@ -127,7 +140,6 @@ describe('sweepAabbVsVoxels — cube path', () => {
         expect(out.subAabbIndex).toBe(-1);
     });
 
-
     it('walks into a wall on +X', () => {
         const { voxels } = makeVoxels([{ id: 'stone', texId: 'stone' }]);
         place(voxels, 3, 0, 0, 'stone');
@@ -170,7 +182,6 @@ describe('sweepAabbVsVoxels — cube path', () => {
         const hit = sweepAabbVsVoxels(voxels, 0, 5, 0, 0.5, 0.5, 0.5, 0, -10, 0, out);
         expect(hit).toBe(false);
     });
-
 });
 
 describe('sweepAabbVsVoxels — aabbs path', () => {
@@ -196,8 +207,8 @@ describe('sweepAabbVsVoxels — aabbs path', () => {
     it('stair: lands on the top step from above', () => {
         // stair = bottom slab + back step (back-half top slab).
         const stair: BlockShape = aabbs([
-            [0, 0, 0, 1, 0.5, 1],     // bottom slab
-            [0, 0.5, 0.5, 1, 1, 1],   // back step (z>=0.5)
+            [0, 0, 0, 1, 0.5, 1], // bottom slab
+            [0, 0.5, 0.5, 1, 1, 1], // back step (z>=0.5)
         ]);
         const { voxels } = makeVoxels([
             { id: 'air', texId: 'air' },

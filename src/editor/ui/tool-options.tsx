@@ -43,8 +43,8 @@ function ToggleBtn({
                 disabled
                     ? 'text-neutral-600 cursor-not-allowed'
                     : active
-                    ? 'bg-neutral-700 text-white'
-                    : 'text-neutral-400 hover:text-neutral-200'
+                      ? 'bg-neutral-700 text-white'
+                      : 'text-neutral-400 hover:text-neutral-200'
             }`}
         >
             {children}
@@ -108,12 +108,7 @@ function SelectorModeRow() {
             </Row>
             {selectorMode === 'air' && (
                 <Row label="distance">
-                    <NumberInput
-                        value={airDistance}
-                        onChange={setAirDistance}
-                        min={1}
-                        max={100}
-                    />
+                    <NumberInput value={airDistance} onChange={setAirDistance} min={1} max={100} />
                 </Row>
             )}
         </>
@@ -291,34 +286,12 @@ export function MagicSelectOptions() {
                 </ToggleBtn>
             </Row>
             <Row label="range">
-                <NumberInput
-                    value={opts.range}
-                    onChange={(range) => set({ range })}
-                    min={1}
-                    max={10}
-                />
-                <Range
-                    value={opts.range}
-                    onChange={(range) => set({ range })}
-                    min={1}
-                    max={10}
-                />
+                <NumberInput value={opts.range} onChange={(range) => set({ range })} min={1} max={10} />
+                <Range value={opts.range} onChange={(range) => set({ range })} min={1} max={10} />
             </Row>
             <Row label="limit">
-                <NumberInput
-                    value={opts.limit}
-                    onChange={(limit) => set({ limit })}
-                    min={1}
-                    step={1000}
-                    width="md"
-                />
-                <Range
-                    value={opts.limit}
-                    onChange={(limit) => set({ limit })}
-                    min={1}
-                    max={100000}
-                    step={1000}
-                />
+                <NumberInput value={opts.limit} onChange={(limit) => set({ limit })} min={1} step={1000} width="md" />
+                <Range value={opts.limit} onChange={(limit) => set({ limit })} min={1} max={100000} step={1000} />
             </Row>
         </div>
     );
@@ -349,32 +322,12 @@ export function LassoSelectOptions() {
                 {modeBtn('add', 'add')}
             </Row>
             <Row label="depth">
-                <NumberInput
-                    value={opts.depth}
-                    onChange={(depth) => set({ depth })}
-                    min={1}
-                />
-                <Range
-                    value={opts.depth}
-                    onChange={(depth) => set({ depth })}
-                    min={1}
-                    max={32}
-                />
+                <NumberInput value={opts.depth} onChange={(depth) => set({ depth })} min={1} />
+                <Range value={opts.depth} onChange={(depth) => set({ depth })} min={1} max={32} />
             </Row>
             <Row label="distance">
-                <NumberInput
-                    value={opts.maxDistance}
-                    onChange={(maxDistance) => set({ maxDistance })}
-                    min={1}
-                    step={16}
-                />
-                <Range
-                    value={opts.maxDistance}
-                    onChange={(maxDistance) => set({ maxDistance })}
-                    min={16}
-                    max={1024}
-                    step={16}
-                />
+                <NumberInput value={opts.maxDistance} onChange={(maxDistance) => set({ maxDistance })} min={1} step={16} />
+                <Range value={opts.maxDistance} onChange={(maxDistance) => set({ maxDistance })} min={16} max={1024} step={16} />
             </Row>
         </div>
     );
@@ -417,36 +370,18 @@ export function PaintOptions() {
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <Row label="shape">
                 {BRUSH_SHAPES.map((s) => (
-                    <ToggleBtn
-                        key={s.id}
-                        active={shape === s.id}
-                        onClick={() => setPaintOptions({ shape: s.id })}
-                    >
+                    <ToggleBtn key={s.id} active={shape === s.id} onClick={() => setPaintOptions({ shape: s.id })}>
                         {s.label}
                     </ToggleBtn>
                 ))}
             </Row>
             <Row label="size">
-                <NumberInput
-                    value={size}
-                    onChange={(size) => setPaintOptions({ size })}
-                    min={0}
-                />
-                <Range
-                    value={size}
-                    onChange={(size) => setPaintOptions({ size })}
-                    min={0}
-                    max={32}
-                />
+                <NumberInput value={size} onChange={(size) => setPaintOptions({ size })} min={0} />
+                <Range value={size} onChange={(size) => setPaintOptions({ size })} min={0} max={32} />
             </Row>
             {shape === 'cylinder' && (
                 <Row label="height">
-                    <NumberInput
-                        value={height}
-                        onChange={(height) => setPaintOptions({ height })}
-                        min={1}
-                        max={64}
-                    />
+                    <NumberInput value={height} onChange={(height) => setPaintOptions({ height })} min={1} max={64} />
                 </Row>
             )}
             <Row label="pattern">
@@ -459,13 +394,7 @@ export function PaintOptions() {
                 />
             </Row>
             <Row label="mask">
-                <ExprInput
-                    value={maskText}
-                    placeholder="(none)"
-                    suggest={suggestMask}
-                    onChange={commitMask}
-                    error={maskError}
-                />
+                <ExprInput value={maskText} placeholder="(none)" suggest={suggestMask} onChange={commitMask} error={maskError} />
             </Row>
             <SelectorModeRow />
         </div>
@@ -538,36 +467,18 @@ export function BrushOptions() {
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <Row label="shape">
                 {BRUSH_SHAPES.map((s) => (
-                    <ToggleBtn
-                        key={s.id}
-                        active={shape === s.id}
-                        onClick={() => setBrushOptions({ shape: s.id })}
-                    >
+                    <ToggleBtn key={s.id} active={shape === s.id} onClick={() => setBrushOptions({ shape: s.id })}>
                         {s.label}
                     </ToggleBtn>
                 ))}
             </Row>
             <Row label="size">
-                <NumberInput
-                    value={size}
-                    onChange={(size) => setBrushOptions({ size })}
-                    min={0}
-                />
-                <Range
-                    value={size}
-                    onChange={(size) => setBrushOptions({ size })}
-                    min={0}
-                    max={32}
-                />
+                <NumberInput value={size} onChange={(size) => setBrushOptions({ size })} min={0} />
+                <Range value={size} onChange={(size) => setBrushOptions({ size })} min={0} max={32} />
             </Row>
             {shape === 'cylinder' && (
                 <Row label="height">
-                    <NumberInput
-                        value={height}
-                        onChange={(height) => setBrushOptions({ height })}
-                        min={1}
-                        max={64}
-                    />
+                    <NumberInput value={height} onChange={(height) => setBrushOptions({ height })} min={1} max={64} />
                 </Row>
             )}
             <Row label="pattern">
@@ -580,13 +491,7 @@ export function BrushOptions() {
                 />
             </Row>
             <Row label="mask">
-                <ExprInput
-                    value={maskText}
-                    placeholder="(none)"
-                    suggest={suggestMask}
-                    onChange={commitMask}
-                    error={maskError}
-                />
+                <ExprInput value={maskText} placeholder="(none)" suggest={suggestMask} onChange={commitMask} error={maskError} />
             </Row>
         </div>
     );
@@ -631,46 +536,22 @@ export function BrushSelectOptions() {
             </Row>
             <Row label="shape">
                 {BRUSH_SHAPES.map((s) => (
-                    <ToggleBtn
-                        key={s.id}
-                        active={shape === s.id}
-                        onClick={() => setBrushSelectOptions({ shape: s.id })}
-                    >
+                    <ToggleBtn key={s.id} active={shape === s.id} onClick={() => setBrushSelectOptions({ shape: s.id })}>
                         {s.label}
                     </ToggleBtn>
                 ))}
             </Row>
             <Row label="size">
-                <NumberInput
-                    value={size}
-                    onChange={(size) => setBrushSelectOptions({ size })}
-                    min={0}
-                />
-                <Range
-                    value={size}
-                    onChange={(size) => setBrushSelectOptions({ size })}
-                    min={0}
-                    max={32}
-                />
+                <NumberInput value={size} onChange={(size) => setBrushSelectOptions({ size })} min={0} />
+                <Range value={size} onChange={(size) => setBrushSelectOptions({ size })} min={0} max={32} />
             </Row>
             {shape === 'cylinder' && (
                 <Row label="height">
-                    <NumberInput
-                        value={height}
-                        onChange={(height) => setBrushSelectOptions({ height })}
-                        min={1}
-                        max={64}
-                    />
+                    <NumberInput value={height} onChange={(height) => setBrushSelectOptions({ height })} min={1} max={64} />
                 </Row>
             )}
             <Row label="mask">
-                <ExprInput
-                    value={maskText}
-                    placeholder="(none)"
-                    suggest={suggestMask}
-                    onChange={commitMask}
-                    error={maskError}
-                />
+                <ExprInput value={maskText} placeholder="(none)" suggest={suggestMask} onChange={commitMask} error={maskError} />
             </Row>
         </div>
     );
@@ -707,45 +588,22 @@ export function SmoothOptions() {
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <Row label="shape">
                 {BRUSH_SHAPES.map((s) => (
-                    <ToggleBtn
-                        key={s.id}
-                        active={shape === s.id}
-                        onClick={() => setSmoothOptions({ shape: s.id })}
-                    >
+                    <ToggleBtn key={s.id} active={shape === s.id} onClick={() => setSmoothOptions({ shape: s.id })}>
                         {s.label}
                     </ToggleBtn>
                 ))}
             </Row>
             <Row label="size">
-                <NumberInput
-                    value={size}
-                    onChange={(size) => setSmoothOptions({ size })}
-                    min={1}
-                />
-                <Range
-                    value={size}
-                    onChange={(size) => setSmoothOptions({ size })}
-                    min={1}
-                    max={32}
-                />
+                <NumberInput value={size} onChange={(size) => setSmoothOptions({ size })} min={1} />
+                <Range value={size} onChange={(size) => setSmoothOptions({ size })} min={1} max={32} />
             </Row>
             {shape === 'cylinder' && (
                 <Row label="height">
-                    <NumberInput
-                        value={height}
-                        onChange={(height) => setSmoothOptions({ height })}
-                        min={1}
-                        max={64}
-                    />
+                    <NumberInput value={height} onChange={(height) => setSmoothOptions({ height })} min={1} max={64} />
                 </Row>
             )}
             <Row label="iters">
-                <NumberInput
-                    value={iterations}
-                    onChange={(iterations) => setSmoothOptions({ iterations })}
-                    min={1}
-                    max={32}
-                />
+                <NumberInput value={iterations} onChange={(iterations) => setSmoothOptions({ iterations })} min={1} max={32} />
             </Row>
             <Row label="mask">
                 <ExprInput
@@ -894,53 +752,22 @@ export function ElevationOptions() {
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <Row label="mode">
                 {ELEVATION_MODES.map((m) => (
-                    <ToggleBtn
-                        key={m.id}
-                        active={mode === m.id}
-                        onClick={() => setElevationOptions({ mode: m.id })}
-                    >
+                    <ToggleBtn key={m.id} active={mode === m.id} onClick={() => setElevationOptions({ mode: m.id })}>
                         {m.label}
                     </ToggleBtn>
                 ))}
             </Row>
             <Row label="size">
-                <NumberInput
-                    value={size}
-                    onChange={(size) => setElevationOptions({ size })}
-                    min={1}
-                />
-                <Range
-                    value={size}
-                    onChange={(size) => setElevationOptions({ size })}
-                    min={1}
-                    max={32}
-                />
+                <NumberInput value={size} onChange={(size) => setElevationOptions({ size })} min={1} />
+                <Range value={size} onChange={(size) => setElevationOptions({ size })} min={1} max={32} />
             </Row>
             <Row label="y limit">
-                <NumberInput
-                    value={yLimit}
-                    onChange={(yLimit) => setElevationOptions({ yLimit })}
-                    min={1}
-                />
-                <Range
-                    value={yLimit}
-                    onChange={(yLimit) => setElevationOptions({ yLimit })}
-                    min={1}
-                    max={64}
-                />
+                <NumberInput value={yLimit} onChange={(yLimit) => setElevationOptions({ yLimit })} min={1} />
+                <Range value={yLimit} onChange={(yLimit) => setElevationOptions({ yLimit })} min={1} max={64} />
             </Row>
             <Row label="amount">
-                <NumberInput
-                    value={amount}
-                    onChange={(amount) => setElevationOptions({ amount })}
-                    min={1}
-                />
-                <Range
-                    value={amount}
-                    onChange={(amount) => setElevationOptions({ amount })}
-                    min={1}
-                    max={64}
-                />
+                <NumberInput value={amount} onChange={(amount) => setElevationOptions({ amount })} min={1} />
+                <Range value={amount} onChange={(amount) => setElevationOptions({ amount })} min={1} max={64} />
             </Row>
             <Row label="falloff">
                 <div className="flex gap-1 flex-1">
@@ -959,36 +786,18 @@ export function ElevationOptions() {
                 <ToggleBtn active={applyMode === 'single'} onClick={() => setElevationOptions({ applyMode: 'single' })}>
                     single
                 </ToggleBtn>
-                <ToggleBtn
-                    active={applyMode === 'continuous'}
-                    onClick={() => setElevationOptions({ applyMode: 'continuous' })}
-                >
+                <ToggleBtn active={applyMode === 'continuous'} onClick={() => setElevationOptions({ applyMode: 'continuous' })}>
                     continuous
                 </ToggleBtn>
             </Row>
             {applyMode === 'continuous' && (
                 <Row label="rate">
-                    <NumberInput
-                        value={rate}
-                        onChange={(rate) => setElevationOptions({ rate })}
-                        min={1}
-                    />
-                    <Range
-                        value={rate}
-                        onChange={(rate) => setElevationOptions({ rate })}
-                        min={1}
-                        max={64}
-                    />
+                    <NumberInput value={rate} onChange={(rate) => setElevationOptions({ rate })} min={1} />
+                    <Range value={rate} onChange={(rate) => setElevationOptions({ rate })} min={1} max={64} />
                 </Row>
             )}
             <Row label="heightmap">
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={onFileChange}
-                    className="hidden"
-                />
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
                 <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
@@ -1017,13 +826,7 @@ export function ElevationOptions() {
                 />
             </Row>
             <Row label="mask">
-                <ExprInput
-                    value={maskText}
-                    placeholder="(none)"
-                    suggest={suggestMask}
-                    onChange={commitMask}
-                    error={maskError}
-                />
+                <ExprInput value={maskText} placeholder="(none)" suggest={suggestMask} onChange={commitMask} error={maskError} />
             </Row>
         </div>
     );
@@ -1180,10 +983,7 @@ export function TransformOptions() {
                     >
                         face center
                     </ToggleBtn>
-                    <ToggleBtn
-                        active={transformHasVoxels || snapTo === 'corner'}
-                        onClick={() => setSnapTo('corner')}
-                    >
+                    <ToggleBtn active={transformHasVoxels || snapTo === 'corner'} onClick={() => setSnapTo('corner')}>
                         block corner
                     </ToggleBtn>
                 </Row>

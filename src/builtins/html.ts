@@ -50,7 +50,7 @@ export const HtmlTrait = trait('html', {
      * Drei-style projected-depth → z-index mapping. Overlapping panels
      * sort correctly without DOM reordering.
      */
-    zIndexRange: (() => [16777271, 0] as [number, number]),
+    zIndexRange: () => [16777271, 0] as [number, number],
 
     /**
      * Bumped by user code after changing static config (size, mode, etc)

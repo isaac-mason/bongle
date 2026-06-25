@@ -90,10 +90,10 @@ const COUNT_CFG: GraphCfg = {
 /** unit → graph config. unknown units fall back to MS so unlabeled timers
  *  keep working. add new units here when introduced. */
 const UNIT_CFG: Record<string, GraphCfg> = {
-    'ms': MS_CFG,
+    ms: MS_CFG,
     'kb/s': KBS_CFG,
     '%': PCT_CFG,
-    'count': COUNT_CFG,
+    count: COUNT_CFG,
 };
 
 function cfgForUnit(unit: string): GraphCfg {
@@ -130,7 +130,7 @@ function PerfCanvas({ view }: { view: 'summary' | 'cpu' | 'net' }) {
     const rooms = useClient((s) => s.rooms);
     const activePlayerId = useClient((s) => s.activePlayerId);
     const allRooms = useMemo(() => [...rooms.values()], [rooms]);
-    const activeRoom = activePlayerId != null ? rooms.get(activePlayerId) ?? null : null;
+    const activeRoom = activePlayerId != null ? (rooms.get(activePlayerId) ?? null) : null;
     const clientGlobal = useClient((s) => s.clientGlobalMetrics);
 
     // mirror reactive data into a ref so the rAF loop sees the latest
@@ -312,22 +312,35 @@ function drawFrameSquare(
     ctx.textAlign = 'left';
 }
 
-function drawSummaryStrip(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    data: PerfData,
-): void {
+function drawSummaryStrip(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, data: PerfData): void {
     drawPanel(ctx, x, y, w, h);
     const cells: { label: string; value: string; unit: string }[] = [
         { label: 'client tick', value: smoothedAvg(data.clientGlobal, 'tick', SMOOTH_SAMPLES_TICK).toFixed(1), unit: 'ms' },
-        { label: 'server tick', value: smoothedAvg(data.activeRoom?.serverMetrics, 'tick', SMOOTH_SAMPLES_TICK).toFixed(1), unit: 'ms' },
-        { label: 'client in', value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/ingress', SMOOTH_SAMPLES_NET).toFixed(1), unit: 'kb/s' },
-        { label: 'client out', value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/egress', SMOOTH_SAMPLES_NET).toFixed(1), unit: 'kb/s' },
-        { label: 'server in', value: smoothedAvg(data.activeRoom?.serverMetrics, 'net/ingress', SMOOTH_SAMPLES_NET).toFixed(1), unit: 'kb/s' },
-        { label: 'server out', value: smoothedAvg(data.activeRoom?.serverMetrics, 'net/egress', SMOOTH_SAMPLES_NET).toFixed(1), unit: 'kb/s' },
+        {
+            label: 'server tick',
+            value: smoothedAvg(data.activeRoom?.serverMetrics, 'tick', SMOOTH_SAMPLES_TICK).toFixed(1),
+            unit: 'ms',
+        },
+        {
+            label: 'client in',
+            value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/ingress', SMOOTH_SAMPLES_NET).toFixed(1),
+            unit: 'kb/s',
+        },
+        {
+            label: 'client out',
+            value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/egress', SMOOTH_SAMPLES_NET).toFixed(1),
+            unit: 'kb/s',
+        },
+        {
+            label: 'server in',
+            value: smoothedAvg(data.activeRoom?.serverMetrics, 'net/ingress', SMOOTH_SAMPLES_NET).toFixed(1),
+            unit: 'kb/s',
+        },
+        {
+            label: 'server out',
+            value: smoothedAvg(data.activeRoom?.serverMetrics, 'net/egress', SMOOTH_SAMPLES_NET).toFixed(1),
+            unit: 'kb/s',
+        },
     ];
     const cellStride = Math.max(110, (w - 28) / cells.length);
     let cx = x + 14;
@@ -379,9 +392,7 @@ function drawColumn(
     const rh = h - COL_TITLE_H;
     state.scrollRegions.push({ x: rx, y: ry, w: rw, h: rh, column });
 
-    type RowItem =
-        | { kind: 'header'; scope: Scope; count: number }
-        | { kind: 'metric'; scope: Scope; id: string };
+    type RowItem = { kind: 'header'; scope: Scope; count: number } | { kind: 'metric'; scope: Scope; id: string };
     const rows: RowItem[] = [];
     let total = 0;
     for (const scope of scopes) {
@@ -639,17 +650,13 @@ function LogColumn({ label, logs }: { label: string; logs: Debug.Logs | null }) 
                 }}
             >
                 {total === 0 && (
-                    <div style={{ font: '9px Helvetica,Arial,sans-serif', color: '#555', padding: '6px 8px' }}>
-                        no logs
-                    </div>
+                    <div style={{ font: '9px Helvetica,Arial,sans-serif', color: '#555', padding: '6px 8px' }}>no logs</div>
                 )}
                 {total > 0 && (
                     <div style={{ height: total * LOG_ROW_H, position: 'relative' }}>
                         <div style={{ position: 'absolute', top: startIdx * LOG_ROW_H, left: 0, right: 0 }}>
                             {visible.map((entry, i) => {
-                                const tag = entry.source
-                                    ? `[${entry.source.traitId}#${entry.source.nodeId}]`
-                                    : '[engine]';
+                                const tag = entry.source ? `[${entry.source.traitId}#${entry.source.nodeId}]` : '[engine]';
                                 return (
                                     <div
                                         key={startIdx + i}
@@ -873,7 +880,7 @@ function TabStrip({ tab, onSelect }: { tab: DebugTab; onSelect: (t: DebugTab) =>
 export default function DebugPanel({ tab }: { tab: DebugTab }) {
     const rooms = useClient((s) => s.rooms);
     const activePlayerId = useClient((s) => s.activePlayerId);
-    const activeRoom = activePlayerId != null ? rooms.get(activePlayerId) ?? null : null;
+    const activeRoom = activePlayerId != null ? (rooms.get(activePlayerId) ?? null) : null;
     const setDebugTab = useClient((s) => s.setDebugTab);
 
     return (

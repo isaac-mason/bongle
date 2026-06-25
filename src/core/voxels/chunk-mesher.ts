@@ -120,11 +120,25 @@ function applyDiagFlipBit(metaWord: number, l0: number, l1: number, l2: number, 
     const ao13 = ao1 + ao3;
     if (ao02 > ao13) return 0;
     if (ao02 < ao13) return 1 << 29;
-    const lm02 = (l0 & 0xf) + ((l0 >>> 8) & 0xf) + ((l0 >>> 16) & 0xf) + ((l0 >>> 24) & 0xf)
-               + (l2 & 0xf) + ((l2 >>> 8) & 0xf) + ((l2 >>> 16) & 0xf) + ((l2 >>> 24) & 0xf);
-    const lm13 = (l1 & 0xf) + ((l1 >>> 8) & 0xf) + ((l1 >>> 16) & 0xf) + ((l1 >>> 24) & 0xf)
-               + (l3 & 0xf) + ((l3 >>> 8) & 0xf) + ((l3 >>> 16) & 0xf) + ((l3 >>> 24) & 0xf);
-    return lm02 <= lm13 ? 0 : (1 << 29);
+    const lm02 =
+        (l0 & 0xf) +
+        ((l0 >>> 8) & 0xf) +
+        ((l0 >>> 16) & 0xf) +
+        ((l0 >>> 24) & 0xf) +
+        (l2 & 0xf) +
+        ((l2 >>> 8) & 0xf) +
+        ((l2 >>> 16) & 0xf) +
+        ((l2 >>> 24) & 0xf);
+    const lm13 =
+        (l1 & 0xf) +
+        ((l1 >>> 8) & 0xf) +
+        ((l1 >>> 16) & 0xf) +
+        ((l1 >>> 24) & 0xf) +
+        (l3 & 0xf) +
+        ((l3 >>> 8) & 0xf) +
+        ((l3 >>> 16) & 0xf) +
+        ((l3 >>> 24) & 0xf);
+    return lm02 <= lm13 ? 0 : 1 << 29;
 }
 
 /** Sodium `LightDataAccess.get` analog. Reads the packed light word for one
@@ -137,20 +151,11 @@ function applyDiagFlipBit(metaWord: number, l0: number, l1: number, l2: number, 
  *  PACKED_LIGHT_SKY_FULL so absent borders read as sky-lit air, and
  *  `_slab` is pre-filled with AIR so opacity reads 0 — matches the
  *  Sodium "no chunk = sky-lit void" fallback. */
-function readLightCellByIdx(
-    _blockSlab: Uint32Array,
-    _lightSlab: Uint16Array,
-    slabIdx: number,
-    cullTable: Uint8Array,
-): number {
+function readLightCellByIdx(_blockSlab: Uint32Array, _lightSlab: Uint16Array, slabIdx: number, cullTable: Uint8Array): number {
     const stateId = _blockSlab[slabIdx]!;
     const opaque = cullTable[stateId]! === CULL_SOLID ? 1 << 28 : 0;
     const packed = _lightSlab[slabIdx]!;
-    return ((packed >> 8) & 0xf)
-         | ((packed & 0xf0) << 4)
-         | ((packed & 0xf) << 16)
-         | ((packed & 0xf000) << 12)
-         | opaque;
+    return ((packed >> 8) & 0xf) | ((packed & 0xf0) << 4) | ((packed & 0xf) << 16) | ((packed & 0xf000) << 12) | opaque;
 }
 
 const CULL_NONE = 0;
@@ -284,7 +289,7 @@ const FACE_NORMAL = new Float32Array([
     // east
     1,
     0,
-    0, 
+    0,
     // west
     -1,
     0,
@@ -379,34 +384,51 @@ const _Z = SLAB_STRIDE_Z; // +z
 
 const FACE_EDGE_OFFSETS = new Int32Array([
     // east  (+x): axU=Z, axW=Y → [-Y, +Y, -Z, +Z]
-    -_Y,  _Y, -_Z,  _Z,
+    -_Y,
+    _Y,
+    -_Z,
+    _Z,
     // west  (-x): axU=Z, axW=Y → [-Y, +Y, -Z, +Z]
-    -_Y,  _Y, -_Z,  _Z,
+    -_Y,
+    _Y,
+    -_Z,
+    _Z,
     // up    (+y): axU=X, axW=Z → [-X, +X, -Z, +Z]
-    -_X,  _X, -_Z,  _Z,
+    -_X,
+    _X,
+    -_Z,
+    _Z,
     // down  (-y): axU=X, axW=Z → [-X, +X, -Z, +Z]
-    -_X,  _X, -_Z,  _Z,
+    -_X,
+    _X,
+    -_Z,
+    _Z,
     // south (+z): axU=X, axW=Y → [-X, +X, -Y, +Y]
-    -_X,  _X, -_Y,  _Y,
+    -_X,
+    _X,
+    -_Y,
+    _Y,
     // north (-z): axU=X, axW=Y → [-X, +X, -Y, +Y]
-    -_X,  _X, -_Y,  _Y,
+    -_X,
+    _X,
+    -_Y,
+    _Y,
 ]);
 
 const FACE_CORNER_EDGES = new Uint8Array([
     // east:  v0(1,0,1)[-Y,+Z]=[0,3] v1(1,0,0)[-Y,-Z]=[0,2] v2(1,1,0)[+Y,-Z]=[1,2] v3(1,1,1)[+Y,+Z]=[1,3]
-    0, 3,  0, 2,  1, 2,  1, 3,
+    0, 3, 0, 2, 1, 2, 1, 3,
     // west:  v0(0,0,0)[-Y,-Z]=[0,2] v1(0,0,1)[-Y,+Z]=[0,3] v2(0,1,1)[+Y,+Z]=[1,3] v3(0,1,0)[+Y,-Z]=[1,2]
-    0, 2,  0, 3,  1, 3,  1, 2,
+    0, 2, 0, 3, 1, 3, 1, 2,
     // up:    v0(0,1,0)[-X,-Z]=[0,2] v1(0,1,1)[-X,+Z]=[0,3] v2(1,1,1)[+X,+Z]=[1,3] v3(1,1,0)[+X,-Z]=[1,2]
-    0, 2,  0, 3,  1, 3,  1, 2,
+    0, 2, 0, 3, 1, 3, 1, 2,
     // down:  v0(0,0,1)[-X,+Z]=[0,3] v1(0,0,0)[-X,-Z]=[0,2] v2(1,0,0)[+X,-Z]=[1,2] v3(1,0,1)[+X,+Z]=[1,3]
-    0, 3,  0, 2,  1, 2,  1, 3,
+    0, 3, 0, 2, 1, 2, 1, 3,
     // south: v0(0,0,1)[-X,-Y]=[0,2] v1(1,0,1)[+X,-Y]=[1,2] v2(1,1,1)[+X,+Y]=[1,3] v3(0,1,1)[-X,+Y]=[0,3]
-    0, 2,  1, 2,  1, 3,  0, 3,
+    0, 2, 1, 2, 1, 3, 0, 3,
     // north: v0(1,0,0)[+X,-Y]=[1,2] v1(0,0,0)[-X,-Y]=[0,2] v2(0,1,0)[-X,+Y]=[0,3] v3(1,1,0)[+X,+Y]=[1,3]
-    1, 2,  0, 2,  0, 3,  1, 3,
+    1, 2, 0, 2, 0, 3, 1, 3,
 ]);
-
 
 // ── light packing for vertex attribute ──────────────────────────────
 //
@@ -468,35 +490,35 @@ const SLOT_SCRATCH = 12;
 // mapped through AO_BRIGHTNESS_TABLE at cache-fill time, so bake quantises
 // to 4 bits across the [0.5, 1.0] range. shader unpacks linearly:
 // `aoFactor = bits/30 + 0.5`.
-const _faceCacheAo = new Float32Array(FACE_CACHE_SIZE * 4);   // 52 f32
+const _faceCacheAo = new Float32Array(FACE_CACHE_SIZE * 4); // 52 f32
 // AO brightness curve. raw occluder count 0..3 → brightness.
 // `[0]` = 3 occluders (darkest), `[3]` = 0 occluders (open). Vanilla MC
 // / Sodium values — applied uniformly across all light levels (the
 // shader no longer fades AO based on corner brightness).
 const AO_BRIGHTNESS_TABLE = new Float32Array([0.5, 0.6, 0.8, 1.0]);
-const _faceCacheAoValid = new Uint8Array(FACE_CACHE_SIZE);      // 13 flags
+const _faceCacheAoValid = new Uint8Array(FACE_CACHE_SIZE); // 13 flags
 
 // Sibling lm field of the per-face cache (Sodium AoFaceData.lm analog).
 // 4 packed corner light words per slot. Layout matches `readLightCellByIdx`
 // output (R | G<<8 | B<<16 | sky<<24) — opacity bit 28 is stripped by
 // `blendCornerBrightness` at cache-fill time, so the stored words are
 // pure light.
-const _faceCacheLm = new Uint32Array(FACE_CACHE_SIZE * 4);    // 52 u32
+const _faceCacheLm = new Uint32Array(FACE_CACHE_SIZE * 4); // 52 u32
 // Independent validity from `_faceCacheAoValid`: AO bake and light bake
 // have the same lifetime (`meshChunk` runs both per voxel and
 // `resetFaceCaches` clears them together), but a quad emit may request AO
 // without light or vice-versa, so we don't want one to false-cache-hit
 // the other.
-const _faceCacheLmValid = new Uint8Array(FACE_CACHE_SIZE);    // 13 flags
+const _faceCacheLmValid = new Uint8Array(FACE_CACHE_SIZE); // 13 flags
 
 // per-face edge scratch — populated by every consumer of the Sodium-style
 // edge-share path (`ensureFaceCache`, `ensureFaceLightCache`, cube AO emit,
 // cube relight). 4 slots = the 4 unique edges around a face center, indexed
 // by FACE_CORNER_EDGES to pick which 2 bracket each corner. Reused across
 // every call; values overwritten on entry.
-const _edgeOffset = new Int32Array(4);   // slab-stride offsets to the 4 edges
-const _edgeOpaque = new Uint8Array(4);   // 0/1 opacity flag per edge
-const _edgeLightWords = new Uint32Array(4);  // packed light word per edge
+const _edgeOffset = new Int32Array(4); // slab-stride offsets to the 4 edges
+const _edgeOpaque = new Uint8Array(4); // 0/1 opacity flag per edge
+const _edgeLightWords = new Uint32Array(4); // packed light word per edge
 
 /** per-face × per-corner (u, w) ∈ {0,1}², matching FACE_VERTS v0..v3
  *  projected via the face's (axisU, axisW). bilerp weights against these
@@ -504,17 +526,17 @@ const _edgeLightWords = new Uint32Array(4);  // packed light word per edge
  *  inverse table `FACE_UV_HASH_TO_CORNER` below for the ALIGNED_FULL fast path. */
 const AO_FACE_UW_PER_CORNER = /* @__PURE__ */ new Float32Array([
     // east (+x), axU=z, axW=y
-    1, 0,  0, 0,  0, 1,  1, 1,
+    1, 0, 0, 0, 0, 1, 1, 1,
     // west (-x), axU=z, axW=y
-    0, 0,  1, 0,  1, 1,  0, 1,
+    0, 0, 1, 0, 1, 1, 0, 1,
     // up (+y), axU=x, axW=z
-    0, 0,  0, 1,  1, 1,  1, 0,
+    0, 0, 0, 1, 1, 1, 1, 0,
     // down (-y), axU=x, axW=z
-    0, 1,  0, 0,  1, 0,  1, 1,
+    0, 1, 0, 0, 1, 0, 1, 1,
     // south (+z), axU=x, axW=y
-    0, 0,  1, 0,  1, 1,  0, 1,
+    0, 0, 1, 0, 1, 1, 0, 1,
     // north (-z), axU=x, axW=y
-    1, 0,  0, 0,  0, 1,  1, 1,
+    1, 0, 0, 0, 0, 1, 1, 1,
 ]);
 
 /** ALIGNED_FULL fast path: hash a quad-vert's (u, w) ∈ {0, 1}² to a 2-bit
@@ -669,7 +691,7 @@ function blendChannelMinNonZero(a: number, b: number, c: number, d: number): num
     const mD = d || 16;
     const m = Math.min(mA, mB, mC, mD);
     if (m === 16) return 0;
-    return (((a || m) + (b || m) + (c || m) + (d || m)) >>> 2);
+    return ((a || m) + (b || m) + (c || m) + (d || m)) >>> 2;
 }
 
 /** Sodium `AoFaceData.calculateCornerBrightness(a, b, c, d, em…)`. Arg order
@@ -678,10 +700,25 @@ function blendChannelMinNonZero(a: number, b: number, c: number, d: number): num
  *  rather than load-bearing — keep it aligned so the relationship to Sodium
  *  is obvious. */
 function blendCornerBrightness(eAword: number, eBword: number, diagWord: number, centerWord: number): number {
-    const r  = blendChannelMinNonZero(eAword        & 0xf, eBword        & 0xf, diagWord        & 0xf, centerWord        & 0xf);
-    const g  = blendChannelMinNonZero((eAword >>> 8) & 0xf, (eBword >>> 8) & 0xf, (diagWord >>> 8) & 0xf, (centerWord >>> 8) & 0xf);
-    const b  = blendChannelMinNonZero((eAword >>> 16) & 0xf, (eBword >>> 16) & 0xf, (diagWord >>> 16) & 0xf, (centerWord >>> 16) & 0xf);
-    const sk = blendChannelMinNonZero((eAword >>> 24) & 0xf, (eBword >>> 24) & 0xf, (diagWord >>> 24) & 0xf, (centerWord >>> 24) & 0xf);
+    const r = blendChannelMinNonZero(eAword & 0xf, eBword & 0xf, diagWord & 0xf, centerWord & 0xf);
+    const g = blendChannelMinNonZero(
+        (eAword >>> 8) & 0xf,
+        (eBword >>> 8) & 0xf,
+        (diagWord >>> 8) & 0xf,
+        (centerWord >>> 8) & 0xf,
+    );
+    const b = blendChannelMinNonZero(
+        (eAword >>> 16) & 0xf,
+        (eBword >>> 16) & 0xf,
+        (diagWord >>> 16) & 0xf,
+        (centerWord >>> 16) & 0xf,
+    );
+    const sk = blendChannelMinNonZero(
+        (eAword >>> 24) & 0xf,
+        (eBword >>> 24) & 0xf,
+        (diagWord >>> 24) & 0xf,
+        (centerWord >>> 24) & 0xf,
+    );
     return r | (g << 8) | (b << 16) | (sk << 24);
 }
 
@@ -720,12 +757,12 @@ function ensureFaceLightCache(
     // block's lightmap — the occluder's interior light is meaningless and
     // would pin every channel's min-non-zero to 0.
     let centerWord = readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx, cullTable);
-    if (offset && ((centerWord >>> 28) & 1)) {
+    if (offset && (centerWord >>> 28) & 1) {
         centerWord = readLightCellByIdx(_slab, _blockLightSlab, blockSlabIdx, cullTable);
     }
 
     // 4 edge reads — each shared by 2 corners
-    const e0Off = FACE_EDGE_OFFSETS[edgeOffsetBase    ]!;
+    const e0Off = FACE_EDGE_OFFSETS[edgeOffsetBase]!;
     const e1Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 1]!;
     const e2Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 2]!;
     const e3Off = FACE_EDGE_OFFSETS[edgeOffsetBase + 3]!;
@@ -752,9 +789,10 @@ function ensureFaceLightCache(
         const eB = FACE_CORNER_EDGES[cornerEdgeBase + corner * 2 + 1]!;
         const eAWord = _edgeLightWords[eA]!;
         const eBWord = _edgeLightWords[eB]!;
-        const diagWord = (_edgeOpaque[eA] && _edgeOpaque[eB])
-            ? eAWord
-            : readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + _edgeOffset[eA]! + _edgeOffset[eB]!, cullTable);
+        const diagWord =
+            _edgeOpaque[eA] && _edgeOpaque[eB]
+                ? eAWord
+                : readLightCellByIdx(_slab, _blockLightSlab, centerSlabIdx + _edgeOffset[eA]! + _edgeOffset[eB]!, cullTable);
         _faceCacheLm[outBase + corner] = blendCornerBrightness(eAWord, eBWord, diagWord, centerWord);
     }
 
@@ -788,13 +826,13 @@ function emitQuadLightSmooth(
 ): void {
     const cacheIdx = ensureFaceLightCache(blockSlabIdx, face, offset, cullTable);
     const lmBase = cacheIdx * 4;
-    const l0 = _faceCacheLm[lmBase + ( vertPicks        & 0x3)]!;
+    const l0 = _faceCacheLm[lmBase + (vertPicks & 0x3)]!;
     const l1 = _faceCacheLm[lmBase + ((vertPicks >>> 2) & 0x3)]!;
     const l2 = _faceCacheLm[lmBase + ((vertPicks >>> 4) & 0x3)]!;
     const l3 = _faceCacheLm[lmBase + ((vertPicks >>> 6) & 0x3)]!;
     const out = target.quads;
     const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    out[cornerBase]     = l0 | applyDiagFlipBit(metaWord, l0, l1, l2, l3);
+    out[cornerBase] = l0 | applyDiagFlipBit(metaWord, l0, l1, l2, l3);
     out[cornerBase + 1] = l1;
     out[cornerBase + 2] = l2;
     out[cornerBase + 3] = l3;
@@ -805,17 +843,11 @@ function emitQuadLightSmooth(
  *  (when AO bits differ corner-to-corner), so we still consult
  *  `applyDiagFlipBit` — its lm-tiebreaker collapses to 0 since the 4
  *  lights are identical. */
-function emitQuadLightFlat(
-    target: QuadScratch,
-    quadIdx: number,
-    cellIdx: number,
-    metaWord: number,
-    cullTable: Uint8Array,
-): void {
+function emitQuadLightFlat(target: QuadScratch, quadIdx: number, cellIdx: number, metaWord: number, cullTable: Uint8Array): void {
     const out = target.quads;
     const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    const w = readLightCellByIdx(_slab, _blockLightSlab, cellIdx, cullTable) & 0x0F0F0F0F;
-    out[cornerBase]     = w | applyDiagFlipBit(metaWord, w, w, w, w);
+    const w = readLightCellByIdx(_slab, _blockLightSlab, cellIdx, cullTable) & 0x0f0f0f0f;
+    out[cornerBase] = w | applyDiagFlipBit(metaWord, w, w, w, w);
     out[cornerBase + 1] = w;
     out[cornerBase + 2] = w;
     out[cornerBase + 3] = w;
@@ -828,7 +860,7 @@ function emitQuadLightFlat(
 function emitQuadLightEmissive(target: QuadScratch, quadIdx: number): void {
     const out = target.quads;
     const cornerBase = quadIdx * QUAD_STRIDE_U32S + QUAD_LIGHT_OFFSET;
-    out[cornerBase]     = 0xffffffff;
+    out[cornerBase] = 0xffffffff;
     out[cornerBase + 1] = 0xffffffff;
     out[cornerBase + 2] = 0xffffffff;
     out[cornerBase + 3] = 0xffffffff;
@@ -862,13 +894,11 @@ function getBlendedAo(slot: number, w0: number, w1: number, w2: number, w3: numb
 
 /** bake variant of Sodium `AoFaceData.weightedMean`. Writes a face-level
  *  linear combine of slotA and slotB into slotOut, for _faceCacheAo only. */
-function blendFacesInto(
-    slotA: number, wA: number,
-    slotB: number, wB: number,
-    slotOut: number,
-): void {
-    const bA = slotA * 4, bB = slotB * 4, bO = slotOut * 4;
-    _faceCacheAo[bO]     = _faceCacheAo[bA]!     * wA + _faceCacheAo[bB]!     * wB;
+function blendFacesInto(slotA: number, wA: number, slotB: number, wB: number, slotOut: number): void {
+    const bA = slotA * 4,
+        bB = slotB * 4,
+        bO = slotOut * 4;
+    _faceCacheAo[bO] = _faceCacheAo[bA]! * wA + _faceCacheAo[bB]! * wB;
     _faceCacheAo[bO + 1] = _faceCacheAo[bA + 1]! * wA + _faceCacheAo[bB + 1]! * wB;
     _faceCacheAo[bO + 2] = _faceCacheAo[bA + 2]! * wA + _faceCacheAo[bB + 2]! * wB;
     _faceCacheAo[bO + 3] = _faceCacheAo[bA + 3]! * wA + _faceCacheAo[bB + 3]! * wB;
@@ -880,12 +910,7 @@ function blendFacesInto(
  *  - depth ≤ 0 → cacheTrue (face cell beyond the host)
  *  - depth ≥ 1 → cacheFalse (host cell itself)
  *  - else      → SLOT_SCRATCH containing weightedMean(true, 1-depth, false, depth) */
-function gatherInsetFaceForAxis(
-    slabIdx: number,
-    face: number,
-    depth: number,
-    opaqueMaskSlab: Uint8Array,
-): number {
+function gatherInsetFaceForAxis(slabIdx: number, face: number, depth: number, opaqueMaskSlab: Uint8Array): number {
     if (depth <= 0) return ensureFaceCache(slabIdx, face, 1, opaqueMaskSlab);
     if (depth >= 1) return ensureFaceCache(slabIdx, face, 0, opaqueMaskSlab);
     const sT = ensureFaceCache(slabIdx, face, 1, opaqueMaskSlab);
@@ -948,8 +973,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = (y + 1) * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + 0;
                     const srcIdx = voxelIndex(CHUNK_SIZE - 1, y, z);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
     // +X border (slab x=CHUNK_SIZE+1 ← neighbor x=0)
@@ -961,8 +986,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = (y + 1) * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
                     const srcIdx = voxelIndex(0, y, z);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
     // -Y border (slab y=0 ← neighbor y=CHUNK_SIZE-1)
@@ -974,8 +999,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = 0 * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + (x + 1);
                     const srcIdx = voxelIndex(x, CHUNK_SIZE - 1, z);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
     // +Y border (slab y=CHUNK_SIZE+1 ← neighbor y=0)
@@ -987,8 +1012,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + (x + 1);
                     const srcIdx = voxelIndex(x, 0, z);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
     // -Z border (slab z=0 ← neighbor z=CHUNK_SIZE-1)
@@ -1000,8 +1025,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = (y + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (x + 1);
                     const srcIdx = voxelIndex(x, y, CHUNK_SIZE - 1);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
     // +Z border (slab z=CHUNK_SIZE+1 ← neighbor z=0)
@@ -1013,8 +1038,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
                     const dstIdx = (y + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (x + 1);
                     const srcIdx = voxelIndex(x, y, 0);
                     slab[dstIdx] = neighbor.palette[neighbor.data[srcIdx]!]!;
-                lightSlab[dstIdx] = neighbor.light[srcIdx]!;
-            }
+                    lightSlab[dstIdx] = neighbor.light[srcIdx]!;
+                }
         }
     }
 
@@ -1275,7 +1300,7 @@ export const META_OFFSET = 9; // u32[9] within each quad header
  *  so this is the identity packing `0 | 1<<2 | 2<<4 | 3<<6 = 0xE4` —
  *  same for every face. Consumed by `emitQuadLightSmooth` to index
  *  AO_OFFSETS per vertex. */
-const CUBE_VERT_CORNER_PICKS = 0xE4;
+const CUBE_VERT_CORNER_PICKS = 0xe4;
 
 const MAX_QUADS_PER_BUCKET = 4096;
 const SCRATCH_BUCKET_COUNT = 3 * FACING_COUNT; // 21
@@ -1310,9 +1335,7 @@ const quadScratch: QuadScratch[] = /* @__PURE__ */ (() => {
  *  the dedicated meta word (`u32[9]`). top byte stays reserved for future
  *  per-quad geometry/material flags. */
 function packQuadFlags(texIndex: number, animType: number, facing: number): number {
-    return (texIndex & 0xffff)
-        | ((animType & 0xf) << 16)
-        | ((facing & 0x7) << 20);
+    return (texIndex & 0xffff) | ((animType & 0xf) << 16) | ((facing & 0x7) << 20);
 }
 
 /** meta layout: aoPacked 16 (4 bits/corner) | reserved 16.
@@ -1351,22 +1374,44 @@ const POS16_INT_LUT = /* @__PURE__ */ (() => {
  *  phased per-block so crossed quads sway together). top 4 bits of u32[3] are
  *  reserved for a future `stackOffset` (multi-block stacked sway). */
 function writeQuadHeader(
-    s: QuadScratch, quadIdx: number,
-    x0v: number, y0v: number, z0v: number,
-    x1v: number, y1v: number, z1v: number,
-    x2v: number, y2v: number, z2v: number,
-    x3v: number, y3v: number, z3v: number,
+    s: QuadScratch,
+    quadIdx: number,
+    x0v: number,
+    y0v: number,
+    z0v: number,
+    x1v: number,
+    y1v: number,
+    z1v: number,
+    x2v: number,
+    y2v: number,
+    z2v: number,
+    x3v: number,
+    y3v: number,
+    z3v: number,
     normalOct16: number,
-    uvPacked0: number, uvPacked1: number, uvPacked2: number, uvPacked3: number,
+    uvPacked0: number,
+    uvPacked1: number,
+    uvPacked2: number,
+    uvPacked3: number,
     flags: number,
     metaWord: number,
-    bx: number, by: number, bz: number,
+    bx: number,
+    by: number,
+    bz: number,
 ): void {
     const off = quadIdx * QUAD_STRIDE_U32S;
-    const x0 = pos16(x0v), y0 = pos16(y0v), z0 = pos16(z0v);
-    const x1 = pos16(x1v), y1 = pos16(y1v), z1 = pos16(z1v);
-    const x2 = pos16(x2v), y2 = pos16(y2v), z2 = pos16(z2v);
-    const x3 = pos16(x3v), y3 = pos16(y3v), z3 = pos16(z3v);
+    const x0 = pos16(x0v),
+        y0 = pos16(y0v),
+        z0 = pos16(z0v);
+    const x1 = pos16(x1v),
+        y1 = pos16(y1v),
+        z1 = pos16(z1v);
+    const x2 = pos16(x2v),
+        y2 = pos16(y2v),
+        z2 = pos16(z2v);
+    const x3 = pos16(x3v),
+        y3 = pos16(y3v),
+        z3 = pos16(z3v);
     s.quads[off] = x0 | (y0 << 8) | (z0 << 16) | (x1 << 24);
     s.quads[off + 1] = y1 | (z1 << 8) | (x2 << 16) | (y2 << 24);
     s.quads[off + 2] = z2 | (x3 << 8) | (y3 << 16) | (z3 << 24);
@@ -1383,22 +1428,44 @@ function writeQuadHeader(
  *  cube verts are always integer v ∈ {0..16}, so the LUT skips
  *  `Math.round` + clamp on 12 components per quad. */
 function writeQuadHeaderInt(
-    s: QuadScratch, quadIdx: number,
-    x0v: number, y0v: number, z0v: number,
-    x1v: number, y1v: number, z1v: number,
-    x2v: number, y2v: number, z2v: number,
-    x3v: number, y3v: number, z3v: number,
+    s: QuadScratch,
+    quadIdx: number,
+    x0v: number,
+    y0v: number,
+    z0v: number,
+    x1v: number,
+    y1v: number,
+    z1v: number,
+    x2v: number,
+    y2v: number,
+    z2v: number,
+    x3v: number,
+    y3v: number,
+    z3v: number,
     normalOct16: number,
-    uvPacked0: number, uvPacked1: number, uvPacked2: number, uvPacked3: number,
+    uvPacked0: number,
+    uvPacked1: number,
+    uvPacked2: number,
+    uvPacked3: number,
     flags: number,
     metaWord: number,
-    bx: number, by: number, bz: number,
+    bx: number,
+    by: number,
+    bz: number,
 ): void {
     const off = quadIdx * QUAD_STRIDE_U32S;
-    const x0 = POS16_INT_LUT[x0v]!, y0 = POS16_INT_LUT[y0v]!, z0 = POS16_INT_LUT[z0v]!;
-    const x1 = POS16_INT_LUT[x1v]!, y1 = POS16_INT_LUT[y1v]!, z1 = POS16_INT_LUT[z1v]!;
-    const x2 = POS16_INT_LUT[x2v]!, y2 = POS16_INT_LUT[y2v]!, z2 = POS16_INT_LUT[z2v]!;
-    const x3 = POS16_INT_LUT[x3v]!, y3 = POS16_INT_LUT[y3v]!, z3 = POS16_INT_LUT[z3v]!;
+    const x0 = POS16_INT_LUT[x0v]!,
+        y0 = POS16_INT_LUT[y0v]!,
+        z0 = POS16_INT_LUT[z0v]!;
+    const x1 = POS16_INT_LUT[x1v]!,
+        y1 = POS16_INT_LUT[y1v]!,
+        z1 = POS16_INT_LUT[z1v]!;
+    const x2 = POS16_INT_LUT[x2v]!,
+        y2 = POS16_INT_LUT[y2v]!,
+        z2 = POS16_INT_LUT[z2v]!;
+    const x3 = POS16_INT_LUT[x3v]!,
+        y3 = POS16_INT_LUT[y3v]!,
+        z3 = POS16_INT_LUT[z3v]!;
     s.quads[off] = x0 | (y0 << 8) | (z0 << 16) | (x1 << 24);
     s.quads[off + 1] = y1 | (z1 << 8) | (x2 << 16) | (y2 << 24);
     s.quads[off + 2] = z2 | (x3 << 8) | (y3 << 16) | (z3 << 24);
@@ -1414,7 +1481,9 @@ function writeQuadHeaderInt(
 /** classify a normal into one of the 7 facing slices.
  *  cardinals require |axis| > 0.999 (cosine within ~2.5° of an axis); else UNASSIGNED. */
 function classifyFacing(nx: number, ny: number, nz: number): number {
-    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    const ax = Math.abs(nx),
+        ay = Math.abs(ny),
+        az = Math.abs(nz);
     if (ax > 0.999) return nx > 0 ? FACING_POS_X : FACING_NEG_X;
     if (ay > 0.999) return ny > 0 ? FACING_POS_Y : FACING_NEG_Y;
     if (az > 0.999) return nz > 0 ? FACING_POS_Z : FACING_NEG_Z;
@@ -1530,7 +1599,7 @@ export type MeshInput = {
     cy: number;
     cz: number;
     blocks: Uint32Array; // 18³ globalStateIds, AIR for missing neighbours
-    light: Uint16Array;  // 18³ packed sky4|R4|G4|B4, sky=15 for missing neighbours
+    light: Uint16Array; // 18³ packed sky4|R4|G4|B4, sky=15 for missing neighbours
 };
 
 // shared main-thread MeshInput backed by module-scope slab scratch. each
@@ -1563,12 +1632,7 @@ export function buildMeshInput(voxels: Voxels, chunk: Chunk): MeshInput {
  *  bytes. */
 export const SLAB_BLOCKS_BYTES = SLAB_VOLUME * 4;
 export const SLAB_LIGHT_BYTES = SLAB_VOLUME * 2;
-export function buildSlabsIntoBuffers(
-    voxels: Voxels,
-    chunk: Chunk,
-    blocksBuf: ArrayBuffer,
-    lightBuf: ArrayBuffer,
-): void {
+export function buildSlabsIntoBuffers(voxels: Voxels, chunk: Chunk, blocksBuf: ArrayBuffer, lightBuf: ArrayBuffer): void {
     buildSlabs(voxels, chunk, new Uint32Array(blocksBuf), new Uint16Array(lightBuf));
 }
 
@@ -1605,11 +1669,7 @@ export function installSlabsAndBuildMeshInput(
  * module-level scratch targets, and the returned ChunkMeshResult slices
  * out only the populated regions.
  */
-export function meshChunk(
-    out: MeshOutput,
-    input: MeshInput,
-    registry: BlockRegistry,
-): ChunkMeshResult | null {
+export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegistry): ChunkMeshResult | null {
     // main-thread invariant: `input.blocks === _slab` and `input.light
     // === _blockLightSlab` (via `buildMeshInput`). Worker stage will
     // swap the module scratch views to the transferred buffers before
@@ -1655,8 +1715,12 @@ export function meshChunk(
     for (let i = 0; i < SCRATCH_BUCKET_COUNT; i++) quadScratch[i]!.quadCount = 0;
 
     // aabb in chunk-local coords; promoted to world space at return.
-    let aabbMinX = Infinity, aabbMinY = Infinity, aabbMinZ = Infinity;
-    let aabbMaxX = -Infinity, aabbMaxY = -Infinity, aabbMaxZ = -Infinity;
+    let aabbMinX = Infinity,
+        aabbMinY = Infinity,
+        aabbMinZ = Infinity;
+    let aabbMaxX = -Infinity,
+        aabbMaxY = -Infinity,
+        aabbMaxZ = -Infinity;
 
     // ── main voxel iteration ────────────────────────────────────────
 
@@ -1690,9 +1754,12 @@ export function meshChunk(
                     // longer in the header — it's implicit in the
                     // smooth-light averaging baked into light.
 
-                    const passBase = materialKind === MAT_TRANSLUCENT ? PASS_TRANSLUCENT_BASE
-                                   : materialKind === MAT_TRANSPARENT ? PASS_TRANSPARENT_BASE
-                                   :                                    PASS_OPAQUE_BASE;
+                    const passBase =
+                        materialKind === MAT_TRANSLUCENT
+                            ? PASS_TRANSLUCENT_BASE
+                            : materialKind === MAT_TRANSPARENT
+                              ? PASS_TRANSPARENT_BASE
+                              : PASS_OPAQUE_BASE;
 
                     const texBase = stateId * 6;
                     const uvStateBase = stateId * 48;
@@ -1716,7 +1783,12 @@ export function meshChunk(
                         // visible through the empty band.
                         if (neighborFluidGroup === 0) {
                             if (neighborCull === CULL_SOLID) continue;
-                            if (neighborCull === CULL_SELF && myCull === CULL_SELF && myBlockTypeId === blockTypeIdTable[neighborId]!) continue;
+                            if (
+                                neighborCull === CULL_SELF &&
+                                myCull === CULL_SELF &&
+                                myBlockTypeId === blockTypeIdTable[neighborId]!
+                            )
+                                continue;
                         }
 
                         const facing = FACE_TO_FACING[face]!;
@@ -1758,26 +1830,46 @@ export function meshChunk(
                         const eA3 = FACE_CORNER_EDGES[cornerEdgeBase + 6]!;
                         const eB3 = FACE_CORNER_EDGES[cornerEdgeBase + 7]!;
 
-                        const sA0 = _edgeOpaque[eA0]!, sB0 = _edgeOpaque[eB0]!;
-                        const sA1 = _edgeOpaque[eA1]!, sB1 = _edgeOpaque[eB1]!;
-                        const sA2 = _edgeOpaque[eA2]!, sB2 = _edgeOpaque[eB2]!;
-                        const sA3 = _edgeOpaque[eA3]!, sB3 = _edgeOpaque[eB3]!;
+                        const sA0 = _edgeOpaque[eA0]!,
+                            sB0 = _edgeOpaque[eB0]!;
+                        const sA1 = _edgeOpaque[eA1]!,
+                            sB1 = _edgeOpaque[eB1]!;
+                        const sA2 = _edgeOpaque[eA2]!,
+                            sB2 = _edgeOpaque[eB2]!;
+                        const sA3 = _edgeOpaque[eA3]!,
+                            sB3 = _edgeOpaque[eB3]!;
 
-                        const c0 = (sA0 && sB0) ? 0
-                            : (cullTable[_slab[neighborSlabIdx + _edgeOffset[eA0]! + _edgeOffset[eB0]!]!] === CULL_SOLID ? 1 : 0);
-                        const c1 = (sA1 && sB1) ? 0
-                            : (cullTable[_slab[neighborSlabIdx + _edgeOffset[eA1]! + _edgeOffset[eB1]!]!] === CULL_SOLID ? 1 : 0);
-                        const c2 = (sA2 && sB2) ? 0
-                            : (cullTable[_slab[neighborSlabIdx + _edgeOffset[eA2]! + _edgeOffset[eB2]!]!] === CULL_SOLID ? 1 : 0);
-                        const c3 = (sA3 && sB3) ? 0
-                            : (cullTable[_slab[neighborSlabIdx + _edgeOffset[eA3]! + _edgeOffset[eB3]!]!] === CULL_SOLID ? 1 : 0);
+                        const c0 =
+                            sA0 && sB0
+                                ? 0
+                                : cullTable[_slab[neighborSlabIdx + _edgeOffset[eA0]! + _edgeOffset[eB0]!]!] === CULL_SOLID
+                                  ? 1
+                                  : 0;
+                        const c1 =
+                            sA1 && sB1
+                                ? 0
+                                : cullTable[_slab[neighborSlabIdx + _edgeOffset[eA1]! + _edgeOffset[eB1]!]!] === CULL_SOLID
+                                  ? 1
+                                  : 0;
+                        const c2 =
+                            sA2 && sB2
+                                ? 0
+                                : cullTable[_slab[neighborSlabIdx + _edgeOffset[eA2]! + _edgeOffset[eB2]!]!] === CULL_SOLID
+                                  ? 1
+                                  : 0;
+                        const c3 =
+                            sA3 && sB3
+                                ? 0
+                                : cullTable[_slab[neighborSlabIdx + _edgeOffset[eA3]! + _edgeOffset[eB3]!]!] === CULL_SOLID
+                                  ? 1
+                                  : 0;
 
                         // raw occluder count → brightness via vanilla MC table
                         // (3 occluders → 0.5, 0 → 1.0). 4-bit quantized below.
-                        const ao0 = (sA0 && sB0) ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA0 - sB0 - c0]!;
-                        const ao1 = (sA1 && sB1) ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA1 - sB1 - c1]!;
-                        const ao2 = (sA2 && sB2) ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA2 - sB2 - c2]!;
-                        const ao3 = (sA3 && sB3) ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA3 - sB3 - c3]!;
+                        const ao0 = sA0 && sB0 ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA0 - sB0 - c0]!;
+                        const ao1 = sA1 && sB1 ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA1 - sB1 - c1]!;
+                        const ao2 = sA2 && sB2 ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA2 - sB2 - c2]!;
+                        const ao3 = sA3 && sB3 ? AO_BRIGHTNESS_TABLE[0]! : AO_BRIGHTNESS_TABLE[3 - sA3 - sB3 - c3]!;
 
                         // diagFlip lands in light[0] bit 29 inside
                         // `emitQuadLightSmooth` via `applyDiagFlipBit`.
@@ -1798,29 +1890,36 @@ export function meshChunk(
 
                         const quadIdx = target.quadCount;
                         writeQuadHeaderInt(
-                            target, quadIdx,
-                            x + FACE_VERTS[faceVertBase]!,     y + FACE_VERTS[faceVertBase + 1]!,  z + FACE_VERTS[faceVertBase + 2]!,
-                            x + FACE_VERTS[faceVertBase + 3]!, y + FACE_VERTS[faceVertBase + 4]!,  z + FACE_VERTS[faceVertBase + 5]!,
-                            x + FACE_VERTS[faceVertBase + 6]!, y + FACE_VERTS[faceVertBase + 7]!,  z + FACE_VERTS[faceVertBase + 8]!,
-                            x + FACE_VERTS[faceVertBase + 9]!, y + FACE_VERTS[faceVertBase + 10]!, z + FACE_VERTS[faceVertBase + 11]!,
+                            target,
+                            quadIdx,
+                            x + FACE_VERTS[faceVertBase]!,
+                            y + FACE_VERTS[faceVertBase + 1]!,
+                            z + FACE_VERTS[faceVertBase + 2]!,
+                            x + FACE_VERTS[faceVertBase + 3]!,
+                            y + FACE_VERTS[faceVertBase + 4]!,
+                            z + FACE_VERTS[faceVertBase + 5]!,
+                            x + FACE_VERTS[faceVertBase + 6]!,
+                            y + FACE_VERTS[faceVertBase + 7]!,
+                            z + FACE_VERTS[faceVertBase + 8]!,
+                            x + FACE_VERTS[faceVertBase + 9]!,
+                            y + FACE_VERTS[faceVertBase + 10]!,
+                            z + FACE_VERTS[faceVertBase + 11]!,
                             normalPacked,
-                            packUV(cubeFaceUVs[faceUvBase]!,     cubeFaceUVs[faceUvBase + 1]!),
+                            packUV(cubeFaceUVs[faceUvBase]!, cubeFaceUVs[faceUvBase + 1]!),
                             packUV(cubeFaceUVs[faceUvBase + 2]!, cubeFaceUVs[faceUvBase + 3]!),
                             packUV(cubeFaceUVs[faceUvBase + 4]!, cubeFaceUVs[faceUvBase + 5]!),
                             packUV(cubeFaceUVs[faceUvBase + 6]!, cubeFaceUVs[faceUvBase + 7]!),
                             flags,
                             metaWord,
-                            x, y, z,
+                            x,
+                            y,
+                            z,
                         );
 
                         if (emissiveTable[stateId]!) {
                             emitQuadLightEmissive(target, quadIdx);
                         } else {
-                            emitQuadLightSmooth(
-                                target, quadIdx,
-                                slabIdx, face, 1, CUBE_VERT_CORNER_PICKS,
-                                metaWord, cullTable,
-                            );
+                            emitQuadLightSmooth(target, quadIdx, slabIdx, face, 1, CUBE_VERT_CORNER_PICKS, metaWord, cullTable);
                         }
                         target.quadCount++;
 
@@ -1828,7 +1927,9 @@ export function meshChunk(
                         if (x < aabbMinX) aabbMinX = x;
                         if (y < aabbMinY) aabbMinY = y;
                         if (z < aabbMinZ) aabbMinZ = z;
-                        const xEnd = x + 1, yEnd = y + 1, zEnd = z + 1;
+                        const xEnd = x + 1,
+                            yEnd = y + 1,
+                            zEnd = z + 1;
                         if (xEnd > aabbMaxX) aabbMaxX = xEnd;
                         if (yEnd > aabbMaxY) aabbMaxY = yEnd;
                         if (zEnd > aabbMaxZ) aabbMaxZ = zEnd;
@@ -1840,9 +1941,12 @@ export function meshChunk(
                     // side quads clip V to match. same-fluid above merges
                     // upward (effectiveHeight = 1) so internal slabs vanish.
 
-                    const passBase = materialKind === MAT_TRANSLUCENT ? PASS_TRANSLUCENT_BASE
-                                   : materialKind === MAT_TRANSPARENT ? PASS_TRANSPARENT_BASE
-                                   :                                    PASS_OPAQUE_BASE;
+                    const passBase =
+                        materialKind === MAT_TRANSLUCENT
+                            ? PASS_TRANSLUCENT_BASE
+                            : materialKind === MAT_TRANSPARENT
+                              ? PASS_TRANSPARENT_BASE
+                              : PASS_OPAQUE_BASE;
 
                     const texBase = stateId * 6;
                     const surfaceHeight = surfaceHeightTable[stateId]!;
@@ -1934,10 +2038,18 @@ export function meshChunk(
                         _edgeOpaque[2] = cullTable[_slab[neighborSlabIdx + eo2]!] === CULL_SOLID ? 1 : 0;
                         _edgeOpaque[3] = cullTable[_slab[neighborSlabIdx + eo3]!] === CULL_SOLID ? 1 : 0;
 
-                        let px0 = 0, py0 = 0, pz0 = 0;
-                        let px1 = 0, py1 = 0, pz1 = 0;
-                        let px2 = 0, py2 = 0, pz2 = 0;
-                        let px3 = 0, py3 = 0, pz3 = 0;
+                        let px0 = 0,
+                            py0 = 0,
+                            pz0 = 0;
+                        let px1 = 0,
+                            py1 = 0,
+                            pz1 = 0;
+                        let px2 = 0,
+                            py2 = 0,
+                            pz2 = 0;
+                        let px3 = 0,
+                            py3 = 0,
+                            pz3 = 0;
 
                         // per-corner AO. positions/UVs stashed for writeQuadHeader below.
                         // Smooth light emitted further down via
@@ -1950,7 +2062,16 @@ export function meshChunk(
                             const bothOpaque = side1 && side2;
                             const ao = bothOpaque
                                 ? AO_BRIGHTNESS_TABLE[0]!
-                                : AO_BRIGHTNESS_TABLE[3 - side1 - side2 - (cullTable[_slab[neighborSlabIdx + _edgeOffset[edgeAIndex]! + _edgeOffset[edgeBIndex]!]!] === CULL_SOLID ? 1 : 0)]!;
+                                : AO_BRIGHTNESS_TABLE[
+                                      3 -
+                                          side1 -
+                                          side2 -
+                                          (cullTable[
+                                              _slab[neighborSlabIdx + _edgeOffset[edgeAIndex]! + _edgeOffset[edgeBIndex]!]!
+                                          ] === CULL_SOLID
+                                              ? 1
+                                              : 0)
+                                  ]!;
 
                             const vertOffset = faceVertBase + corner * 3;
                             const uvOffset = faceUvBase + corner * 2;
@@ -1961,10 +2082,23 @@ export function meshChunk(
                             const pz = z + FACE_VERTS[vertOffset + 2]!;
                             const finalV = isSide && cornerV === 0 ? topVClamp : cornerV;
 
-                            if (corner === 0) { px0 = px; py0 = py; pz0 = pz; }
-                            else if (corner === 1) { px1 = px; py1 = py; pz1 = pz; }
-                            else if (corner === 2) { px2 = px; py2 = py; pz2 = pz; }
-                            else { px3 = px; py3 = py; pz3 = pz; }
+                            if (corner === 0) {
+                                px0 = px;
+                                py0 = py;
+                                pz0 = pz;
+                            } else if (corner === 1) {
+                                px1 = px;
+                                py1 = py;
+                                pz1 = pz;
+                            } else if (corner === 2) {
+                                px2 = px;
+                                py2 = py;
+                                pz2 = pz;
+                            } else {
+                                px3 = px;
+                                py3 = py;
+                                pz3 = pz;
+                            }
 
                             _liquidUvScratch[corner] = packUV(FACE_UVS[uvOffset]!, finalV);
                             _liquidAoScratch[corner] = ao;
@@ -1993,24 +2127,43 @@ export function meshChunk(
                         const metaWord = packQuadMeta(aoPacked);
                         const liquidQuadIdx = target.quadCount;
                         writeQuadHeader(
-                            target, liquidQuadIdx,
-                            px0, py0, pz0,
-                            px1, py1, pz1,
-                            px2, py2, pz2,
-                            px3, py3, pz3,
+                            target,
+                            liquidQuadIdx,
+                            px0,
+                            py0,
+                            pz0,
+                            px1,
+                            py1,
+                            pz1,
+                            px2,
+                            py2,
+                            pz2,
+                            px3,
+                            py3,
+                            pz3,
                             normalPacked,
-                            _liquidUvScratch[0]!, _liquidUvScratch[1]!, _liquidUvScratch[2]!, _liquidUvScratch[3]!,
+                            _liquidUvScratch[0]!,
+                            _liquidUvScratch[1]!,
+                            _liquidUvScratch[2]!,
+                            _liquidUvScratch[3]!,
                             flags,
                             metaWord,
-                            x, y, z,
+                            x,
+                            y,
+                            z,
                         );
                         if (emissiveTable[stateId]!) {
                             emitQuadLightEmissive(target, liquidQuadIdx);
                         } else {
                             emitQuadLightSmooth(
-                                target, liquidQuadIdx,
-                                slabIdx, face, 1, CUBE_VERT_CORNER_PICKS,
-                                metaWord, cullTable,
+                                target,
+                                liquidQuadIdx,
+                                slabIdx,
+                                face,
+                                1,
+                                CUBE_VERT_CORNER_PICKS,
+                                metaWord,
+                                cullTable,
                             );
                         }
                         target.quadCount++;
@@ -2061,9 +2214,12 @@ export function meshChunk(
                         // into multiple passes (cauldron: opaque shell +
                         // translucent water).
                         const quadMaterial = quadMaterials[qi]!;
-                        const passBase = quadMaterial === MAT_TRANSLUCENT ? PASS_TRANSLUCENT_BASE
-                                       : quadMaterial === MAT_TRANSPARENT ? PASS_TRANSPARENT_BASE
-                                       :                                    PASS_OPAQUE_BASE;
+                        const passBase =
+                            quadMaterial === MAT_TRANSLUCENT
+                                ? PASS_TRANSLUCENT_BASE
+                                : quadMaterial === MAT_TRANSPARENT
+                                  ? PASS_TRANSPARENT_BASE
+                                  : PASS_OPAQUE_BASE;
 
                         const nBase = qi * 3;
                         const nx = qNormal[nBase]!;
@@ -2084,7 +2240,11 @@ export function meshChunk(
                         // the opaque-mask slab.
                         const shape = qShape[qi]!;
                         if (shape === SHAPE_FLAT) {
-                            _meshAoScratch[0] = _meshAoScratch[1] = _meshAoScratch[2] = _meshAoScratch[3] = AO_BRIGHTNESS_TABLE[3]!;
+                            _meshAoScratch[0] =
+                                _meshAoScratch[1] =
+                                _meshAoScratch[2] =
+                                _meshAoScratch[3] =
+                                    AO_BRIGHTNESS_TABLE[3]!;
                         } else if (shape === SHAPE_IRREGULAR) {
                             // Sodium applyIrregularFace: per-vert weighted-mean over
                             // the 3 axis face caches, weights = n_a². face direction
@@ -2106,7 +2266,8 @@ export function meshChunk(
                                 const vy = qCornerPos[pBase + 1]!;
                                 const vz = qCornerPos[pBase + 2]!;
 
-                                let aoAcc = 0, wAcc = 0;
+                                let aoAcc = 0,
+                                    wAcc = 0;
 
                                 if (nsx > 0) {
                                     const positive = nx >= 0;
@@ -2114,10 +2275,14 @@ export function meshChunk(
                                     const depth = positive ? 1 - vx : vx;
                                     const slot = gatherInsetFaceForAxis(slabIdx, face, depth, _opaqueMaskSlab);
                                     const fb = face * 8;
-                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,     w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
-                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!, w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
-                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!, w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
-                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!, w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
+                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,
+                                        w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
+                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!,
+                                        w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
+                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!,
+                                        w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
+                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!,
+                                        w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
                                     const bw0 = (1 - Math.abs(vz - u0)) * (1 - Math.abs(vy - w0p));
                                     const bw1 = (1 - Math.abs(vz - u1)) * (1 - Math.abs(vy - w1p));
                                     const bw2 = (1 - Math.abs(vz - u2)) * (1 - Math.abs(vy - w2p));
@@ -2131,10 +2296,14 @@ export function meshChunk(
                                     const depth = positive ? 1 - vy : vy;
                                     const slot = gatherInsetFaceForAxis(slabIdx, face, depth, _opaqueMaskSlab);
                                     const fb = face * 8;
-                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,     w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
-                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!, w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
-                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!, w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
-                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!, w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
+                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,
+                                        w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
+                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!,
+                                        w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
+                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!,
+                                        w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
+                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!,
+                                        w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
                                     const bw0 = (1 - Math.abs(vx - u0)) * (1 - Math.abs(vz - w0p));
                                     const bw1 = (1 - Math.abs(vx - u1)) * (1 - Math.abs(vz - w1p));
                                     const bw2 = (1 - Math.abs(vx - u2)) * (1 - Math.abs(vz - w2p));
@@ -2148,10 +2317,14 @@ export function meshChunk(
                                     const depth = positive ? 1 - vz : vz;
                                     const slot = gatherInsetFaceForAxis(slabIdx, face, depth, _opaqueMaskSlab);
                                     const fb = face * 8;
-                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,     w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
-                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!, w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
-                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!, w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
-                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!, w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
+                                    const u0 = AO_FACE_UW_PER_CORNER[fb]!,
+                                        w0p = AO_FACE_UW_PER_CORNER[fb + 1]!;
+                                    const u1 = AO_FACE_UW_PER_CORNER[fb + 2]!,
+                                        w1p = AO_FACE_UW_PER_CORNER[fb + 3]!;
+                                    const u2 = AO_FACE_UW_PER_CORNER[fb + 4]!,
+                                        w2p = AO_FACE_UW_PER_CORNER[fb + 5]!;
+                                    const u3 = AO_FACE_UW_PER_CORNER[fb + 6]!,
+                                        w3p = AO_FACE_UW_PER_CORNER[fb + 7]!;
                                     const bw0 = (1 - Math.abs(vx - u0)) * (1 - Math.abs(vy - w0p));
                                     const bw1 = (1 - Math.abs(vx - u1)) * (1 - Math.abs(vy - w1p));
                                     const bw2 = (1 - Math.abs(vx - u2)) * (1 - Math.abs(vy - w2p));
@@ -2204,10 +2377,14 @@ export function meshChunk(
                                     ? gatherInsetFaceForAxis(slabIdx, faceDir, qVertDepth[qi * 4 + v]!, _opaqueMaskSlab)
                                     : uniformSlot;
 
-                                const u0 = AO_FACE_UW_PER_CORNER[uwBase]!,     w0p = AO_FACE_UW_PER_CORNER[uwBase + 1]!;
-                                const u1 = AO_FACE_UW_PER_CORNER[uwBase + 2]!, w1p = AO_FACE_UW_PER_CORNER[uwBase + 3]!;
-                                const u2 = AO_FACE_UW_PER_CORNER[uwBase + 4]!, w2p = AO_FACE_UW_PER_CORNER[uwBase + 5]!;
-                                const u3 = AO_FACE_UW_PER_CORNER[uwBase + 6]!, w3p = AO_FACE_UW_PER_CORNER[uwBase + 7]!;
+                                const u0 = AO_FACE_UW_PER_CORNER[uwBase]!,
+                                    w0p = AO_FACE_UW_PER_CORNER[uwBase + 1]!;
+                                const u1 = AO_FACE_UW_PER_CORNER[uwBase + 2]!,
+                                    w1p = AO_FACE_UW_PER_CORNER[uwBase + 3]!;
+                                const u2 = AO_FACE_UW_PER_CORNER[uwBase + 4]!,
+                                    w2p = AO_FACE_UW_PER_CORNER[uwBase + 5]!;
+                                const u3 = AO_FACE_UW_PER_CORNER[uwBase + 6]!,
+                                    w3p = AO_FACE_UW_PER_CORNER[uwBase + 7]!;
                                 const bw0 = (1 - Math.abs(u - u0)) * (1 - Math.abs(w - w0p));
                                 const bw1 = (1 - Math.abs(u - u1)) * (1 - Math.abs(w - w1p));
                                 const bw2 = (1 - Math.abs(u - u2)) * (1 - Math.abs(w - w2p));
@@ -2230,29 +2407,48 @@ export function meshChunk(
                         const aoPacked = ao0Bits | (ao1Bits << 4) | (ao2Bits << 8) | (ao3Bits << 12);
 
                         const vBase = qi * 12;
-                        const px0 = x + qVerts[vBase]!,      py0 = y + qVerts[vBase + 1]!,  pz0 = z + qVerts[vBase + 2]!;
-                        const px1 = x + qVerts[vBase + 3]!,  py1 = y + qVerts[vBase + 4]!,  pz1 = z + qVerts[vBase + 5]!;
-                        const px2 = x + qVerts[vBase + 6]!,  py2 = y + qVerts[vBase + 7]!,  pz2 = z + qVerts[vBase + 8]!;
-                        const px3 = x + qVerts[vBase + 9]!,  py3 = y + qVerts[vBase + 10]!, pz3 = z + qVerts[vBase + 11]!;
+                        const px0 = x + qVerts[vBase]!,
+                            py0 = y + qVerts[vBase + 1]!,
+                            pz0 = z + qVerts[vBase + 2]!;
+                        const px1 = x + qVerts[vBase + 3]!,
+                            py1 = y + qVerts[vBase + 4]!,
+                            pz1 = z + qVerts[vBase + 5]!;
+                        const px2 = x + qVerts[vBase + 6]!,
+                            py2 = y + qVerts[vBase + 7]!,
+                            pz2 = z + qVerts[vBase + 8]!;
+                        const px3 = x + qVerts[vBase + 9]!,
+                            py3 = y + qVerts[vBase + 10]!,
+                            pz3 = z + qVerts[vBase + 11]!;
 
                         const flags = packQuadFlags(textureIndex, animType, facing);
                         const metaWord = packQuadMeta(aoPacked);
 
                         const quadIdx = target.quadCount;
                         writeQuadHeader(
-                            target, quadIdx,
-                            px0, py0, pz0,
-                            px1, py1, pz1,
-                            px2, py2, pz2,
-                            px3, py3, pz3,
+                            target,
+                            quadIdx,
+                            px0,
+                            py0,
+                            pz0,
+                            px1,
+                            py1,
+                            pz1,
+                            px2,
+                            py2,
+                            pz2,
+                            px3,
+                            py3,
+                            pz3,
                             normalPacked,
-                            packUV(qUVs[uvBase]!,     qUVs[uvBase + 1]!),
+                            packUV(qUVs[uvBase]!, qUVs[uvBase + 1]!),
                             packUV(qUVs[uvBase + 2]!, qUVs[uvBase + 3]!),
                             packUV(qUVs[uvBase + 4]!, qUVs[uvBase + 5]!),
                             packUV(qUVs[uvBase + 6]!, qUVs[uvBase + 7]!),
                             flags,
                             metaWord,
-                            x, y, z,
+                            x,
+                            y,
+                            z,
                         );
 
                         if (emissiveTable[stateId]!) {
@@ -2278,11 +2474,7 @@ export function meshChunk(
                                 const corner = FACE_UV_HASH_TO_CORNER[meshHashBase + hash]!;
                                 picks |= (corner & 0x3) << (v * 2);
                             }
-                            emitQuadLightSmooth(
-                                target, quadIdx,
-                                slabIdx, meshFace, meshOffset, picks,
-                                metaWord, cullTable,
-                            );
+                            emitQuadLightSmooth(target, quadIdx, slabIdx, meshFace, meshOffset, picks, metaWord, cullTable);
                         }
                         target.quadCount++;
 
@@ -2333,4 +2525,3 @@ export function meshChunk(
 
     return { opaque, transparent, translucent, aabb };
 }
-

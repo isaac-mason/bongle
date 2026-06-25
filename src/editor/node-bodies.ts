@@ -189,13 +189,7 @@ function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): vo
     rigidBody.setPosition(physics.rigid.world, body, _scratchPos, false);
 }
 
-export function update(
-    state: NodeBodies,
-    physics: Physics,
-    nodes: Nodes,
-    store: EditRoomStoreApi,
-    resources: Resources,
-): void {
+export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store: EditRoomStoreApi, resources: Resources): void {
     const { nodeToBody, bodyToNode, targetable } = state;
     const world = physics.rigid.world;
 

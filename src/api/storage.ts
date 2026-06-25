@@ -37,19 +37,10 @@ export const gameStorage = {
     get(ctx: ScriptContext, key: string): Promise<StorageEntry | null> {
         return requireDriver(ctx).game.get(key);
     },
-    set(
-        ctx: ScriptContext,
-        key: string,
-        value: JsonValue,
-        opts?: { ifVersion?: string },
-    ): Promise<StorageSetResult> {
+    set(ctx: ScriptContext, key: string, value: JsonValue, opts?: { ifVersion?: string }): Promise<StorageSetResult> {
         return requireDriver(ctx).game.set(key, value, opts);
     },
-    delete(
-        ctx: ScriptContext,
-        key: string,
-        opts?: { ifVersion?: string },
-    ): Promise<StorageDeleteResult> {
+    delete(ctx: ScriptContext, key: string, opts?: { ifVersion?: string }): Promise<StorageDeleteResult> {
         return requireDriver(ctx).game.delete(key, opts);
     },
     list(ctx: ScriptContext, opts?: StorageListOpts): Promise<StorageListPage> {
@@ -75,19 +66,10 @@ export const userStorage = {
     ): Promise<StorageSetResult> {
         return requireDriver(ctx).user.set(userId, key, value, opts);
     },
-    delete(
-        ctx: ScriptContext,
-        userId: string,
-        key: string,
-        opts?: { ifVersion?: string },
-    ): Promise<StorageDeleteResult> {
+    delete(ctx: ScriptContext, userId: string, key: string, opts?: { ifVersion?: string }): Promise<StorageDeleteResult> {
         return requireDriver(ctx).user.delete(userId, key, opts);
     },
-    list(
-        ctx: ScriptContext,
-        userId: string,
-        opts?: StorageListOpts,
-    ): Promise<StorageListPage> {
+    list(ctx: ScriptContext, userId: string, opts?: StorageListOpts): Promise<StorageListPage> {
         return requireDriver(ctx).user.list(userId, opts);
     },
 };

@@ -21,7 +21,10 @@ import { addDeps, type DepHandle } from './dep-graph';
 
 export function __addDeps<H extends DepHandle>(handle: H, deps: ReadonlyArray<DepHandle>): H {
     if (deps.length > 0) {
-        addDeps(handle.dependency, deps.map((d) => d.dependency));
+        addDeps(
+            handle.dependency,
+            deps.map((d) => d.dependency),
+        );
     }
     return handle;
 }

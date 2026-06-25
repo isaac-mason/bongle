@@ -60,11 +60,7 @@ export const RIG_6BONE_REQUIRED_NODES = [
  *  builds these as persistent rig nodes and derives their rest position from
  *  the parent bone's geometry when a model doesn't author one — so creators
  *  get usable mount points for free; an authored node's TRS wins. */
-export const RIG_6BONE_ATTACH_NODES = [
-    RIG_6BONE_BACK,
-    RIG_6BONE_HAND_LEFT,
-    RIG_6BONE_HAND_RIGHT,
-] as const;
+export const RIG_6BONE_ATTACH_NODES = [RIG_6BONE_BACK, RIG_6BONE_HAND_LEFT, RIG_6BONE_HAND_RIGHT] as const;
 
 /** Height bounds (metres) — referenced by the post-v1 validator,
  *  not enforced in v1. Listed here so the eventual extension has a
@@ -96,9 +92,7 @@ export type RigSceneView = {
     readonly roots: readonly RigNodeView[];
 };
 
-export type ValidationResult =
-    | { readonly ok: true }
-    | { readonly ok: false; readonly errors: readonly string[] };
+export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly errors: readonly string[] };
 
 /** v1: required-node presence only.
  *  Post-v1 extends to height bounds, triangle/texture caps, TRS rest

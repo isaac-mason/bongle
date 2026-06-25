@@ -72,18 +72,30 @@ export function halfFromPlaceCtx(ctx: BlockPlaceCtx): 'bottom' | 'top' {
 // east(+X) → north(-Z) → west(-X) → south(+Z).
 
 const FACING4_ROT_Y_CW: Record<Facing4, Facing4> = {
-    east: 'north', north: 'west', west: 'south', south: 'east',
+    east: 'north',
+    north: 'west',
+    west: 'south',
+    south: 'east',
 };
 const FACING4_ROT_Y_CCW: Record<Facing4, Facing4> = {
-    north: 'east', east: 'south', south: 'west', west: 'north',
+    north: 'east',
+    east: 'south',
+    south: 'west',
+    west: 'north',
 };
 // raw tables exported for presets whose flip hooks branch on axis directly;
 // new code should prefer flipFacing4().
 export const FACING4_FLIP_X: Record<Facing4, Facing4> = {
-    east: 'west', west: 'east', north: 'north', south: 'south',
+    east: 'west',
+    west: 'east',
+    north: 'north',
+    south: 'south',
 };
 export const FACING4_FLIP_Z: Record<Facing4, Facing4> = {
-    north: 'south', south: 'north', east: 'east', west: 'west',
+    north: 'south',
+    south: 'north',
+    east: 'east',
+    west: 'west',
 };
 
 /** rotate a cardinal 90° around Y. cw = looking down +Y. */

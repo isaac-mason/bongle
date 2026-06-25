@@ -216,10 +216,7 @@ function packSkyStops(stops: SkyStop[]): Float32Array {
  */
 export function createEnvironmentResources(initial: ResolvedEnvironment): EnvironmentResources {
     const envConfigBuffer = gpu.createStorageBuffer(EnvConfig, packConfig(initial, 0.6, 0));
-    const envSkyBuffer = gpu.createStorageBuffer(
-        gpu.d.sizedArray(gpu.d.vec3f, SKY_VEC3_COUNT),
-        packSkyStops(initial.sky.stops),
-    );
+    const envSkyBuffer = gpu.createStorageBuffer(gpu.d.sizedArray(gpu.d.vec3f, SKY_VEC3_COUNT), packSkyStops(initial.sky.stops));
     return { envConfigBuffer, envSkyBuffer };
 }
 
@@ -230,9 +227,35 @@ export function disposeResources(res: EnvironmentResources): void {
 
 /* ── sky shader ───────────────────────────────────────────────────── */
 
-const { f32, u32, vec3f, vec4f, mix, mul, add, sub, dot, cos, sin, abs, pow,
-    floor, fract, sqrt, clamp, smoothstep, step, max, normalize, attribute,
-    storage, varying, cameraProjectionMatrix, cameraViewMatrix, d } = gpu;
+const {
+    f32,
+    u32,
+    vec3f,
+    vec4f,
+    mix,
+    mul,
+    add,
+    sub,
+    dot,
+    cos,
+    sin,
+    abs,
+    pow,
+    floor,
+    fract,
+    sqrt,
+    clamp,
+    smoothstep,
+    step,
+    max,
+    normalize,
+    attribute,
+    storage,
+    varying,
+    cameraProjectionMatrix,
+    cameraViewMatrix,
+    d,
+} = gpu;
 
 /**
  * david hoskins' "hash without sine" — float-bit-mixing in [0,1) with no
@@ -283,16 +306,8 @@ function getSkyMaterial(): gpu.Material {
     const bBase = mul(segB, u32(SKY_VEC3_PER_STOP)).toVar('lutBBase');
 
     const zenith = mix(skyArr.element(aBase), skyArr.element(bBase), fracT).toVar('zenith');
-    const horizon = mix(
-        skyArr.element(add(aBase, u32(1))),
-        skyArr.element(add(bBase, u32(1))),
-        fracT,
-    ).toVar('horizon');
-    const nadir = mix(
-        skyArr.element(add(aBase, u32(2))),
-        skyArr.element(add(bBase, u32(2))),
-        fracT,
-    ).toVar('nadir');
+    const horizon = mix(skyArr.element(add(aBase, u32(1))), skyArr.element(add(bBase, u32(1))), fracT).toVar('horizon');
+    const nadir = mix(skyArr.element(add(aBase, u32(2))), skyArr.element(add(bBase, u32(2))), fracT).toVar('nadir');
 
     // -- vertical gradient --
     // y in [-1,1]; above horizon blend horizon→zenith, below blend horizon→nadir.
@@ -381,7 +396,10 @@ function getSkyMaterial(): gpu.Material {
     const sunWash = mul(pow(cdotSunC, sunWashPow), sunWashStrength).toVar('sunWash');
     const sunFalloff = clamp(add(sunCore, sunWash), f32(0), f32(1)).toVar('sunFalloff');
     const sunTintW = mul(mul(sunFalloff, horizonBand), sunEnabled).toVar('sunTintW');
-    const moonTintW = mul(mul(mul(mul(pow(clamp(cdotMoon, f32(0), f32(1)), f32(3)), horizonBand), nightFactor), f32(0.25)), moonEnabled).toVar('moonTintW');
+    const moonTintW = mul(
+        mul(mul(mul(pow(clamp(cdotMoon, f32(0), f32(1)), f32(3)), horizonBand), nightFactor), f32(0.25)),
+        moonEnabled,
+    ).toVar('moonTintW');
 
     // warm tint shifts orange → deep red as the sun nears the horizon.
     const sunTintBase = vec3f(f32(FOG_SUN_TINT[0]), f32(FOG_SUN_TINT[1]), f32(FOG_SUN_TINT[2]));
@@ -445,7 +463,10 @@ function getSkyMaterial(): gpu.Material {
     // ground plane when the camera tilts down. narrow smoothstep band
     // around y=0 keeps the cutoff from aliasing along the horizon line.
     const aboveHorizon = smoothstep(f32(0), f32(0.04), y).toVar('starAboveHorizon');
-    const starIntensity = mul(mul(mul(mul(mul(mul(mul(starOn, onStar), starBrightness), twinkle), nightFactor), occlusion), starsEnabled), aboveHorizon).toVar('starIntensity');
+    const starIntensity = mul(
+        mul(mul(mul(mul(mul(mul(starOn, onStar), starBrightness), twinkle), nightFactor), occlusion), starsEnabled),
+        aboveHorizon,
+    ).toVar('starIntensity');
     const starColorNode = vec3f(f32(STAR_COLOR[0]), f32(STAR_COLOR[1]), f32(STAR_COLOR[2]));
     const stars = mul(starColorNode, starIntensity).toVar('stars');
 
@@ -489,7 +510,12 @@ function createSkyMesh(res: EnvironmentResources): gpu.Mesh {
 
 /* ── lifecycle ────────────────────────────────────────────────────── */
 
-export function init(scene: gpu.Scene, resources: EnvironmentResources, initial: ResolvedEnvironment, cloudResources: CloudResources.CloudResources): Environment {
+export function init(
+    scene: gpu.Scene,
+    resources: EnvironmentResources,
+    initial: ResolvedEnvironment,
+    cloudResources: CloudResources.CloudResources,
+): Environment {
     const skyMesh = createSkyMesh(resources);
     scene.add(skyMesh);
     const clouds = CloudVisuals.init(scene, cloudResources);

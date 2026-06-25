@@ -31,10 +31,14 @@ export function emptyHotbar(): HotbarSlot[] {
 /** stable string key for an item — usable as a react key or DnD id. */
 export function inventoryItemKey(item: InventoryItem): string {
     switch (item.kind) {
-        case 'block': return `block:${item.blockKey}`;
-        case 'prefab': return `prefab:${item.prefabId}`;
-        case 'blueprint': return `blueprint:${item.sceneId}`;
-        default: return `unknown:${JSON.stringify(item)}`;
+        case 'block':
+            return `block:${item.blockKey}`;
+        case 'prefab':
+            return `prefab:${item.prefabId}`;
+        case 'blueprint':
+            return `blueprint:${item.sceneId}`;
+        default:
+            return `unknown:${JSON.stringify(item)}`;
     }
 }
 
@@ -66,10 +70,7 @@ export function inventoryItemsEqual(a: InventoryItem | null, b: InventoryItem | 
  *
  * Returns id-only fallbacks when the room or def isn't available.
  */
-export function inventoryItemDisplay(
-    item: InventoryItem,
-    room: ClientRoom | null,
-): { name: string; id: string; title: string } {
+export function inventoryItemDisplay(item: InventoryItem, room: ClientRoom | null): { name: string; id: string; title: string } {
     switch (item.kind) {
         case 'block': {
             const id = item.blockKey;
@@ -113,9 +114,7 @@ export function buildCatalog(_room: ClientRoom, sceneList: string[]): InventoryI
     for (const id of prefabIds) {
         items.push({ kind: 'prefab', prefabId: id });
     }
-    const blueprintIds = sceneList
-        .filter((id) => id.startsWith(BLUEPRINT_PREFIX))
-        .sort();
+    const blueprintIds = sceneList.filter((id) => id.startsWith(BLUEPRINT_PREFIX)).sort();
     for (const id of blueprintIds) {
         items.push({ kind: 'blueprint', sceneId: id });
     }

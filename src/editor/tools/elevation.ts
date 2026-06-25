@@ -30,12 +30,7 @@ import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown, pointerHeld, pointerJustUp, pointerJustRight } from '../pointer-state';
 import type { Input } from '../../client/input';
-import type {
-    EditRoomStoreApi,
-    ElevationFalloff,
-    ElevationImage,
-    ElevationOptions,
-} from '../edit-room-store';
+import type { EditRoomStoreApi, ElevationFalloff, ElevationImage, ElevationOptions } from '../edit-room-store';
 import * as Selection from '../../core/scene/selection';
 import type { VoxelOp } from '../blueprint';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
@@ -85,13 +80,7 @@ function sampleImage(image: ElevationImage, dx: number, dz: number, size: number
 // ── column scan ───────────────────────────────────────────────────
 // topmost non-air voxel inside [yLo, yHi]. null = empty column in band.
 
-function findTopH(
-    voxels: Voxels,
-    wx: number,
-    wz: number,
-    yLo: number,
-    yHi: number,
-): { h: number; key: string } | null {
+function findTopH(voxels: Voxels, wx: number, wz: number, yLo: number, yHi: number): { h: number; key: string } | null {
     for (let y = yHi; y >= yLo; y--) {
         const key = getBlock(voxels, wx, y, wz);
         if (key !== BLOCK_AIR) return { h: y, key };
@@ -211,21 +200,8 @@ export function updateElevation(
             // project the stamp into state.forward/reverse only — nothing
             // hits the voxel grid until release. the cyan preview shows the
             // affected cells via the brush selection below.
-            const active = activeBlockKeyOf(
-                useEditor.getState().hotbar,
-                store.getState().activeSlotIndex,
-            );
-            applyElevationStamp(
-                voxels,
-                hv[0],
-                hv[1],
-                hv[2],
-                opts,
-                hv[1],
-                active,
-                state.forward,
-                state.reverse,
-            );
+            const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
+            applyElevationStamp(voxels, hv[0], hv[1], hv[2], opts, hv[1], active, state.forward, state.reverse);
             if (state.forward.length > 0) state.version++;
         }
     }
@@ -236,10 +212,7 @@ export function updateElevation(
             const dt = Math.min(0.05, Math.max(0, (now - state.lastFrameMs) / 1000));
             state.lastFrameMs = now;
             if (dt > 0) {
-                const active = activeBlockKeyOf(
-                    useEditor.getState().hotbar,
-                    store.getState().activeSlotIndex,
-                );
+                const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
                 const added = integrateContinuous(state, voxels, hv[0], hv[2], dt, state.opts, active);
                 if (added > 0) state.version++;
             }
@@ -302,12 +275,7 @@ export function updateElevation(
         // idle reads from the live UI setting so the tint previews the next
         // click's behavior.
         const activeMode = state.active && state.opts ? state.opts.mode : opts.mode;
-        const tint =
-            activeMode === 'lower'
-                ? BRUSH_TINTS.red
-                : activeMode === 'flatten'
-                ? BRUSH_TINTS.amber
-                : BRUSH_TINTS.cyan;
+        const tint = activeMode === 'lower' ? BRUSH_TINTS.red : activeMode === 'flatten' ? BRUSH_TINTS.amber : BRUSH_TINTS.cyan;
         // idle preview always marks the hit voxel (cy) so the user sees
         // where the click lands, plus thin disc layers at the mode's reachable
         // cap(s) so the y-limit band is visible:
@@ -318,9 +286,7 @@ export function updateElevation(
         // (inside terrain) still shows through.
         const showUpCap = activeMode === 'raise' || activeMode === 'flatten';
         const showDownCap = activeMode === 'lower' || activeMode === 'flatten';
-        const key = showStroke
-            ? `stroke|${state.version}`
-            : `idle|${hv![0]},${hv![1]},${hv![2]}|${size}|${yLimit}|${activeMode}`;
+        const key = showStroke ? `stroke|${state.version}` : `idle|${hv![0]},${hv![1]},${hv![2]}|${size}|${yLimit}|${activeMode}`;
         if (key !== state.previewKey) {
             state.previewKey = key;
             const sel = Selection.create();
@@ -347,10 +313,7 @@ export function updateElevation(
                 if (showDownCap) addDisc(cy - yLimit);
             }
             store.setState({ brush: sel, brushFill: tint.fill, brushEdges: tint.edges });
-        } else if (
-            store.getState().brushFill !== tint.fill ||
-            store.getState().brushEdges !== tint.edges
-        ) {
+        } else if (store.getState().brushFill !== tint.fill || store.getState().brushEdges !== tint.edges) {
             // mode changed without the preview geometry changing — push the new
             // tint refs anyway so the materials update.
             store.setState({ brushFill: tint.fill, brushEdges: tint.edges });
@@ -521,16 +484,12 @@ function integrateContinuous(
             if (col.sign > 0) {
                 // raise / flatten-up: fill with pattern (default: baselineKey).
                 const ceil =
-                    opts.mode === 'flatten'
-                        ? Math.min(yMax, state.flattenTargetY) - col.baselineH
-                        : yMax - col.baselineH;
+                    opts.mode === 'flatten' ? Math.min(yMax, state.flattenTargetY) - col.baselineH : yMax - col.baselineH;
                 const capped = Math.min(newApplied, ceil);
                 for (let i = col.applied + 1; i <= capped; i++) {
                     const wy = col.baselineH + i;
                     const cur = getBlock(voxels, wx, wy, wz);
-                    const key = opts.pattern
-                        ? samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng)
-                        : col.baselineKey;
+                    const key = opts.pattern ? samplePattern(opts.pattern, voxels, wx, wy, wz, active, rng) : col.baselineKey;
                     state.forward.push({ wx, wy, wz, key });
                     state.reverse.push({ wx, wy, wz, key: cur });
                     added++;
@@ -540,9 +499,7 @@ function integrateContinuous(
             } else {
                 // lower / flatten-down: clear from the top downward.
                 const floor =
-                    opts.mode === 'flatten'
-                        ? col.baselineH - Math.max(yMin, state.flattenTargetY)
-                        : col.baselineH - yMin;
+                    opts.mode === 'flatten' ? col.baselineH - Math.max(yMin, state.flattenTargetY) : col.baselineH - yMin;
                 const capped = Math.min(newApplied, floor);
                 for (let i = col.applied + 1; i <= capped; i++) {
                     const wy = col.baselineH - (i - 1);

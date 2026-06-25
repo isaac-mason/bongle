@@ -261,14 +261,10 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     pushToast: (toast) =>
         set((s) => ({
-            toasts: [
-                ...s.toasts,
-                { ...toast, id: crypto.randomUUID(), createdAt: performance.now() },
-            ],
+            toasts: [...s.toasts, { ...toast, id: crypto.randomUUID(), createdAt: performance.now() }],
         })),
 
-    dismissToast: (id) =>
-        set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+    dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 
     setNetSimEnabled: (netSimEnabled) => set({ netSimEnabled }),
     setNetSimRttMs: (netSimRttMs) => set({ netSimRttMs }),

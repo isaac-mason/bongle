@@ -19,10 +19,7 @@ import type { ScriptContext } from '../core/scene/scripts';
  *   keeps the world fully lit; `0` is pitch black except for block
  *   emission.
  */
-export function configureFloodFillLighting(
-    ctx: ScriptContext,
-    o: { enabled?: boolean; minLevel?: number },
-): void {
+export function configureFloodFillLighting(ctx: ScriptContext, o: { enabled?: boolean; minLevel?: number }): void {
     if (!ctx.server) {
         throw new Error('[bongle] configureFloodFillLighting: server-only');
     }

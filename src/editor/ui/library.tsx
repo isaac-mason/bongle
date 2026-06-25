@@ -20,13 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/compone
 import { depId, registry } from '../../core/registry';
 import { useEditor } from '../editor-store';
 import { useEditRoom } from '../edit-room-store';
-import {
-    buildCatalog,
-    type InventoryItem,
-    inventoryItemDisplay,
-    inventoryItemKey,
-    inventoryItemsEqual,
-} from '../inventory';
+import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
 import { InventoryItemIcon } from './inventory-icon';
 
 type Tab = 'inventory' | 'scenes';
@@ -148,7 +142,10 @@ function InventoryTab() {
                 {filtered.length === 0 ? (
                     <div className="text-[12px] font-mono text-neutral-400 px-2 py-4 text-center">no items</div>
                 ) : (
-                    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${ITEM_SIZE}px, 1fr))` }}>
+                    <div
+                        className="grid gap-1.5"
+                        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${ITEM_SIZE}px, 1fr))` }}
+                    >
                         {filtered.map((item) => (
                             <InventoryGridItem key={inventoryItemKey(item)} item={item} />
                         ))}
@@ -175,9 +172,7 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
                 <button
                     type="button"
                     onMouseEnter={() => setHovered(item)}
-                    onMouseLeave={() =>
-                        setHovered(null) /* simple: clearing on leave is fine, the next enter sets it again */
-                    }
+                    onMouseLeave={() => setHovered(null) /* simple: clearing on leave is fine, the next enter sets it again */}
                     onClick={() => setCarried(isCarried ? null : item)}
                     onContextMenu={(e) => {
                         e.preventDefault();

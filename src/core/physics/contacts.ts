@@ -280,12 +280,7 @@ export function aabbBodySideKey(aabbBodyId: number): string {
 }
 
 /** canonical key fragment for a voxel side. */
-export function voxelSideKey(
-    voxelX: number,
-    voxelY: number,
-    voxelZ: number,
-    subAabbIndex: number,
-): string {
+export function voxelSideKey(voxelX: number, voxelY: number, voxelZ: number, subAabbIndex: number): string {
     return `v${voxelX},${voxelY},${voxelZ}.${subAabbIndex}`;
 }
 
@@ -348,10 +343,7 @@ export function createPhysicsContacts(): PhysicsContacts {
  * clears the per-step lists. `_byKey` carries forward as the prev-step
  * active set, used to classify pairs into added vs persisted.
  */
-export function beginPhysicsContactsFrame(
-    pc: PhysicsContacts,
-    pairPool: ContactPairPool,
-): void {
+export function beginPhysicsContactsFrame(pc: PhysicsContacts, pairPool: ContactPairPool): void {
     if (pc._frameOpen) {
         throw new Error('contacts: beginPhysicsContactsFrame called without prior end');
     }
@@ -379,11 +371,7 @@ export function beginPhysicsContactsFrame(
  * cares — we don't expose one for now, since the common case is "fill
  * unconditionally, it's cheap."
  */
-export function recordContactPair(
-    pc: PhysicsContacts,
-    pairPool: ContactPairPool,
-    key: string,
-): ContactPair {
+export function recordContactPair(pc: PhysicsContacts, pairPool: ContactPairPool, key: string): ContactPair {
     if (pc._seen.has(key)) {
         return pc._byKey.get(key)!;
     }
@@ -439,25 +427,7 @@ function sideKeyFromPair(
 }
 
 function pairKeyFromPair(p: ContactPair): string {
-    const a = sideKeyFromPair(
-        p.aKind,
-        p.aNodeId,
-        p.aSubShapeId,
-        p.aAabbBodyId,
-        p.aVoxelX,
-        p.aVoxelY,
-        p.aVoxelZ,
-        p.aSubAabbIndex,
-    );
-    const b = sideKeyFromPair(
-        p.bKind,
-        p.bNodeId,
-        p.bSubShapeId,
-        p.bAabbBodyId,
-        p.bVoxelX,
-        p.bVoxelY,
-        p.bVoxelZ,
-        p.bSubAabbIndex,
-    );
+    const a = sideKeyFromPair(p.aKind, p.aNodeId, p.aSubShapeId, p.aAabbBodyId, p.aVoxelX, p.aVoxelY, p.aVoxelZ, p.aSubAabbIndex);
+    const b = sideKeyFromPair(p.bKind, p.bNodeId, p.bSubShapeId, p.bAabbBodyId, p.bVoxelX, p.bVoxelY, p.bVoxelZ, p.bSubAabbIndex);
     return pairKey(a, b);
 }

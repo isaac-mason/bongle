@@ -364,198 +364,201 @@ export const modelIdSync = sync(CharacterTrait, 'model-id', {
 // bone whose currently-playing clip channels target it — that's the
 // emote / upper-body-mask path. To opt out of engine-driven limb
 // swing, set `t.config.animation = false` and own the bones yourself.
-script(WorldTrait, 'character', (ctx) => {
-    const qChars = query(ctx, [CharacterTrait, TransformTrait]);
-    const qLocomotion = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
+script(
+    WorldTrait,
+    'character',
+    (ctx) => {
+        const qChars = query(ctx, [CharacterTrait, TransformTrait]);
+        const qLocomotion = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
 
-    onFrame(ctx, ({ delta }) => {
-        const controlNode = getControlNode(ctx);
-        const camera = getControlCamera(ctx);
+        onFrame(ctx, ({ delta }) => {
+            const controlNode = getControlNode(ctx);
+            const camera = getControlCamera(ctx);
 
-        // ── pass 1: every character ─────────────────────────────
-        for (const [t, transform] of qChars.matches) {
-            const node = t._node;
+            // ── pass 1: every character ─────────────────────────────
+            for (const [t, transform] of qChars.matches) {
+                const node = t._node;
 
-            // ── rig reconciler ─────────────────────────────────────
-            // Reconcile the mounted rig against LIVE payload state, not a cached
-            // fact. `getModel` returns a handle only while the target model's
-            // payload is ready *right now*, so a play/stop payload wipe (which
-            // clears Resources) self-heals on the next frame instead of getting
-            // stuck on a stale "already mounted" flag. Runs on every side; both
-            // server and client need bones for `findByName(node, 'head')` and for
-            // animator ticks.
-            const handle = getModel(ctx, t.modelId);
-            if (handle) {
-                // target ready → mount it unless it's already the mounted handle.
-                if (t.state.modelHandle !== handle) {
-                    unmountRig(node);
-                    mountRig(node, handle);
-                    t.state.modelId = t.modelId;
-                    t.state.modelHandle = handle;
+                // ── rig reconciler ─────────────────────────────────────
+                // Reconcile the mounted rig against LIVE payload state, not a cached
+                // fact. `getModel` returns a handle only while the target model's
+                // payload is ready *right now*, so a play/stop payload wipe (which
+                // clears Resources) self-heals on the next frame instead of getting
+                // stuck on a stale "already mounted" flag. Runs on every side; both
+                // server and client need bones for `findByName(node, 'head')` and for
+                // animator ticks.
+                const handle = getModel(ctx, t.modelId);
+                if (handle) {
+                    // target ready → mount it unless it's already the mounted handle.
+                    if (t.state.modelHandle !== handle) {
+                        unmountRig(node);
+                        mountRig(node, handle);
+                        t.state.modelId = t.modelId;
+                        t.state.modelHandle = handle;
+                    }
+                } else {
+                    // target not ready (still loading, or its payload was wiped under
+                    // us). Keep the lazy load going and show the placeholder — reverting
+                    // a now-stale real model so the null→ready edge re-mounts cleanly.
+                    // The player avatar pipeline also ensures on a player's behalf, but
+                    // a game that sets `modelId` directly (NPCs) relies on this.
+                    ensureModel(ctx, t.modelId);
+                    if (t.state.modelHandle !== baseAvatar) {
+                        unmountRig(node);
+                        mountRig(node, baseAvatar);
+                        t.state.modelId = BUILTIN_BASE_AVATAR_ID;
+                        t.state.modelHandle = baseAvatar;
+                    }
                 }
-            } else {
-                // target not ready (still loading, or its payload was wiped under
-                // us). Keep the lazy load going and show the placeholder — reverting
-                // a now-stale real model so the null→ready edge re-mounts cleanly.
-                // The player avatar pipeline also ensures on a player's behalf, but
-                // a game that sets `modelId` directly (NPCs) relies on this.
-                ensureModel(ctx, t.modelId);
-                if (t.state.modelHandle !== baseAvatar) {
-                    unmountRig(node);
-                    mountRig(node, baseAvatar);
-                    t.state.modelId = BUILTIN_BASE_AVATAR_ID;
-                    t.state.modelHandle = baseAvatar;
+
+                // The remaining systems are client-only presentation; skip
+                // them on the server (which does need the reconciler above
+                // for logical bone access).
+                if (!env.client) continue;
+
+                // No bones yet — reconciler will install the placeholder
+                // next call. Skip presentation work for this character.
+                if (t.state.modelId === null) continue;
+
+                // ── loading-state pulse ────────────────────────────────
+                const loading = t.state.modelId !== t.modelId;
+                if (loading) {
+                    const pulse = 0.5 + 0.5 * Math.sin((performance.now() * (TAU * LOAD_PULSE_RATE_HZ)) / 1000);
+                    t.state.loadingDither = LOAD_PULSE_MIN + (LOAD_PULSE_MAX - LOAD_PULSE_MIN) * pulse;
+                } else if (t.state.loadingDither > 0) {
+                    t.state.loadingDither = Math.max(0, t.state.loadingDither - delta * LOAD_DECAY_PER_SEC);
+                }
+
+                // ── POV visibility / proximity dither ──────────────────
+                // Compute the per-frame dither value first, then only walk
+                // the rig subtree when it changes vs the last applied value.
+                // Steady-state characters (loaded, out of fade range) write
+                // zero, compare-equals the cache, and skip the walk.
+                let finalDither: number;
+                if (controlNode === node) {
+                    const pc = getTrait(node, PlayerControllerTrait);
+                    const hide =
+                        (pc && pc.config.perspective === 'first') ||
+                        !!getTrait(node, OrbitControllerTrait) ||
+                        !!getTrait(node, FlyControllerTrait);
+                    setCharacterSubtreeVisible(node, !hide);
+                    // POV character can still be loading (own avatar streaming
+                    // in) — apply the load dither alone; proximity fade never
+                    // applies to own body. a script-driven dither (e.g. own death
+                    // fade) still composes in.
+                    finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
+                } else {
+                    setCharacterSubtreeVisible(node, true);
+                    const range = t.config.proximityFadeRange;
+                    let proxDither = 0;
+                    if (range > 0 && camera) {
+                        // measure against character center (~1m above the foot
+                        // transform) so a camera at eye-level standing inside
+                        // reads as ~0 distance.
+                        const dx = camera.position[0] - transform.position[0];
+                        const dy = camera.position[1] - (transform.position[1] + 1);
+                        const dz = camera.position[2] - transform.position[2];
+                        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                        proxDither = dist >= range ? 0 : 1 - dist / range;
+                    }
+                    finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
+                }
+                if (t.state.appliedDither !== finalDither) {
+                    setCharacterSubtreeDither(node, finalDither);
+                    t.state.appliedDither = finalDither;
                 }
             }
 
-            // The remaining systems are client-only presentation; skip
-            // them on the server (which does need the reconciler above
-            // for logical bone access).
-            if (!env.client) continue;
+            // ── pass 2: controller-driven characters ────────────────
+            // Locomotion + footstep sfx are client-only and depend on the
+            // rig being mounted (pass 1 above). Servers skip this pass
+            // entirely.
+            if (!env.client) return;
 
-            // No bones yet — reconciler will install the placeholder
-            // next call. Skip presentation work for this character.
-            if (t.state.modelId === null) continue;
+            for (const [t, cc, transform] of qLocomotion.matches) {
+                if (t.state.modelId === null) continue;
+                const node = t._node;
 
-            // ── loading-state pulse ────────────────────────────────
-            const loading = t.state.modelId !== t.modelId;
-            if (loading) {
-                const pulse = 0.5 + 0.5 * Math.sin(performance.now() * (TAU * LOAD_PULSE_RATE_HZ) / 1000);
-                t.state.loadingDither = LOAD_PULSE_MIN + (LOAD_PULSE_MAX - LOAD_PULSE_MIN) * pulse;
-            } else if (t.state.loadingDither > 0) {
-                t.state.loadingDither = Math.max(0, t.state.loadingDither - delta * LOAD_DECAY_PER_SEC);
-            }
+                // ── locomotion ──────────────────────────────────────────
+                // head bone follow: every side derives head local rotation
+                // from the synced `cc.input.look` + the synced player
+                // transform yaw. independent of `t.config.animation`; head
+                // tracking is a controller affordance, not a swing clip.
+                updateHeadOrientation(node, cc, transform);
 
-            // ── POV visibility / proximity dither ──────────────────
-            // Compute the per-frame dither value first, then only walk
-            // the rig subtree when it changes vs the last applied value.
-            // Steady-state characters (loaded, out of fade range) write
-            // zero, compare-equals the cache, and skip the walk.
-            let finalDither: number;
-            if (controlNode === node) {
-                const pc = getTrait(node, PlayerControllerTrait);
-                const hide =
-                    (pc && pc.config.perspective === 'first') ||
-                    !!getTrait(node, OrbitControllerTrait) ||
-                    !!getTrait(node, FlyControllerTrait);
-                setCharacterSubtreeVisible(node, !hide);
-                // POV character can still be loading (own avatar streaming
-                // in) — apply the load dither alone; proximity fade never
-                // applies to own body. a script-driven dither (e.g. own death
-                // fade) still composes in.
-                finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
-            } else {
-                setCharacterSubtreeVisible(node, true);
-                const range = t.config.proximityFadeRange;
-                let proxDither = 0;
-                if (range > 0 && camera) {
-                    // measure against character center (~1m above the foot
-                    // transform) so a camera at eye-level standing inside
-                    // reads as ~0 distance.
-                    const dx = camera.position[0] - transform.position[0];
-                    const dy = camera.position[1] - (transform.position[1] + 1);
-                    const dz = camera.position[2] - transform.position[2];
-                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                    proxDither = dist >= range ? 0 : 1 - dist / range;
+                // arm/leg swing. per-character opt-out via `t.config.animation`.
+                if (t.config.animation) driveProceduralLocomotion(node, t, cc, delta);
+
+                // ── footstep sfx + dust vfx ────────────────────────────
+                if (t.state.landingCooldownRemaining > 0) {
+                    t.state.landingCooldownRemaining -= delta;
                 }
-                finalDither = Math.max(proxDither, t.state.loadingDither, t.state.externalDither);
-            }
-            if (t.state.appliedDither !== finalDither) {
-                setCharacterSubtreeDither(node, finalDither);
-                t.state.appliedDither = finalDither;
-            }
-        }
 
-        // ── pass 2: controller-driven characters ────────────────
-        // Locomotion + footstep sfx are client-only and depend on the
-        // rig being mounted (pass 1 above). Servers skip this pass
-        // entirely.
-        if (!env.client) return;
+                const owner = isOwner(ctx, node);
+                const footBlockState = cc.state.groundBlockState;
+                const prevFootBlockState = cc.state.previousGroundBlockState;
+                const inLiquid = footBlockState !== 0 && (ctx.blocks.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
+                const wasInLiquid = prevFootBlockState !== 0 && (ctx.blocks.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
 
-        for (const [t, cc, transform] of qLocomotion.matches) {
-            if (t.state.modelId === null) continue;
-            const node = t._node;
+                // entry splash — fires on the bob-tick the foot-sample first
+                // resolves to a liquid voxel. one-shot, independent of cadence.
+                // played even if the bob hasn't ticked at all (e.g. dropping
+                // straight in from above), so it lives outside the bucket
+                // detector below.
+                if (inLiquid && !wasInLiquid) {
+                    emitSplash(ctx, cc, transform, owner, owner ? t.config.ownLandingVolume : t.config.landingVolume);
+                }
 
-            // ── locomotion ──────────────────────────────────────────
-            // head bone follow: every side derives head local rotation
-            // from the synced `cc.input.look` + the synced player
-            // transform yaw. independent of `t.config.animation`; head
-            // tracking is a controller affordance, not a swing clip.
-            updateHeadOrientation(node, cc, transform);
+                // suppress landing thud while feet are in liquid: water entry
+                // is already covered by emitSplash above, and resting at the
+                // bottom of a pool flickers `grounded` on/off and retriggers
+                // landings.
+                const isLanding = cc.state.grounded && !cc.state.previousGrounded && !inLiquid;
 
-            // arm/leg swing. per-character opt-out via `t.config.animation`.
-            if (t.config.animation) driveProceduralLocomotion(node, t, cc, delta);
-
-            // ── footstep sfx + dust vfx ────────────────────────────
-            if (t.state.landingCooldownRemaining > 0) {
-                t.state.landingCooldownRemaining -= delta;
-            }
-
-            const owner = isOwner(ctx, node);
-            const footBlockState = cc.state.groundBlockState;
-            const prevFootBlockState = cc.state.previousGroundBlockState;
-            const inLiquid =
-                footBlockState !== 0 && (ctx.blocks.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
-            const wasInLiquid =
-                prevFootBlockState !== 0 && (ctx.blocks.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
-
-            // entry splash — fires on the bob-tick the foot-sample first
-            // resolves to a liquid voxel. one-shot, independent of cadence.
-            // played even if the bob hasn't ticked at all (e.g. dropping
-            // straight in from above), so it lives outside the bucket
-            // detector below.
-            if (inLiquid && !wasInLiquid) {
-                emitSplash(ctx, cc, transform, owner, owner ? t.config.ownLandingVolume : t.config.landingVolume);
-            }
-
-            // suppress landing thud while feet are in liquid: water entry
-            // is already covered by emitSplash above, and resting at the
-            // bottom of a pool flickers `grounded` on/off and retriggers
-            // landings.
-            const isLanding = cc.state.grounded && !cc.state.previousGrounded && !inLiquid;
-
-            if (isLanding && t.state.landingCooldownRemaining <= 0) {
-                emitFootstep(
-                    ctx,
-                    cc,
-                    transform,
-                    owner,
-                    owner ? t.config.ownLandingVolume : t.config.landingVolume,
-                    true, // landing always kicks dust
-                );
-                t.state.landingCooldownRemaining = t.config.landingCooldown;
-            } else if (cc.state.grounded || inLiquid) {
-                // phase-bucket crossing detector. each bucket boundary lies
-                // at sin(bobPhase) = −1, i.e. the bottom of the camera dip.
-                // bucket increments → one footstep per 2π of phase. dt-robust
-                // (no threshold to undershoot) and amplitude-independent.
-                // gated on grounded OR feet-in-liquid so the swim stroke
-                // cadence drives the liquid block's `footstep` clips through
-                // the same path (controller writes the liquid id into
-                // `groundBlockState` while submerged).
-                const idx = Math.floor((cc.state.bobPhase - FOOT_PHASE) / TAU);
-                const prevIdx = Math.floor((cc.state.previousBobPhase - FOOT_PHASE) / TAU);
-                if (idx > prevIdx) {
+                if (isLanding && t.state.landingCooldownRemaining <= 0) {
                     emitFootstep(
                         ctx,
                         cc,
                         transform,
                         owner,
-                        owner ? t.config.ownFootstepVolume : t.config.footstepVolume,
-                        // dust: never while swimming (water doesn't kick
-                        // dust), and on ground only when sprinting — walking
-                        // stays visually quiet.
-                        cc.state.grounded && cc.input.sprint,
+                        owner ? t.config.ownLandingVolume : t.config.landingVolume,
+                        true, // landing always kicks dust
                     );
+                    t.state.landingCooldownRemaining = t.config.landingCooldown;
+                } else if (cc.state.grounded || inLiquid) {
+                    // phase-bucket crossing detector. each bucket boundary lies
+                    // at sin(bobPhase) = −1, i.e. the bottom of the camera dip.
+                    // bucket increments → one footstep per 2π of phase. dt-robust
+                    // (no threshold to undershoot) and amplitude-independent.
+                    // gated on grounded OR feet-in-liquid so the swim stroke
+                    // cadence drives the liquid block's `footstep` clips through
+                    // the same path (controller writes the liquid id into
+                    // `groundBlockState` while submerged).
+                    const idx = Math.floor((cc.state.bobPhase - FOOT_PHASE) / TAU);
+                    const prevIdx = Math.floor((cc.state.previousBobPhase - FOOT_PHASE) / TAU);
+                    if (idx > prevIdx) {
+                        emitFootstep(
+                            ctx,
+                            cc,
+                            transform,
+                            owner,
+                            owner ? t.config.ownFootstepVolume : t.config.footstepVolume,
+                            // dust: never while swimming (water doesn't kick
+                            // dust), and on ground only when sprinting — walking
+                            // stays visually quiet.
+                            cc.state.grounded && cc.input.sprint,
+                        );
+                    }
                 }
             }
-        }
-    });
-    // editor: true → this presentation runs in edit mode too, so the editor lens
-    // gets the real avatar (reconciler), procedural locomotion, and the
-    // first-person POV-hide when viewing through the character (control.node ===
-    // playerNode), not just in play.
-}, { editor: true });
+        });
+        // editor: true → this presentation runs in edit mode too, so the editor lens
+        // gets the real avatar (reconciler), procedural locomotion, and the
+        // first-person POV-hide when viewing through the character (control.node ===
+        // playerNode), not just in play.
+    },
+    { editor: true },
+);
 
 /** Rotate the canonical `head` bone to point at `cc.look`. yaw is the
  *  delta between look-yaw and the body's yaw (which already tracks
@@ -748,24 +751,35 @@ function ensureCanonicalBones(playerNode: Node): void {
 // pose is axis-aligned, so we compose local translate/scale only (no rotation).
 function deriveSocketPosition(boneNode: Node, handle: ModelHandle, socket: string): Vec3 | null {
     const meshes = handle.meshes as Record<string, { aabb: ArrayLike<number> } | undefined>;
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+    let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
     let found = false;
     const walk = (node: Node, ox: number, oy: number, oz: number, sx: number, sy: number, sz: number): void => {
         const meshName = getTrait(node, MeshTrait)?.meshId?.meshName;
         const aabb = meshName ? meshes[meshName]?.aabb : undefined;
         if (aabb) {
             found = true;
-            minX = Math.min(minX, ox + sx * aabb[0]); maxX = Math.max(maxX, ox + sx * aabb[3]);
-            minY = Math.min(minY, oy + sy * aabb[1]); maxY = Math.max(maxY, oy + sy * aabb[4]);
-            minZ = Math.min(minZ, oz + sz * aabb[2]); maxZ = Math.max(maxZ, oz + sz * aabb[5]);
+            minX = Math.min(minX, ox + sx * aabb[0]);
+            maxX = Math.max(maxX, ox + sx * aabb[3]);
+            minY = Math.min(minY, oy + sy * aabb[1]);
+            maxY = Math.max(maxY, oy + sy * aabb[4]);
+            minZ = Math.min(minZ, oz + sz * aabb[2]);
+            maxZ = Math.max(maxZ, oz + sz * aabb[5]);
         }
         for (const child of node.children) {
             const t = getTrait(child, TransformTrait);
             walk(
                 child,
-                ox + sx * (t?.position[0] ?? 0), oy + sy * (t?.position[1] ?? 0), oz + sz * (t?.position[2] ?? 0),
-                sx * (t?.scale[0] ?? 1), sy * (t?.scale[1] ?? 1), sz * (t?.scale[2] ?? 1),
+                ox + sx * (t?.position[0] ?? 0),
+                oy + sy * (t?.position[1] ?? 0),
+                oz + sz * (t?.position[2] ?? 0),
+                sx * (t?.scale[0] ?? 1),
+                sy * (t?.scale[1] ?? 1),
+                sz * (t?.scale[2] ?? 1),
             );
         }
     };
@@ -807,12 +821,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
             if (loadedTransform) {
                 const ph = getTrait(placeholder, TransformTrait);
                 if (ph) {
-                    setTransform(
-                        ph,
-                        loadedTransform.position,
-                        loadedTransform.quaternion,
-                        loadedTransform.scale,
-                    );
+                    setTransform(ph, loadedTransform.position, loadedTransform.quaternion, loadedTransform.scale);
                 }
             }
         }
@@ -847,9 +856,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     // otherwise it's a synthetic / decorative wrapper — skip the TRS
     // copy and just recurse into its children.
     const rootName = loadedRoot.name ?? '';
-    const rootPlaceholder = canonical.has(rootName)
-        ? findByName(playerNode, rootName)
-        : null;
+    const rootPlaceholder = canonical.has(rootName) ? findByName(playerNode, rootName) : null;
     visit(loadedRoot, rootPlaceholder);
 
     // drive any attach socket the model didn't author from its parent bone's
@@ -957,12 +964,7 @@ function unmountRig(playerNode: Node): void {
  * (hanging at rest). If a future avatar bakes a non-identity rest into
  * its limbs, add a rest-quaternion compose step here.
  */
-function driveProceduralLocomotion(
-    playerNode: Node,
-    t: CharacterTrait,
-    cc: CharacterControllerTrait,
-    delta: number,
-): void {
+function driveProceduralLocomotion(playerNode: Node, t: CharacterTrait, cc: CharacterControllerTrait, delta: number): void {
     const vx = cc.state.velocity[0];
     const vz = cc.state.velocity[2];
     const horizSpeed = Math.sqrt(vx * vx + vz * vz);
@@ -1006,11 +1008,7 @@ function applyLimb(playerNode: Node, boneName: string, xAngle: number, zAngle: n
  *  is one indexed lookup with no `findByName` walk on the rest pose.
  *  Caller guarantees `state.modelId !== null` (skipped at the iteration
  *  guard), but the handle can still be null transiently — bail. */
-function applyWaistCrouchDrop(
-    playerNode: Node,
-    t: CharacterTrait,
-    crouchAmount: number,
-): void {
+function applyWaistCrouchDrop(playerNode: Node, t: CharacterTrait, crouchAmount: number): void {
     if (!t.state.modelHandle) return;
     const restWaist = t.state.modelHandle.nodes.waist;
     if (!restWaist) return;
@@ -1028,7 +1026,6 @@ function applyWaistCrouchDrop(
     _waistPos[2] = restTransform.position[2] + crouchAmount * CROUCH_WAIST_BACK;
     setPosition(waistTransform, _waistPos);
 }
-
 
 /** resolve foot-sample block once, play SFX, conditionally emit dust.
  *  shared between the landing-edge branch and the phase-bucket
@@ -1092,11 +1089,7 @@ const SPLASH_DROPLET_COUNT = 6;
  *  top-face texture, so water blocks ship water-tinted slices for
  *  free) with splashier tuning — wider horizontal spread and higher
  *  upward velocity than the footstep puff. */
-function spawnSplashDroplets(
-    ctx: ScriptContext,
-    particles: BlockParticleConfig,
-    pos: Vec3,
-): void {
+function spawnSplashDroplets(ctx: ScriptContext, particles: BlockParticleConfig, pos: Vec3): void {
     const variants = particles.dust;
     if (!variants || variants.length === 0) return;
     for (let i = 0; i < SPLASH_DROPLET_COUNT; i++) {
@@ -1117,11 +1110,7 @@ function spawnSplashDroplets(
  *  numbers are tuned starting points — `particleUpdate.dust` already
  *  applies gravity + drag + ground-collide-destroy so the puff settles
  *  on its own. */
-function spawnFootstepDust(
-    ctx: ScriptContext,
-    particles: BlockParticleConfig,
-    pos: Vec3,
-): void {
+function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, pos: Vec3): void {
     const variants = particles.dust;
     if (!variants || variants.length === 0) return;
     for (let i = 0; i < FOOTSTEP_DUST_COUNT; i++) {
@@ -1131,7 +1120,7 @@ function spawnFootstepDust(
             velY: 5 + Math.random() * 0.2,
             velZ: (Math.random() - 0.5) * 1.2,
             lifetime: 0.4 + Math.random() * 0.2,
-            size: 0.05 + (Math.random() * 0.1),
+            size: 0.05 + Math.random() * 0.1,
         });
     }
 }

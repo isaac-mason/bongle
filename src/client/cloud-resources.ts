@@ -293,15 +293,8 @@ function createCloudMaterial(): Material {
     const nightColor = vec3f(f32(CLOUD_NIGHT[0]), f32(CLOUD_NIGHT[1]), f32(CLOUD_NIGHT[2]));
     const baseColor = mix(dayColor, nightColor, nightFactor).toVar('cloudBaseColor');
 
-    const sunsetTintLin = srgbBytesToLinear(
-        CLOUD_SUNSET_TINT_SRGB[0],
-        CLOUD_SUNSET_TINT_SRGB[1],
-        CLOUD_SUNSET_TINT_SRGB[2],
-    );
-    const sunHorizon = pow(
-        max(f32(0), sub(f32(1), abs(sunY).mul(f32(3)))),
-        f32(2),
-    ).toVar('cloudSunHorizon');
+    const sunsetTintLin = srgbBytesToLinear(CLOUD_SUNSET_TINT_SRGB[0], CLOUD_SUNSET_TINT_SRGB[1], CLOUD_SUNSET_TINT_SRGB[2]);
+    const sunHorizon = pow(max(f32(0), sub(f32(1), abs(sunY).mul(f32(3)))), f32(2)).toVar('cloudSunHorizon');
     const sunsetTint = vec3f(f32(sunsetTintLin[0]), f32(sunsetTintLin[1]), f32(sunsetTintLin[2]));
     const warmedColor = mix(baseColor, sunsetTint, sunHorizon.mul(f32(CLOUD_SUNSET_STRENGTH))).toVar('cloudWarmedColor');
 
@@ -312,9 +305,9 @@ function createCloudMaterial(): Material {
     // threshold. fadeOut == 0 → compare never passes (free fast path).
     const cloudFragmentDiscard = Fn(
         (color, fade, fragX, fragY) => {
-            const ign = fract(
-                mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY)))),
-            ).toVar('cloudIgn');
+            const ign = fract(mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY))))).toVar(
+                'cloudIgn',
+            );
             If(fade.greaterThan(ign), () => {
                 Discard();
             });

@@ -18,40 +18,128 @@ type Face = {
     verts: [number, number, number][];
     // face-local "right" and "up" axes in world space — used as a basis to
     // transform the label so it sticks to the face surface.
-    rx: number; ry: number; rz: number;
-    ux: number; uy: number; uz: number;
+    rx: number;
+    ry: number;
+    rz: number;
+    ux: number;
+    uy: number;
+    uz: number;
 };
 
 const FACES: Face[] = [
     {
-        nx: 1, ny: 0, nz: 0, label: 'RIGHT', color: '#c0392b',
-        verts: [[H, -H, -H], [H, H, -H], [H, H, H], [H, -H, H]],
-        rx: 0, ry: 0, rz: -1, ux: 0, uy: 1, uz: 0,
+        nx: 1,
+        ny: 0,
+        nz: 0,
+        label: 'RIGHT',
+        color: '#c0392b',
+        verts: [
+            [H, -H, -H],
+            [H, H, -H],
+            [H, H, H],
+            [H, -H, H],
+        ],
+        rx: 0,
+        ry: 0,
+        rz: -1,
+        ux: 0,
+        uy: 1,
+        uz: 0,
     },
     {
-        nx: -1, ny: 0, nz: 0, label: 'LEFT', color: '#c0392b',
-        verts: [[-H, -H, H], [-H, H, H], [-H, H, -H], [-H, -H, -H]],
-        rx: 0, ry: 0, rz: 1, ux: 0, uy: 1, uz: 0,
+        nx: -1,
+        ny: 0,
+        nz: 0,
+        label: 'LEFT',
+        color: '#c0392b',
+        verts: [
+            [-H, -H, H],
+            [-H, H, H],
+            [-H, H, -H],
+            [-H, -H, -H],
+        ],
+        rx: 0,
+        ry: 0,
+        rz: 1,
+        ux: 0,
+        uy: 1,
+        uz: 0,
     },
     {
-        nx: 0, ny: 1, nz: 0, label: 'TOP', color: '#27ae60',
-        verts: [[-H, H, -H], [H, H, -H], [H, H, H], [-H, H, H]],
-        rx: 1, ry: 0, rz: 0, ux: 0, uy: 0, uz: -1,
+        nx: 0,
+        ny: 1,
+        nz: 0,
+        label: 'TOP',
+        color: '#27ae60',
+        verts: [
+            [-H, H, -H],
+            [H, H, -H],
+            [H, H, H],
+            [-H, H, H],
+        ],
+        rx: 1,
+        ry: 0,
+        rz: 0,
+        ux: 0,
+        uy: 0,
+        uz: -1,
     },
     {
-        nx: 0, ny: -1, nz: 0, label: 'BOTTOM', color: '#27ae60',
-        verts: [[-H, -H, H], [H, -H, H], [H, -H, -H], [-H, -H, -H]],
-        rx: 1, ry: 0, rz: 0, ux: 0, uy: 0, uz: 1,
+        nx: 0,
+        ny: -1,
+        nz: 0,
+        label: 'BOTTOM',
+        color: '#27ae60',
+        verts: [
+            [-H, -H, H],
+            [H, -H, H],
+            [H, -H, -H],
+            [-H, -H, -H],
+        ],
+        rx: 1,
+        ry: 0,
+        rz: 0,
+        ux: 0,
+        uy: 0,
+        uz: 1,
     },
     {
-        nx: 0, ny: 0, nz: 1, label: 'FRONT', color: '#2980b9',
-        verts: [[H, -H, H], [H, H, H], [-H, H, H], [-H, -H, H]],
-        rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0,
+        nx: 0,
+        ny: 0,
+        nz: 1,
+        label: 'FRONT',
+        color: '#2980b9',
+        verts: [
+            [H, -H, H],
+            [H, H, H],
+            [-H, H, H],
+            [-H, -H, H],
+        ],
+        rx: 1,
+        ry: 0,
+        rz: 0,
+        ux: 0,
+        uy: 1,
+        uz: 0,
     },
     {
-        nx: 0, ny: 0, nz: -1, label: 'BACK', color: '#2980b9',
-        verts: [[-H, -H, -H], [-H, H, -H], [H, H, -H], [H, -H, -H]],
-        rx: -1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0,
+        nx: 0,
+        ny: 0,
+        nz: -1,
+        label: 'BACK',
+        color: '#2980b9',
+        verts: [
+            [-H, -H, -H],
+            [-H, H, -H],
+            [H, H, -H],
+            [H, -H, -H],
+        ],
+        rx: -1,
+        ry: 0,
+        rz: 0,
+        ux: 0,
+        uy: 1,
+        uz: 0,
     },
 ];
 
@@ -87,17 +175,35 @@ export function OrientationCube() {
             const camera = r ? getControlCamera(r) : null;
             if (camera) {
                 const m = camera.matrixWorldInverse;
-                const a0 = m[0], a1 = m[1], a2 = m[2];
-                const a3 = m[4], a4 = m[5], a5 = m[6];
-                const a6 = m[8], a7 = m[9], a8 = m[10];
+                const a0 = m[0],
+                    a1 = m[1],
+                    a2 = m[2];
+                const a3 = m[4],
+                    a4 = m[5],
+                    a5 = m[6];
+                const a6 = m[8],
+                    a7 = m[9],
+                    a8 = m[10];
                 if (
-                    a0 !== last[0] || a1 !== last[1] || a2 !== last[2] ||
-                    a3 !== last[3] || a4 !== last[4] || a5 !== last[5] ||
-                    a6 !== last[6] || a7 !== last[7] || a8 !== last[8]
+                    a0 !== last[0] ||
+                    a1 !== last[1] ||
+                    a2 !== last[2] ||
+                    a3 !== last[3] ||
+                    a4 !== last[4] ||
+                    a5 !== last[5] ||
+                    a6 !== last[6] ||
+                    a7 !== last[7] ||
+                    a8 !== last[8]
                 ) {
-                    last[0] = a0; last[1] = a1; last[2] = a2;
-                    last[3] = a3; last[4] = a4; last[5] = a5;
-                    last[6] = a6; last[7] = a7; last[8] = a8;
+                    last[0] = a0;
+                    last[1] = a1;
+                    last[2] = a2;
+                    last[3] = a3;
+                    last[4] = a4;
+                    last[5] = a5;
+                    last[6] = a6;
+                    last[7] = a7;
+                    last[8] = a8;
                     draw(ctx, a0, a1, a2, a3, a4, a5, a6, a7, a8);
                 }
             }
@@ -108,10 +214,7 @@ export function OrientationCube() {
     }, []);
 
     return (
-        <div
-            className="absolute bottom-2 left-2 pointer-events-none"
-            style={{ width: CUBE_PX, height: TOTAL_H }}
-        >
+        <div className="absolute bottom-2 left-2 pointer-events-none" style={{ width: CUBE_PX, height: TOTAL_H }}>
             <canvas ref={canvasRef} style={{ width: CUBE_PX, height: TOTAL_H, display: 'block' }} />
         </div>
     );
@@ -120,11 +223,21 @@ export function OrientationCube() {
 // project a world-space point through the 3x3 view rotation onto the canvas.
 // returns [screenX, screenY, viewZ]. viewZ < 0 = in front of camera.
 function project(
-    a0: number, a1: number, a2: number,
-    a3: number, a4: number, a5: number,
-    a6: number, a7: number, a8: number,
-    vx: number, vy: number, vz: number,
-    scale: number, cx: number, cy: number,
+    a0: number,
+    a1: number,
+    a2: number,
+    a3: number,
+    a4: number,
+    a5: number,
+    a6: number,
+    a7: number,
+    a8: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    scale: number,
+    cx: number,
+    cy: number,
 ): [number, number, number] {
     const px = a0 * vx + a3 * vy + a6 * vz;
     const py = a1 * vx + a4 * vy + a7 * vz;
@@ -134,10 +247,18 @@ function project(
 
 // project a free vector (rotation only, no translation). returns screen-space delta per unit.
 function projectVec(
-    a0: number, a1: number, _a2: number,
-    a3: number, a4: number, _a5: number,
-    a6: number, a7: number, _a8: number,
-    vx: number, vy: number, vz: number,
+    a0: number,
+    a1: number,
+    _a2: number,
+    a3: number,
+    a4: number,
+    _a5: number,
+    a6: number,
+    a7: number,
+    _a8: number,
+    vx: number,
+    vy: number,
+    vz: number,
     scale: number,
 ): [number, number] {
     const px = a0 * vx + a3 * vy + a6 * vz;
@@ -147,9 +268,15 @@ function projectVec(
 
 function draw(
     ctx: CanvasRenderingContext2D,
-    a0: number, a1: number, a2: number,
-    a3: number, a4: number, a5: number,
-    a6: number, a7: number, a8: number,
+    a0: number,
+    a1: number,
+    a2: number,
+    a3: number,
+    a4: number,
+    a5: number,
+    a6: number,
+    a7: number,
+    a8: number,
 ) {
     ctx.clearRect(0, 0, CUBE_PX, TOTAL_H);
     drawGizmo(ctx, a0, a1, a2, a3, a4, a5, a6, a7, a8);
@@ -158,9 +285,15 @@ function draw(
 
 function drawCube(
     ctx: CanvasRenderingContext2D,
-    a0: number, a1: number, a2: number,
-    a3: number, a4: number, a5: number,
-    a6: number, a7: number, a8: number,
+    a0: number,
+    a1: number,
+    a2: number,
+    a3: number,
+    a4: number,
+    a5: number,
+    a6: number,
+    a7: number,
+    a8: number,
 ) {
     const cx = CUBE_PX / 2;
     const cy = GIZMO_PX + CUBE_PX / 2;
@@ -169,9 +302,12 @@ function drawCube(
         face: Face;
         pts: [number, number][];
         depth: number;
-        lx: number; ly: number;
-        rdx: number; rdy: number;
-        udx: number; udy: number;
+        lx: number;
+        ly: number;
+        rdx: number;
+        rdy: number;
+        udx: number;
+        udy: number;
     };
     const drawn: Drawn[] = [];
     for (const f of FACES) {
@@ -183,7 +319,9 @@ function drawCube(
         if (nz <= 0) continue;
 
         const pts: [number, number][] = [];
-        let lx = 0, ly = 0, depth = 0;
+        let lx = 0,
+            ly = 0,
+            depth = 0;
         for (const v of f.verts) {
             const [sx, sy, sz] = project(a0, a1, a2, a3, a4, a5, a6, a7, a8, v[0], v[1], v[2], CUBE_SCALE, cx, cy);
             pts.push([sx, sy]);
@@ -191,7 +329,9 @@ function drawCube(
             ly += sy;
             depth += sz;
         }
-        lx /= 4; ly /= 4; depth /= 4;
+        lx /= 4;
+        ly /= 4;
+        depth /= 4;
 
         const [rdx, rdy] = projectVec(a0, a1, a2, a3, a4, a5, a6, a7, a8, f.rx, f.ry, f.rz, CUBE_SCALE);
         const [udx, udy] = projectVec(a0, a1, a2, a3, a4, a5, a6, a7, a8, f.ux, f.uy, f.uz, CUBE_SCALE);
@@ -235,15 +375,22 @@ function drawCube(
 
 function drawGizmo(
     ctx: CanvasRenderingContext2D,
-    a0: number, a1: number, a2: number,
-    a3: number, a4: number, a5: number,
-    a6: number, a7: number, a8: number,
+    a0: number,
+    a1: number,
+    a2: number,
+    a3: number,
+    a4: number,
+    a5: number,
+    a6: number,
+    a7: number,
+    a8: number,
 ) {
     const cx = CUBE_PX / 2;
     const cy = GIZMO_PX / 2;
 
     type DrawnAxis = {
-        sx: number; sy: number;
+        sx: number;
+        sy: number;
         depth: number;
         label: string;
         color: string;

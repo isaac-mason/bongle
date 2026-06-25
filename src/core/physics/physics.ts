@@ -296,12 +296,7 @@ function fanOutContacts(physics: Physics, nodes: Nodes): void {
     fanOutBucket(physics, nodes, physics.contacts.removed, 'removed');
 }
 
-function fanOutBucket(
-    physics: Physics,
-    nodes: Nodes,
-    bucket: ContactPair[],
-    phase: 'added' | 'persisted' | 'removed',
-): void {
+function fanOutBucket(physics: Physics, nodes: Nodes, bucket: ContactPair[], phase: 'added' | 'persisted' | 'removed'): void {
     for (let i = 0; i < bucket.length; i++) {
         const pair = bucket[i]!;
         const aObserverNodeId = observerNodeIdForSide(pair, 'a');

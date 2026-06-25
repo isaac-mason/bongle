@@ -14,13 +14,7 @@
 // is the source of truth.
 
 import { registry } from '../registry';
-import {
-    addChild,
-    deserializeNode,
-    type Node,
-    refreshTraitIssues,
-    type SerializedSceneGraph,
-} from '../scene/nodes';
+import { addChild, deserializeNode, type Node, refreshTraitIssues, type SerializedSceneGraph } from '../scene/nodes';
 import { buildTraitInstance } from '../scene/traits';
 import * as bitset from '../utils/bitset';
 import type { BlockRegistry } from '../voxels/block-registry';
@@ -92,9 +86,7 @@ export function populateScene(
         for (const st of raw.nodes.root.traits) {
             const def = registry.traits.byId.get(st.id)?.payload;
             if (!def) {
-                console.warn(
-                    `[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`,
-                );
+                console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
                 handle.node._unresolvedTraits.set(st.id, {
                     json: structuredClone(st.controls) as Record<string, unknown> | undefined,
                 });
@@ -135,11 +127,7 @@ export function populateScene(
  * the handle reference itself stays valid — module-scope closures still
  * resolve.
  */
-export function clearScene(
-    content: Content,
-    id: string,
-    side: 'server' | 'client',
-): void {
+export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
     content.payloads.delete(id);
 
     const handle = registry.scenes.byId.get(id)?.payload;

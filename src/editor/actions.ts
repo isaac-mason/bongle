@@ -104,12 +104,7 @@ function resolveFill(
     return { forward, reverse };
 }
 
-export function fill(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    pattern: Pattern,
-    mask?: Mask,
-): number {
+export function fill(state: EditRoomState, ctx: ScriptContext, pattern: Pattern, mask?: Mask): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
@@ -132,10 +127,7 @@ export function fill(
     return forward.length;
 }
 
-export function del(
-    state: EditRoomState,
-    ctx: ScriptContext,
-): void {
+export function del(state: EditRoomState, ctx: ScriptContext): void {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return;
 
@@ -259,11 +251,7 @@ export function pickBlock(state: EditRoomState, ctx: ScriptContext): void {
 /** for each non-air voxel in the selection, set the cell directly above to
  *  `pattern` — but only when that cell is currently air. mirrors WorldEdit's
  *  //overlay. the overlay row may sit one block outside the selection AABB. */
-export function overlay(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    pattern: Pattern,
-): number {
+export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
@@ -303,11 +291,7 @@ export function overlay(
  *  selection whose ±x or ±z neighbour falls outside the selection. vertical
  *  neighbours don't count, so the top and bottom of the selection are left
  *  untouched — you get the 4 vertical sides only. */
-export function walls(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    pattern: Pattern,
-): number {
+export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
@@ -457,12 +441,7 @@ export function elevateSelection(
  *  when null), runs `iterations` 5×5 gaussian passes, then raises/lowers
  *  each column inside its selection y band. unlike //fill/replace, leaves
  *  the selection intact so you can iterate. */
-export function smoothSelection(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    iterations: number,
-    heightmapMask?: Mask,
-): number {
+export function smoothSelection(state: EditRoomState, ctx: ScriptContext, iterations: number, heightmapMask?: Mask): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
@@ -481,12 +460,7 @@ export function smoothSelection(
     return forward.length;
 }
 
-export function replace(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    pattern: Pattern,
-    from?: Mask,
-): number {
+export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Pattern, from?: Mask): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
 
@@ -513,13 +487,7 @@ export function replace(
 
 /* ── scene actions ── */
 
-export function createNodeAction(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    parentId: number,
-    index: number,
-    name?: string,
-): void {
+export function createNodeAction(state: EditRoomState, ctx: ScriptContext, parentId: number, index: number, name?: string): void {
     send(ctx, CreateNodeCommand, {
         id: ctx.nodes._nextNodeId,
         parentId,
@@ -626,12 +594,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
     });
 }
 
-export function setNameAction(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    nodeId: number,
-    name: string | undefined,
-): void {
+export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, name: string | undefined): void {
     const node = getNodeById(ctx.nodes, nodeId);
     if (!node) return;
 
@@ -686,13 +649,7 @@ export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId:
     });
 }
 
-export function reparentAction(
-    state: EditRoomState,
-    ctx: ScriptContext,
-    nodeId: number,
-    parentId: number,
-    index: number,
-): void {
+export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, parentId: number, index: number): void {
     const node = getNodeById(ctx.nodes, nodeId);
     if (!node?.parent) return;
     const newParent = getNodeById(ctx.nodes, parentId);

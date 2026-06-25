@@ -12,12 +12,7 @@
 import type { RotAxis } from './block-orient';
 import { parseKey, type BlockRegistry } from './block-registry';
 
-export function rotateBlockKey(
-    key: string,
-    axis: RotAxis,
-    cw: boolean,
-    registry: BlockRegistry,
-): string {
+export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry: BlockRegistry): string {
     const parsed = parseKey(key);
     if (!parsed) return key;
     const def = registry.idToDef.get(parsed.blockId);
@@ -28,11 +23,7 @@ export function rotateBlockKey(
     return registry.stateToKey[rotatedId] ?? key;
 }
 
-export function flipBlockKey(
-    key: string,
-    axis: RotAxis,
-    registry: BlockRegistry,
-): string {
+export function flipBlockKey(key: string, axis: RotAxis, registry: BlockRegistry): string {
     const parsed = parseKey(key);
     if (!parsed) return key;
     const def = registry.idToDef.get(parsed.blockId);

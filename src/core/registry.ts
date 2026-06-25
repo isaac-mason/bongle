@@ -265,9 +265,7 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
         // PLACEHOLDER_OWNER entries are claimed via `claimOwnership` +
         // mutate-in-place, not via upsert — so any module-mismatch here
         // is a genuine redeclaration conflict.
-        throw new Error(
-            `[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`,
-        );
+        throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`);
     }
 
     // when `diff` is omitted, any re-upsert is a change — module
@@ -281,9 +279,7 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
     // can short-circuit even when the consumer's effective producer set
     // moved. when that happens we elevate to a synthetic `changed` event
     // so dispatch reacts.
-    const depsChanged = store.extractDeps
-        ? setDeps({ registry: store.name, id }, store.extractDeps(payload))
-        : false;
+    const depsChanged = store.extractDeps ? setDeps({ registry: store.name, id }, store.extractDeps(payload)) : false;
 
     if (!changed && !depsChanged) {
         if (store.replaceIdentity) {
@@ -331,9 +327,7 @@ export function touch<T>(store: KindStore<T>, id: string): void {
 
     const newHash = store.hash(existing.payload);
     const hashChanged = newHash !== existing.hash;
-    const depsChanged = store.extractDeps
-        ? setDeps({ registry: store.name, id }, store.extractDeps(existing.payload))
-        : false;
+    const depsChanged = store.extractDeps ? setDeps({ registry: store.name, id }, store.extractDeps(existing.payload)) : false;
 
     if (!hashChanged && !depsChanged) return;
 
@@ -424,9 +418,7 @@ export function claimOwnership<T>(store: KindStore<T>, id: string): void {
         (existing as Mutable<Handle<T>>).module = module;
         return;
     }
-    throw new Error(
-        `[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`,
-    );
+    throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`);
 }
 
 /* ── reads ──────────────────────────────────────────────────────── */
@@ -458,10 +450,7 @@ export function clearPendingChanges(stores: ReadonlyArray<KindStore<any>>): void
  * top of each `applyRegistryChanges*` so devs can see what hot reloaded
  * without instrumenting the rest of the pipeline.
  */
-export function logPendingChanges(
-    side: 'client' | 'server',
-    stores: ReadonlyArray<KindStore<any>>,
-): void {
+export function logPendingChanges(side: 'client' | 'server', stores: ReadonlyArray<KindStore<any>>): void {
     const lines: string[] = [];
     const directProducers: DepKey[] = [];
     const directConsumerKeys = new Set<string>();
@@ -680,11 +669,9 @@ const extractBlockDeps = (h: BlockHandle): DepKey[] => {
 // cycles) plus per-side `.bin` URLs. The bin URLs already embed a content
 // hash codegen'd by buildModels, so they're a sufficient change-detection
 // key on their own — hashing the Node tree would just recurse the cycle.
-const modelHash = (h: ModelHandle) =>
-    structuralHash({ modelId: h.modelId, src: h.src, bin: h.bin });
+const modelHash = (h: ModelHandle) => structuralHash({ modelId: h.modelId, src: h.src, bin: h.bin });
 
-const prefabHash = (p: PrefabDef) =>
-    structuralHash({ id: p.id, type: p.type, args: p.args, node: p.node, apply: p.apply });
+const prefabHash = (p: PrefabDef) => structuralHash({ id: p.id, type: p.type, args: p.args, node: p.node, apply: p.apply });
 
 const extractPrefabDeps = (p: PrefabDef): DepKey[] => {
     const deps: DepKey[] = [];
@@ -696,8 +683,7 @@ const extractPrefabDeps = (p: PrefabDef): DepKey[] => {
 // form cycles) which is runtime state, not authored content. The authored
 // payload (`_payload`) is the change driver — hashing that side-steps the
 // cycle and matches the actual edit surface.
-const sceneHash = (s: SceneHandle) =>
-    structuralHash({ id: s.id, client: s.client, server: s.server, payload: s._payload });
+const sceneHash = (s: SceneHandle) => structuralHash({ id: s.id, client: s.client, server: s.server, payload: s._payload });
 
 /**
  * trait body + meta only — controls / sync / scripts are diffed in their
@@ -706,8 +692,7 @@ const sceneHash = (s: SceneHandle) =>
  * trait would also fire a wholesale "trait changed" event, drowning the
  * granular per-kind dispatch and producing spurious editor toasts.
  */
-const traitHash = (t: TraitDef) =>
-    structuralHash({ id: t.id, name: t.name, slot: t.slot, persist: t.persist, body: t.body });
+const traitHash = (t: TraitDef) => structuralHash({ id: t.id, name: t.name, slot: t.slot, persist: t.persist, body: t.body });
 const controlHash = (c: ControlDef) =>
     structuralHash({
         label: c.label,
@@ -734,8 +719,7 @@ const matchmakingHash = (m: MatchmakingConfig) => structuralHash(m);
 // client/audio/audio.ts keyed by id; the handle itself never carries it.
 // `duration` is in the hash because the codegen barrel's in-place mutation
 // needs to flow as a `changed` event.
-const soundHash = (s: SoundHandle) =>
-    structuralHash({ soundId: s.soundId, src: s.src, long: s.long, duration: s.duration });
+const soundHash = (s: SoundHandle) => structuralHash({ soundId: s.soundId, src: s.src, long: s.long, duration: s.duration });
 
 /* ── singleton ──────────────────────────────────────────────────── */
 
@@ -930,8 +914,20 @@ export function init(): Registry {
     // test's setup starts from a virgin registry. used by tst/e2e/harness.ts.
     reg._reset = () => {
         const stores: KindStore<unknown>[] = [
-            blockTextures, blocks, models, traits, controls, sync,
-            scripts, commands, scenes, prefabs, sounds, sprites, particles, matchmaking,
+            blockTextures,
+            blocks,
+            models,
+            traits,
+            controls,
+            sync,
+            scripts,
+            commands,
+            scenes,
+            prefabs,
+            sounds,
+            sprites,
+            particles,
+            matchmaking,
         ] as KindStore<unknown>[];
         for (const s of stores) {
             s.byId.clear();

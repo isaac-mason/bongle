@@ -183,7 +183,12 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Ar
  * packed the update (the server, when called from the client inbox).
  * absent → runtime's local table is used (in-process tests).
  */
-export function applySceneSyncUpdate(sg: Nodes, runtime: NodesContext, update: SceneSyncUpdate, traitWireIndex?: WireIndex): void {
+export function applySceneSyncUpdate(
+    sg: Nodes,
+    runtime: NodesContext,
+    update: SceneSyncUpdate,
+    traitWireIndex?: WireIndex,
+): void {
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
     switch (update.type) {
         case 'node_created': {
@@ -306,12 +311,7 @@ export function applySceneSyncUpdate(sg: Nodes, runtime: NodesContext, update: S
  * nodes resolve to that value. iterative — no recursion, no stack growth on
  * deep trees.
  */
-function walkReplicable(
-    node: Node,
-    mode: RoomMode,
-    inheritedRealm: Realm,
-    callback: (node: Node) => void,
-): void {
+function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callback: (node: Node) => void): void {
     const stack: Array<{ node: Node; inherited: Realm }> = [{ node, inherited: inheritedRealm }];
     while (stack.length > 0) {
         const { node: cur, inherited } = stack.pop()!;

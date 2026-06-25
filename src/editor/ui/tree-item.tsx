@@ -124,10 +124,7 @@ export const TreeItem = memo(function TreeItem({
             tabIndex={0}
         >
             {/* drag handle */}
-            <span
-                ref={handleRef}
-                className="cursor-grab active:cursor-grabbing text-neutral-500 shrink-0 select-none px-0.5"
-            >
+            <span ref={handleRef} className="cursor-grab active:cursor-grabbing text-neutral-500 shrink-0 select-none px-0.5">
                 <Icons.GripVertical size={12} />
             </span>
 

@@ -28,27 +28,56 @@ if (typeof globalThis.window !== 'undefined' && !('AudioContext' in globalThis.w
         sampleRate: number;
         destination = {};
         listener = {
-            positionX: param(), positionY: param(), positionZ: param(),
-            forwardX: param(), forwardY: param(), forwardZ: param(),
-            upX: param(), upY: param(), upZ: param(),
+            positionX: param(),
+            positionY: param(),
+            positionZ: param(),
+            forwardX: param(),
+            forwardY: param(),
+            forwardZ: param(),
+            upX: param(),
+            upY: param(),
+            upZ: param(),
         };
         currentTime = 0;
         state = 'running';
         constructor(opts?: { sampleRate?: number }) {
             this.sampleRate = opts?.sampleRate ?? 48000;
         }
-        decodeAudioData(_bytes: ArrayBuffer): Promise<unknown> { return Promise.resolve({}); }
-        resume(): Promise<void> { return Promise.resolve(); }
-        createGain() { return { gain: param(), connect: () => {}, disconnect: () => {} }; }
+        decodeAudioData(_bytes: ArrayBuffer): Promise<unknown> {
+            return Promise.resolve({});
+        }
+        resume(): Promise<void> {
+            return Promise.resolve();
+        }
+        createGain() {
+            return { gain: param(), connect: () => {}, disconnect: () => {} };
+        }
         createBufferSource() {
-            return { buffer: null, detune: param(), playbackRate: param(), connect: () => {}, disconnect: () => {}, start: () => {}, stop: () => {}, onended: null };
+            return {
+                buffer: null,
+                detune: param(),
+                playbackRate: param(),
+                connect: () => {},
+                disconnect: () => {},
+                start: () => {},
+                stop: () => {},
+                onended: null,
+            };
         }
         createPanner() {
             return {
-                positionX: param(), positionY: param(), positionZ: param(),
-                orientationX: param(), orientationY: param(), orientationZ: param(),
-                refDistance: 1, maxDistance: 10000, rolloffFactor: 1, distanceModel: 'inverse',
-                connect: () => {}, disconnect: () => {},
+                positionX: param(),
+                positionY: param(),
+                positionZ: param(),
+                orientationX: param(),
+                orientationY: param(),
+                orientationZ: param(),
+                refDistance: 1,
+                maxDistance: 10000,
+                rolloffFactor: 1,
+                distanceModel: 'inverse',
+                connect: () => {},
+                disconnect: () => {},
             };
         }
     }

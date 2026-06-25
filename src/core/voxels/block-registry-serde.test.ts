@@ -12,13 +12,7 @@ import { registerAllShapes } from 'crashcat';
 import type { BlockRegistry } from './block-registry';
 import { blockTexture, CullType, MaterialType } from './blocks';
 import { stairs } from './block-presets';
-import {
-    type ChunkMeshResult,
-    type PassMesh,
-    buildMeshInput,
-    createMeshOutput,
-    meshChunk,
-} from './chunk-mesher';
+import { type ChunkMeshResult, type PassMesh, buildMeshInput, createMeshOutput, meshChunk } from './chunk-mesher';
 import {
     type DeserializedBlockRegistry,
     deserializeBlockRegistryForWorker,
@@ -100,20 +94,20 @@ describe('block-registry-serde', () => {
             expect(out.meshTexIndices!.length).toBe(meshCount + 1);
 
             for (let m = 1; m <= meshCount; m++) {
-                expect(bytesEqual(out.meshTexIndices![m]!,       reg.meshTexIndices[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadMaterials![m]!,    reg.meshQuadMaterials[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadShape![m]!,        reg.meshQuadShape[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadFaceDir![m]!,      reg.meshQuadFaceDir[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadCullFaceDir![m]!,  reg.meshQuadCullFaceDir[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadDepth![m]!,        reg.meshQuadDepth[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadVertDepth![m]!,    reg.meshQuadVertDepth[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadVertNormal![m]!,   reg.meshQuadVertNormal[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadCornerUV![m]!,     reg.meshQuadCornerUV[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadCornerPos![m]!,    reg.meshQuadCornerPos[m]!)).toBe(true);
+                expect(bytesEqual(out.meshTexIndices![m]!, reg.meshTexIndices[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadMaterials![m]!, reg.meshQuadMaterials[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadShape![m]!, reg.meshQuadShape[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadFaceDir![m]!, reg.meshQuadFaceDir[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadCullFaceDir![m]!, reg.meshQuadCullFaceDir[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadDepth![m]!, reg.meshQuadDepth[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadVertDepth![m]!, reg.meshQuadVertDepth[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadVertNormal![m]!, reg.meshQuadVertNormal[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadCornerUV![m]!, reg.meshQuadCornerUV[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadCornerPos![m]!, reg.meshQuadCornerPos[m]!)).toBe(true);
                 expect(bytesEqual(out.meshQuadCornerNormSq![m]!, reg.meshQuadCornerNormSq[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadNormal![m]!,       reg.meshQuadNormal[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadUVs![m]!,          reg.meshQuadUVs[m]!)).toBe(true);
-                expect(bytesEqual(out.meshQuadVerts![m]!,        reg.meshQuadVerts[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadNormal![m]!, reg.meshQuadNormal[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadUVs![m]!, reg.meshQuadUVs[m]!)).toBe(true);
+                expect(bytesEqual(out.meshQuadVerts![m]!, reg.meshQuadVerts[m]!)).toBe(true);
             }
         });
 

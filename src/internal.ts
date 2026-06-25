@@ -24,7 +24,16 @@ export type { BlockRegistry } from './core/voxels/block-registry';
 export type { ModelHandle } from './core/models/handle';
 export type { MatchmakingConfig } from './core/matchmaking';
 export type { SoundHandle, SoundOptions } from './core/sounds/sounds';
-export type { DrawFn, DrawInputs, DrawParams, DrawSource, ImageSource, NormalizedImageSource, SpriteHandle, SpriteOptions } from './core/sprites/sprites';
+export type {
+    DrawFn,
+    DrawInputs,
+    DrawParams,
+    DrawSource,
+    ImageSource,
+    NormalizedImageSource,
+    SpriteHandle,
+    SpriteOptions,
+} from './core/sprites/sprites';
 export { draw, normalizeImageSource } from './core/sprites/sprites';
 export type { ParticleHandle, ParticleOptions, ParticlePlayback, ParticlePool, UpdateFn } from './core/particles/particles';
 export { particle } from './core/particles/particles';
@@ -36,7 +45,6 @@ export { allocateSlot, init, update } from './client/particles/particles';
 // sprite-atlas pass in `lib/kit/src/asset-pipeline/sprite-atlas.ts`.
 export type { Region, SkylineNode } from './core/atlas/skyline';
 export { addSkylineLevel, emptySkyline, findBestFit } from './core/atlas/skyline';
-
 
 // __kit — runtime namespace called by kit-generated code (Vite transform
 // prelude/postlude, model + scene codegen barrels, kit boot entries).

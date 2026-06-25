@@ -120,7 +120,12 @@ export async function loadBlockTextureAtlasIntoTextureArray(
     ctx2d.imageSmoothingEnabled = false;
     ctx2d.drawImage(img, 0, 0);
     const fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
-    writeBlockTextureAtlasIntoTextureArray(atlas, textureNames, meta, new Uint8Array(fullPixels.buffer, fullPixels.byteOffset, fullPixels.byteLength));
+    writeBlockTextureAtlasIntoTextureArray(
+        atlas,
+        textureNames,
+        meta,
+        new Uint8Array(fullPixels.buffer, fullPixels.byteOffset, fullPixels.byteLength),
+    );
 }
 
 /**

@@ -34,11 +34,7 @@ import type { Player, Room } from './rooms';
  * absent on the dev/edit path (no matchmaker) — default to the engine
  * builtin.
  */
-export function setClientAvatar(
-    state: EngineServer,
-    cs: ClientState,
-    resolved: ResolvedAvatar | undefined,
-): void {
+export function setClientAvatar(state: EngineServer, cs: ClientState, resolved: ResolvedAvatar | undefined): void {
     // Idempotent — the avatar is fixed for the connection (resolved once
     // by the matchmaker). Guards against a re-entered onClientJoin
     // double-acquiring the runtime model and leaking a refcount.

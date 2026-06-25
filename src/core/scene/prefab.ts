@@ -194,12 +194,7 @@ export function expandPrefab(
  * (in play mode) stamps voxel content into the world. idempotent — safe to
  * call repeatedly; only does work when the node is stale.
  */
-export function reconcilePrefabNode(
-    nodes: Nodes,
-    node: Node,
-    runtime: NodesContext,
-    worldVoxels: Voxels | null,
-): void {
+export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesContext, worldVoxels: Voxels | null): void {
     const config = node.prefab!;
     const def = registry.prefabs.byId.get(config.prefabId)?.payload;
 
@@ -248,7 +243,14 @@ export function reconcilePrefabNode(
                         if (!key || key === BLOCK_AIR) continue;
                         // BULK — prefab paste writes potentially thousands of cells;
                         // server end-of-tick runBlockEventHooks drains them in one pass.
-                        setBlock(worldVoxels, chunk.wx + lx + ox, chunk.wy + ly + oy, chunk.wz + lz + oz, key, SetBlockFlags.BULK);
+                        setBlock(
+                            worldVoxels,
+                            chunk.wx + lx + ox,
+                            chunk.wy + ly + oy,
+                            chunk.wz + lz + oz,
+                            key,
+                            SetBlockFlags.BULK,
+                        );
                     }
                 }
             }

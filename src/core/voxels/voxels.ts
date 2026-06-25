@@ -457,12 +457,16 @@ export function repackChunkSnapshot(chunk: Chunk): { paletteKeys: string[]; data
 
 export type VoxelBlockOp = {
     kind: 0;
-    cx: number; cy: number; cz: number;
+    cx: number;
+    cy: number;
+    cz: number;
     index: number;
     /** chunk-local palette index — what the network sends to clients. */
     data: number;
     /** world coords — saves recomputing per delta for hook dispatch. */
-    wx: number; wy: number; wz: number;
+    wx: number;
+    wy: number;
+    wz: number;
     /** global state id before this op. */
     oldStateId: number;
     /** global state id after this op. */
@@ -802,7 +806,9 @@ function markBoundaryNeighborsDirty(
  */
 export function setBlock(
     voxels: Voxels,
-    wx: number, wy: number, wz: number,
+    wx: number,
+    wy: number,
+    wz: number,
     key: string,
     flags: number = SetBlockFlags.DEFAULT,
 ): void {
@@ -832,10 +838,14 @@ export function setBlock(
         const newStateId = chunk.palette[chunk.data[index]!]!;
         auth.changes.ops.push({
             kind: 0,
-            cx, cy, cz,
+            cx,
+            cy,
+            cz,
             index,
             data: chunk.data[index]!,
-            wx, wy, wz,
+            wx,
+            wy,
+            wz,
             oldStateId,
             newStateId,
         });

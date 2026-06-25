@@ -166,7 +166,7 @@ script(
             const ms = (performance.now() - t0).toFixed(1);
             chat.message(ctx, `light repropagated in ${ms}ms`);
         });
-        
+
         // capability gate — does this client have permission to mutate scene
         // state in this room? Today the only signal is `env.editor` (dev builds
         // grant edit to any connected client; prod builds grant to no one).
@@ -223,9 +223,8 @@ script(
                     chat.message(ctx, '[blueprint] invalid payload (json parse failed)');
                     return;
                 }
-                const name = args.name && args.name.length > 0
-                    ? args.name
-                    : Blueprints.allocateBlueprintName(state.contentManager);
+                const name =
+                    args.name && args.name.length > 0 ? args.name : Blueprints.allocateBlueprintName(state.contentManager);
                 const result = Blueprints.saveBlueprint(state.contentManager, name, payload);
                 if (!result.ok) {
                     chat.message(ctx, `[blueprint] ${result.error}`);
@@ -235,9 +234,7 @@ script(
                 // `bongle:scene-list` emission catches up the editor.
                 chat.message(
                     ctx,
-                    result.overwritten
-                        ? `[blueprint] overwrote ${result.sceneId}`
-                        : `[blueprint] saved ${result.sceneId}`,
+                    result.overwritten ? `[blueprint] overwrote ${result.sceneId}` : `[blueprint] saved ${result.sceneId}`,
                 );
             }),
         );
@@ -441,8 +438,8 @@ script(
                 bumpNodeVersion(sg, node);
                 _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
                 return true;
-        }),
-    );
+            }),
+        );
     },
     { editor: true },
 );
@@ -605,555 +602,515 @@ script(
         let heldCategory: ToolCategoryId | null = null;
         let categoryConsumed = false;
         onInput(ctx, () => {
-                const mk = client.input.mouseKeyboard;
+            const mk = client.input.mouseKeyboard;
 
-                // cmd/ctrl combos (undo/redo etc.) are handled at the DOM layer
-                // (edit-ui.tsx) so they fire while a tool-option input holds
-                // focus. swallow them here so a held modifier doesn't trigger
-                // letter-key tool shortcuts.
-                if (isModDown(mk)) return;
+            // cmd/ctrl combos (undo/redo etc.) are handled at the DOM layer
+            // (edit-ui.tsx) so they fire while a tool-option input holds
+            // focus. swallow them here so a held modifier doesn't trigger
+            // letter-key tool shortcuts.
+            if (isModDown(mk)) return;
 
-                // ── backtick: debug panel chord prefix ──
-                if (isKeyJustDown(mk, 'Backquote')) backtickConsumed = false;
-                if (isKeyDown(mk, 'Backquote')) {
-                    for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
-                        if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
-                            const tabs = availableDebugTabs();
-                            if (i < tabs.length) {
-                                useClient.getState().setDebugTab(tabs[i]!);
-                                useClient.getState().setDebugOpen(true);
-                                backtickConsumed = true;
-                            }
-                            break;
+            // ── backtick: debug panel chord prefix ──
+            if (isKeyJustDown(mk, 'Backquote')) backtickConsumed = false;
+            if (isKeyDown(mk, 'Backquote')) {
+                for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
+                    if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
+                        const tabs = availableDebugTabs();
+                        if (i < tabs.length) {
+                            useClient.getState().setDebugTab(tabs[i]!);
+                            useClient.getState().setDebugOpen(true);
+                            backtickConsumed = true;
                         }
+                        break;
                     }
                 }
-                if (isKeyJustUp(mk, 'Backquote') && !backtickConsumed) {
-                    useClient.getState().toggleDebugOpen();
-                }
+            }
+            if (isKeyJustUp(mk, 'Backquote') && !backtickConsumed) {
+                useClient.getState().toggleDebugOpen();
+            }
 
-                // ── tool category chord (V/M/B + digit jump, tap to cycle) ──
-                if (heldCategory === null) {
-                    for (const cat of TOOL_CATEGORIES) {
-                        if (isKeyJustDown(mk, cat.key)) {
-                            heldCategory = cat.id;
-                            categoryConsumed = false;
-                            break;
-                        }
-                    }
-                }
-                if (heldCategory !== null) {
-                    const cat = TOOL_CATEGORIES.find((c) => c.id === heldCategory)!;
-                    if (isKeyDown(mk, cat.key)) {
-                        for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
-                            if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
-                                if (i < cat.tools.length) {
-                                    store.getState().setActiveTool(cat.tools[i]!.id);
-                                    categoryConsumed = true;
-                                }
-                                break;
-                            }
-                        }
-                    } else {
-                        // category key released — commit cycle if not consumed
-                        if (!categoryConsumed) {
-                            const s = store.getState();
-                            const currentCat = findCategoryByTool(s.activeTool);
-                            if (currentCat?.id === cat.id) {
-                                const idx = cat.tools.findIndex((t) => t.id === s.activeTool);
-                                const next = cat.tools[(idx + 1) % cat.tools.length]!;
-                                s.setActiveTool(next.id);
-                            } else {
-                                s.setActiveTool(cat.tools[0]!.id);
-                            }
-                        }
-                        heldCategory = null;
+            // ── tool category chord (V/M/B + digit jump, tap to cycle) ──
+            if (heldCategory === null) {
+                for (const cat of TOOL_CATEGORIES) {
+                    if (isKeyJustDown(mk, cat.key)) {
+                        heldCategory = cat.id;
                         categoryConsumed = false;
+                        break;
                     }
                 }
-
-                // ── library toggle (E) ──
-                if (isKeyJustDown(mk, LIBRARY_KEYS.toggleLibrary)) {
-                    store.getState().toggleLibrary();
-                }
-
-                // ── hotbar 1..9 (suppressed while a chord prefix is held) ──
-                if (!isKeyDown(mk, 'Backquote') && heldCategory === null) {
+            }
+            if (heldCategory !== null) {
+                const cat = TOOL_CATEGORIES.find((c) => c.id === heldCategory)!;
+                if (isKeyDown(mk, cat.key)) {
                     for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
                         if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
-                            const s = store.getState();
-                            if (s.libraryOpen && s.hoveredInventoryItem) {
-                                useEditor.getState().setHotbarSlot(i, s.hoveredInventoryItem);
-                            } else {
-                                s.setActiveSlot(i);
+                            if (i < cat.tools.length) {
+                                store.getState().setActiveTool(cat.tools[i]!.id);
+                                categoryConsumed = true;
                             }
                             break;
                         }
                     }
+                } else {
+                    // category key released — commit cycle if not consumed
+                    if (!categoryConsumed) {
+                        const s = store.getState();
+                        const currentCat = findCategoryByTool(s.activeTool);
+                        if (currentCat?.id === cat.id) {
+                            const idx = cat.tools.findIndex((t) => t.id === s.activeTool);
+                            const next = cat.tools[(idx + 1) % cat.tools.length]!;
+                            s.setActiveTool(next.id);
+                        } else {
+                            s.setActiveTool(cat.tools[0]!.id);
+                        }
+                    }
+                    heldCategory = null;
+                    categoryConsumed = false;
                 }
+            }
 
-                // ── wheel cycles hotbar slot in build/brush tools ──
-                // grab handles its own wheel inside transform; fly/orbit
-                // see only what we don't consume here. brush is included
-                // because the active slot resolves $active in patterns.
-                const wheelTool = store.getState().activeTool;
-                if (
-                    (wheelTool === 'build' || wheelTool === 'brush') &&
-                    mk._wheelDeltaY !== 0 &&
-                    !TransformTool.isInGrab(transformToolState)
-                ) {
-                    store.getState().cycleActiveSlot(Math.sign(mk._wheelDeltaY));
-                    mk._wheelDeltaY = 0;
+            // ── library toggle (E) ──
+            if (isKeyJustDown(mk, LIBRARY_KEYS.toggleLibrary)) {
+                store.getState().toggleLibrary();
+            }
+
+            // ── hotbar 1..9 (suppressed while a chord prefix is held) ──
+            if (!isKeyDown(mk, 'Backquote') && heldCategory === null) {
+                for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
+                    if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
+                        const s = store.getState();
+                        if (s.libraryOpen && s.hoveredInventoryItem) {
+                            useEditor.getState().setHotbarSlot(i, s.hoveredInventoryItem);
+                        } else {
+                            s.setActiveSlot(i);
+                        }
+                        break;
+                    }
                 }
+            }
+
+            // ── wheel cycles hotbar slot in build/brush tools ──
+            // grab handles its own wheel inside transform; fly/orbit
+            // see only what we don't consume here. brush is included
+            // because the active slot resolves $active in patterns.
+            const wheelTool = store.getState().activeTool;
+            if (
+                (wheelTool === 'build' || wheelTool === 'brush') &&
+                mk._wheelDeltaY !== 0 &&
+                !TransformTool.isInGrab(transformToolState)
+            ) {
+                store.getState().cycleActiveSlot(Math.sign(mk._wheelDeltaY));
+                mk._wheelDeltaY = 0;
+            }
         });
 
         // ── per-frame voxel tool update ──
         onFrame(ctx, () => {
-                // editor visuals + tool dispatch only run when POV is the
-                // editor's camera. for play rooms, that means the lens is up
-                // AND the user is on the inspect-client sub-tab (control.node
-                // is the lens). for edit rooms, the player node IS the editor
-                // camera. when not active, force-hide every editor visual so
-                // they don't leak into the player view, and short-circuit.
-                const editorViewActive =
-                    room.playerMode === 'edit' || (!!room.editor && room.control.node === room.editor.editorNode);
-                if (!editorViewActive) {
-                    gridVisualsState.minorLines.visible = false;
-                    gridVisualsState.majorLines.visible = false;
-                    gridVisualsState.xAxisLines.visible = false;
-                    gridVisualsState.zAxisLines.visible = false;
-                    debugVisualsState.mesh.visible = false;
-                    chunkBoundsState.lines.visible = false;
-                    if (pivotPoint.mesh) pivotPoint.mesh.visible = false;
-                    if (inspectMeshState.mesh) inspectMeshState.mesh.visible = false;
-                    const sm = meshState;
-                    if (sm.selectionMesh) sm.selectionMesh.visible = false;
-                    if (sm.selectionOutline) sm.selectionOutline.visible = false;
-                    if (sm.selectionEdges) sm.selectionEdges.visible = false;
-                    if (sm.brushMesh) sm.brushMesh.visible = false;
-                    if (sm.brushEdges) sm.brushEdges.visible = false;
-                    if (sm.hoverOutline) sm.hoverOutline.visible = false;
-                    const helper = transformToolState.gizmo.getHelper?.();
-                    if (helper) (helper as { visible: boolean }).visible = false;
-                    return;
-                }
+            // editor visuals + tool dispatch only run when POV is the
+            // editor's camera. for play rooms, that means the lens is up
+            // AND the user is on the inspect-client sub-tab (control.node
+            // is the lens). for edit rooms, the player node IS the editor
+            // camera. when not active, force-hide every editor visual so
+            // they don't leak into the player view, and short-circuit.
+            const editorViewActive =
+                room.playerMode === 'edit' || (!!room.editor && room.control.node === room.editor.editorNode);
+            if (!editorViewActive) {
+                gridVisualsState.minorLines.visible = false;
+                gridVisualsState.majorLines.visible = false;
+                gridVisualsState.xAxisLines.visible = false;
+                gridVisualsState.zAxisLines.visible = false;
+                debugVisualsState.mesh.visible = false;
+                chunkBoundsState.lines.visible = false;
+                if (pivotPoint.mesh) pivotPoint.mesh.visible = false;
+                if (inspectMeshState.mesh) inspectMeshState.mesh.visible = false;
+                const sm = meshState;
+                if (sm.selectionMesh) sm.selectionMesh.visible = false;
+                if (sm.selectionOutline) sm.selectionOutline.visible = false;
+                if (sm.selectionEdges) sm.selectionEdges.visible = false;
+                if (sm.brushMesh) sm.brushMesh.visible = false;
+                if (sm.brushEdges) sm.brushEdges.visible = false;
+                if (sm.hoverOutline) sm.hoverOutline.visible = false;
+                const helper = transformToolState.gizmo.getHelper?.();
+                if (helper) (helper as { visible: boolean }).visible = false;
+                return;
+            }
 
-                // resolve the active POV camera once; tools read this for
-                // raycasts, nudge basis, build/inspect projection. also patch
-                // it into the gizmo so a POV swap (player ↔ editor freecam)
-                // is reflected in the gizmo's projection without rebuilding.
-                // TransformControls is third-party and holds its own camera
-                // ref — there's no way to avoid this sync.
-                const camera = getControlCamera(room) as PerspectiveCamera | null;
-                if (!camera) return;
-                transformToolState.gizmo.camera = camera;
+            // resolve the active POV camera once; tools read this for
+            // raycasts, nudge basis, build/inspect projection. also patch
+            // it into the gizmo so a POV swap (player ↔ editor freecam)
+            // is reflected in the gizmo's projection without rebuilding.
+            // TransformControls is third-party and holds its own camera
+            // ref — there's no way to avoid this sync.
+            const camera = getControlCamera(room) as PerspectiveCamera | null;
+            if (!camera) return;
+            transformToolState.gizmo.camera = camera;
 
-                // sync editor node bodies with the scene graph for broadphase queries
-                NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
+            // sync editor node bodies with the scene graph for broadphase queries
+            NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
 
-                // redraw the per-node selection AABB outlines. called from
-                // every tool's exit path so node selection is visible whether
-                // the user is in inspect, transform, or any voxel tool.
-                // during voxel-placement, the placement root has no geometry —
-                // swap in the ghost's voxel node so the box reflects content.
-                function redrawInspectMesh() {
-                    const selectedNodeIds = store.getState().selection.nodes;
-                    const placement = transformToolState.placement;
-                    const selectedNodes = [];
-                    for (const nid of selectedNodeIds) {
-                        if (placement && nid === placement.rootId && placement.voxelNodeId !== null) {
-                            const vn = getNodeById(room.nodes, placement.voxelNodeId);
-                            if (vn) selectedNodes.push(vn);
-                            continue;
-                        }
-                        const n = getNodeById(room.nodes, nid);
-                        if (n) selectedNodes.push(n);
+            // redraw the per-node selection AABB outlines. called from
+            // every tool's exit path so node selection is visible whether
+            // the user is in inspect, transform, or any voxel tool.
+            // during voxel-placement, the placement root has no geometry —
+            // swap in the ghost's voxel node so the box reflects content.
+            function redrawInspectMesh() {
+                const selectedNodeIds = store.getState().selection.nodes;
+                const placement = transformToolState.placement;
+                const selectedNodes = [];
+                for (const nid of selectedNodeIds) {
+                    if (placement && nid === placement.rootId && placement.voxelNodeId !== null) {
+                        const vn = getNodeById(room.nodes, placement.voxelNodeId);
+                        if (vn) selectedNodes.push(vn);
+                        continue;
                     }
-                    InspectMesh.update(inspectMeshState, selectedNodes, client.state!.resources);
+                    const n = getNodeById(room.nodes, nid);
+                    if (n) selectedNodes.push(n);
                 }
+                InspectMesh.update(inspectMeshState, selectedNodes, client.state!.resources);
+            }
 
-                // update prefab ghost voxels for nodes whose def produces voxels
-                PrefabVisuals.update(prefabVisuals, room.nodes, room.scriptRuntime, ctx.voxels.registry);
+            // update prefab ghost voxels for nodes whose def produces voxels
+            PrefabVisuals.update(prefabVisuals, room.nodes, room.scriptRuntime, ctx.voxels.registry);
 
-                const { activeTool } = store.getState();
+            const { activeTool } = store.getState();
 
-                // hover raycast — always active regardless of tool.
-                // pointer.ndcX/Y is auto-frozen to (0,0) under pointer
-                // lock, so this implicitly fires from the crosshair.
-                unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
-                unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
-                vec3.subtract(_rayDir, _farWorld, _nearWorld);
-                vec3.normalize(_rayDir, _rayDir);
-                raycastVoxels(
-                    _hoverRayResult,
-                    ctx.voxels,
-                    ctx.blocks,
-                    _nearWorld[0],
-                    _nearWorld[1],
-                    _nearWorld[2],
-                    _rayDir[0],
-                    _rayDir[1],
-                    _rayDir[2],
-                    MAX_RAY_DIST,
-                    0,
+            // hover raycast — always active regardless of tool.
+            // pointer.ndcX/Y is auto-frozen to (0,0) under pointer
+            // lock, so this implicitly fires from the crosshair.
+            unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
+            unproject(_farWorld, [pointer.ndcX, pointer.ndcY, 1], camera);
+            vec3.subtract(_rayDir, _farWorld, _nearWorld);
+            vec3.normalize(_rayDir, _rayDir);
+            raycastVoxels(
+                _hoverRayResult,
+                ctx.voxels,
+                ctx.blocks,
+                _nearWorld[0],
+                _nearWorld[1],
+                _nearWorld[2],
+                _rayDir[0],
+                _rayDir[1],
+                _rayDir[2],
+                MAX_RAY_DIST,
+                0,
+            );
+            let hoverVoxel: [number, number, number] | null = _hoverRayResult.hit
+                ? [_hoverRayResult.voxelX, _hoverRayResult.voxelY, _hoverRayResult.voxelZ]
+                : null;
+
+            // tight collider-AABB for the hovered block — drives the hover
+            // outline so it hugs the actual shape (slabs, stairs, fences)
+            // instead of the full voxel cell. cube colliders (cid=0) and the
+            // synthesized air-mode hover both fall back to the unit cube.
+            let hoverAabb: [number, number, number, number, number, number] | null = null;
+            if (_hoverRayResult.hit) {
+                const sid = _hoverRayResult.stateId;
+                const cid = ctx.blocks.colliderId[sid]!;
+                const [vx, vy, vz] = hoverVoxel!;
+                if (cid === 0) {
+                    hoverAabb = [vx, vy, vz, vx + 1, vy + 1, vz + 1];
+                } else {
+                    const boxes = ctx.blocks.shapeAabbs[cid]!;
+                    let nx = Infinity,
+                        ny = Infinity,
+                        nz = Infinity,
+                        xx = -Infinity,
+                        xy = -Infinity,
+                        xz = -Infinity;
+                    for (const b of boxes) {
+                        if (b[0] < nx) nx = b[0];
+                        if (b[1] < ny) ny = b[1];
+                        if (b[2] < nz) nz = b[2];
+                        if (b[3] > xx) xx = b[3];
+                        if (b[4] > xy) xy = b[4];
+                        if (b[5] > xz) xz = b[5];
+                    }
+                    hoverAabb = [vx + nx, vy + ny, vz + nz, vx + xx, vy + xy, vz + xz];
+                }
+            }
+
+            // air mode: synthesize a hover position in empty space
+            if (!hoverVoxel && store.getState().selectorMode === 'air') {
+                const d = store.getState().airDistance;
+                hoverVoxel = [
+                    Math.floor(_nearWorld[0] + _rayDir[0] * d),
+                    Math.floor(_nearWorld[1] + _rayDir[1] * d),
+                    Math.floor(_nearWorld[2] + _rayDir[2] * d),
+                ];
+                hoverAabb = [
+                    hoverVoxel[0],
+                    hoverVoxel[1],
+                    hoverVoxel[2],
+                    hoverVoxel[0] + 1,
+                    hoverVoxel[1] + 1,
+                    hoverVoxel[2] + 1,
+                ];
+            }
+            const hoverNormal: [number, number, number] | null = _hoverRayResult.hit
+                ? [_hoverRayResult.nx, _hoverRayResult.ny, _hoverRayResult.nz]
+                : hoverVoxel
+                  ? [0, 1, 0]
+                  : null;
+            const hoverPoint: [number, number, number] | null = _hoverRayResult.hit
+                ? [_hoverRayResult.px, _hoverRayResult.py, _hoverRayResult.pz]
+                : null;
+            store.setState((cur) => ({
+                hoverVoxel,
+                hoverNormal,
+                hoverPoint,
+                hoverAabb,
+                lastHoverVoxel: hoverVoxel ?? cur.lastHoverVoxel,
+            }));
+
+            // debug collider visualization — runs every frame regardless of active tool
+            DebugVisuals.update(debugVisualsState, room.physics.rigid.world, store.getState().showPhysicsColliders);
+
+            // grid visualization
+            GridVisuals.update(gridVisualsState, store.getState().showGrid);
+
+            // chunk-boundary wireframe overlay
+            ChunkBoundsVisuals.update(chunkBoundsState, ctx.voxels, store.getState().showChunkBoundaries);
+
+            // force-release any active grab when we leave transform/grab.
+            // covers tool switches and transformMode flips that happen
+            // between frames — updateInspect won't fire to clean up
+            // when the new tool isn't inspect/transform.
+            if (TransformTool.isInGrab(transformToolState)) {
+                const tm = store.getState().transformMode;
+                if (activeTool !== 'transform' || tm !== 'grab') {
+                    TransformTool.exitGrab(transformToolState, room.nodes, room.physics, ctx);
+                }
+            }
+
+            // force-cancel any active placement when leaving transform.
+            // symmetric with the grab guard above — otherwise the
+            // __placement_root / __placement_voxels ghost nodes
+            // linger because cancelPlacement is only reachable via
+            // Escape/Enter while still in transform.
+            if (transformToolState.placement && activeTool !== 'transform') {
+                TransformTool.cancelPlacement(transformToolState, room.nodes, ctx);
+            }
+
+            // inspect tool: cast ray on click to select nodes, clear voxel visuals
+            if (activeTool === 'inspect' || activeTool === 'transform') {
+                _brushHoverKey = '';
+                _brushCornerA = null;
+                _brushCornerB = null;
+                updateInspect(
+                    store,
+                    activeTool,
+                    client,
+                    room,
+                    ctx,
+                    nodeBodies,
+                    transformToolState,
+                    pivotPoint,
+                    meshState,
+                    pointer,
+                    camera,
                 );
-                let hoverVoxel: [number, number, number] | null = _hoverRayResult.hit
-                    ? [_hoverRayResult.voxelX, _hoverRayResult.voxelY, _hoverRayResult.voxelZ]
-                    : null;
+                redrawInspectMesh();
+                return;
+            }
 
-                // tight collider-AABB for the hovered block — drives the hover
-                // outline so it hugs the actual shape (slabs, stairs, fences)
-                // instead of the full voxel cell. cube colliders (cid=0) and the
-                // synthesized air-mode hover both fall back to the unit cube.
-                let hoverAabb: [number, number, number, number, number, number] | null = null;
-                if (_hoverRayResult.hit) {
-                    const sid = _hoverRayResult.stateId;
-                    const cid = ctx.blocks.colliderId[sid]!;
-                    const [vx, vy, vz] = hoverVoxel!;
-                    if (cid === 0) {
-                        hoverAabb = [vx, vy, vz, vx + 1, vy + 1, vz + 1];
-                    } else {
-                        const boxes = ctx.blocks.shapeAabbs[cid]!;
-                        let nx = Infinity,
-                            ny = Infinity,
-                            nz = Infinity,
-                            xx = -Infinity,
-                            xy = -Infinity,
-                            xz = -Infinity;
-                        for (const b of boxes) {
-                            if (b[0] < nx) nx = b[0];
-                            if (b[1] < ny) ny = b[1];
-                            if (b[2] < nz) nz = b[2];
-                            if (b[3] > xx) xx = b[3];
-                            if (b[4] > xy) xy = b[4];
-                            if (b[5] > xz) xz = b[5];
-                        }
-                        hoverAabb = [vx + nx, vy + ny, vz + nz, vx + xx, vy + xy, vz + xz];
-                    }
-                }
+            const mk = client.input.mouseKeyboard;
 
-                // air mode: synthesize a hover position in empty space
-                if (!hoverVoxel && store.getState().selectorMode === 'air') {
-                    const d = store.getState().airDistance;
-                    hoverVoxel = [
-                        Math.floor(_nearWorld[0] + _rayDir[0] * d),
-                        Math.floor(_nearWorld[1] + _rayDir[1] * d),
-                        Math.floor(_nearWorld[2] + _rayDir[2] * d),
-                    ];
-                    hoverAabb = [
-                        hoverVoxel[0],
-                        hoverVoxel[1],
-                        hoverVoxel[2],
-                        hoverVoxel[0] + 1,
-                        hoverVoxel[1] + 1,
-                        hoverVoxel[2] + 1,
-                    ];
-                }
-                const hoverNormal: [number, number, number] | null = _hoverRayResult.hit
-                    ? [_hoverRayResult.nx, _hoverRayResult.ny, _hoverRayResult.nz]
-                    : hoverVoxel
-                      ? [0, 1, 0]
-                      : null;
-                const hoverPoint: [number, number, number] | null = _hoverRayResult.hit
-                    ? [_hoverRayResult.px, _hoverRayResult.py, _hoverRayResult.pz]
-                    : null;
-                store.setState((cur) => ({
-                    hoverVoxel,
-                    hoverNormal,
-                    hoverPoint,
-                    hoverAabb,
-                    lastHoverVoxel: hoverVoxel ?? cur.lastHoverVoxel,
-                }));
+            // tool dispatch
+            if (activeTool === 'build') {
+                updateBuild(store, ctx, pointer, client.input, ctx.voxels, transformToolState, camera);
+            }
+            if (activeTool === 'box-select') {
+                const boxNudge = !isInputFocused() ? readNudgeDelta(client.input, camera.quaternion) : null;
+                const boxEnter = !isInputFocused() && isKeyJustDown(mk, 'Enter');
+                updateBoxSelect(store, ctx, pointer, client.input, room.physics, nodeBodies, boxNudge, boxEnter);
+            }
+            if (activeTool === 'magic-select') {
+                updateMagicSelect(store, pointer, client.input, ctx.voxels, ctx.blocks);
+            }
+            if (activeTool === 'lasso-select') {
+                updateLassoSelect(store, pointer, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.nodes);
+            }
+            // right-click context menu for dedicated selection tools.
+            // inspect handles its own call inside updateInspect; build/
+            // paint/brush/smooth/elevation + transform use right-click
+            // for tool semantics (erase, place commit) so are skipped.
+            if (activeTool === 'box-select' || activeTool === 'magic-select' || activeTool === 'lasso-select') {
+                openViewportContextMenu(store, client, room, ctx, nodeBodies, pointer, camera);
+            }
+            if (activeTool === 'brush-select') {
+                updateBrushSelect(brushSelectState, store, ctx, pointer, client.input, ctx.voxels);
+            }
+            if (activeTool === 'paint') {
+                updatePainter(painterState, store, ctx, pointer, client.input, ctx.voxels);
+            }
+            if (activeTool === 'brush') {
+                updateBrush(brushState, store, ctx, pointer, client.input, ctx.voxels);
+            }
+            if (activeTool === 'smooth') {
+                updateSmooth(smoothState, store, ctx, pointer, client.input, ctx.voxels);
+            }
+            if (activeTool === 'elevation') {
+                updateElevation(elevationState, store, ctx, pointer, client.input, ctx.voxels);
+            }
 
-                // debug collider visualization — runs every frame regardless of active tool
-                DebugVisuals.update(debugVisualsState, room.physics.rigid.world, store.getState().showPhysicsColliders);
+            pointerFlush(pointer);
 
-                // grid visualization
-                GridVisuals.update(gridVisualsState, store.getState().showGrid);
+            // r = reset selection or cancel in-progress tool
+            // (skipped while grab is active — R drives free-rotate there)
+            const sBefore = store.getState();
+            const hasSelection = !Selection.isEmpty(sBefore.selection);
+            const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
+            const hasInspectedVoxel = sBefore.inspectedVoxel !== null;
+            if (
+                (hasSelection || hasInProgressTool || hasInspectedVoxel) &&
+                !isInputFocused() &&
+                isKeyJustDown(mk, 'KeyR') &&
+                !TransformTool.isInGrab(transformToolState)
+            ) {
+                clearBoxSelect(store);
+                clearLassoStroke(store);
+                if (hasSelection) {
+                    store.setState({
+                        selection: Selection.create(),
+                        inspectedVoxel: null,
+                    });
+                } else if (hasInspectedVoxel) {
+                    store.setState({ inspectedVoxel: null });
+                }
+            }
 
-                // chunk-boundary wireframe overlay
-                ChunkBoundsVisuals.update(chunkBoundsState, ctx.voxels, store.getState().showChunkBoundaries);
-
-                // force-release any active grab when we leave transform/grab.
-                // covers tool switches and transformMode flips that happen
-                // between frames — updateInspect won't fire to clean up
-                // when the new tool isn't inspect/transform.
-                if (TransformTool.isInGrab(transformToolState)) {
-                    const tm = store.getState().transformMode;
-                    if (activeTool !== 'transform' || tm !== 'grab') {
-                        TransformTool.exitGrab(transformToolState, room.nodes, room.physics, ctx);
-                    }
-                }
-
-                // force-cancel any active placement when leaving transform.
-                // symmetric with the grab guard above — otherwise the
-                // __placement_root / __placement_voxels ghost nodes
-                // linger because cancelPlacement is only reachable via
-                // Escape/Enter while still in transform.
-                if (transformToolState.placement && activeTool !== 'transform') {
-                    TransformTool.cancelPlacement(transformToolState, room.nodes, ctx);
-                }
-
-                // inspect tool: cast ray on click to select nodes, clear voxel visuals
-                if (activeTool === 'inspect' || activeTool === 'transform') {
-                    _brushHoverKey = '';
-                    _brushCornerA = null;
-                    _brushCornerB = null;
-                    updateInspect(
-                        store,
-                        activeTool,
-                        client,
-                        room,
-                        ctx,
-                        nodeBodies,
-                        transformToolState,
-                        pivotPoint,
-                        meshState,
-                        pointer,
-                        camera,
-                    );
-                    redrawInspectMesh();
-                    return;
-                }
-
-                const mk = client.input.mouseKeyboard;
-
-                // tool dispatch
-                if (activeTool === 'build') {
-                    updateBuild(
-                        store,
-                        ctx,
-                        pointer,
-                        client.input,
-                        ctx.voxels,
-                        transformToolState,
-                        camera,
-                    );
-                }
-                if (activeTool === 'box-select') {
-                    const boxNudge = !isInputFocused() ? readNudgeDelta(client.input, camera.quaternion) : null;
-                    const boxEnter = !isInputFocused() && isKeyJustDown(mk, 'Enter');
-                    updateBoxSelect(
-                        store,
-                        ctx,
-                        pointer,
-                        client.input,
-                        room.physics,
-                        nodeBodies,
-                        boxNudge,
-                        boxEnter,
-                    );
-                }
-                if (activeTool === 'magic-select') {
-                    updateMagicSelect(store, pointer, client.input, ctx.voxels, ctx.blocks);
-                }
-                if (activeTool === 'lasso-select') {
-                    updateLassoSelect(
-                        store,
-                        pointer,
-                        client.input,
-                        camera,
-                        ctx.voxels,
-                        ctx.blocks,
-                        nodeBodies,
-                        room.nodes,
-                    );
-                }
-                // right-click context menu for dedicated selection tools.
-                // inspect handles its own call inside updateInspect; build/
-                // paint/brush/smooth/elevation + transform use right-click
-                // for tool semantics (erase, place commit) so are skipped.
-                if (
-                    activeTool === 'box-select'
-                    || activeTool === 'magic-select'
-                    || activeTool === 'lasso-select'
-                ) {
-                    openViewportContextMenu(
-                        store,
-                        client,
-                        room,
-                        ctx,
-                        nodeBodies,
-                        pointer,
-                        camera,
-                    );
-                }
-                if (activeTool === 'brush-select') {
-                    updateBrushSelect(brushSelectState, store, ctx, pointer, client.input, ctx.voxels);
-                }
-                if (activeTool === 'paint') {
-                    updatePainter(painterState, store, ctx, pointer, client.input, ctx.voxels);
-                }
-                if (activeTool === 'brush') {
-                    updateBrush(brushState, store, ctx, pointer, client.input, ctx.voxels);
-                }
-                if (activeTool === 'smooth') {
-                    updateSmooth(smoothState, store, ctx, pointer, client.input, ctx.voxels);
-                }
-                if (activeTool === 'elevation') {
-                    updateElevation(elevationState, store, ctx, pointer, client.input, ctx.voxels);
-                }
-
-                pointerFlush(pointer);
-
-                // r = reset selection or cancel in-progress tool
-                // (skipped while grab is active — R drives free-rotate there)
-                const sBefore = store.getState();
-                const hasSelection = !Selection.isEmpty(sBefore.selection);
-                const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
-                const hasInspectedVoxel = sBefore.inspectedVoxel !== null;
-                if (
-                    (hasSelection || hasInProgressTool || hasInspectedVoxel) &&
-                    !isInputFocused() &&
-                    isKeyJustDown(mk, 'KeyR') &&
-                    !TransformTool.isInGrab(transformToolState)
-                ) {
+            // Escape → cascading cancel for selection tools
+            if (!isInputFocused() && isKeyJustDown(mk, 'Escape')) {
+                const sNow = store.getState();
+                if (sNow.cursor || hasInProgressTool) {
+                    // cancel keyboard cursor and/or any in-progress selection tool
                     clearBoxSelect(store);
                     clearLassoStroke(store);
-                    if (hasSelection) {
-                        store.setState({
-                            selection: Selection.create(),
-                            inspectedVoxel: null,
-                        });
-                    } else if (hasInspectedVoxel) {
-                        store.setState({ inspectedVoxel: null });
-                    }
+                } else if (hasSelection) {
+                    // clear voxel selection
+                    store.setState({
+                        selection: Selection.create(),
+                        inspectedVoxel: null,
+                    });
+                } else if (hasInspectedVoxel) {
+                    store.setState({ inspectedVoxel: null });
+                } else {
+                    // nothing active → fall back to inspect tool
+                    store.setState({ activeTool: 'inspect' });
                 }
+            }
 
-                // Escape → cascading cancel for selection tools
-                if (!isInputFocused() && isKeyJustDown(mk, 'Escape')) {
-                    const sNow = store.getState();
-                    if (sNow.cursor || hasInProgressTool) {
-                        // cancel keyboard cursor and/or any in-progress selection tool
-                        clearBoxSelect(store);
-                        clearLassoStroke(store);
-                    } else if (hasSelection) {
-                        // clear voxel selection
-                        store.setState({
-                            selection: Selection.create(),
-                            inspectedVoxel: null,
-                        });
-                    } else if (hasInspectedVoxel) {
-                        store.setState({ inspectedVoxel: null });
-                    } else {
-                        // nothing active → fall back to inspect tool
-                        store.setState({ activeTool: 'inspect' });
-                    }
-                }
+            // action shortcuts (only when a selection exists and no input is focused)
+            if (!isInputFocused()) {
+                const s = store.getState();
+                const hotbar = useEditor.getState().hotbar;
+                const activeBlockKey = activeBlockKeyOf(hotbar, s.activeSlotIndex);
+                if (isKeyJustDown(mk, 'KeyF') && !isShiftDown(mk) && activeBlockKey) s.fill(parsePattern(activeBlockKey));
+                if (isKeyJustDown(mk, 'Backspace')) s.delete();
+                if (isKeyJustDown(mk, 'KeyF') && isShiftDown(mk) && activeBlockKey) s.replace(parsePattern(activeBlockKey));
+            }
 
-                // action shortcuts (only when a selection exists and no input is focused)
-                if (!isInputFocused()) {
-                    const s = store.getState();
-                    const hotbar = useEditor.getState().hotbar;
-                    const activeBlockKey = activeBlockKeyOf(hotbar, s.activeSlotIndex);
-                    if (isKeyJustDown(mk, 'KeyF') && !isShiftDown(mk) && activeBlockKey)
-                        s.fill(parsePattern(activeBlockKey));
-                    if (isKeyJustDown(mk, 'Backspace')) s.delete();
-                    if (isKeyJustDown(mk, 'KeyF') && isShiftDown(mk) && activeBlockKey)
-                        s.replace(parsePattern(activeBlockKey));
-                }
+            // p = pick
+            if (!isInputFocused() && isKeyJustDown(mk, 'KeyP')) {
+                store.getState().pick();
+            }
 
-                // p = pick
-                if (!isInputFocused() && isKeyJustDown(mk, 'KeyP')) {
-                    store.getState().pick();
+            // nudge committed selection with arrow keys + [ / ] (any selection tool, when no keyboard cursor active)
+            const sNudge = store.getState();
+            if (!sNudge.cursor && !sNudge.boxSelect && !Selection.isEmpty(sNudge.selection) && !isInputFocused()) {
+                const nudge = readNudgeDelta(client.input, camera.quaternion);
+                if (nudge) {
+                    const [dx, dy, dz] = nudge;
+                    const next = Selection.create();
+                    Selection.nudge(next, sNudge.selection, dx, dy, dz);
+                    store.setState({ selection: next });
                 }
+            }
 
-                // nudge committed selection with arrow keys + [ / ] (any selection tool, when no keyboard cursor active)
-                const sNudge = store.getState();
-                if (!sNudge.cursor && !sNudge.boxSelect && !Selection.isEmpty(sNudge.selection) && !isInputFocused()) {
-                    const nudge = readNudgeDelta(client.input, camera.quaternion);
-                    if (nudge) {
-                        const [dx, dy, dz] = nudge;
-                        const next = Selection.create();
-                        Selection.nudge(next, sNudge.selection, dx, dy, dz);
-                        store.setState({ selection: next });
-                    }
-                }
-
-                // build brush selection each frame.
-                // lasso has its own screen-space overlay — suppress the
-                // world-space hover brush so it doesn't add visual noise.
-                if (activeTool === 'lasso-select') {
-                    if (store.getState().brush !== null) {
-                        store.setState({ brush: null });
-                        _brushHoverKey = '';
-                        _brushCornerA = null;
-                        _brushCornerB = null;
-                    }
-                    updateSelectionMeshes(meshState, store.getState());
-                    redrawInspectMesh();
-                    return;
-                }
-                // brush + paint + smooth + elevation drive state.brush
-                // themselves (shape-at-hover preview when idle, accumulated
-                // stroke during drag) — skip the single-voxel / box logic below.
-                if (
-                    activeTool === 'brush'
-                    || activeTool === 'brush-select'
-                    || activeTool === 'paint'
-                    || activeTool === 'smooth'
-                    || activeTool === 'elevation'
-                ) {
+            // build brush selection each frame.
+            // lasso has its own screen-space overlay — suppress the
+            // world-space hover brush so it doesn't add visual noise.
+            if (activeTool === 'lasso-select') {
+                if (store.getState().brush !== null) {
+                    store.setState({ brush: null });
                     _brushHoverKey = '';
                     _brushCornerA = null;
                     _brushCornerB = null;
-                    updateSelectionMeshes(meshState, store.getState());
-                    redrawInspectMesh();
-                    return;
                 }
-
-                const sBrush = store.getState();
-                const boxSelect = sBrush.boxSelect;
-                if (boxSelect?.previewB) {
-                    const [ax, ay, az] = boxSelect.cornerA;
-                    const [bx, by, bz] = boxSelect.previewB;
-                    const prevBrush = sBrush.brush;
-                    const sameAsLast =
-                        prevBrush !== null &&
-                        _brushCornerA !== null &&
-                        _brushCornerB !== null &&
-                        _brushCornerA[0] === ax &&
-                        _brushCornerA[1] === ay &&
-                        _brushCornerA[2] === az &&
-                        _brushCornerB[0] === bx &&
-                        _brushCornerB[1] === by &&
-                        _brushCornerB[2] === bz;
-                    if (!sameAsLast) {
-                        _brushCornerA = [ax, ay, az];
-                        _brushCornerB = [bx, by, bz];
-                        _brushHoverKey = '';
-                        const sel = Selection.create();
-                        Selection.setAABB(
-                            sel,
-                            Math.min(ax, bx),
-                            Math.min(ay, by),
-                            Math.min(az, bz),
-                            Math.max(ax, bx),
-                            Math.max(ay, by),
-                            Math.max(az, bz),
-                        );
-                        store.setState({ brush: sel });
-                    }
-                } else {
-                    // show single-voxel brush at keyboard cursor (if active) or mouse hover
-                    const brushVoxel = sBrush.cursor ?? sBrush.hoverVoxel;
-                    const hoverKey = brushVoxel ? `${brushVoxel[0]},${brushVoxel[1]},${brushVoxel[2]}` : '';
-                    if (hoverKey !== _brushHoverKey) {
-                        _brushHoverKey = hoverKey;
-                        _brushCornerA = null;
-                        _brushCornerB = null;
-                        if (brushVoxel) {
-                            const sel = Selection.create();
-                            Selection.set(sel, brushVoxel[0], brushVoxel[1], brushVoxel[2]);
-                            store.setState({ brush: sel });
-                        } else {
-                            store.setState({ brush: null });
-                        }
-                    }
-                }
-
                 updateSelectionMeshes(meshState, store.getState());
                 redrawInspectMesh();
+                return;
+            }
+            // brush + paint + smooth + elevation drive state.brush
+            // themselves (shape-at-hover preview when idle, accumulated
+            // stroke during drag) — skip the single-voxel / box logic below.
+            if (
+                activeTool === 'brush' ||
+                activeTool === 'brush-select' ||
+                activeTool === 'paint' ||
+                activeTool === 'smooth' ||
+                activeTool === 'elevation'
+            ) {
+                _brushHoverKey = '';
+                _brushCornerA = null;
+                _brushCornerB = null;
+                updateSelectionMeshes(meshState, store.getState());
+                redrawInspectMesh();
+                return;
+            }
+
+            const sBrush = store.getState();
+            const boxSelect = sBrush.boxSelect;
+            if (boxSelect?.previewB) {
+                const [ax, ay, az] = boxSelect.cornerA;
+                const [bx, by, bz] = boxSelect.previewB;
+                const prevBrush = sBrush.brush;
+                const sameAsLast =
+                    prevBrush !== null &&
+                    _brushCornerA !== null &&
+                    _brushCornerB !== null &&
+                    _brushCornerA[0] === ax &&
+                    _brushCornerA[1] === ay &&
+                    _brushCornerA[2] === az &&
+                    _brushCornerB[0] === bx &&
+                    _brushCornerB[1] === by &&
+                    _brushCornerB[2] === bz;
+                if (!sameAsLast) {
+                    _brushCornerA = [ax, ay, az];
+                    _brushCornerB = [bx, by, bz];
+                    _brushHoverKey = '';
+                    const sel = Selection.create();
+                    Selection.setAABB(
+                        sel,
+                        Math.min(ax, bx),
+                        Math.min(ay, by),
+                        Math.min(az, bz),
+                        Math.max(ax, bx),
+                        Math.max(ay, by),
+                        Math.max(az, bz),
+                    );
+                    store.setState({ brush: sel });
+                }
+            } else {
+                // show single-voxel brush at keyboard cursor (if active) or mouse hover
+                const brushVoxel = sBrush.cursor ?? sBrush.hoverVoxel;
+                const hoverKey = brushVoxel ? `${brushVoxel[0]},${brushVoxel[1]},${brushVoxel[2]}` : '';
+                if (hoverKey !== _brushHoverKey) {
+                    _brushHoverKey = hoverKey;
+                    _brushCornerA = null;
+                    _brushCornerB = null;
+                    if (brushVoxel) {
+                        const sel = Selection.create();
+                        Selection.set(sel, brushVoxel[0], brushVoxel[1], brushVoxel[2]);
+                        store.setState({ brush: sel });
+                    } else {
+                        store.setState({ brush: null });
+                    }
+                }
+            }
+
+            updateSelectionMeshes(meshState, store.getState());
+            redrawInspectMesh();
         });
 
         // controller swap — reconcile attached trait vs desired control mode each tick.
@@ -1215,84 +1172,84 @@ script(
             out[2] = -(1 - 2 * (qx * qx + qy * qy));
         };
         onTick(ctx, () => {
-                const node = room.editor?.editorNode ?? room.playerNode;
-                const desiredMode = store.getState().controlMode;
+            const node = room.editor?.editorNode ?? room.playerNode;
+            const desiredMode = store.getState().controlMode;
 
-                let activeMode: ControlMode | null = null;
-                if (hasTrait(node, FlyControllerTrait)) activeMode = 'fly';
-                else if (hasTrait(node, OrbitControllerTrait)) activeMode = 'orbit';
-                else if (hasTrait(node, CharacterControllerTrait)) activeMode = 'character';
+            let activeMode: ControlMode | null = null;
+            if (hasTrait(node, FlyControllerTrait)) activeMode = 'fly';
+            else if (hasTrait(node, OrbitControllerTrait)) activeMode = 'orbit';
+            else if (hasTrait(node, CharacterControllerTrait)) activeMode = 'character';
 
-                if (activeMode === desiredMode) return;
+            if (activeMode === desiredMode) return;
 
-                const hadPose = snapshotCameraPose(node);
+            const hadPose = snapshotCameraPose(node);
 
-                if (desiredMode === 'fly') {
-                    if (hasTrait(node, OrbitControllerTrait)) removeTrait(node, OrbitControllerTrait);
-                    if (hasTrait(node, PlayerControllerTrait)) removeTrait(node, PlayerControllerTrait);
-                    if (hasTrait(node, CharacterControllerTrait)) removeTrait(node, CharacterControllerTrait);
-                    addTrait(node, FlyControllerTrait);
-                } else if (desiredMode === 'orbit') {
-                    if (hasTrait(node, FlyControllerTrait)) removeTrait(node, FlyControllerTrait);
-                    if (hasTrait(node, PlayerControllerTrait)) removeTrait(node, PlayerControllerTrait);
-                    if (hasTrait(node, CharacterControllerTrait)) removeTrait(node, CharacterControllerTrait);
-                    addTrait(node, OrbitControllerTrait);
-                } else {
-                    if (hasTrait(node, FlyControllerTrait)) removeTrait(node, FlyControllerTrait);
-                    if (hasTrait(node, OrbitControllerTrait)) removeTrait(node, OrbitControllerTrait);
-                    // CC first so PlayerController can find it in onInit
-                    if (!hasTrait(node, CharacterControllerTrait)) addTrait(node, CharacterControllerTrait);
-                    if (!hasTrait(node, PlayerControllerTrait)) addTrait(node, PlayerControllerTrait);
+            if (desiredMode === 'fly') {
+                if (hasTrait(node, OrbitControllerTrait)) removeTrait(node, OrbitControllerTrait);
+                if (hasTrait(node, PlayerControllerTrait)) removeTrait(node, PlayerControllerTrait);
+                if (hasTrait(node, CharacterControllerTrait)) removeTrait(node, CharacterControllerTrait);
+                addTrait(node, FlyControllerTrait);
+            } else if (desiredMode === 'orbit') {
+                if (hasTrait(node, FlyControllerTrait)) removeTrait(node, FlyControllerTrait);
+                if (hasTrait(node, PlayerControllerTrait)) removeTrait(node, PlayerControllerTrait);
+                if (hasTrait(node, CharacterControllerTrait)) removeTrait(node, CharacterControllerTrait);
+                addTrait(node, OrbitControllerTrait);
+            } else {
+                if (hasTrait(node, FlyControllerTrait)) removeTrait(node, FlyControllerTrait);
+                if (hasTrait(node, OrbitControllerTrait)) removeTrait(node, OrbitControllerTrait);
+                // CC first so PlayerController can find it in onInit
+                if (!hasTrait(node, CharacterControllerTrait)) addTrait(node, CharacterControllerTrait);
+                if (!hasTrait(node, PlayerControllerTrait)) addTrait(node, PlayerControllerTrait);
+            }
+
+            if (!hadPose) return;
+            writeCameraPose(node);
+
+            if (desiredMode === 'orbit') {
+                const orbit = getTrait(node, OrbitControllerTrait);
+                if (orbit) {
+                    writeForwardFromSnapQuat(_seedBodyPos);
+                    orbit.target[0] = _snapPos[0] + _seedBodyPos[0] * ORBIT_TAKEOVER_DISTANCE;
+                    orbit.target[1] = _snapPos[1] + _seedBodyPos[1] * ORBIT_TAKEOVER_DISTANCE;
+                    orbit.target[2] = _snapPos[2] + _seedBodyPos[2] * ORBIT_TAKEOVER_DISTANCE;
                 }
+            } else if (desiredMode === 'character') {
+                const pc = getTrait(node, PlayerControllerTrait);
+                const cc = getTrait(node, CharacterControllerTrait);
+                const transform = getTrait(node, TransformTrait);
+                if (pc && cc && transform) {
+                    // seed the body under the snapshot eye, so the player
+                    // camera (head = body + eyeHeight) lands on the prior pose.
+                    _seedBodyPos[0] = _snapPos[0];
+                    _seedBodyPos[1] = _snapPos[1] - pc.config.eyeHeight;
+                    _seedBodyPos[2] = _snapPos[2];
+                    setWorldPosition(transform, _seedBodyPos);
+                    resetInterpolation(node);
+                    vec3.copy(transform.interpolatedWorldPosition, transform.position);
+                    quat.copy(transform.interpolatedWorldQuaternion, transform.quaternion);
+                    transform.teleport++;
 
-                if (!hadPose) return;
-                writeCameraPose(node);
+                    // seed look from the snapshot orientation so the player
+                    // camera reproduces it. fwd(look) = -toVec3(look), and
+                    // the camera's backward axis (+Z) fed through setFromVec3
+                    // yields look with fwd(look) = camera-forward.
+                    const qx = _snapQuat[0],
+                        qy = _snapQuat[1],
+                        qz = _snapQuat[2],
+                        qw = _snapQuat[3];
+                    _seedBackward[0] = 2 * (qx * qz + qw * qy);
+                    _seedBackward[1] = 2 * (qy * qz - qw * qx);
+                    _seedBackward[2] = 1 - 2 * (qx * qx + qy * qy);
+                    spherical.setFromVec3(_seedSph, _seedBackward);
+                    cc.input.look[1] = _seedSph[1];
+                    cc.input.look[2] = _seedSph[2];
 
-                if (desiredMode === 'orbit') {
-                    const orbit = getTrait(node, OrbitControllerTrait);
-                    if (orbit) {
-                        writeForwardFromSnapQuat(_seedBodyPos);
-                        orbit.target[0] = _snapPos[0] + _seedBodyPos[0] * ORBIT_TAKEOVER_DISTANCE;
-                        orbit.target[1] = _snapPos[1] + _seedBodyPos[1] * ORBIT_TAKEOVER_DISTANCE;
-                        orbit.target[2] = _snapPos[2] + _seedBodyPos[2] * ORBIT_TAKEOVER_DISTANCE;
-                    }
-                } else if (desiredMode === 'character') {
-                    const pc = getTrait(node, PlayerControllerTrait);
-                    const cc = getTrait(node, CharacterControllerTrait);
-                    const transform = getTrait(node, TransformTrait);
-                    if (pc && cc && transform) {
-                        // seed the body under the snapshot eye, so the player
-                        // camera (head = body + eyeHeight) lands on the prior pose.
-                        _seedBodyPos[0] = _snapPos[0];
-                        _seedBodyPos[1] = _snapPos[1] - pc.config.eyeHeight;
-                        _seedBodyPos[2] = _snapPos[2];
-                        setWorldPosition(transform, _seedBodyPos);
-                        resetInterpolation(node);
-                        vec3.copy(transform.interpolatedWorldPosition, transform.position);
-                        quat.copy(transform.interpolatedWorldQuaternion, transform.quaternion);
-                        transform.teleport++;
-
-                        // seed look from the snapshot orientation so the player
-                        // camera reproduces it. fwd(look) = -toVec3(look), and
-                        // the camera's backward axis (+Z) fed through setFromVec3
-                        // yields look with fwd(look) = camera-forward.
-                        const qx = _snapQuat[0],
-                            qy = _snapQuat[1],
-                            qz = _snapQuat[2],
-                            qw = _snapQuat[3];
-                        _seedBackward[0] = 2 * (qx * qz + qw * qy);
-                        _seedBackward[1] = 2 * (qy * qz - qw * qx);
-                        _seedBackward[2] = 1 - 2 * (qx * qx + qy * qy);
-                        spherical.setFromVec3(_seedSph, _seedBackward);
-                        cc.input.look[1] = _seedSph[1];
-                        cc.input.look[2] = _seedSph[2];
-
-                        // editor character mode starts in free-fly with the
-                        // double-tap-Space toggle armed.
-                        cc.input.noclip = true;
-                        pc.controls.desktop.doubleTapNoclip = true;
-                    }
+                    // editor character mode starts in free-fly with the
+                    // double-tap-Space toggle armed.
+                    cc.input.noclip = true;
+                    pc.controls.desktop.doubleTapNoclip = true;
                 }
+            }
         });
 
         onDispose(ctx, () => {
@@ -1321,10 +1278,7 @@ script(
 /* ── registration ── */
 
 export async function registerServer(_state: EngineServer): Promise<void> {
-    [_Rooms, _Discovery] = await Promise.all([
-        import('../server/rooms'),
-        import('../server/discovery'),
-    ]);
+    [_Rooms, _Discovery] = await Promise.all([import('../server/rooms'), import('../server/discovery')]);
 }
 
 /**
@@ -1359,21 +1313,31 @@ function loadEditorAssets(): void {
         // ready` retry above re-runs this once block-icons finishes writing.
         // Parsing a 404 body would throw "Unexpected end of JSON input".
         .then((r) => (r.ok ? r.json() : null))
-        .then((json: { hash?: string; iconPx: number; cols: number; rows: number; states: Record<string, [number, number]> } | null) => {
-            if (!json) return;
-            // cache-bust the atlas PNG by content hash. A texture-only edit
-            // keeps the same coords + url, so without this the browser keeps
-            // the already-painted (stale) CSS background-image on HMR.
-            const bust = json.hash ? `?v=${json.hash}` : '';
-            useEditor.setState({
-                blockIconAtlasUrl: assetUrl('voxels-icons.png') + bust,
-                blockIconCoords: json.states,
-                blockIconPx: json.iconPx,
-                blockIconCols: json.cols,
-                blockIconRows: json.rows,
-            });
-            console.log('[bongle] block icon atlas loaded from static artifacts');
-        })
+        .then(
+            (
+                json: {
+                    hash?: string;
+                    iconPx: number;
+                    cols: number;
+                    rows: number;
+                    states: Record<string, [number, number]>;
+                } | null,
+            ) => {
+                if (!json) return;
+                // cache-bust the atlas PNG by content hash. A texture-only edit
+                // keeps the same coords + url, so without this the browser keeps
+                // the already-painted (stale) CSS background-image on HMR.
+                const bust = json.hash ? `?v=${json.hash}` : '';
+                useEditor.setState({
+                    blockIconAtlasUrl: assetUrl('voxels-icons.png') + bust,
+                    blockIconCoords: json.states,
+                    blockIconPx: json.iconPx,
+                    blockIconCols: json.cols,
+                    blockIconRows: json.rows,
+                });
+                console.log('[bongle] block icon atlas loaded from static artifacts');
+            },
+        )
         .catch((e) => console.warn('[bongle] failed to load block icon artifacts:', e));
 }
 

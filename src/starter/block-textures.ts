@@ -37,19 +37,13 @@ export const grassPlant2 = blockTexture('starter:grass_plant_2', {
 });
 
 export const water = blockTexture('starter:water', {
-    src: [
-        new URL('./assets/textures/water_1.png', import.meta.url),
-        new URL('./assets/textures/water_2.png', import.meta.url),
-    ],
+    src: [new URL('./assets/textures/water_1.png', import.meta.url), new URL('./assets/textures/water_2.png', import.meta.url)],
     fps: 1.5,
     interpolate: true,
 });
 
 export const lava = blockTexture('starter:lava', {
-    src: [
-        new URL('./assets/textures/lava_1.png', import.meta.url),
-        new URL('./assets/textures/lava_2.png', import.meta.url),
-    ],
+    src: [new URL('./assets/textures/lava_1.png', import.meta.url), new URL('./assets/textures/lava_2.png', import.meta.url)],
     fps: 1.5,
     interpolate: true,
 });
@@ -83,18 +77,36 @@ export const snow = blockTexture('starter:snow', {
 // wool — 15 dye colors. names follow Minecraft's palette (textures sourced
 // from minetest_game's wool mod, MIT-licensed). there's no `light_blue` —
 // MC's 16th color — without a hand-tinted texture; skip for now.
-export const woolWhite = blockTexture('starter:wool_white', { src: new URL('./assets/textures/wool_white.png', import.meta.url) });
-export const woolLightGray = blockTexture('starter:wool_light_gray', { src: new URL('./assets/textures/wool_light_gray.png', import.meta.url) });
+export const woolWhite = blockTexture('starter:wool_white', {
+    src: new URL('./assets/textures/wool_white.png', import.meta.url),
+});
+export const woolLightGray = blockTexture('starter:wool_light_gray', {
+    src: new URL('./assets/textures/wool_light_gray.png', import.meta.url),
+});
 export const woolGray = blockTexture('starter:wool_gray', { src: new URL('./assets/textures/wool_gray.png', import.meta.url) });
-export const woolBlack = blockTexture('starter:wool_black', { src: new URL('./assets/textures/wool_black.png', import.meta.url) });
-export const woolBrown = blockTexture('starter:wool_brown', { src: new URL('./assets/textures/wool_brown.png', import.meta.url) });
+export const woolBlack = blockTexture('starter:wool_black', {
+    src: new URL('./assets/textures/wool_black.png', import.meta.url),
+});
+export const woolBrown = blockTexture('starter:wool_brown', {
+    src: new URL('./assets/textures/wool_brown.png', import.meta.url),
+});
 export const woolRed = blockTexture('starter:wool_red', { src: new URL('./assets/textures/wool_red.png', import.meta.url) });
-export const woolOrange = blockTexture('starter:wool_orange', { src: new URL('./assets/textures/wool_orange.png', import.meta.url) });
-export const woolYellow = blockTexture('starter:wool_yellow', { src: new URL('./assets/textures/wool_yellow.png', import.meta.url) });
+export const woolOrange = blockTexture('starter:wool_orange', {
+    src: new URL('./assets/textures/wool_orange.png', import.meta.url),
+});
+export const woolYellow = blockTexture('starter:wool_yellow', {
+    src: new URL('./assets/textures/wool_yellow.png', import.meta.url),
+});
 export const woolLime = blockTexture('starter:wool_lime', { src: new URL('./assets/textures/wool_lime.png', import.meta.url) });
-export const woolGreen = blockTexture('starter:wool_green', { src: new URL('./assets/textures/wool_green.png', import.meta.url) });
+export const woolGreen = blockTexture('starter:wool_green', {
+    src: new URL('./assets/textures/wool_green.png', import.meta.url),
+});
 export const woolCyan = blockTexture('starter:wool_cyan', { src: new URL('./assets/textures/wool_cyan.png', import.meta.url) });
 export const woolBlue = blockTexture('starter:wool_blue', { src: new URL('./assets/textures/wool_blue.png', import.meta.url) });
-export const woolPurple = blockTexture('starter:wool_purple', { src: new URL('./assets/textures/wool_purple.png', import.meta.url) });
-export const woolMagenta = blockTexture('starter:wool_magenta', { src: new URL('./assets/textures/wool_magenta.png', import.meta.url) });
+export const woolPurple = blockTexture('starter:wool_purple', {
+    src: new URL('./assets/textures/wool_purple.png', import.meta.url),
+});
+export const woolMagenta = blockTexture('starter:wool_magenta', {
+    src: new URL('./assets/textures/wool_magenta.png', import.meta.url),
+});
 export const woolPink = blockTexture('starter:wool_pink', { src: new URL('./assets/textures/wool_pink.png', import.meta.url) });

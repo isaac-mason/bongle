@@ -119,9 +119,7 @@ describe('aabb-physics — friction combine', () => {
 
 describe('aabb-physics — restitution combine', () => {
     it('trampoline (block rest=0.8) × body rest=0.5 → 0.4 bounce', () => {
-        const { voxels, crashWorld, world } = setupWorld([
-            { id: 'trampoline', def: { restitution: 0.8 } },
-        ]);
+        const { voxels, crashWorld, world } = setupWorld([{ id: 'trampoline', def: { restitution: 0.8 } }]);
         setupFloor(voxels, 'trampoline');
         const body = AabbPhysics.createBody(world, crashWorld, {
             position: [0, 2, 0],
@@ -159,9 +157,7 @@ describe('aabb-physics — restitution combine', () => {
     });
 
     it('per-axis restitution: trampoline floor bounces Y; X velocity preserved', () => {
-        const { voxels, crashWorld, world } = setupWorld([
-            { id: 'trampoline', def: { restitution: 0.8 } },
-        ]);
+        const { voxels, crashWorld, world } = setupWorld([{ id: 'trampoline', def: { restitution: 0.8 } }]);
         setupFloor(voxels, 'trampoline');
         const body = AabbPhysics.createBody(world, crashWorld, {
             position: [0, 2, 0],

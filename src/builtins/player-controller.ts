@@ -278,12 +278,7 @@ const _rayDir: Vec3 = [0, 0, 0];
 
 // ── input poll ────────────────────────────────────────────────────────
 
-function pollInput(
-    pc: PlayerControllerTrait,
-    cc: CharacterControllerTrait,
-    input: Input,
-    viewportWidth: number,
-): void {
+function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, input: Input, viewportWidth: number): void {
     if (!pc.controls.enabled) return;
     const mk = input.mouseKeyboard;
     const t = input.touch;
@@ -509,7 +504,17 @@ function updateCamera(
 
     if (playerController.config.perspective === 'third-back') {
         // Camera behind head, looking the same direction as the player.
-        const hitDist = castCameraRay(characterController, physics, headX, headY, headZ, -fwdX, -fwdY, -fwdZ, playerController.config.thirdPersonDistance);
+        const hitDist = castCameraRay(
+            characterController,
+            physics,
+            headX,
+            headY,
+            headZ,
+            -fwdX,
+            -fwdY,
+            -fwdZ,
+            playerController.config.thirdPersonDistance,
+        );
         const clamped = Math.max(0, hitDist - playerController.config.cameraCollisionMargin);
         playerController.state.currentCameraDistance = clamped;
         eyeX = headX - fwdX * clamped;
@@ -518,7 +523,17 @@ function updateCamera(
         // target = head + fwd keeps the camera looking in +fwd direction.
     } else if (playerController.config.perspective === 'third-front') {
         // Camera in front of head, looking back at the head.
-        const hitDist = castCameraRay(characterController, physics, headX, headY, headZ, fwdX, fwdY, fwdZ, playerController.config.thirdPersonDistance);
+        const hitDist = castCameraRay(
+            characterController,
+            physics,
+            headX,
+            headY,
+            headZ,
+            fwdX,
+            fwdY,
+            fwdZ,
+            playerController.config.thirdPersonDistance,
+        );
         const clamped = Math.max(0, hitDist - playerController.config.cameraCollisionMargin);
         playerController.state.currentCameraDistance = clamped;
         eyeX = headX + fwdX * clamped;

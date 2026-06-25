@@ -397,11 +397,7 @@ export function invalidateRig(animator: AnimatorTrait): void {
  * `root` can also match the animator's own node name; in that case the walk
  * starts from the animator node itself.
  */
-export function descendants(
-    animator: AnimatorTrait,
-    root: string,
-    opts?: { includeRoot?: boolean },
-): Set<string> {
+export function descendants(animator: AnimatorTrait, root: string, opts?: { includeRoot?: boolean }): Set<string> {
     const out = new Set<string>();
     const animatorNode = animator._node;
     if (!animatorNode) return out;
@@ -516,7 +512,7 @@ function tickAnimator(
         const forceSample = wasVisible === 0;
         if (!forceSample) {
             const stride = state._lodStride;
-            const shouldSample = stride === 1 || ((frameCount + state._lodPhase) % stride) === 0;
+            const shouldSample = stride === 1 || (frameCount + state._lodPhase) % stride === 0;
             if (!shouldSample) {
                 advanceActionTimes(state, dt);
                 return;
@@ -701,10 +697,7 @@ function tickAnimator(
                 let qw = _scratchQuat[3]!;
                 if (total > 0) {
                     const dot =
-                        layerAccum[o + 4]! * qx +
-                        layerAccum[o + 5]! * qy +
-                        layerAccum[o + 6]! * qz +
-                        layerAccum[o + 7]! * qw;
+                        layerAccum[o + 4]! * qx + layerAccum[o + 5]! * qy + layerAccum[o + 6]! * qz + layerAccum[o + 7]! * qw;
                     if (dot < 0) {
                         qx = -qx;
                         qy = -qy;
@@ -908,7 +901,7 @@ function tickAnimator(
         // iteration. exception: rig-root bones whose `parent transform`
         // lives outside the rig — refresh it via the lazy walk-up.
         const parent = t._parent as TransformTrait | null;
-        if (parent !== null && (parent._dirty & TRANSFORM_DIRTY_WORLD_MATRIX)) {
+        if (parent !== null && parent._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
             getWorldMatrix(parent);
         }
 
@@ -976,17 +969,15 @@ function rebuildBoneOrder(state: AnimatorState, animatorNode: Node): void {
  * called only when the rig was rebuilt, the channels payload swapped
  * (resource reload), or the action's mask ref changed.
  */
-function rebuildActionBoneIndices(
-    action: AnimationAction,
-    channels: ClipChannels,
-    state: AnimatorState,
-): void {
+function rebuildActionBoneIndices(action: AnimationAction, channels: ClipChannels, state: AnimatorState): void {
     const arr = channels.channels;
     let out = action._boneIndices;
     if (!out || out.length < arr.length) out = new Int32Array(arr.length);
     const mask = action.mask;
     const boneIndex = state.boneIndex;
-    let nT = 0, nR = 0, nS = 0;
+    let nT = 0,
+        nR = 0,
+        nS = 0;
     for (let c = 0; c < arr.length; c++) {
         const ch = arr[c]!;
         const name = ch.nodeName;
@@ -1009,7 +1000,9 @@ function rebuildActionBoneIndices(
     const idxT = new Int32Array(nT);
     const idxR = new Int32Array(nR);
     const idxS = new Int32Array(nS);
-    let iT = 0, iR = 0, iS = 0;
+    let iT = 0,
+        iR = 0,
+        iS = 0;
     for (let c = 0; c < arr.length; c++) {
         if (out[c]! < 0) continue;
         const p = arr[c]!.property;

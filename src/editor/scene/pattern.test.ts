@@ -80,7 +80,9 @@ describe('samplePattern', () => {
     });
 
     it('block with state → key with brackets', () => {
-        expect(samplePattern({ kind: 'block', block: { blockId: 'oak_log', props: { axis: 'y' } } }, V, 0, 0, 0, '')).toBe('oak_log[axis=y]');
+        expect(samplePattern({ kind: 'block', block: { blockId: 'oak_log', props: { axis: 'y' } } }, V, 0, 0, 0, '')).toBe(
+            'oak_log[axis=y]',
+        );
     });
 
     it('$active resolves to the supplied active key', () => {

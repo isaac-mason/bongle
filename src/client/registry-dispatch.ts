@@ -70,9 +70,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     _hmrCallCount++;
     if (_hmrCallCount === 1) _hmrFirstT = _now;
     const sinceLast = _hmrLastT > 0 ? (_now - _hmrLastT).toFixed(0) : 'first';
-    const ratePerSec = _hmrCallCount > 1
-        ? (_hmrCallCount / ((_now - _hmrFirstT) / 1000)).toFixed(2)
-        : '—';
+    const ratePerSec = _hmrCallCount > 1 ? (_hmrCallCount / ((_now - _hmrFirstT) / 1000)).toFixed(2) : '—';
     console.log(`[registry-dispatch][hmr] call#${_hmrCallCount} sinceLast=${sinceLast}ms rate=${ratePerSec}/s`);
     _hmrLastT = _now;
 
@@ -130,10 +128,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // when the atlas does change, per-room visuals (which hold material refs)
     // must be disposed + re-init'd; mesh visuals also bind the atlas + anim
     // buffer directly.
-    if (
-        registry.blocks.pendingChanges.length > 0 ||
-        registry.blockTextures.pendingChanges.length > 0
-    ) {
+    if (registry.blocks.pendingChanges.length > 0 || registry.blockTextures.pendingChanges.length > 0) {
         await refreshBlockResources(state);
         registry.blocks.pendingChanges.length = 0;
         registry.blockTextures.pendingChanges.length = 0;
@@ -197,13 +192,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
             const handle = change.handle.payload;
             const payload = handle._payload;
             if (!payload) continue;
-            Content.populateScene(
-                state.content,
-                registry.blockRegistry,
-                sceneId,
-                payload,
-                'client',
-            );
+            Content.populateScene(state.content, registry.blockRegistry, sceneId, payload, 'client');
         }
         registry.scenes.pendingChanges.length = 0;
     }
@@ -315,15 +304,10 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
     // must rebuild alongside voxelResources whenever those swap.
     if (voxelResourcesChanged) {
         VoxelMeshResources.dispose(state.voxelMeshResources);
-        state.voxelMeshResources = VoxelMeshResources.init(
-            state.voxelResources.atlas,
-            state.voxelResources.texAnimBuffer,
-        );
+        state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
     }
 
-    const activeRoom = state.rooms.activePlayerId !== null
-        ? state.rooms.rooms.get(state.rooms.activePlayerId) ?? null
-        : null;
+    const activeRoom = state.rooms.activePlayerId !== null ? (state.rooms.rooms.get(state.rooms.activePlayerId) ?? null) : null;
 
     for (const room of state.rooms.rooms.values()) {
         room.voxels.registry = blockRegistry;
@@ -407,23 +391,21 @@ const TOAST_LABELS: Record<string, [singular: string, plural: string]> = {
     particles: ['particle emitter', 'particle emitters'],
 };
 
-function pushHmrToasts(
-    stores: ReadonlyArray<KindStore<unknown>>,
-    dirtyScriptIds: ReadonlySet<string>,
-): void {
+function pushHmrToasts(stores: ReadonlyArray<KindStore<unknown>>, dirtyScriptIds: ReadonlySet<string>): void {
     const ed = useEditor.getState();
     for (const store of stores) {
         if (store.pendingChanges.length === 0) continue;
         const ids = store.pendingChanges.map((ch) => ch.handle.id);
         const allSame = store.pendingChanges.every((ch) => ch.kind === store.pendingChanges[0]!.kind);
-        const verb = !allSame ? 'updated'
-            : store.pendingChanges[0]!.kind === 'added' ? 'added'
-            : store.pendingChanges[0]!.kind === 'removed' ? 'removed'
-            : 'updated';
+        const verb = !allSame
+            ? 'updated'
+            : store.pendingChanges[0]!.kind === 'added'
+              ? 'added'
+              : store.pendingChanges[0]!.kind === 'removed'
+                ? 'removed'
+                : 'updated';
         const [singular, plural] = TOAST_LABELS[store.name] ?? [store.name, store.name];
-        const message = ids.length === 1
-            ? `${singular} '${ids[0]}' ${verb}`
-            : `${ids.length} ${plural} ${verb}`;
+        const message = ids.length === 1 ? `${singular} '${ids[0]}' ${verb}` : `${ids.length} ${plural} ${verb}`;
         ed.pushToast({ kind: store.name, message });
     }
     // script-instance swaps via DepGraph (producer-only change reaching

@@ -267,54 +267,86 @@ function resetScenario(s: Scenario): void {
 describe('vcc.move — single character', () => {
     const air = makeScenario({
         voxels: emptyVoxels(),
-        startX: 0, startY: 10, startZ: 0,
-        velX: 0, velY: -9.8 * DT, velZ: 0,
+        startX: 0,
+        startY: 10,
+        startZ: 0,
+        velX: 0,
+        velY: -9.8 * DT,
+        velZ: 0,
     });
 
     const grounded = makeScenario({
         voxels: flatFloorVoxels(),
-        startX: 4, startY: 0, startZ: 4,
-        velX: 4, velY: -9.8 * DT, velZ: 0,
+        startX: 4,
+        startY: 0,
+        startZ: 4,
+        velX: 4,
+        velY: -9.8 * DT,
+        velZ: 0,
     });
 
     const wall = makeScenario({
         voxels: wallVoxels(),
         // pressed up against the +X wall at x=8 (block face at world x=8).
-        startX: 7.5, startY: 0, startZ: 4,
-        velX: 4, velY: -9.8 * DT, velZ: 0,
+        startX: 7.5,
+        startY: 0,
+        startZ: 4,
+        velX: 4,
+        velY: -9.8 * DT,
+        velZ: 0,
     });
 
     const corner = makeScenario({
         voxels: cornerVoxels(),
-        startX: 7.5, startY: 0, startZ: 7.5,
+        startX: 7.5,
+        startY: 0,
+        startZ: 7.5,
         // diagonal push into +X/+Z corner.
-        velX: 4, velY: -9.8 * DT, velZ: 4,
+        velX: 4,
+        velY: -9.8 * DT,
+        velZ: 4,
     });
 
     const tunnel = makeScenario({
         voxels: tunnelVoxels(),
-        startX: 7.5, startY: 0, startZ: 4,
-        velX: 4, velY: 0, velZ: 0,
+        startX: 7.5,
+        startY: 0,
+        startZ: 4,
+        velX: 4,
+        velY: 0,
+        velZ: 0,
     });
 
     const dense = makeScenario({
         // dense pocket: stand at world (4.5, 13, 4.5). chunk at cy=-1 spans y=-16..-1; pocket starts y=-3.
         voxels: denseVoxels(),
-        startX: 4.5, startY: -3, startZ: 4.5,
-        velX: 1, velY: -9.8 * DT, velZ: 0,
+        startX: 4.5,
+        startY: -3,
+        startZ: 4.5,
+        velX: 1,
+        velY: -9.8 * DT,
+        velZ: 0,
     });
 
     const bodies5 = makeScenario({
         voxels: flatFloorVoxels(),
-        startX: 4, startY: 0, startZ: 4,
-        velX: 0, velY: -9.8 * DT, velZ: 0,
+        startX: 4,
+        startY: 0,
+        startZ: 4,
+        velX: 0,
+        velY: -9.8 * DT,
+        velZ: 0,
         bodyCount: 5,
     });
 
     const bodies20 = makeScenario({
         voxels: flatFloorVoxels(),
-        startX: 4, startY: 0, startZ: 4,
-        velX: 0, velY: -9.8 * DT, velZ: 0,
+        startX: 4,
+        startY: 0,
+        startZ: 4,
+        velX: 0,
+        velY: -9.8 * DT,
+        velZ: 0,
         bodyCount: 20,
     });
 
@@ -432,16 +464,7 @@ const _tl_horizVel = vec3.create();
 
 let _tl_isIntentional = false;
 const _tl_listener: vcc.VccListener = {
-    onContactSolve(
-        v,
-        _body,
-        _subShapeId,
-        _contactPos,
-        contactNormal,
-        contactVelocity,
-        characterVelocity,
-        ioCharacterVelocity,
-    ) {
+    onContactSolve(v, _body, _subShapeId, _contactPos, contactNormal, contactVelocity, characterVelocity, ioCharacterVelocity) {
         const inAir = v.groundState === vcc.GROUND_STATE_IN_AIR;
         const cvSq =
             contactVelocity[0] * contactVelocity[0] +
@@ -533,19 +556,22 @@ function makeCcState(cfg: Partial<CcConfig> = {}): CcState {
 }
 
 /** mirror of tickCharacterController, but driven by a CcInput instead of traits. */
-function tickLike(world: World, voxels: Voxels, aabbWorld: AabbPhysics.World, v: vcc.VCC, st: CcState, input: CcInput, dt: number): void {
+function tickLike(
+    world: World,
+    voxels: Voxels,
+    aabbWorld: AabbPhysics.World,
+    v: vcc.VCC,
+    st: CcState,
+    input: CcInput,
+    dt: number,
+): void {
     const cfg = st.cfg;
     const theta = input.cameraTheta;
     const strafe = input.move[0];
     const fwd = input.move[1];
     vec3.set(_tl_forward, -Math.sin(theta), 0, -Math.cos(theta));
     vec3.set(_tl_right, Math.cos(theta), 0, -Math.sin(theta));
-    vec3.set(
-        _tl_movementDir,
-        _tl_forward[0] * fwd + _tl_right[0] * strafe,
-        0,
-        _tl_forward[2] * fwd + _tl_right[2] * strafe,
-    );
+    vec3.set(_tl_movementDir, _tl_forward[0] * fwd + _tl_right[0] * strafe, 0, _tl_forward[2] * fwd + _tl_right[2] * strafe);
     const movLen = vec3.length(_tl_movementDir);
     const isIntentional = movLen > 1e-6;
     if (isIntentional) vec3.scale(_tl_movementDir, _tl_movementDir, 1 / movLen);
@@ -615,7 +641,7 @@ function tickLike(world: World, voxels: Voxels, aabbWorld: AabbPhysics.World, v:
             if (stepped) {
                 v.linearVelocity[0] = _tl_newVel[0];
                 v.linearVelocity[2] = _tl_newVel[2];
-                st.stepSmoothOffset -= (v.position[1] - preStepY);
+                st.stepSmoothOffset -= v.position[1] - preStepY;
                 if (st.stepSmoothOffset < -cfg.stepHeight) st.stepSmoothOffset = -cfg.stepHeight;
                 else if (st.stepSmoothOffset > cfg.stepHeight) st.stepSmoothOffset = cfg.stepHeight;
             }
@@ -706,9 +732,14 @@ function makeRealisticScenario(opts: { propCount: number; cameraTheta: number })
     }
 
     return {
-        world, voxels, aabbWorld, vcc: v,
+        world,
+        voxels,
+        aabbWorld,
+        vcc: v,
         state: makeCcState(),
-        startX, startY, startZ,
+        startX,
+        startY,
+        startZ,
         input: { cameraTheta: opts.cameraTheta, move: [0, 1], jump: false, sprint: false },
     };
 }
@@ -879,8 +910,13 @@ describe('vcc phase — body cast (called once per outer iter)', () => {
     function runCast(scn: ReturnType<typeof makeBodyWorld>): void {
         collector.reset();
         castShape(
-            scn.world, collector, settings, scn.queryShape,
-            [0, 0, 0], ID_QUAT, ONE,
+            scn.world,
+            collector,
+            settings,
+            scn.queryShape,
+            [0, 0, 0],
+            ID_QUAT,
+            ONE,
             [0.083, -0.16, 0],
             _phaseFilter.filter,
         );
@@ -920,11 +956,7 @@ describe('vcc phase — solver only (synthetic constraints)', () => {
 
     const oneFloor = [makeConstraint(0, 1, 0, 0)];
     const floorAndWall = [makeConstraint(0, 1, 0, 0), makeConstraint(-1, 0, 0, 0)];
-    const corner = [
-        makeConstraint(0, 1, 0, 0),
-        makeConstraint(-1, 0, 0, 0),
-        makeConstraint(0, 0, -1, 0),
-    ];
+    const corner = [makeConstraint(0, 1, 0, 0), makeConstraint(-1, 0, 0, 0), makeConstraint(0, 0, -1, 0)];
     const eight = [
         makeConstraint(0, 1, 0, 0),
         makeConstraint(-1, 0, 0, 0),

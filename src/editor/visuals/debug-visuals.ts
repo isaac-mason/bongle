@@ -62,7 +62,7 @@ export function update(state: DebugVisualsState, world: World, enabled: boolean)
 
     let offset = 0;
     const cap = state.scratch.length;
-    
+
     for (const b of rigidBody.iterate(world)) {
         if (b.objectLayer === OBJECT_LAYER_EDITOR_NODES) continue;
         const result = debug.body(b, state.bodyOpts);

@@ -92,8 +92,16 @@ function buildBenchRegistry() {
         };
         defs.set(b.id, def);
         handles.set(b.id, {
-            id: b.id, states: SINGLE_STATE, _def: def, _baseStateId: 0, _index: 0,
-            totalStates: 1, stateId: () => 0, defaultId: () => 0, stateKey: () => b.id, defaultKey: () => b.id,
+            id: b.id,
+            states: SINGLE_STATE,
+            _def: def,
+            _baseStateId: 0,
+            _index: 0,
+            totalStates: 1,
+            stateId: () => 0,
+            defaultId: () => 0,
+            stateKey: () => b.id,
+            defaultKey: () => b.id,
         });
     }
     return buildBlockRegistry(defs, handles, textures);
@@ -131,9 +139,11 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
             }
         }
     }
-    const hx0 = 6, hz0 = 2, hx1 = 13, hz1 = 9;
-    for (let z = hz0; z <= hz1; z++)
-        for (let x = hx0; x <= hx1; x++) setChunkBlock(chunk, x, 5, z, 'oak_planks', registry);
+    const hx0 = 6,
+        hz0 = 2,
+        hx1 = 13,
+        hz1 = 9;
+    for (let z = hz0; z <= hz1; z++) for (let x = hx0; x <= hx1; x++) setChunkBlock(chunk, x, 5, z, 'oak_planks', registry);
     for (let y = 6; y < 9; y++) {
         for (let x = hx0; x <= hx1; x++) {
             const corner = x === hx0 || x === hx1;
@@ -161,14 +171,17 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
     setChunkBlock(chunk, hx0 + 4, 8, hz0 + 4, 'glowstone', registry);
     setChunkBlock(chunk, hx0 + 1, 7, hz0 + 1, 'torch', registry);
     setChunkBlock(chunk, hx1 - 1, 7, hz1 - 1, 'torch', registry);
-    const tx = 2, tz = 12;
+    const tx = 2,
+        tz = 12;
     for (let y = 5; y < 9; y++) setChunkBlock(chunk, tx, y, tz, 'oak_log', registry);
     for (let dy = 0; dy < 3; dy++) {
         const radius = dy === 2 ? 1 : 2;
         for (let dz = -radius; dz <= radius; dz++)
             for (let dx = -radius; dx <= radius; dx++) {
                 if (dx === 0 && dz === 0 && dy < 2) continue;
-                const lx = tx + dx, ly = 8 + dy, lz = tz + dz;
+                const lx = tx + dx,
+                    ly = 8 + dy,
+                    lz = tz + dz;
                 if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE)
                     setChunkBlock(chunk, lx, ly, lz, 'leaves', registry);
             }
@@ -187,8 +200,7 @@ function makeModelDispatch(registry: ReturnType<typeof buildBenchRegistry>): Vox
     const chunk = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', chunk);
     for (let z = 0; z < CHUNK_SIZE; z++)
-        for (let x = 0; x < CHUNK_SIZE; x++)
-            for (let y = 0; y < 4; y++) setChunkBlock(chunk, x, y, z, 'stone', registry);
+        for (let x = 0; x < CHUNK_SIZE; x++) for (let y = 0; y < 4; y++) setChunkBlock(chunk, x, y, z, 'stone', registry);
     for (let z = 0; z < CHUNK_SIZE; z++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             const k = (x + z * 3) % 5;
@@ -207,48 +219,52 @@ function meshAndLight(voxels: Voxels, chunk: Chunk, registry: ReturnType<typeof 
     meshChunk(_profileMeshOutput, buildMeshInput(voxels, chunk), registry);
 }
 
-test.skipIf(!SHOULD_RUN)('profile meshChunk', async () => {
-    const registry = buildBenchRegistry();
-    const scenes = [
-        { name: 'terrain', voxels: makeTerrainChunk(registry) },
-        { name: 'village', voxels: makeVillage(registry) },
-        { name: 'model_dispatch', voxels: makeModelDispatch(registry) },
-    ];
-    const ITERS = 8000;
+test.skipIf(!SHOULD_RUN)(
+    'profile meshChunk',
+    async () => {
+        const registry = buildBenchRegistry();
+        const scenes = [
+            { name: 'terrain', voxels: makeTerrainChunk(registry) },
+            { name: 'village', voxels: makeVillage(registry) },
+            { name: 'model_dispatch', voxels: makeModelDispatch(registry) },
+        ];
+        const ITERS = 8000;
 
-    // warm-up
-    for (const s of scenes) {
-        const c = s.voxels.chunks.get('0,0,0')!;
-        for (let i = 0; i < 200; i++) {
-            c.dirty = true;
-            meshAndLight(s.voxels, c, registry);
+        // warm-up
+        for (const s of scenes) {
+            const c = s.voxels.chunks.get('0,0,0')!;
+            for (let i = 0; i < 200; i++) {
+                c.dirty = true;
+                meshAndLight(s.voxels, c, registry);
+            }
         }
-    }
 
-    // start CPU profiler — captures only the hot region (skips vitest boot,
-    // pnpm wrapper, etc. that --cpu-prof would otherwise dominate)
-    const session = new Session();
-    session.connect();
-    await session.post('Profiler.enable');
-    await session.post('Profiler.setSamplingInterval', { interval: 100 }); // µs
-    await session.post('Profiler.start');
+        // start CPU profiler — captures only the hot region (skips vitest boot,
+        // pnpm wrapper, etc. that --cpu-prof would otherwise dominate)
+        const session = new Session();
+        session.connect();
+        await session.post('Profiler.enable');
+        await session.post('Profiler.setSamplingInterval', { interval: 100 }); // µs
+        await session.post('Profiler.start');
 
-    console.log(`\n# scene timings (${ITERS} iters each)`);
-    for (const s of scenes) {
-        const c = s.voxels.chunks.get('0,0,0')!;
-        const t0 = performance.now();
-        for (let i = 0; i < ITERS; i++) {
-            c.dirty = true;
-            meshAndLight(s.voxels, c, registry);
+        console.log(`\n# scene timings (${ITERS} iters each)`);
+        for (const s of scenes) {
+            const c = s.voxels.chunks.get('0,0,0')!;
+            const t0 = performance.now();
+            for (let i = 0; i < ITERS; i++) {
+                c.dirty = true;
+                meshAndLight(s.voxels, c, registry);
+            }
+            const t1 = performance.now();
+            const total = t1 - t0;
+            console.log(`  ${s.name.padEnd(20)} ${(total / ITERS).toFixed(3)} ms/iter   (${total.toFixed(0)} ms total)`);
         }
-        const t1 = performance.now();
-        const total = t1 - t0;
-        console.log(`  ${s.name.padEnd(20)} ${(total / ITERS).toFixed(3)} ms/iter   (${total.toFixed(0)} ms total)`);
-    }
 
-    const { profile } = await session.post('Profiler.stop');
-    const outPath = process.env.PROFILE_MESH_OUT ?? 'mesh.cpuprofile';
-    writeFileSync(outPath, JSON.stringify(profile));
-    console.log(`\n# cpuprofile written: ${outPath}`);
-    session.disconnect();
-}, 120_000);
+        const { profile } = await session.post('Profiler.stop');
+        const outPath = process.env.PROFILE_MESH_OUT ?? 'mesh.cpuprofile';
+        writeFileSync(outPath, JSON.stringify(profile));
+        console.log(`\n# cpuprofile written: ${outPath}`);
+        session.disconnect();
+    },
+    120_000,
+);

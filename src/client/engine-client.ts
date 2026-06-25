@@ -340,15 +340,8 @@ export async function load(state: EngineClient) {
     state.modelResources = ModelResources.init();
     state.shadowResources = ShadowResources.init();
 
-    state.voxelResources = VoxelResources.init(
-        registry.blockRegistry,
-        state.renderer.environmentResources,
-        voxelBudget,
-    );
-    state.voxelMeshResources = VoxelMeshResources.init(
-        state.voxelResources.atlas,
-        state.voxelResources.texAnimBuffer,
-    );
+    state.voxelResources = VoxelResources.init(registry.blockRegistry, state.renderer.environmentResources, voxelBudget);
+    state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
 
     // async load pass — pre-warms compile pipelines, fetches atlases. All
     // resources race in parallel; the placeholder atlas keeps materials
@@ -364,11 +357,7 @@ export async function load(state: EngineClient) {
         state.renderer.renderer,
     );
 
-    const [audioResources] = await Promise.all([
-        audioPromise,
-        spriteLoadPromise,
-        voxelLoadPromise,
-    ]);
+    const [audioResources] = await Promise.all([audioPromise, spriteLoadPromise, voxelLoadPromise]);
 
     state.audioResources = audioResources!;
 
@@ -729,8 +718,7 @@ const NEIGHBOR_OFFSETS: readonly (readonly [number, number, number])[] = /* @__P
     const offsets: [number, number, number][] = [];
     for (let dz = -1; dz <= 1; dz++)
         for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++)
-                if (dx !== 0 || dy !== 0 || dz !== 0) offsets.push([dx, dy, dz]);
+            for (let dx = -1; dx <= 1; dx++) if (dx !== 0 || dy !== 0 || dz !== 0) offsets.push([dx, dy, dz]);
     return offsets;
 })();
 
@@ -804,13 +792,16 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
             if (nextKeys.length < prevKeys.length) kind = 'shrunk';
             else {
                 for (let i = 0; i < prevKeys.length; i++) {
-                    if (prevKeys[i] !== nextKeys[i]) { kind = 'reordered-or-replaced'; break; }
+                    if (prevKeys[i] !== nextKeys[i]) {
+                        kind = 'reordered-or-replaced';
+                        break;
+                    }
                 }
             }
             if (kind) {
                 throw new Error(
                     `[voxel-drift][ops-palette] chunk=(${entry.cx},${entry.cy},${entry.cz}) kind=${kind}` +
-                    ` prev=[${prevKeys.join('|')}] next=[${nextKeys.join('|')}]`,
+                        ` prev=[${prevKeys.join('|')}] next=[${nextKeys.join('|')}]`,
                 );
             }
         }
@@ -1267,11 +1258,21 @@ export function update(state: EngineClient, delta: number) {
             if (room.clientMetrics.enabled) {
                 const quadR = VoxelResources.arenaReport(state.voxelResources.arenas.quadArena);
                 const orderR = VoxelResources.arenaReport(state.voxelResources.arenas.quadOrderArena);
-                Debug.record(room.clientMetrics, 'voxels/arena/quad/usedPct', 100 * quadR.used / quadR.slotCount, '%');
-                Debug.record(room.clientMetrics, 'voxels/arena/quad/largestFreePct', 100 * quadR.largestFree / quadR.slotCount, '%');
+                Debug.record(room.clientMetrics, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
+                Debug.record(
+                    room.clientMetrics,
+                    'voxels/arena/quad/largestFreePct',
+                    (100 * quadR.largestFree) / quadR.slotCount,
+                    '%',
+                );
                 Debug.record(room.clientMetrics, 'voxels/arena/quad/allocs', quadR.allocs, 'count');
-                Debug.record(room.clientMetrics, 'voxels/arena/order/usedPct', 100 * orderR.used / orderR.slotCount, '%');
-                Debug.record(room.clientMetrics, 'voxels/arena/order/largestFreePct', 100 * orderR.largestFree / orderR.slotCount, '%');
+                Debug.record(room.clientMetrics, 'voxels/arena/order/usedPct', (100 * orderR.used) / orderR.slotCount, '%');
+                Debug.record(
+                    room.clientMetrics,
+                    'voxels/arena/order/largestFreePct',
+                    (100 * orderR.largestFree) / orderR.slotCount,
+                    '%',
+                );
                 Debug.record(room.clientMetrics, 'voxels/arena/order/allocs', orderR.allocs, 'count');
             }
         }
@@ -1322,13 +1323,7 @@ export function update(state: EngineClient, delta: number) {
         const activeCamera = Rooms.getControlCamera(activeRoom);
 
         Debug.begin(activeRoom.clientMetrics, 'render');
-        Renderer.render(
-            state.renderer,
-            activeRoom,
-            activeCamera,
-            state.voxelResources,
-            perfSettings.voxelViewChunkRadius,
-        );
+        Renderer.render(state.renderer, activeRoom, activeCamera, state.voxelResources, perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
         /* metrics — request server-side stats for every room the client

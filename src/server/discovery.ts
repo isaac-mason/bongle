@@ -289,13 +289,7 @@ export function invalidateRoomList(state: Discovery): void {
  * `[rpc1, join_room, rpc2]` in the outbox. End-of-tick batching applies
  * only to scene_sync (which needs diff detection over the full tick).
  */
-export function invalidatePlayer(
-    state: Discovery,
-    net: ServerNet,
-    rooms: Rooms,
-    resources: Resources,
-    player: Player,
-): void {
+export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms, resources: Resources, player: Player): void {
     const cs = state.clients.get(player.client);
     if (!cs) return;
 
@@ -349,7 +343,7 @@ export function invalidatePlayer(
     const snapMs = performance.now() - snapT0;
     console.log(
         `[room-start]     invalidatePlayer packSceneGraph=${packMs.toFixed(1)} ` +
-        `snapshotNodes=${snapMs.toFixed(1)} packedBytes=${packedNodes.byteLength}`,
+            `snapshotNodes=${snapMs.toFixed(1)} packedBytes=${packedNodes.byteLength}`,
     );
 }
 
@@ -622,7 +616,6 @@ export function flush(
                 },
             ]);
         }
-
     }
 
     // clear the per-room dirty set now that every client has diffed against it
@@ -1072,11 +1065,7 @@ function diffNodeKnowledge(
 /* ── knowledge snapshotting ── */
 
 /** snapshot the current state of a node into a knowledge map. */
-export function snapshotNodeKnowledge(
-    nodeKnowledge: Map<number, ClientNodeKnowledge>,
-    node: Node,
-    currentTick = 0,
-): void {
+export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowledge>, node: Node, currentTick = 0): void {
     const parentId = node.parent?.id ?? 0;
     const childIndex = node.parent ? node.parent.children.indexOf(node) : 0;
 
@@ -1121,11 +1110,7 @@ export function snapshotNodeKnowledge(
  * in play mode skips non-shared subtrees — those are never replicated and
  * should not appear in client knowledge.
  */
-function snapshotAllNodeKnowledge(
-    sg: Nodes,
-    nodeKnowledge: Map<number, ClientNodeKnowledge>,
-    mode: RoomMode,
-): void {
+function snapshotAllNodeKnowledge(sg: Nodes, nodeKnowledge: Map<number, ClientNodeKnowledge>, mode: RoomMode): void {
     // include root: it's sent to the client as part of the packed scene
     // at join_room, so we must mark it known. otherwise the next diff loop
     // will see no knowledge entry and emit a redundant node_created.
@@ -1457,7 +1442,7 @@ function dispatchChannel(
 
     candidates.sort((a, b) => a.d2 - b.d2);
 
-    const globalCap = Math.floor((players.length + ROOM_MAX_USERS) * perClientCap / 4) + 1;
+    const globalCap = Math.floor(((players.length + ROOM_MAX_USERS) * perClientCap) / 4) + 1;
     const perClientCount = new Map<PlayerId, number>();
     let totalSent = 0;
 

@@ -752,9 +752,7 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
                 <div className="px-2 py-1.5 space-y-1.5">
                     {propertyEntries.map(({ key, reg, value }) => (
                         <div key={key}>
-                            <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">
-                                {reg.label ?? key}
-                            </span>
+                            <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">{reg.label ?? key}</span>
                             <PropertyEditor
                                 schema={reg.schema}
                                 value={value}
@@ -1219,7 +1217,6 @@ export function InspectorPanel() {
                         </>
                     )}
                 </div>
-
             </div>
         </div>
     );

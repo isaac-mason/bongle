@@ -327,7 +327,10 @@ describe('kcc environmental mechanics', () => {
         transform.position = [6, 8, 6];
         harness.tickN(60);
         let tries = 0;
-        while (!cc.state.inLiquid && tries < 60) { harness.tick(); tries++; }
+        while (!cc.state.inLiquid && tries < 60) {
+            harness.tick();
+            tries++;
+        }
         harness.tickN(30); // sink until no ground contact
 
         // submerged with no ground contact → liquid branch wins.

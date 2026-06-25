@@ -82,14 +82,7 @@ export function findBestFit(
  * (or partial nodes) that fall within `[x, x+w]`. Maintains the contig-
  * uous-coverage invariant and merges adjacent same-y nodes.
  */
-export function addSkylineLevel(
-    skyline: SkylineNode[],
-    nodeIdx: number,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-): void {
+export function addSkylineLevel(skyline: SkylineNode[], nodeIdx: number, x: number, y: number, w: number, h: number): void {
     const newNode: SkylineNode = { x, y: y + h, w };
 
     // consume widths from nodeIdx forward until `w` is covered

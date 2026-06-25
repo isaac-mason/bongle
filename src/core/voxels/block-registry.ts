@@ -2,7 +2,16 @@ import type { Shape } from 'crashcat';
 import type { ParticleHandle } from '../particles/particles';
 import { type AABB, type BlockShape, blockShapeToShape } from './block-collider';
 import type { PropsDef, PropsValues } from './block-state';
-import type { BlockDef, BlockHandle, BlockModel, BlockParticleConfig, BlockQuad, BlockSoundConfig, BlockTextureDef, VertexAnimation } from './blocks';
+import type {
+    BlockDef,
+    BlockHandle,
+    BlockModel,
+    BlockParticleConfig,
+    BlockQuad,
+    BlockSoundConfig,
+    BlockTextureDef,
+    VertexAnimation,
+} from './blocks';
 import { collectModelTextureIds, deriveBlockDust, resolveTextureRef } from './blocks';
 import { defaultLightOpacity, packEmission } from './light';
 
@@ -162,12 +171,18 @@ const MESH_SHAPE_EPSILON = 1e-4;
  * 4=south(+z), 5=north(-z).
  */
 const FACE_AXIS_UW = /* @__PURE__ */ new Uint8Array([
-    2, 1,  // east
-    2, 1,  // west
-    0, 2,  // up
-    0, 2,  // down
-    0, 1,  // south
-    0, 1,  // north
+    2,
+    1, // east
+    2,
+    1, // west
+    0,
+    2, // up
+    0,
+    2, // down
+    0,
+    1, // south
+    0,
+    1, // north
 ]);
 
 /**
@@ -189,7 +204,10 @@ function classifyMeshQuadShape(
     if (q.ao === false) return { shape: SHAPE_FLAT, faceDir: FACE_DIR_NONE, depth: 0 };
 
     const v = q.verts;
-    const v0 = v[0], v1 = v[1], v2 = v[2], v3 = v[3];
+    const v0 = v[0],
+        v1 = v[1],
+        v2 = v[2],
+        v3 = v[3];
     const n = q.normal;
 
     // try to find a face direction (0..5) that the quad's normal aligns with
@@ -197,15 +215,25 @@ function classifyMeshQuadShape(
     // axis: 0=x, 1=y, 2=z. positive flag picks face dir 0/2/4, negative picks 1/3/5.
     let axis = -1;
     let positive = false;
-    if (Math.abs(n[0]) > 0.999) { axis = 0; positive = n[0] > 0; }
-    else if (Math.abs(n[1]) > 0.999) { axis = 1; positive = n[1] > 0; }
-    else if (Math.abs(n[2]) > 0.999) { axis = 2; positive = n[2] > 0; }
+    if (Math.abs(n[0]) > 0.999) {
+        axis = 0;
+        positive = n[0] > 0;
+    } else if (Math.abs(n[1]) > 0.999) {
+        axis = 1;
+        positive = n[1] > 0;
+    } else if (Math.abs(n[2]) > 0.999) {
+        axis = 2;
+        positive = n[2] > 0;
+    }
 
     if (axis >= 0) {
         // axis-aligned normal. measure per-vertex depth = inset distance from
         // the face plane in [0,1]. positive face: depth = 1 - axisComp. negative
         // face: depth = axisComp. (matches Sodium's getDepth in AoNeighborInfo.)
-        const c0 = v0[axis], c1 = v1[axis], c2 = v2[axis], c3 = v3[axis];
+        const c0 = v0[axis],
+            c1 = v1[axis],
+            c2 = v2[axis],
+            c3 = v3[axis];
         const d0 = positive ? 1 - c0 : c0;
         const d1 = positive ? 1 - c1 : c1;
         const d2 = positive ? 1 - c2 : c2;
@@ -228,8 +256,11 @@ function classifyMeshQuadShape(
                 const maxU = Math.max(v0[ua], v1[ua], v2[ua], v3[ua]);
                 const minV = Math.min(v0[ub], v1[ub], v2[ub], v3[ub]);
                 const maxV = Math.max(v0[ub], v1[ub], v2[ub], v3[ub]);
-                const isFull = minU < MESH_SHAPE_EPSILON && maxU > 1 - MESH_SHAPE_EPSILON
-                            && minV < MESH_SHAPE_EPSILON && maxV > 1 - MESH_SHAPE_EPSILON;
+                const isFull =
+                    minU < MESH_SHAPE_EPSILON &&
+                    maxU > 1 - MESH_SHAPE_EPSILON &&
+                    minV < MESH_SHAPE_EPSILON &&
+                    maxV > 1 - MESH_SHAPE_EPSILON;
                 return { shape: isFull ? SHAPE_ALIGNED_FULL : SHAPE_ALIGNED_PARTIAL, faceDir, depth };
             }
             return { shape: SHAPE_PARALLEL, faceDir, depth };
@@ -629,7 +660,7 @@ export function buildBlockRegistry(
         // intrinsic hook bitmask — observer hooks (onBuild/onBreak/onStateChange)
         // are tracked per-room and not reflected here.
         let hooks = 0;
-        if (def.onNeighbourUpdate) hooks |= 1 << 0;  // HOOK_ON_NEIGHBOUR_UPDATE
+        if (def.onNeighbourUpdate) hooks |= 1 << 0; // HOOK_ON_NEIGHBOUR_UPDATE
         if (def.onNeighbourChanged) hooks |= 1 << 1; // HOOK_ON_NEIGHBOUR_CHANGED
         handle._hooks = hooks;
 
@@ -825,8 +856,7 @@ export function buildBlockRegistry(
             const pathfindableVal =
                 typeof def.pathfindable === 'function' ? def.pathfindable(props) : (def.pathfindable ?? !collides);
             // sneakGuard defaults true for any collidable block, false otherwise.
-            const sneakGuardVal =
-                typeof def.sneakGuard === 'function' ? def.sneakGuard(props) : (def.sneakGuard ?? collides);
+            const sneakGuardVal = typeof def.sneakGuard === 'function' ? def.sneakGuard(props) : (def.sneakGuard ?? collides);
 
             let f = 0;
             if (collides) f |= BLOCK_FLAG_COLLISION;
@@ -846,8 +876,7 @@ export function buildBlockRegistry(
 
             // resolve restitution (defaults to 0, already zero-initialised)
             if (def.restitution !== undefined) {
-                const restitution =
-                    typeof def.restitution === 'function' ? def.restitution(props) : def.restitution;
+                const restitution = typeof def.restitution === 'function' ? def.restitution(props) : def.restitution;
                 restitutionTable[globalId] = restitution;
             }
 
@@ -858,8 +887,7 @@ export function buildBlockRegistry(
 
             // resolve surface height (default 1.0 = full cube, already filled)
             if (def.surfaceHeight !== undefined) {
-                const h =
-                    typeof def.surfaceHeight === 'function' ? def.surfaceHeight(props) : def.surfaceHeight;
+                const h = typeof def.surfaceHeight === 'function' ? def.surfaceHeight(props) : def.surfaceHeight;
                 surfaceHeightTable[globalId] = h;
             }
 
@@ -870,8 +898,7 @@ export function buildBlockRegistry(
 
             // resolve screen tint (a===0 = no tint, already zero-initialized)
             if (def.screenTint !== undefined) {
-                const spec =
-                    typeof def.screenTint === 'function' ? def.screenTint(props) : def.screenTint;
+                const spec = typeof def.screenTint === 'function' ? def.screenTint(props) : def.screenTint;
                 if (spec) {
                     const off = globalId * 4;
                     screenTintTable[off] = spec.color[0];
@@ -1007,7 +1034,12 @@ export function buildBlockRegistry(
     // matches FACE_INDEX up top, except cullFace uses 'up'/'down' where
     // FACE_INDEX uses 'top'/'bottom' for the same +y/-y directions.
     const CULL_FACE_TO_DIR: Record<string, number> = {
-        east: 0, west: 1, up: 2, down: 3, south: 4, north: 5,
+        east: 0,
+        west: 1,
+        up: 2,
+        down: 3,
+        south: 4,
+        north: 5,
     };
     const meshQuadDepth: Float32Array[] = new Array(meshCount + 1);
     const meshQuadVertDepth: Float32Array[] = new Array(meshCount + 1);
@@ -1148,14 +1180,14 @@ export function buildBlockRegistry(
                 const vBase = i * 12;
                 for (let v = 0; v < 4; v++) {
                     const vert = q.verts[v]!;
-                    qVerts[vBase + v * 3]     = vert[0]!;
+                    qVerts[vBase + v * 3] = vert[0]!;
                     qVerts[vBase + v * 3 + 1] = vert[1]!;
                     qVerts[vBase + v * 3 + 2] = vert[2]!;
                 }
                 const uvBase = i * 8;
                 const uvs = q.uvs;
                 if (uvs !== undefined) {
-                    qUVs[uvBase]     = uvs[0]![0]!;
+                    qUVs[uvBase] = uvs[0]![0]!;
                     qUVs[uvBase + 1] = uvs[0]![1]!;
                     qUVs[uvBase + 2] = uvs[1]![0]!;
                     qUVs[uvBase + 3] = uvs[1]![1]!;
@@ -1165,10 +1197,14 @@ export function buildBlockRegistry(
                     qUVs[uvBase + 7] = uvs[3]![1]!;
                 } else {
                     // default: [0,1] [1,1] [1,0] [0,0]
-                    qUVs[uvBase]     = 0; qUVs[uvBase + 1] = 1;
-                    qUVs[uvBase + 2] = 1; qUVs[uvBase + 3] = 1;
-                    qUVs[uvBase + 4] = 1; qUVs[uvBase + 5] = 0;
-                    qUVs[uvBase + 6] = 0; qUVs[uvBase + 7] = 0;
+                    qUVs[uvBase] = 0;
+                    qUVs[uvBase + 1] = 1;
+                    qUVs[uvBase + 2] = 1;
+                    qUVs[uvBase + 3] = 1;
+                    qUVs[uvBase + 4] = 1;
+                    qUVs[uvBase + 5] = 0;
+                    qUVs[uvBase + 6] = 0;
+                    qUVs[uvBase + 7] = 0;
                 }
                 if (c.shape === SHAPE_NON_PARALLEL) {
                     const o = i * 4;
@@ -1205,7 +1241,7 @@ export function buildBlockRegistry(
                     const pBase = i * 12;
                     const nsBase = i * 12;
                     for (let v = 0; v < 4; v++) {
-                        qCornerPos[pBase + v * 3]     = q.verts[v]![0]!;
+                        qCornerPos[pBase + v * 3] = q.verts[v]![0]!;
                         qCornerPos[pBase + v * 3 + 1] = q.verts[v]![1]!;
                         qCornerPos[pBase + v * 3 + 2] = q.verts[v]![2]!;
 
@@ -1395,10 +1431,7 @@ function resolveDefaultDust<P extends PropsDef>(def: BlockDef<P>): readonly Part
  *  through (shared ref across all states — common case); function form
  *  is called with decoded props. `undefined` for blocks without any
  *  sounds option. */
-function resolveBlockSounds<P extends PropsDef>(
-    def: BlockDef<P>,
-    props: PropsValues<P>,
-): BlockSoundConfig | undefined {
+function resolveBlockSounds<P extends PropsDef>(def: BlockDef<P>, props: PropsValues<P>): BlockSoundConfig | undefined {
     const opt = def.sounds;
     if (!opt) return undefined;
     return typeof opt === 'function' ? opt(props) : opt;

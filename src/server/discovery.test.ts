@@ -89,11 +89,7 @@ function takeJoinRoom(net: Net.ServerNet, client: Client) {
     return message;
 }
 
-function flushUntilQuiet(
-    discovery: Discovery.Discovery,
-    rooms: Rooms.Rooms,
-    resources: Resources.Resources,
-) {
+function flushUntilQuiet(discovery: Discovery.Discovery, rooms: Rooms.Rooms, resources: Resources.Resources) {
     return Discovery.flush(discovery, rooms, resources, Debug.createMetrics(false));
 }
 
@@ -320,7 +316,9 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         for (let i = 0; i < 3; i++)
             for (let j = 0; j < 3; j++)
                 for (let l = 0; l < 3; l++) {
-                    const cx = ax + i, cy = ay + j, cz = az + l;
+                    const cx = ax + i,
+                        cy = ay + j,
+                        cz = az + l;
                     setBlock(server.room.voxels, cx * 16, cy * 16, cz * 16, FAIRNESS_BLOCK);
                     expected.add(`${cx},${cy},${cz}`);
                 }
@@ -475,7 +473,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
                 }
 
         const N_PLAYERS = 3;
-        const globalCap = Math.floor((N_PLAYERS + 8) * FULL_CAP / 4) + 1; // ROOM_MAX_USERS = 8 → 17
+        const globalCap = Math.floor(((N_PLAYERS + 8) * FULL_CAP) / 4) + 1; // ROOM_MAX_USERS = 8 → 17
         const seenByClient = new Map<Client, Set<string>>(roster.map((r) => [r.client, new Set<string>()]));
         let checkedContention = false;
 
@@ -492,10 +490,14 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
                     const f = m as { cx: number; cy: number; cz: number };
                     perClient.set(client, (perClient.get(client) ?? 0) + 1);
                     seenByClient.get(client)!.add(`${f.cx},${f.cy},${f.cz}`);
-                    (fullPerClient.get(client) ?? fullPerClient.set(client, new Set()).get(client)!).add(`${f.cx},${f.cy},${f.cz}`);
+                    (fullPerClient.get(client) ?? fullPerClient.set(client, new Set()).get(client)!).add(
+                        `${f.cx},${f.cy},${f.cz}`,
+                    );
                 } else if (m.type === 'voxel_chunk_light' || m.type === 'voxel_chunk_light_delta') {
                     const l = m as { cx: number; cy: number; cz: number };
-                    (lightPerClient.get(client) ?? lightPerClient.set(client, new Set()).get(client)!).add(`${l.cx},${l.cy},${l.cz}`);
+                    (lightPerClient.get(client) ?? lightPerClient.set(client, new Set()).get(client)!).add(
+                        `${l.cx},${l.cy},${l.cz}`,
+                    );
                 }
             }
             const total = [...perClient.values()].reduce((a, b) => a + b, 0);

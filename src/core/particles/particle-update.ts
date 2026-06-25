@@ -86,9 +86,15 @@ const HIT: Hit = { t: 0, axis: 0 };
  * zero / reflect the right velocity component.
  */
 function sweepAabbs(
-    sx: number, sy: number, sz: number,
-    dx: number, dy: number, dz: number,
-    vx: number, vy: number, vz: number,
+    sx: number,
+    sy: number,
+    sz: number,
+    dx: number,
+    dy: number,
+    dz: number,
+    vx: number,
+    vy: number,
+    vz: number,
     boxes: AABB[],
     tMin: number,
     exclusive: boolean,
@@ -98,8 +104,12 @@ function sweepAabbs(
 
     for (let bi = 0; bi < boxes.length; bi++) {
         const b = boxes[bi]!;
-        const minX = vx + b[0], minY = vy + b[1], minZ = vz + b[2];
-        const maxX = vx + b[3], maxY = vy + b[4], maxZ = vz + b[5];
+        const minX = vx + b[0],
+            minY = vy + b[1],
+            minZ = vz + b[2];
+        const maxX = vx + b[3],
+            maxY = vy + b[4],
+            maxZ = vz + b[5];
 
         let tNear = Number.NEGATIVE_INFINITY;
         let tFar = Number.POSITIVE_INFINITY;
@@ -112,8 +122,15 @@ function sweepAabbs(
             const inv = 1 / dx;
             let t1 = (minX - sx) * inv;
             let t2 = (maxX - sx) * inv;
-            if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-            if (t1 > tNear) { tNear = t1; axis = 0; }
+            if (t1 > t2) {
+                const tmp = t1;
+                t1 = t2;
+                t2 = tmp;
+            }
+            if (t1 > tNear) {
+                tNear = t1;
+                axis = 0;
+            }
             if (t2 < tFar) tFar = t2;
             if (tNear > tFar) continue;
         }
@@ -124,8 +141,15 @@ function sweepAabbs(
             const inv = 1 / dy;
             let t1 = (minY - sy) * inv;
             let t2 = (maxY - sy) * inv;
-            if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-            if (t1 > tNear) { tNear = t1; axis = 1; }
+            if (t1 > t2) {
+                const tmp = t1;
+                t1 = t2;
+                t2 = tmp;
+            }
+            if (t1 > tNear) {
+                tNear = t1;
+                axis = 1;
+            }
             if (t2 < tFar) tFar = t2;
             if (tNear > tFar) continue;
         }
@@ -136,8 +160,15 @@ function sweepAabbs(
             const inv = 1 / dz;
             let t1 = (minZ - sz) * inv;
             let t2 = (maxZ - sz) * inv;
-            if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
-            if (t1 > tNear) { tNear = t1; axis = 2; }
+            if (t1 > t2) {
+                const tmp = t1;
+                t1 = t2;
+                t2 = tmp;
+            }
+            if (t1 > tNear) {
+                tNear = t1;
+                axis = 2;
+            }
             if (t2 < tFar) tFar = t2;
             if (tNear > tFar) continue;
         }

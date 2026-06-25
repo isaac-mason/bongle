@@ -14,15 +14,24 @@ import * as Rooms from './rooms';
  * so a command can't beat this tick's scene state (join_room / scene_sync) onto
  * a client's ordered socket. See discovery.ts "RPC command ordering".
  */
-const toClientMsg = (roomId: string, commandIndex: number, payload: Uint8Array) =>
-    ({ type: 'net_message' as const, direction: 'to_client' as const, roomId, commandIndex, payload });
+const toClientMsg = (roomId: string, commandIndex: number, payload: Uint8Array) => ({
+    type: 'net_message' as const,
+    direction: 'to_client' as const,
+    roomId,
+    commandIndex,
+    payload,
+});
 
 export function createDriver(rooms: Rooms.Rooms, discovery: Discovery.Discovery): RpcDriver {
     return {
         send(commandIndex, roomId, payload, client) {
             if (!client) return; // server never sends to itself
             if (!Rooms.getRoom(rooms, roomId)) return;
-            Discovery.queueCommand(discovery, { kind: 'send', client: client as Client, msg: toClientMsg(roomId, commandIndex, payload) });
+            Discovery.queueCommand(discovery, {
+                kind: 'send',
+                client: client as Client,
+                msg: toClientMsg(roomId, commandIndex, payload),
+            });
         },
         broadcast(commandIndex, roomId, payload) {
             if (!Rooms.getRoom(rooms, roomId)) return;

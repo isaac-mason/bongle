@@ -80,10 +80,7 @@ function buildLightRegistry(specs: Spec[]) {
 
 // stone (solid opaque), glowstone (full RGB emitter, transparent so it
 // doesn't block its own light), glass (low-opacity passthrough)
-const registry = buildLightRegistry([
-    { id: 'stone' },
-    { id: 'glowstone', cull: CullType.NONE, lightEmission: [15, 15, 15] },
-]);
+const registry = buildLightRegistry([{ id: 'stone' }, { id: 'glowstone', cull: CullType.NONE, lightEmission: [15, 15, 15] }]);
 
 // ── helpers ─────────────────────────────────────────────────────────
 
@@ -97,16 +94,14 @@ function blankServerVoxels(): Voxels {
 /** ensure every chunk in a [minC..maxC]^3 cube exists (all air). */
 function seedChunkCube(v: Voxels, minC: number, maxC: number): void {
     for (let cx = minC; cx <= maxC; cx++)
-        for (let cy = minC; cy <= maxC; cy++)
-            for (let cz = minC; cz <= maxC; cz++) ensureChunk(v, cx, cy, cz);
+        for (let cy = minC; cy <= maxC; cy++) for (let cz = minC; cz <= maxC; cz++) ensureChunk(v, cx, cy, cz);
 }
 
 /** fill y=0 plane across [minC*CHUNK_SIZE..(maxC+1)*CHUNK_SIZE) with stone. */
 function seedFloor(v: Voxels, minC: number, maxC: number): void {
     const lo = minC * CHUNK_SIZE;
     const hi = (maxC + 1) * CHUNK_SIZE;
-    for (let x = lo; x < hi; x++)
-        for (let z = lo; z < hi; z++) setBlock(v, x, 0, z, 'stone', SetBlockFlags.BULK);
+    for (let x = lo; x < hi; x++) for (let z = lo; z < hi; z++) setBlock(v, x, 0, z, 'stone', SetBlockFlags.BULK);
 }
 
 // ── suite 1: propagateAllLight (rebake-light cost) ──────────────────
@@ -120,8 +115,7 @@ describe('propagateAllLight — full recompute', () => {
 
     bench('4x4x1 chunks (16), all air', () => {
         const v = blankServerVoxels();
-        for (let cx = 0; cx < 4; cx++)
-            for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
+        for (let cx = 0; cx < 4; cx++) for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
         propagateAllLight(v);
     });
 
@@ -153,8 +147,14 @@ describe('propagateAllLight — full recompute', () => {
         const v = blankServerVoxels();
         seedChunkCube(v, 0, 3);
         const positions: [number, number, number][] = [
-            [8, 8, 8], [24, 8, 24], [40, 8, 40], [56, 8, 56],
-            [8, 32, 56], [56, 32, 8], [24, 48, 24], [40, 48, 40],
+            [8, 8, 8],
+            [24, 8, 24],
+            [40, 8, 40],
+            [56, 8, 56],
+            [8, 32, 56],
+            [56, 32, 8],
+            [24, 48, 24],
+            [40, 48, 40],
         ];
         for (const [x, y, z] of positions) setBlock(v, x, y, z, 'glowstone', SetBlockFlags.BULK);
         propagateAllLight(v);
@@ -170,16 +170,13 @@ describe('propagateAllLight — full recompute', () => {
 
     bench('SPARSITY — 32 chunks dense (4x4x2, bbox=32)', () => {
         const v = blankServerVoxels();
-        for (let cx = 0; cx < 4; cx++)
-            for (let cy = 0; cy < 2; cy++)
-                for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, cy, cz);
+        for (let cx = 0; cx < 4; cx++) for (let cy = 0; cy < 2; cy++) for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, cy, cz);
         propagateAllLight(v);
     });
 
     bench('SPARSITY — 32 chunks flat plane (8x1x4, bbox=32)', () => {
         const v = blankServerVoxels();
-        for (let cx = 0; cx < 8; cx++)
-            for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
+        for (let cx = 0; cx < 8; cx++) for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
         propagateAllLight(v);
     });
 
@@ -187,8 +184,7 @@ describe('propagateAllLight — full recompute', () => {
         // 8×4 plane at cy=0 plus a single chunk at cy=3 — same 32 chunks
         // (31 floor + 1 high) but bbox now 8×4×4 = 128 (4× sparser).
         const v = blankServerVoxels();
-        for (let cx = 0; cx < 8; cx++)
-            for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
+        for (let cx = 0; cx < 8; cx++) for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
         ensureChunk(v, 0, 3, 0);
         propagateAllLight(v);
     });
@@ -316,9 +312,13 @@ describe('updateLightBatch — direct (no setBlock)', () => {
         // then hand-craft the LightChange so updateLightBatch is what we measure
         v.authority!.changes.pendingLight.length = 0;
         // overwrite voxel in-place
-        const cx = 0, cy = 0, cz = 0;
+        const cx = 0,
+            cy = 0,
+            cz = 0;
         const chunk = v.chunks.get(`${cx},${cy},${cz}`)!;
-        const lx = 8, ly = 8, lz = 8;
+        const lx = 8,
+            ly = 8,
+            lz = 8;
         const oldStateId = chunk.palette[chunk.data[lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE]!]!;
         setBlock(v, 8, 8, 8, 'stone', SetBlockFlags.BULK);
         v.authority!.changes.pendingLight.length = 0;

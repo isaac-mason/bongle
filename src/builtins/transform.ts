@@ -882,7 +882,12 @@ export function getVisualWorldPosition(t: TransformTrait): Vec3 {
     if (!t._interpolated) return getWorldPosition(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
-        mat4.decompose(t.interpolatedWorldQuaternion, t.interpolatedWorldPosition, t.interpolatedWorldScale, t.interpolatedWorldMatrix);
+        mat4.decompose(
+            t.interpolatedWorldQuaternion,
+            t.interpolatedWorldPosition,
+            t.interpolatedWorldScale,
+            t.interpolatedWorldMatrix,
+        );
         t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
     return t.interpolatedWorldPosition;
@@ -893,7 +898,12 @@ export function getVisualWorldQuaternion(t: TransformTrait): Quat {
     if (!t._interpolated) return getWorldQuaternion(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
-        mat4.decompose(t.interpolatedWorldQuaternion, t.interpolatedWorldPosition, t.interpolatedWorldScale, t.interpolatedWorldMatrix);
+        mat4.decompose(
+            t.interpolatedWorldQuaternion,
+            t.interpolatedWorldPosition,
+            t.interpolatedWorldScale,
+            t.interpolatedWorldMatrix,
+        );
         t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
     return t.interpolatedWorldQuaternion;
@@ -904,7 +914,12 @@ export function getVisualWorldScale(t: TransformTrait): Vec3 {
     if (!t._interpolated) return getWorldScale(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
-        mat4.decompose(t.interpolatedWorldQuaternion, t.interpolatedWorldPosition, t.interpolatedWorldScale, t.interpolatedWorldMatrix);
+        mat4.decompose(
+            t.interpolatedWorldQuaternion,
+            t.interpolatedWorldPosition,
+            t.interpolatedWorldScale,
+            t.interpolatedWorldMatrix,
+        );
         t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
     return t.interpolatedWorldScale;
@@ -1071,4 +1086,3 @@ function composeLocalIntoChild(anchor: TransformTrait, child: TransformTrait): v
     child.scale[1] *= as[1];
     child.scale[2] *= as[2];
 }
-

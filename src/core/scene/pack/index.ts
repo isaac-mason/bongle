@@ -1,1 +1,1 @@
-export * as pack from "./pack";
+export * as pack from './pack';

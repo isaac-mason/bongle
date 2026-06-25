@@ -71,7 +71,13 @@ export function init(): Renderer {
  * RenderTargets itself (see offline snapshot sessions).
  */
 export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): Renderer {
-    const renderer = new WebGPURenderer({ antialias: true, headless: true, device: gpu.device, adapter: gpu.adapter, format: 'rgba8unorm' });
+    const renderer = new WebGPURenderer({
+        antialias: true,
+        headless: true,
+        device: gpu.device,
+        adapter: gpu.adapter,
+        format: 'rgba8unorm',
+    });
     const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
     const pipeline = createRenderPipeline(renderer);
     return { renderer, environmentResources, pipeline };
@@ -193,9 +199,18 @@ export function syncRenderCamera(pipeline: EngineRenderPipeline, cameraTrait: Ca
     }
 
     let projDirty = false;
-    if (out.fov !== cameraTrait.fov) { out.fov = cameraTrait.fov; projDirty = true; }
-    if (out.near !== cameraTrait.near) { out.near = cameraTrait.near; projDirty = true; }
-    if (out.far !== cameraTrait.far) { out.far = cameraTrait.far; projDirty = true; }
+    if (out.fov !== cameraTrait.fov) {
+        out.fov = cameraTrait.fov;
+        projDirty = true;
+    }
+    if (out.near !== cameraTrait.near) {
+        out.near = cameraTrait.near;
+        projDirty = true;
+    }
+    if (out.far !== cameraTrait.far) {
+        out.far = cameraTrait.far;
+        projDirty = true;
+    }
     if (projDirty) out.updateProjectionMatrix();
 
     out.updateWorldMatrix();

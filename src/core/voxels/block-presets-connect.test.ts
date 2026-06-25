@@ -19,9 +19,27 @@ beforeAll(() => {
 
 // ── shared registry ─────────────────────────────────────────────────
 
-const glassTex: BlockTextureDef = { id: 'glass', dependency: { registry: 'blockTextures', id: 'glass' }, frames: ['glass.png'], fps: 1, interpolate: false };
-const oakTex: BlockTextureDef = { id: 'oak', dependency: { registry: 'blockTextures', id: 'oak' }, frames: ['oak.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
+const glassTex: BlockTextureDef = {
+    id: 'glass',
+    dependency: { registry: 'blockTextures', id: 'glass' },
+    frames: ['glass.png'],
+    fps: 1,
+    interpolate: false,
+};
+const oakTex: BlockTextureDef = {
+    id: 'oak',
+    dependency: { registry: 'blockTextures', id: 'oak' },
+    frames: ['oak.png'],
+    fps: 1,
+    interpolate: false,
+};
+const stoneTex: BlockTextureDef = {
+    id: 'stone',
+    dependency: { registry: 'blockTextures', id: 'stone' },
+    frames: ['stone.png'],
+    fps: 1,
+    interpolate: false,
+};
 
 const paneHandle = pane('test:pane', { all: { texture: glassTex } }) as BlockHandle;
 const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
@@ -52,10 +70,12 @@ function makeVoxels() {
 
 type ConnectProps = { north: boolean; east: boolean; south: boolean; west: boolean };
 
-function decodeAt(voxels: ReturnType<typeof makeVoxels>, wx: number, wy: number, wz: number):
-    | { id: 'air' }
-    | { id: string } & Partial<ConnectProps>
-{
+function decodeAt(
+    voxels: ReturnType<typeof makeVoxels>,
+    wx: number,
+    wy: number,
+    wz: number,
+): { id: 'air' } | ({ id: string } & Partial<ConnectProps>) {
     const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return { id: 'air' };
     const blockIdx = voxels.registry.stateToBlockIndex[id]!;
@@ -75,7 +95,11 @@ describe('pane neighbour update', () => {
         runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 8, 8, 8)).toMatchObject({
-            id: paneHandle.id, north: false, east: false, south: false, west: false,
+            id: paneHandle.id,
+            north: false,
+            east: false,
+            south: false,
+            west: false,
         });
     });
 
@@ -222,7 +246,16 @@ describe('pane neighbour update', () => {
             const lastByPos = new Map<string, string>();
             for (const op of voxels.authority!.changes.ops) {
                 if (op.kind !== 0) continue;
-                const blockOp = op as { wx: number; wy: number; wz: number; data: number; cx: number; cy: number; cz: number; index: number };
+                const blockOp = op as {
+                    wx: number;
+                    wy: number;
+                    wz: number;
+                    data: number;
+                    cx: number;
+                    cy: number;
+                    cz: number;
+                    index: number;
+                };
                 const wx = blockOp.cx * 16 + (blockOp.index & 0xf);
                 const wy = blockOp.cy * 16 + (blockOp.index >> 8);
                 const wz = blockOp.cz * 16 + ((blockOp.index >> 4) & 0xf);
@@ -230,10 +263,12 @@ describe('pane neighbour update', () => {
                 const key = voxels.registry.stateToKey[stateId] ?? '?';
                 lastByPos.set(`${wx},${wy},${wz}`, key);
             }
-            tickOps.push([...lastByPos.entries()].map(([pos, key]) => {
-                const [wx, wy, wz] = pos.split(',').map(Number) as [number, number, number];
-                return { wx, wy, wz, key };
-            }));
+            tickOps.push(
+                [...lastByPos.entries()].map(([pos, key]) => {
+                    const [wx, wy, wz] = pos.split(',').map(Number) as [number, number, number];
+                    return { wx, wy, wz, key };
+                }),
+            );
 
             clearVoxelChanges(voxels.authority!.changes);
         }

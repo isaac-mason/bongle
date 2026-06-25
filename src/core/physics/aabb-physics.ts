@@ -25,12 +25,7 @@ import { type SweepResult, sweepAabbVsAabb } from '../math/aabb-sweep';
 import type { Nodes } from '../scene/nodes';
 import { query } from '../scene/nodes';
 import type { TraitHandle } from '../scene/traits';
-import {
-    getWorldPosition,
-    hasTransformedParent,
-    markTransformDirty,
-    worldToLocalPosition,
-} from '../../builtins/transform';
+import { getWorldPosition, hasTransformedParent, markTransformDirty, worldToLocalPosition } from '../../builtins/transform';
 import { BLOCK_FLAG_COLLISION } from '../voxels/block-registry';
 import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../voxels/voxel-aabb-sweep';
 import type { Voxels } from '../voxels/voxels';
@@ -506,11 +501,7 @@ export function create(voxels: Voxels, opts?: CreateWorldOpts): World {
  * Called by the top-level `Physics` coordinator only — tests and headless
  * callers leave this unbound and skip `preStep`/`postStep`.
  */
-export function bindNodeSync(
-    world: World,
-    nodes: Nodes,
-    bodyTrait: TraitHandle<AabbBodyTraitInstance>,
-): void {
+export function bindNodeSync(world: World, nodes: Nodes, bodyTrait: TraitHandle<AabbBodyTraitInstance>): void {
     world._bodyQuery = query(nodes, [bodyTrait, TransformTrait]);
 }
 
@@ -811,12 +802,7 @@ function makeEmptyPair(): PairInfo {
  *   - if `awakeBodies` is empty we short-circuit and skip the per-tick work
  *     entirely — important for piles that have fully settled.
  */
-export function tick(
-    world: World,
-    crashcatWorld: crashcat.World,
-    dt: number,
-    recordedPairs: PairSink,
-): void {
+export function tick(world: World, crashcatWorld: crashcat.World, dt: number, recordedPairs: PairSink): void {
     const awake = world.awakeBodies;
     if (awake.length === 0) return;
 
@@ -1202,9 +1188,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
 
         const vAn = body.linearVelocity[0] * bestNX + body.linearVelocity[1] * bestNY + body.linearVelocity[2] * bestNZ;
         const vBn = bestOther
-            ? bestOther.linearVelocity[0] * bestNX +
-              bestOther.linearVelocity[1] * bestNY +
-              bestOther.linearVelocity[2] * bestNZ
+            ? bestOther.linearVelocity[0] * bestNX + bestOther.linearVelocity[1] * bestNY + bestOther.linearVelocity[2] * bestNZ
             : 0;
         const vRelN = vAn - vBn;
 
@@ -1891,12 +1875,7 @@ function syncAabbBodyTraitToWorld(
 /** trait → world sync. install/update bodies for nodes with the bound aabb body
  *  trait; destroy bodies for nodes that lost the trait. no-op unless
  *  `bindNodeSync` has been called. */
-export function preStep(
-    world: World,
-    crashcatWorld: crashcat.World,
-    identity: PlayerId | null,
-    simulate: boolean,
-): void {
+export function preStep(world: World, crashcatWorld: crashcat.World, identity: PlayerId | null, simulate: boolean): void {
     if (!world._bodyQuery) return;
 
     const active = new Set<number>();

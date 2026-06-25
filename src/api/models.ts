@@ -83,11 +83,7 @@ const DEFAULT_POLL_INTERVAL_MS = 16;
  * its retry give-up. Until then, transient failures retry in the
  * background and the promise stays pending.
  */
-export function loadModel(
-    ctx: ScriptContext,
-    id: string,
-    options: LoadModelOptions,
-): Promise<ModelHandle> {
+export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelHandle> {
     const resources = ctx._runtime?.resources;
     if (!resources) {
         return Promise.reject(new Error('[bongle] loadModel: no runtime resources on ctx'));

@@ -114,10 +114,7 @@ export function updatePainter(
             state.lastCenter[2] === hv[2];
         if (!sameAsLast) {
             state.lastCenter = [hv[0], hv[1], hv[2]];
-            const active = activeBlockKeyOf(
-                useEditor.getState().hotbar,
-                store.getState().activeSlotIndex,
-            );
+            const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
             // rasterise the stamp into the scratch Selection, but only feed
             // applyStamp the cells we haven't already painted this stroke —
             // this is what makes re-crossing painted cells a no-op.

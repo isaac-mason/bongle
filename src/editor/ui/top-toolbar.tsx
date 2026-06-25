@@ -132,13 +132,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                 onClose={onClose}
                 onClick={() => leaveRoom?.(info.id, tabMode)}
             />
-            <MenuItem
-                label="Stop room"
-                danger
-                disabled={isMainEdit}
-                onClose={onClose}
-                onClick={() => stopRoom?.(info.id)}
-            />
+            <MenuItem label="Stop room" danger disabled={isMainEdit} onClose={onClose} onClick={() => stopRoom?.(info.id)} />
         </div>
     );
 }
@@ -350,10 +344,7 @@ function RoomTab({
 
 /* ── RoomTabs ───────────────────────────────────────────────────── */
 
-function buildGroups(
-    roomList: RoomInfo[],
-    roomViews: Map<RoomViewId, RoomView>,
-): { namespace: string; tabs: Tab[] }[] {
+function buildGroups(roomList: RoomInfo[], roomViews: Map<RoomViewId, RoomView>): { namespace: string; tabs: Tab[] }[] {
     // index views by their underlying ClientRoom.roomId so we can join
     // each RoomInfo against the views on the same room.
     const viewsByRoomId = new Map<string, RoomView[]>();

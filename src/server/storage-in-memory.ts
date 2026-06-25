@@ -27,19 +27,14 @@ type Row = { value: JsonValue; version: string };
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 
-function listFromMap(
-    map: Map<string, Row>,
-    opts: StorageListOpts | undefined,
-): StorageListPage {
+function listFromMap(map: Map<string, Row>, opts: StorageListOpts | undefined): StorageListPage {
     const prefix = opts?.prefix ?? '';
     const cursor = opts?.cursor ?? '';
     const limit = Math.min(opts?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
     // Sort keys so cursor pagination is deterministic — matches the
     // service's `order by key` over a B-tree index.
-    const keys = [...map.keys()]
-        .filter((k) => (prefix === '' || k.startsWith(prefix)) && k > cursor)
-        .sort();
+    const keys = [...map.keys()].filter((k) => (prefix === '' || k.startsWith(prefix)) && k > cursor).sort();
 
     const page = keys.slice(0, limit);
     const items = page.map((key) => {
@@ -66,12 +61,7 @@ export function createInMemoryStorageDriver(): ServerDriver['storage'] {
         return m;
     }
 
-    function setOn(
-        map: Map<string, Row>,
-        key: string,
-        value: JsonValue,
-        ifVersion: string | undefined,
-    ): StorageSetResult {
+    function setOn(map: Map<string, Row>, key: string, value: JsonValue, ifVersion: string | undefined): StorageSetResult {
         const existing = map.get(key);
         if (ifVersion !== undefined && (!existing || existing.version !== ifVersion)) {
             return { ok: false, code: 'version_conflict' };
@@ -81,11 +71,7 @@ export function createInMemoryStorageDriver(): ServerDriver['storage'] {
         return { ok: true, version };
     }
 
-    function deleteOn(
-        map: Map<string, Row>,
-        key: string,
-        ifVersion: string | undefined,
-    ): StorageDeleteResult {
+    function deleteOn(map: Map<string, Row>, key: string, ifVersion: string | undefined): StorageDeleteResult {
         const existing = map.get(key);
         if (ifVersion !== undefined && existing && existing.version !== ifVersion) {
             return { ok: false, code: 'version_conflict' };

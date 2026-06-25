@@ -19,11 +19,7 @@
 import { recordScene } from '../core/capture/module-scope';
 import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../core/registry';
 import type { ScenePayload } from '../core/content/scene-store';
-import {
-    createSceneHandle,
-    type SceneHandle,
-    type SceneOptions,
-} from '../core/scene/scene-handle';
+import { createSceneHandle, type SceneHandle, type SceneOptions } from '../core/scene/scene-handle';
 
 export type { SceneHandle, SceneOptions };
 export { cloneVoxels, copyVoxels } from '../core/voxels/voxels';
@@ -119,4 +115,3 @@ export function _registerScenePayload(id: string, payload: ScenePayload): void {
     handle._payload = payload;
     upsertPlaceholder(registry.scenes, id, handle);
 }
-

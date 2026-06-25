@@ -25,9 +25,27 @@ beforeAll(() => {
     registerAllShapes();
 });
 
-const oakTex: BlockTextureDef = { id: 'oak', dependency: { registry: 'blockTextures', id: 'oak' }, frames: ['oak.png'], fps: 1, interpolate: false };
-const oakEndTex: BlockTextureDef = { id: 'oak-end', dependency: { registry: 'blockTextures', id: 'oak-end' }, frames: ['oak-end.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
+const oakTex: BlockTextureDef = {
+    id: 'oak',
+    dependency: { registry: 'blockTextures', id: 'oak' },
+    frames: ['oak.png'],
+    fps: 1,
+    interpolate: false,
+};
+const oakEndTex: BlockTextureDef = {
+    id: 'oak-end',
+    dependency: { registry: 'blockTextures', id: 'oak-end' },
+    frames: ['oak-end.png'],
+    fps: 1,
+    interpolate: false,
+};
+const stoneTex: BlockTextureDef = {
+    id: 'stone',
+    dependency: { registry: 'blockTextures', id: 'stone' },
+    frames: ['stone.png'],
+    fps: 1,
+    interpolate: false,
+};
 
 const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } }) as BlockHandle;
 const columnHandle = column('test:column', { end: oakEndTex, side: oakTex }) as BlockHandle;
@@ -169,10 +187,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
             v = rotateVoxelsByQuat(v, quatY(90), v.registry);
         }
         // after 4×90° = 360° the keys should match the originals
-        const originals = new Set([
-            'test:column[axis=x]',
-            'test:stairs[facing=north,half=bottom,shape=straight]',
-        ]);
+        const originals = new Set(['test:column[axis=x]', 'test:stairs[facing=north,half=bottom,shape=straight]']);
         const got = new Set<string>();
         for (const chunk of v.chunks.values()) {
             if (chunk.aggregate === 0) continue;
@@ -196,9 +211,18 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         // after rotation. so `north=true` becomes `west=true` after one CW
         // turn; cycles N→W→S→E→N over four turns.
         let v = makeVoxels();
-        setBlock(v, 0, 0, 0, fenceHandle.stateKey({
-            north: true, east: false, south: false, west: false,
-        }));
+        setBlock(
+            v,
+            0,
+            0,
+            0,
+            fenceHandle.stateKey({
+                north: true,
+                east: false,
+                south: false,
+                west: false,
+            }),
+        );
         const expected: Array<{ north: string; east: string; south: string; west: string }> = [
             { north: 'false', east: 'false', south: 'false', west: 'true' },
             { north: 'false', east: 'false', south: 'true', west: 'false' },

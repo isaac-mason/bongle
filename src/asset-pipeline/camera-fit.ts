@@ -55,9 +55,9 @@ export function fitOrthoIsometric(
     let maxH = 0;
     let maxV = 0;
     for (let i = 0; i < 8; i++) {
-        const x = (i & 1) ? aabbMax[0] : aabbMin[0];
-        const y = (i & 2) ? aabbMax[1] : aabbMin[1];
-        const z = (i & 4) ? aabbMax[2] : aabbMin[2];
+        const x = i & 1 ? aabbMax[0] : aabbMin[0];
+        const y = i & 2 ? aabbMax[1] : aabbMin[1];
+        const z = i & 4 ? aabbMax[2] : aabbMin[2];
         const dx = x - cx;
         const dy = y - cy;
         const dz = z - cz;

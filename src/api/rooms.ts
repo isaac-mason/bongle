@@ -39,20 +39,10 @@ function assertSameNamespace(callerNs: string, targetNs: string, roomId: string)
  *
  * Client: creates a local-only ClientRoom from a scene() handle (Phase 8).
  */
-export function create(
-    ctx: ScriptContext,
-    sceneId: string,
-    o?: { mode?: PlayerMode; sourceRoomId?: string },
-): string {
+export function create(ctx: ScriptContext, sceneId: string, o?: { mode?: PlayerMode; sourceRoomId?: string }): string {
     if (env.server && ctx.server) {
         const ns = callerNamespace(ctx);
-        const room = ServerRooms.createRoomInNamespace(
-            ctx.server.state,
-            sceneId,
-            o?.mode ?? 'play',
-            ns,
-            o?.sourceRoomId,
-        );
+        const room = ServerRooms.createRoomInNamespace(ctx.server.state, sceneId, o?.mode ?? 'play', ns, o?.sourceRoomId);
         return room.id;
     }
     if (env.client && ctx.client?.state) {
@@ -120,13 +110,7 @@ export function recreate(ctx: ScriptContext): void {
 
     // fresh room from the same scene, in the same namespace — gameOptions and
     // matchmaking are namespace-scoped, so they carry over untouched.
-    const fresh = ServerRooms.createRoomInNamespace(
-        state,
-        old.sceneId,
-        old.mode,
-        old.namespace,
-        old.sourceRoomId ?? undefined,
-    );
+    const fresh = ServerRooms.createRoomInNamespace(state, old.sceneId, old.mode, old.namespace, old.sourceRoomId ?? undefined);
 
     // move every client across: a fresh player node + onJoin in the new room,
     // then point their active view at it. snapshot the clients first, since
@@ -158,12 +142,7 @@ export function recreate(ctx: ScriptContext): void {
  * Client form (3 args): switches the local active view among rooms the
  * client already observes (server-mirrored or local).
  */
-export function activate(
-    ctx: ScriptContext,
-    client: Client,
-    roomId: string,
-    o?: { mode?: PlayerMode },
-): void;
+export function activate(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void;
 export function activate(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode }): void;
 export function activate(
     ctx: ScriptContext,
@@ -245,11 +224,7 @@ export function list(ctx: ScriptContext): string[] {
  * observed (client). Mutation through the returned context is allowed
  * — advanced; it bypasses the calling room's tick boundaries.
  */
-export function view(
-    ctx: ScriptContext,
-    roomId: string,
-    o?: { mode?: PlayerMode },
-): ScriptContext | null {
+export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode }): ScriptContext | null {
     if (env.server && ctx.server) {
         const target = ServerRooms.getRoom(ctx.server.state.rooms, roomId);
         if (!target) return null;
@@ -307,12 +282,7 @@ export function view(
  * Add `client` as a Player in `roomId`. Does NOT activate; pair with
  * rooms.activate when the new view should become focused.
  */
-export function join(
-    ctx: ScriptContext,
-    client: Client,
-    roomId: string,
-    o?: { mode?: PlayerMode },
-): void {
+export function join(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void {
     if (!env.server) throw new Error('[bongle] rooms.join: server-only');
     if (!ctx.server) throw new Error('[bongle] rooms.join: server-only');
     const target = ServerRooms.getRoom(ctx.server.state.rooms, roomId);
@@ -325,12 +295,7 @@ export function join(
  * Remove `client`'s Player from `roomId`. Does NOT auto-destroy the
  * room when empty — use rooms.stop explicitly.
  */
-export function leave(
-    ctx: ScriptContext,
-    client: Client,
-    roomId: string,
-    o?: { mode?: PlayerMode },
-): void {
+export function leave(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void {
     if (!env.server) throw new Error('[bongle] rooms.leave: server-only');
     if (!ctx.server) throw new Error('[bongle] rooms.leave: server-only');
     const target = ServerRooms.getRoom(ctx.server.state.rooms, roomId);
@@ -347,12 +312,7 @@ export function leave(
  * activate. `fromRoomId` defaults to the client's currently active
  * room. mode defaults to the destination room's mode.
  */
-export function swap(
-    ctx: ScriptContext,
-    client: Client,
-    toRoomId: string,
-    o?: { fromRoomId?: string; mode?: PlayerMode },
-): void {
+export function swap(ctx: ScriptContext, client: Client, toRoomId: string, o?: { fromRoomId?: string; mode?: PlayerMode }): void {
     if (!env.server) throw new Error('[bongle] rooms.swap: server-only');
     if (!ctx.server) throw new Error('[bongle] rooms.swap: server-only');
     const state = ctx.server.state;
@@ -389,9 +349,7 @@ export function active(ctx: ScriptContext): { roomId: string; mode: PlayerMode }
 }
 
 /** Every (roomId, mode) the client is currently observing. */
-export function observed(
-    ctx: ScriptContext,
-): { roomId: string; mode: PlayerMode; local: boolean }[] {
+export function observed(ctx: ScriptContext): { roomId: string; mode: PlayerMode; local: boolean }[] {
     if (!env.client) throw new Error('[bongle] rooms.observed: client-only');
     if (!ctx.client?.state) throw new Error('[bongle] rooms.observed: client-only');
     const out: { roomId: string; mode: PlayerMode; local: boolean }[] = [];

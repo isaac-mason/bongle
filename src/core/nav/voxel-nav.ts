@@ -115,15 +115,22 @@ export function gridActions(moves: readonly Move[], walkable: Walkable): Actions
 
 /** euclidean distance — fast, slightly non-admissible with unit-cost diagonals
  *  (favours speed over strict optimality, matching the source sketch). */
-const euclidean: Heuristic = (fromX, fromY, fromZ, toX, toY, toZ) =>
-    Math.hypot(fromX - toX, fromY - toY, fromZ - toZ);
+const euclidean: Heuristic = (fromX, fromY, fromZ, toX, toY, toZ) => Math.hypot(fromX - toX, fromY - toY, fromZ - toZ);
 
 // 12 ground moves: 4 cardinals × {flat, step-up +1, step-down −1}. unit cost.
 const GROUND_OFFSETS: Vec3[] = [
-    [-1, 0, 0], [-1, 1, 0], [-1, -1, 0],
-    [1, 0, 0], [1, 1, 0], [1, -1, 0],
-    [0, 0, -1], [0, 1, -1], [0, -1, -1],
-    [0, 0, 1], [0, 1, 1], [0, -1, 1],
+    [-1, 0, 0],
+    [-1, 1, 0],
+    [-1, -1, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+    [1, -1, 0],
+    [0, 0, -1],
+    [0, 1, -1],
+    [0, -1, -1],
+    [0, 0, 1],
+    [0, 1, 1],
+    [0, -1, 1],
 ];
 
 /** the default ground move set — spread + extend it (e.g. add gap-jumps) and feed
@@ -348,7 +355,6 @@ export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIter
     }
     return queue;
 }
-
 
 // ── swept-box voxel trace (skishore/wave) ───────────────────────────
 // fixed-point sweep of a unit box; used only to precompute the diagonal cell

@@ -63,14 +63,7 @@ function sphere(out: Selection.Selection, cx: number, cy: number, cz: number, r:
     }
 }
 
-function cylinder(
-    out: Selection.Selection,
-    cx: number,
-    cy: number,
-    cz: number,
-    r: number,
-    h: number,
-): void {
+function cylinder(out: Selection.Selection, cx: number, cy: number, cz: number, r: number, h: number): void {
     // centre the vertical extent: odd h is symmetric, even h tips up by one.
     const yLo = cy - ((h - 1) >> 1);
     const yHi = yLo + h - 1;

@@ -285,17 +285,7 @@ const _wrapCollideCollector: CollideShapeCollector = {
         }
         const len = Math.sqrt(px * px + py * py + pz * pz);
         const inv = len > 1e-10 ? 1 / len : 0;
-        const hitIdx = pushCustomHit(
-            _wrap.vx,
-            _wrap.vy,
-            _wrap.vz,
-            _wrap.stateId,
-            _wrap.cid,
-            px * inv,
-            py * inv,
-            pz * inv,
-            face,
-        );
+        const hitIdx = pushCustomHit(_wrap.vx, _wrap.vy, _wrap.vz, _wrap.stateId, _wrap.cid, px * inv, py * inv, pz * inv, face);
         const newId = reEncodeVoxelSubShapeId(hitIdx);
         if (voxelSide === 'A') h.subShapeIdA = newId;
         else h.subShapeIdB = newId;

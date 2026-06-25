@@ -12,9 +12,27 @@ import { rotateBlockKey, flipBlockKey } from './block-transform';
 import { createVoxels, setBlock } from './voxels';
 import * as blockModel from './block-model';
 
-const topTex: BlockTextureDef = { id: 'door-top', dependency: { registry: 'blockTextures', id: 'door-top' }, frames: ['door-top.png'], fps: 1, interpolate: false };
-const botTex: BlockTextureDef = { id: 'door-bot', dependency: { registry: 'blockTextures', id: 'door-bot' }, frames: ['door-bot.png'], fps: 1, interpolate: false };
-const stoneTex: BlockTextureDef = { id: 'stone', dependency: { registry: 'blockTextures', id: 'stone' }, frames: ['stone.png'], fps: 1, interpolate: false };
+const topTex: BlockTextureDef = {
+    id: 'door-top',
+    dependency: { registry: 'blockTextures', id: 'door-top' },
+    frames: ['door-top.png'],
+    fps: 1,
+    interpolate: false,
+};
+const botTex: BlockTextureDef = {
+    id: 'door-bot',
+    dependency: { registry: 'blockTextures', id: 'door-bot' },
+    frames: ['door-bot.png'],
+    fps: 1,
+    interpolate: false,
+};
+const stoneTex: BlockTextureDef = {
+    id: 'stone',
+    dependency: { registry: 'blockTextures', id: 'stone' },
+    frames: ['stone.png'],
+    fps: 1,
+    interpolate: false,
+};
 
 const doorHandle = door('test:door', { top: topTex, bottom: botTex }) as BlockHandle;
 const stoneHandle = cube('test:stone', { all: { texture: stoneTex } }) as BlockHandle;
@@ -42,10 +60,17 @@ beforeAll(() => {
 // floor-click ctx at (x,y,z); camera yaw controls the resolved facing.
 function floorCtx(x: number, y: number, z: number, yaw = Math.PI): BlockPlaceCtx {
     return {
-        worldX: x, worldY: y, worldZ: z,
-        normalX: 0, normalY: 1, normalZ: 0,
-        hitX: 0.5, hitY: 0, hitZ: 0.5,
-        yaw, pitch: 0,
+        worldX: x,
+        worldY: y,
+        worldZ: z,
+        normalX: 0,
+        normalY: 1,
+        normalZ: 0,
+        hitX: 0.5,
+        hitY: 0,
+        hitZ: 0.5,
+        yaw,
+        pitch: 0,
     };
 }
 
@@ -130,8 +155,12 @@ describe('door model — hinge mirror', () => {
     });
 
     it('right-hinge closed door is the horizontal mirror of left', () => {
-        const left = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'left', open: false }) as { quads: BlockQuad[] };
-        const right = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'right', open: false }) as { quads: BlockQuad[] };
+        const left = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'left', open: false }) as {
+            quads: BlockQuad[];
+        };
+        const right = doorHandle._def.model!({ facing: 'north', half: 'lower', hinge: 'right', open: false }) as {
+            quads: BlockQuad[];
+        };
         expect(right.quads).not.toEqual(left.quads); // texture/uvs mirrored → quads differ
         expect(blockModel.mirrorX(right.quads)).toEqual(left.quads); // and it IS the mirror of left
     });

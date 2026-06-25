@@ -28,11 +28,7 @@ import { frustum, Mesh } from 'gpucat';
 import type { Box3, Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
-import {
-    buildMeshInput,
-    type ChunkMeshResult,
-    meshChunk,
-} from '../../core/voxels/chunk-mesher';
+import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
 import { type Chunk, CHUNK_SIZE, chunkKey, type Voxels } from '../../core/voxels/voxels';
 import { enqueueMesh, isInFlight } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
@@ -229,13 +225,8 @@ export function update(
         let syncDone = 0;
         for (let i = 0; i < remeshCandidates.length; i++) {
             const { key, chunk } = remeshCandidates[i]!;
-            const chebyshevChunks = Math.max(
-                Math.abs(chunk.cx - camCx),
-                Math.abs(chunk.cy - camCy),
-                Math.abs(chunk.cz - camCz),
-            );
-            const canSync = syncDone < remeshBudget
-                && chebyshevChunks <= MAIN_THREAD_REMESH_RADIUS_CHUNKS;
+            const chebyshevChunks = Math.max(Math.abs(chunk.cx - camCx), Math.abs(chunk.cy - camCy), Math.abs(chunk.cz - camCz));
+            const canSync = syncDone < remeshBudget && chebyshevChunks <= MAIN_THREAD_REMESH_RADIUS_CHUNKS;
 
             // all-air chunks have no geometry to mesh — evict any prior
             // arena entry inline rather than shipping a ~700 KB no-op job
@@ -276,28 +267,15 @@ export function update(
 
 /** main-thread remesh: run `meshChunk` against the room's shared
  *  `meshOutput`, then install the result via `writeChunkMesh`. */
-function remeshChunk(
-    voxelResources: VoxelResources,
-    voxels: Voxels,
-    registry: BlockRegistry,
-    key: string,
-    chunk: Chunk,
-): void {
-    const mesh = chunk.aggregate === 0
-        ? null
-        : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk), registry);
+function remeshChunk(voxelResources: VoxelResources, voxels: Voxels, registry: BlockRegistry, key: string, chunk: Chunk): void {
+    const mesh = chunk.aggregate === 0 ? null : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk), registry);
     writeChunkMesh(voxelResources, key, chunk, mesh);
 }
 
 /** upsert a mesh result into the engine-global arena packer (or evict
  *  if the chunk is all-air / has no geometry). Shared between the main-
  *  thread `remeshChunk` path and the worker drain path. */
-function writeChunkMesh(
-    voxelResources: VoxelResources,
-    key: string,
-    chunk: Chunk,
-    mesh: ChunkMeshResult | null,
-): void {
+function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
     const packer = voxelResources.arenas.packer;
     if (mesh === null || chunk.aggregate === 0 || mesh.aabb === null) {
         if (packerHas(packer, key)) packerEvictChunk(packer, key);
@@ -321,8 +299,8 @@ const _cmpAsc = (a: _Survivor, b: _Survivor) => a.key - b.key;
 /** per-pass running counters during emit; mutated in place by
  *  `emitFacingSlices` / inline translucent emit. */
 type _PassCounters = { sliceCount: number; instStart: number; wgCount: number };
-const _countersO:  _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
-const _countersT:  _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
+const _countersO: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
+const _countersT: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
 const _countersTr: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
 
 /** opaque / transparent 7-facing emit. fans the section's facing slices,
@@ -337,7 +315,9 @@ function emitFacingSlices(
     faceCounts: Uint32Array,
     slot: number,
     aabb: Box3,
-    cx: number, cy: number, cz: number,
+    cx: number,
+    cy: number,
+    cz: number,
 ): void {
     const facingBase = slot * 7;
     for (let face = 0; face < 7; face++) {
@@ -410,16 +390,22 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
     }
     _survivors.sort(_cmpAsc);
 
-    const rO  = voxelResources.passRender.opaque;
-    const rT  = voxelResources.passRender.transparent;
+    const rO = voxelResources.passRender.opaque;
+    const rT = voxelResources.passRender.transparent;
     const rTr = voxelResources.passRender.translucent;
-    const tO  = arenas.tables.opaque;
-    const tT  = arenas.tables.transparent;
+    const tO = arenas.tables.opaque;
+    const tT = arenas.tables.transparent;
     const tTr = arenas.tables.translucent;
 
-    _countersO.sliceCount = 0;  _countersO.instStart = 0;  _countersO.wgCount = 0;
-    _countersT.sliceCount = 0;  _countersT.instStart = 0;  _countersT.wgCount = 0;
-    _countersTr.sliceCount = 0; _countersTr.instStart = 0; _countersTr.wgCount = 0;
+    _countersO.sliceCount = 0;
+    _countersO.instStart = 0;
+    _countersO.wgCount = 0;
+    _countersT.sliceCount = 0;
+    _countersT.instStart = 0;
+    _countersT.wgCount = 0;
+    _countersTr.sliceCount = 0;
+    _countersTr.instStart = 0;
+    _countersTr.wgCount = 0;
 
     // forward loop (near→far): opaque + transparent.
     for (let i = 0; i < _survivors.length; i++) {
@@ -427,21 +413,39 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
         const aabb = alloc.aabb;
 
         if (alloc.opaque) {
-            emitFacingSlices(_countersO, rO.visibleSlicesData, rO.wgInfoData,
-                tO.cpuFaceOffsets, tO.cpuFaceCounts,
-                alloc.opaque.sectionSlot, aabb, cx, cy, cz);
+            emitFacingSlices(
+                _countersO,
+                rO.visibleSlicesData,
+                rO.wgInfoData,
+                tO.cpuFaceOffsets,
+                tO.cpuFaceCounts,
+                alloc.opaque.sectionSlot,
+                aabb,
+                cx,
+                cy,
+                cz,
+            );
         }
         if (alloc.transparent) {
-            emitFacingSlices(_countersT, rT.visibleSlicesData, rT.wgInfoData,
-                tT.cpuFaceOffsets, tT.cpuFaceCounts,
-                alloc.transparent.sectionSlot, aabb, cx, cy, cz);
+            emitFacingSlices(
+                _countersT,
+                rT.visibleSlicesData,
+                rT.wgInfoData,
+                tT.cpuFaceOffsets,
+                tT.cpuFaceCounts,
+                alloc.transparent.sectionSlot,
+                aabb,
+                cx,
+                cy,
+                cz,
+            );
         }
     }
 
     // reverse loop (far→near): translucent. one slice per section, no
     // facing fan-out — quadOrder handles in-section ordering.
     const sliceOutTr = rTr.visibleSlicesData;
-    const wgOutTr    = rTr.wgInfoData;
+    const wgOutTr = rTr.wgInfoData;
     const dataCountTr = tTr.cpuDataCount;
     for (let i = _survivors.length - 1; i >= 0; i--) {
         const alloc = _survivors[i]!.alloc;
@@ -453,7 +457,7 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
         sliceOutTr[base + 0] = _countersTr.instStart;
         sliceOutTr[base + 1] = slot;
         sliceOutTr[base + 2] = quadCount;
-        sliceOutTr[base + 3] = 0;             // localBase: identity quadOrder
+        sliceOutTr[base + 3] = 0; // localBase: identity quadOrder
         for (let q = 0; q < quadCount; q += EXPAND_WG_SIZE) {
             const wgBase = _countersTr.wgCount * WG_INFO_U32S;
             wgOutTr[wgBase + 0] = _countersTr.sliceCount;
@@ -465,8 +469,8 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
     }
 
     // commit + upload per pass.
-    commitPass(rO,  _countersO);
-    commitPass(rT,  _countersT);
+    commitPass(rO, _countersO);
+    commitPass(rT, _countersT);
     commitPass(rTr, _countersTr);
 }
 

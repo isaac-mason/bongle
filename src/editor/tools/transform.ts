@@ -450,7 +450,6 @@ export function createTransformTool(
                 markTransformDirty(t);
             }
         }
-
     });
 
     // on drag end: commit undo action + send to server (normal mode only)
@@ -756,12 +755,7 @@ function _activeNodeIds(state: TransformToolState): number[] {
  * compute the pivot offset vec3 for a given preset and blueprint size.
  * 'custom' returns the current store value unchanged.
  */
-export function pivotOffsetForPreset(
-    store: EditRoomStoreApi,
-    preset: PivotPreset,
-    size: Vec3,
-    voxelAligned = false,
-): Vec3 {
+export function pivotOffsetForPreset(store: EditRoomStoreApi, preset: PivotPreset, size: Vec3, voxelAligned = false): Vec3 {
     switch (preset) {
         case 'min':
             return [0, 0, 0];
@@ -847,7 +841,9 @@ export function enterPlacement(
 
     // default to 'center' pivot for voxel placements
     const preset: PivotPreset = 'center';
-    const pivotOffset: Vec3 = blueprint.hasVoxels ? pivotOffsetForPreset(state.store, preset, rotatedBlueprint.size, true) : [0, 0, 0];
+    const pivotOffset: Vec3 = blueprint.hasVoxels
+        ? pivotOffsetForPreset(state.store, preset, rotatedBlueprint.size, true)
+        : [0, 0, 0];
 
     // ── create root ghost pivot ──
     // sits at blueprint.origin + pivotOffset in world space.
@@ -1237,13 +1233,7 @@ const _nudgeResult: Quat = quat.create();
  * uses the rotation snap from the store if set, otherwise falls back to the provided angle.
  * wrapped in an undo action so ctrl+z reverts it.
  */
-export function rotateNodes(
-    state: TransformToolState,
-    nodes: Nodes,
-    ctx: ScriptContext,
-    axis: Vec3,
-    angle: number,
-): void {
+export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptContext, axis: Vec3, angle: number): void {
     const storeState = state.store.getState();
     const nodeIds = Array.from(storeState.selection.nodes);
     if (nodeIds.length === 0) return;
@@ -1299,12 +1289,7 @@ export function rotateNodes(
  * uses the scale snap from the store as the step size.
  * wrapped in an undo action so ctrl+z reverts it.
  */
-export function scaleNodes(
-    state: TransformToolState,
-    nodes: Nodes,
-    ctx: ScriptContext,
-    factor: number,
-): void {
+export function scaleNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptContext, factor: number): void {
     const storeState = state.store.getState();
     const nodeIds = Array.from(storeState.selection.nodes);
     if (nodeIds.length === 0) return;
@@ -1451,11 +1436,7 @@ export function rotatePlacement(
     }
 }
 
-export function flipPlacement(
-    state: TransformToolState,
-    nodes: Nodes,
-    axis: 'x' | 'y' | 'z',
-): void {
+export function flipPlacement(state: TransformToolState, nodes: Nodes, axis: 'x' | 'y' | 'z'): void {
     const placement = state.placement;
     if (!placement) return;
     if (placement.rotation === null) return; // node-only: gizmo handles it
@@ -1490,12 +1471,7 @@ export function flipPlacement(
  * commit placement: materialize ghost content as real voxel ops + nodes.
  * creates an undo action that covers everything.
  */
-export function commitPlacement(
-    state: TransformToolState,
-    nodes: Nodes,
-    worldVoxels: Voxels,
-    ctx: ScriptContext,
-): void {
+export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVoxels: Voxels, ctx: ScriptContext): void {
     const placement = state.placement;
     if (!placement) return;
 
@@ -1696,11 +1672,7 @@ export function revertPlaceSelection(state: TransformToolState, nodes: Nodes): v
  * called only on explicit confirm (click) — see revertPlaceSelection for the
  * cancel path. no-op when nothing actually moved (avoids noise in undo stack).
  */
-export function commitPlaceSelection(
-    state: TransformToolState,
-    nodes: Nodes,
-    ctx: ScriptContext,
-): void {
+export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ctx: ScriptContext): void {
     const prevSnapshots = state.placeSnapshots;
     state.placeSnapshots = null;
     if (!prevSnapshots || prevSnapshots.length === 0) return;
@@ -1718,11 +1690,7 @@ export function commitPlaceSelection(
             quaternion: quat.clone(t.quaternion),
             scale: vec3.clone(t.scale),
         });
-        if (
-            t.position[0] !== snap.position[0] ||
-            t.position[1] !== snap.position[1] ||
-            t.position[2] !== snap.position[2]
-        ) {
+        if (t.position[0] !== snap.position[0] || t.position[1] !== snap.position[1] || t.position[2] !== snap.position[2]) {
             changed = true;
         }
     }
@@ -1974,7 +1942,14 @@ function _grabBodyAabb(node: Node, resources: Resources, outCenter: Vec3, outHal
  *
  * no-op if a grab is already active or the node is missing TransformTrait.
  */
-export function enterGrab(state: TransformToolState, nodeId: number, nodes: Nodes, physics: Physics, resources: Resources, camera: PerspectiveCamera): void {
+export function enterGrab(
+    state: TransformToolState,
+    nodeId: number,
+    nodes: Nodes,
+    physics: Physics,
+    resources: Resources,
+    camera: PerspectiveCamera,
+): void {
     if (state.grab) return;
     const node = getNodeById(nodes, nodeId);
     if (!node) return;
@@ -2132,7 +2107,9 @@ export function prePhysicsGrab(state: TransformToolState, physics: Physics, came
         _grabDeltaQ[2] = -_grabDeltaQ[2];
         _grabDeltaQ[3] = -_grabDeltaQ[3];
     }
-    const sinHalf = Math.sqrt(_grabDeltaQ[0] * _grabDeltaQ[0] + _grabDeltaQ[1] * _grabDeltaQ[1] + _grabDeltaQ[2] * _grabDeltaQ[2]);
+    const sinHalf = Math.sqrt(
+        _grabDeltaQ[0] * _grabDeltaQ[0] + _grabDeltaQ[1] * _grabDeltaQ[1] + _grabDeltaQ[2] * _grabDeltaQ[2],
+    );
     const angle = 2 * Math.atan2(sinHalf, _grabDeltaQ[3]);
     if (sinHalf > 1e-6) {
         const inv = 1 / sinHalf;

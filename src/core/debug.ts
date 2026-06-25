@@ -166,7 +166,10 @@ export function pushLog(logs: Logs, entry: LogEntry): void {
  * caller missed entries that fell off the buffer — `dropped` indicates
  * how many. caller can show a "… N entries dropped" marker.
  */
-export function readDelta(logs: Logs, cursor: number): {
+export function readDelta(
+    logs: Logs,
+    cursor: number,
+): {
     entries: LogEntry[];
     cursor: number;
     dropped: number;

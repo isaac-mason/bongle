@@ -5,17 +5,7 @@
 // character stays on the ground without jittering.
 
 import { describe, expect, it, afterEach } from 'vitest';
-import {
-    addTrait,
-    block,
-    CharacterControllerTrait,
-    getTrait,
-    onJoin,
-    script,
-    setBlock,
-    trait,
-    TransformTrait,
-} from 'bongle';
+import { addTrait, block, CharacterControllerTrait, getTrait, onJoin, script, setBlock, trait, TransformTrait } from 'bongle';
 import { createTestHarness, type TestHarness } from './harness';
 
 describe('kcc walking', () => {

@@ -178,8 +178,8 @@ export function decodeLight(skyBytes: Uint8Array, rgbBytes: Uint8Array): Uint16A
     // walk both RLE streams in lockstep. each iteration advances the channel
     // whose current run ends sooner, writing min(skyRun, rgbRun) packed
     // values before refilling the shorter run. no intermediate buffers.
-    let si = 0;          // index into skyRle (pair-aligned, += 2 per refill)
-    let ri = 0;          // index into rgbRle
+    let si = 0; // index into skyRle (pair-aligned, += 2 per refill)
+    let ri = 0; // index into rgbRle
     let skyVal = skyRle[0]! << 12;
     let skyLeft = skyRle[1]!;
     let rgbVal = rgbRle[0]!;

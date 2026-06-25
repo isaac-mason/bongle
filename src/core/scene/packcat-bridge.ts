@@ -100,10 +100,7 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
             try {
                 syncDef.unpack(s.unpack(data), instance);
             } catch (e) {
-                console.error(
-                    `[bongle] failed to apply sync '${label}' (bytes=${data.byteLength}):`,
-                    e,
-                );
+                console.error(`[bongle] failed to apply sync '${label}' (bytes=${data.byteLength}):`, e);
             }
             // an applied (replicated) write is by definition not a local
             // change to re-emit. unpack callbacks may call back into

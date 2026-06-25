@@ -123,10 +123,7 @@ export async function applyRegistryChanges(state: State): Promise<void> {
     state.voxelResources = nextRes;
     if (changed) {
         VoxelMeshResources.dispose(state.voxelMeshResources);
-        state.voxelMeshResources = VoxelMeshResources.init(
-            state.voxelResources.atlas,
-            state.voxelResources.texAnimBuffer,
-        );
+        state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
     }
     ModelResources.update(state.modelResources, state.resources);
 }

@@ -111,7 +111,12 @@ export function box(
         // up face UVs match the default cube convention (u=z, v=1-x) so a
         // local sub-rect samples the same orientation as a full-cube top.
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[z0, 1 - x0], [z1, 1 - x0], [z1, 1 - x1], [z0, 1 - x1]]
+            ? [
+                  [z0, 1 - x0],
+                  [z1, 1 - x0],
+                  [z1, 1 - x1],
+                  [z0, 1 - x1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -130,7 +135,12 @@ export function box(
     // -y (down)
     if (!excluded.has('down')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[1 - z1, 1 - x0], [1 - z0, 1 - x0], [1 - z0, 1 - x1], [1 - z1, 1 - x1]]
+            ? [
+                  [1 - z1, 1 - x0],
+                  [1 - z0, 1 - x0],
+                  [1 - z0, 1 - x1],
+                  [1 - z1, 1 - x1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -149,7 +159,12 @@ export function box(
     // +z (south)
     if (!excluded.has('south')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[x0, 1 - y0], [x1, 1 - y0], [x1, 1 - y1], [x0, 1 - y1]]
+            ? [
+                  [x0, 1 - y0],
+                  [x1, 1 - y0],
+                  [x1, 1 - y1],
+                  [x0, 1 - y1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -168,7 +183,12 @@ export function box(
     // -z (north)
     if (!excluded.has('north')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[1 - x1, 1 - y0], [1 - x0, 1 - y0], [1 - x0, 1 - y1], [1 - x1, 1 - y1]]
+            ? [
+                  [1 - x1, 1 - y0],
+                  [1 - x0, 1 - y0],
+                  [1 - x0, 1 - y1],
+                  [1 - x1, 1 - y1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -187,7 +207,12 @@ export function box(
     // +x (east)
     if (!excluded.has('east')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[1 - z1, 1 - y0], [1 - z0, 1 - y0], [1 - z0, 1 - y1], [1 - z1, 1 - y1]]
+            ? [
+                  [1 - z1, 1 - y0],
+                  [1 - z0, 1 - y0],
+                  [1 - z0, 1 - y1],
+                  [1 - z1, 1 - y1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -206,7 +231,12 @@ export function box(
     // -x (west)
     if (!excluded.has('west')) {
         const uvs: [Vec2, Vec2, Vec2, Vec2] | undefined = useLocalUv
-            ? [[z0, 1 - y0], [z1, 1 - y0], [z1, 1 - y1], [z0, 1 - y1]]
+            ? [
+                  [z0, 1 - y0],
+                  [z1, 1 - y0],
+                  [z1, 1 - y1],
+                  [z0, 1 - y1],
+              ]
             : undefined;
         emitQuad(
             [
@@ -317,12 +347,7 @@ export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[] {
     if (s === 0) return quads;
 
     return quads.map((q) => ({
-        verts: [
-            rotatePos(q.verts[0], s),
-            rotatePos(q.verts[1], s),
-            rotatePos(q.verts[2], s),
-            rotatePos(q.verts[3], s),
-        ] as const,
+        verts: [rotatePos(q.verts[0], s), rotatePos(q.verts[1], s), rotatePos(q.verts[2], s), rotatePos(q.verts[3], s)] as const,
         normal: rotateNormal(q.normal, s),
         texture: q.texture,
         uvs: q.uvs,
@@ -362,12 +387,7 @@ function mirrorCullFaceX(cf: CullFace | undefined): CullFace | undefined {
  */
 export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
     return quads.map((q) => ({
-        verts: [
-            mirrorPosX(q.verts[3]),
-            mirrorPosX(q.verts[2]),
-            mirrorPosX(q.verts[1]),
-            mirrorPosX(q.verts[0]),
-        ] as const,
+        verts: [mirrorPosX(q.verts[3]), mirrorPosX(q.verts[2]), mirrorPosX(q.verts[1]), mirrorPosX(q.verts[0])] as const,
         normal: mirrorNormalX(q.normal),
         texture: q.texture,
         uvs: q.uvs ? ([q.uvs[3], q.uvs[2], q.uvs[1], q.uvs[0]] as const) : undefined,
@@ -465,4 +485,3 @@ export function cross(texture: TextureRef, options?: { material?: MaterialType }
         ),
     ];
 }
-

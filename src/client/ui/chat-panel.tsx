@@ -62,10 +62,7 @@ const EMPTY_LINES: ChatLine[] = [];
 const EMPTY_SUGGESTIONS: Suggestion[] = [];
 
 function useChatLines(chat: ChatClient | null): ChatLine[] {
-    const subscribe = useCallback(
-        (cb: () => void) => (chat ? ClientChat.subscribe(chat, cb) : () => {}),
-        [chat],
-    );
+    const subscribe = useCallback((cb: () => void) => (chat ? ClientChat.subscribe(chat, cb) : () => {}), [chat]);
     const getSnapshot = useCallback(() => chat?.lines ?? EMPTY_LINES, [chat]);
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
@@ -137,14 +134,8 @@ export function ChatPanel() {
     }, [isOpen, lines.length]);
 
     const commands = chat?.commands ?? null;
-    const parsed: ParseState = useMemo(
-        () => ChatCommands.parseLine(commands, input, cursor),
-        [commands, input, cursor],
-    );
-    const rawSuggestions: Suggestion[] = useMemo(
-        () => ChatCommands.suggestAt(commands, parsed),
-        [commands, parsed],
-    );
+    const parsed: ParseState = useMemo(() => ChatCommands.parseLine(commands, input, cursor), [commands, input, cursor]);
+    const rawSuggestions: Suggestion[] = useMemo(() => ChatCommands.suggestAt(commands, parsed), [commands, parsed]);
     // hide completions when the user is typing plain chat (no leading '/').
     const suggestions = input.startsWith('/') ? rawSuggestions : EMPTY_SUGGESTIONS;
 

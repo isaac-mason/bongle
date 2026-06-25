@@ -93,9 +93,7 @@ function buildBenchRegistry() {
         const def: BlockDef = {
             id: b.id,
             states: SINGLE_STATE as any,
-            model: b.model
-                ? () => b.model!(tex)
-                : () => ({ type: 'cube' as const, textures: { all: { texture: tex } } }),
+            model: b.model ? () => b.model!(tex) : () => ({ type: 'cube' as const, textures: { all: { texture: tex } } }),
             cull: b.cull ?? CullType.SOLID,
             material: b.material ?? MaterialType.OPAQUE,
         };
@@ -265,10 +263,12 @@ function makeVillage(): Voxels {
     }
 
     // house: planks floor + log corners + bricks walls + glass windows + roof
-    const hx0 = 6, hz0 = 2, hx1 = 13, hz1 = 9;
+    const hx0 = 6,
+        hz0 = 2,
+        hx1 = 13,
+        hz1 = 9;
     // floor
-    for (let z = hz0; z <= hz1; z++)
-        for (let x = hx0; x <= hx1; x++) setChunkBlock(chunk, x, 5, z, 'oak_planks', registry);
+    for (let z = hz0; z <= hz1; z++) for (let x = hx0; x <= hx1; x++) setChunkBlock(chunk, x, 5, z, 'oak_planks', registry);
     // walls (bricks) + corners (logs) + windows (glass)
     for (let y = 6; y < 9; y++) {
         for (let x = hx0; x <= hx1; x++) {
@@ -302,14 +302,17 @@ function makeVillage(): Voxels {
     setChunkBlock(chunk, hx1 - 1, 7, hz1 - 1, 'torch', registry);
 
     // tree behind house: oak_log trunk + leaves canopy
-    const tx = 2, tz = 12;
+    const tx = 2,
+        tz = 12;
     for (let y = 5; y < 9; y++) setChunkBlock(chunk, tx, y, tz, 'oak_log', registry);
     for (let dy = 0; dy < 3; dy++) {
         const radius = dy === 2 ? 1 : 2;
         for (let dz = -radius; dz <= radius; dz++)
             for (let dx = -radius; dx <= radius; dx++) {
                 if (dx === 0 && dz === 0 && dy < 2) continue;
-                const lx = tx + dx, ly = 8 + dy, lz = tz + dz;
+                const lx = tx + dx,
+                    ly = 8 + dy,
+                    lz = tz + dz;
                 if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE)
                     setChunkBlock(chunk, lx, ly, lz, 'leaves', registry);
             }
@@ -336,9 +339,7 @@ function makeModelDispatch(): Voxels {
 
     // stone base y=0..3 (background, mostly culled — keeps light/AO realistic)
     for (let z = 0; z < CHUNK_SIZE; z++)
-        for (let x = 0; x < CHUNK_SIZE; x++)
-            for (let y = 0; y < 4; y++)
-                setChunkBlock(chunk, x, y, z, 'stone', registry);
+        for (let x = 0; x < CHUNK_SIZE; x++) for (let y = 0; y < 4; y++) setChunkBlock(chunk, x, y, z, 'stone', registry);
 
     // model carpet at y=4..6 — 3 model variants tiled across the chunk
     for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -425,4 +426,3 @@ describe('meshAndLight', () => {
         meshAndLight(modelDispatch, chunk);
     });
 });
-

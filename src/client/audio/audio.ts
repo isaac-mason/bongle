@@ -157,10 +157,7 @@ export async function loadResources(): Promise<AudioResources> {
         } catch (err) {
             // a failed atlas decode silences *every* atlas sound, not one —
             // surface it loudly rather than as a per-play warning.
-            console.error(
-                `[bongle] audio atlas failed to load — all ${manifest.atlas.length} atlas sounds will be silent:`,
-                err,
-            );
+            console.error(`[bongle] audio atlas failed to load — all ${manifest.atlas.length} atlas sounds will be silent:`, err);
         }
     }
 

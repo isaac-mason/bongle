@@ -49,13 +49,7 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
 // unsampled cells as edges.
 
 const KERNEL_RADIUS = 2;
-const KERNEL = new Float32Array([
-    1, 4, 6, 4, 1,
-    4, 16, 24, 16, 4,
-    6, 24, 36, 24, 6,
-    4, 16, 24, 16, 4,
-    1, 4, 6, 4, 1,
-]);
+const KERNEL = new Float32Array([1, 4, 6, 4, 1, 4, 16, 24, 16, 4, 6, 24, 36, 24, 6, 4, 16, 24, 16, 4, 1, 4, 6, 4, 1]);
 
 // ── per-frame update ───────────────────────────────────────────────
 

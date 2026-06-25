@@ -57,13 +57,7 @@ import {
     setMeshRegistry,
 } from './mesh-dispatcher';
 
-import {
-    createOffsetAllocator,
-    oaAllocate,
-    oaFree,
-    oaStorageReport,
-    type OffsetAllocator,
-} from './offset-allocator';
+import { createOffsetAllocator, oaAllocate, oaFree, oaStorageReport, type OffsetAllocator } from './offset-allocator';
 import { createQuadMaterial, type VoxelPass } from './voxel-material';
 import {
     type BlockTextureAtlasMetadata,
@@ -107,9 +101,9 @@ export const ChunkInfo = /* @__PURE__ */ struct('VoxelChunkInfo', {
 
 export const VisibleSlice = /* @__PURE__ */ struct('VoxelVisibleSlice', {
     instanceStart: d.u32,
-    slot:          d.u32,
-    quadCount:     d.u32,
-    localBase:     d.u32,
+    slot: d.u32,
+    quadCount: d.u32,
+    localBase: d.u32,
 });
 
 // ── VisibleQuad ─────────────────────────────────────────────────────
@@ -120,7 +114,7 @@ export const VisibleSlice = /* @__PURE__ */ struct('VoxelVisibleSlice', {
 // to index quads / light.
 
 export const VisibleQuad = /* @__PURE__ */ struct('VoxelVisibleQuad', {
-    slot:     d.u32,
+    slot: d.u32,
     localIdx: d.u32,
 });
 
@@ -138,8 +132,8 @@ export const WgInfo = /* @__PURE__ */ struct('VoxelExpandWgInfo', {
 });
 
 export const VISIBLE_SLICE_STRIDE = /* @__PURE__ */ layoutStrideOf(VisibleSlice);
-export const VISIBLE_QUAD_STRIDE  = /* @__PURE__ */ layoutStrideOf(VisibleQuad);
-export const WG_INFO_STRIDE       = /* @__PURE__ */ layoutStrideOf(WgInfo);
+export const VISIBLE_QUAD_STRIDE = /* @__PURE__ */ layoutStrideOf(VisibleQuad);
+export const WG_INFO_STRIDE = /* @__PURE__ */ layoutStrideOf(WgInfo);
 export const DRAW_INDIRECT_STRIDE = /* @__PURE__ */ layoutStrideOf(DrawIndirect);
 
 const VISIBLE_SLICE_U32S = VISIBLE_SLICE_STRIDE / 4;
@@ -162,22 +156,24 @@ export const EXPAND_WG_SIZE = 64;
 
 function createExpandSlicesCompute(): ComputeNode {
     return Fn(() => {
-        const wgInfo        = storage('wgInfo',        d.array(WgInfo),        'read');
+        const wgInfo = storage('wgInfo', d.array(WgInfo), 'read');
         const visibleSlices = storage('visibleSlices', d.array(VisibleSlice), 'read');
-        const visibleQuads  = storage('visibleQuads',  d.array(VisibleQuad),  'read_write');
+        const visibleQuads = storage('visibleQuads', d.array(VisibleQuad), 'read_write');
 
         const info = wgInfo.element(workgroupId.x);
         const sliceIdx = info.field('sliceIdx').toVar('sliceIdx');
         const quadBase = info.field('quadBase').toVar('quadBase');
-        const quadIdx  = add(quadBase, localId.x).toVar('quadIdx');
+        const quadIdx = add(quadBase, localId.x).toVar('quadIdx');
 
         const slice = visibleSlices.element(sliceIdx);
         const quadCount = slice.field('quadCount').toVar('quadCount');
-        If(quadIdx.greaterThanEqual(quadCount), () => { Return(); });
+        If(quadIdx.greaterThanEqual(quadCount), () => {
+            Return();
+        });
 
         const instanceStart = slice.field('instanceStart').toVar('instanceStart');
-        const localBase     = slice.field('localBase').toVar('localBase');
-        const slot          = slice.field('slot').toVar('slot');
+        const localBase = slice.field('localBase').toVar('localBase');
+        const slot = slice.field('slot').toVar('slot');
 
         const outIdx = add(instanceStart, quadIdx).toVar('outIdx');
         const out = visibleQuads.element(outIdx).fields();
@@ -276,10 +272,7 @@ export function createSegmentArena<S extends Record<string, StreamSpec>>(opts: {
     };
 }
 
-export function arenaAlloc<S extends Record<string, StreamSpec>>(
-    a: SegmentArena<S>,
-    slots: number,
-): number {
+export function arenaAlloc<S extends Record<string, StreamSpec>>(a: SegmentArena<S>, slots: number): number {
     if (slots <= 0) throw new Error('SegmentArena.alloc: slots must be > 0');
     const h = oaAllocate(a.allocator, slots);
     if (!h) {
@@ -300,10 +293,7 @@ export function arenaAlloc<S extends Record<string, StreamSpec>>(
     return h.offset;
 }
 
-export function arenaFree<S extends Record<string, StreamSpec>>(
-    a: SegmentArena<S>,
-    start: number,
-): void {
+export function arenaFree<S extends Record<string, StreamSpec>>(a: SegmentArena<S>, start: number): void {
     const node = a.slotToNode.get(start);
     if (node === undefined) {
         // forensic dump: nearest 5 live offsets on either side.
@@ -312,7 +302,10 @@ export function arenaFree<S extends Record<string, StreamSpec>>(
         while (pivot < offsets.length && offsets[pivot]! < start) pivot++;
         const lo = Math.max(0, pivot - 5);
         const hi = Math.min(offsets.length, pivot + 5);
-        const near = offsets.slice(lo, hi).map((o) => `${o}=>node${a.slotToNode.get(o)}`).join(',');
+        const near = offsets
+            .slice(lo, hi)
+            .map((o) => `${o}=>node${a.slotToNode.get(o)}`)
+            .join(',');
         throw new Error(
             `[voxel-drift][free-miss] SegmentArena.free: no live alloc at slot ${start} (nearbyLive=[${near}], totalLive=${offsets.length})`,
         );
@@ -403,8 +396,11 @@ export function createQuadOrderArena(byteBudget: number, maxAllocs?: number): Qu
 // ── SectionTable ────────────────────────────────────────────────────
 
 export type SectionEntryFields = {
-    originX: number; originY: number; originZ: number;
-    dataStart: number; dataCount: number;
+    originX: number;
+    originY: number;
+    originZ: number;
+    dataStart: number;
+    dataCount: number;
     quadOrderStart: number;
     faceOffsets: ArrayLike<number>;
     faceCounts: ArrayLike<number>;
@@ -418,9 +414,9 @@ export type SectionTable = {
     /** CPU mirrors of the per-slot fields cullCPU needs to size + emit
      *  slices. AABB + iteration order live on the per-chunk `ChunkAlloc`
      *  (shared across passes) — frustum cull runs once per chunk now. */
-    readonly cpuDataCount: Uint32Array;    // 1 per slot (translucent slice quadCount)
-    readonly cpuFaceOffsets: Uint32Array;  // 7 per slot (opaque/transparent localBase per facing)
-    readonly cpuFaceCounts: Uint32Array;   // 7 per slot
+    readonly cpuDataCount: Uint32Array; // 1 per slot (translucent slice quadCount)
+    readonly cpuFaceOffsets: Uint32Array; // 7 per slot (opaque/transparent localBase per facing)
+    readonly cpuFaceCounts: Uint32Array; // 7 per slot
     allocSlot(): number;
     freeSlot(slot: number): void;
     writeEntry(slot: number, entry: SectionEntryFields): void;
@@ -464,7 +460,10 @@ export function createSectionTable(opts: { name: string; slotCount: number }): S
         // zero CPU mirrors so a stale read can't sneak through.
         cpuDataCount[slot] = 0;
         const facingBase = slot * 7;
-        for (let i = 0; i < 7; i++) { cpuFaceOffsets[facingBase + i] = 0; cpuFaceCounts[facingBase + i] = 0; }
+        for (let i = 0; i < 7; i++) {
+            cpuFaceOffsets[facingBase + i] = 0;
+            cpuFaceCounts[facingBase + i] = 0;
+        }
 
         freeStack.push(slot);
         used--;
@@ -485,11 +484,13 @@ export function createSectionTable(opts: { name: string; slotCount: number }): S
         const facingBase = slot * 7;
         for (let i = 0; i < 7; i++) {
             cpuFaceOffsets[facingBase + i] = entry.faceOffsets[i]!;
-            cpuFaceCounts[facingBase + i]  = entry.faceCounts[i]!;
+            cpuFaceCounts[facingBase + i] = entry.faceCounts[i]!;
         }
     }
 
-    function dispose(): void { buffer.dispose(); }
+    function dispose(): void {
+        buffer.dispose();
+    }
 
     return {
         slotCount,
@@ -584,11 +585,19 @@ export function packerUpsertChunk(
     };
     const meshAabb = mesh.aabb;
     if (meshAabb) {
-        next.aabb[0] = meshAabb.min[0]; next.aabb[1] = meshAabb.min[1]; next.aabb[2] = meshAabb.min[2];
-        next.aabb[3] = meshAabb.max[0]; next.aabb[4] = meshAabb.max[1]; next.aabb[5] = meshAabb.max[2];
+        next.aabb[0] = meshAabb.min[0];
+        next.aabb[1] = meshAabb.min[1];
+        next.aabb[2] = meshAabb.min[2];
+        next.aabb[3] = meshAabb.max[0];
+        next.aabb[4] = meshAabb.max[1];
+        next.aabb[5] = meshAabb.max[2];
     } else {
-        next.aabb[0] = 0; next.aabb[1] = 0; next.aabb[2] = 0;
-        next.aabb[3] = 0; next.aabb[4] = 0; next.aabb[5] = 0;
+        next.aabb[0] = 0;
+        next.aabb[1] = 0;
+        next.aabb[2] = 0;
+        next.aabb[3] = 0;
+        next.aabb[4] = 0;
+        next.aabb[5] = 0;
     }
 
     for (const pass of PASSES) {
@@ -630,8 +639,11 @@ export function packerUpsertChunk(
         const sectionSlot = cur?.sectionSlot ?? packerAllocSlotWithEviction(packer, chunkKey, pass);
 
         table.writeEntry(sectionSlot, {
-            originX: origin[0], originY: origin[1], originZ: origin[2],
-            dataStart, dataCount: needQuads,
+            originX: origin[0],
+            originY: origin[1],
+            originZ: origin[2],
+            dataStart,
+            dataCount: needQuads,
             quadOrderStart,
             faceOffsets: passMesh.faceOffsets,
             faceCounts: passMesh.faceCounts,
@@ -726,15 +738,19 @@ function farthestChunkKey(packer: ArenaPacker, excludeKey: string): string | nul
         const dy = origin[1] + CHUNK_SIZE * 0.5 - cam[1];
         const dz = origin[2] + CHUNK_SIZE * 0.5 - cam[2];
         const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq > bestDistSq) { bestDistSq = distSq; bestKey = key; }
+        if (distSq > bestDistSq) {
+            bestDistSq = distSq;
+            bestKey = key;
+        }
     }
     return bestKey;
 }
 
 function packerAllocWithEviction(packer: ArenaPacker, upsertKey: string, slots: number): number {
     for (;;) {
-        try { return arenaAlloc(packer.quadArena, slots); }
-        catch (e) {
+        try {
+            return arenaAlloc(packer.quadArena, slots);
+        } catch (e) {
             const victim = farthestChunkKey(packer, upsertKey);
             if (!victim) throw e;
             packerEvictChunk(packer, victim);
@@ -744,8 +760,9 @@ function packerAllocWithEviction(packer: ArenaPacker, upsertKey: string, slots: 
 
 function packerAllocOrderWithEviction(packer: ArenaPacker, upsertKey: string, slots: number): number {
     for (;;) {
-        try { return arenaAlloc(packer.quadOrderArena, slots); }
-        catch (e) {
+        try {
+            return arenaAlloc(packer.quadOrderArena, slots);
+        } catch (e) {
             const victim = farthestChunkKey(packer, upsertKey);
             if (!victim) throw e;
             packerEvictChunk(packer, victim);
@@ -755,8 +772,9 @@ function packerAllocOrderWithEviction(packer: ArenaPacker, upsertKey: string, sl
 
 function packerAllocSlotWithEviction(packer: ArenaPacker, upsertKey: string, pass: VoxelPass): number {
     for (;;) {
-        try { return packer.tables[pass].allocSlot(); }
-        catch (e) {
+        try {
+            return packer.tables[pass].allocSlot();
+        } catch (e) {
             const victim = farthestChunkKey(packer, upsertKey);
             if (!victim) throw e;
             packerEvictChunk(packer, victim);
@@ -816,7 +834,7 @@ function createPassRender(arenas: VoxelArenaResources, budget: VoxelArenaBudget)
     // 7 facings per section (+X,-X,+Y,-Y,+Z,-Z,UNASSIGNED); translucent
     // is one slice per section.
     const sliceCaps: Record<VoxelPass, number> = {
-        opaque:      budget.maxSections * 7,
+        opaque: budget.maxSections * 7,
         transparent: budget.maxSections * 7,
         translucent: budget.maxSections,
     };
@@ -828,7 +846,7 @@ function createPassRender(arenas: VoxelArenaResources, budget: VoxelArenaBudget)
     // ceil(quadCount / EXPAND_WG_SIZE) ≤ ceil(visibleQuadCap/64) +
     // visibleSlices (one tail WG per slice).
     const wgInfoCaps: Record<VoxelPass, number> = {
-        opaque:      Math.ceil(visibleQuadCap / EXPAND_WG_SIZE) + sliceCaps.opaque,
+        opaque: Math.ceil(visibleQuadCap / EXPAND_WG_SIZE) + sliceCaps.opaque,
         transparent: Math.ceil(visibleQuadCap / EXPAND_WG_SIZE) + sliceCaps.transparent,
         translucent: Math.ceil(visibleQuadCap / EXPAND_WG_SIZE) + sliceCaps.translucent,
     };
@@ -954,14 +972,8 @@ export type VoxelResources = {
     meshOutput: MeshOutput;
 };
 
-export function init(
-    registry: BlockRegistry,
-    env: EnvironmentResources,
-    budget: VoxelArenaBudget,
-): VoxelResources {
-    console.log(
-        `[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`,
-    );
+export function init(registry: BlockRegistry, env: EnvironmentResources, budget: VoxelArenaBudget): VoxelResources {
+    console.log(`[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
     const atlas = createVoxelTextureArray(registry.textures.length);
 
@@ -1070,9 +1082,7 @@ export async function load(
     {
         const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(resources);
         res.atlasHash = resolvedMeta?.hash ?? null;
-        const atlasWrite = resolvedMeta
-            ? writeAtlasPixels(res, registry.textures, resolvedMeta, resources)
-            : Promise.resolve();
+        const atlasWrite = resolvedMeta ? writeAtlasPixels(res, registry.textures, resolvedMeta, resources) : Promise.resolve();
         if (serializeAtlasBeforeCompute) {
             await atlasWrite.catch((e) => console.warn('[voxel-resources] atlas load failed:', e));
             res._resolveAtlasReady();

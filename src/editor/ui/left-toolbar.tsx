@@ -85,27 +85,27 @@ export function LeftToolbar() {
                 {TOOL_CATEGORIES.map((category: ToolCategory, ci) => {
                     const CategoryIcon = category.icon;
                     return (
-                    <div key={category.id} className="flex flex-col items-center gap-1">
-                        {ci > 0 && <div className="w-6 h-px bg-neutral-300 my-1" />}
-                        <div
-                            className="flex flex-row items-center gap-1 select-none mb-1"
-                            title={`category: ${category.label} (${formatKeyLabel(category.key)})`}
-                        >
-                            <CategoryIcon size={12} className="text-neutral-500" />
-                            <Kbd size="xs">{formatKeyLabel(category.key)}</Kbd>
+                        <div key={category.id} className="flex flex-col items-center gap-1">
+                            {ci > 0 && <div className="w-6 h-px bg-neutral-300 my-1" />}
+                            <div
+                                className="flex flex-row items-center gap-1 select-none mb-1"
+                                title={`category: ${category.label} (${formatKeyLabel(category.key)})`}
+                            >
+                                <CategoryIcon size={12} className="text-neutral-500" />
+                                <Kbd size="xs">{formatKeyLabel(category.key)}</Kbd>
+                            </div>
+                            {category.tools.map((def, ti) => (
+                                <ToolButton
+                                    key={def.id}
+                                    def={def}
+                                    active={activeTool === def.id}
+                                    categoryKeyLabel={formatKeyLabel(category.key)}
+                                    slotDigit={ti + 1}
+                                    showSlot={category.tools.length > 1}
+                                    onSelect={() => setActiveTool(def.id)}
+                                />
+                            ))}
                         </div>
-                        {category.tools.map((def, ti) => (
-                            <ToolButton
-                                key={def.id}
-                                def={def}
-                                active={activeTool === def.id}
-                                categoryKeyLabel={formatKeyLabel(category.key)}
-                                slotDigit={ti + 1}
-                                showSlot={category.tools.length > 1}
-                                onSelect={() => setActiveTool(def.id)}
-                            />
-                        ))}
-                    </div>
                     );
                 })}
             </div>

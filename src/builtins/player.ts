@@ -10,21 +10,25 @@ import { sync, type TraitType, trait } from '../core/scene/traits';
  * replicated as 'dirty' syncs (no editor exposure, no auto byte-diff).
  * server code that mutates them must call <field>Sync.dirty(t).
  */
-export const PlayerTrait = trait('player', {
-    /** server-allocated Player id. set by the server at runtime. */
-    playerId: 0,
-    /** the client id that owns the Player. set by the server at runtime. */
-    client: -1,
-    /** stable authenticated user id (matchmaker / auth-session derived). */
-    userId: '',
-    /** display name for the user. */
-    username: '',
-    /** voxel chunk stream radius in chunks. server's Discovery flush iterates a
-     *  sphere of this radius around the player's chunk coord. server-set per
-     *  room mode at createPlayerNode time (small for play, large for edit).
-     *  the eviction radius is `viewRadius + KEEP_HYSTERESIS` (discovery.ts). */
-    viewRadius: 8,
-}, { persist: false });
+export const PlayerTrait = trait(
+    'player',
+    {
+        /** server-allocated Player id. set by the server at runtime. */
+        playerId: 0,
+        /** the client id that owns the Player. set by the server at runtime. */
+        client: -1,
+        /** stable authenticated user id (matchmaker / auth-session derived). */
+        userId: '',
+        /** display name for the user. */
+        username: '',
+        /** voxel chunk stream radius in chunks. server's Discovery flush iterates a
+         *  sphere of this radius around the player's chunk coord. server-set per
+         *  room mode at createPlayerNode time (small for play, large for edit).
+         *  the eviction radius is `viewRadius + KEEP_HYSTERESIS` (discovery.ts). */
+        viewRadius: 8,
+    },
+    { persist: false },
+);
 
 /** instance type for PlayerTrait */
 export type PlayerTrait = TraitType<typeof PlayerTrait>;

@@ -588,7 +588,9 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
             const blob = new Blob([img.bytes as BlobPart], { type: img.mimeType });
             createImageBitmap(blob)
                 .then((bitmap) => {
-                    place(img, atlasKey, bitmap.width, bitmap.height, (region) => blitBitmapToAtlas(resources.atlas, region, bitmap));
+                    place(img, atlasKey, bitmap.width, bitmap.height, (region) =>
+                        blitBitmapToAtlas(resources.atlas, region, bitmap),
+                    );
                     bitmap.close();
                 })
                 .catch((err) => {
@@ -760,4 +762,3 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
         depthWrite: true,
     });
 }
-

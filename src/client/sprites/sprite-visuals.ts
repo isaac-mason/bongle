@@ -26,16 +26,7 @@
 // atlas TextureNode in place — no per-room work needed. The compiled
 // pipeline survives across reloads.
 
-import {
-    type Camera,
-    createPlaneGeometry,
-    d,
-    type Geometry,
-    GpuBuffer,
-    Mesh,
-    packTo,
-    type Scene,
-} from 'gpucat';
+import { type Camera, createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, packTo, type Scene } from 'gpucat';
 import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { SpriteTrait } from '../../builtins/sprite';

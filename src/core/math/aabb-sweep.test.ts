@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-    AXIS_NONE,
-    AXIS_X,
-    AXIS_Y,
-    AXIS_Z,
-    sweepAabbVsAabb,
-    sweptBounds,
-} from './aabb-sweep';
+import { AXIS_NONE, AXIS_X, AXIS_Y, AXIS_Z, sweepAabbVsAabb, sweptBounds } from './aabb-sweep';
 
 // helper: unit cube character (half-extents 0.5) at given center.
 function sweepUnit(
@@ -18,24 +11,15 @@ function sweepUnit(
     dz: number,
     box: [number, number, number, number, number, number],
 ) {
-    return sweepAabbVsAabb(
-        cx,
-        cy,
-        cz,
-        0.5,
-        0.5,
-        0.5,
-        dx,
-        dy,
-        dz,
-        box[0],
-        box[1],
-        box[2],
-        box[3],
-        box[4],
-        box[5],
-        { toi: 0, axis: 0, sign: 0, nX: 0, nY: 0, nZ: 0, overlapDepth: 0 },
-    );
+    return sweepAabbVsAabb(cx, cy, cz, 0.5, 0.5, 0.5, dx, dy, dz, box[0], box[1], box[2], box[3], box[4], box[5], {
+        toi: 0,
+        axis: 0,
+        sign: 0,
+        nX: 0,
+        nY: 0,
+        nZ: 0,
+        overlapDepth: 0,
+    });
 }
 
 describe('sweepAabbVsAabb', () => {

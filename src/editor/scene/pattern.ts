@@ -159,7 +159,7 @@ export function suggestPattern(
     const weightMatch = WEIGHT_PREFIX_RE.exec(tokenText);
     // strip leading whitespace inside the token (after a `,` users typically
     // hit space) so the body offset is right.
-    const wsLen = (tokenText.match(/^\s*/)?.[0].length) ?? 0;
+    const wsLen = tokenText.match(/^\s*/)?.[0].length ?? 0;
     const prefixLen = weightMatch ? weightMatch[0].length : wsLen;
     const bodyStart = tokenStart + prefixLen;
     const body = text.slice(bodyStart, cursor).toLowerCase();

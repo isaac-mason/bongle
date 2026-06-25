@@ -205,12 +205,7 @@ describe('mesh-dispatcher', () => {
             return { reg, tws, results, d };
         }
 
-        function makeChunkAt(
-            reg: ReturnType<typeof buildSmallRegistry>,
-            cx: number,
-            cy: number,
-            cz: number,
-        ) {
+        function makeChunkAt(reg: ReturnType<typeof buildSmallRegistry>, cx: number, cy: number, cz: number) {
             const voxels = createVoxels(reg);
             const chunk = createChunk(cx, cy, cz);
             voxels.chunks.set(`${cx},${cy},${cz}`, chunk);

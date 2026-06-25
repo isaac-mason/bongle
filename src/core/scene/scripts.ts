@@ -62,7 +62,7 @@ export type EditRoomState = {
      *  even though both belong to the same ClientRoom. */
     id: string;
 
-    /** 
+    /**
      * The node representing the editor actor.
      */
     editorNode: nodes.Node;
@@ -417,10 +417,7 @@ export function script<T extends TraitBase>(
     // producers changed even when the factory body itself is unchanged
     // (e.g. a referenced model handle reloaded). dispatch uses these to
     // target only the dirty scripts on applyTraitSwap.
-    setDeps(
-        { registry: 'scripts', id: key },
-        opts?.deps ? opts.deps.map((d) => d.dependency) : [],
-    );
+    setDeps({ registry: 'scripts', id: key }, opts?.deps ? opts.deps.map((d) => d.dependency) : []);
     return def;
 }
 
@@ -1159,19 +1156,14 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
 export function pruneRemovedScript(def: ScriptDef): void {
     const traitDef = registry.traits.byId.get(def.traitId)?.payload;
     if (!traitDef || !traitDef.scriptsById.delete(def.scriptId)) return;
-    const remaining = [...traitDef.scriptsById.values()]
-        .sort((a, b) => a.index - b.index)
-        .map((entry) => entry.reg);
+    const remaining = [...traitDef.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
     traitDef.scripts = remaining;
     remaining.forEach((reg, index) => {
         traitDef.scriptsById.set(reg.scriptId, { reg, index });
     });
 }
 
-export function applyTraitSwap(
-    runtime: NodesContext,
-    dirtyScriptIds: ReadonlySet<string> | null = null,
-): void {
+export function applyTraitSwap(runtime: NodesContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
     for (const [nodeId, nodeInstances] of runtime.instances) {
         for (const [instanceKey, oldInstance] of nodeInstances) {
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;

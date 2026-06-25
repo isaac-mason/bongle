@@ -791,11 +791,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
  * add a trait by its numeric index. used internally by the inspector
  * and other engine code that works with numeric indices directly.
  */
-export function addTraitBySlot(
-    node: Node,
-    traitSlot: number,
-    props?: Record<string, unknown>,
-): TraitBase | null {
+export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<string, unknown>): TraitBase | null {
     const scene = node.scene;
 
     const def = registry.traitsBySlot.get(traitSlot);
@@ -1270,7 +1266,13 @@ const SILENT = Debug.createMetrics(false);
 // the one driver behind every runOn* below: walk initialized instances, run each
 // `select`-ed hook fn with `args`, time it as `script/<hook>/<key>` (begin/end
 // self-gate on metrics.enabled), and log errors with the node + hook name.
-function runHook<A>(sg: Nodes, args: A, metrics: Debug.Metrics, hook: string, select: (i: ScriptInstance) => Iterable<(a: A) => void>): void {
+function runHook<A>(
+    sg: Nodes,
+    args: A,
+    metrics: Debug.Metrics,
+    hook: string,
+    select: (i: ScriptInstance) => Iterable<(a: A) => void>,
+): void {
     if (!sg.runtime) return;
     for (const nodeInstances of sg.runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
@@ -1377,11 +1379,7 @@ export type SerializedNode = {
  * serialize a trait instance to a plain object for scene files.
  * only `control()`-decorated fields are serialized. tag traits get `controls: undefined`.
  */
-function serializeTrait(
-    traitSlot: number,
-    instance: TraitBase,
-    options?: SerializeOptions,
-): SerializedTrait | null {
+function serializeTrait(traitSlot: number, instance: TraitBase, options?: SerializeOptions): SerializedTrait | null {
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return null;
     if (options?.persistOnly && !def.persist) return null;

@@ -5,12 +5,7 @@ import { getTrait, getNodeById } from '../core/scene/nodes';
 import type { ClientRoom } from '../client/rooms';
 import { CameraRefTrait } from '../builtins/camera';
 import { TransformTrait } from '../builtins/transform';
-import {
-    getVisualWorldMatrix,
-    getVisualWorldPosition,
-    setWorldPosition,
-    setWorldQuaternion,
-} from '../api/transforms';
+import { getVisualWorldMatrix, getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { MeshTrait } from '../builtins/mesh';
 import type { Resources } from '../core/resources';
 import type { Input } from '../client/input';
@@ -104,12 +99,7 @@ const _focusQuat: Quat = [0, 0, 0, 1];
  * TODO(W3.x): walk descendant MeshTraits and union their AABBs for a tight
  * focus on multi-mesh model trees (matches the old ModelTrait behaviour).
  */
-export function focusNode(
-    api: EditRoomStoreApi,
-    room: ClientRoom,
-    resources: Resources,
-    nodeId: number,
-): void {
+export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Resources, nodeId: number): void {
     const node = getNodeById(room.nodes, nodeId);
     if (!node) return;
 

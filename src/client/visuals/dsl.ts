@@ -79,9 +79,9 @@ export function ditherDiscard(color: Node<d.vec4f>, alpha: Node<d.f32>, dither: 
             If(a.lessThan(f32(0.5)), () => {
                 Discard();
             });
-            const ign = fract(
-                mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY)))),
-            ).toVar('ditherIgn');
+            const ign = fract(mul(f32(52.9829189), fract(add(mul(f32(0.06711056), fragX), mul(f32(0.00583715), fragY))))).toVar(
+                'ditherIgn',
+            );
             If(fade.greaterThan(ign), () => {
                 Discard();
             });

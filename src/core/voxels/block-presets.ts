@@ -92,11 +92,7 @@ const AXIS_REMAP: Record<'x' | 'y' | 'z', Record<'x' | 'y' | 'z', 'x' | 'y' | 'z
     z: { x: 'y', y: 'x', z: 'z' },
 };
 
-export function column(
-    id: string,
-    textures: { end: TextureRef; side: TextureRef },
-    options?: PresetOptions,
-) {
+export function column(id: string, textures: { end: TextureRef; side: TextureRef }, options?: PresetOptions) {
     const end = textures.end;
     const side = textures.side;
     let handle: BlockHandle<typeof ColumnState.props>;
@@ -147,8 +143,7 @@ export function column(
                 },
             };
         },
-        place: (ctx, io) =>
-            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ axis: axisFromPlaceCtx(ctx) })),
+        place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ axis: axisFromPlaceCtx(ctx) })),
         rotate: (stateId, axis) => {
             const local = stateId - handle._baseStateId;
             const p = handle.states.decode(local);
@@ -208,28 +203,44 @@ const STAIR_SHAPE_FLIP: Record<StairShape, StairShape> = {
 // y=0.5..1 boxes for the bottom-half stair facing=north. base + perm.
 function stairUpperBoxes(shape: StairShape): [number, number, number, number, number, number][] {
     switch (shape) {
-        case 'straight': return [[0, 0.5, 0.5, 1, 1, 1]];
-        case 'outer_left': return [[0, 0.5, 0.5, 0.5, 1, 1]];        // back-west quarter
-        case 'outer_right': return [[0.5, 0.5, 0.5, 1, 1, 1]];       // back-east quarter
-        case 'inner_left': return [
-            [0, 0.5, 0.5, 1, 1, 1],
-            [0, 0.5, 0, 0.5, 1, 0.5],                                // + front-west quarter
-        ];
-        case 'inner_right': return [
-            [0, 0.5, 0.5, 1, 1, 1],
-            [0.5, 0.5, 0, 1, 1, 0.5],                                // + front-east quarter
-        ];
+        case 'straight':
+            return [[0, 0.5, 0.5, 1, 1, 1]];
+        case 'outer_left':
+            return [[0, 0.5, 0.5, 0.5, 1, 1]]; // back-west quarter
+        case 'outer_right':
+            return [[0.5, 0.5, 0.5, 1, 1, 1]]; // back-east quarter
+        case 'inner_left':
+            return [
+                [0, 0.5, 0.5, 1, 1, 1],
+                [0, 0.5, 0, 0.5, 1, 0.5], // + front-west quarter
+            ];
+        case 'inner_right':
+            return [
+                [0, 0.5, 0.5, 1, 1, 1],
+                [0.5, 0.5, 0, 1, 1, 0.5], // + front-east quarter
+            ];
     }
 }
 
 // exposed top-of-slab regions (y=0.5) for the bottom-half facing=north.
 function stairExposedTopRects(shape: StairShape): [number, number, number, number][] {
     switch (shape) {
-        case 'straight': return [[0, 0, 1, 0.5]];
-        case 'outer_left': return [[0, 0, 1, 0.5], [0.5, 0.5, 1, 1]];
-        case 'outer_right': return [[0, 0, 1, 0.5], [0, 0.5, 0.5, 1]];
-        case 'inner_left': return [[0.5, 0, 1, 0.5]];
-        case 'inner_right': return [[0, 0, 0.5, 0.5]];
+        case 'straight':
+            return [[0, 0, 1, 0.5]];
+        case 'outer_left':
+            return [
+                [0, 0, 1, 0.5],
+                [0.5, 0.5, 1, 1],
+            ];
+        case 'outer_right':
+            return [
+                [0, 0, 1, 0.5],
+                [0, 0.5, 0.5, 1],
+            ];
+        case 'inner_left':
+            return [[0.5, 0, 1, 0.5]];
+        case 'inner_right':
+            return [[0, 0, 0.5, 0.5]];
     }
 }
 
@@ -264,11 +275,7 @@ function stairBoxes(p: { half: StairHalf; shape: StairShape }) {
     return p.half === 'top' ? boxes.map(reflectAabbY) : boxes;
 }
 
-function stairQuads(
-    textures: CubeTextures,
-    topTex: TextureRef,
-    p: { half: StairHalf; shape: StairShape },
-): BlockQuad[] {
+function stairQuads(textures: CubeTextures, topTex: TextureRef, p: { half: StairHalf; shape: StairShape }): BlockQuad[] {
     const quads: BlockQuad[] = [
         // bottom slab (top face emitted separately as exposed quads)
         ...blockModel.box([0, 0, 0], [1, 0.5, 1], textures, { exclude: ['up'] }),
@@ -299,7 +306,9 @@ function stairQuads(
 function readStairAt(
     voxels: import('./voxels').Voxels,
     handle: BlockHandle<typeof StairState.props>,
-    wx: number, wy: number, wz: number,
+    wx: number,
+    wy: number,
+    wz: number,
     matchHalf: StairHalf,
 ): Facing4 | null {
     const id = getBlockState(voxels, wx, wy, wz);
@@ -328,11 +337,16 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
         cull: CullType.PARTIAL,
         place: (ctx, io) => {
             // shape stays 'straight' — onNeighbourUpdate re-derives corners post-placement.
-            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({
-                facing: facing4FromPlaceCtx(ctx),
-                half: halfFromPlaceCtx(ctx),
-                shape: 'straight',
-            }));
+            io.set(
+                ctx.worldX,
+                ctx.worldY,
+                ctx.worldZ,
+                handle.stateKey({
+                    facing: facing4FromPlaceCtx(ctx),
+                    half: halfFromPlaceCtx(ctx),
+                    shape: 'straight',
+                }),
+            );
         },
         onNeighbourUpdate(ctx) {
             const me = handle.states.decode(ctx.voxels.registry.stateToLocalIndex[ctx.stateId]!);
@@ -345,9 +359,14 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
 
             // world-direction the stair faces — same direction the low/front
             // step points (= where the placer was standing).
-            const dir = ({
-                north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0],
-            } as const)[f];
+            const dir = (
+                {
+                    north: [0, -1],
+                    east: [1, 0],
+                    south: [0, 1],
+                    west: [-1, 0],
+                } as const
+            )[f];
 
             // FRONT neighbour (one cell beyond the low step): if it's a
             // perpendicular stair, we form an OUTER corner. CW-facing
@@ -423,8 +442,7 @@ export function slab(id: string, textures: CubeTextures, options?: PresetOptions
             return { type: 'custom' as const, quads: blockModel.box(from, to, textures) };
         },
         cull: (p) => (p.half === 'double' ? CullType.SOLID : CullType.PARTIAL),
-        place: (ctx, io) =>
-            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ half: halfFromPlaceCtx(ctx) })),
+        place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ half: halfFromPlaceCtx(ctx) })),
         // rotate is identity (half/double are axis-aligned).
         flip: (stateId, axis) => {
             if (axis !== 'y') return stateId;
@@ -523,8 +541,7 @@ export function ladder(id: string, texture: TextureRef, options?: PresetOptions)
         cull: CullType.PARTIAL,
         collision: false,
         climbable: true,
-        place: (ctx, io) =>
-            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ facing: facing4FromPlaceCtx(ctx) })),
+        place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ facing: facing4FromPlaceCtx(ctx) })),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
@@ -548,7 +565,6 @@ export function ladder(id: string, texture: TextureRef, options?: PresetOptions)
 
 export const WATER_DEFAULT_TINT: ScreenTintSpec = { color: [0.04, 0.1, 0.2], opacity: 0.3 };
 export const LAVA_DEFAULT_TINT: ScreenTintSpec = { color: [1.0, 0.35, 0.05], opacity: 0.75 };
-
 
 //
 // MODEL_LIQUID block — the character swims in it instead of colliding,
@@ -719,11 +735,7 @@ function fenceArmQuads(textures: CubeTextures, side: 'north' | 'south' | 'east' 
 // connectivity check shared by fence/wall/pane: neighbour is a full solid
 // cube (cull=SOLID) or carries the same group flag. avoids the "fence-arm
 // stuck into a slab" look that any-collision matching produces.
-function hasGroupConnection(
-    voxels: import('./voxels').Voxels,
-    wx: number, wy: number, wz: number,
-    groupFlag: number,
-): boolean {
+function hasGroupConnection(voxels: import('./voxels').Voxels, wx: number, wy: number, wz: number, groupFlag: number): boolean {
     const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return false;
     if (voxels.registry.cull[id]! === CullType.SOLID) return true;
@@ -740,9 +752,7 @@ export function fence(id: string, textures: CubeTextures, options?: PresetOption
         defaultState: { north: true, south: true, east: true, west: true },
         shape: (p) => fenceShape(p),
         model: (p) => {
-            const quads = [
-                ...blockModel.box([6 / 16, 0, 6 / 16], [10 / 16, 1, 10 / 16], textures, { uvs: 'local' }),
-            ];
+            const quads = [...blockModel.box([6 / 16, 0, 6 / 16], [10 / 16, 1, 10 / 16], textures, { uvs: 'local' })];
             if (p.north) quads.push(...fenceArmQuads(textures, 'north'));
             if (p.south) quads.push(...fenceArmQuads(textures, 'south'));
             if (p.east) quads.push(...fenceArmQuads(textures, 'east'));
@@ -757,10 +767,10 @@ export function fence(id: string, textures: CubeTextures, options?: PresetOption
             const east = hasGroupConnection(ctx.voxels, ctx.worldX + 1, ctx.worldY, ctx.worldZ, BLOCK_FLAG_FENCE);
             const west = hasGroupConnection(ctx.voxels, ctx.worldX - 1, ctx.worldY, ctx.worldZ, BLOCK_FLAG_FENCE);
             return handle.stateIdLocal(
-                (north ? FENCE_STRIDE_NORTH : 0)
-                + (east ? FENCE_STRIDE_EAST : 0)
-                + (south ? FENCE_STRIDE_SOUTH : 0)
-                + (west ? FENCE_STRIDE_WEST : 0),
+                (north ? FENCE_STRIDE_NORTH : 0) +
+                    (east ? FENCE_STRIDE_EAST : 0) +
+                    (south ? FENCE_STRIDE_SOUTH : 0) +
+                    (west ? FENCE_STRIDE_WEST : 0),
             );
         },
         rotate: (stateId, axis, cw) => {
@@ -813,9 +823,7 @@ export function pane(id: string, textures: CubeTextures, options?: PresetOptions
         material: options?.material ?? MaterialType.TRANSPARENT,
         shape: (p) => paneShape(p),
         model: (p) => {
-            const quads = [
-                ...blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 1, 9 / 16], textures, { uvs: 'local' }),
-            ];
+            const quads = [...blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 1, 9 / 16], textures, { uvs: 'local' })];
             if (p.north) quads.push(...blockModel.box([7 / 16, 0, 0], [9 / 16, 1, 7 / 16], textures, { uvs: 'local' }));
             if (p.south) quads.push(...blockModel.box([7 / 16, 0, 9 / 16], [9 / 16, 1, 1], textures, { uvs: 'local' }));
             if (p.east) quads.push(...blockModel.box([9 / 16, 0, 7 / 16], [1, 1, 9 / 16], textures, { uvs: 'local' }));
@@ -831,10 +839,10 @@ export function pane(id: string, textures: CubeTextures, options?: PresetOptions
             const west = hasGroupConnection(ctx.voxels, ctx.worldX - 1, ctx.worldY, ctx.worldZ, BLOCK_FLAG_PANE);
             // PaneState aliases FenceState — same strides apply.
             return handle.stateIdLocal(
-                (north ? FENCE_STRIDE_NORTH : 0)
-                + (east ? FENCE_STRIDE_EAST : 0)
-                + (south ? FENCE_STRIDE_SOUTH : 0)
-                + (west ? FENCE_STRIDE_WEST : 0),
+                (north ? FENCE_STRIDE_NORTH : 0) +
+                    (east ? FENCE_STRIDE_EAST : 0) +
+                    (south ? FENCE_STRIDE_SOUTH : 0) +
+                    (west ? FENCE_STRIDE_WEST : 0),
             );
         },
         rotate: (stateId, axis, cw) => {
@@ -898,24 +906,35 @@ function trapdoorShape(p: { facing: 'north' | 'east' | 'south' | 'west'; half: '
     }
     // open: thin vertical panel against the facing wall
     switch (p.facing) {
-        case 'north': return blockShape.aabbs([[0, 0, 0, 1, 1, TRAPDOOR_DEPTH]]);
-        case 'south': return blockShape.aabbs([[0, 0, 1 - TRAPDOOR_DEPTH, 1, 1, 1]]);
-        case 'east': return blockShape.aabbs([[1 - TRAPDOOR_DEPTH, 0, 0, 1, 1, 1]]);
-        case 'west': return blockShape.aabbs([[0, 0, 0, TRAPDOOR_DEPTH, 1, 1]]);
+        case 'north':
+            return blockShape.aabbs([[0, 0, 0, 1, 1, TRAPDOOR_DEPTH]]);
+        case 'south':
+            return blockShape.aabbs([[0, 0, 1 - TRAPDOOR_DEPTH, 1, 1, 1]]);
+        case 'east':
+            return blockShape.aabbs([[1 - TRAPDOOR_DEPTH, 0, 0, 1, 1, 1]]);
+        case 'west':
+            return blockShape.aabbs([[0, 0, 0, TRAPDOOR_DEPTH, 1, 1]]);
     }
 }
 
-function trapdoorQuads(textures: CubeTextures, p: { facing: 'north' | 'east' | 'south' | 'west'; half: 'bottom' | 'top'; open: boolean }): BlockQuad[] {
+function trapdoorQuads(
+    textures: CubeTextures,
+    p: { facing: 'north' | 'east' | 'south' | 'west'; half: 'bottom' | 'top'; open: boolean },
+): BlockQuad[] {
     const opts = { uvs: 'local' as const };
     if (!p.open) {
         if (p.half === 'bottom') return blockModel.box([0, 0, 0], [1, TRAPDOOR_DEPTH, 1], textures, opts);
         return blockModel.box([0, 1 - TRAPDOOR_DEPTH, 0], [1, 1, 1], textures, opts);
     }
     switch (p.facing) {
-        case 'north': return blockModel.box([0, 0, 0], [1, 1, TRAPDOOR_DEPTH], textures, opts);
-        case 'south': return blockModel.box([0, 0, 1 - TRAPDOOR_DEPTH], [1, 1, 1], textures, opts);
-        case 'east': return blockModel.box([1 - TRAPDOOR_DEPTH, 0, 0], [1, 1, 1], textures, opts);
-        case 'west': return blockModel.box([0, 0, 0], [TRAPDOOR_DEPTH, 1, 1], textures, opts);
+        case 'north':
+            return blockModel.box([0, 0, 0], [1, 1, TRAPDOOR_DEPTH], textures, opts);
+        case 'south':
+            return blockModel.box([0, 0, 1 - TRAPDOOR_DEPTH], [1, 1, 1], textures, opts);
+        case 'east':
+            return blockModel.box([1 - TRAPDOOR_DEPTH, 0, 0], [1, 1, 1], textures, opts);
+        case 'west':
+            return blockModel.box([0, 0, 0], [TRAPDOOR_DEPTH, 1, 1], textures, opts);
     }
 }
 
@@ -932,11 +951,16 @@ export function trapdoor(id: string, textures: CubeTextures, options?: PresetOpt
         // placement opens closed: half from where the player clicked, facing
         // toward the placer. open can be toggled later via interaction.
         place: (ctx, io) =>
-            io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({
-                facing: facing4FromPlaceCtx(ctx),
-                half: halfFromPlaceCtx(ctx),
-                open: false,
-            })),
+            io.set(
+                ctx.worldX,
+                ctx.worldY,
+                ctx.worldZ,
+                handle.stateKey({
+                    facing: facing4FromPlaceCtx(ctx),
+                    half: halfFromPlaceCtx(ctx),
+                    open: false,
+                }),
+            ),
         rotate: (stateId, axis, cw) => {
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
@@ -951,7 +975,9 @@ export function trapdoor(id: string, textures: CubeTextures, options?: PresetOpt
             const f = p.facing as Facing4;
             if (axis === 'y') {
                 return handle.stateId({
-                    facing: f, half: p.half === 'top' ? 'bottom' : 'top', open: p.open,
+                    facing: f,
+                    half: p.half === 'top' ? 'bottom' : 'top',
+                    open: p.open,
                 });
             }
             const table = axis === 'x' ? FACING4_FLIP_X : FACING4_FLIP_Z;
@@ -1039,12 +1065,13 @@ function wallShape(p: { north: boolean; east: boolean; south: boolean; west: boo
     return blockShape.aabbs(boxes);
 }
 
-function wallQuads(textures: CubeTextures, p: { north: boolean; east: boolean; south: boolean; west: boolean; up: boolean }): BlockQuad[] {
+function wallQuads(
+    textures: CubeTextures,
+    p: { north: boolean; east: boolean; south: boolean; west: boolean; up: boolean },
+): BlockQuad[] {
     const opts = { uvs: 'local' as const };
     const postTop = p.up ? 1 : WALL_POST_SHORT;
-    const quads = [
-        ...blockModel.box([4 / 16, 0, 4 / 16], [12 / 16, postTop, 12 / 16], textures, opts),
-    ];
+    const quads = [...blockModel.box([4 / 16, 0, 4 / 16], [12 / 16, postTop, 12 / 16], textures, opts)];
     if (p.north) quads.push(...blockModel.box([5 / 16, 0, 0], [11 / 16, WALL_POST_SHORT, 4 / 16], textures, opts));
     if (p.south) quads.push(...blockModel.box([5 / 16, 0, 12 / 16], [11 / 16, WALL_POST_SHORT, 1], textures, opts));
     if (p.east) quads.push(...blockModel.box([12 / 16, 0, 5 / 16], [1, WALL_POST_SHORT, 11 / 16], textures, opts));
@@ -1078,11 +1105,11 @@ export function wall(id: string, textures: CubeTextures, options?: PresetOptions
             const straightEW = east && west && !north && !south;
             const up = aboveSolid || !(straightNS || straightEW);
             return handle.stateIdLocal(
-                (north ? WALL_STRIDE_NORTH : 0)
-                + (east ? WALL_STRIDE_EAST : 0)
-                + (south ? WALL_STRIDE_SOUTH : 0)
-                + (west ? WALL_STRIDE_WEST : 0)
-                + (up ? WALL_STRIDE_UP : 0),
+                (north ? WALL_STRIDE_NORTH : 0) +
+                    (east ? WALL_STRIDE_EAST : 0) +
+                    (south ? WALL_STRIDE_SOUTH : 0) +
+                    (west ? WALL_STRIDE_WEST : 0) +
+                    (up ? WALL_STRIDE_UP : 0),
             );
         },
         rotate: (stateId, axis, cw) => {
@@ -1126,16 +1153,21 @@ const TORCH_WEST_SHAPE = blockShape.aabbs([[0, 3 / 16, 7 / 16, 4 / 16, 13 / 16, 
 
 function torchShape(mount: 'floor' | 'north' | 'east' | 'south' | 'west') {
     switch (mount) {
-        case 'floor': return TORCH_FLOOR_SHAPE;
-        case 'north': return TORCH_NORTH_SHAPE;
-        case 'south': return TORCH_SOUTH_SHAPE;
-        case 'east': return TORCH_EAST_SHAPE;
-        case 'west': return TORCH_WEST_SHAPE;
+        case 'floor':
+            return TORCH_FLOOR_SHAPE;
+        case 'north':
+            return TORCH_NORTH_SHAPE;
+        case 'south':
+            return TORCH_SOUTH_SHAPE;
+        case 'east':
+            return TORCH_EAST_SHAPE;
+        case 'west':
+            return TORCH_WEST_SHAPE;
     }
 }
 
 function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'south' | 'west'): BlockQuad[] {
-    const tex: CubeTextures = { all:  { texture } };
+    const tex: CubeTextures = { all: { texture } };
     const opts = { uvs: 'local' as const };
     switch (mount) {
         case 'floor':
@@ -1157,11 +1189,7 @@ function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: numbe
     return (voxels.registry.flags[id]! & BLOCK_FLAG_COLLISION) !== 0;
 }
 
-export function torch(
-    id: string,
-    texture: TextureRef,
-    options?: PresetOptions & { lightEmission?: [number, number, number] },
-) {
+export function torch(id: string, texture: TextureRef, options?: PresetOptions & { lightEmission?: [number, number, number] }) {
     const emission = options?.lightEmission ?? [14, 12, 6];
     let handle: BlockHandle<typeof TorchState.props>;
     handle = block(id, {
@@ -1238,7 +1266,10 @@ const DOOR_DEPTH = 3 / 16;
 
 // (dx,dz) step per cardinal (world convention: north=-Z, south=+Z, east=+X, west=-X).
 const FACING_DELTA: Record<Facing4, readonly [number, number]> = {
-    north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0],
+    north: [0, -1],
+    south: [0, 1],
+    east: [1, 0],
+    west: [-1, 0],
 };
 
 // door panel AABB in the base (facing=north) orientation. closed = a thin slab
@@ -1249,11 +1280,7 @@ function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
     return hinge === 'left' ? [0, 0, 0, DOOR_DEPTH, 1, 1] : [1 - DOOR_DEPTH, 0, 0, 1, 1, 1];
 }
 
-export function door(
-    id: string,
-    textures: { top: TextureRef; bottom: TextureRef },
-    options?: PresetOptions,
-) {
+export function door(id: string, textures: { top: TextureRef; bottom: TextureRef }, options?: PresetOptions) {
     let handle: BlockHandle<typeof DoorState.props>;
     handle = block(id, {
         name: options?.name,
@@ -1269,7 +1296,12 @@ export function door(
             // the handle/panel — and the open swing — land on the correct side.
             const b = doorBox('left', p.open);
             const texture = p.half === 'lower' ? textures.bottom : textures.top;
-            let quads = blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], { all: { texture } }, { uvs: 'local', cull: false });
+            let quads = blockModel.box(
+                [b[0], b[1], b[2]],
+                [b[3], b[4], b[5]],
+                { all: { texture } },
+                { uvs: 'local', cull: false },
+            );
             if (p.hinge === 'right') quads = blockModel.mirrorX(quads);
             return { type: 'custom' as const, quads: blockModel.rotateY(quads, (4 - FACING4_STEPS[p.facing]) % 4) };
         },

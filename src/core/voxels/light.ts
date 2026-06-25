@@ -28,7 +28,18 @@
 
 import type { Vec4 } from 'mathcat';
 import type { BlockRegistry } from './block-registry';
-import { CHUNK_SIZE, type Chunk, chunkKey, EMPTY_LIGHT_MASK, rebuildColumns, setLight, toChunkCoord, toLocalCoord, type Voxels, voxelIndex } from './voxels';
+import {
+    CHUNK_SIZE,
+    type Chunk,
+    chunkKey,
+    EMPTY_LIGHT_MASK,
+    rebuildColumns,
+    setLight,
+    toChunkCoord,
+    toLocalCoord,
+    type Voxels,
+    voxelIndex,
+} from './voxels';
 
 // ── packing / unpacking ─────────────────────────────────────────────
 
@@ -406,7 +417,13 @@ const _spreadQueue = createBucketQueue();
 // no sky-specific logic here. sky column handling is entirely in the
 // pre-step in updateLightBatch (matching minetest's design).
 
-function unspreadChannel(voxels: Voxels, registry: BlockRegistry, ch: number, removalQueue: BucketQueue, relightQueue: BucketQueue): void {
+function unspreadChannel(
+    voxels: Voxels,
+    registry: BlockRegistry,
+    ch: number,
+    removalQueue: BucketQueue,
+    relightQueue: BucketQueue,
+): void {
     const { lightOpacity, lightEmission } = registry;
     // hoist channel shift/mask once per BFS — ch is fixed for the entire
     // pop loop, so the per-cell chGet/chSet array indexing collapses to

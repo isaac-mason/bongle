@@ -33,9 +33,10 @@ export async function runSceneIcon(state: State, id: string): Promise<SceneIconR
     }
     // _payload holds the canonical serialized form — handle.node/voxels are
     // mutated in place by populateScene on every reload.
-    const payload = handleEntry.payload._payload as
-        | { nodes: { root: { children: unknown[] } }; voxels: import('../../core/voxels/voxel-savefile').SavedVoxels | null }
-        | null;
+    const payload = handleEntry.payload._payload as {
+        nodes: { root: { children: unknown[] } };
+        voxels: import('../../core/voxels/voxel-savefile').SavedVoxels | null;
+    } | null;
     if (!payload) return { pixels: new Uint8Array(0), pxSize: SUBJECT_ICON_PX };
 
     const room = createRoom(state);

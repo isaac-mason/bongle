@@ -19,11 +19,7 @@
 
 import { bench, describe } from 'vitest';
 import { LineSegmentsGeometry } from 'gpucat';
-import {
-    buildMeshEdgeSegments,
-    buildOutlineSegments,
-    buildSelectionGeometry,
-} from './selection-mesh';
+import { buildMeshEdgeSegments, buildOutlineSegments, buildSelectionGeometry } from './selection-mesh';
 import * as Selection from '../core/scene/selection';
 
 // ── scenario builders ───────────────────────────────────────────────
@@ -46,8 +42,7 @@ function shell(n: number): Selection.Selection {
     for (let z = 0; z < n; z++) {
         for (let y = 0; y < n; y++) {
             for (let x = 0; x < n; x++) {
-                const onSurf =
-                    x === 0 || x === n - 1 || y === 0 || y === n - 1 || z === 0 || z === n - 1;
+                const onSurf = x === 0 || x === n - 1 || y === 0 || y === n - 1 || z === 0 || z === n - 1;
                 if (onSurf) Selection.set(sel, x, y, z);
             }
         }
@@ -75,8 +70,7 @@ function sparse(count: number, range: number): Selection.Selection {
 function checkerboard(n: number): Selection.Selection {
     const sel = Selection.create();
     for (let z = 0; z < n; z++)
-        for (let y = 0; y < n; y++)
-            for (let x = 0; x < n; x++) if ((x + y + z) % 2 === 0) Selection.set(sel, x, y, z);
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if ((x + y + z) % 2 === 0) Selection.set(sel, x, y, z);
     return sel;
 }
 

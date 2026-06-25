@@ -46,18 +46,20 @@ function buildGlb(json: object, bin: Uint8Array): Uint8Array {
  *  rotating one node, plus an embedded PNG-mimed image. */
 function makeRichGlb(): Uint8Array {
     // ── geometry: a single triangle in XY plane
-    const positions = new Float32Array([
-        0, 0, 0,
-        1, 0, 0,
-        0, 1, 0,
-    ]);
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const indices = new Uint32Array([0, 1, 2]);
 
     // ── animation: 2 keyframes rotating 'head' node around Y, 0..1s
     const times = new Float32Array([0, 1]);
     const rotations = new Float32Array([
-        0, 0, 0, 1,           // identity
-        0, 0.7071, 0, 0.7071, // 90° around Y
+        0,
+        0,
+        0,
+        1, // identity
+        0,
+        0.7071,
+        0,
+        0.7071, // 90° around Y
     ]);
 
     // ── image: 4 bytes of fake PNG payload
@@ -112,9 +114,7 @@ function makeRichGlb(): Uint8Array {
                 samplers: [{ input: 2, output: 3, interpolation: 'LINEAR' }],
             },
         ],
-        materials: [
-            { pbrMetallicRoughness: { baseColorTexture: { index: 0 } } },
-        ],
+        materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 } } }],
         textures: [{ source: 0 }],
         images: [{ bufferView: 4, mimeType: 'image/png' }],
         accessors: [

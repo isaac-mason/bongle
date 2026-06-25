@@ -22,12 +22,7 @@ import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
 import { trait, type TraitType } from '../api/traits';
-import {
-    getWorldPosition,
-    getWorldQuaternion,
-    setWorldPosition,
-    setWorldQuaternion,
-} from '../api/transforms';
+import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
 import { TransformTrait } from './transform';
 
@@ -46,10 +41,14 @@ const INITIAL_TARGET_DISTANCE = 5;
  * default (null) to use whatever pose the camera transform already
  * carries (set externally before attach, or the room default).
  */
-export const OrbitControllerTrait = trait('engine:orbit-controller', {
-    target: () => [0, 0, -INITIAL_TARGET_DISTANCE] as Vec3,
-    eye: null as Vec3 | null,
-}, { persist: false });
+export const OrbitControllerTrait = trait(
+    'engine:orbit-controller',
+    {
+        target: () => [0, 0, -INITIAL_TARGET_DISTANCE] as Vec3,
+        eye: null as Vec3 | null,
+    },
+    { persist: false },
+);
 
 export type OrbitControllerTrait = TraitType<typeof OrbitControllerTrait>;
 
@@ -74,89 +73,90 @@ const MAX_POLAR = Math.PI;
 
 type DragMode = 'none' | 'rotate' | 'pan';
 
-script(OrbitControllerTrait, 'controller', (ctx) => {
-    if (!env.client) return;
+script(
+    OrbitControllerTrait,
+    'controller',
+    (ctx) => {
+        if (!env.client) return;
 
-    const client = ctx.client!;
-    const { input } = client;
-    const viewport = client.state!.viewport;
-    const mk = input.mouseKeyboard;
+        const client = ctx.client!;
+        const { input } = client;
+        const viewport = client.state!.viewport;
+        const mk = input.mouseKeyboard;
 
-    // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
-    // to the room's default at client.camera), so editor lenses that point
-    // editorNode's CameraRefTrait at a lens-private camera drive their own
-    // camera. camera-node lifecycle is owned by whoever installed the ref
-    // (room init or editor lens); onDispose only clears the contextmenu
-    // listener.
-    const { camera: cameraTrait, node: cameraNode } = resolveCamera(ctx);
-    const cameraTransform = getTrait(cameraNode, TransformTrait)!;
+        // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
+        // to the room's default at client.camera), so editor lenses that point
+        // editorNode's CameraRefTrait at a lens-private camera drive their own
+        // camera. camera-node lifecycle is owned by whoever installed the ref
+        // (room init or editor lens); onDispose only clears the contextmenu
+        // listener.
+        const { camera: cameraTrait, node: cameraNode } = resolveCamera(ctx);
+        const cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
-    // mirror targets for the orbit eye position. orbit only writes to
-    // cameraTransform (a separate scene-root camera node), so ctx.node's
-    // TransformTrait never moves. see fly-controller for the full
-    // rationale — same two cases (real edit room: ctx.node ===
-    // room.playerNode is the server-authoritative anchor; local lens:
-    // ctx.node is client-only and we additionally mirror into
-    // room.playerNode so owner-sync carries the anchor to the server).
-    const nodeTransform = getTrait(ctx.node, TransformTrait);
+        // mirror targets for the orbit eye position. orbit only writes to
+        // cameraTransform (a separate scene-root camera node), so ctx.node's
+        // TransformTrait never moves. see fly-controller for the full
+        // rationale — same two cases (real edit room: ctx.node ===
+        // room.playerNode is the server-authoritative anchor; local lens:
+        // ctx.node is client-only and we additionally mirror into
+        // room.playerNode so owner-sync carries the anchor to the server).
+        const nodeTransform = getTrait(ctx.node, TransformTrait);
 
-    // ── state (closure, mutable) ───────────────────────────────────
-    // initial eye: either the `eye` trait field if set, or whatever the
-    // camera transform currently holds. target stays on the trait
-    // (mutated by pan).
-    const target = ctx.trait.target;
-    const seedEye = ctx.trait.eye;
-    if (seedEye) setWorldPosition(cameraTransform, seedEye);
-    const eyeWp = getWorldPosition(cameraTransform);
-    const eye: Vec3 = [eyeWp[0], eyeWp[1], eyeWp[2]];
+        // ── state (closure, mutable) ───────────────────────────────────
+        // initial eye: either the `eye` trait field if set, or whatever the
+        // camera transform currently holds. target stays on the trait
+        // (mutated by pan).
+        const target = ctx.trait.target;
+        const seedEye = ctx.trait.eye;
+        if (seedEye) setWorldPosition(cameraTransform, seedEye);
+        const eyeWp = getWorldPosition(cameraTransform);
+        const eye: Vec3 = [eyeWp[0], eyeWp[1], eyeWp[2]];
 
-    const sph: Spherical = spherical.create();
-    const sphDelta: Spherical = spherical.create();
-    const panOffset: Vec3 = [0, 0, 0];
-    let scaleAccum = 1;
+        const sph: Spherical = spherical.create();
+        const sphDelta: Spherical = spherical.create();
+        const panOffset: Vec3 = [0, 0, 0];
+        let scaleAccum = 1;
 
-    vec3.subtract(_v, eye, target);
-    spherical.setFromVec3(sph, _v);
+        vec3.subtract(_v, eye, target);
+        spherical.setFromVec3(sph, _v);
 
-    let dragMode: DragMode = 'none';
+        let dragMode: DragMode = 'none';
 
-    // suppress browser context menu so right-drag pan doesn't pop the menu.
-    const onContextMenu = (e: Event): void => {
-        e.preventDefault();
-    };
-    window.addEventListener('contextmenu', onContextMenu);
+        // suppress browser context menu so right-drag pan doesn't pop the menu.
+        const onContextMenu = (e: Event): void => {
+            e.preventDefault();
+        };
+        window.addEventListener('contextmenu', onContextMenu);
 
-    // point the camera at target (eye is already where we want it).
-    mat4.targetTo(_lookMat, eye, target, _UP);
-    quat.fromMat4(_lookQuat, _lookMat);
-    setWorldQuaternion(cameraTransform, _lookQuat);
+        // point the camera at target (eye is already where we want it).
+        mat4.targetTo(_lookMat, eye, target, _UP);
+        quat.fromMat4(_lookQuat, _lookMat);
+        setWorldQuaternion(cameraTransform, _lookQuat);
 
-    onDispose(ctx, () => {
-        window.removeEventListener('contextmenu', onContextMenu);
-    });
+        onDispose(ctx, () => {
+            window.removeEventListener('contextmenu', onContextMenu);
+        });
 
-    // pan in screen space: deltaX/deltaY are pixels
-    const pan = (deltaX: number, deltaY: number): void => {
-        const h = viewport.height;
-        const camPos = getWorldPosition(cameraTransform);
-        const camQuat = getWorldQuaternion(cameraTransform);
-        vec3.subtract(_v, camPos, target);
-        const targetDistance = vec3.length(_v) * Math.tan(cameraTrait.fov / 2);
+        // pan in screen space: deltaX/deltaY are pixels
+        const pan = (deltaX: number, deltaY: number): void => {
+            const h = viewport.height;
+            const camPos = getWorldPosition(cameraTransform);
+            const camQuat = getWorldQuaternion(cameraTransform);
+            vec3.subtract(_v, camPos, target);
+            const targetDistance = vec3.length(_v) * Math.tan(cameraTrait.fov / 2);
 
-        // pan left: -camera-right * (2 * dx * targetDistance / h)
-        vec3.transformQuat(_right, [1, 0, 0], camQuat);
-        vec3.scaleAndAdd(panOffset, panOffset, _right, (-2 * deltaX * targetDistance) / h);
+            // pan left: -camera-right * (2 * dx * targetDistance / h)
+            vec3.transformQuat(_right, [1, 0, 0], camQuat);
+            vec3.scaleAndAdd(panOffset, panOffset, _right, (-2 * deltaX * targetDistance) / h);
 
-        // pan up: camera-up * (2 * dy * targetDistance / h)
-        vec3.transformQuat(_up, [0, 1, 0], camQuat);
-        vec3.scaleAndAdd(panOffset, panOffset, _up, (2 * deltaY * targetDistance) / h);
-    };
+            // pan up: camera-up * (2 * dy * targetDistance / h)
+            vec3.transformQuat(_up, [0, 1, 0], camQuat);
+            vec3.scaleAndAdd(panOffset, panOffset, _up, (2 * deltaY * targetDistance) / h);
+        };
 
-    const zoomScale = (delta: number): number => 0.95 ** (ZOOM_SPEED * Math.abs(delta * 0.01));
+        const zoomScale = (delta: number): number => 0.95 ** (ZOOM_SPEED * Math.abs(delta * 0.01));
 
-    onFrame(
-        ctx,
-        (_args) => {
+        onFrame(ctx, (_args) => {
             if (getControlNode(ctx) !== ctx.node) return;
             // Skip until the viewport has a real size — the ResizeObserver
             // hasn't fired yet on the first frame(s) after attach. Without
@@ -232,6 +232,7 @@ script(OrbitControllerTrait, 'controller', (ctx) => {
             sphDelta[2] *= 1 - DAMPING_FACTOR;
             vec3.scale(panOffset, panOffset, 1 - DAMPING_FACTOR);
             scaleAccum = 1;
-        },
-    );
-}, { editor: true });
+        });
+    },
+    { editor: true },
+);

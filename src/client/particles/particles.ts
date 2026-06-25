@@ -142,9 +142,7 @@ export function allocateSlot(
     pool.velZ[i] = opts?.velZ ?? 0;
 
     pool.spawnTime[i] = opts?.spawnTime ?? now;
-    pool.expiresAt[i] = opts?.lifetime !== undefined
-        ? now + opts.lifetime
-        : Number.POSITIVE_INFINITY;
+    pool.expiresAt[i] = opts?.lifetime !== undefined ? now + opts.lifetime : Number.POSITIVE_INFINITY;
     pool.size[i] = opts?.size ?? 1;
     pool.glow[i] = opts?.glow ?? handle.glow;
     const tint = opts?.tint ?? handle.tint;
@@ -152,7 +150,7 @@ export function allocateSlot(
     pool.tintG[i] = tint[1];
     pool.tintB[i] = tint[2];
     pool.tintA[i] = tint[3];
-    pool.seed[i] = opts?.seed ?? ((Math.random() * 0x1_0000_0000) >>> 0);
+    pool.seed[i] = opts?.seed ?? (Math.random() * 0x1_0000_0000) >>> 0;
 
     return i;
 }

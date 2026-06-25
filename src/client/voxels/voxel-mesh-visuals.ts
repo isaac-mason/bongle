@@ -65,14 +65,7 @@ import {
     SLOT_BITS,
     type VoxelMeshResources,
 } from './voxel-mesh-resources';
-import {
-    arenaAlloc,
-    arenaDispose,
-    arenaFree,
-    arenaWrite,
-    createSegmentArena,
-    type SegmentArena,
-} from './voxel-resources';
+import { arenaAlloc, arenaDispose, arenaFree, arenaWrite, createSegmentArena, type SegmentArena } from './voxel-resources';
 
 type VoxelMeshQuery = ReturnType<typeof query<[typeof VoxelMeshTrait, typeof TransformTrait]>>;
 type GpuBufferType = GpuBuffer<any>;
@@ -502,11 +495,7 @@ export function dispose(visuals: VoxelMeshVisuals, scene: Scene, visibility: Vis
  *  required after mutating the model's voxels — bakes are immutable
  *  otherwise. live instances referencing this model are torn down and
  *  rebuilt on the next update tick. */
-export function invalidateVoxelModel(
-    visuals: VoxelMeshVisuals,
-    model: VoxelModel,
-    visibility: Visibility.Visibility,
-): void {
+export function invalidateVoxelModel(visuals: VoxelMeshVisuals, model: VoxelModel, visibility: Visibility.Visibility): void {
     const entry = visuals.modelEntries.get(model);
     if (!entry) return;
 
@@ -533,20 +522,15 @@ function destroyInstance(visuals: VoxelMeshVisuals, trait: VoxelMeshTrait, visib
     const slot = state.slot;
     // zero per-slot params so a reused slot doesn't briefly inherit
     // stale tint/light before the first write lands.
-    packTo(
-        InstanceParams,
-        visuals.instanceDataBuf.array!,
-        slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET,
-        {
-            tint: [0, 0, 0, 0],
-            flash: [0, 0, 0, 0],
-            light: [0, 0, 0, 0],
-            glow: 0,
-            unlit: 0,
-            litMin: 0,
-            dither: 0,
-        },
-    );
+    packTo(InstanceParams, visuals.instanceDataBuf.array!, slot * MODEL_INSTANCE_STRIDE + MODEL_INSTANCE_PARAMS_OFFSET, {
+        tint: [0, 0, 0, 0],
+        flash: [0, 0, 0, 0],
+        light: [0, 0, 0, 0],
+        glow: 0,
+        unlit: 0,
+        litMin: 0,
+        dither: 0,
+    });
     visuals.instanceDataBuf.needsUpdate = true;
 
     freeOne(visuals.instanceAllocator, slot);
@@ -709,9 +693,7 @@ function growBucketBuffers(visuals: VoxelMeshVisuals, needed: number): void {
     let cap = visuals.maxBuckets;
     while (cap < needed) cap *= 2;
     if (cap > MAX_BUCKETS) {
-        throw new Error(
-            `voxel-mesh-visuals: bucket count ${needed} exceeds SLOT_BITS-derived cap ${MAX_BUCKETS}`,
-        );
+        throw new Error(`voxel-mesh-visuals: bucket count ${needed} exceeds SLOT_BITS-derived cap ${MAX_BUCKETS}`);
     }
 
     {

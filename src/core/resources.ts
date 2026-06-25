@@ -187,11 +187,7 @@ export function deleteModel(resources: Resources, id: string): void {
  * against re-supplying the same entry (URL + handle re-bind is a noop
  * inside `setModel`).
  */
-export function acquireRuntimeModel(
-    resources: Resources,
-    id: string,
-    entry: Omit<ResourceModel, '_refcount'>,
-): void {
+export function acquireRuntimeModel(resources: Resources, id: string, entry: Omit<ResourceModel, '_refcount'>): void {
     const existing = resources.models.get(id);
     if (existing) {
         existing._refcount = (existing._refcount ?? 0) + 1;
@@ -288,7 +284,8 @@ export function ensureModel(resources: Resources, modelId: string): void {
 
     const url = resources.side === 'client' ? entry.clientUrl : entry.serverUrl;
     const source = entry.source;
-    resources.loader.loadBytes(url)
+    resources.loader
+        .loadBytes(url)
         .then((bytes) => (source === 'runtime' ? gltfUnpack(modelId, bytes) : toModel(modelId, unpack(bytes))))
         .then((model) => {
             _onPayloadReady(resources, modelId, model);

@@ -31,13 +31,7 @@ export function createSyncSnapshots(): Set<Node> {
  * per-slice byte snapshot lives on `instance._sync` — same store the server
  * diff uses.
  */
-export function sendOwnerSyncUpdates(
-    net: ClientNet,
-    sg: Nodes,
-    roomId: string,
-    playerId: PlayerId,
-    tracked: Set<Node>,
-): void {
+export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, playerId: PlayerId, tracked: Set<Node>): void {
     const owned = sg.playerIdToOwnedNodes.get(playerId);
 
     // reset + untrack nodes we no longer own (destroyed, or owner handed off) so

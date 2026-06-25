@@ -90,7 +90,14 @@ export type CubeFaceSpec = { texture: TextureRef; rotation?: CubeFaceRotation };
 export type CubeTextures =
     | { all: CubeFaceSpec }
     | { top: CubeFaceSpec; bottom: CubeFaceSpec; sides: CubeFaceSpec }
-    | { top: CubeFaceSpec; bottom: CubeFaceSpec; north: CubeFaceSpec; south: CubeFaceSpec; east: CubeFaceSpec; west: CubeFaceSpec };
+    | {
+          top: CubeFaceSpec;
+          bottom: CubeFaceSpec;
+          north: CubeFaceSpec;
+          south: CubeFaceSpec;
+          east: CubeFaceSpec;
+          west: CubeFaceSpec;
+      };
 
 /** cube model — standard solid block. */
 export type CubeModel = {

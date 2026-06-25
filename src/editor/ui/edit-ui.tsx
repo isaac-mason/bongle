@@ -331,10 +331,7 @@ function CarriedItemCursor() {
 
     if (!carried || !pos) return null;
     return (
-        <div
-            className="fixed pointer-events-none z-50"
-            style={{ left: pos.x + 12, top: pos.y + 12 }}
-        >
+        <div className="fixed pointer-events-none z-50" style={{ left: pos.x + 12, top: pos.y + 12 }}>
             <div className="bg-white/90 rounded shadow-md border border-neutral-200 p-1">
                 <InventoryItemIcon item={carried} size={32} />
             </div>

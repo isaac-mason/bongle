@@ -179,9 +179,7 @@ export type Namespace = {
  * the matchmaker would.
  */
 export function canonicalJson(opts: Record<string, string | number | boolean>): string {
-    const sorted = Object.fromEntries(
-        Object.entries(opts).sort(([a], [b]) => a.localeCompare(b)),
-    );
+    const sorted = Object.fromEntries(Object.entries(opts).sort(([a], [b]) => a.localeCompare(b)));
     return JSON.stringify(sorted);
 }
 
@@ -250,11 +248,7 @@ export function getNamespace(state: Rooms, id: string): Namespace | undefined {
  * Runtime calls this once at boot in deployed (game-room) to stamp gatho's
  * `joinData.gameOptions` onto the 'main' namespace so scripts can read it.
  */
-export function setNamespaceGameOptions(
-    state: Rooms,
-    id: string,
-    gameOptions: Record<string, string | number | boolean>,
-): void {
+export function setNamespaceGameOptions(state: Rooms, id: string, gameOptions: Record<string, string | number | boolean>): void {
     const ns = state.namespaces.get(id);
     if (ns) {
         ns.gameOptions = gameOptions;
@@ -753,9 +747,9 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const nodeCount = room.nodes.nodes.size;
     console.log(
         `[room-start]   initializeRoom mode=${room.mode} chunks=${chunkCount} nodes=${nodeCount} ` +
-        `snapshot=${snapshotMs.toFixed(1)} dispose=${disposeMs.toFixed(1)} ` +
-        `sceneLoad=${sceneLoadMs.toFixed(1)} voxDeser=${voxDeserMs.toFixed(1)} sceneParse=${sceneParseMs.toFixed(1)} ` +
-        `physics=${physMs.toFixed(1)} total=${totalMs.toFixed(1)}ms`,
+            `snapshot=${snapshotMs.toFixed(1)} dispose=${disposeMs.toFixed(1)} ` +
+            `sceneLoad=${sceneLoadMs.toFixed(1)} voxDeser=${voxDeserMs.toFixed(1)} sceneParse=${sceneParseMs.toFixed(1)} ` +
+            `physics=${physMs.toFixed(1)} total=${totalMs.toFixed(1)}ms`,
     );
 }
 
@@ -818,8 +812,8 @@ export function addClientToRoom(
     const totalMs = performance.now() - t0;
     console.log(
         `[room-start]   addClientToRoom mode=${playerMode} ` +
-        `playerNode=${playerNodeMs.toFixed(1)} joinHooks=${joinHooksMs.toFixed(1)} ` +
-        `avatars=${avatarMs.toFixed(1)} discovery=${discoveryMs.toFixed(1)} total=${totalMs.toFixed(1)}ms`,
+            `playerNode=${playerNodeMs.toFixed(1)} joinHooks=${joinHooksMs.toFixed(1)} ` +
+            `avatars=${avatarMs.toFixed(1)} discovery=${discoveryMs.toFixed(1)} total=${totalMs.toFixed(1)}ms`,
     );
     return player;
 }
@@ -991,14 +985,7 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
                 const playerNode = createPlayerNode(state, def, fp);
                 // stamp avatar before join hooks (see addClientToRoom)
                 Avatars.enqueuePlayer(state, def, fp);
-                Scripts.fireJoinHooks(
-                    def.scriptRuntime,
-                    client,
-                    user,
-                    {},
-                    playerNode,
-                    Avatars.clientAvatarIdentity(cs),
-                );
+                Scripts.fireJoinHooks(def.scriptRuntime, client, user, {}, playerNode, Avatars.clientAvatarIdentity(cs));
                 Chat.broadcast(def.chat, {
                     from: 'system',
                     text: `${user.username || 'anon'} joined`,

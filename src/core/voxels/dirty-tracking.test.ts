@@ -309,10 +309,14 @@ describe('clearVoxelChanges', () => {
         const changes = createVoxelChanges();
         changes.ops.push({
             kind: 0,
-            cx: 0, cy: 0, cz: 0,
+            cx: 0,
+            cy: 0,
+            cz: 0,
             index: 0,
             data: 1,
-            wx: 0, wy: 0, wz: 0,
+            wx: 0,
+            wy: 0,
+            wz: 0,
             oldStateId: 0,
             newStateId: 1,
         });

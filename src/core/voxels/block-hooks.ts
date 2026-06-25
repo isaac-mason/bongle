@@ -225,7 +225,9 @@ function fireBlockBuild(
     observers: Map<number, BlockObserverEntry>,
     blockIdx: number,
     voxels: Voxels,
-    wx: number, wy: number, wz: number,
+    wx: number,
+    wy: number,
+    wz: number,
     stateId: number,
 ): void {
     const entry = observers.get(blockIdx);
@@ -238,7 +240,9 @@ function fireBlockBreak(
     observers: Map<number, BlockObserverEntry>,
     blockIdx: number,
     voxels: Voxels,
-    wx: number, wy: number, wz: number,
+    wx: number,
+    wy: number,
+    wz: number,
     stateId: number,
 ): void {
     const entry = observers.get(blockIdx);
@@ -251,7 +255,9 @@ function fireBlockStateChange(
     observers: Map<number, BlockObserverEntry>,
     blockIdx: number,
     voxels: Voxels,
-    wx: number, wy: number, wz: number,
+    wx: number,
+    wy: number,
+    wz: number,
     stateId: number,
     oldStateId: number,
 ): void {

@@ -164,8 +164,7 @@ export function commitBoxSelect(
         maxY = Math.max(ay, by),
         maxZ = Math.max(az, bz);
 
-    const next =
-        selectionBehavior === 'add' ? Selection.clone(s.selection) : Selection.create();
+    const next = selectionBehavior === 'add' ? Selection.clone(s.selection) : Selection.create();
 
     // voxels
     if (selectTarget !== 'nodes') {

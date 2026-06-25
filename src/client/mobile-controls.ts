@@ -20,10 +20,7 @@ function getOverlay(ctx: ScriptContext): { overlay: HTMLDivElement; touch: Touch
     return { overlay, touch: client.input.touch };
 }
 
-function applyEdges(
-    el: HTMLDivElement,
-    opts: { left?: number; right?: number; top?: number; bottom?: number },
-): void {
+function applyEdges(el: HTMLDivElement, opts: { left?: number; right?: number; top?: number; bottom?: number }): void {
     el.style.position = 'absolute';
     if (opts.left !== undefined) el.style.left = `${opts.left}px`;
     if (opts.right !== undefined) el.style.right = `${opts.right}px`;

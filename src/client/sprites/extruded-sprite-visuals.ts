@@ -362,9 +362,7 @@ export function update(
 
         // material — flipbook frame selection + per-instance tint/light.
         const frameCount = state.entry.frames.length;
-        const frameIdx = frameCount > 1
-            ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount
-            : 0;
+        const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const frame = state.entry.frames[frameIdx]!;
         const tint = trait.tint;
         const flash = trait.flash;
@@ -493,14 +491,7 @@ function destroyInstance(
 /** Multiply the linear basis columns of `m` by (sx, sy, sz) and write
  *  the resulting column-major mat4x4 into `out` starting at `base`.
  *  Translation column is copied verbatim. */
-function writeScaledMatrix(
-    out: Float32Array,
-    base: number,
-    m: Mat4,
-    sx: number,
-    sy: number,
-    sz: number,
-): void {
+function writeScaledMatrix(out: Float32Array, base: number, m: Mat4, sx: number, sy: number, sz: number): void {
     out[base + 0] = m[0]! * sx;
     out[base + 1] = m[1]! * sx;
     out[base + 2] = m[2]! * sx;

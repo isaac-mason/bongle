@@ -1,12 +1,6 @@
 import { registerAllShapes, ShapeType } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-    aabbs,
-    type BlockShapeAabbs,
-    blockShapeToShape,
-    cube,
-    rotateY,
-} from './block-collider';
+import { aabbs, type BlockShapeAabbs, blockShapeToShape, cube, rotateY } from './block-collider';
 import { SHAPE_AABBS, SHAPE_CUBE } from './block-registry';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
 

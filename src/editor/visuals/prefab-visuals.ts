@@ -45,12 +45,7 @@ export function dispose(state: PrefabVisuals): void {
 
 // ── per-frame update ──────────────────────────────────────────────
 
-export function update(
-    state: PrefabVisuals,
-    sg: Nodes,
-    _runtime: NodesContext,
-    registry: BlockRegistry,
-): void {
+export function update(state: PrefabVisuals, sg: Nodes, _runtime: NodesContext, registry: BlockRegistry): void {
     if (sg.roomMode !== 'edit') return;
 
     for (const node of sg.nodes) {

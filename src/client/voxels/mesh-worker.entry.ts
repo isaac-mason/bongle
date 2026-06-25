@@ -6,12 +6,7 @@
 // `core/voxels/mesh-worker.ts` so unit tests can drive `handleMessage`
 // directly without spawning a worker.
 
-import {
-    type MeshWorkerInMsg,
-    type MeshWorkerOutMsg,
-    createWorkerState,
-    handleMessage,
-} from '../../core/voxels/mesh-worker';
+import { type MeshWorkerInMsg, type MeshWorkerOutMsg, createWorkerState, handleMessage } from '../../core/voxels/mesh-worker';
 
 const state = createWorkerState();
 
@@ -32,7 +27,9 @@ self.onmessage = (e: MessageEvent<MeshWorkerInMsg>) => {
             out.recycle.translucentBuf,
         );
     }
-    (self as unknown as {
-        postMessage: (msg: MeshWorkerOutMsg, transfer: Transferable[]) => void;
-    }).postMessage(out, transfers);
+    (
+        self as unknown as {
+            postMessage: (msg: MeshWorkerOutMsg, transfer: Transferable[]) => void;
+        }
+    ).postMessage(out, transfers);
 };

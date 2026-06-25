@@ -46,7 +46,7 @@ export function loadAvatar(ctx: ScriptContext, avatar: ResolvedAvatar): { modelI
     if (!resources) {
         // No runtime resources (degenerate context) — return identity so a bundled
         // assign still works; runtime payloads simply won't load here.
-        const rigType = avatar.source === 'runtime' ? avatar.rigType ?? RIG_TYPE_6BONE : RIG_TYPE_6BONE;
+        const rigType = avatar.source === 'runtime' ? (avatar.rigType ?? RIG_TYPE_6BONE) : RIG_TYPE_6BONE;
         return { modelId: avatar.modelId, rigType };
     }
     return acquireAvatarModel(resources, avatar);
@@ -65,8 +65,26 @@ export function releaseAvatar(ctx: ScriptContext, modelId: string): void {
 // Wholly separate from avatar sourcing — games may use it, ignore it, or bring
 // their own list.
 const DISPLAY_NAMES = [
-    'Ash', 'Mara', 'Quill', 'Dex', 'Niko', 'Sage', 'Bex', 'Ivo', 'Lux', 'Pim',
-    'Rune', 'Wren', 'Zane', 'Cleo', 'Fox', 'Juno', 'Kai', 'Nova', 'Otis', 'Vera',
+    'Ash',
+    'Mara',
+    'Quill',
+    'Dex',
+    'Niko',
+    'Sage',
+    'Bex',
+    'Ivo',
+    'Lux',
+    'Pim',
+    'Rune',
+    'Wren',
+    'Zane',
+    'Cleo',
+    'Fox',
+    'Juno',
+    'Kai',
+    'Nova',
+    'Otis',
+    'Vera',
 ];
 
 /** A plausible display name for an ambient NPC, drawn from a small bundled pool. */

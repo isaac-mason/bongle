@@ -18,15 +18,19 @@ import { type TraitType, trait } from '../core/scene/traits';
  * with *different* object identity but identical-meaning fields. don't hash
  * by reference; key by `nodeId`+`subShapeId` or `(voxelX, voxelY, voxelZ)`.
  */
-export const ContactsTrait = trait('contacts', {
-    /** all contacts active this step — `added` ++ `persisted`. */
-    active: () => [] as Contact[],
-    /** first seen this step. */
-    added: () => [] as Contact[],
-    /** present last step AND this step. */
-    persisted: () => [] as Contact[],
-    /** present last step, gone this step. fields are last-known (one step stale). */
-    removed: () => [] as Contact[],
-}, { persist: false });
+export const ContactsTrait = trait(
+    'contacts',
+    {
+        /** all contacts active this step — `added` ++ `persisted`. */
+        active: () => [] as Contact[],
+        /** first seen this step. */
+        added: () => [] as Contact[],
+        /** present last step AND this step. */
+        persisted: () => [] as Contact[],
+        /** present last step, gone this step. fields are last-known (one step stale). */
+        removed: () => [] as Contact[],
+    },
+    { persist: false },
+);
 
 export type ContactsTrait = TraitType<typeof ContactsTrait>;

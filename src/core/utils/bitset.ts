@@ -1,4 +1,3 @@
-
 export type Bitset = number[];
 
 const BITS_PER_WORD = 32;
@@ -42,7 +41,6 @@ export function has(bitset: Bitset, traitId: number): boolean {
     const bitIndex = traitId % BITS_PER_WORD;
     return (bitset[wordIndex] & ((1 << bitIndex) >>> 0)) !== 0;
 }
-
 
 export function containsAll(bitset: Bitset, mask: Bitset): boolean {
     for (let i = 0; i < mask.length; i++) {

@@ -19,11 +19,7 @@ import { type TraitType, trait } from '../core/scene/traits';
  * concern, not part of the saved scene. Disable temporarily by flipping
  * `active: false` rather than removing + re-adding the trait.
  */
-export const AudioListenerTrait = trait(
-    'audio-listener',
-    { active: true },
-    { persist: false },
-);
+export const AudioListenerTrait = trait('audio-listener', { active: true }, { persist: false });
 
 /** instance type for AudioListenerTrait */
 export type AudioListenerTrait = TraitType<typeof AudioListenerTrait>;

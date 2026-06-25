@@ -120,11 +120,7 @@ let nextBlueprintId = 1;
  * node trait data is serialized via serializeNode. positions are stored
  * relative to the blueprint origin.
  */
-export function copySelection(
-    worldVoxels: Voxels,
-    nodes: Nodes,
-    selection: Selection.Selection,
-): Blueprint {
+export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Selection.Selection): Blueprint {
     const voxelCount = Selection.countVoxels(selection);
     const hasVoxels = voxelCount > 0;
     const hasNodes = selection.nodes.size > 0;
@@ -250,11 +246,7 @@ export function copySelection(
 // selected nodes as children + serialized voxels in local space. used by
 // the "save selection as blueprint" flow (chat command, context menu).
 
-export function selectionToScenePayload(
-    worldVoxels: Voxels,
-    nodes: Nodes,
-    selection: Selection.Selection,
-): ScenePayload | null {
+export function selectionToScenePayload(worldVoxels: Voxels, nodes: Nodes, selection: Selection.Selection): ScenePayload | null {
     const bp = copySelection(worldVoxels, nodes, selection);
     if (!bp.hasVoxels && !bp.hasNodes) return null;
 
@@ -279,11 +271,7 @@ export function selectionToScenePayload(
 // shape Blueprint already wants. we just deserialize voxels, scan the
 // AABB for size, and clone children.
 
-export function createSceneBlueprint(
-    sceneId: string,
-    anchor: Vec3,
-    registry: BlockRegistry,
-): Blueprint | null {
+export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: BlockRegistry): Blueprint | null {
     const payload = useEditor.getState().blueprints.get(sceneId);
     if (!payload) return null;
 
@@ -295,8 +283,12 @@ export function createSceneBlueprint(
         const tmp = createVoxels(registry);
         loadVoxels(tmp, payload.voxels, registry);
 
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        let minX = Infinity,
+            minY = Infinity,
+            minZ = Infinity;
+        let maxX = -Infinity,
+            maxY = -Infinity,
+            maxZ = -Infinity;
         for (const chunk of tmp.chunks.values()) {
             if (chunk.aggregate === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
@@ -305,9 +297,15 @@ export function createSceneBlueprint(
                         const paletteIdx = chunk.data[(ly << (CHUNK_BITS + CHUNK_BITS)) | (lz << CHUNK_BITS) | lx]!;
                         const key = chunk.paletteKeys[paletteIdx];
                         if (!key || key === BLOCK_AIR) continue;
-                        const wx = chunk.wx + lx, wy = chunk.wy + ly, wz = chunk.wz + lz;
-                        if (wx < minX) minX = wx; if (wy < minY) minY = wy; if (wz < minZ) minZ = wz;
-                        if (wx > maxX) maxX = wx; if (wy > maxY) maxY = wy; if (wz > maxZ) maxZ = wz;
+                        const wx = chunk.wx + lx,
+                            wy = chunk.wy + ly,
+                            wz = chunk.wz + lz;
+                        if (wx < minX) minX = wx;
+                        if (wy < minY) minY = wy;
+                        if (wz < minZ) minZ = wz;
+                        if (wx > maxX) maxX = wx;
+                        if (wy > maxY) maxY = wy;
+                        if (wz > maxZ) maxZ = wz;
                         blockCount++;
                     }
                 }

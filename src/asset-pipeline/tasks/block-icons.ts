@@ -165,8 +165,7 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
 
             VoxelVisuals.cullCPU(state.voxelResources, camera, Infinity);
 
-            const dispatches: ComputeDispatch[] =
-                VoxelVisuals.expandDispatches(state.voxelResources);
+            const dispatches: ComputeDispatch[] = VoxelVisuals.expandDispatches(state.voxelResources);
 
             iconRoom.scene.updateWorldMatrix();
             if (dispatches.length > 0) renderer.compute(dispatches);

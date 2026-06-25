@@ -60,7 +60,11 @@ export function updateBuild(
     const activeSlotIndex = s.activeSlotIndex;
     const slot = hotbar[activeSlotIndex] ?? null;
     if (slot && slot.kind === 'prefab' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
-        const anchor: Vec3 = [s.hoverVoxel[0] + s.hoverNormal[0], s.hoverVoxel[1] + s.hoverNormal[1], s.hoverVoxel[2] + s.hoverNormal[2]];
+        const anchor: Vec3 = [
+            s.hoverVoxel[0] + s.hoverNormal[0],
+            s.hoverVoxel[1] + s.hoverNormal[1],
+            s.hoverVoxel[2] + s.hoverNormal[2],
+        ];
         store.setState({ placementContinuous: true });
         enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.nodes, ctx);
         return;
@@ -68,7 +72,11 @@ export function updateBuild(
     // same auto-enter flow for saved blueprints — the placement preview is
     // the saved scene's voxels + nodes, committed via the standard path.
     if (slot && slot.kind === 'blueprint' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
-        const anchor: Vec3 = [s.hoverVoxel[0] + s.hoverNormal[0], s.hoverVoxel[1] + s.hoverNormal[1], s.hoverVoxel[2] + s.hoverNormal[2]];
+        const anchor: Vec3 = [
+            s.hoverVoxel[0] + s.hoverNormal[0],
+            s.hoverVoxel[1] + s.hoverNormal[1],
+            s.hoverVoxel[2] + s.hoverNormal[2],
+        ];
         store.setState({ placementContinuous: true });
         enterBlueprintPlacement(transformToolState, slot.sceneId, anchor, ctx.nodes, ctx);
         return;
@@ -100,9 +108,7 @@ export function updateBuild(
     // prefab slots never reach here — auto-enter above intercepts them and
     // commit/re-arm is driven by the transform-tool place-mode handler.
     const locked = !!document.pointerLockElement;
-    const rmb = locked
-        ? isMouseJustDown(input.mouseKeyboard, 'right')
-        : isMouseTap(input.mouseKeyboard, 'right');
+    const rmb = locked ? isMouseJustDown(input.mouseKeyboard, 'right') : isMouseTap(input.mouseKeyboard, 'right');
     if (rmb && s.hoverVoxel && s.hoverNormal) {
         const activeBlockKey = slot && slot.kind === 'block' ? slot.blockKey : '';
         if (activeBlockKey) {

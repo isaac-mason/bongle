@@ -23,10 +23,7 @@ import * as Resources from '../resources';
  * the `modelId`/`rigType` to hand to `assignAvatar` (or store as the client's
  * avatar identity). Balance each call with one `Resources.releaseRuntimeModel`.
  */
-export function acquireAvatarModel(
-    resources: Resources.Resources,
-    avatar: ResolvedAvatar,
-): { modelId: string; rigType: string } {
+export function acquireAvatarModel(resources: Resources.Resources, avatar: ResolvedAvatar): { modelId: string; rigType: string } {
     if (avatar.source === 'runtime') {
         Resources.acquireRuntimeModel(resources, avatar.modelId, {
             clientUrl: avatar.clientUrl,

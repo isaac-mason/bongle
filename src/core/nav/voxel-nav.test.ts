@@ -6,15 +6,22 @@ import * as nav from './voxel-nav';
 const noVoxels = null as unknown as Parameters<typeof nav.floodFill>[0];
 
 // 4-connected open grid in the z-plane, bounded to [0, n)².
-const gridActions = (n: number): nav.Actions => (_voxels, x, y, z) => {
-    const steps: nav.Step[] = [];
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx >= 0 && nx < n && ny >= 0 && ny < n) steps.push({ x: nx, y: ny, z, cost: 1 });
-    }
-    return steps;
-};
+const gridActions =
+    (n: number): nav.Actions =>
+    (_voxels, x, y, z) => {
+        const steps: nav.Step[] = [];
+        for (const [dx, dy] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+        ] as const) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < n && ny >= 0 && ny < n) steps.push({ x: nx, y: ny, z, cost: 1 });
+        }
+        return steps;
+    };
 
 const has = (cells: readonly number[][], c: number[]): boolean =>
     cells.some((x) => x[0] === c[0] && x[1] === c[1] && x[2] === c[2]);
@@ -24,7 +31,12 @@ describe('nav.floodFill', () => {
         const cells = nav.floodFill(noVoxels, [1, 1, 0], gridActions(3), 100);
         expect(cells).toHaveLength(9); // full 3×3 grid
         expect(cells[0]).toEqual([1, 1, 0]); // start included, nearest-first
-        for (const corner of [[0, 0, 0], [2, 0, 0], [0, 2, 0], [2, 2, 0]]) {
+        for (const corner of [
+            [0, 0, 0],
+            [2, 0, 0],
+            [0, 2, 0],
+            [2, 2, 0],
+        ]) {
             expect(has(cells, corner)).toBe(true);
         }
     });
@@ -64,11 +76,19 @@ describe('nav.findPath', () => {
 
 describe('nav.smoothPath', () => {
     // a flat path (no y-hops); shortcut stubbed (it ignores voxels here).
-    const flat: number[][] = [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]];
+    const flat: number[][] = [
+        [0, 0, 0],
+        [1, 0, 0],
+        [2, 0, 0],
+        [3, 0, 0],
+    ];
 
     it('collapses to endpoints when every segment is line-of-sight', () => {
         const out = nav.smoothPath(noVoxels, flat, () => true);
-        expect(out).toEqual([[0, 0, 0], [3, 0, 0]]);
+        expect(out).toEqual([
+            [0, 0, 0],
+            [3, 0, 0],
+        ]);
     });
 
     it('keeps every waypoint when nothing is line-of-sight', () => {
@@ -77,7 +97,10 @@ describe('nav.smoothPath', () => {
     });
 
     it('returns paths shorter than 3 untouched', () => {
-        const two: number[][] = [[0, 0, 0], [1, 0, 0]];
+        const two: number[][] = [
+            [0, 0, 0],
+            [1, 0, 0],
+        ];
         expect(nav.smoothPath(noVoxels, two, () => true)).toBe(two);
     });
 });

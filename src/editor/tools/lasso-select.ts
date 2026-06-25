@@ -150,7 +150,10 @@ function commitLasso(
     // ── voxels ────────────────────────────────────────────────────
     if (selectTarget !== 'nodes') {
         // polygon AABB in NDC
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
         for (const [x, y] of polygon) {
             if (x < minX) minX = x;
             if (y < minY) minY = y;
@@ -185,8 +188,12 @@ function commitLasso(
                     _rayResult,
                     voxels,
                     blocks,
-                    _origin[0], _origin[1], _origin[2],
-                    _dir[0], _dir[1], _dir[2],
+                    _origin[0],
+                    _origin[1],
+                    _origin[2],
+                    _dir[0],
+                    _dir[1],
+                    _dir[2],
                     maxDistance,
                     0,
                 );
@@ -200,7 +207,9 @@ function commitLasso(
                 const adx = Math.abs(_dir[0]);
                 const ady = Math.abs(_dir[1]);
                 const adz = Math.abs(_dir[2]);
-                let sxd = 0, syd = 0, szd = 0;
+                let sxd = 0,
+                    syd = 0,
+                    szd = 0;
                 if (adx >= ady && adx >= adz) sxd = _dir[0] >= 0 ? 1 : -1;
                 else if (ady >= adz) syd = _dir[1] >= 0 ? 1 : -1;
                 else szd = _dir[2] >= 0 ? 1 : -1;

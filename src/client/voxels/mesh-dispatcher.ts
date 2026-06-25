@@ -38,10 +38,7 @@ import {
 } from '../../core/voxels/chunk-mesher';
 import type { Chunk, Voxels } from '../../core/voxels/voxels';
 import { chunkKey } from '../../core/voxels/voxels';
-import type {
-    MeshWorkerInMsg,
-    MeshWorkerOutMsg,
-} from '../../core/voxels/mesh-worker';
+import type { MeshWorkerInMsg, MeshWorkerOutMsg } from '../../core/voxels/mesh-worker';
 
 /** minimal Worker surface the dispatcher needs. Both real `Worker` and
  *  `MessagePort` (used by the in-process test) satisfy this shape.
@@ -201,12 +198,7 @@ function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): v
  *  to the pool. We replenish with freshly-allocated sets to keep the
  *  pool at its original capacity. In-flight chunks are surfaced
  *  through `onLost` so the caller can re-mark them dirty. */
-function handleWorkerCrash(
-    d: MeshDispatcher,
-    slotIndex: number,
-    kind: 'error' | 'messageerror',
-    ev: unknown,
-): void {
+function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' | 'messageerror', ev: unknown): void {
     const slot = d.slots[slotIndex];
     if (!slot) return;
     console.warn(`[mesh-dispatcher] worker slot ${slotIndex} crashed (${kind}); respawning`, ev);
@@ -312,13 +304,7 @@ export function enqueueMesh(d: MeshDispatcher, voxels: Voxels, chunk: Chunk, gen
         transparentBuf: set.transparentBuf,
         translucentBuf: set.translucentBuf,
     };
-    slot.worker.postMessage(msg, [
-        set.blocksBuf,
-        set.lightBuf,
-        set.opaqueBuf,
-        set.transparentBuf,
-        set.translucentBuf,
-    ]);
+    slot.worker.postMessage(msg, [set.blocksBuf, set.lightBuf, set.opaqueBuf, set.transparentBuf, set.translucentBuf]);
     return true;
 }
 
@@ -333,9 +319,7 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
         // FIFO so usually it's at index 0, but a stale-result scenario
         // could surface it elsewhere — splice by chunkKey, not by
         // position.
-        const idx = slot.inFlight.findIndex(
-            (e) => e.chunkKey === msg.chunkKey && e.gen === msg.gen,
-        );
+        const idx = slot.inFlight.findIndex((e) => e.chunkKey === msg.chunkKey && e.gen === msg.gen);
         if (idx >= 0) slot.inFlight.splice(idx, 1);
 
         // Clear the global dedup entry only if it matches the gen we

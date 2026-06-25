@@ -21,12 +21,7 @@ import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
 import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
 import { control, trait, type TraitType } from '../api/traits';
-import {
-    getWorldPosition,
-    getWorldQuaternion,
-    setWorldPosition,
-    setWorldQuaternion,
-} from '../api/transforms';
+import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
 import { TransformTrait } from './transform';
 
@@ -55,25 +50,29 @@ const PITCH_LIMIT = Math.PI / 2 - 0.01;
  * `speed` is the live move speed; updated by the wheel-adjust path while
  * pointer-locked. the rest are caps and rates configurable via inspector.
  */
-export const FlyControllerTrait = trait('engine:fly-controller', {
-    /** current move speed in units per second. wheel-adjusts within [minSpeed, maxSpeed]. */
-    speed: 10,
+export const FlyControllerTrait = trait(
+    'engine:fly-controller',
+    {
+        /** current move speed in units per second. wheel-adjusts within [minSpeed, maxSpeed]. */
+        speed: 10,
 
-    /** look sensitivity in radians per pixel of mouse movement. */
-    lookSpeed: 0.002,
+        /** look sensitivity in radians per pixel of mouse movement. */
+        lookSpeed: 0.002,
 
-    /** wheel scroll up / down scales speed by this factor each notch. */
-    speedScrollFactor: 1.1,
-    minSpeed: 0.1,
-    maxSpeed: 200,
+        /** wheel scroll up / down scales speed by this factor each notch. */
+        speedScrollFactor: 1.1,
+        minSpeed: 0.1,
+        maxSpeed: 200,
 
-    /**
-     * smoothing half-life in seconds for both translation and look.
-     * 0 = off (instant, snappy — default).
-     * higher = smoother for cinematic / video capture (try 0.1–0.3).
-     */
-    damping: 0,
-}, { persist: false });
+        /**
+         * smoothing half-life in seconds for both translation and look.
+         * 0 = off (instant, snappy — default).
+         * higher = smoother for cinematic / video capture (try 0.1–0.3).
+         */
+        damping: 0,
+    },
+    { persist: false },
+);
 
 /** instance type for FlyControllerTrait */
 export type FlyControllerTrait = TraitType<typeof FlyControllerTrait>;
@@ -121,87 +120,88 @@ control(FlyControllerTrait, 'damping', {
     },
 });
 
-script(FlyControllerTrait, 'controller', (ctx) => {
-    if (!env.client) return;
+script(
+    FlyControllerTrait,
+    'controller',
+    (ctx) => {
+        if (!env.client) return;
 
-    const client = ctx.client!;
-    const room = client.room!;
-    const { domElement, input } = client;
+        const client = ctx.client!;
+        const room = client.room!;
+        const { domElement, input } = client;
 
-    // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
-    // to the room's default at client.camera), so editor lenses that point
-    // editorNode's CameraRefTrait at a lens-private camera drive their own
-    // camera and survive play↔edit toggles. the camera node lives at the
-    // scene root (NOT parented under ctx.node) which dodges parent-frame
-    // inheritance from controllers like CharacterController whose body yaw
-    // would otherwise drag the camera with the head.
-    const { node: cameraNode } = resolveCamera(ctx);
-    const cameraTransform = getTrait(cameraNode, TransformTrait)!;
+        // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
+        // to the room's default at client.camera), so editor lenses that point
+        // editorNode's CameraRefTrait at a lens-private camera drive their own
+        // camera and survive play↔edit toggles. the camera node lives at the
+        // scene root (NOT parented under ctx.node) which dodges parent-frame
+        // inheritance from controllers like CharacterController whose body yaw
+        // would otherwise drag the camera with the head.
+        const { node: cameraNode } = resolveCamera(ctx);
+        const cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
-    // mirror targets for the camera pose. fly only writes to cameraTransform
-    // (a separate scene-root camera node), so ctx.node's TransformTrait never
-    // moves. that matters because:
-    //  - real edit room: ctx.node === room.playerNode, server-authoritative.
-    //    server's Discovery.getPlayerChunkCoord reads this trait — without
-    //    a write here, the anchor stays stuck at spawn.
-    //  - local editor lens: ctx.node is a realm:'client' editorNode the
-    //    server never sees; we additionally mirror into room.playerNode so
-    //    its owner-synced TransformTrait carries the anchor to the server.
-    const nodeTransform = getTrait(ctx.node, TransformTrait);
+        // mirror targets for the camera pose. fly only writes to cameraTransform
+        // (a separate scene-root camera node), so ctx.node's TransformTrait never
+        // moves. that matters because:
+        //  - real edit room: ctx.node === room.playerNode, server-authoritative.
+        //    server's Discovery.getPlayerChunkCoord reads this trait — without
+        //    a write here, the anchor stays stuck at spawn.
+        //  - local editor lens: ctx.node is a realm:'client' editorNode the
+        //    server never sees; we additionally mirror into room.playerNode so
+        //    its owner-synced TransformTrait carries the anchor to the server.
+        const nodeTransform = getTrait(ctx.node, TransformTrait);
 
-    // ── state (closure, mutable) ───────────────────────────────────
-    // base orientation captured at takeover (and on any external camera
-    // change); yaw/pitch are deltas applied around world-Y and local-X
-    // respectively. this preserves any prior orientation including roll
-    // exactly at the moment of transition (orbit→fly handoff).
-    const baseQuat: Quat = quat.clone(getWorldQuaternion(cameraTransform));
-    // applied yaw/pitch; lerps toward target* when damping > 0
-    let yawDelta = 0;
-    let pitchDelta = 0;
-    // raw input accumulators — receive mouse delta directly
-    let targetYawDelta = 0;
-    let targetPitchDelta = 0;
-    // absolute world-pitch baked into baseQuat. the clamp below enforces
-    // basePitch + pitchDelta ∈ [−PITCH_LIMIT, PITCH_LIMIT] so total pitch
-    // stays bounded across rebases (right-click handoff or focusNode teleport).
-    let basePitch = 0;
-    let looking = false;
-    const lastQuaternion: Quat = quat.clone(baseQuat);
-    // damped move velocity (world-space). lerps toward _targetVel each frame.
-    const _velocity: Vec3 = [0, 0, 0];
-    const _targetVel: Vec3 = [0, 0, 0];
+        // ── state (closure, mutable) ───────────────────────────────────
+        // base orientation captured at takeover (and on any external camera
+        // change); yaw/pitch are deltas applied around world-Y and local-X
+        // respectively. this preserves any prior orientation including roll
+        // exactly at the moment of transition (orbit→fly handoff).
+        const baseQuat: Quat = quat.clone(getWorldQuaternion(cameraTransform));
+        // applied yaw/pitch; lerps toward target* when damping > 0
+        let yawDelta = 0;
+        let pitchDelta = 0;
+        // raw input accumulators — receive mouse delta directly
+        let targetYawDelta = 0;
+        let targetPitchDelta = 0;
+        // absolute world-pitch baked into baseQuat. the clamp below enforces
+        // basePitch + pitchDelta ∈ [−PITCH_LIMIT, PITCH_LIMIT] so total pitch
+        // stays bounded across rebases (right-click handoff or focusNode teleport).
+        let basePitch = 0;
+        let looking = false;
+        const lastQuaternion: Quat = quat.clone(baseQuat);
+        // damped move velocity (world-space). lerps toward _targetVel each frame.
+        const _velocity: Vec3 = [0, 0, 0];
+        const _targetVel: Vec3 = [0, 0, 0];
 
-    // adopt the current camera orientation as the new base. used at startup
-    // and whenever an external system (focusNode teleport) overwrites the
-    // camera quat between frames.
-    const rebaseToCurrent = (): void => {
-        quat.copy(baseQuat, getWorldQuaternion(cameraTransform));
-        yawDelta = 0;
-        pitchDelta = 0;
-        targetYawDelta = 0;
-        targetPitchDelta = 0;
-        // kill momentum on rebase — focusNode teleports / takeover should
-        // not preserve velocity from the prior orientation.
-        vec3.set(_velocity, 0, 0, 0);
-        vec3.set(_forward, 0, 0, -1);
-        vec3.transformQuat(_forward, _forward, baseQuat);
-        basePitch = Math.asin(Math.max(-1, Math.min(1, _forward[1])));
-    };
+        // adopt the current camera orientation as the new base. used at startup
+        // and whenever an external system (focusNode teleport) overwrites the
+        // camera quat between frames.
+        const rebaseToCurrent = (): void => {
+            quat.copy(baseQuat, getWorldQuaternion(cameraTransform));
+            yawDelta = 0;
+            pitchDelta = 0;
+            targetYawDelta = 0;
+            targetPitchDelta = 0;
+            // kill momentum on rebase — focusNode teleports / takeover should
+            // not preserve velocity from the prior orientation.
+            vec3.set(_velocity, 0, 0, 0);
+            vec3.set(_forward, 0, 0, -1);
+            vec3.transformQuat(_forward, _forward, baseQuat);
+            basePitch = Math.asin(Math.max(-1, Math.min(1, _forward[1])));
+        };
 
-    // suppress browser context menu so right-drag look doesn't pop the menu.
-    const onContextMenu = (e: Event): void => {
-        e.preventDefault();
-    };
-    window.addEventListener('contextmenu', onContextMenu);
+        // suppress browser context menu so right-drag look doesn't pop the menu.
+        const onContextMenu = (e: Event): void => {
+            e.preventDefault();
+        };
+        window.addEventListener('contextmenu', onContextMenu);
 
-    onDispose(ctx, () => {
-        window.removeEventListener('contextmenu', onContextMenu);
-        if (looking && document.pointerLockElement) document.exitPointerLock();
-    });
+        onDispose(ctx, () => {
+            window.removeEventListener('contextmenu', onContextMenu);
+            if (looking && document.pointerLockElement) document.exitPointerLock();
+        });
 
-    onFrame(
-        ctx,
-        ({ delta }) => {
+        onFrame(ctx, ({ delta }) => {
             if (getControlNode(ctx) !== ctx.node) return;
             const fly = ctx.trait;
 
@@ -236,10 +236,7 @@ script(FlyControllerTrait, 'controller', (ctx) => {
             if (looking) {
                 targetYawDelta -= input.mouseKeyboard._dx * fly.lookSpeed;
                 targetPitchDelta -= input.mouseKeyboard._dy * fly.lookSpeed;
-                targetPitchDelta = Math.max(
-                    -PITCH_LIMIT - basePitch,
-                    Math.min(PITCH_LIMIT - basePitch, targetPitchDelta),
-                );
+                targetPitchDelta = Math.max(-PITCH_LIMIT - basePitch, Math.min(PITCH_LIMIT - basePitch, targetPitchDelta));
             }
 
             // exponential smoothing factor — k=1 when damping=0 (instant snap,
@@ -272,10 +269,15 @@ script(FlyControllerTrait, 'controller', (ctx) => {
             // ── WASD movement (pointer-locked only) ────────────────
             // gate all movement on `looking` so WASD/Space/Shift stay free
             // for editor shortcuts and selection modifiers when not flying.
-            const fwd = looking ? (isKeyDown(input.mouseKeyboard, 'KeyW') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'KeyS') ? 1 : 0) : 0;
-            const strafe = looking ? (isKeyDown(input.mouseKeyboard, 'KeyD') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'KeyA') ? 1 : 0) : 0;
+            const fwd = looking
+                ? (isKeyDown(input.mouseKeyboard, 'KeyW') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'KeyS') ? 1 : 0)
+                : 0;
+            const strafe = looking
+                ? (isKeyDown(input.mouseKeyboard, 'KeyD') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'KeyA') ? 1 : 0)
+                : 0;
             const vertical = looking
-                ? (isKeyDown(input.mouseKeyboard, 'Space') ? 1 : 0) - (isKeyDown(input.mouseKeyboard, 'ShiftLeft') || isKeyDown(input.mouseKeyboard, 'ShiftRight') ? 1 : 0)
+                ? (isKeyDown(input.mouseKeyboard, 'Space') ? 1 : 0) -
+                  (isKeyDown(input.mouseKeyboard, 'ShiftLeft') || isKeyDown(input.mouseKeyboard, 'ShiftRight') ? 1 : 0)
                 : 0;
             // build target velocity in world-space (zero when no input — lerps
             // velocity back to zero on key-up for smooth deceleration).
@@ -313,6 +315,7 @@ script(FlyControllerTrait, 'controller', (ctx) => {
             if (editorStore && fly.speed !== editorStore.getState().flySpeed) {
                 editorStore.setState({ flySpeed: fly.speed });
             }
-        },
-    );
-}, { editor: true });
+        });
+    },
+    { editor: true },
+);

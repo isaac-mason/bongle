@@ -36,9 +36,7 @@ describe('block registry flags', () => {
     });
 
     it('climbable: true sets CLIMBABLE bit', () => {
-        const { registry, stateOf } = buildRegistry([
-            { id: 'vines', def: { climbable: true, collision: false } },
-        ]);
+        const { registry, stateOf } = buildRegistry([{ id: 'vines', def: { climbable: true, collision: false } }]);
         const flags = registry.flags[stateOf('vines')]!;
         expect(flags & BLOCK_FLAG_CLIMBABLE).toBeTruthy();
         expect(flags & BLOCK_FLAG_COLLISION).toBe(0);
@@ -47,9 +45,7 @@ describe('block registry flags', () => {
     });
 
     it('liquid: sets LIQUID bit and writes viscosity', () => {
-        const { registry, stateOf } = buildRegistry([
-            { id: 'water', def: { liquid: { viscosity: 0.5 }, collision: false } },
-        ]);
+        const { registry, stateOf } = buildRegistry([{ id: 'water', def: { liquid: { viscosity: 0.5 }, collision: false } }]);
         const stateId = stateOf('water');
         expect(registry.flags[stateId]! & BLOCK_FLAG_LIQUID).toBeTruthy();
         expect(registry.liquidViscosity[stateId]).toBeCloseTo(0.5);

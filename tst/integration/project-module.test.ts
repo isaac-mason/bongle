@@ -52,18 +52,10 @@ describe('project-module — deterministic wire indices', () => {
         const server = createTestServer();
 
         const traits = entriesUnderPrefix(registry.traitWireIndex.indexToId, 'wire-test-a/');
-        expect(traits).toEqual([
-            'wire-test-a/c-mid',
-            'wire-test-a/m-middle',
-            'wire-test-a/z-late',
-        ]);
+        expect(traits).toEqual(['wire-test-a/c-mid', 'wire-test-a/m-middle', 'wire-test-a/z-late']);
 
         const commands = entriesUnderPrefix(registry.commandWireIndex.indexToId, 'wire-test-a/');
-        expect(commands).toEqual([
-            'wire-test-a/c-mid',
-            'wire-test-a/m-middle',
-            'wire-test-a/z-late',
-        ]);
+        expect(commands).toEqual(['wire-test-a/c-mid', 'wire-test-a/m-middle', 'wire-test-a/z-late']);
 
         for (let i = 0; i < registry.traitWireIndex.indexToId.length; i++) {
             const id = registry.traitWireIndex.indexToId[i];
@@ -100,11 +92,7 @@ describe('project-module — deterministic wire indices', () => {
         const TraitBA = trait('wire-test-b/a-earliest', { value: 0 });
 
         const traitsAfter = entriesUnderPrefix(registry.traitWireIndex.indexToId, 'wire-test-b/');
-        expect(traitsAfter).toEqual([
-            'wire-test-b/a-earliest',
-            'wire-test-b/c-mid',
-            'wire-test-b/m-middle',
-        ]);
+        expect(traitsAfter).toEqual(['wire-test-b/a-earliest', 'wire-test-b/c-mid', 'wire-test-b/m-middle']);
         expect(registry.traitWireIndex.idToIndex.get('wire-test-b/c-mid')!).toBe(indexBefore + 1);
 
         // but the runtime slot didn't move — the live node's trait is still
@@ -134,9 +122,7 @@ describe('project-module — deterministic wire indices', () => {
         // simulate the HMR drift race: a new trait sorts BEFORE m-middle so
         // m-middle's wire index shifts up by 1 on the next module refresh.
         trait('wire-test-c/b-prepended', { value: 0 });
-        expect(registry.traitWireIndex.idToIndex.get('wire-test-c/m-middle')!).toBeGreaterThan(
-            indexAtPack!,
-        );
+        expect(registry.traitWireIndex.idToIndex.get('wire-test-c/m-middle')!).toBeGreaterThan(indexAtPack!);
 
         const receiver = createTestServer();
 

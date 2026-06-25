@@ -2,11 +2,7 @@
 
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-    BLOCK_FLAG_LIQUID,
-    MODEL_CUBE,
-    MODEL_LIQUID,
-} from './block-registry';
+import { BLOCK_FLAG_LIQUID, MODEL_CUBE, MODEL_LIQUID } from './block-registry';
 import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from './test-helpers';
 
 beforeAll(() => {

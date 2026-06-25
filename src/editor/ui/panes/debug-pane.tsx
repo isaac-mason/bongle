@@ -67,20 +67,8 @@ export function DebugPane() {
             {netSimEnabled && (
                 <div className="flex items-center gap-1 pl-5">
                     <span className="text-[10px] font-mono text-neutral-500 w-12 shrink-0">rtt ms</span>
-                    <NumberInput
-                        value={netSimRttMs}
-                        onChange={setNetSimRttMs}
-                        min={0}
-                        max={2000}
-                        step={10}
-                    />
-                    <Range
-                        value={netSimRttMs}
-                        onChange={setNetSimRttMs}
-                        min={0}
-                        max={500}
-                        step={10}
-                    />
+                    <NumberInput value={netSimRttMs} onChange={setNetSimRttMs} min={0} max={2000} step={10} />
+                    <Range value={netSimRttMs} onChange={setNetSimRttMs} min={0} max={500} step={10} />
                 </div>
             )}
         </div>

@@ -56,8 +56,7 @@ export function enumType<T extends string>(values: T[]): ArgType<T> {
     const set = new Set<string>(values);
     return {
         name: `enum(${values.join('|')})`,
-        parse: (s) =>
-            set.has(s) ? { ok: true, value: s as T } : { ok: false, error: `expected one of: ${values.join(', ')}` },
+        parse: (s) => (set.has(s) ? { ok: true, value: s as T } : { ok: false, error: `expected one of: ${values.join(', ')}` }),
         suggest: (partial) => values.filter((v) => v.startsWith(partial)).map((v) => ({ text: v })),
         describe: () => values.join(' | '),
     };

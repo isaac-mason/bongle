@@ -26,12 +26,7 @@
  * drops any preset a game doesn't reference.
  */
 
-import {
-    type ParticleHandle,
-    particle,
-    particleUpdate,
-    type SpriteHandle,
-} from 'bongle';
+import { type ParticleHandle, particle, particleUpdate, type SpriteHandle } from 'bongle';
 
 // `fps` only matters for 'loop' / 'once' on multi-frame flipbook sprites;
 // single-frame sprites degenerate to "show frame 0" regardless. Defaults

@@ -5,7 +5,14 @@ import { type buildBlockRegistry, resolveKey } from './block-registry';
 import { loadVoxels, saveVoxels } from './voxel-savefile';
 import { CullType, MaterialType } from './blocks';
 import { buildTestRegistry, resetVoxelRegistry } from './test-helpers';
-import { type ChunkMeshResult, buildMeshInput, createMeshOutput, meshChunk, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from './chunk-mesher';
+import {
+    type ChunkMeshResult,
+    buildMeshInput,
+    createMeshOutput,
+    meshChunk,
+    QUAD_LIGHT_OFFSET,
+    QUAD_STRIDE_U32S,
+} from './chunk-mesher';
 import type { BlockRegistry } from './block-registry';
 import type { Chunk, Voxels } from './voxels';
 import {
@@ -65,19 +72,33 @@ function meshAndLight(voxels: Voxels, chunk: Chunk, reg: BlockRegistry): ChunkMe
 
 /** facing (0..5 cardinal) → outward normal. matches FACE_TO_FACING in chunk-mesher.ts. */
 const FACING_NORMAL = new Float32Array([
-    1, 0, 0,   // FACING_POS_X (east)
-    -1, 0, 0,  // FACING_NEG_X (west)
-    0, 1, 0,   // FACING_POS_Y (up)
-    0, -1, 0,  // FACING_NEG_Y (down)
-    0, 0, 1,   // FACING_POS_Z (south)
-    0, 0, -1,  // FACING_NEG_Z (north)
-    0, 0, 0,   // FACING_UNASSIGNED
+    1,
+    0,
+    0, // FACING_POS_X (east)
+    -1,
+    0,
+    0, // FACING_NEG_X (west)
+    0,
+    1,
+    0, // FACING_POS_Y (up)
+    0,
+    -1,
+    0, // FACING_NEG_Y (down)
+    0,
+    0,
+    1, // FACING_POS_Z (south)
+    0,
+    0,
+    -1, // FACING_NEG_Z (north)
+    0,
+    0,
+    0, // FACING_UNASSIGNED
 ]);
 
 type LegacyCubeMesh = {
     vertexCount: number;
     positions: Float32Array; // 3 per corner, chunk-local
-    normals: Float32Array;   // 3 per corner (broadcast from facing)
+    normals: Float32Array; // 3 per corner (broadcast from facing)
     light: Uint32Array;
 };
 
@@ -117,7 +138,7 @@ function decodeCubeBucket(pass: PassMeshLike | null): LegacyCubeMesh {
         for (let c = 0; c < 4; c++) {
             const dstVert = q * 4 + c;
             const vi = dstVert * 3;
-            positions[vi]     = decodePos(bytes[byteBase + c * 3]!);
+            positions[vi] = decodePos(bytes[byteBase + c * 3]!);
             positions[vi + 1] = decodePos(bytes[byteBase + c * 3 + 1]!);
             positions[vi + 2] = decodePos(bytes[byteBase + c * 3 + 2]!);
             normals[vi] = nx;
@@ -2579,8 +2600,6 @@ describe('multi-chunk sealed cave', () => {
             }
         }
 
-        expect(offenders.slice(0, 20), `${offenders.length}/${(W - 2) * (CHUNK_SIZE - 2) * (W - 2)} cave cells lit`).toEqual(
-            [],
-        );
+        expect(offenders.slice(0, 20), `${offenders.length}/${(W - 2) * (CHUNK_SIZE - 2) * (W - 2)} cave cells lit`).toEqual([]);
     });
 });

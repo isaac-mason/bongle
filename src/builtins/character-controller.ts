@@ -102,7 +102,6 @@ const BODY_YAW_RESPONSE_RATE = 12;
 const BODY_YAW_BACK_CONE_RAD = degreesToRadians(30);
 const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 
-
 const _vccListener: vcc.VccListener = {
     onContactSolve(
         _vccInstance,
@@ -142,10 +141,10 @@ const _vccListener: vcc.VccListener = {
         // implicitly 1 here (vcc doesn't expose a per-body restitution),
         // so the block value drives the bounce strength.
         if (
-            _vccListenerBlockRest !== null
-            && _body.id === _vccListenerTerrainBodyId
-            && !isSteep
-            && characterVelocity[1] < -BOUNCE_MIN_DOWN_SPEED
+            _vccListenerBlockRest !== null &&
+            _body.id === _vccListenerTerrainBodyId &&
+            !isSteep &&
+            characterVelocity[1] < -BOUNCE_MIN_DOWN_SPEED
         ) {
             const info = unpackVoxelHitInfo(_subShapeId);
             const restitution = _vccListenerBlockRest[info.stateId] ?? 0;
@@ -662,9 +661,7 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     // one-tick friction approximation). footstep sfx/particles don't use
     // this — they read the solver's authoritative `groundVoxelStateId`.
     const standingFromContacts = deriveStandingStateFromContacts(state.vcc!);
-    state.standingStateId = standingFromContacts !== 0
-        ? standingFromContacts
-        : getBlockState(voxels, fx, belowY, fz);
+    state.standingStateId = standingFromContacts !== 0 ? standingFromContacts : getBlockState(voxels, fx, belowY, fz);
 }
 
 /** pick the most up-facing voxel contact above the slope threshold; 0
@@ -741,18 +738,19 @@ const SNEAK_Y_PULL_BIAS = 0.01;
  *  coords. Matches luanti's `getNodeBoundingBox` (lines 73–86).
  *  Cube fast path (cid===0) returns the unit box without touching
  *  `shapeAabbs`. Non-AABB-shape blocks fall back to the unit box. */
-function blockUnionAabbLocal(
-    registry: BlockRegistry,
-    stateId: number,
-): [number, number, number, number, number, number] {
+function blockUnionAabbLocal(registry: BlockRegistry, stateId: number): [number, number, number, number, number, number] {
     const cid = registry.colliderId[stateId]!;
     if (cid === 0) return [0, 0, 0, 1, 1, 1];
     const kind = registry.shapeKind[cid];
     if (kind !== SHAPE_AABBS) return [0, 0, 0, 1, 1, 1];
     const boxes = registry.shapeAabbs[cid]!;
     if (boxes.length === 0) return [0, 0, 0, 1, 1, 1];
-    let minX = boxes[0]![0], minY = boxes[0]![1], minZ = boxes[0]![2];
-    let maxX = boxes[0]![3], maxY = boxes[0]![4], maxZ = boxes[0]![5];
+    let minX = boxes[0]![0],
+        minY = boxes[0]![1],
+        minZ = boxes[0]![2];
+    let maxX = boxes[0]![3],
+        maxY = boxes[0]![4],
+        maxZ = boxes[0]![5];
     for (let i = 1; i < boxes.length; i++) {
         const b = boxes[i]!;
         if (b[0] < minX) minX = b[0];
@@ -779,8 +777,15 @@ function hasSneakHeadroom(voxels: Voxels, x: number, fy: number, z: number): boo
 // first, then 4 cardinals, then 4 diagonals. matches luanti's
 // `dir9_center` order in localplayer.cpp (line 96).
 const SNEAK_SEARCH_OFFSETS: readonly [number, number][] = [
-    [0, 0], [1, 0], [-1, 0], [0, 1], [0, -1],
-    [1, 1], [-1, 1], [1, -1], [-1, -1],
+    [0, 0],
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+    [1, 1],
+    [-1, 1],
+    [1, -1],
+    [-1, -1],
 ];
 
 /** Faithful port of luanti's `updateSneakNode` (lines 89–208). Runs on
@@ -810,8 +815,7 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
 
     // keep current sneak node if its voxel coords still match and it's
     // still guardable. cheaper than re-running the full 3×3 search.
-    if (state.sneakNode &&
-        state.sneakNode[0] === cx && state.sneakNode[1] === fy && state.sneakNode[2] === cz) {
+    if (state.sneakNode && state.sneakNode[0] === cx && state.sneakNode[1] === fy && state.sneakNode[2] === cz) {
         const stateId = getBlockState(voxels, cx, fy, cz);
         if ((flags[stateId]! & BLOCK_FLAG_SNEAK_GUARD) !== 0) return true;
     }
@@ -819,7 +823,9 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
     // 3×3 search around (cx, fy, cz). pick the guardable candidate
     // nearest the player's XZ (using union AABB center), subject to
     // per-axis range cap + headroom.
-    let bestX = 0, bestY = 0, bestZ = 0;
+    let bestX = 0,
+        bestY = 0,
+        bestZ = 0;
     let bestBox: [number, number, number, number, number, number] | null = null;
     let minDistSq = Infinity;
     const sneakMaxX = v.halfExtents[0] * SNEAK_HALF_EXTENT_FACTOR;
@@ -843,7 +849,9 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
         if (Math.abs(ddx) > rangeCapX || Math.abs(ddz) > rangeCapZ) continue;
         if (!hasSneakHeadroom(voxels, x, fy, z)) continue;
         minDistSq = distSq;
-        bestX = x; bestY = fy; bestZ = z;
+        bestX = x;
+        bestY = fy;
+        bestZ = z;
         bestBox = localBox;
     }
 
@@ -854,7 +862,9 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
     }
 
     if (state.sneakNode) {
-        state.sneakNode[0] = bestX; state.sneakNode[1] = bestY; state.sneakNode[2] = bestZ;
+        state.sneakNode[0] = bestX;
+        state.sneakNode[1] = bestY;
+        state.sneakNode[2] = bestZ;
     } else {
         state.sneakNode = [bestX, bestY, bestZ];
     }
@@ -965,7 +975,9 @@ function processCrouchGuard(cc: CharacterControllerTrait, voxels: Voxels, dt: nu
         const cy = Math.floor(v.position[1]);
         const cz = Math.floor(v.position[2]);
         if (state.sneakNode) {
-            state.sneakNode[0] = cx; state.sneakNode[1] = cy; state.sneakNode[2] = cz;
+            state.sneakNode[0] = cx;
+            state.sneakNode[1] = cy;
+            state.sneakNode[2] = cz;
         } else {
             state.sneakNode = [cx, cy, cz];
         }
@@ -1018,11 +1030,7 @@ export function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void
 // raycasts hit the right hull on every side. note: replicated input
 // arrives ~50–150ms after the owner, so the ease starts later on non-
 // owner sides; during the ~380ms transition shapes briefly disagree.
-export function updateCrouchShape(
-    cc: CharacterControllerTrait,
-    physics: Physics,
-    dt: number,
-): void {
+export function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics, dt: number): void {
     const v = cc.state.vcc;
     if (!v) return;
     const state = cc.state;
@@ -1031,11 +1039,7 @@ export function updateCrouchShape(
     state.crouchAmount += (crouchTarget - state.crouchAmount) * (1 - Math.exp(-config.crouchLerpRate * dt));
     const wantCrouchShape = state.crouchAmount >= CROUCH_SHAPE_THRESHOLD;
     if (wantCrouchShape !== state.isCrouchShape) {
-        vcc.resize(
-            physics.rigid.world,
-            v,
-            wantCrouchShape ? config.halfExtents.crouching : config.halfExtents.standing,
-        );
+        vcc.resize(physics.rigid.world, v, wantCrouchShape ? config.halfExtents.crouching : config.halfExtents.standing);
         state.isCrouchShape = wantCrouchShape;
     }
 }
@@ -1396,17 +1400,20 @@ export function applyNoclipDisplacement(
 type BobStatus = 'walk' | 'run' | 'crouch' | 'idle' | 'fall' | 'fly';
 
 /** per-state amplitude targets (units). */
-const CHARACTER_BOB_STATE_VALUES: Record<BobStatus, {
-    itemSwayAmplitude: number;
-    horizontalAmplitude: number;
-    verticalAmplitude: number;
-}> = {
-    walk:   { itemSwayAmplitude: 0.04, horizontalAmplitude: 0,    verticalAmplitude: 0.05 },
-    run:    { itemSwayAmplitude: 0.06, horizontalAmplitude: 0.05, verticalAmplitude: 0.05 },
-    crouch: { itemSwayAmplitude: 0.04, horizontalAmplitude: 0,    verticalAmplitude: 0    },
-    idle:   { itemSwayAmplitude: 0,    horizontalAmplitude: 0,    verticalAmplitude: 0    },
-    fall:   { itemSwayAmplitude: 0,    horizontalAmplitude: 0,    verticalAmplitude: 0    },
-    fly:    { itemSwayAmplitude: 0,    horizontalAmplitude: 0,    verticalAmplitude: 0    },
+const CHARACTER_BOB_STATE_VALUES: Record<
+    BobStatus,
+    {
+        itemSwayAmplitude: number;
+        horizontalAmplitude: number;
+        verticalAmplitude: number;
+    }
+> = {
+    walk: { itemSwayAmplitude: 0.04, horizontalAmplitude: 0, verticalAmplitude: 0.05 },
+    run: { itemSwayAmplitude: 0.06, horizontalAmplitude: 0.05, verticalAmplitude: 0.05 },
+    crouch: { itemSwayAmplitude: 0.04, horizontalAmplitude: 0, verticalAmplitude: 0 },
+    idle: { itemSwayAmplitude: 0, horizontalAmplitude: 0, verticalAmplitude: 0 },
+    fall: { itemSwayAmplitude: 0, horizontalAmplitude: 0, verticalAmplitude: 0 },
+    fly: { itemSwayAmplitude: 0, horizontalAmplitude: 0, verticalAmplitude: 0 },
 };
 
 // phase velocity is pure-linear in actual horizontal speed, capped to
@@ -1439,11 +1446,7 @@ function getBobStatus(cc: CharacterControllerTrait, horizontalSpeed: number): Bo
     return 'idle';
 }
 
-export function updateCharacterBob(
-    cc: CharacterControllerTrait,
-    registry: BlockRegistry,
-    dt: number,
-): void {
+export function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistry, dt: number): void {
     const state = cc.state;
     const config = cc.config;
     const input = cc.input;
@@ -1468,10 +1471,8 @@ export function updateCharacterBob(
     // off the same synced signal as the owner.
     const footBlockState = state.groundBlockState;
     const prevFootBlockState = state.previousGroundBlockState;
-    const liquidNow =
-        footBlockState !== 0 && (registry.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
-    const liquidPrev =
-        prevFootBlockState !== 0 && (registry.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
+    const liquidNow = footBlockState !== 0 && (registry.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
+    const liquidPrev = prevFootBlockState !== 0 && (registry.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
     if ((state.grounded && !state.previousGrounded) || (liquidNow && !liquidPrev)) {
         state.bobPhase = (3 * Math.PI) / 2;
     }
@@ -1569,12 +1570,7 @@ export function characterLook(cc: CharacterControllerTrait, yaw: number, pitch?:
 /** orient a character at a world target. uses character's current world
  *  position + `eyeHeight` as the look origin so head-height entities aim
  *  through their eyes, not their feet. */
-export function characterLookAt(
-    cc: CharacterControllerTrait,
-    transform: TransformTrait,
-    target: Vec3,
-    eyeHeight = 1.62,
-): void {
+export function characterLookAt(cc: CharacterControllerTrait, transform: TransformTrait, target: Vec3, eyeHeight = 1.62): void {
     const p = getWorldPosition(transform);
     const dx = target[0] - p[0];
     const dy = target[1] - (p[1] + eyeHeight);

@@ -45,13 +45,7 @@ type Props = {
 // during a session are rare (room load); a fresh useMemo per parent render
 // keeps it correct without an explicit subscription.
 function useBlockIds(): ReadonlyArray<{ id: string; name?: string }> {
-    return useMemo(
-        () =>
-            registry.blockRegistry.defs
-                .filter((d) => d.id !== 'air')
-                .map((d) => ({ id: d.id, name: d.name })),
-        [],
-    );
+    return useMemo(() => registry.blockRegistry.defs.filter((d) => d.id !== 'air').map((d) => ({ id: d.id, name: d.name })), []);
 }
 
 export function ExprInput({ value, placeholder, suggest, onChange, error }: Props) {
@@ -61,10 +55,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
     const [selectedIndex, setSelectedIndex] = useState(0);
 
     const blockIds = useBlockIds();
-    const result = useMemo(
-        () => suggest(value, cursor, blockIds),
-        [suggest, value, cursor, blockIds],
-    );
+    const result = useMemo(() => suggest(value, cursor, blockIds), [suggest, value, cursor, blockIds]);
     const suggestions = result.suggestions;
 
     useEffect(() => {
@@ -201,11 +192,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                 >
                                     <span>{sug.label ?? sug.text}</span>
                                     {sug.detail && (
-                                        <span
-                                            className={
-                                                i === selectedIndex ? 'text-neutral-300 ml-2' : 'text-neutral-500 ml-2'
-                                            }
-                                        >
+                                        <span className={i === selectedIndex ? 'text-neutral-300 ml-2' : 'text-neutral-500 ml-2'}>
                                             {sug.detail}
                                         </span>
                                     )}

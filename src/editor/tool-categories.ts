@@ -60,7 +60,12 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
             { id: 'paint', icon: Icons.Brush, label: 'paint', hint: 'paint voxel faces' },
             { id: 'brush', icon: Icons.Paintbrush, label: 'brush', hint: 'stamp a shape × pattern at the cursor' },
             { id: 'smooth', icon: Icons.MoveDown, label: 'smooth', hint: 'heightmap gaussian — smooth the terrain surface' },
-            { id: 'elevation', icon: Icons.Mountain, label: 'elevation', hint: 'raise / lower / flatten terrain — heightmap brush' },
+            {
+                id: 'elevation',
+                icon: Icons.Mountain,
+                label: 'elevation',
+                hint: 'raise / lower / flatten terrain — heightmap brush',
+            },
         ],
     },
 ];
