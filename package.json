@@ -74,7 +74,8 @@
     ],
     "scripts": {
         "test": "vitest run",
-        "bench": "vitest bench --run"
+        "bench": "vitest bench --run",
+        "typecheck": "tsgo -p tsconfig.json"
     },
     "dependencies": {
         "@dnd-kit/abstract": "^0.3.2",
@@ -118,6 +119,7 @@
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.3",
         "@types/ws": "^8.5.13",
+        "@typescript/native-preview": "7.0.0-dev.20260421.2",
         "@tailwindcss/vite": "^4.2.2",
         "happy-dom": "^20.8.9",
         "tailwindcss": "^4.2.2",
