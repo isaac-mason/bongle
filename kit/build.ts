@@ -164,6 +164,15 @@ function zipBundle(distDir: string, outFile: string): Promise<void> {
 }
 
 export async function build(projectDir: string) {
+    // Run the whole build with production semantics. Vite derives `isProduction`
+    // *only* from `process.env.NODE_ENV` (not `mode`/`command`), and the CLI
+    // bootstraps through a Vite SSR dev server (kit/bin.mjs) whose config resolution
+    // sets NODE_ENV='development'. Left as-is that leaks into the bundle build →
+    // `isProduction` false → dev-only transforms ship (e.g. the dev JSX runtime,
+    // which crashes with `jsxDEV is not a function` against the prod React runtime).
+    // Forcing it here, before any `viteBuild`, restores correct production output.
+    process.env.NODE_ENV = 'production';
+
     const resolvedProjectDir = path.resolve(projectDir);
 
     if (!fs.existsSync(resolvedProjectDir)) {

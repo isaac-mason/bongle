@@ -97,6 +97,12 @@ async function runAssetPipelineInProcess(opts: {
 }
 
 export async function buildStatic(projectDir: string, opts?: { sceneId?: string }) {
+    // Production semantics for the build (see build.ts): the CLI bootstraps through a
+    // Vite SSR dev server that sets NODE_ENV='development', and Vite derives
+    // `isProduction` solely from NODE_ENV — so without this the static bundle ships
+    // dev-only transforms (e.g. the dev JSX runtime → `jsxDEV is not a function`).
+    process.env.NODE_ENV = 'production';
+
     const resolvedProjectDir = path.resolve(projectDir);
     if (!fs.existsSync(resolvedProjectDir)) {
         console.error(`Project directory does not exist: ${resolvedProjectDir}`);
