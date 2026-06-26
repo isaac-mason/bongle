@@ -18,8 +18,8 @@
  */
 
 import type { Vec3 } from 'mathcat';
-import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_PATHFINDABLE } from '../voxels/block-registry';
-import { getBlockState, type Voxels } from '../voxels/voxels';
+import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_PATHFINDABLE } from './voxels/block-registry';
+import { getBlockState, type Voxels } from './voxels/voxels';
 
 // ── voxel reads (block-flag based) ──────────────────────────────────
 
@@ -154,6 +154,38 @@ type Node = {
     f: number;
 };
 
+// node pool — search() would otherwise allocate one Node per heap push (up to
+// ~maxIterations expansions plus their neighbours), the dominant per-search garbage.
+// a bump allocator: requestNode hands out the next pool slot (reused in place, grown on
+// demand) and releaseSearchNodes returns the whole batch with a single index reset — no
+// per-node bookkeeping or array churn. none can be released mid-search, since any may
+// still sit on the final parent chain reconstruct() walks, so release is batch-only at
+// the next search start. steady-state searches allocate zero Node objects. NOT
+// re-entrancy safe — search() never calls search().
+const nodePool: Node[] = [];
+let nodePoolIndex = 0; // count of slots handed out to the current search
+function requestNode(x: number, y: number, z: number, parent: Node | null, g: number, f: number): Node {
+    let node = nodePool[nodePoolIndex];
+    if (node === undefined) {
+        node = { x, y, z, parent, g, f };
+        nodePool[nodePoolIndex] = node;
+    } else {
+        node.x = x;
+        node.y = y;
+        node.z = z;
+        node.parent = parent;
+        node.g = g;
+        node.f = f;
+    }
+    nodePoolIndex++;
+    return node;
+}
+// release the whole batch the just-finished search requested — an O(1) reset; slots stay
+// in nodePool and are reused in place by the next search's requestNode calls.
+function releaseSearchNodes(): void {
+    nodePoolIndex = 0;
+}
+
 // min-heap of nodes keyed by f, as a plain array mutated only through `heapPush` /
 // `heapPop` — so the heap invariant always holds. read `.length` for the size.
 type NodeHeap = Node[];
@@ -228,12 +260,13 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, optio
     const greedy = options?.searchType === 'greedy';
     const heuristic = options?.heuristic ?? euclidean;
 
+    releaseSearchNodes(); // return the previous search's nodes to the pool
     const open: NodeHeap = [];
     const gScore = new Map<string, number>();
     const closed = new Set<string>();
 
     const h0 = heuristic(start[0], start[1], start[2], gx, gy, gz);
-    heapPush(open, { x: start[0], y: start[1], z: start[2], parent: null, g: 0, f: h0 });
+    heapPush(open, requestNode(start[0], start[1], start[2], null, 0, h0));
     gScore.set(key(start[0], start[1], start[2]), 0);
 
     let iterations = 0;
@@ -257,7 +290,7 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, optio
             gScore.set(nk, g);
 
             const h = heuristic(step.x, step.y, step.z, gx, gy, gz);
-            heapPush(open, { x: step.x, y: step.y, z: step.z, parent: current, g, f: greedy ? h : g + h });
+            heapPush(open, requestNode(step.x, step.y, step.z, current, g, greedy ? h : g + h));
         }
     }
 

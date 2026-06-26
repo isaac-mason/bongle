@@ -1,6 +1,6 @@
 import type { Vec3 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
-import * as nav from './voxel-nav';
+import * as nav from './nav';
 
 // floodFill only forwards `voxels` to `actions`, so the BFS can be exercised with a
 // stub Actions over a synthetic grid — no Voxels world needed.

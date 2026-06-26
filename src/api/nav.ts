@@ -1,6 +1,6 @@
 /**
  * public navigation api — grid A* pathfinding + flood-fill reachability over the
- * voxel cells (see core/nav/voxel-nav).
+ * voxel cells (see core/nav).
  *
  * `findPath`/`floodFill` take a successor function (`Actions`) and return raw cells.
  * compose movement by passing `nav.groundActions` directly, wrapping it, or building
@@ -12,4 +12,4 @@
  *   nav.floodFill(voxels, start, nav.groundActions, maxIterations)   // reachability
  */
 
-export * as nav from '../core/nav/voxel-nav';
+export * as nav from '../core/nav';
