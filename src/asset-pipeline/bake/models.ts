@@ -28,10 +28,11 @@
 
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
-import { resolveSrcToAbsPath, writeFileIfChanged } from './util';
 import * as path from 'node:path';
 import { type Document, type Node as GltfNode, Logger, NodeIO, type Texture } from '@gltf-transform/core';
 import { dedup, reorder, weld } from '@gltf-transform/functions';
+import { type Box3, mat4 } from 'mathcat';
+import { MeshoptEncoder } from 'meshoptimizer';
 import {
     type ModelBinChannel,
     type ModelBinClip,
@@ -39,9 +40,8 @@ import {
     type ModelBinMesh,
     type ModuleVersion,
     packModelBin,
-} from 'bongle/internal';
-import { type Box3, mat4 } from 'mathcat';
-import { MeshoptEncoder } from 'meshoptimizer';
+} from '../../internal';
+import { resolveSrcToAbsPath, writeFileIfChanged } from './util';
 
 // ── paths ──────────────────────────────────────────────────────────
 
@@ -193,7 +193,9 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     if (anyFresh) {
         const fresh = entries.filter((e) => e.fresh).length;
         const cached = entries.length - fresh;
-        console.log(`[bongle] models built: ${fresh} fresh, ${cached} cached in ${(performance.now() - buildStart).toFixed(0)}ms`);
+        console.log(
+            `[bongle] models built: ${fresh} fresh, ${cached} cached in ${(performance.now() - buildStart).toFixed(0)}ms`,
+        );
     }
 
     return anyFresh;
@@ -214,11 +216,7 @@ async function loadAndOptimize(absPath: string): Promise<Document> {
     // silence per-transform "Removed types... Accessor (N)" cleanup logs
     doc.setLogger(new Logger(Logger.Verbosity.WARN));
     await MeshoptEncoder.ready;
-    await doc.transform(
-        weld(),
-        dedup(),
-        reorder({ encoder: MeshoptEncoder, target: 'performance' }),
-    );
+    await doc.transform(weld(), dedup(), reorder({ encoder: MeshoptEncoder, target: 'performance' }));
     return doc;
 }
 
@@ -548,8 +546,12 @@ function projectDocument(doc: Document): ProjectedDocument {
  */
 function computeModelAabb(sceneNodes: SceneNodeInfo[], meshes: Map<string, ModelBinMesh>): Box3 {
     const worldMats: ReturnType<typeof mat4.create>[] = [];
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    let minX = Infinity,
+        minY = Infinity,
+        minZ = Infinity;
+    let maxX = -Infinity,
+        maxY = -Infinity,
+        maxZ = -Infinity;
 
     for (let i = 0; i < sceneNodes.length; i++) {
         const sn = sceneNodes[i]!;
@@ -564,9 +566,9 @@ function computeModelAabb(sceneNodes: SceneNodeInfo[], meshes: Map<string, Model
         // transform 8 corners of the mesh's local AABB and expand
         const [loX, loY, loZ, hiX, hiY, hiZ] = mesh.aabb;
         for (let c = 0; c < 8; c++) {
-            const x = (c & 1) ? hiX : loX;
-            const y = (c & 2) ? hiY : loY;
-            const z = (c & 4) ? hiZ : loZ;
+            const x = c & 1 ? hiX : loX;
+            const y = c & 2 ? hiY : loY;
+            const z = c & 4 ? hiZ : loZ;
             const wx = world[0] * x + world[4] * y + world[8] * z + world[12];
             const wy = world[1] * x + world[5] * y + world[9] * z + world[13];
             const wz = world[2] * x + world[6] * y + world[10] * z + world[14];
@@ -767,8 +769,7 @@ function renderModelConstruction(e: BuildEntry, lines: string[]): void {
     for (let i = 0; i < sceneNodes.length; i++) {
         const sn = sceneNodes[i]!;
         lines.push(`    const ${nodeVar(i)} = createNode({ name: ${JSON.stringify(sn.name)} });`);
-        const needsTransform =
-            sn.meshName !== null || animated.has(sn.name) || !isIdentityTRS(sn);
+        const needsTransform = sn.meshName !== null || animated.has(sn.name) || !isIdentityTRS(sn);
         if (needsTransform) {
             lines.push(
                 `    addTrait(${nodeVar(i)}, TransformTrait, { position: ${vec3Lit(sn.position)}, quaternion: ${vec4Lit(sn.quaternion)}, scale: ${vec3Lit(sn.scale)} });`,
@@ -892,12 +893,8 @@ function assertNoIdentCollisions(ids: string[]): void {
     }
     const collisions = [...byIdent.entries()].filter(([, raw]) => raw.length > 1);
     if (collisions.length === 0) return;
-    const detail = collisions
-        .map(([ident, raw]) => `  '${ident}' ← ${raw.map((s) => `'${s}'`).join(', ')}`)
-        .join('\n');
-    throw new Error(
-        `[bongle] model ids collide after identifier sanitization (ids must be globally unique):\n${detail}`,
-    );
+    const detail = collisions.map(([ident, raw]) => `  '${ident}' ← ${raw.map((s) => `'${s}'`).join(', ')}`).join('\n');
+    throw new Error(`[bongle] model ids collide after identifier sanitization (ids must be globally unique):\n${detail}`);
 }
 
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
@@ -916,10 +913,16 @@ function isIdentityTRS(sn: SceneNodeInfo): boolean {
     const [qx, qy, qz, qw] = sn.quaternion;
     const [sx, sy, sz] = sn.scale;
     return (
-        Math.abs(px) < TRS_EPS && Math.abs(py) < TRS_EPS && Math.abs(pz) < TRS_EPS &&
-        Math.abs(qx) < TRS_EPS && Math.abs(qy) < TRS_EPS && Math.abs(qz) < TRS_EPS &&
+        Math.abs(px) < TRS_EPS &&
+        Math.abs(py) < TRS_EPS &&
+        Math.abs(pz) < TRS_EPS &&
+        Math.abs(qx) < TRS_EPS &&
+        Math.abs(qy) < TRS_EPS &&
+        Math.abs(qz) < TRS_EPS &&
         Math.abs(qw - 1) < TRS_EPS &&
-        Math.abs(sx - 1) < TRS_EPS && Math.abs(sy - 1) < TRS_EPS && Math.abs(sz - 1) < TRS_EPS
+        Math.abs(sx - 1) < TRS_EPS &&
+        Math.abs(sy - 1) < TRS_EPS &&
+        Math.abs(sz - 1) < TRS_EPS
     );
 }
 

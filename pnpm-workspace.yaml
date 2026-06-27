@@ -2,6 +2,7 @@ packages:
   - engine
   - interface
   - examples/*
+  - docs/template
 
 minimumReleaseAge: 10080
 

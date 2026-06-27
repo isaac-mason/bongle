@@ -20,11 +20,11 @@ import {
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import type { CameraTrait } from '../builtins/camera';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
+import type { ClientRoom } from '../client/rooms';
 import { getTrait } from '../core/scene/nodes';
 import { getCameraTint } from '../core/voxels/camera-tint';
 import type { Voxels } from '../core/voxels/voxels';
 import * as Environment from './environment';
-import type { ClientRoom } from './rooms';
 import { elapsedTime } from './voxels/voxel-material';
 import type { VoxelResources } from './voxels/voxel-resources';
 import * as VoxelVisuals from './voxels/voxel-visuals';

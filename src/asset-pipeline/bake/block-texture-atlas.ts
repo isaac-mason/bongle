@@ -25,10 +25,10 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import sharp from 'sharp';
-import { resolveSrcToAbsPath } from './util';
-import type { DrawSource, ModuleVersion } from 'bongle/internal';
-import { readArtifactHashSync } from '../cache';
+import type { DrawSource, ModuleVersion } from '../../internal';
+import { readArtifactHashSync } from './cache';
 import type { BakedDraws } from './draw-textures';
+import { resolveSrcToAbsPath } from './util';
 
 // ── constants ───────────────────────────────────────────────────────
 
@@ -93,8 +93,16 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
         // no textures — drop any leftover artifacts so downstream icon tasks
         // hash a clean slate. Deleting the JSON also clears the cache marker,
         // so the next non-empty build rebuilds unconditionally.
-        try { fs.unlinkSync(atlasPng); } catch { /* missing is fine */ }
-        try { fs.unlinkSync(atlasJson); } catch { /* missing is fine */ }
+        try {
+            fs.unlinkSync(atlasPng);
+        } catch {
+            /* missing is fine */
+        }
+        try {
+            fs.unlinkSync(atlasJson);
+        } catch {
+            /* missing is fine */
+        }
         return false;
     }
 
@@ -138,7 +146,9 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
             const canvas = bakedDraws.get(src);
             if (!canvas) {
                 tileBuffer = createMagentaTile();
-                console.warn(`[bongle] block texture "${textures[i]}" is a DrawSource with no baked canvas (magenta placeholder)`);
+                console.warn(
+                    `[bongle] block texture "${textures[i]}" is a DrawSource with no baked canvas (magenta placeholder)`,
+                );
             } else {
                 const png = await canvas.toBuffer('png');
                 tileBuffer = await sharp(png).resize(TILE_SIZE, TILE_SIZE, { kernel: 'nearest' }).ensureAlpha().raw().toBuffer();
@@ -181,7 +191,9 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
     };
     fs.writeFileSync(atlasJson, JSON.stringify(metadata, null, 2));
 
-    console.log(`[bongle] texture atlas built: ${atlasWidth}x${atlasHeight} (${textures.length} tiles) in ${(performance.now() - buildStart).toFixed(0)}ms`);
+    console.log(
+        `[bongle] texture atlas built: ${atlasWidth}x${atlasHeight} (${textures.length} tiles) in ${(performance.now() - buildStart).toFixed(0)}ms`,
+    );
 
     return true;
 }

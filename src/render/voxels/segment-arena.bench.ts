@@ -1,7 +1,7 @@
 // ── SegmentArena allocator bench ───────────────────────────────────
 //
 // run with:
-//   pnpm vitest bench src/client/voxels/segment-arena.bench.ts
+//   pnpm vitest bench src/render/voxels/segment-arena.bench.ts
 //
 // measures per-op cost AND fragmentation profile of the slot allocator
 // powering SegmentArena. baseline (this commit): first-fit free list.

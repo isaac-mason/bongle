@@ -157,6 +157,12 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.5.0)(happy-dom@20.8.9)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.22.3)
 
+  docs/template:
+    dependencies:
+      bongle:
+        specifier: link:../..
+        version: link:../..
+
   examples/audio:
     dependencies:
       bongle:

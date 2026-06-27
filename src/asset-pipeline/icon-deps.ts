@@ -19,8 +19,8 @@
  * trade for not walking every node tree for mesh refs.
  */
 
-import { type DepKey, directProducersOf, extractScenePrefabDeps } from 'bongle/internal';
-import type { PipelineInternal } from '../asset-pipeline/pipeline';
+import { type DepKey, directProducersOf, extractScenePrefabDeps } from '../internal';
+import type { PipelineInternal } from './bake/pass';
 
 const encode = (k: DepKey): string => `${k.registry}:${k.id}`;
 
@@ -61,9 +61,7 @@ export function iconDepClosure(internal: PipelineInternal, subject: DepKey): Map
  *  change). -1 when absent — distinct from any real version, so a producer
  *  appearing/disappearing moves the digest. */
 function producerVersion(internal: PipelineInternal, key: DepKey): number {
-    const store = (internal.registry as unknown as Record<string, { byId: Map<string, { version: number }> }>)[
-        key.registry
-    ];
+    const store = (internal.registry as unknown as Record<string, { byId: Map<string, { version: number }> }>)[key.registry];
     return store?.byId.get(key.id)?.version ?? -1;
 }
 

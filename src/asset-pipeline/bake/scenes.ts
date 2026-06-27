@@ -24,7 +24,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ModuleVersion } from 'bongle/internal';
+import type { ModuleVersion } from '../../internal';
 import { writeFileIfChanged } from './util';
 
 const SCENES_SUBDIR = path.join('content', 'scenes');

@@ -18,17 +18,6 @@
 import { Scene } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { attachWorldTrait } from '../builtins/world';
-import type * as CloudResources from '../client/cloud-resources';
-import * as Environment from '../client/environment';
-import * as Interpolation from '../client/interpolation';
-import type * as ModelResources from '../client/models/model-resources';
-import * as ModelVisuals from '../client/models/model-visuals';
-import type * as Renderer from '../client/renderer';
-import * as Visibility from '../client/visibility';
-import type * as VoxelMeshResources from '../client/voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from '../client/voxels/voxel-mesh-visuals';
-import type * as VoxelResources from '../client/voxels/voxel-resources';
-import * as VoxelVisuals from '../client/voxels/voxel-visuals';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
 import * as Physics from '../core/physics/physics';
@@ -38,6 +27,17 @@ import * as Rpc from '../core/rpc';
 import * as Nodes from '../core/scene/nodes';
 import type { NodesContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
+import type * as CloudResources from '../render/cloud-resources';
+import * as Environment from '../render/environment';
+import * as Interpolation from '../render/interpolation';
+import type * as ModelResources from '../render/models/model-resources';
+import * as ModelVisuals from '../render/models/model-visuals';
+import type * as Renderer from '../render/renderer';
+import * as Visibility from '../render/visibility';
+import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import type * as VoxelResources from '../render/voxels/voxel-resources';
+import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 
 /** No real player exists offline; Interpolation needs a PlayerId. No node is
  *  owned by this id, so every node interpolates uniformly — fine for a static

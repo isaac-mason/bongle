@@ -43,11 +43,11 @@ import { spawn } from 'node:child_process';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { resolveSrcToAbsPath, writeFileIfChanged } from './util';
 import * as path from 'node:path';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
-import type { KindStore, SoundHandle } from 'bongle/internal';
+import type { KindStore, SoundHandle } from '../../internal';
+import { resolveSrcToAbsPath, writeFileIfChanged } from './util';
 
 const FFMPEG = ffmpegInstaller.path;
 const FFPROBE = ffprobeInstaller.path;
@@ -59,7 +59,11 @@ const FFPROBE = ffprobeInstaller.path;
 // module load; cheap, idempotent, no-op on win32.
 if (process.platform !== 'win32') {
     for (const bin of [FFMPEG, FFPROBE]) {
-        try { fs.chmodSync(bin, 0o755); } catch { /* missing → real error surfaces on spawn */ }
+        try {
+            fs.chmodSync(bin, 0o755);
+        } catch {
+            /* missing → real error surfaces on spawn */
+        }
     }
 }
 
@@ -148,10 +152,7 @@ export {};
  *
  * returns true if anything was rebuilt, false on full cache hit.
  */
-export async function buildAudio(
-    soundsRegistry: KindStore<SoundHandle>,
-    opts: BuildAudioOptions,
-): Promise<boolean> {
+export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: BuildAudioOptions): Promise<boolean> {
     const paths = resolvePaths(opts.projectDir);
 
     // partition sources, sorted by id for deterministic order.
@@ -161,38 +162,43 @@ export async function buildAudio(
 
     if (all.length === 0) {
         // no sounds declared — clean up any leftover artifacts + codegen.
-        try { fs.unlinkSync(paths.atlasFile); } catch { /* missing is fine */ }
-        try { fs.unlinkSync(paths.manifestPath); } catch { /* missing is fine */ }
-        try { fs.rmSync(paths.standaloneDir, { recursive: true, force: true }); } catch { /* */ }
+        try {
+            fs.unlinkSync(paths.atlasFile);
+        } catch {
+            /* missing is fine */
+        }
+        try {
+            fs.unlinkSync(paths.manifestPath);
+        } catch {
+            /* missing is fine */
+        }
+        try {
+            fs.rmSync(paths.standaloneDir, { recursive: true, force: true });
+        } catch {
+            /* */
+        }
         ensureDir(path.dirname(paths.barrelPath));
         writeFileIfChanged(paths.barrelPath, EMPTY_BARREL);
         return false;
     }
 
-    const atlasResolved = all
-        .filter((s) => !s.long)
-        .map((s) => ({ ...s, absPath: resolveSrcToAbsPath(s.src, opts.projectDir) }));
+    const atlasResolved = all.filter((s) => !s.long).map((s) => ({ ...s, absPath: resolveSrcToAbsPath(s.src, opts.projectDir) }));
     const standaloneResolved = all
         .filter((s) => s.long)
         .map((s) => ({ ...s, absPath: resolveSrcToAbsPath(s.src, opts.projectDir) }));
 
-    const atlasHash = computeBucketHash(atlasResolved.map((s) => s.absPath), ATLAS_FORMAT_VERSION);
+    const atlasHash = computeBucketHash(
+        atlasResolved.map((s) => s.absPath),
+        ATLAS_FORMAT_VERSION,
+    );
     const standaloneHash = computeBucketHash(standaloneResolved.map((s) => s.absPath));
-    const combinedHash = crypto
-        .createHash('sha256')
-        .update(atlasHash)
-        .update(standaloneHash)
-        .digest('hex');
+    const combinedHash = crypto.createHash('sha256').update(atlasHash).update(standaloneHash).digest('hex');
 
     const existing = readManifest(paths.manifestPath);
-    const atlasUpToDate =
-        existing?.atlasHash === atlasHash &&
-        (atlasResolved.length === 0 || fs.existsSync(paths.atlasFile));
+    const atlasUpToDate = existing?.atlasHash === atlasHash && (atlasResolved.length === 0 || fs.existsSync(paths.atlasFile));
     const standaloneUpToDate =
         existing?.standaloneHash === standaloneHash &&
-        standaloneResolved.every((s) =>
-            fs.existsSync(path.join(paths.standaloneDir, `${s.id}.mp3`)),
-        );
+        standaloneResolved.every((s) => fs.existsSync(path.join(paths.standaloneDir, `${s.id}.mp3`)));
 
     let manifest: AudioManifest;
     let rebuilt = false;
@@ -201,15 +207,11 @@ export async function buildAudio(
         // full cache hit — reuse the on-disk manifest for codegen durations.
         manifest = existing;
     } else {
-        console.log(
-            `[bongle] building audio (${atlasResolved.length} atlas, ${standaloneResolved.length} standalone)...`,
-        );
+        console.log(`[bongle] building audio (${atlasResolved.length} atlas, ${standaloneResolved.length} standalone)...`);
         ensureDir(paths.outDir);
 
         const atlasEntries: AudioManifestAtlasEntry[] =
-            atlasUpToDate && existing
-                ? existing.atlas
-                : await buildAtlas(atlasResolved, paths.atlasFile);
+            atlasUpToDate && existing ? existing.atlas : await buildAtlas(atlasResolved, paths.atlasFile);
 
         let standaloneEntries: AudioManifestStandaloneEntry[];
         if (standaloneUpToDate && existing) {
@@ -223,10 +225,16 @@ export async function buildAudio(
                 for (const name of fs.readdirSync(paths.standaloneDir)) {
                     const id = name.replace(/\.mp3$/, '');
                     if (!liveIds.has(id)) {
-                        try { fs.unlinkSync(path.join(paths.standaloneDir, name)); } catch { /* */ }
+                        try {
+                            fs.unlinkSync(path.join(paths.standaloneDir, name));
+                        } catch {
+                            /* */
+                        }
                     }
                 }
-            } catch { /* dir may not exist yet — fine */ }
+            } catch {
+                /* dir may not exist yet — fine */
+            }
         }
 
         manifest = {
@@ -239,9 +247,7 @@ export async function buildAudio(
         };
         fs.writeFileSync(paths.manifestPath, JSON.stringify(manifest, null, 2));
         rebuilt = true;
-        console.log(
-            `[bongle] audio built: atlas ${atlasEntries.length} clips, standalone ${standaloneEntries.length} files`,
-        );
+        console.log(`[bongle] audio built: atlas ${atlasEntries.length} clips, standalone ${standaloneEntries.length} files`);
     }
 
     // ── codegen barrel ──────────────────────────────────────────────
@@ -280,7 +286,9 @@ function readManifest(p: string): AudioManifest | null {
         ) {
             return parsed as AudioManifest;
         }
-    } catch { /* fall through */ }
+    } catch {
+        /* fall through */
+    }
     return null;
 }
 
@@ -303,12 +311,13 @@ function computeBucketHash(absPaths: string[], salt = ''): string {
 
 type ResolvedSource = { id: string; src: string; long: boolean; absPath: string };
 
-async function buildAtlas(
-    sources: ResolvedSource[],
-    outPath: string,
-): Promise<AudioManifestAtlasEntry[]> {
+async function buildAtlas(sources: ResolvedSource[], outPath: string): Promise<AudioManifestAtlasEntry[]> {
     if (sources.length === 0) {
-        try { fs.unlinkSync(outPath); } catch { /* */ }
+        try {
+            fs.unlinkSync(outPath);
+        } catch {
+            /* */
+        }
         return [];
     }
 
@@ -339,10 +348,14 @@ async function buildAtlas(
             const wavPath = path.join(tmpDir, `${i}.wav`);
             await runProcess(FFMPEG, [
                 '-y',
-                '-i', sources[i]!.absPath,
-                '-ac', '1',
-                '-ar', String(SAMPLE_RATE),
-                '-c:a', 'pcm_s16le',
+                '-i',
+                sources[i]!.absPath,
+                '-ac',
+                '1',
+                '-ar',
+                String(SAMPLE_RATE),
+                '-c:a',
+                'pcm_s16le',
                 wavPath,
             ]);
             wavPaths.push(wavPath);
@@ -352,26 +365,22 @@ async function buildAtlas(
         // ffmpeg concat demuxer needs a list file. single-quote each path
         // and escape embedded quotes per ffmpeg's escaping rules.
         const listPath = path.join(tmpDir, 'concat.txt');
-        fs.writeFileSync(
-            listPath,
-            wavPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
-        );
+        fs.writeFileSync(listPath, wavPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
         const mergedWav = path.join(tmpDir, 'merged.wav');
-        await runProcess(FFMPEG, [
-            '-y',
-            '-f', 'concat',
-            '-safe', '0',
-            '-i', listPath,
-            '-c:a', 'copy',
-            mergedWav,
-        ]);
+        await runProcess(FFMPEG, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'copy', mergedWav]);
 
         await runProcess(FFMPEG, [
             '-y',
-            '-i', mergedWav,
-            '-ac', '1',
-            '-ar', String(SAMPLE_RATE),
-            '-c:a', 'libmp3lame', '-b:a', ATLAS_BITRATE,
+            '-i',
+            mergedWav,
+            '-ac',
+            '1',
+            '-ar',
+            String(SAMPLE_RATE),
+            '-c:a',
+            'libmp3lame',
+            '-b:a',
+            ATLAS_BITRATE,
             outPath,
         ]);
 
@@ -388,14 +397,15 @@ async function buildAtlas(
         }
         return entries;
     } finally {
-        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* */ }
+        try {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch {
+            /* */
+        }
     }
 }
 
-async function buildStandalones(
-    sources: ResolvedSource[],
-    outDir: string,
-): Promise<AudioManifestStandaloneEntry[]> {
+async function buildStandalones(sources: ResolvedSource[], outDir: string): Promise<AudioManifestStandaloneEntry[]> {
     const entries: AudioManifestStandaloneEntry[] = [];
     for (const s of sources) {
         if (!fs.existsSync(s.absPath)) {
@@ -404,9 +414,14 @@ async function buildStandalones(
         const outPath = path.join(outDir, `${s.id}.mp3`);
         const args = [
             '-y',
-            '-i', s.absPath,
-            '-ar', String(SAMPLE_RATE),
-            '-c:a', 'libmp3lame', '-b:a', STANDALONE_BITRATE,
+            '-i',
+            s.absPath,
+            '-ar',
+            String(SAMPLE_RATE),
+            '-c:a',
+            'libmp3lame',
+            '-b:a',
+            STANDALONE_BITRATE,
             outPath,
         ];
         await runProcess(FFMPEG, args);
@@ -422,10 +437,14 @@ async function probeSampleCount(absPath: string): Promise<number> {
     // is the exact sample count (ffprobe doesn't expose nb_samples for raw
     // PCM streams).
     const args = [
-        '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=duration_ts',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-show_entries',
+        'stream=duration_ts',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
         absPath,
     ];
     const out = await runProcess(FFPROBE, args, { captureStdout: true });
@@ -437,12 +456,7 @@ async function probeSampleCount(absPath: string): Promise<number> {
 }
 
 async function probeDurationSec(absPath: string): Promise<number> {
-    const args = [
-        '-v', 'error',
-        '-show_entries', 'format=duration',
-        '-of', 'default=noprint_wrappers=1:nokey=1',
-        absPath,
-    ];
+    const args = ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', absPath];
     const out = await runProcess(FFPROBE, args, { captureStdout: true });
     const n = parseFloat(out.trim());
     if (!Number.isFinite(n)) {
@@ -451,17 +465,17 @@ async function probeDurationSec(absPath: string): Promise<number> {
     return n;
 }
 
-function runProcess(
-    bin: string,
-    args: string[],
-    opts: { captureStdout?: boolean } = {},
-): Promise<string> {
+function runProcess(bin: string, args: string[], opts: { captureStdout?: boolean } = {}): Promise<string> {
     return new Promise((resolve, reject) => {
         const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
         let stderr = '';
-        child.stdout.on('data', (d) => { stdout += d.toString(); });
-        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.stdout.on('data', (d) => {
+            stdout += d.toString();
+        });
+        child.stderr.on('data', (d) => {
+            stderr += d.toString();
+        });
         child.on('error', reject);
         child.on('close', (code) => {
             if (code === 0) resolve(opts.captureStdout ? stdout : '');
@@ -550,12 +564,8 @@ function assertNoIdentCollisions(ids: string[]): void {
     }
     const collisions = [...byIdent.entries()].filter(([, raw]) => raw.length > 1);
     if (collisions.length === 0) return;
-    const detail = collisions
-        .map(([ident, raw]) => `  '${ident}' ← ${raw.map((s) => `'${s}'`).join(', ')}`)
-        .join('\n');
-    throw new Error(
-        `[bongle] sound ids collide after identifier sanitization (ids must be globally unique):\n${detail}`,
-    );
+    const detail = collisions.map(([ident, raw]) => `  '${ident}' ← ${raw.map((s) => `'${s}'`).join(', ')}`).join('\n');
+    throw new Error(`[bongle] sound ids collide after identifier sanitization (ids must be globally unique):\n${detail}`);
 }
 
 const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;

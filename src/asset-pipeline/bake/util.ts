@@ -3,7 +3,7 @@
 // the new content before touching the disk.
 //
 // matters most for the `src/generated/*.ts` barrels: every write triggers
-// an HMR update in both the client + gameServer environments, and on cold
+// an HMR update in both the client + server environments, and on cold
 // start the pipeline emits all barrels even when nothing relevant changed
 // (e.g. user-entry shim wiped them, pipeline regenerates identical bytes).
 // byte-comparison short-circuits the cascade.

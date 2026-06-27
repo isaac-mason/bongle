@@ -8,7 +8,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { PipelineInternal } from '../asset-pipeline/pipeline';
+import type { PipelineInternal } from './bake/pass';
 import { closureVersionDigest, iconDepClosure } from './icon-deps';
 
 const BLOCK_HASH_VERSION = 4;
@@ -28,9 +28,7 @@ function stableReplacer(_key: string, value: unknown): unknown {
         return Array.from(value as unknown as Iterable<number>);
     }
     if (value instanceof Map) {
-        const entries = Array.from(value.entries()).sort((a, b) =>
-            String(a[0]).localeCompare(String(b[0])),
-        );
+        const entries = Array.from(value.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
         return { __map: entries };
     }
     if (value instanceof Set) {
@@ -101,7 +99,7 @@ export function computePrefabIconHashes(
     });
 }
 
-/** Per-scene icon hashes. Self-identity is the disk `bytesHash` (the gameServer
+/** Per-scene icon hashes. Self-identity is the disk `bytesHash` (the server
  *  `registry.scenes` is a derived view that lags codegen for new
  *  filesystem-discovered blueprints, so disk stays the source of truth for
  *  *which* scenes exist + their authored bytes — corpus comes from `scanScenes`

@@ -3,7 +3,7 @@
  *
  *   - dev: bongle:pipeline Vite plugin handler (kit/src/vite/plugin.ts),
  *     fired on every settled HMR cascade. Pulls the typed registries off
- *     the gameServer env via `env.runner.import('bongle/internal')`.
+ *     the server env via `env.runner.import('bongle/internal')`.
  *
  *   - prod: build.ts's `runAssetPipelineInProcess`, fired once before
  *     the Vite bundle. Pulls them off the same process via plain
@@ -27,10 +27,10 @@ import type {
     ModuleVersion,
     Registry,
     SceneHandle,
-} from 'bongle/internal';
-import { buildBlockTextureAtlas } from './block-texture-atlas';
+} from '../../internal';
 import { buildAudio } from './audio';
-import { bakeDrawTextures, type BakedDraws } from './draw-textures';
+import { buildBlockTextureAtlas } from './block-texture-atlas';
+import { type BakedDraws, bakeDrawTextures } from './draw-textures';
 import { buildModels, type ModelsCacheEntry } from './models';
 import { buildScenes } from './scenes';
 import { buildSpriteAtlas } from './sprite-atlas';
@@ -200,15 +200,20 @@ export async function runAssetPipelinePass(
     // replace magenta placeholders with rendered pixels. The bake walks
     // both registries unconditionally; per-builder gates downstream still
     // apply.
-    const bakedDraws: BakedDraws = (atlasDirty || spritesDirty)
-        ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { projectDir }))
-        : new Map();
+    const bakedDraws: BakedDraws =
+        atlasDirty || spritesDirty
+            ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { projectDir }))
+            : new Map();
 
     const tasks: Promise<void>[] = [];
 
     if (moduleView) {
-        if (atlasDirty) tasks.push(timed('block-atlas', buildBlockTextureAtlas(moduleView, { projectDir, bakedDraws, cache })).then(() => undefined));
-        if (modelsDirty) tasks.push(timed('models', buildModels(moduleView, { projectDir, cache: state.modelsCache })).then(() => undefined));
+        if (atlasDirty)
+            tasks.push(
+                timed('block-atlas', buildBlockTextureAtlas(moduleView, { projectDir, bakedDraws, cache })).then(() => undefined),
+            );
+        if (modelsDirty)
+            tasks.push(timed('models', buildModels(moduleView, { projectDir, cache: state.modelsCache })).then(() => undefined));
         if (scenesDirty) tasks.push(timed('scenes', buildScenes(moduleView, { projectDir, mode })).then(() => undefined));
     }
 
@@ -216,9 +221,7 @@ export async function runAssetPipelinePass(
         // buildAudio reads the sounds store directly (independent surface
         // from the partial view above — sounds aren't part of any
         // cross-domain composition like blocks/textures/models).
-        tasks.push(
-            timed('audio', buildAudio(registry.sounds, { projectDir })).then(() => undefined),
-        );
+        tasks.push(timed('audio', buildAudio(registry.sounds, { projectDir })).then(() => undefined));
     }
 
     if (spritesDirty) {

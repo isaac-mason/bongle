@@ -12,6 +12,10 @@ import type { EngineClient } from './client/engine-client';
 import * as Editor from './editor/index';
 import { mountEditUI } from './editor/ui/edit-ui';
 
+// The editor UI store. Re-exported here because engine-editor is the editor's
+// public surface — the kit's edit client reads it for the net-sim toggle.
+export { useEditor } from './editor/editor-store';
+
 export async function setup(state: EngineClient): Promise<void> {
     Editor.registerClient(state);
     mountEditUI(state.domElement);

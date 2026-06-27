@@ -73,6 +73,7 @@
         "README.md"
     ],
     "scripts": {
+        "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
         "test": "vitest run",
         "bench": "vitest bench --run",
         "typecheck": "tsgo -p tsconfig.json",

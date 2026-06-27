@@ -6,7 +6,7 @@
 //     stays `['models', 'scenes', 'sounds']` — sprites are not added)
 //   - declarations are pure source data; runtime wiring is a JSON
 //     sidecar (`sprites-atlas.json`) emitted by the asset-pipeline pass
-//     and fetched by `client/sprites/sprite-resources.ts` at room init
+//     and fetched by `render/sprites/sprite-resources.ts` at room init
 //
 // `src` accepts an `ImageSource` (path/url, or a `DrawSource` bake-time
 // fn descriptor) or an array of them (flipbook frames). URLs are

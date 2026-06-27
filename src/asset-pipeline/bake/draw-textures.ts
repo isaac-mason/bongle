@@ -19,13 +19,8 @@
 
 import * as fs from 'node:fs';
 import { Canvas, type CanvasRenderingContext2D, type Image, loadImage } from 'skia-canvas';
-import type {
-    BlockTextureDef,
-    DrawSource,
-    KindStore,
-    NormalizedImageSource,
-    SpriteHandle,
-} from 'bongle/internal';
+import { normalizeImageSource } from '../../core/sprites/draw';
+import type { BlockTextureDef, DrawSource, KindStore, NormalizedImageSource, SpriteHandle } from '../../internal';
 import { resolveSrcToAbsPath } from './util';
 
 export type BakedDraws = Map<DrawSource, Canvas>;
@@ -109,7 +104,10 @@ async function bakeOne(
 
     const inputEntries = await Promise.all(
         Object.entries(ds.inputs).map(async ([key, src]) => {
-            const resolved = await resolveInput(src, baked, imageCache, projectDir, cycleGuard);
+            // `ds.inputs` values are `ImageSource` (may carry a URL); collapse to
+            // the normalized form `resolveInput` consumes. URLs are already
+            // collapsed at registration, so this is a no-op for real inputs.
+            const resolved = await resolveInput(normalizeImageSource(src), baked, imageCache, projectDir, cycleGuard);
             return [key, resolved] as const;
         }),
     );
@@ -121,11 +119,13 @@ async function bakeOne(
     // user fn is typed against the DOM CanvasRenderingContext2D + DOM
     // CanvasImageSource — skia-canvas types are structurally compatible
     // for the subset draw fns actually use (drawImage, fillStyle, etc).
-    (ds.fn as unknown as (
-        c: CanvasRenderingContext2D,
-        i: Record<string, Image | Canvas>,
-        p: Record<string, string | number | boolean>,
-    ) => void)(ctx, inputs, ds.params);
+    (
+        ds.fn as unknown as (
+            c: CanvasRenderingContext2D,
+            i: Record<string, Image | Canvas>,
+            p: Record<string, string | number | boolean>,
+        ) => void
+    )(ctx, inputs, ds.params);
 
     baked.set(ds, canvas);
     cycleGuard.delete(ds);

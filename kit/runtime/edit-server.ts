@@ -1,5 +1,6 @@
+/// <reference types="vite/client" />
 /**
- * kit/runtime/edit-server.ts — boot module for the dev gameServer Vite env.
+ * kit/runtime/edit-server.ts — boot module for the dev server Vite env.
  *
  * Invoked through the `virtual:bongle/edit-server` virtual module (served
  * by `kit/vite/virtual-entries.ts`). The kit's `dev/game-env.ts` imports
@@ -23,10 +24,10 @@
  *     scenes + matchmaking config on pipeline state).
  */
 
-import path from 'node:path';
 import type { Server as HttpServer } from 'node:http';
+import path from 'node:path';
 import { env } from 'bongle';
-import { EngineServer, createFallbackAvatarsDriver, createInMemoryStorageDriver } from 'bongle/engine-server';
+import { createFallbackAvatarsDriver, createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { __kit } from 'bongle/internal';
 import { attachGameTransport } from 'bongle/kit/runtime/transport';
 
@@ -67,7 +68,9 @@ export async function start(opts: StartOptions) {
 
     await EngineServer.load(state);
 
-    __kit.registerFlush(() => { EngineServer.applyRegistryChanges(state); });
+    __kit.registerFlush(() => {
+        EngineServer.applyRegistryChanges(state);
+    });
 
     // scene HMR — symmetric to the client. parses the raw JSON event payload
     // and stamps the authored payload onto the matching SceneHandle, then
@@ -97,7 +100,9 @@ export async function start(opts: StartOptions) {
         onClientLeave: (s: typeof state, c: number) => EngineServer.onClientLeave(s, c as never),
         getInbox: (s: typeof state) => s.net.inbox,
         getOutbox: (s: typeof state) => s.net.outbox,
-        clearOutbox: (s: typeof state) => { s.net.outbox.clear(); },
+        clearOutbox: (s: typeof state) => {
+            s.net.outbox.clear();
+        },
     };
 
     const transport = attachGameTransport({ httpServer, app, state });

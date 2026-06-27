@@ -1,7 +1,6 @@
 import * as Icons from 'lucide-react';
 import { type EulerOrder, euler, type Quat, quat } from 'mathcat';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
-import { assetUrl } from '../../client/asset-url';
 import { IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';
 import { registry } from '../../core/registry';
 import type { Node, Realm } from '../../core/scene/nodes';
@@ -11,6 +10,7 @@ import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/pro
 import * as Selection from '../../core/scene/selection';
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
+import { assetUrl } from '../../render/asset-url';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 

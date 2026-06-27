@@ -6,7 +6,7 @@ import { enumValue, type Schema } from './prop';
  * push numeric/string keys). `severity` distinguishes hard type mismatches from
  * soft constraint violations (e.g. number out of declared range).
  */
-export type Issue = {
+export type ValidationIssue = {
     path: (string | number)[];
     severity: 'error' | 'warn';
     message: string;
@@ -21,13 +21,13 @@ export type Issue = {
  * regardless of issues so the user can see and fix them rather than silently
  * losing the original bytes.
  */
-export function validate(schema: Schema, value: unknown): Issue[] {
-    const issues: Issue[] = [];
+export function validate(schema: Schema, value: unknown): ValidationIssue[] {
+    const issues: ValidationIssue[] = [];
     walk(schema, value, [], issues);
     return issues;
 }
 
-function walk(schema: Schema, value: unknown, path: (string | number)[], issues: Issue[]): void {
+function walk(schema: Schema, value: unknown, path: (string | number)[], issues: ValidationIssue[]): void {
     switch (schema.type) {
         case 'boolean':
             if (typeof value !== 'boolean') push(issues, path, `expected boolean, got ${describe(value)}`);
@@ -163,7 +163,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
     }
 }
 
-function push(issues: Issue[], path: (string | number)[], message: string, severity: 'error' | 'warn' = 'error'): void {
+function push(issues: ValidationIssue[], path: (string | number)[], message: string, severity: 'error' | 'warn' = 'error'): void {
     issues.push({ path, severity, message });
 }
 

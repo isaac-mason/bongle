@@ -7,7 +7,7 @@
  */
 
 import { memo } from 'react';
-import { assetUrl } from '../../client/asset-url';
+import { assetUrl } from '../../render/asset-url';
 import { useEditor } from '../editor-store';
 import type { InventoryItem } from '../inventory';
 

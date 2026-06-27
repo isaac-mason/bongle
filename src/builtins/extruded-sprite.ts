@@ -8,7 +8,7 @@
 // different quad orientation.
 //
 // Geometry is lazily baked on first render (per
-// `client/sprites/sprite-extrusion.ts`), cached on `SpriteResources`
+// `render/sprites/sprite-extrusion.ts`), cached on `SpriteResources`
 // keyed by `spriteId`, and shared across instances. Depth is applied
 // per-instance via `mesh.scale[2]` at draw time, so changing `depth`
 // never invalidates the bake.
@@ -17,14 +17,14 @@
 // `SpriteTrait` — sprite handle is module-eval state, persist + sync
 // are out-of-scope for v1.
 //
-// Render path: `client/sprites/extruded-sprite-visuals.ts`. Flipbook
+// Render path: `render/sprites/extruded-sprite-visuals.ts`. Flipbook
 // playback is `fps`-driven and loops; single-frame sprites ignore
 // `fps` (parallel to `SpriteTrait`).
 
 import type { Vec4 } from 'mathcat';
-import type { ExtrudedSpriteVisualState } from '../client/sprites/extruded-sprite-visuals';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
+import type { ExtrudedSpriteVisualState } from '../render/sprites/extruded-sprite-visuals';
 
 export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
     /** the sprite handle to extrude + render. defaults to null

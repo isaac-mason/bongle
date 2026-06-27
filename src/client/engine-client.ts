@@ -19,39 +19,39 @@ import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
+import * as CloudResources from '../render/cloud-resources';
+import * as Device from '../render/device';
+import * as Interpolation from '../render/interpolation';
+import * as ModelLighting from '../render/model-lighting';
+import * as ModelResources from '../render/models/model-resources';
+import * as ModelVisuals from '../render/models/model-visuals';
+import * as ParticleResources from '../render/particles/particle-resources';
+import * as ParticleVisuals from '../render/particles/particle-visuals';
+import * as Particles from '../render/particles/particles';
+import * as Performance from '../render/performance';
+import * as Renderer from '../render/renderer';
+import * as ShadowResources from '../render/shadows/shadow-resources';
+import * as ShadowVisuals from '../render/shadows/shadow-visuals';
+import * as ExtrudedSpriteResources from '../render/sprites/extruded-sprite-resources';
+import * as ExtrudedSpriteVisuals from '../render/sprites/extruded-sprite-visuals';
+import * as SpriteResources from '../render/sprites/sprite-resources';
+import * as SpriteVisuals from '../render/sprites/sprite-visuals';
+import * as Visibility from '../render/visibility';
+import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import * as VoxelResources from '../render/voxels/voxel-resources';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-resources';
+import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import * as Audio from './audio/audio';
 import * as Chat from './chat';
-import * as CloudResources from './cloud-resources';
-import * as Device from './device';
 import * as DomUi from './dom-ui';
 import * as Input from './input';
-import * as Interpolation from './interpolation';
-import * as ModelLighting from './model-lighting';
-import * as ModelResources from './models/model-resources';
-import * as ModelVisuals from './models/model-visuals';
 import * as Net from './net';
-import * as ParticleResources from './particles/particle-resources';
-import * as ParticleVisuals from './particles/particle-visuals';
-import * as Particles from './particles/particles';
-import * as Performance from './performance';
-import * as Renderer from './renderer';
 import * as Replication from './replication';
 import * as Rooms from './rooms';
 import * as ClientRpc from './rpc';
-import * as ShadowResources from './shadows/shadow-resources';
-import * as ShadowVisuals from './shadows/shadow-visuals';
-import * as ExtrudedSpriteResources from './sprites/extruded-sprite-resources';
-import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
-import * as SpriteResources from './sprites/sprite-resources';
-import * as SpriteVisuals from './sprites/sprite-visuals';
 import { useClient } from './ui/client-store';
 import * as Viewport from './viewport';
-import * as Visibility from './visibility';
-import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
-import * as VoxelResources from './voxels/voxel-resources';
-import { type VoxelArenaBudget, voxelArenaBudgetForTier } from './voxels/voxel-resources';
-import * as VoxelVisuals from './voxels/voxel-visuals';
 
 export type InitOptions = {
     mode: 'edit' | 'play';
@@ -209,7 +209,7 @@ export type EngineClient = ReturnType<typeof init>;
 
 /**
  * Boot a self-contained room — no server, no matchmaking, one local player.
- * Used by the kit `standalone` build (and the asset pipeline page conceptually):
+ * Used by the kit `standalone` build (and the asset pipeline worker conceptually):
  * `init()` → `load()` → `startStandaloneRoom()` → frame loop. The returned
  * room is already the active player; the caller just has to drive `update()`.
  */

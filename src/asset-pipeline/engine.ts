@@ -13,18 +13,18 @@
  * here.
  */
 
-import * as CloudResources from '../client/cloud-resources';
-import * as ModelResources from '../client/models/model-resources';
-import * as Performance from '../client/performance';
-import * as Renderer from '../client/renderer';
-import * as VoxelMeshResources from '../client/voxels/voxel-mesh-resources';
-import * as VoxelResources from '../client/voxels/voxel-resources';
-import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../client/voxels/voxel-resources';
 import * as Content from '../core/content';
 import * as Registry from '../core/registry';
 import { registry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
+import * as CloudResources from '../render/cloud-resources';
+import * as ModelResources from '../render/models/model-resources';
+import * as Performance from '../render/performance';
+import * as Renderer from '../render/renderer';
+import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelResources from '../render/voxels/voxel-resources';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-resources';
 import { type BlockIconAtlasResult, runBlockIcons } from './tasks/block-icons';
 import { type PrefabIconResult, runPrefabIcon } from './tasks/prefab-icons';
 import { runSceneIcon, type SceneIconResult } from './tasks/scene-icon';
@@ -51,6 +51,38 @@ export type BootOptions = {
     resourceLoader: ResourceLoader;
 };
 
+/**
+ * Seed the URL registry (`resources.models`) from the model registry.
+ *
+ * The client/server populate theirs by draining `registry.models.pendingChanges`
+ * in their registry-dispatch. The pipeline can't: it shares the server runner
+ * graph, so EngineServer's dispatch has already drained `pendingChanges` to zero
+ * before any icon render runs. So we re-seed wholesale from `byId` (the same set
+ * EngineClient.seedModels uses), every boot + before every render pass.
+ *
+ * Idempotent: re-`setModel`-ing an unchanged id leaves its payload untouched, so
+ * an already-loaded model isn't refetched. Models dropped from the registry are
+ * deleted so their atlas/geometry slots release on the next `ModelResources.update`.
+ */
+function seedModels(resources: Resources.Resources): void {
+    const live = new Set<string>();
+    for (const [id, h] of registry.models.byId) {
+        live.add(id);
+        const handle = h.payload;
+        Resources.setModel(resources, id, {
+            clientUrl: handle.bin.client,
+            serverUrl: handle.bin.server,
+            source: 'bundled',
+            handle,
+        });
+    }
+    for (const id of Array.from(resources.models.keys())) {
+        if (live.has(id)) continue;
+        Resources.deleteModel(resources, id);
+        Resources.releaseModel(resources, id);
+    }
+}
+
 /** Build the full render state (the WorkerApi's bootEngine). */
 export async function boot(opts: BootOptions): Promise<State> {
     const renderer = Renderer.initHeadless(opts.gpu);
@@ -62,6 +94,8 @@ export async function boot(opts: BootOptions): Promise<State> {
     const performance = Performance.detect(renderer.renderer._adapter);
     const voxelBudget = voxelArenaBudgetForTier(performance);
     const settings = Performance.settingsForTier(performance);
+
+    seedModels(resources);
 
     const cloudResources = CloudResources.init(renderer.environmentResources);
     const modelResources = ModelResources.init();
@@ -109,6 +143,7 @@ export function clearScene(state: State, id: string): void {
  *  Rooms are ephemeral (built per render), so they pick up the swapped
  *  engine-global resources on the next render — no per-room rebind needed. */
 export async function applyRegistryChanges(state: State): Promise<void> {
+    seedModels(state.resources);
     const settings = Performance.settingsForTier(state.performance);
     const { resources: nextRes, changed } = await VoxelResources.refresh(
         state.voxelResources,

@@ -9,8 +9,9 @@ import { type Topic, topic } from '../utils/topic';
 import type { Voxels } from '../voxels/voxels';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
+import type { ValidationIssue } from './prop/validate';
 import { logScriptError } from './script-errors';
-import type { NodesContext, ScriptInstance } from './scripts';
+import type { FrameArgs, NodesContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
@@ -100,7 +101,7 @@ export type Node = {
      * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
      * empty entries are cleaned up.
      */
-    _traitIssues: Map<number, import('./prop').Issue[]>;
+    _traitIssues: Map<number, ValidationIssue[]>;
 
     /**
      * if non-null, this node is a prefab instance. its children are
@@ -1296,7 +1297,7 @@ function runHook<A>(
  * before runOnUpdate, so consumers can pre-process / consume input (e.g. an
  * editor zeroing mk._dx/_dy) before player controllers read it.
  */
-export function runOnInput(sg: Nodes, args: import('./scripts').FrameArgs, metrics: Debug.Metrics): void {
+export function runOnInput(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onInput', (i) => i.onInput);
 }
 
@@ -1304,7 +1305,7 @@ export function runOnInput(sg: Nodes, args: import('./scripts').FrameArgs, metri
  * update all scripts in the scene graph. fires once per frame before the
  * fixed-timestep tick loop — intended for input polling and camera binding.
  */
-export function runOnUpdate(sg: Nodes, args: import('./scripts').UpdateArgs, metrics: Debug.Metrics): void {
+export function runOnUpdate(sg: Nodes, args: UpdateArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onUpdate', (i) => i.onUpdate);
 }
 
@@ -1312,7 +1313,7 @@ export function runOnUpdate(sg: Nodes, args: import('./scripts').UpdateArgs, met
  * tick all scripts in the scene graph. iterates all nodes and calls onTick
  * on each script instance.
  */
-export function runOnTick(sg: Nodes, args: import('./scripts').TickArgs, metrics: Debug.Metrics): void {
+export function runOnTick(sg: Nodes, args: TickArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onTick', (i) => i.onTick);
 }
 
@@ -1321,7 +1322,7 @@ export function runOnTick(sg: Nodes, args: import('./scripts').TickArgs, metrics
  * tickSceneGraph but before the physics step. routes through SILENT — it runs
  * from physics.tick, which carries no metrics, and isn't surfaced in the digest.
  */
-export function runOnPrePhysicsStep(sg: Nodes, args: import('./scripts').TickArgs): void {
+export function runOnPrePhysicsStep(sg: Nodes, args: TickArgs): void {
     runHook(sg, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
 }
 
@@ -1329,7 +1330,7 @@ export function runOnPrePhysicsStep(sg: Nodes, args: import('./scripts').TickArg
  * fire onPostPhysicsStep hooks on all scripts in the scene graph. called after
  * the physics step, before frameSceneGraph. SILENT — see runOnPrePhysicsStep.
  */
-export function runOnPostPhysicsStep(sg: Nodes, args: import('./scripts').TickArgs): void {
+export function runOnPostPhysicsStep(sg: Nodes, args: TickArgs): void {
     runHook(sg, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
 }
 
@@ -1339,7 +1340,7 @@ export function runOnPostPhysicsStep(sg: Nodes, args: import('./scripts').TickAr
  * recompute, so post-anim callbacks see fresh local TRS but world matrices
  * are still last-tick.
  */
-export function runOnPostAnimate(sg: Nodes, args: import('./scripts').TickArgs, metrics: Debug.Metrics): void {
+export function runOnPostAnimate(sg: Nodes, args: TickArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
@@ -1347,7 +1348,7 @@ export function runOnPostAnimate(sg: Nodes, args: import('./scripts').TickArgs, 
  * frame all scripts in the scene graph. iterates all nodes and calls onFrame
  * on each script instance. intended for client-side render frame updates.
  */
-export function runOnFrame(sg: Nodes, args: import('./scripts').FrameArgs, metrics: Debug.Metrics): void {
+export function runOnFrame(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onFrame', (i) => i.onFrame);
 }
 

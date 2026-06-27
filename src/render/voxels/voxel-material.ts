@@ -94,7 +94,7 @@ import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/vox
 
 /**
  * Voxel animation clock in seconds. gpucat no longer ticks time itself, so the
- * render loop drives this each frame (see client/renderer.ts); static offline
+ * render loop drives this each frame (see render/renderer.ts); static offline
  * renders leave it at 0, freezing animation. renderGroup so it uploads once per
  * render rather than per draw.
  */

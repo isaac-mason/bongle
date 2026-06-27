@@ -47,17 +47,17 @@ import { markPrefabAnchorsDirty } from '../core/scene/nodes';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
+import * as ParticleResources from '../render/particles/particle-resources';
+import * as Performance from '../render/performance';
+import * as ExtrudedSpriteResources from '../render/sprites/extruded-sprite-resources';
+import * as ExtrudedSpriteVisuals from '../render/sprites/extruded-sprite-visuals';
+import * as SpriteResources from '../render/sprites/sprite-resources';
+import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import * as VoxelResources from '../render/voxels/voxel-resources';
+import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import type { EngineClient } from './engine-client';
 import * as Net from './net';
-import * as ParticleResources from './particles/particle-resources';
-import * as Performance from './performance';
-import * as ExtrudedSpriteResources from './sprites/extruded-sprite-resources';
-import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
-import * as SpriteResources from './sprites/sprite-resources';
-import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
-import * as VoxelResources from './voxels/voxel-resources';
-import * as VoxelVisuals from './voxels/voxel-visuals';
 
 // TEMP diagnostic: count HMR dispatches to detect runaway re-fire loops.
 // Logs every call with elapsed-ms-since-last and a 30-call rolling rate.

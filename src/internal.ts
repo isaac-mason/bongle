@@ -19,10 +19,8 @@ export type ModuleVersion = {
     models: Map<string, ModelHandleType>;
     scenes: Map<string, SceneHandleType>;
 };
-export type { SpawnOpts } from './client/particles/particles';
-export { allocateSlot, init, update } from './client/particles/particles';
 // Skyline atlas core — pure algorithm + types, consumed by both the
-// runtime model atlas (`client/models/model-atlas.ts`) and the bake-time
+// runtime model atlas (`render/models/model-atlas.ts`) and the bake-time
 // sprite-atlas pass in `lib/kit/src/asset-pipeline/sprite-atlas.ts`.
 export type { Region, SkylineNode } from './core/atlas/skyline';
 export { addSkylineLevel, emptySkyline, findBestFit } from './core/atlas/skyline';
@@ -68,3 +66,5 @@ export type { BlockDef, BlockHandle, BlockTextureDef } from './core/voxels/block
 // prelude/postlude, model + scene codegen barrels, kit boot entries).
 // See engine/src/__kit.ts for the full surface + injection sites.
 export { __kit } from './kit';
+export type { SpawnOpts } from './render/particles/particles';
+export { allocateSlot, init, update } from './render/particles/particles';

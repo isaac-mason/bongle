@@ -9,11 +9,11 @@
 // not synced, not editor-editable, not persisted.
 
 import { type Vec4, vec4 } from 'mathcat';
-import type { MeshVisualState } from '../client/models/model-visuals';
 import type { MeshId } from '../core/models/handle';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
+import type { MeshVisualState } from '../render/models/model-visuals';
 
 export const MeshTrait = trait('mesh', {
     /**

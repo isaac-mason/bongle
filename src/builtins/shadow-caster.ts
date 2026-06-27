@@ -11,10 +11,10 @@
 // raycast cares about). Multi-block clipping (ledges, stairs) is the
 // lazy single-ray version — same fidelity as Minecraft's entity shadow.
 //
-// Render path lives in `client/shadows/shadow-visuals.ts`.
+// Render path lives in `render/shadows/shadow-visuals.ts`.
 
-import type { ShadowVisualState } from '../client/shadows/shadow-visuals';
 import { type TraitType, trait } from '../core/scene/traits';
+import type { ShadowVisualState } from '../render/shadows/shadow-visuals';
 
 export const ShadowCasterTrait = trait('shadow-caster', {
     /** disc radius in world units. */

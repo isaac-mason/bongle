@@ -3,7 +3,7 @@
 // Lives in core/ for the same reason sprite() does: the declaration is a
 // pure registry write with no client-runtime dependency. The pool, tick,
 // and spawn op are client-only and live next door under
-// `client/particles/particles.ts` — that file imports the types from
+// `render/particles/particles.ts` — that file imports the types from
 // here and supplies the implementations.
 //
 // The split mirrors sprites: declaration + handle shape in core,
@@ -35,7 +35,7 @@ import { registry, upsert } from '../registry';
 import type { SpriteHandle } from '../sprites/sprites';
 import type { Voxels } from '../voxels/voxels';
 
-/* ── pool shape (impl lives in client/particles/particles.ts) ── */
+/* ── pool shape (impl lives in render/particles/particles.ts) ── */
 
 /** Per-room SoA pool. Alive prefix is `[0, count)`; dead slots are
  *  compacted by `Particles.update` (client). The type is declared here

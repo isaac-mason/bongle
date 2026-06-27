@@ -10,7 +10,7 @@
  * getWorldPosition/getWorldMatrix/etc triggers recompute on demand.
  *
  * the per-frame snapshot+interpolate pipeline lives in
- * `client/interpolation.ts` — interpolation is a rendering concern and
+ * `render/interpolation.ts` — interpolation is a rendering concern and
  * only meaningful client-side.
  */
 
@@ -718,7 +718,7 @@ export function markInterpolatedDescendantsDirty(node: Node): void {
  *
  * on enable: flips `interpolate` flag, seeds prev pose from the current
  * local pose, and adds the transform to the per-room `_interpolating` set
- * — which the per-frame `interpolate()` loop in `client/interpolation.ts`
+ * — which the per-frame `interpolate()` loop in `render/interpolation.ts`
  * iterates.
  *
  * on disable: flips the flag off, clears `_interpolated` (so visual getters

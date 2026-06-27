@@ -4,24 +4,24 @@
  * Three named environments via Vite's Environment API:
  *   • `client`         — browser bundle. default web env. user code + engine
  *                        client sources live here.
- *   • `gameServer`     — `createRunnableDevEnvironment`. node-side runner
+ *   • `server`     — `createRunnableDevEnvironment`. node-side runner
  *                        loaded by `kit/dev/game-env.ts`. Hosts the
  *                        EngineServer; receives WS upgrades via the
  *                        `/game` transport. Also hosts the asset-pipeline
  *                        flush handler (atlas/models/scenes codegen) registered
  *                        by the `bongle:pipeline` plugin.
- *   • `pipeline`       — `createRunnableDevEnvironment`. the in-process Node
- *                        asset pipeline: its runner imports
- *                        `virtual:bongle/pipeline-worker` and drives
- *                        EngineAssetPipeline to render icons offscreen
- *                        (kit/pipeline/local-pipeline.ts). DOM-less.
+ * The asset pipeline (`AssetPipeline`, behind `engine-asset-pipeline`) is NOT
+ * its own env — it runs inside the `server` graph (compiled `env.client=false`;
+ * the render path is env-agnostic), so bake + codegen + render share one
+ * registry. The `bongle:pipeline` plugin inits + drives it; see
+ * `src/asset-pipeline/pipeline.ts`.
  *
  * The `bongle()` plugin is shared across the envs — every user-src file
  * gets the same push/pop/decideReload transform regardless of which env
  * evaluates it. Each env's runtime separately calls
  * `__kit.registerFlush(...)` at boot, so the same `__kit.flush()` call
  * site routes to the right consumer per env (engine dispatch + pipeline
- * on gameServer; engine dispatch on client).
+ * on server; engine dispatch on client).
  *
  * `optimizeDeps.exclude` covers engine + external workspace deps so vite
  * serves them as source, not pre-bundled chunks. Pre-bundling would fork
@@ -31,7 +31,15 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
-import { createLogger, createRunnableDevEnvironment, defineConfig, type Logger, searchForWorkspaceRoot, type Plugin, type UserConfig } from 'vite';
+import {
+    createLogger,
+    createRunnableDevEnvironment,
+    defineConfig,
+    type Logger,
+    type Plugin,
+    searchForWorkspaceRoot,
+    type UserConfig,
+} from 'vite';
 
 // Absolute path to bongle's package root, derived from this file's own
 // location (`<root>/kit/vite/config.ts`). Works whether bongle is the
@@ -41,6 +49,7 @@ const BONGLE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 /** Normalise to a forward-slash glob (vite's dep scanner globs want posix). */
 const toGlob = (p: string) => p.replace(/\\/g, '/');
+
 import { envPlugin } from '../env-plugin';
 import { bongle } from './plugin';
 
@@ -85,25 +94,24 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
         publicDir: path.join(projectDir, 'public'),
         plugins: [
             // Scope tailwind to the client env only. Without this the plugin
-            // pipeline also runs editor.css through gameServer/SSR, which
+            // pipeline also runs editor.css through server/SSR, which
             // races vite's per-env `cssModulesCache` init in `vite:css-post`
             // and crashes the dev server at startup with
             // `cssModulesCache.get(config)` undefined. editor.css is only
             // reachable from client/ui/ui.tsx anyway.
-            ...tailwindcss().map((p: Plugin): Plugin => ({
-                ...p,
-                applyToEnvironment(env) {
-                    return env.name === 'client';
-                },
-            })),
+            ...tailwindcss().map(
+                (p: Plugin): Plugin => ({
+                    ...p,
+                    applyToEnvironment(env) {
+                        return env.name === 'client';
+                    },
+                }),
+            ),
             // Per-env envPlugin instances — `applyToEnvironment` scopes each
             // substitution set to its own env's module graph.
             envPlugin({ client: true, server: false, editor: true }, 'client'),
-            envPlugin({ client: false, server: true, editor: true }, 'gameServer'),
-            // The in-process Node asset pipeline is a CLIENT (env.client) — it
-            // runs EngineAssetPipeline in the `pipeline` runnable env's runner.
-            envPlugin({ client: true, server: false, editor: true }, 'pipeline'),
-            ...bongle({ projectDir, bongleDir }),
+            envPlugin({ client: false, server: true, editor: true }, 'server'),
+            ...bongle({ projectDir }),
         ],
         server: {
             port,
@@ -177,7 +185,7 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                 // browser env defaults; the bongle() plugin's transform
                 // applies here too.
             },
-            gameServer: {
+            server: {
                 resolve: {
                     conditions: ['node'],
                     // bundle engine + workspace deps so user code and engine
@@ -187,32 +195,7 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                     // for CJS-only leaf deps reached via the editor module
                     // (react, react-dom, zustand). vite's module-runner
                     // can't evaluate CJS, so bundling those crashes the
-                    // gameServer env at boot.
-                    noExternal: [
-                        'bongle',
-                        /^@bongle\//,
-                        'gpucat',
-                        'mathcat',
-                        'packcat',
-                        'crashcat',
-                    ],
-                },
-                dev: {
-                    createEnvironment(name, config) {
-                        return createRunnableDevEnvironment(name, config, {
-                            runnerOptions: { hmr: { logger: false } },
-                        });
-                    },
-                },
-            },
-            // The Node asset pipeline runs in-process via this runnable env (like
-            // gameServer). Resolved for node + bundles the engine so user code +
-            // engine share one module instance / capture registry. Its runner
-            // imports `virtual:bongle/pipeline-worker` and drives
-            // EngineAssetPipeline; `kit/pipeline/local-pipeline.ts` boots it.
-            pipeline: {
-                resolve: {
-                    conditions: ['node'],
+                    // server env at boot.
                     noExternal: ['bongle', /^@bongle\//, 'gpucat', 'mathcat', 'packcat', 'crashcat'],
                 },
                 dev: {
@@ -227,4 +210,3 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
         logLevel: 'info',
     });
 }
-

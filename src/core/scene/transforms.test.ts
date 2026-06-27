@@ -25,7 +25,7 @@ import {
     worldToLocalPosition,
     worldToLocalQuaternion,
 } from '../../builtins/transform';
-import { init as initInterpolation, interpolate, snapshot } from '../../client/interpolation';
+import { init as initInterpolation, interpolate, snapshot } from '../../render/interpolation';
 import {
     addChild,
     addTrait,

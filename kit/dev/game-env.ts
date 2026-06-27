@@ -1,7 +1,7 @@
 /**
- * kit/dev/game-env.ts — boot the `gameServer` Vite environment.
+ * kit/dev/game-env.ts — boot the `server` Vite environment.
  *
- * The gameServer env is a `RunnableDevEnvironment` declared in
+ * The server env is a `RunnableDevEnvironment` declared in
  * `kit/vite/config.ts`. Its runner evaluates user + engine code in the
  * same node process as Vite, but isolated through Vite's module runner
  * (its own module graph, its own HMR boundary). We import the virtual
@@ -50,9 +50,9 @@ const BOOT_ID = 'virtual:bongle/edit-server';
 export async function initGameEnv(opts: InitGameEnvOptions): Promise<GameEnvBootResult<unknown>> {
     const { server, projectDir, bongleDir } = opts;
 
-    const env = server.environments.gameServer as RunnableDevEnvironment | undefined;
+    const env = server.environments.server as RunnableDevEnvironment | undefined;
     if (!env) {
-        throw new Error('[game-env] gameServer environment not configured — check vite config');
+        throw new Error('[game-env] server environment not configured — check vite config');
     }
     if (!server.httpServer) {
         throw new Error('[game-env] vite httpServer not initialized — call server.listen() first');
@@ -62,10 +62,7 @@ export async function initGameEnv(opts: InitGameEnvOptions): Promise<GameEnvBoot
         boot?: (ctx: GameEnvBootContext) => Promise<GameEnvBootResult<unknown>>;
     };
     if (typeof mod.boot !== 'function') {
-        throw new Error(
-            `[game-env] ${BOOT_ID} did not export \`boot(ctx)\` — ` +
-                `check kit/vite/virtual-entries.ts`,
-        );
+        throw new Error(`[game-env] ${BOOT_ID} did not export \`boot(ctx)\` — ` + `check kit/vite/virtual-entries.ts`);
     }
 
     return await mod.boot({

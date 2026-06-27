@@ -3,31 +3,31 @@
  *
  * Composition:
  *   1. `createServer(defineBongleConfig(...))` builds a Vite dev server
- *      with the two named envs (`client`, `gameServer`) and the `bongle()`
+ *      with the two named envs (`client`, `server`) and the `bongle()`
  *      plugin in both. The plugin's `bongle:pipeline` entry registers an
- *      asset-pipeline flush handler against the gameServer env during
+ *      asset-pipeline flush handler against the server env during
  *      `configureServer`, so there's no separate pipeline env to boot.
  *   2. `server.listen()` brings up Vite's http server on the configured
  *      port. Listen first so `server.httpServer` is bound when the
  *      transport hooks `upgrade`.
  *   3. `initGameEnv` imports `virtual:bongle/edit-server` through the
- *      gameServer runner (served by the bongle:virtual-entries plugin).
+ *      server runner (served by the bongle:virtual-entries plugin).
  *      The virtual's `boot()` calls into `runtime/edit-server.start()` which
  *      attaches `/game` upgrades to `server.httpServer`. Loading populates
- *      the gameServer-local registries; the initial `__kit.flush()`
+ *      the server-local registries; the initial `__kit.flush()`
  *      issued by `start()` drives the first pipeline pass alongside the
  *      engine's server-side dispatch.
  *
  * Returns a handle whose `.close()` shuts everything down — closes the
  * Vite server (which closes the http server, which closes the WS via the
- * transport's `'close'` handler), tears down the gameServer env, and
+ * transport's `'close'` handler), tears down the server env, and
  * disposes the user's ServerApp.
  */
 
 import { createServer, type ViteDevServer } from 'vite';
-import { initGameEnv, type GameEnvBootResult } from './game-env';
 import { defineBongleConfig } from '../vite/config';
 import { iconsRendered } from '../vite/plugin';
+import { type GameEnvBootResult, initGameEnv } from './game-env';
 
 export type StartDevOptions = {
     projectDir: string;
@@ -43,21 +43,19 @@ export type DevHandle = {
      *  free-port probe and `listen()` — callers must log/tunnel this, not the
      *  requested value. */
     port: number;
-    /** Resolves once the persistent pipeline page has rendered + emitted
-     *  every icon on cold start (the headless page is fully warm). The CLI
-     *  awaits this before its ready banner. Resolves even on a pipeline
-     *  fault, so it never wedges startup. */
+    /** Resolves once the in-process pipeline worker has rendered every icon
+     *  on cold start (the worker is fully warm). The CLI awaits this before
+     *  its ready banner. Resolves even on a pipeline fault, so it never
+     *  wedges startup. */
     iconsRendered: Promise<void>;
-    /** Tear down the gameServer env + the vite server. Idempotent. */
+    /** Tear down the server env + the vite server. Idempotent. */
     close(): Promise<void>;
 };
 
 export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> {
     const { projectDir, bongleDir, port } = opts;
 
-    const server = await createServer(
-        defineBongleConfig({ projectDir, bongleDir, port }),
-    );
+    const server = await createServer(defineBongleConfig({ projectDir, bongleDir, port }));
     await server.listen();
 
     // Source of truth for the bound port: read it off the http server rather
@@ -66,7 +64,7 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
     const address = server.httpServer?.address();
     const boundPort = typeof address === 'object' && address ? address.port : port;
 
-    // The transport attaches inside the gameServer env's boot entry
+    // The transport attaches inside the server env's boot entry
     // (`virtual:bongle/edit-server` → `runtime/edit-server.start`), so the
     // http server must already be bound — `server.listen()` above
     // guarantees that. initGameEnv forwards server.httpServer into the
@@ -77,9 +75,21 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
     async function close(): Promise<void> {
         if (closed) return;
         closed = true;
-        try { game.transport.close(); } catch (err) { console.warn('[dev/start] transport close failed:', err); }
-        try { game.app.dispose?.(game.state); } catch (err) { console.warn('[dev/start] app.dispose failed:', err); }
-        try { await server.close(); } catch (err) { console.warn('[dev/start] server close failed:', err); }
+        try {
+            game.transport.close();
+        } catch (err) {
+            console.warn('[dev/start] transport close failed:', err);
+        }
+        try {
+            game.app.dispose?.(game.state);
+        } catch (err) {
+            console.warn('[dev/start] app.dispose failed:', err);
+        }
+        try {
+            await server.close();
+        } catch (err) {
+            console.warn('[dev/start] server close failed:', err);
+        }
     }
 
     return { server, game, port: boundPort, iconsRendered, close };

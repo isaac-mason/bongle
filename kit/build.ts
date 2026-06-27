@@ -1,13 +1,11 @@
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { INTERFACE_VERSION } from 'bongle/interface';
-import archiver from 'archiver';
 import tailwindcss from '@tailwindcss/vite';
+import archiver from 'archiver';
+import { AssetPipeline, excludeEditorIcons, resolveEngineRoot } from 'bongle/engine-asset-pipeline';
+import { INTERFACE_VERSION } from 'bongle/interface';
 import { build as viteBuild } from 'vite';
-import { excludeEditorIcons } from './asset-pipeline/icons-write';
-import { createPipelineState, type PipelineInternal, runAssetPipelinePass } from './asset-pipeline/pipeline';
-import { resolveEngineRoot } from './asset-pipeline/run';
 import { captureImportPlugin } from './capture-import-plugin';
 import { envPlugin } from './env-plugin';
 import { buildManifest } from './manifest';
@@ -48,9 +46,19 @@ async function runBuild(projectDir: string, target: Target): Promise<void> {
 
     // Tailwind is client-only — it has nothing to do on the server and
     // would otherwise emit a stray CSS asset alongside `server/index.js`.
-    const plugins = target === 'client'
-        ? [virtualEntriesPlugin({ projectDir }), tailwindcss(), envPlugin({ client: true, server: false, editor: false, offline: false }), captureImportPlugin(projectDir)]
-        : [virtualEntriesPlugin({ projectDir }), envPlugin({ client: false, server: true, editor: false, offline: false }), captureImportPlugin(projectDir)];
+    const plugins =
+        target === 'client'
+            ? [
+                  virtualEntriesPlugin({ projectDir }),
+                  tailwindcss(),
+                  envPlugin({ client: true, server: false, editor: false, offline: false }),
+                  captureImportPlugin(projectDir),
+              ]
+            : [
+                  virtualEntriesPlugin({ projectDir }),
+                  envPlugin({ client: false, server: true, editor: false, offline: false }),
+                  captureImportPlugin(projectDir),
+              ];
 
     // Vite's `lib` mode doesn't auto-replace `process.env.NODE_ENV` —
     // unlike its app-mode build — so React et al. ship their dev-only
@@ -106,10 +114,11 @@ async function runBuild(projectDir: string, target: Target): Promise<void> {
 }
 
 /**
- * Prod-build adapter for runAssetPipelinePass. Imports the user module
- * in-process (bun's native TS loader handles `.ts` directly) so its
- * declarative APIs upsert into the typed registries, then hands the
- * shared pipeline pass the same registries the dev plugin handler uses.
+ * Prod-build adapter for `AssetPipeline`. Imports the user module in-process
+ * (bun's native TS loader handles `.ts` directly) so its declarative APIs
+ * upsert into the typed registries, then runs the same pipeline the dev plugin
+ * drives — `renderIcons: false`, so it bakes (atlas/models/scenes/audio/
+ * sprites) without booting a GPU device.
  *
  * Returns the matchmaking config seen during evaluation — used by the
  * caller to seed the bundle manifest.
@@ -130,10 +139,10 @@ async function runAssetPipelineInProcess(opts: {
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
 
-    const internal = (await import('bongle/internal')) as unknown as PipelineInternal;
-    const state = createPipelineState();
-    await runAssetPipelinePass(internal, { projectDir: opts.projectDir, mode: 'play', cache: false }, state);
-    return { matchmaking: state.matchmakingConfig ?? { maxPlayers: 10 } };
+    const pipeline = AssetPipeline.init({ projectDir: opts.projectDir, mode: 'play', cache: false, renderIcons: false });
+    const result = await AssetPipeline.run(pipeline);
+    AssetPipeline.dispose(pipeline);
+    return { matchmaking: result.matchmakingConfig ?? { maxPlayers: 10 } };
 }
 
 /** Read a package's resolved version from its `package.json`. Resolved

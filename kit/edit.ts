@@ -3,7 +3,7 @@
  *
  * Orchestration is intentionally thin: prime the user's generated-stubs
  * barrels, then hand off to `startDevServer` (which owns the Vite dev
- * server, the gameServer env's runner, and — via the `bongle:pipeline`
+ * server, the server env's runner, and — via the `bongle:pipeline`
  * plugin entry — the in-process Node asset pipeline that renders icons).
  * The dev server's HTML shell (`/`) and every kit boot module are served as
  * virtuals by `bongle:virtual-entries`; nothing kit-side gets written to
@@ -19,10 +19,10 @@
 
 import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
-import { open as openInspector, url as inspectorUrl } from 'node:inspector';
+import { url as inspectorUrl, open as openInspector } from 'node:inspector';
 import net from 'node:net';
 import path from 'node:path';
-import { startDevServer, type DevHandle } from './dev/start';
+import { type DevHandle, startDevServer } from './dev/start';
 import { checkContent } from './migrations';
 import { ensureGeneratedStubs, resetGeneratedBarrels } from './user-entry';
 
@@ -208,7 +208,11 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         path.join(resourcesClientDir, 'scenes-icons.json'),
     ];
     for (const f of coldStartWipes) {
-        try { fs.unlinkSync(f); } catch { /* missing is fine */ }
+        try {
+            fs.unlinkSync(f);
+        } catch {
+            /* missing is fine */
+        }
     }
 
     const port = await getPort(CLIENT_PORT);
@@ -256,8 +260,8 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         }
     }
 
-    // Hold the banner until the persistent pipeline page has rendered +
-    // emitted every icon, so "started!" means the whole pipeline is warm, not
+    // Hold the banner until the in-process pipeline worker has rendered
+    // every icon, so "started!" means the whole pipeline is warm, not
     // just the dev server listening. Resolves even on a pipeline fault.
     const stepIcons = step('rendering icons');
     await handle.iconsRendered;
@@ -266,7 +270,11 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
     printReady(links);
 
     const cleanup = () => {
-        try { tunnel?.kill('SIGTERM'); } catch { /* nothing to do */ }
+        try {
+            tunnel?.kill('SIGTERM');
+        } catch {
+            /* nothing to do */
+        }
         handle?.close().catch(() => {});
     };
 
@@ -285,9 +293,7 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
 // `cloudflared tunnel --url` prints the assigned `*.trycloudflare.com`
 // URL into stderr along with a banner. Resolve once we see it; reject
 // if the child exits first or ENOENTs (binary not installed).
-type CloudflaredResult =
-    | { kind: 'ok'; child: ChildProcess; url: string }
-    | { kind: 'err'; message: string };
+type CloudflaredResult = { kind: 'ok'; child: ChildProcess; url: string } | { kind: 'err'; message: string };
 
 function startCloudflaredTunnel(port: number): Promise<CloudflaredResult> {
     return new Promise((resolve) => {
@@ -296,10 +302,12 @@ function startCloudflaredTunnel(port: number): Promise<CloudflaredResult> {
             [
                 'tunnel',
                 '--no-autoupdate',
-                '--url', `http://localhost:${port}`,
+                '--url',
+                `http://localhost:${port}`,
                 // rewrite the Host header on the way to the origin so vite's
                 // built-in host-check passes without an explicit allowlist.
-                '--http-host-header', `localhost:${port}`,
+                '--http-host-header',
+                `localhost:${port}`,
             ],
             { stdio: ['ignore', 'pipe', 'pipe'] },
         );

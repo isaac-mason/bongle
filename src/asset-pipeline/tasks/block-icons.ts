@@ -14,14 +14,14 @@
 
 import { type ComputeDispatch, OrthographicCamera } from 'gpucat';
 import { PRESETS } from '../../api/environment';
-import { applyConfig, flushActive } from '../../client/environment';
-import * as Renderer from '../../client/renderer';
-import * as VoxelResources from '../../client/voxels/voxel-resources';
-import * as VoxelVisuals from '../../client/voxels/voxel-visuals';
 import { registry as engineRegistry } from '../../core/registry';
 import { MODEL_NONE } from '../../core/voxels/block-registry';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../../core/voxels/chunk-mesher';
 import { createVoxels, ensureChunk, setBlock } from '../../core/voxels/voxels';
+import { applyConfig, flushActive } from '../../render/environment';
+import * as Renderer from '../../render/renderer';
+import * as VoxelResources from '../../render/voxels/voxel-resources';
+import * as VoxelVisuals from '../../render/voxels/voxel-visuals';
 import type { State } from '../engine';
 import { createRoom, disposeRoom } from '../rooms';
 import { beginSnapshotSession, captureTile, endSnapshotSession } from '../snapshot';

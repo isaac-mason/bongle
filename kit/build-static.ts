@@ -1,10 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
+import { AssetPipeline, excludeEditorIcons, resolveEngineRoot } from 'bongle/engine-asset-pipeline';
 import { build as viteBuild } from 'vite';
-import { excludeEditorIcons } from './asset-pipeline/icons-write';
-import { createPipelineState, type PipelineInternal, runAssetPipelinePass } from './asset-pipeline/pipeline';
-import { resolveEngineRoot } from './asset-pipeline/run';
 import { captureImportPlugin } from './capture-import-plugin';
 import { envPlugin } from './env-plugin';
 import { checkContent } from './migrations';
@@ -84,16 +82,13 @@ requestAnimationFrame(loop)
     return { entryHtml, entryTs };
 }
 
-async function runAssetPipelineInProcess(opts: {
-    projectDir: string;
-    bongleDir: string;
-    engineRoot: string;
-}): Promise<void> {
+async function runAssetPipelineInProcess(opts: { projectDir: string; bongleDir: string; engineRoot: string }): Promise<void> {
     await import(/* @vite-ignore */ path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
-    const internal = (await import('bongle/internal')) as unknown as PipelineInternal;
-    await runAssetPipelinePass(internal, { projectDir: opts.projectDir, mode: 'play', cache: false }, createPipelineState());
+    const pipeline = AssetPipeline.init({ projectDir: opts.projectDir, mode: 'play', cache: false, renderIcons: false });
+    await AssetPipeline.run(pipeline);
+    AssetPipeline.dispose(pipeline);
 }
 
 export async function buildStatic(projectDir: string, opts?: { sceneId?: string }) {

@@ -11,15 +11,15 @@
 // out-of-scope for v1; if they're ever needed, the spriteId is the
 // stable wire surface (the handle itself is module-eval state).
 //
-// Render path lives in `client/sprites/sprite-visuals.ts`. Flipbook
+// Render path lives in `render/sprites/sprite-visuals.ts`. Flipbook
 // playback is `fps`-driven; the trait carries no playback enum (no
 // lifetime → no `'stretch'`, no natural `'once'` trigger), so the only
 // sensible behaviour is loop. Single-frame sprites ignore `fps`.
 
 import type { Vec4 } from 'mathcat';
-import type { SpriteVisualState } from '../client/sprites/sprite-visuals';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
+import type { SpriteVisualState } from '../render/sprites/sprite-visuals';
 
 export type SpriteMode = 'world' | 'billboard' | 'y-billboard';
 

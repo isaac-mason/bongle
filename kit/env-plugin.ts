@@ -15,7 +15,7 @@ import type { Plugin } from 'vite';
  * registers `applyToEnvironment` so only that env's module graph receives
  * these substitutions. This lets multiple `envPlugin` instances coexist
  * with different value sets — e.g. client=true in the client env and
- * server=true in the gameServer env.
+ * server=true in the server env.
  */
 export function envPlugin(values: Record<string, boolean>, applyToEnvironmentName?: string): Plugin {
     const keys = Object.keys(values);
@@ -23,9 +23,7 @@ export function envPlugin(values: Record<string, boolean>, applyToEnvironmentNam
 
     return {
         name: applyToEnvironmentName ? `bongle-env:${applyToEnvironmentName}` : 'bongle-env',
-        applyToEnvironment: applyToEnvironmentName
-            ? (environment) => environment.name === applyToEnvironmentName
-            : undefined,
+        applyToEnvironment: applyToEnvironmentName ? (environment) => environment.name === applyToEnvironmentName : undefined,
 
         transform(code, _id) {
             // Quick bail: if file doesn't reference any known env key, skip

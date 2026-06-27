@@ -1,10 +1,10 @@
 /**
- * kit/pipeline/resource-loader.ts — the asset pipeline's `ResourceLoader`.
+ * src/asset-pipeline/bake/resource-loader.ts — the asset pipeline's `ResourceLoader`.
  *
  * The Node-only counterpart to the browser's `browserResourceLoader`: byte
- * loading off disk + a `sharp` image decoder. This is the ONLY place `sharp`
- * is imported in the asset-pipeline path; the engine (`src/`) sees only the
- * `ResourceLoader` type, so sharp can never reach the client bundle.
+ * loading off disk + a `sharp` image decoder. `sharp` is only reachable through
+ * the `engine-asset-pipeline` entrypoint (edit + build), never from the
+ * `engine-client`/`engine-server`/play bundles, so it can't reach the client.
  *
  * No caching: the sharp/Dawn-overlap segfault is avoided by VoxelResources.load
  * serialising the atlas decode before the compute compile when `decodeImage` is
@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
-import type { ResourceLoader } from 'bongle/engine-client';
+import type { ResourceLoader } from '../../core/resource-loader';
 
 export function createPipelineResourceLoader(resourcesClientDir: string): ResourceLoader {
     return {
@@ -28,7 +28,11 @@ export function createPipelineResourceLoader(resourcesClientDir: string): Resour
 
         async decodeImage(bytes) {
             const { data, info } = await sharp(Buffer.from(bytes)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-            return { width: info.width, height: info.height, rgba: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) };
+            return {
+                width: info.width,
+                height: info.height,
+                rgba: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+            };
         },
     };
 }

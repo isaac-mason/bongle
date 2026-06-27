@@ -6,23 +6,25 @@
  *
  *   virtual:bongle/edit-client
  *   virtual:bongle/edit-server     (game-env.ts imports this through the
- *                                   gameServer runner and calls boot(ctx))
- *   virtual:bongle/pipeline-worker (the in-process asset-pipeline boot entry;
- *                                   the pipeline env's runner imports it)
+ *                                   server runner and calls boot(ctx); the
+ *                                   asset pipeline rides this same graph via
+ *                                   the bongle:pipeline plugin)
  *   virtual:bongle/build-client    (lib.entry for `bongle build` client)
  *   virtual:bongle/build-server    (lib.entry for `bongle build` server)
- *   virtual:bongle/user-src        (dynamic-imported by edit/pipeline
+ *   virtual:bongle/user-src        (dynamic-imported by the edit
  *                                   entries; static-imported by build
  *                                   entries; statically imports the user's
  *                                   `src/generated` + `src/index` and ends
  *                                   the HMR self-accept cascade)
  *
- * Env-set-ordering invariant: dev entries (edit-client / edit-server /
- * pipeline) call into `runtime/*.start()`, which sets `env.{client,
+ * Env-set-ordering invariant: the env-owning dev entries (edit-client /
+ * edit-server) call into `runtime/*.start()`, which sets `env.{client,
  * server,editor}` BEFORE awaiting `opts.userEntry()`. The userEntry thunk
  * dynamic-imports `virtual:bongle/user-src` so user code's top-level
  * `model()/block()/script()/...` declarations evaluate AFTER env is set.
- * ESM static-import hoisting can't reorder past the dynamic import.
+ * ESM static-import hoisting can't reorder past the dynamic import. The asset
+ * pipeline sets no env — it runs inside the server graph and inherits the env
+ * edit-server already set.
  *
  * Build entries don't need a dynamic boundary — `play-{client,server}`
  * set env inside their `init()`, not at module top level — so the
@@ -64,14 +66,7 @@ const INDEX_HTML = `<!doctype html>
 const PREFIX = 'virtual:bongle/';
 const RESOLVED_PREFIX = '\0' + PREFIX;
 
-const NAMES = new Set([
-    'edit-client',
-    'edit-server',
-    'pipeline-worker',
-    'build-client',
-    'build-server',
-    'user-src',
-]);
+const NAMES = new Set(['edit-client', 'edit-server', 'build-client', 'build-server', 'user-src']);
 
 export interface VirtualEntriesOptions {
     projectDir: string;
@@ -109,13 +104,6 @@ export function boot(ctx) {
         bongleDir: ctx.bongleDir,
         userEntry: () => import('virtual:bongle/user-src'),
     });
-}
-`;
-                case 'pipeline-worker':
-                    return /* js */ `
-import { boot as bootImpl } from 'bongle/kit/runtime/pipeline-node';
-export function boot(ctx) {
-    return bootImpl({ ...ctx, userEntry: () => import('virtual:bongle/user-src') });
 }
 `;
                 case 'build-client':

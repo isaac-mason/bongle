@@ -19,19 +19,9 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import sharp from 'sharp';
-import type {
-    DrawSource,
-    NormalizedImageSource,
-    Region,
-    KindStore,
-    SpriteHandle,
-} from 'bongle/internal';
-import {
-    addSkylineLevel,
-    emptySkyline,
-    findBestFit,
-} from 'bongle/internal';
-import { readArtifactHashSync } from '../cache';
+import type { DrawSource, KindStore, NormalizedImageSource, Region, SpriteHandle } from '../../internal';
+import { addSkylineLevel, emptySkyline, findBestFit } from '../../internal';
+import { readArtifactHashSync } from './cache';
 import type { BakedDraws } from './draw-textures';
 import { resolveSrcToAbsPath } from './util';
 
@@ -104,8 +94,16 @@ export async function buildSpriteAtlas(
     if (handles.length === 0) {
         // empty registry — drop any leftover artifacts so the cache marker
         // resets cleanly. parallels buildBlockTextureAtlas's empty path.
-        try { fs.unlinkSync(atlasPng); } catch { /* missing is fine */ }
-        try { fs.unlinkSync(atlasJson); } catch { /* missing is fine */ }
+        try {
+            fs.unlinkSync(atlasPng);
+        } catch {
+            /* missing is fine */
+        }
+        try {
+            fs.unlinkSync(atlasJson);
+        } catch {
+            /* missing is fine */
+        }
         return false;
     }
 
@@ -180,7 +178,9 @@ export async function buildSpriteAtlas(
     const metadata: SpriteAtlasMetadata = { atlasSize, sprites, hash };
     fs.writeFileSync(atlasJson, JSON.stringify(metadata, null, 2));
 
-    console.log(`[bongle] sprite atlas built: ${atlasSize}x${atlasSize} (${handles.length} sprites, ${items.length} frames) in ${(performance.now() - buildStart).toFixed(0)}ms`);
+    console.log(
+        `[bongle] sprite atlas built: ${atlasSize}x${atlasSize} (${handles.length} sprites, ${items.length} frames) in ${(performance.now() - buildStart).toFixed(0)}ms`,
+    );
     return true;
 }
 
@@ -218,7 +218,9 @@ async function loadFramePixels(item: FrameItem, bakedDraws: BakedDraws): Promise
     if (typeof item.source !== 'string') {
         const canvas = bakedDraws.get(item.source);
         if (!canvas) {
-            console.warn(`[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} is a DrawSource with no baked canvas (magenta placeholder)`);
+            console.warn(
+                `[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} is a DrawSource with no baked canvas (magenta placeholder)`,
+            );
             return placeholder(item, PLACEHOLDER_SIZE);
         }
         const png = await canvas.toBuffer('png');

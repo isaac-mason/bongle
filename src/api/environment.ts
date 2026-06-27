@@ -4,9 +4,9 @@
 // merges into the config buffer.
 
 import type { Vec2, Vec3 } from 'mathcat';
-import * as ClientEnvironment from '../client/environment';
 import { srgbBytesToLinear } from '../core/color';
 import type { ScriptContext } from '../core/scene/scripts';
+import * as ClientEnvironment from '../render/environment';
 
 /* ── types ────────────────────────────────────────────────────────── */
 
