@@ -7,21 +7,7 @@
 // diff detection still runs every tick for all nodes (cheap byte compare).
 // rate gating only applies to the send path (serialization + network I/O).
 
-import type { SyncRateConfig, ThresholdRate } from '../traits';
-
-/**
- * resolve a SyncRateConfig to an Hz cap, or null = no send-path throttle.
- * - number → explicit Hz cap
- * - everything else → null:
- *   - 'realtime' — emit whenever the diff bumps the version
- *   - 'dirty'    — emission is flagged by SyncHandle.dirty() in the diff loop
- *   - ThresholdRate — the throttle IS the diff: the version only bumps on a
- *     significant value change (see `diffSyncSlice`)
- */
-export function resolveRate(rateConfig: SyncRateConfig | undefined): number | null {
-    if (typeof rateConfig === 'number') return rateConfig;
-    return null;
-}
+import type { ThresholdRate } from '../traits';
 
 /**
  * change metrics for `ThresholdRate`. each receives the previously-emitted value

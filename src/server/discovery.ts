@@ -18,7 +18,7 @@ import {
 } from '../core/scene/nodes';
 import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
 import { packSceneGraph } from '../core/scene/scene-pack';
-import { captureValue, diffSyncSlice, writeSnapshot } from '../core/scene/sync/sync-diff';
+import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
 import { encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
@@ -92,7 +92,7 @@ function diffNode(sg: Nodes, node: Node): void {
             // shared cold path: byte-diff or ThresholdRate metric. the server seeds
             // a first-seen slice silently (its initial version already covers it),
             // so emitOnFirstSeen = false.
-            if (diffSyncSlice(def.sync[i], codec, instance, node, i, sync, false)) {
+            if (diffSync(def.sync[i], codec, instance, node, i, sync, false)) {
                 bumpFieldVersion(sg, node, instance, i);
             }
         }
@@ -103,15 +103,25 @@ function diffNode(sg: Nodes, node: Node): void {
 
 type TraitKnowledge = {
     version: number;
-    /** per-field knowledge, keyed by "${traitSlot}:${fieldName}" */
-    fieldVersions: Map<string, FieldKnowledge>;
+    // Per-field knowledge as dense arrays indexed by sync field index (0..def.sync.length).
+    // The trait is already selected by the enclosing `traits` map (keyed by def.id), so
+    // the field only needs its index — no per-tick key to build. Sized + zero-filled once
+    // when the trait knowledge is created (0 = never sent / unknown, matching the old
+    // `?? 0` semantics).
+    versions: number[];
+    /** tick this field was last sent to this client (per-field rate gating). */
+    lastSentTicks: number[];
 };
 
-type FieldKnowledge = {
-    version: number;
-    /** last tick this field was sent to this client (for per-field rate gating) */
-    lastSentTick: number;
-};
+// Build a zero-filled PACKED_SMI array. `new Array(n)` (even `.fill(0)`'d) stays
+// HOLEY elements-kind forever — and a single holey `versions`/`lastSentTicks`
+// array would make every `known.versions[i]` read polymorphic. Pushing from `[]`
+// keeps them all PACKED so those hot reads stay monomorphic.
+function zeros(n: number): number[] {
+    const a: number[] = [];
+    for (let i = 0; i < n; i++) a.push(0);
+    return a;
+}
 
 type ClientNodeKnowledge = {
     nodeVersion: number;
@@ -487,7 +497,6 @@ export function acceptOwnerFields(
 
         // 2. update the per-instance snapshot to the just-applied bytes so the
         //    byte-diff in diffNode sees no change and doesn't re-bump.
-        const snapshotKey = `${def.slot}:${i}`;
         sync.bytes[i] = codec.pack(instance, node);
 
         // for a ThresholdRate slice, keep the value snapshot in lockstep with the
@@ -514,13 +523,15 @@ export function acceptOwnerFields(
             if (!known) continue;
             let traitKnowledge = known.traits.get(def.id);
             if (!traitKnowledge) {
-                traitKnowledge = { version: 0, fieldVersions: new Map() };
+                traitKnowledge = {
+                    version: 0,
+                    versions: zeros(def.sync.length),
+                    lastSentTicks: zeros(def.sync.length),
+                };
                 known.traits.set(def.id, traitKnowledge);
             }
-            traitKnowledge.fieldVersions.set(snapshotKey, {
-                version: fieldVersion,
-                lastSentTick: traitKnowledge.fieldVersions.get(snapshotKey)?.lastSentTick ?? 0,
-            });
+            // stamp the field version; lastSentTick stays as-is (0 if first seen).
+            traitKnowledge.versions[i] = fieldVersion;
         }
     }
 }
@@ -802,9 +813,9 @@ function readChangedFields(
     node: Node,
     traitSlot: number,
     instance: TraitBase,
-    knownFieldVersions: Map<string, FieldKnowledge>,
+    known: TraitKnowledge,
     currentTick: number,
-    sentFields: Array<{ key: string; version: number }>,
+    sentFields: Array<{ index: number; version: number }>,
 ): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return [];
@@ -818,16 +829,16 @@ function readChangedFields(
     for (let i = 0; i < codecs.length; i++) {
         // current field version lives on the instance; known version is per-client.
         const fieldVersion = sync?.versions[i] ?? 0;
-        const key = `${traitSlot}:${i}`;
-        const knownFk = knownFieldVersions.get(key);
-        const knownVersion = knownFk?.version ?? 0;
+        const knownVersion = known.versions[i] ?? 0;
 
         if (fieldVersion <= knownVersion) continue;
 
         const syncDef = def.sync[i];
-        const rate = SyncRate.resolveRate(syncDef.rate);
+        // only a numeric rate is a send-path Hz throttle; 'realtime'/'dirty'/ThresholdRate
+        // gate elsewhere (the diff itself), so they don't throttle here.
+        const rate = typeof syncDef.rate === 'number' ? syncDef.rate : null;
         if (rate !== null) {
-            const lastSent = knownFk?.lastSentTick ?? 0;
+            const lastSent = known.lastSentTicks[i] ?? 0;
             if (!SyncRate.shouldSendThisTick(rate, lastSent, currentTick, 60)) {
                 continue;
             }
@@ -841,7 +852,7 @@ function readChangedFields(
         }
 
         entries.push({ index: i, data });
-        sentFields.push({ key, version: fieldVersion });
+        sentFields.push({ index: i, version: fieldVersion });
     }
 
     return entries;
@@ -947,28 +958,23 @@ function diffNodeKnowledge(
                 syncs: readAllSyncs(node, traitSlot, instance),
             });
 
-            // snapshot knowledge for this new trait
-            const fieldVersions = new Map<string, FieldKnowledge>();
-            for (let i = 0; i < def.sync.length; i++) {
-                const key = `${traitSlot}:${i}`;
-                const v = instance._sync?.versions[i] ?? 0;
-                fieldVersions.set(key, { version: v, lastSentTick: currentTick });
+            // snapshot knowledge for this new trait — dense PACKED arrays by field index.
+            const len = def.sync.length;
+            const versions: number[] = [];
+            const lastSentTicks: number[] = [];
+            for (let i = 0; i < len; i++) {
+                versions.push(instance._sync?.versions[i] ?? 0);
+                lastSentTicks.push(currentTick);
             }
             known.traits.set(def.id, {
                 version: instance._sync?.traitVersion ?? 0,
-                fieldVersions,
+                versions,
+                lastSentTicks,
             });
         } else {
             // existing trait — send only changed fields, with per-field rate gating
-            const sentFields: Array<{ key: string; version: number }> = [];
-            const changedFields = readChangedFields(
-                node,
-                traitSlot,
-                instance,
-                traitKnowledge.fieldVersions,
-                currentTick,
-                sentFields,
-            );
+            const sentFields: Array<{ index: number; version: number }> = [];
+            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, sentFields);
             if (changedFields.length > 0) {
                 updates.push({
                     type: 'node_trait_fields',
@@ -980,7 +986,8 @@ function diffNodeKnowledge(
 
             // update knowledge for sent fields only
             for (const sf of sentFields) {
-                traitKnowledge.fieldVersions.set(sf.key, { version: sf.version, lastSentTick: currentTick });
+                traitKnowledge.versions[sf.index] = sf.version;
+                traitKnowledge.lastSentTicks[sf.index] = currentTick;
             }
             traitKnowledge.version = instance._sync?.traitVersion ?? 0;
         }
@@ -999,7 +1006,7 @@ function diffNodeKnowledge(
                 fields: [],
                 syncs: [],
             });
-            known.traits.set(id, { version: 0, fieldVersions: new Map() });
+            known.traits.set(id, { version: 0, versions: [], lastSentTicks: [] });
         }
         // note: unresolved traits can't change in-place (no live instance),
         // so we don't need to check version diffs for them
@@ -1044,10 +1051,8 @@ function diffNodeKnowledge(
         const tk = known.traits.get(def.id);
         if (!tk) continue;
         for (let i = 0; i < def.sync.length; i++) {
-            const key = `${traitSlot}:${i}`;
             const currentFv = instance._sync?.versions[i] ?? 0;
-            const knownFk = tk.fieldVersions.get(key);
-            if (currentFv > (knownFk?.version ?? 0)) {
+            if (currentFv > (tk.versions[i] ?? 0)) {
                 allFieldsCurrent = false;
                 break;
             }
@@ -1073,22 +1078,27 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
 
-        // snapshot per-sync versions for this trait (0 = never bumped → not recorded)
-        const fieldVersions = new Map<string, FieldKnowledge>();
-        for (let i = 0; i < def.sync.length; i++) {
-            const v = instance._sync?.versions[i];
-            if (v) fieldVersions.set(`${traitSlot}:${i}`, { version: v, lastSentTick: currentTick });
+        // snapshot per-sync versions for this trait — dense PACKED arrays by field
+        // index (0 = never bumped → lastSentTick stays 0, matching the old "no entry").
+        const len = def.sync.length;
+        const versions: number[] = [];
+        const lastSentTicks: number[] = [];
+        for (let i = 0; i < len; i++) {
+            const v = instance._sync?.versions[i] ?? 0;
+            versions.push(v);
+            lastSentTicks.push(v ? currentTick : 0);
         }
 
         traits.set(def.id, {
             version: instance._sync?.traitVersion ?? 0,
-            fieldVersions,
+            versions,
+            lastSentTicks,
         });
     }
     // include unresolved traits so the diff system knows we already sent them
     for (const id of node._unresolvedTraits.keys()) {
         if (!traits.has(id)) {
-            traits.set(id, { version: 0, fieldVersions: new Map() });
+            traits.set(id, { version: 0, versions: [], lastSentTicks: [] });
         }
     }
 

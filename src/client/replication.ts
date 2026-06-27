@@ -12,7 +12,7 @@ import type { BinaryField } from '../core/protocol';
 import { registry } from '../core/registry';
 import type { Node, Nodes } from '../core/scene/nodes';
 import { getSyncCodecs } from '../core/scene/packcat-bridge';
-import { diffSyncSlice } from '../core/scene/sync/sync-diff';
+import { diffSync } from '../core/scene/sync/sync-diff';
 import type { ClientNet } from './net';
 import { send } from './net';
 
@@ -81,7 +81,7 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, 
                 // shared cold path: byte-diff or ThresholdRate metric. the client
                 // uploads a first-seen owned slice (the server needs the initial
                 // value), so emitOnFirstSeen = true.
-                if (diffSyncSlice(def.sync[i], codecs[i], instance, node, i, sync, true)) {
+                if (diffSync(def.sync[i], codecs[i], instance, node, i, sync, true)) {
                     changedFields.push({ index: i, data: sync.bytes[i]! });
                 }
             }

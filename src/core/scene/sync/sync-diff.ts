@@ -12,7 +12,7 @@
 // instance's `_sync` arrays, indexed by slice — so this is array indexing, not
 // keyed side-map lookups.
 
-import { bytesEqual } from '../../utils/bytes';
+import { bytesEqualPrefix } from '../../utils/bytes';
 import type { Node } from '../nodes';
 import type { SyncCodec } from '../packcat-bridge';
 import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
@@ -68,8 +68,12 @@ function packToScratch(codec: SyncCodec, instance: TraitBase, node: Node): numbe
  */
 function storeSnapshot(sync: TraitSyncState, i: number, n: number): void {
     const prev = sync.bytes[i];
-    if (prev !== undefined && prev.length === n) prev.set(scratch.subarray(0, n));
-    else sync.bytes[i] = scratch.slice(0, n);
+    // in-place copy of scratch[0:n] without a subarray view — this runs per
+    // changed slice per tick (e.g. realtime positions), so it must not allocate.
+    // first-seen / size-change still allocates the owned snapshot buffer (rare).
+    if (prev !== undefined && prev.length === n) {
+        for (let j = 0; j < n; j++) prev[j] = scratch[j]!;
+    } else sync.bytes[i] = scratch.slice(0, n);
 }
 
 /**
@@ -96,7 +100,7 @@ export function writeSnapshot(codec: SyncCodec, instance: TraitBase, node: Node,
  * upload emits it (the server needs the initial owned value); the server diff
  * seeds silently (the trait's initial version already covers it).
  */
-export function diffSyncSlice(
+export function diffSync(
     syncDef: SyncDef,
     codec: SyncCodec,
     instance: TraitBase,
@@ -120,9 +124,9 @@ export function diffSyncSlice(
 
     const n = packToScratch(codec, instance, node);
     if (n <= 0) return false; // no serdes — nothing to diff or send
-    const current = scratch.subarray(0, n);
     const previous = sync.bytes[i];
-    if (previous !== undefined && bytesEqual(current, previous)) return false;
+    // compare scratch[0:n] in place — no subarray view per slice per tick.
+    if (previous !== undefined && bytesEqualPrefix(scratch, n, previous)) return false;
     storeSnapshot(sync, i, n); // reuse the snapshot buffer in place when size-stable
     return previous !== undefined || emitOnFirstSeen;
 }
