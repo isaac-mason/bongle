@@ -7,3 +7,6 @@
 [submodule "games/circus-obby"]
 	path = games/circus-obby
 	url = https://github.com/isaac-mason/bongle-circus-obby.git
+[submodule "games/bow-pvp"]
+	path = games/bow-pvp
+	url = https://github.com/isaac-mason/bongle-bow-pvp.git
