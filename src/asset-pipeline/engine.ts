@@ -67,8 +67,15 @@ export type BootOptions = {
 function seedModels(resources: Resources.Resources): void {
     const live = new Set<string>();
     for (const [id, h] of registry.models.byId) {
-        live.add(id);
         const handle = h.payload;
+        // Skip placeholder/unbaked models: a model declared but not yet (or never)
+        // baked has empty bin urls (createPlaceholderHandle) — e.g. a model from an
+        // imported pack whose .gltf isn't present in this project. Registering one
+        // would resolve its url to the resources dir itself (EISDIR) when the
+        // render path force-loads it. Leaving it out degrades a scene that
+        // references it to a "no resource entry" skip rather than a stalled load.
+        if (!handle.bin.client) continue;
+        live.add(id);
         Resources.setModel(resources, id, {
             clientUrl: handle.bin.client,
             serverUrl: handle.bin.server,
