@@ -67,10 +67,20 @@ export const oakStairs = blockPreset.stairs(
     { all: { texture: tex.oakPlanks } },
     { name: 'Oak Stairs', sounds: soundPreset.wood },
 );
+export const cobblestoneStairs = blockPreset.stairs(
+    'starter:cobblestone_stairs',
+    { all: { texture: tex.cobblestone } },
+    { name: 'Cobblestone Stairs', sounds: soundPreset.stone },
+);
 export const stoneSlab = blockPreset.slab(
     'starter:stone_slab',
     { all: { texture: tex.stone } },
     { name: 'Stone Slab', sounds: soundPreset.stone },
+);
+export const cobblestoneSlab = blockPreset.slab(
+    'starter:cobblestone_slab',
+    { all: { texture: tex.cobblestone } },
+    { name: 'Cobblestone Slab', sounds: soundPreset.stone },
 );
 export const oakSlab = blockPreset.slab(
     'starter:oak_slab',
