@@ -64,7 +64,7 @@ export { buildBlockRegistry } from './core/voxels/block-registry';
 export type { BlockDef, BlockHandle, BlockTextureDef } from './core/voxels/blocks';
 // __kit — runtime namespace called by kit-generated code (Vite transform
 // prelude/postlude, model + scene codegen barrels, kit boot entries).
-// See engine/src/__kit.ts for the full surface + injection sites.
+// See src/kit.ts for the full surface + injection sites.
 export { __kit } from './kit';
 export type { SpawnOpts } from './render/particles/particles';
 export { allocateSlot, init, update } from './render/particles/particles';
