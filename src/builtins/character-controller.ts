@@ -50,14 +50,10 @@ import { TransformTrait } from './transform';
 // crouching 0.6 x 1.3 x 0.6). feet at y=0. vcc.create owns the inner
 // kinematic body + foot-pivot transform internally, so the trait just
 // hands it `position` (= feet) and `linearVelocity`. crouch swaps the
-// inner shape via `vcc.resize` once the crouch ease fully settles.
-
-// crouch-shape swap threshold. `crouchAmount` eases exponentially toward
-// 0/1 so it never reaches 1 exactly; 0.99 gates "fully crouched" (~0.38s
-// in/out at the default crouchLerpRate=12). single threshold means the
-// shape flips back to standing the instant the ease starts releasing,
-// which matches MC's binary hitbox feel.
-const CROUCH_SHAPE_THRESHOLD = 0.99;
+// inner shape via `vcc.resize` — binary, the instant the input flips (and,
+// on release, once there's headroom to stand) — so the collider is a pure
+// sim decision off the synced input, never gated on the visual ease. the
+// visual `crouchAmount` (presentation only) eases to catch up.
 
 const _forward = vec3.create();
 const _right = vec3.create();
@@ -181,9 +177,9 @@ type CharacterControllerInput = {
 
 type CharacterControllerConfig = {
     /** inner-body half-extents (x, y, z) for the two posture shapes.
-     *  `standing` is used at vcc creation and any time `crouchAmount`
-     *  has not fully eased to crouched; `crouching` is swapped in once
-     *  `crouchAmount >= CROUCH_SHAPE_THRESHOLD`. defaults match MC's
+     *  `standing` is the default; `crouching` is swapped in (binary, via
+     *  `isCrouchShape`) the instant `input.crouch` is held, and back once
+     *  there's headroom to stand. defaults match MC's
      *  hitbox: standing 0.6×1.8×0.6, crouching 0.6×1.5×0.6. swap
      *  rebuilds the inner kinematic body's shape; eye-height +
      *  sneak-guard math read `state.vcc.halfExtents` live so they
@@ -372,19 +368,21 @@ type CharacterControllerState = {
      *  so spawning characters don't start with the body twisted 40°
      *  off their look direction. */
     bodyYawInit: boolean;
-    /** which posture is currently active on `state.vcc.innerBody`. flips
-     *  to true once `crouchAmount >= CROUCH_SHAPE_THRESHOLD` and back to
-     *  false the moment it drops below — owner-only (vcc is owner-only).
-     *  the trait re-reads this each tick to detect the edge that drives
-     *  `vcc.resize`; not synced because remote sides reconstruct posture
-     *  from `input.crouch` for visuals. */
+    /** which posture is currently active on `state.vcc.innerBody`. binary
+     *  sim state: flips to true the instant `input.crouch` is held, and back
+     *  to false on release *once there's headroom to stand* — owner-only
+     *  (vcc is owner-only). the trait re-reads this each tick to detect the
+     *  edge that drives `vcc.resize`; not synced because remote sides
+     *  reconstruct posture from `input.crouch` for visuals. */
     isCrouchShape: boolean;
-    /** eased 0..1 toward `input.crouch ? 1 : 0` at `config.crouchLerpRate`.
-     *  shared signal — CharacterTrait drives the body lean off it, and
-     *  PlayerController drives the eye-height drop off it (no separate
-     *  lerp), so visual pose and camera stay locked in step on the same
-     *  rate. integrated locally on every client (input is synced) so
-     *  remote viewers see the same eased pose as the owner. */
+    /** VISUAL-ONLY 0..1 crouch, eased per-frame toward `input.crouch ? 1 : 0`
+     *  at `config.crouchLerpRate` (in `updateCharacterBob`). the collider is
+     *  binary (`isCrouchShape`) and never reads this — so the ease is pure
+     *  presentation catch-up and render cadence can't drive a sim decision.
+     *  shared signal: CharacterTrait drives the body lean off it and
+     *  PlayerController the eye-height drop, so pose + camera stay locked in
+     *  step. integrated locally on every client (input is synced) so remote
+     *  viewers see the same eased pose as the owner. */
     crouchAmount: number;
 };
 
@@ -773,6 +771,36 @@ function hasSneakHeadroom(voxels: Voxels, x: number, fy: number, z: number): boo
     return true;
 }
 
+/** Is the band the standing hull would add above the crouch hull clear of
+ *  collidable voxels? Gates standing back up so you stay crouched under a
+ *  low ceiling (MC-style). Exact for full cubes; conservative (stays
+ *  crouched) for partial blocks, which is the safe direction. */
+function canStandUp(cc: CharacterControllerTrait, voxels: Voxels): boolean {
+    const v = cc.state.vcc;
+    if (!v) return true;
+    const flags = voxels.registry.flags;
+    const feet = v.position;
+    const half = cc.config.halfExtents;
+    // feet → top: the standing hull rises `2*halfY`; only the slice above the
+    // crouch top is new, so scan [crouchTop, standingTop) across the footprint.
+    const bandBottom = feet[1] + half.crouching[1] * 2;
+    const bandTop = feet[1] + half.standing[1] * 2;
+    const x0 = Math.floor(feet[0] - half.standing[0]);
+    const x1 = Math.floor(feet[0] + half.standing[0]);
+    const z0 = Math.floor(feet[2] - half.standing[2]);
+    const z1 = Math.floor(feet[2] + half.standing[2]);
+    const y0 = Math.floor(bandBottom);
+    const y1 = Math.floor(bandTop - 1e-4);
+    for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+            for (let z = z0; z <= z1; z++) {
+                if ((flags[getBlockState(voxels, x, y, z)]! & BLOCK_FLAG_COLLISION) !== 0) return false;
+            }
+        }
+    }
+    return true;
+}
+
 // 3×3 neighbor offsets used by the sneak anchor search — center voxel
 // first, then 4 cardinals, then 4 diagonals. matches luanti's
 // `dir9_center` order in localplayer.cpp (line 96).
@@ -1024,20 +1052,21 @@ export function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void
 
 // ── crouch shape (runs on every side) ────────────────────────────────
 //
-// driven by the already-synced `input.crouch`. easing + threshold-flip
-// + vcc.resize all run side-agnostic so the inner body's shape stays
-// coherent on the owner, server, and peer clients — sensor triggers and
-// raycasts hit the right hull on every side. note: replicated input
-// arrives ~50–150ms after the owner, so the ease starts later on non-
-// owner sides; during the ~380ms transition shapes briefly disagree.
-export function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics, dt: number): void {
+// binary, driven by the already-synced `input.crouch`: the hull swaps the
+// instant the input flips (on release, only once there's headroom to stand
+// — else you stay crouched under a low ceiling). running off synced input
+// keeps the inner body coherent on the owner, server, and peer clients, so
+// sensor triggers and raycasts hit the right hull on every side. the visual
+// `crouchAmount` (presentation only) eases to catch up in `updateCharacterBob`.
+// note: replicated input arrives ~50–150ms after the owner, so the shape
+// flips later on non-owner sides; during that window shapes briefly disagree.
+export function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics): void {
     const v = cc.state.vcc;
     if (!v) return;
     const state = cc.state;
     const config = cc.config;
-    const crouchTarget = cc.input.crouch ? 1 : 0;
-    state.crouchAmount += (crouchTarget - state.crouchAmount) * (1 - Math.exp(-config.crouchLerpRate * dt));
-    const wantCrouchShape = state.crouchAmount >= CROUCH_SHAPE_THRESHOLD;
+    const voxels = physics.rigid.terrainShape.voxels;
+    const wantCrouchShape = cc.input.crouch || (state.isCrouchShape && !canStandUp(cc, voxels));
     if (wantCrouchShape !== state.isCrouchShape) {
         vcc.resize(physics.rigid.world, v, wantCrouchShape ? config.halfExtents.crouching : config.halfExtents.standing);
         state.isCrouchShape = wantCrouchShape;
@@ -1451,6 +1480,11 @@ export function updateCharacterBob(cc: CharacterControllerTrait, registry: Block
     const config = cc.config;
     const input = cc.input;
 
+    // visual crouch catch-up (presentation only — the collider is binary,
+    // `isCrouchShape`). eased per-frame here so the head/waist drop reads
+    // smooth instead of stepping at the tick rate.
+    state.crouchAmount += ((input.crouch ? 1 : 0) - state.crouchAmount) * (1 - Math.exp(-config.crouchLerpRate * dt));
+
     // snapshot prev phase BEFORE any mutation this tick. consumers
     // (footstep bucket detector in CharacterTrait) compare bobPhase vs
     // previousBobPhase to detect crossings; if we snapshotted at end-of-
@@ -1613,7 +1647,7 @@ script(
             // contact events, raycasts, and shape queries against the
             // character work uniformly. only the owner steps the sim.
             ensureVCC(cc, transform, ctx.physics);
-            updateCrouchShape(cc, ctx.physics, delta);
+            updateCrouchShape(cc, ctx.physics);
 
             if (isOwner(ctx, ctx.node)) {
                 // noclip drives motion from the writer (PlayerController);
