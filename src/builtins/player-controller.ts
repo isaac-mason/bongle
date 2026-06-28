@@ -169,7 +169,7 @@ export const PlayerControllerTrait = trait(
             thirdPersonDistance: 4,
             cameraCollisionMargin: 0.2,
             eyeHeight: 1.62,
-            crouchEyeHeight: 1.42,
+            crouchEyeHeight: 1.37,
             fovLerpSpeed: 10,
             fov: degreesToRadians(75),
             fovSprint: degreesToRadians(85),
