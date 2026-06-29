@@ -23,7 +23,7 @@ export const CameraTrait = trait(
         /** vertical FOV in radians. */
         fov: 75 * (Math.PI / 180),
         /** near clip plane. */
-        near: 0.1,
+        near: 0.05,
         /** far clip plane. */
         far: 1000,
     },

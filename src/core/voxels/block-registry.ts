@@ -12,7 +12,7 @@ import type {
     BlockTextureDef,
     VertexAnimation,
 } from './blocks';
-import { collectModelTextureIds, deriveBlockDust, resolveTextureRef } from './blocks';
+import { collectModelTextureIds, deriveBlockDust, MaterialType, resolveTextureRef } from './blocks';
 import { defaultLightOpacity, packEmission } from './light';
 
 /** shape kind enum; matches block-collider's BlockShape['type'] order. */
@@ -608,6 +608,14 @@ export type BlockRegistry = {
      * the shader uses this to compute the actual layer to sample.
      */
     texAnimData: Float32Array;
+
+    /**
+     * per-layer alpha-cutout flag (1 = used by a TRANSPARENT face/quad). built
+     * at freeze time by scanning every cube face and mesh quad. consumed by the
+     * mip-pyramid builder, which gives cutout layers coverage-preserving alpha
+     * so foliage/glass keeps its silhouette at distance instead of eroding.
+     */
+    textureCutout: Uint8Array;
 };
 
 // ── build ───────────────────────────────────────────────────────────
@@ -916,10 +924,14 @@ export function buildBlockRegistry(
             particlesTable[globalId] = resolveBlockParticles(def, props, defaultDust);
 
             // resolve collider shape. explicit cube collapses to the
-            // colliderId=0 fast path — same as no shape.
+            // colliderId=0 fast path — same as no shape. a non-cube shape with no
+            // boxes has no collision geometry: assigning it a custom collider would
+            // build a zero-child crashcat compound, and castRayVsShape dereferences
+            // an undefined child on the next raycast (e.g. the editor cursor). leave
+            // such a (degenerate) shape on the fast path so it can never crash.
             if (def.shape) {
                 const blockShape = typeof def.shape === 'function' ? def.shape(props) : def.shape;
-                if (blockShape.type !== 'cube') {
+                if (blockShape.type !== 'cube' && blockShape.boxes.length > 0) {
                     colliderCount++;
                     colliderIdTable[globalId] = colliderCount; // 1-based
                     _tempBlockShapes[globalId] = blockShape;
@@ -971,6 +983,15 @@ export function buildBlockRegistry(
     // and a game with no blocks defined would otherwise produce an empty array.
     if (animEntries.length === 0) animEntries.push(1, 0, 0, 0);
     const texAnimData = new Float32Array(animEntries);
+
+    // per-layer alpha-cutout flag, populated during pass 2 below. marking a
+    // base layer also marks its animation frames (consecutive layers), so an
+    // animated cutout texture is fully covered.
+    const textureCutout = new Uint8Array(textures.length);
+    const markCutoutLayer = (baseLayer: number) => {
+        const frameCount = texAnimData[baseLayer * 4] || 1;
+        for (let f = 0; f < frameCount; f++) textureCutout[baseLayer + f] = 1;
+    };
 
     // ── pass 2: bake flat texture index tables + dense mesh arrays ─────
     //
@@ -1113,6 +1134,11 @@ export function buildBlockRegistry(
                 writeFaceUVs(uvBase, FACE_INDEX.east, tex.east.rotation ?? 0);
                 writeFaceUVs(uvBase, FACE_INDEX.west, tex.west.rotation ?? 0);
             }
+
+            // a TRANSPARENT cube cuts out on every face → flag all 6 textures.
+            if (materialTable[sid] === MaterialType.TRANSPARENT) {
+                for (let f = 0; f < 6; f++) markCutoutLayer(cubeTexIndices[base + f]!);
+            }
         } else {
             // mesh / liquid-from-custom: seed default uvs so the array is
             // well-formed across all stateIds. mesh path doesn't read it.
@@ -1147,6 +1173,11 @@ export function buildBlockRegistry(
                 quadMats[i] = quads[i]!.material ?? defaultMat;
             }
             meshQuadMaterials[mid] = quadMats;
+
+            // flag textures of any cutout quad so their mips preserve coverage.
+            for (let i = 0; i < quads.length; i++) {
+                if (quadMats[i] === MaterialType.TRANSPARENT) markCutoutLayer(indices[i]!);
+            }
 
             // per-quad smooth-light shape classification (see classifyMeshQuadShape).
             const qShape = new Uint8Array(quads.length);
@@ -1348,6 +1379,7 @@ export function buildBlockRegistry(
         textures,
         textureIndex,
         texAnimData,
+        textureCutout,
     };
 }
 

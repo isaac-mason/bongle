@@ -10,13 +10,12 @@
 
 import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
-import { send } from '../../core/scene/scripts';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
-import { VoxelEditCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import type { PointerState } from '../pointer-state';
+import { commitVoxelOps } from '../voxel-edit';
 import { applyStamp } from './brush-apply';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
@@ -32,7 +31,7 @@ const OPS_PER_PACKET = 4096;
 
 function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     for (let i = 0; i < ops.length; i += OPS_PER_PACKET) {
-        send(ctx, VoxelEditCommand, { ops: ops.slice(i, i + OPS_PER_PACKET) });
+        commitVoxelOps(ctx, ops.slice(i, i + OPS_PER_PACKET));
     }
 }
 

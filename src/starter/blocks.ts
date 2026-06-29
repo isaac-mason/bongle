@@ -5,7 +5,7 @@
 // own `export const` so the package index can re-export them as
 // `export * as blocks` and bundlers can drop unused declarations.
 
-import { block, blockPreset } from 'bongle';
+import { block, blockPreset, CullType, MaterialType } from 'bongle';
 import * as soundPreset from './block-sound-presets';
 import * as tex from './block-textures';
 
@@ -30,9 +30,44 @@ export const grass = block('starter:grass', {
     sounds: soundPreset.grass,
 });
 
+// farmland (tilled dirt) and dirt path (flattened dirt). both sit 1px below a
+// full cube via surfaceHeight — the mesher lowers the top quad and clips the
+// side quads to match. CullType.NONE so adjacent full blocks still draw their
+// faces flush down past the lowered lip (a SOLID cull would over-cull and leave
+// a see-through gap); lightOpacity 15 keeps them light-blocking like dirt.
+export const farmland = block('starter:farmland', {
+    name: 'Farmland',
+    model: () => ({
+        type: 'cube',
+        textures: { top: { texture: tex.farmlandTop }, bottom: { texture: tex.dirt }, sides: { texture: tex.dirt } },
+    }),
+    surfaceHeight: 15 / 16,
+    cull: CullType.NONE,
+    lightOpacity: 15,
+    sounds: soundPreset.dirt,
+});
+
+export const dirtPath = block('starter:dirt_path', {
+    name: 'Dirt Path',
+    model: () => ({
+        type: 'cube',
+        textures: { top: { texture: tex.dirtPathTop }, bottom: { texture: tex.dirt }, sides: { texture: tex.dirt } },
+    }),
+    surfaceHeight: 15 / 16,
+    cull: CullType.NONE,
+    lightOpacity: 15,
+    sounds: soundPreset.dirt,
+});
+
 export const cobblestone = block('starter:cobblestone', {
     name: 'Cobblestone',
     model: () => ({ type: 'cube', textures: { all: { texture: tex.cobblestone } } }),
+    sounds: soundPreset.stone,
+});
+
+export const mossyCobblestone = block('starter:mossy_cobblestone', {
+    name: 'Mossy Cobblestone',
+    model: () => ({ type: 'cube', textures: { all: { texture: tex.mossyCobblestone } } }),
     sounds: soundPreset.stone,
 });
 
@@ -92,6 +127,16 @@ export const cobblestoneWall = blockPreset.wall(
     { all: { texture: tex.cobblestone } },
     { name: 'Cobblestone Wall', sounds: soundPreset.stone },
 );
+// full glass cube. transparent (alpha-cutout) like the glass pane, with
+// CullType.SELF so a wall of glass culls its internal shared faces and only
+// the outer shell draws — adjacent glass reads as one clear pane.
+export const glass = block('starter:glass', {
+    name: 'Glass',
+    model: () => ({ type: 'cube', textures: { all: { texture: tex.glass } } }),
+    cull: CullType.SELF,
+    material: MaterialType.TRANSPARENT,
+    sounds: soundPreset.glass,
+});
 export const glassPane = blockPreset.pane(
     'starter:glass_pane',
     { all: { texture: tex.glass } },
@@ -128,6 +173,12 @@ export const grassPlant1 = blockPreset.plant('starter:grass_plant_1', tex.grassP
 });
 export const grassPlant2 = blockPreset.plant('starter:grass_plant_2', tex.grassPlant2, {
     name: 'Tall Grass',
+    sounds: soundPreset.leaves,
+});
+// minecraft-style short grass: a denser blade tuft on the same cross-quad
+// plant preset, kept alongside the existing grass_plant_1/2 sprites.
+export const shortGrass = blockPreset.plant('starter:short_grass', tex.shortGrass, {
+    name: 'Short Grass',
     sounds: soundPreset.leaves,
 });
 export const oakLeaves = blockPreset.leaves(
@@ -169,20 +220,20 @@ export const oakFence = blockPreset.fence(
     { all: { texture: tex.oakPlanks } },
     { name: 'Oak Fence', sounds: soundPreset.wood },
 );
-export const torch = blockPreset.torch('starter:torch', tex.oakPlanks, { name: 'Torch', sounds: soundPreset.wood });
+export const torch = blockPreset.torch('starter:torch', tex.torch, { name: 'Torch', sounds: soundPreset.wood });
 
 // rgb variants — same preset, custom lightEmission per channel.
-export const redTorch = blockPreset.torch('starter:red_torch', tex.oakPlanks, {
+export const redTorch = blockPreset.torch('starter:red_torch', tex.torch, {
     name: 'Red Torch',
     lightEmission: [15, 0, 0],
     sounds: soundPreset.wood,
 });
-export const greenTorch = blockPreset.torch('starter:green_torch', tex.oakPlanks, {
+export const greenTorch = blockPreset.torch('starter:green_torch', tex.torch, {
     name: 'Green Torch',
     lightEmission: [0, 15, 0],
     sounds: soundPreset.wood,
 });
-export const blueTorch = blockPreset.torch('starter:blue_torch', tex.oakPlanks, {
+export const blueTorch = blockPreset.torch('starter:blue_torch', tex.torch, {
     name: 'Blue Torch',
     lightEmission: [0, 0, 15],
     sounds: soundPreset.wood,

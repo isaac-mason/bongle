@@ -305,14 +305,16 @@ export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
         .toVar('cornerIdx');
 }
 
-/** flags word (u32[8]) → { texIndex, animType }. layout:
- *  texIndex(16) | animType(4) | facing(3) | reserved(9).
- *  diagFlip used to live at bit 23; it's now in `light[0]` bit 29 and
- *  callers extract it directly from the light buffer. */
+/** flags word (u32[8]) → { texIndex, animType, emissive }. layout:
+ *  texIndex(16) | animType(4) | facing(3) | emissive(1) | reserved(8).
+ *  bit 23 (formerly the diagFlip, now in `light[0]` bit 29) is the
+ *  emissive flag — self-lit quads skip directional face-shade + AO so
+ *  they glow uniformly. */
 export function decodeQuadFlags(flags: Node<d.u32>) {
     const texIndex = flags.bitwiseAnd(u32(0xffff)).toF32().toVar('texIndex');
     const animType = flags.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toVar('animType');
-    return { texIndex, animType };
+    const emissive = flags.shiftRight(u32(23)).bitwiseAnd(u32(1)).toVar('emissive');
+    return { texIndex, animType, emissive };
 }
 
 /** read u0..u3, uv0..uv3 for `realQuadId`, decode the per-corner position
@@ -495,7 +497,7 @@ export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: G
     const flags = index(quads, add(headerBase, u32(8))).toVar('qdFlags');
     const meta = index(quads, add(headerBase, u32(META_OFFSET))).toVar('qdMeta');
 
-    const { texIndex, animType } = decodeQuadFlags(flags);
+    const { texIndex, animType, emissive } = decodeQuadFlags(flags);
 
     // ── diagFlip from corner-0 of the per-corner light slot (bit 29) ─
     // meshChunk's emitQuadLight* helpers write the Sodium hierarchical-
@@ -564,9 +566,11 @@ export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: G
 
     // Sodium-parity AO: apply aoFactor uniformly regardless of corner
     // brightness. Vanilla MC behavior — AO darkens corners by the same
-    // proportion in lit and unlit scenes.
+    // proportion in lit and unlit scenes. Emissive quads (torch, glowstone)
+    // opt out of both AO and directional face-shade so a self-lit block
+    // glows uniformly instead of dimming its E/W/N/S faces to 0.6/0.8.
     const rawLight = unpackVoxelLight(cornerLight, skyBrightness).toVar('rawLight');
-    const aoMul = mul(aoFactor, faceFactor).toVar('aoMul');
+    const aoMul = emissive.equal(u32(1)).select(f32(1.0), mul(aoFactor, faceFactor)).toVar('aoMul');
     const voxelLight = rawLight.mul(aoMul).toVar('voxelLightAo');
 
     // ── varyings ────────────────────────────────────────────────────

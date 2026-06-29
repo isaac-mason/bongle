@@ -23,6 +23,12 @@ export const grassTop = blockTexture('starter:grass_top', {
 export const grassSide = blockTexture('starter:grass_side', {
     src: new URL('./assets/textures/dirt_grass.png', import.meta.url),
 });
+export const farmlandTop = blockTexture('starter:farmland_top', {
+    src: new URL('./assets/textures/farmland_top.png', import.meta.url),
+});
+export const dirtPathTop = blockTexture('starter:dirt_path_top', {
+    src: new URL('./assets/textures/dirt_path_top.png', import.meta.url),
+});
 export const mushroomRed = blockTexture('starter:mushroom_red', {
     src: new URL('./assets/textures/mushroom_plant_red.png', import.meta.url),
 });
@@ -34,6 +40,9 @@ export const grassPlant1 = blockTexture('starter:grass_plant_1', {
 });
 export const grassPlant2 = blockTexture('starter:grass_plant_2', {
     src: new URL('./assets/textures/grass_plant_2.png', import.meta.url),
+});
+export const shortGrass = blockTexture('starter:short_grass', {
+    src: new URL('./assets/textures/short_grass.png', import.meta.url),
 });
 
 export const water = blockTexture('starter:water', {
@@ -58,6 +67,9 @@ export const ladder = blockTexture('starter:ladder', {
 export const oakPlanks = blockTexture('starter:oak_planks', {
     src: new URL('./assets/textures/oak_planks.png', import.meta.url),
 });
+export const torch = blockTexture('starter:torch', {
+    src: new URL('./assets/textures/torch.png', import.meta.url),
+});
 export const oakLogTop = blockTexture('starter:oak_log_top', {
     src: new URL('./assets/textures/oak_log_top.png', import.meta.url),
 });
@@ -66,6 +78,9 @@ export const oakLogSide = blockTexture('starter:oak_log_side', {
 });
 export const cobblestone = blockTexture('starter:cobblestone', {
     src: new URL('./assets/textures/cobblestone.png', import.meta.url),
+});
+export const mossyCobblestone = blockTexture('starter:mossy_cobblestone', {
+    src: new URL('./assets/textures/mossy_cobblestone.png', import.meta.url),
 });
 export const glass = blockTexture('starter:glass', {
     src: new URL('./assets/textures/glass.png', import.meta.url),

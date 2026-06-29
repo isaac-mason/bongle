@@ -43,11 +43,12 @@ import { setTraitProps } from '../actions';
 import type { Blueprint as BlueprintData, VoxelOp } from '../blueprint';
 import * as Blueprint from '../blueprint';
 import { readNudgeDelta, snapCardinal, yawFromQuat } from '../camera';
-import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand, VoxelEditCommand } from '../commands';
+import { CreateNodeCommand, DestroyNodeCommand, SetTraitCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { NUDGE_KEYS, TRANSFORM_GIZMO_KEYS, TRANSFORM_OTHER_KEYS } from '../editor-controls';
 import { useEditor } from '../editor-store';
 import { unionSubtreeWorldAabb } from '../node-aabb';
+import { commitVoxelOps } from '../voxel-edit';
 
 // ── types ──────────────────────────────────────────────────────────
 
@@ -1371,10 +1372,10 @@ export function nudgeVoxelsFromSelection(
     state.store.getState().action({
         label: 'nudge voxels',
         do() {
-            send(ctx, VoxelEditCommand, { ops: forwardOps });
+            commitVoxelOps(ctx, forwardOps);
         },
         undo() {
-            send(ctx, VoxelEditCommand, { ops: reverseOps });
+            commitVoxelOps(ctx, reverseOps);
         },
     });
 }
@@ -1572,7 +1573,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
             }
             // apply voxels
             if (voxelForward.length > 0) {
-                send(ctx, VoxelEditCommand, { ops: voxelForward });
+                commitVoxelOps(ctx, voxelForward);
             }
             // create nodes — buildNodePaste already re-anchored each entry's
             // top-level transform to world space. children carry parent-relative
@@ -1595,11 +1596,11 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
         undo() {
             // reverse voxels back
             if (voxelReverse.length > 0) {
-                send(ctx, VoxelEditCommand, { ops: voxelReverse });
+                commitVoxelOps(ctx, voxelReverse);
             }
             // restore cut source voxels
             if (isCut && cutReverseOps && cutReverseOps.length > 0) {
-                send(ctx, VoxelEditCommand, { ops: cutReverseOps });
+                commitVoxelOps(ctx, cutReverseOps);
             }
             // destroy nodes created in do(). server cascades child destruction.
             for (const id of createdIds) {
@@ -1638,7 +1639,7 @@ export function cancelPlacement(state: TransformToolState, nodes: Nodes, ctx: Sc
     _exitPlacementState(state);
 
     if (cutReverseOps && cutReverseOps.length > 0) {
-        send(ctx, VoxelEditCommand, { ops: cutReverseOps });
+        commitVoxelOps(ctx, cutReverseOps);
     }
 
     state.store.setState((cur) => ({

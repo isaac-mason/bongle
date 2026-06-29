@@ -1146,11 +1146,14 @@ const TorchState = blockState.create({
     mount: blockState.enumeration(['floor', 'north', 'east', 'south', 'west'] as const),
 });
 
+// wall torches lean ~22.5° off the wall (see torchQuads). the selection
+// AABBs below wrap the tilted post: tall on Y, extending outward from the
+// wall on the lean axis to cover the leaning tip.
 const TORCH_FLOOR_SHAPE = blockShape.aabbs([[7 / 16, 0, 7 / 16, 9 / 16, 10 / 16, 9 / 16]]);
-const TORCH_NORTH_SHAPE = blockShape.aabbs([[7 / 16, 3 / 16, 0, 9 / 16, 13 / 16, 4 / 16]]);
-const TORCH_SOUTH_SHAPE = blockShape.aabbs([[7 / 16, 3 / 16, 12 / 16, 9 / 16, 13 / 16, 1]]);
-const TORCH_EAST_SHAPE = blockShape.aabbs([[12 / 16, 3 / 16, 7 / 16, 1, 13 / 16, 9 / 16]]);
-const TORCH_WEST_SHAPE = blockShape.aabbs([[0, 3 / 16, 7 / 16, 4 / 16, 13 / 16, 9 / 16]]);
+const TORCH_NORTH_SHAPE = blockShape.aabbs([[7 / 16, 2 / 16, 0, 9 / 16, 13 / 16, 6 / 16]]);
+const TORCH_SOUTH_SHAPE = blockShape.aabbs([[7 / 16, 2 / 16, 10 / 16, 9 / 16, 13 / 16, 1]]);
+const TORCH_EAST_SHAPE = blockShape.aabbs([[10 / 16, 2 / 16, 7 / 16, 1, 13 / 16, 9 / 16]]);
+const TORCH_WEST_SHAPE = blockShape.aabbs([[0, 2 / 16, 7 / 16, 6 / 16, 13 / 16, 9 / 16]]);
 
 function torchShape(mount: 'floor' | 'north' | 'east' | 'south' | 'west') {
     switch (mount) {
@@ -1167,21 +1170,85 @@ function torchShape(mount: 'floor' | 'north' | 'east' | 'south' | 'west') {
     }
 }
 
-function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'south' | 'west'): BlockQuad[] {
+// wall torch geometry, snapped to the 1/16 vertex lattice the voxel format
+// quantizes positions to. an off-grid rotateAxis lean (sin/cos 22.5°) would
+// round each corner unevenly and give the post a visibly non-uniform
+// thickness; instead the post's top is sheared TORCH_WALL_LEAN outward over
+// its 10/16 height — a grid-aligned ~21.8° lean, close to Minecraft's 22.5°.
+// TORCH_WALL_LIFT is how far up the wall the base sits (~3px, MC-like).
+const TORCH_WALL_LIFT = 3 / 16;
+const TORCH_WALL_LEAN = 4 / 16;
+
+// wall mounts rotate a single north-mounted base model around Y. the
+// north torch leans toward +z (away from the wall at z=0); rotating it
+// CW from above lands each lean direction on the matching wall.
+const TORCH_WALL_STEPS = { north: 0, west: 1, south: 2, east: 3 } as const;
+
+// the upright 2×10×2 stick, centred in the cell (x,z ∈ [7/16,9/16] so its
+// local UVs bake from the centred stick column). the four sides sample the
+// stick column via local UVs; the up/down caps get explicit UVs (matching
+// MC's torch model) so the bottom shows the dim stick base (rows 13–15) and
+// the top the lit neck under the flame (rows 6–8). a local-UV cap keys off
+// x/z, not height, so both caps would sample the bright texture-centre rows
+// and read as "fire on the bottom of the torch".
+function torchPostQuads(texture: TextureRef): BlockQuad[] {
     const tex: CubeTextures = { all: { texture } };
-    const opts = { uvs: 'local' as const };
-    switch (mount) {
-        case 'floor':
-            return blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 10 / 16, 9 / 16], tex, opts);
-        case 'north':
-            return blockModel.box([7 / 16, 3 / 16, 0], [9 / 16, 13 / 16, 4 / 16], tex, opts);
-        case 'south':
-            return blockModel.box([7 / 16, 3 / 16, 12 / 16], [9 / 16, 13 / 16, 1], tex, opts);
-        case 'east':
-            return blockModel.box([12 / 16, 3 / 16, 7 / 16], [1, 13 / 16, 9 / 16], tex, opts);
-        case 'west':
-            return blockModel.box([0, 3 / 16, 7 / 16], [4 / 16, 13 / 16, 9 / 16], tex, opts);
-    }
+    // cull:false — the post is free-standing, no face sits on a boundary.
+    const sides = blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 10 / 16, 9 / 16], tex, {
+        uvs: 'local',
+        cull: false,
+        exclude: ['up', 'down'],
+    });
+    const up = blockModel.quad(
+        [
+            [7 / 16, 10 / 16, 7 / 16],
+            [7 / 16, 10 / 16, 9 / 16],
+            [9 / 16, 10 / 16, 9 / 16],
+            [9 / 16, 10 / 16, 7 / 16],
+        ],
+        [0, 1, 0],
+        texture,
+        {
+            uvs: [
+                [7 / 16, 6 / 16],
+                [7 / 16, 8 / 16],
+                [9 / 16, 8 / 16],
+                [9 / 16, 6 / 16],
+            ],
+        },
+    );
+    const down = blockModel.quad(
+        [
+            [7 / 16, 0, 9 / 16],
+            [7 / 16, 0, 7 / 16],
+            [9 / 16, 0, 7 / 16],
+            [9 / 16, 0, 9 / 16],
+        ],
+        [0, -1, 0],
+        texture,
+        {
+            uvs: [
+                [7 / 16, 15 / 16],
+                [7 / 16, 13 / 16],
+                [9 / 16, 13 / 16],
+                [9 / 16, 15 / 16],
+            ],
+        },
+    );
+    return [...sides, up, down];
+}
+
+function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'south' | 'west'): BlockQuad[] {
+    const post = torchPostQuads(texture);
+    if (mount === 'floor') return post;
+    // wall: shift the post back against the wall (z=0), shear its top out over
+    // +z for a grid-aligned lean, lift it up the wall, then rotate to the
+    // mount. every step keeps vertices on the 1/16 lattice (no off-grid
+    // rotateAxis), so the quantized post stays a uniform 2×2 cross-section.
+    const atWall = blockModel.translate(post, [0, 0, -7 / 16]);
+    const leaned = blockModel.shearByHeight(atWall, 'z', 0, 10 / 16, TORCH_WALL_LEAN);
+    const lifted = blockModel.translate(leaned, [0, TORCH_WALL_LIFT, 0]);
+    return blockModel.rotateY(lifted, TORCH_WALL_STEPS[mount]);
 }
 
 function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: number, wz: number): boolean {

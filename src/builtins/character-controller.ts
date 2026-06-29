@@ -242,6 +242,12 @@ type CharacterControllerConfig = {
      *  camera eye-height drop (PlayerController), so they stay locked in
      *  step regardless of who reads it. */
     crouchLerpRate: number;
+    /** standing eye height (m above feet) — the look-ray origin used by the
+     *  camera and `view.origin`. */
+    eyeHeight: number;
+    /** crouched eye height (m); the eased `state.eyeHeight` (and the camera +
+     *  `view.origin`) lerp between the two by `state.crouchAmount`. */
+    crouchEyeHeight: number;
 };
 
 type CharacterControllerState = {
@@ -384,6 +390,18 @@ type CharacterControllerState = {
      *  step. integrated locally on every client (input is synced) so remote
      *  viewers see the same eased pose as the owner. */
     crouchAmount: number;
+    /** current eased eye height (m), lerped `eyeHeight`↔`crouchEyeHeight` by
+     *  `crouchAmount`. the camera and `view.origin` read this. */
+    eyeHeight: number;
+};
+
+/** the character's look ray this frame: eye `origin` (world space) + unit
+ *  `direction` from `input.look`. populated every frame for every character —
+ *  players AND npcs — so scripts can fire / raycast / aim from the eyes without
+ *  reaching for the camera (which doesn't exist server-side or for npcs). */
+export type CharacterView = {
+    origin: Vec3;
+    direction: Vec3;
 };
 
 export const CharacterControllerTrait = trait(
@@ -424,6 +442,8 @@ export const CharacterControllerTrait = trait(
             bobAmpLerpRate: 15,
             bobOffsetLerpRate: 15,
             crouchLerpRate: 12,
+            eyeHeight: 1.62,
+            crouchEyeHeight: 1.37,
         }),
 
         state: (): CharacterControllerState => ({
@@ -460,6 +480,12 @@ export const CharacterControllerTrait = trait(
             bodyYawInit: false,
             isCrouchShape: false,
             crouchAmount: 0,
+            eyeHeight: 1.62,
+        }),
+
+        view: (): CharacterView => ({
+            origin: vec3.create(),
+            direction: vec3.create(),
         }),
     },
     { persist: false },
@@ -1615,6 +1641,33 @@ export function characterLookAt(cc: CharacterControllerTrait, transform: Transfo
     writeLook(cc, Math.atan2(-dx, -dz), Math.atan2(horiz, -dy));
 }
 
+/** world-space forward unit vector from a `[_, yaw, pitch]` look spherical.
+ *  engine convention: yaw=0, pitch=π/2 → -Z (matches the camera + glTF). shared
+ *  by the camera composition, npc aim, and `view.direction`. */
+export function lookForward(look: Vec3, out: Vec3): Vec3 {
+    const theta = look[1];
+    const phi = look[2];
+    const sinPhi = Math.sin(phi);
+    out[0] = -Math.sin(theta) * sinPhi;
+    out[1] = -Math.cos(phi);
+    out[2] = -Math.cos(theta) * sinPhi;
+    return out;
+}
+
+/** refresh `cc.view` (eye origin + look direction) and the eased `state.eyeHeight`,
+ *  so any script can read the character's look ray from its eyes. eye height eases
+ *  `eyeHeight`↔`crouchEyeHeight` by `crouchAmount` (climbing keeps full height).
+ *  run per-frame for every character — players and npcs alike. */
+export function updateCharacterView(cc: CharacterControllerTrait, transform: TransformTrait): void {
+    const config = cc.config;
+    const state = cc.state;
+    const crouchT = state.isClimbing ? 0 : state.crouchAmount;
+    state.eyeHeight = config.eyeHeight + (config.crouchEyeHeight - config.eyeHeight) * crouchT;
+    const p = getWorldPosition(transform);
+    vec3.set(cc.view.origin, p[0], p[1] + state.eyeHeight + state.stepSmoothOffset, p[2]);
+    lookForward(cc.input.look, cc.view.direction);
+}
+
 // ── script ────────────────────────────────────────────────────────────
 
 script(
@@ -1674,6 +1727,10 @@ script(
         // signals on their own onFrame.
         onFrame(ctx, ({ delta }) => {
             updateCharacterBob(ctx.trait, ctx.blocks, delta);
+            // refresh the look ray (eye origin + direction) after the bob/crouch ease, so
+            // every character — players and npcs — exposes `cc.view` for aiming/firing.
+            const transform = getTrait(ctx.node, TransformTrait);
+            if (transform) updateCharacterView(ctx.trait, transform);
         });
     },
     { editor: true },

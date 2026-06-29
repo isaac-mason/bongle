@@ -1033,6 +1033,7 @@ async function loadAtlasMeta(resources: Resources): Promise<BlockTextureAtlasMet
 async function writeAtlasPixels(
     res: VoxelResources,
     textureNames: string[],
+    textureCutout: Uint8Array,
     meta: BlockTextureAtlasMetadata,
     resources: Resources,
 ): Promise<void> {
@@ -1040,10 +1041,10 @@ async function writeAtlasPixels(
     if (decodeImage) {
         const bytes = await resources.loader.loadBytes('voxels-atlas.png');
         const { rgba } = await decodeImage(bytes, 'image/png');
-        writeBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, rgba);
+        writeBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, rgba, textureCutout);
         return;
     }
-    return loadBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta);
+    return loadBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, textureCutout);
 }
 
 /** Async side of construction: pre-warms the expansion compute pipeline,
@@ -1080,7 +1081,9 @@ export async function load(
     {
         const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(resources);
         res.atlasHash = resolvedMeta?.hash ?? null;
-        const atlasWrite = resolvedMeta ? writeAtlasPixels(res, registry.textures, resolvedMeta, resources) : Promise.resolve();
+        const atlasWrite = resolvedMeta
+            ? writeAtlasPixels(res, registry.textures, registry.textureCutout, resolvedMeta, resources)
+            : Promise.resolve();
         if (serializeAtlasBeforeCompute) {
             await atlasWrite.catch((e) => console.warn('[voxel-resources] atlas load failed:', e));
             res._resolveAtlasReady();

@@ -396,6 +396,113 @@ export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
     }));
 }
 
+// ── free-form rotate / translate helpers ────────────────────────────
+//
+// rotateY handles the common 90° cases with cullFace remapping. these
+// cover the off-axis cases (tilted geometry like a wall torch): a
+// free-form rotation about an arbitrary axis through a pivot, and a
+// plain translation. faces of tilted geometry no longer sit flush with
+// the block boundary, so rotateAxis clears cullFace — build the source
+// box with `cull: false`.
+
+/** rotate a position about `axis` through `pivot` by `cos`/`sin` of the angle. */
+function rotateAxisPos(v: Vec3, axis: 'x' | 'y' | 'z', cos: number, sin: number, pivot: Vec3): Vec3 {
+    const dx = v[0] - pivot[0];
+    const dy = v[1] - pivot[1];
+    const dz = v[2] - pivot[2];
+    switch (axis) {
+        case 'x':
+            return [v[0], pivot[1] + dy * cos - dz * sin, pivot[2] + dy * sin + dz * cos];
+        case 'y':
+            return [pivot[0] + dx * cos + dz * sin, v[1], pivot[2] - dx * sin + dz * cos];
+        case 'z':
+            return [pivot[0] + dx * cos - dy * sin, pivot[1] + dx * sin + dy * cos, v[2]];
+    }
+}
+
+/** rotate a normal about `axis` by `cos`/`sin` of the angle (pivot-independent). */
+function rotateAxisNormal(n: Vec3, axis: 'x' | 'y' | 'z', cos: number, sin: number): Vec3 {
+    switch (axis) {
+        case 'x':
+            return [n[0], n[1] * cos - n[2] * sin, n[1] * sin + n[2] * cos];
+        case 'y':
+            return [n[0] * cos + n[2] * sin, n[1], -n[0] * sin + n[2] * cos];
+        case 'z':
+            return [n[0] * cos - n[1] * sin, n[0] * sin + n[1] * cos, n[2]];
+    }
+}
+
+/**
+ * rotate an array of BlockQuad by `angleDeg` around `axis` through `pivot`
+ * (block-local space). positive angles follow the right-hand rule. cullFace
+ * is cleared because tilted faces no longer align to a block boundary.
+ */
+export function rotateAxis(quads: BlockQuad[], axis: 'x' | 'y' | 'z', angleDeg: number, pivot: Vec3): BlockQuad[] {
+    const rad = (angleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return quads.map((q) => ({
+        verts: [
+            rotateAxisPos(q.verts[0], axis, cos, sin, pivot),
+            rotateAxisPos(q.verts[1], axis, cos, sin, pivot),
+            rotateAxisPos(q.verts[2], axis, cos, sin, pivot),
+            rotateAxisPos(q.verts[3], axis, cos, sin, pivot),
+        ] as const,
+        normal: rotateAxisNormal(q.normal, axis, cos, sin),
+        texture: q.texture,
+        uvs: q.uvs,
+        cullFace: undefined,
+        material: q.material,
+    }));
+}
+
+/**
+ * shear an array of BlockQuad along `axis` as a linear function of height:
+ * a vertex at y=`yBase` is unmoved, one at y=`yBase + ySpan` shifts by
+ * `delta` along `axis`, with a proportional shift in between. unlike
+ * rotateAxis (which introduces sin/cos and pulls vertices off the lattice),
+ * a shear by lattice-aligned `delta`/`ySpan` keeps every input vertex on the
+ * 1/16 grid — so geometry survives the voxel vertex format's 1/16 position
+ * quantization with uniform thickness, instead of rounding unevenly per
+ * corner. used for the wall torch's grid-aligned lean. normals are left
+ * as-is: callers shear emissive geometry (face-shade bypassed) and gpucat
+ * culls by winding, which the shear preserves.
+ */
+export function shearByHeight(quads: BlockQuad[], axis: 'x' | 'z', yBase: number, ySpan: number, delta: number): BlockQuad[] {
+    const ai = axis === 'x' ? 0 : 2;
+    const shift = (v: Vec3): Vec3 => {
+        const moved: Vec3 = [v[0], v[1], v[2]];
+        moved[ai] = v[ai] + ((v[1] - yBase) / ySpan) * delta;
+        return moved;
+    };
+    return quads.map((q) => ({
+        verts: [shift(q.verts[0]), shift(q.verts[1]), shift(q.verts[2]), shift(q.verts[3])] as const,
+        normal: q.normal,
+        texture: q.texture,
+        uvs: q.uvs,
+        cullFace: q.cullFace,
+        material: q.material,
+    }));
+}
+
+/** translate an array of BlockQuad by `delta` (block-local space). */
+export function translate(quads: BlockQuad[], delta: Vec3): BlockQuad[] {
+    const [dx, dy, dz] = delta;
+    return quads.map((q) => ({
+        verts: [
+            [q.verts[0][0] + dx, q.verts[0][1] + dy, q.verts[0][2] + dz],
+            [q.verts[1][0] + dx, q.verts[1][1] + dy, q.verts[1][2] + dz],
+            [q.verts[2][0] + dx, q.verts[2][1] + dy, q.verts[2][2] + dz],
+            [q.verts[3][0] + dx, q.verts[3][1] + dy, q.verts[3][2] + dz],
+        ] as const,
+        normal: q.normal,
+        texture: q.texture,
+        uvs: q.uvs,
+        cullFace: q.cullFace,
+        material: q.material,
+    }));
+}
+
 // ── cross helper ────────────────────────────────────────────────────
 //
 // two diagonal planes, each double-sided (4 quads).

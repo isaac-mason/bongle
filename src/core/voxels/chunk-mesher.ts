@@ -1329,13 +1329,17 @@ const quadScratch: QuadScratch[] = /* @__PURE__ */ (() => {
     return arr;
 })();
 
-/** flags layout: texIndex 16 | animType 4 | facing 3 | reserved 9.
- *  bit 23 used to carry the bake-time diagFlip; the decision now lives in
- *  `light[0]` bit 29 (per-relight, see `applyDiagFlipBit`). AO sits in
- *  the dedicated meta word (`u32[9]`). top byte stays reserved for future
- *  per-quad geometry/material flags. */
-function packQuadFlags(texIndex: number, animType: number, facing: number): number {
-    return (texIndex & 0xffff) | ((animType & 0xf) << 16) | ((facing & 0x7) << 20);
+/** flags layout: texIndex 16 | animType 4 | facing 3 | emissive 1 | reserved 8.
+ *  bit 23 (was the bake-time diagFlip — that decision now lives in
+ *  `light[0]` bit 29, see `applyDiagFlipBit`) is reused as the emissive
+ *  flag: the shader skips directional face-shade + AO for emissive quads
+ *  so a self-lit block (torch, glowstone) glows uniformly instead of
+ *  dimming its E/W/N/S faces. AO sits in the dedicated meta word
+ *  (`u32[9]`). bits 24..31 stay reserved. */
+const QUAD_FLAG_EMISSIVE = 1 << 23;
+
+function packQuadFlags(texIndex: number, animType: number, facing: number, emissive: number): number {
+    return (texIndex & 0xffff) | ((animType & 0xf) << 16) | ((facing & 0x7) << 20) | (emissive ? QUAD_FLAG_EMISSIVE : 0);
 }
 
 /** meta layout: aoPacked 16 (4 bits/corner) | reserved 16.
@@ -1885,7 +1889,7 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                         const faceVertBase = face * 12;
                         const faceUvBase = uvStateBase + face * 8;
                         const normalPacked = FACE_OCT16[face]!;
-                        const flags = packQuadFlags(textureIndex, animType, facing);
+                        const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
 
                         const quadIdx = target.quadCount;
@@ -2123,7 +2127,7 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                         const a3Bits = Math.round((a3 - 0.5) * 30) | 0;
                         const aoPacked = a0Bits | (a1Bits << 4) | (a2Bits << 8) | (a3Bits << 12);
 
-                        const flags = packQuadFlags(textureIndex, animType, facing);
+                        const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
                         const liquidQuadIdx = target.quadCount;
                         writeQuadHeader(
@@ -2420,7 +2424,7 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                             py3 = y + qVerts[vBase + 10]!,
                             pz3 = z + qVerts[vBase + 11]!;
 
-                        const flags = packQuadFlags(textureIndex, animType, facing);
+                        const flags = packQuadFlags(textureIndex, animType, facing, emissiveTable[stateId]!);
                         const metaWord = packQuadMeta(aoPacked);
 
                         const quadIdx = target.quadCount;

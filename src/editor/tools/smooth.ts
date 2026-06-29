@@ -15,15 +15,14 @@
 
 import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
-import { send } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
-import { VoxelEditCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import type { PointerState } from '../pointer-state';
 import { type Mask, testMask } from '../scene/mask';
+import { commitVoxelOps } from '../voxel-edit';
 import { advanceBrushStroke, type BrushStrokeState, createBrushStrokeState } from './utils/brush';
 
 // per-room state contract. the shared stroke harness is nested under `brush`
@@ -38,7 +37,7 @@ const OPS_PER_PACKET = 4096;
 
 function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     for (let i = 0; i < ops.length; i += OPS_PER_PACKET) {
-        send(ctx, VoxelEditCommand, { ops: ops.slice(i, i + OPS_PER_PACKET) });
+        commitVoxelOps(ctx, ops.slice(i, i + OPS_PER_PACKET));
     }
 }
 

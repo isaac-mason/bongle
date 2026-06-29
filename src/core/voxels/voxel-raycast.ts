@@ -270,7 +270,13 @@ export function raycastVoxels(
                 return out;
             } else {
                 // custom collider shape — use crashcat castRayVsShape
-                const shape = colliderShapes[cid]!;
+                const shape = colliderShapes[cid];
+
+                // a stale state id — e.g. a chunk briefly resolved against a different
+                // registry mid-HMR (block add) — can index past the rebuilt shape table.
+                // skip the cell rather than hand crashcat an undefined shape (it would
+                // deref `.type` on undefined and crash the caller, e.g. the editor cursor).
+                if (!shape) continue;
 
                 // compute tMin/tMax for the ray segment within this voxel cell
                 const tVoxelExit = Math.min(tMaxX, tMaxY, tMaxZ);

@@ -24,12 +24,10 @@
 
 import type { Input } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
-import { send } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import type { VoxelOp } from '../blueprint';
-import { VoxelEditCommand } from '../commands';
 import type { EditRoomStoreApi, ElevationFalloff, ElevationImage, ElevationOptions } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { activeBlockKeyOf } from '../inventory';
@@ -38,12 +36,13 @@ import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '.
 import { testMask } from '../scene/mask';
 import { samplePattern } from '../scene/pattern';
 import { BRUSH_TINTS } from '../visuals/editor-colors';
+import { commitVoxelOps } from '../voxel-edit';
 
 const OPS_PER_PACKET = 4096;
 
 function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     for (let i = 0; i < ops.length; i += OPS_PER_PACKET) {
-        send(ctx, VoxelEditCommand, { ops: ops.slice(i, i + OPS_PER_PACKET) });
+        commitVoxelOps(ctx, ops.slice(i, i + OPS_PER_PACKET));
     }
 }
 

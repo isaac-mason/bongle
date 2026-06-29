@@ -5,14 +5,13 @@
 
 import type { ClientRoom } from '../client/rooms';
 import type { ScriptContext } from '../core/scene/scripts';
-import { send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import * as Blueprint from './blueprint';
-import { VoxelEditCommand } from './commands';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { isInputFocused } from './input';
 import type { TransformToolState } from './tools/transform';
 import * as TransformTool from './tools/transform';
+import { commitVoxelOps } from './voxel-edit';
 
 export type ClipboardHandlers = {
     onCopy: (e: ClipboardEvent) => void;
@@ -120,7 +119,7 @@ export function createClipboardHandlers(
         );
         // erase source voxels immediately (set each occupied cell to air)
         const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
-        send(ctx, VoxelEditCommand, { ops: airOps });
+        commitVoxelOps(ctx, airOps);
 
         api.setState({ placementContinuous: shiftHeldAtTrigger });
         TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.nodes, ctx);

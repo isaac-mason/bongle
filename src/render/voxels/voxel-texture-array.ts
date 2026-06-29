@@ -16,6 +16,7 @@
 
 import { ArrayTexture } from 'gpucat';
 import { assetUrl } from '../asset-url';
+import { buildVoxelMipPyramid } from './voxel-mip-pyramid';
 
 // ── constants ───────────────────────────────────────────────────────
 
@@ -78,9 +79,12 @@ export function createVoxelTextureArray(layerCount: number): ArrayTexture {
         mipmapFilter: 'linear', // trilinear blend between levels, no LOD popping
         wrapS: 'repeat',
         wrapT: 'repeat',
-        // each tile is its own array layer, so mips downsample per-tile with no
-        // cross-tile bleed. cutout (transparent) pass is intentionally left
-        // unchanged here so the erosion impact is visible for evaluation.
+        // generateMipmaps reserves the full mip chain on the placeholder so the
+        // GPU texture is allocated with every level. The real chain is built on
+        // the CPU and uploaded as explicit `atlas.mipmaps` once the atlas loads
+        // (see writeBlockTextureAtlasIntoTextureArray) — premultiplied RGB plus
+        // coverage-preserving alpha for cutout layers, which the naive GPU
+        // box filter can't do. Each tile is its own layer, so no cross-tile bleed.
         generateMipmaps: true,
     });
 }
@@ -99,11 +103,13 @@ export function createVoxelTextureArray(layerCount: number): ArrayTexture {
  * @param atlas - the existing ArrayTexture (created by createVoxelTextureArray)
  * @param textureNames - registry.textures (string[])
  * @param meta - pre-fetched atlas metadata from fetchBlockTextureAtlasMetadata()
+ * @param textureCutout - registry.textureCutout (1 per cutout layer)
  */
 export async function loadBlockTextureAtlasIntoTextureArray(
     atlas: ArrayTexture,
     textureNames: string[],
     meta: BlockTextureAtlasMetadata,
+    textureCutout: Uint8Array,
 ): Promise<void> {
     let img: HTMLImageElement;
     try {
@@ -125,6 +131,7 @@ export async function loadBlockTextureAtlasIntoTextureArray(
         textureNames,
         meta,
         new Uint8Array(fullPixels.buffer, fullPixels.byteOffset, fullPixels.byteLength),
+        textureCutout,
     );
 }
 
@@ -140,6 +147,7 @@ export function writeBlockTextureAtlasIntoTextureArray(
     textureNames: string[],
     meta: BlockTextureAtlasMetadata,
     pixels: Uint8Array,
+    textureCutout: Uint8Array,
 ): void {
     const metaIndexByName = new Map<string, number>();
     for (let i = 0; i < meta.textures.length; i++) {
@@ -189,6 +197,18 @@ export function writeBlockTextureAtlasIntoTextureArray(
 
         atlas.addLayerUpdate(layerIdx);
     }
+
+    // Build the CPU mip chain from the freshly-written level-0 data and upload
+    // it as explicit mips: premultiplied RGB everywhere (no transparent-texel
+    // fringe), coverage-preserving alpha on cutout layers (no foliage erosion).
+    // This replaces gpucat's naive box-filter generation for this texture.
+    atlas.mipmaps = buildVoxelMipPyramid(
+        sourceData,
+        atlas.depth,
+        TILE_SIZE,
+        (layer) => layer < textureCutout.length && textureCutout[layer] === 1,
+    );
+    atlas.generateMipmaps = false;
 
     atlas.needsUpdate = true;
 }

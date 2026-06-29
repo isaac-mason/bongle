@@ -135,12 +135,9 @@ type PlayerControllerConfig = {
     perspective: Perspective;
     thirdPersonDistance: number;
     cameraCollisionMargin: number;
-    eyeHeight: number;
-    crouchEyeHeight: number;
-    /** ease rate (1/s) for the sprint FOV transition. crouch eye-height
-     *  follows `cc.state.crouchAmount` directly (no separate lerp here)
-     *  so the camera drop and the visual sneak pose stay locked to the
-     *  same rate on the controller. */
+    /** ease rate (1/s) for the sprint FOV transition. (eye height now lives on
+     *  CharacterControllerTrait — `config.eyeHeight`/`crouchEyeHeight`, eased into
+     *  `state.eyeHeight` — so the camera reads it from there.) */
     fovLerpSpeed: number;
     fov: number;
     fovSprint: number;
@@ -150,7 +147,6 @@ type PlayerControllerConfig = {
 };
 
 type PlayerControllerState = {
-    currentEyeHeight: number;
     currentFov: number;
     currentCameraDistance: number;
     elapsed: number;
@@ -168,8 +164,6 @@ export const PlayerControllerTrait = trait(
             perspective: 'first',
             thirdPersonDistance: 4,
             cameraCollisionMargin: 0.2,
-            eyeHeight: 1.62,
-            crouchEyeHeight: 1.37,
             fovLerpSpeed: 10,
             fov: degreesToRadians(75),
             fovSprint: degreesToRadians(85),
@@ -179,7 +173,6 @@ export const PlayerControllerTrait = trait(
         }),
 
         state: (): PlayerControllerState => ({
-            currentEyeHeight: 1.62,
             currentFov: degreesToRadians(75),
             currentCameraDistance: 0,
             elapsed: 0,
@@ -471,7 +464,7 @@ function updateCamera(
     // which would cause a one-frame dip before the smooth rise.
     const baseY = characterController.state.stepSmoothOffset !== 0 ? transform.position[1] : pos[1];
     const headX = pos[0];
-    const headY = baseY + playerController.state.currentEyeHeight + characterController.state.stepSmoothOffset;
+    const headY = baseY + characterController.state.eyeHeight + characterController.state.stepSmoothOffset;
     const headZ = pos[2];
 
     const theta = characterController.input.look[1];
@@ -1082,14 +1075,8 @@ script(
                 }
             }
 
-            // eye-height follows the controller's shared `crouchAmount`
-            // directly — no separate lerp here, so the camera drop and the
-            // CharacterTrait body lean stay locked to the same rate
-            // (`crouchLerpRate` on CC). climbing keeps full eye-height even
-            // with crouch held: crouch means "descend" in climb mode, not
-            // "lower stance".
-            const crouchT = cc.state.isClimbing ? 0 : cc.state.crouchAmount;
-            pc.state.currentEyeHeight = pc.config.eyeHeight + (pc.config.crouchEyeHeight - pc.config.eyeHeight) * crouchT;
+            // eye-height (incl. the crouch drop) is eased on CharacterControllerTrait
+            // now — `state.eyeHeight`, which the camera reads above.
             const targetFov = cc.input.sprint ? pc.config.fovSprint : pc.config.fov;
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });

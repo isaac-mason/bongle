@@ -60,8 +60,8 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: github:isaac-mason/gpucat#54ee728
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13
+        specifier: github:isaac-mason/gpucat#b97471c
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -2056,8 +2056,8 @@ packages:
     resolution: {integrity: sha512-sSs4inE1FB2YQiymcmTv6NWENryABjUNPeWhOvmn4SjtKybglsyPZxFB3U1/+L1bYi0rNZDqCLlHyLYDl1Pq5A==}
     engines: {node: '>=8'}
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -4659,7 +4659,7 @@ snapshots:
       merge2: 1.4.1
       slash: 3.0.0
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/54ee728bea85152ab5688dd7dab28f8f00ab3e13:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d:
     dependencies:
       mathcat: 0.0.12
 

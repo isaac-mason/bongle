@@ -152,6 +152,7 @@ export type EngineRenderPipeline = {
 
 function createRenderPipeline(webGpuRenderer: WebGPURenderer): EngineRenderPipeline {
     const camera = new PerspectiveCamera(75 * (Math.PI / 180));
+
     // pass() needs a non-null Scene at construction; we use a throwaway
     // placeholder and mutate `passNode.scene = activeRoom.scene` each
     // frame. the placeholder is never rendered.

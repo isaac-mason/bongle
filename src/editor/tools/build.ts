@@ -22,18 +22,17 @@ import type { Quat, Vec3 } from 'mathcat';
 import type { Input } from '../../client/input';
 import { isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
-import { send } from '../../core/scene/scripts';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { PlaceIO } from '../../core/voxels/blocks';
 import type { Voxels } from '../../core/voxels/voxels';
 import { BLOCK_AIR, getBlock } from '../../core/voxels/voxels';
 import { pitchFromQuat, yawFromQuat } from '../camera';
-import { VoxelEditCommand } from '../commands';
 import type { EditRoomStoreApi } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import type { PointerState } from '../pointer-state';
 import { pointerJustDown } from '../pointer-state';
+import { commitVoxelOps } from '../voxel-edit';
 import type { TransformToolState } from './transform';
 import { enterBlueprintPlacement, enterPrefabPlacement, isInPlacement } from './transform';
 
@@ -95,10 +94,10 @@ export function updateBuild(
             store.getState().action({
                 label: 'break',
                 do() {
-                    send(ctx, VoxelEditCommand, { ops: [fwd] });
+                    commitVoxelOps(ctx, [fwd]);
                 },
                 undo() {
-                    send(ctx, VoxelEditCommand, { ops: [rev] });
+                    commitVoxelOps(ctx, [rev]);
                 },
             });
         }
@@ -134,10 +133,10 @@ export function updateBuild(
                     store.getState().action({
                         label: 'place',
                         do() {
-                            send(ctx, VoxelEditCommand, { ops: placement.fwd });
+                            commitVoxelOps(ctx, placement.fwd);
                         },
                         undo() {
-                            send(ctx, VoxelEditCommand, { ops: placement.rev });
+                            commitVoxelOps(ctx, placement.rev);
                         },
                     });
                 }

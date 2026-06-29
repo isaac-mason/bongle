@@ -54,13 +54,13 @@ import {
     SetPrefabCommand,
     SetRealmCommand,
     SetTraitCommand,
-    VoxelEditCommand,
 } from './commands';
 import type { EditRoomState, ElevationMode } from './edit-room-store';
 import { useEditor } from './editor-store';
 import { type Mask, testMask } from './scene/mask';
 import { type Pattern, samplePattern } from './scene/pattern';
 import { runSmooth } from './tools/smooth';
+import { commitVoxelOps } from './voxel-edit';
 
 /* ── voxel actions ── */
 
@@ -68,7 +68,7 @@ const OPS_PER_PACKET = 4096;
 
 function sendVoxelOps(ctx: ScriptContext, ops: VoxelOp[]): void {
     for (let i = 0; i < ops.length; i += OPS_PER_PACKET) {
-        send(ctx, VoxelEditCommand, { ops: ops.slice(i, i + OPS_PER_PACKET) });
+        commitVoxelOps(ctx, ops.slice(i, i + OPS_PER_PACKET));
     }
 }
 

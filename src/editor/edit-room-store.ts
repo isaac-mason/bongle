@@ -31,7 +31,7 @@ import * as Actions from './actions';
 import * as Blueprint from './blueprint';
 import { focusNode as focusCamera } from './camera';
 import { copySelectionToSystemClipboard } from './clipboard';
-import { SaveBlueprintCommand, VoxelEditCommand } from './commands';
+import { SaveBlueprintCommand } from './commands';
 import { useEditor } from './editor-store';
 import type { HotbarSlot } from './inventory';
 import type { Mask } from './scene/mask';
@@ -40,6 +40,7 @@ import type { BrushShape } from './scene/shapes';
 import type { PivotPreset, TransformToolState } from './tools/transform';
 import * as TransformTool from './tools/transform';
 import type { Rgba } from './visuals/editor-colors';
+import { commitVoxelOps } from './voxel-edit';
 
 export type ControlMode = 'fly' | 'orbit' | 'character';
 
@@ -736,7 +737,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 ctx.voxels,
             );
             const airOps = cutSourceOps.map((op) => ({ ...op, key: 'air' }));
-            send(ctx, VoxelEditCommand, { ops: airOps });
+            commitVoxelOps(ctx, airOps);
 
             set({
                 selection: { chunks: new Map(), nodes: new Set() },
@@ -776,7 +777,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             return true;
         },
         setBlock: (wx, wy, wz, key) => {
-            send(ctx, VoxelEditCommand, { ops: [{ wx, wy, wz, key }] });
+            commitVoxelOps(ctx, [{ wx, wy, wz, key }]);
             set({ inspectedVoxel: { wx, wy, wz, key } });
         },
         setPlacementPivotPreset: (preset) => {

@@ -1221,7 +1221,7 @@ script(
                     // seed the body under the snapshot eye, so the player
                     // camera (head = body + eyeHeight) lands on the prior pose.
                     _seedBodyPos[0] = _snapPos[0];
-                    _seedBodyPos[1] = _snapPos[1] - pc.config.eyeHeight;
+                    _seedBodyPos[1] = _snapPos[1] - cc.config.eyeHeight;
                     _seedBodyPos[2] = _snapPos[2];
                     setWorldPosition(transform, _seedBodyPos);
                     resetInterpolation(node);
