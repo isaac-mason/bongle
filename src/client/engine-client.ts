@@ -75,7 +75,7 @@ export type InitOptions = {
 
 // Re-export the registry-dispatch entry so the client boot template can call
 // `EngineClient.applyRegistryChanges(state)` from its flush handler.
-export { applyRegistryChanges, refreshBlockResources, refreshSpriteResources } from './registry-dispatch';
+export { applyRegistryChanges, refreshAudioResources, refreshBlockResources, refreshSpriteResources } from './registry-dispatch';
 
 // Re-export the play-mode UI mount so the play-mode boot template can mount
 // the play shell directly — keeps `engine-client` free of `env.editor` UI

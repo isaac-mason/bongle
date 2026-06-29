@@ -1062,10 +1062,12 @@ export function updatePlacementFromRaycast(
     const [sx, sy, sz] = placement.rotatedBlueprint.size;
     const [px, py, pz] = placement.pivotOffset;
 
-    // node-only 1x1x1 placements: respect snapTo same as the no-placement branch.
-    // face-center → ghost pinned to face midpoint; corner → snap to the integer
-    // corner of the face closest to the cursor (requires hitPoint).
-    if (!placement.blueprint.hasVoxels && sx === 1 && sy === 1 && sz === 1) {
+    // node-only prefabs have no voxel footprint (size is [0,0,0]); they place a
+    // single point on the hovered face and respect snapTo, same as the
+    // no-placement branch. face-center → ghost pinned to face midpoint; corner →
+    // snap to the integer corner of the face closest to the cursor (requires
+    // hitPoint).
+    if (!placement.blueprint.hasVoxels) {
         const useFaceCenter = _effectiveSnapTo(state) === 'face-center';
         let qx: number;
         let qy: number;

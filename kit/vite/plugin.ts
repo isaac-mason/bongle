@@ -565,6 +565,8 @@ if (import.meta.hot) {
                     // Sprite atlas → SpriteResources.refresh on the client.
                     if (result.spriteAtlasChanged)
                         clientHot.send('bongle:sprite-atlas-updated', { hash: result.spriteAtlasHash });
+                    // Audio manifest/atlas → Audio.refreshResources on the client.
+                    if (result.audioAtlasChanged) clientHot.send('bongle:audio-atlas-updated', { hash: result.audioAtlasHash });
                     // Each written icon → editor re-fetches the thumbnail.
                     for (const icon of result.iconsWritten)
                         clientHot.send('bongle:icons-ready', { kind: icon.kind, id: icon.id });

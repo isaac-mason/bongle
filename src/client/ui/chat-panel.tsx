@@ -79,6 +79,107 @@ function formatLine(l: ChatLine): string {
     return l.from ? `${l.from}: ${l.text}` : l.text;
 }
 
+// Minecraft-style inline formatting codes. The `§` (section sign) prefixes a
+// single code: `§0`–`§f` set a colour (the classic 16-colour palette), `§l`
+// bold, `§o` italic, `§n` underline, `§m` strikethrough, `§r` resets all.
+// This is the same convention Minecraft uses on the wire (alongside its newer
+// JSON text components), so messages stay readable as plain text where codes
+// aren't understood. Codes ride inside a normal chat string — no protocol
+// change — so any script can colour a line via `chat.message(ctx, '§b…')`.
+const MC_COLORS: Record<string, string> = {
+    '0': '#000000',
+    '1': '#0000aa',
+    '2': '#00aa00',
+    '3': '#00aaaa',
+    '4': '#aa0000',
+    '5': '#aa00aa',
+    '6': '#ffaa00',
+    '7': '#aaaaaa',
+    '8': '#555555',
+    '9': '#5555ff',
+    a: '#55ff55',
+    b: '#55ffff',
+    c: '#ff5555',
+    d: '#ff55ff',
+    e: '#ffff55',
+    f: '#ffffff',
+};
+
+type Segment = { text: string; color?: string; bold: boolean; italic: boolean; underline: boolean; strike: boolean };
+
+function parseFormatCodes(text: string): Segment[] {
+    const segments: Segment[] = [];
+    let color: string | undefined;
+    let bold = false;
+    let italic = false;
+    let underline = false;
+    let strike = false;
+    let buf = '';
+    const flush = (): void => {
+        if (buf) segments.push({ text: buf, color, bold, italic, underline, strike });
+        buf = '';
+    };
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i]!;
+        if (ch === '§' && i + 1 < text.length) {
+            const code = text[i + 1]!.toLowerCase();
+            if (code in MC_COLORS) {
+                flush();
+                color = MC_COLORS[code];
+                i++;
+                continue;
+            }
+            if (code === 'l' || code === 'o' || code === 'n' || code === 'm' || code === 'r') {
+                flush();
+                if (code === 'l') bold = true;
+                else if (code === 'o') italic = true;
+                else if (code === 'n') underline = true;
+                else if (code === 'm') strike = true;
+                else {
+                    color = undefined;
+                    bold = italic = underline = strike = false;
+                }
+                i++;
+                continue;
+            }
+        }
+        buf += ch;
+    }
+    flush();
+    return segments;
+}
+
+/** render a chat string with Minecraft `§` colour/style codes applied. */
+function FormattedText({ text }: { text: string }) {
+    if (!text.includes('§')) return <>{text}</>;
+    const segments = parseFormatCodes(text);
+    return (
+        <>
+            {segments.map((s, i) => (
+                <span
+                    // biome-ignore lint/suspicious/noArrayIndexKey: positional formatting segments
+                    key={i}
+                    style={{
+                        color: s.color,
+                        fontWeight: s.bold ? 'bold' : undefined,
+                        fontStyle: s.italic ? 'italic' : undefined,
+                        textDecoration:
+                            s.underline && s.strike
+                                ? 'underline line-through'
+                                : s.underline
+                                  ? 'underline'
+                                  : s.strike
+                                    ? 'line-through'
+                                    : undefined,
+                    }}
+                >
+                    {s.text}
+                </span>
+            ))}
+        </>
+    );
+}
+
 /** module-scoped command history — survives ChatPanel mount/unmount
  *  (e.g. editor toggled off/on) so prior submissions stay recallable. */
 const submitHistory: string[] = [];
@@ -292,7 +393,7 @@ export function ChatPanel() {
                         openHistory.map((l, i) => (
                             // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
                             <div key={`${l.ts}-${i}`} className={`${lineColor(l.kind)} whitespace-pre-wrap`}>
-                                {formatLine(l)}
+                                <FormattedText text={formatLine(l)} />
                             </div>
                         ))
                     )}
@@ -307,7 +408,7 @@ export function ChatPanel() {
                                 style={{ opacity: recentOpacity(l) }}
                                 className={`bg-black/50 px-2 py-0.5 ${lineColor(l.kind)} whitespace-pre-wrap`}
                             >
-                                {formatLine(l)}
+                                <FormattedText text={formatLine(l)} />
                             </div>
                         ))}
                     </div>

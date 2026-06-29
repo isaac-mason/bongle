@@ -138,6 +138,14 @@ export async function start(opts: StartOptions) {
                 console.error('[bongle] refreshSpriteResources failed:', err);
             });
         });
+        // Sibling for the audio manifest/atlas — a sound source-file edit
+        // re-bakes the atlas but carries no registry change, so this is the
+        // only path that reloads the decoded buffers in the live client.
+        import.meta.hot.on('bongle:audio-atlas-updated', () => {
+            EngineClient.refreshAudioResources(state).catch((err) => {
+                console.error('[bongle] refreshAudioResources failed:', err);
+            });
+        });
     }
 
     // Same origin as the page; the bongle:pipeline plugin in the same

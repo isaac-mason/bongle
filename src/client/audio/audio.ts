@@ -88,14 +88,18 @@ export type AudioResources = {
     muted: boolean;
     /** clips by sound id — atlas entries ready, standalones lazy. */
     clips: Map<string, ResolvedClip>;
+    /** manifest combined `hash` the clips were built against (`null` when no
+     *  manifest loaded). `refreshResources` compares against it to short-circuit
+     *  a no-op HMR poke. */
+    hash: string | null;
 };
 
 /** Build the resources object + the engine-global output bus for a context. */
-function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>): AudioResources {
+function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>, hash: string | null): AudioResources {
     const outputGain = context.createGain();
     outputGain.gain.value = 1;
     outputGain.connect(context.destination);
-    return { context, outputGain, muted: false, clips };
+    return { context, outputGain, muted: false, clips, hash };
 }
 
 /** Mute/unmute all engine audio at the output bus, ramping (to avoid clicks)
@@ -112,26 +116,23 @@ export function setOutputMuted(resources: AudioResources, muted: boolean): void 
     g.linearRampToValueAtTime(muted ? 0 : 1, now + 0.05);
 }
 
-/** load + decode the audio manifest + atlas. Called from
- *  `EngineClient.load()`. Always returns a live `AudioResources` — when
- *  no manifest is present (pipeline emitted nothing) the clips map is
- *  empty and `play(unknownId, ...)` no-ops cleanly. */
-export async function loadResources(): Promise<AudioResources> {
-    const Ctx: typeof AudioContext =
-        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-
-    let manifest: AudioManifest;
+/** Fetch + parse the audio manifest. `no-store` so a dev rebuild's bytes
+ *  aren't served stale from the HTTP cache on an HMR refresh. Returns null
+ *  when there's no manifest (no sounds declared) or it's unreadable. */
+async function fetchManifest(): Promise<AudioManifest | null> {
     try {
-        const res = await fetch(assetUrl('audio-manifest.json'));
-        if (!res.ok) return makeResources(new Ctx(), new Map());
-        manifest = (await res.json()) as AudioManifest;
+        const res = await fetch(assetUrl('audio-manifest.json'), { cache: 'no-store' });
+        if (!res.ok) return null;
+        return (await res.json()) as AudioManifest;
     } catch {
-        // no manifest = no sounds declared. fine, return a live but empty
-        // resources object so `play(unknownId, ...)` still no-ops cleanly.
-        return makeResources(new Ctx(), new Map());
+        return null;
     }
+}
 
-    const context = new Ctx({ sampleRate: manifest.sampleRate });
+/** Build the clips map for a manifest against an existing context: one eager
+ *  atlas decode covering every atlas-bucket clip, plus lazy standalone stubs.
+ *  Shared by `loadResources` (boot) and `refreshResources` (HMR). */
+async function buildClips(context: AudioContext, manifest: AudioManifest): Promise<Map<string, ResolvedClip>> {
     const clips = new Map<string, ResolvedClip>();
 
     // eager atlas decode — one fetch + one decodeAudioData covers every
@@ -139,7 +140,7 @@ export async function loadResources(): Promise<AudioResources> {
     // view into the same shared buffer.
     if (manifest.atlas.length > 0) {
         try {
-            const atlasRes = await fetch(assetUrl('audio-atlas.mp3'));
+            const atlasRes = await fetch(assetUrl('audio-atlas.mp3'), { cache: 'no-store' });
             if (!atlasRes.ok) throw new Error(`atlas HTTP ${atlasRes.status}`);
             const bytes = await atlasRes.arrayBuffer();
             // decodeAudioData *detaches* its input ArrayBuffer; pass a fresh
@@ -170,7 +171,47 @@ export async function loadResources(): Promise<AudioResources> {
         });
     }
 
-    return makeResources(context, clips);
+    return clips;
+}
+
+/** load + decode the audio manifest + atlas. Called from
+ *  `EngineClient.load()`. Always returns a live `AudioResources` — when
+ *  no manifest is present (pipeline emitted nothing) the clips map is
+ *  empty and `play(unknownId, ...)` no-ops cleanly. */
+export async function loadResources(): Promise<AudioResources> {
+    const Ctx: typeof AudioContext =
+        window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+
+    const manifest = await fetchManifest();
+    // no manifest = no sounds declared. fine, return a live but empty resources
+    // object so `play(unknownId, ...)` still no-ops cleanly.
+    if (!manifest) return makeResources(new Ctx(), new Map(), null);
+
+    const context = new Ctx({ sampleRate: manifest.sampleRate });
+    const clips = await buildClips(context, manifest);
+    return makeResources(context, clips, manifest.hash);
+}
+
+/** Re-fetch the manifest + atlas and rebuild the clips map IN PLACE, so every
+ *  room (each holds the same `resources` ref via `Audio.init`) picks up the new
+ *  buffers without a reboot. Returns true when the audio actually moved (the
+ *  manifest hash changed), false on a no-op. Called from the
+ *  `bongle:audio-atlas-updated` HMR listener — the source-file edit has no
+ *  registry change to ride, so this is the only path that reaches the live
+ *  client. The AudioContext is reused (sample rate is a fixed constant), and
+ *  in-flight playbacks keep their already-started buffers and finish cleanly. */
+export async function refreshResources(resources: AudioResources): Promise<boolean> {
+    const manifest = await fetchManifest();
+    if (!manifest) return false;
+    if (resources.hash !== null && manifest.hash === resources.hash) return false;
+
+    const clips = await buildClips(resources.context, manifest);
+    // replace the map's CONTENTS, not the reference — `resources.clips` is read
+    // on every play and shared across rooms, so mutating in place propagates.
+    resources.clips.clear();
+    for (const [id, clip] of clips) resources.clips.set(id, clip);
+    resources.hash = manifest.hash;
+    return true;
 }
 
 /* ── PlaybackHandle ────────────────────────────────────────────────── */

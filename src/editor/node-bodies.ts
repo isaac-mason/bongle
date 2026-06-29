@@ -11,10 +11,12 @@
 //   - root.children are always present so the user can pick another
 //     top-level object without first deselecting.
 //
-// Nodes whose subtree contributes no mesh AABB get NO body — they're only
-// selectable from the hierarchy panel. Each tracked body owns a stable
-// `BoxShape` whose `halfExtents` is mutated in place each frame to avoid
-// per-frame allocations.
+// Nodes whose subtree contributes a mesh/voxel AABB get a body sized to it;
+// transform-only nodes (empties, group pivots, not-yet-loaded visuals) fall
+// back to a small fixed-size pick box on their world origin so they stay
+// clickable in the viewport rather than being hierarchy-only. Each tracked
+// body owns a stable `BoxShape` whose `halfExtents` is mutated in place each
+// frame to avoid per-frame allocations.
 //
 // the module does NOT use userData on the rigid body — instead it maintains
 // a bidirectional map: bodyId ↔ nodeId.
@@ -22,6 +24,7 @@
 import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
 import { type Box3, box3, type Mat4, mat4, type Vec3 } from 'mathcat';
 import { getVisualWorldMatrix } from '../api/transforms';
+import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
 import { TransformTrait } from '../builtins/transform';
 import type { Physics } from '../core/physics/physics';
@@ -30,6 +33,7 @@ import type { Resources } from '../core/resources';
 import type { Node, Nodes } from '../core/scene/nodes';
 import { getNodeById, getTrait, isAncestorOf, query } from '../core/scene/nodes';
 import type { EditRoomStoreApi } from './edit-room-store';
+import { EditorTrait } from './editor-trait';
 import { unionSubtreeWorldAabb } from './node-aabb';
 
 // ── types ───────────────────────────────────────────────────────────
@@ -110,11 +114,16 @@ export function dispose(state: NodeBodies, physics: Physics): void {
 
 // ── frontier computation ────────────────────────────────────────────
 
-/** does this node carry a transform and is not a player or scene root? */
+/** does this node carry a transform and is not a player, scene root, or the
+ * editor's own lens nodes (the free-fly camera + the EditorTrait host)? both
+ * lens traits are runtime-only (persist:false) view artifacts, never level
+ * content, so they should never be click-selectable. */
 function isFrontierEligible(node: Node, playerNodeId: number, root: Node): boolean {
     if (node === root) return false;
     if (node.id === playerNodeId) return false;
     if (!getTrait(node, TransformTrait)) return false;
+    if (getTrait(node, CameraTrait)) return false;
+    if (getTrait(node, EditorTrait)) return false;
     return true;
 }
 
@@ -169,6 +178,12 @@ function recomputeFrontier(state: NodeBodies, nodes: Nodes, store: EditRoomStore
 const _worldAabb: Box3 = box3.create();
 const _invMat: Mat4 = mat4.create();
 const _scratchPos: Vec3 = [0, 0, 0];
+
+// half-size of the fallback pick box dropped on transform-only nodes (no
+// mesh/voxel geometry in their subtree). a 0.5-unit cube centered on the
+// node's world origin — big enough to click, small enough not to swallow
+// nearby geometry picks.
+const FALLBACK_PICK_HALF_EXTENT = 0.25;
 
 function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): void {
     const body = rigidBody.get(physics.rigid.world, entry.bodyId);
@@ -239,14 +254,21 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
         // ── first sync (or post-dirty rebuild): walk subtree once ──
         box3.set(_worldAabb, Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
         if (!unionSubtreeWorldAabb(node, resources, _worldAabb)) {
-            // no geometry yet — drop a stale body if present (mesh may have been removed)
-            if (existing) {
-                const body = rigidBody.get(world, existing.bodyId);
-                if (body) rigidBody.remove(world, body);
-                bodyToNode.delete(existing.bodyId);
-                nodeToBody.delete(nodeId);
-            }
-            continue;
+            // no mesh/voxel geometry in the subtree — fall back to a small fixed
+            // box centered on the node's world origin so it stays clickable.
+            const wm = getVisualWorldMatrix(transform);
+            const wx = wm[12];
+            const wy = wm[13];
+            const wz = wm[14];
+            box3.set(
+                _worldAabb,
+                wx - FALLBACK_PICK_HALF_EXTENT,
+                wy - FALLBACK_PICK_HALF_EXTENT,
+                wz - FALLBACK_PICK_HALF_EXTENT,
+                wx + FALLBACK_PICK_HALF_EXTENT,
+                wy + FALLBACK_PICK_HALF_EXTENT,
+                wz + FALLBACK_PICK_HALF_EXTENT,
+            );
         }
 
         // derive node-local AABB once: localAabb = inverse(rootWorld) * worldAabb

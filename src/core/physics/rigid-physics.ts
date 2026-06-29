@@ -68,7 +68,14 @@ import {
     rigidBodySideKey,
     voxelSideKey,
 } from './contacts';
-import { OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_NODE_NOT_MOVING, OBJECT_LAYER_VOXELS, settings } from './crashcat';
+import {
+    COLLISION_GROUP_NODES,
+    COLLISION_GROUP_VOXELS,
+    OBJECT_LAYER_NODE_MOVING,
+    OBJECT_LAYER_NODE_NOT_MOVING,
+    OBJECT_LAYER_VOXELS,
+    settings,
+} from './crashcat';
 
 // ── infinite aabb ───────────────────────────────────────────────────
 
@@ -149,6 +156,7 @@ export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): W
         shape: terrainShape,
         objectLayer: OBJECT_LAYER_VOXELS,
         motionType: MotionType.STATIC,
+        collisionGroups: COLLISION_GROUP_VOXELS,
     });
     return {
         nodes,
@@ -481,7 +489,10 @@ function buildBodyFromDef(
             sensor: def.sensor,
             allowedDegreesOfFreedom: def.allowedDegreesOfFreedom,
             gravityFactor: def.gravityFactor,
-            collisionGroups: def.collisionGroups,
+            // node rigid bodies are always in the NODES group (a structural
+            // fact, like terrain is always VOXELS); a game's own groups stack
+            // on top so "filter toward nodes" stays reliable.
+            collisionGroups: (def.collisionGroups ?? 0) | COLLISION_GROUP_NODES,
             collisionMask: def.collisionMask,
             linearDamping: def.linearDamping,
             angularDamping: def.angularDamping,

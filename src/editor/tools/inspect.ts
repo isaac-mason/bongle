@@ -242,7 +242,15 @@ export function updateInspect(
     const inPlaceMode = activeTool === 'transform' && transformModeNow === 'place';
     const inGrabMode = activeTool === 'transform' && transformModeNow === 'grab';
     const clicked = pointerJustDown(pointer, client.input);
-    const rightClicked = isMouseJustDown(client.input.mouseKeyboard, 'right');
+    // right-click trigger is mode-aware, mirroring the build tool: when the
+    // pointer is already locked (RMB unambiguous) fire on down for a snappy
+    // commit; when the cursor is visible (fly / orbit) fire only on a tap —
+    // a release that didn't cross the drag threshold — so a right-drag look
+    // doesn't also commit the placement.
+    const pointerLocked = !!document.pointerLockElement;
+    const rightClicked = pointerLocked
+        ? isMouseJustDown(client.input.mouseKeyboard, 'right')
+        : isMouseTap(client.input.mouseKeyboard, 'right');
 
     // grab mode: hold LMB on a node to grab; release/blur to drop. clicks on
     // empty space are no-ops. tool/mode switch force-release happens in

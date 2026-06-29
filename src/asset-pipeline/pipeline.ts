@@ -63,6 +63,11 @@ export type RunResult = {
     atlasHash: string | null;
     spriteAtlasChanged: boolean;
     spriteAtlasHash: string | null;
+    /** audio manifest (atlas + standalone) moved this pass → caller tells the
+     *  live client to re-fetch the manifest + atlas. hash is the manifest's
+     *  combined `hash` field, read the same way as the atlas sidecars. */
+    audioAtlasChanged: boolean;
+    audioAtlasHash: string | null;
     /** icons written this pass → caller notifies the editor to re-fetch them. */
     iconsWritten: IconWritten[];
 };
@@ -111,15 +116,20 @@ export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<
     const dir = clientResourcesDir(s);
     const atlasJsonPath = path.join(dir, 'voxels-atlas.json');
     const spriteAtlasJsonPath = path.join(dir, 'sprites-atlas.json');
+    // the audio manifest doubles as its own sidecar — its combined `hash` field
+    // is exactly what readArtifactHashSync reads (see asset-pipeline/bake/audio.ts).
+    const audioManifestPath = path.join(dir, 'audio-manifest.json');
 
     // ── bake ──
     const prevAtlasHash = readArtifactHashSync(atlasJsonPath);
     const prevSpriteAtlasHash = readArtifactHashSync(spriteAtlasJsonPath);
+    const prevAudioAtlasHash = readArtifactHashSync(audioManifestPath);
     const timings = await runAssetPipelinePass(s.internal, { projectDir, mode, cache }, s.bake, {
         forceAll: opts.forceAll,
     });
     const atlasHash = readArtifactHashSync(atlasJsonPath);
     const spriteAtlasHash = readArtifactHashSync(spriteAtlasJsonPath);
+    const audioAtlasHash = readArtifactHashSync(audioManifestPath);
 
     const result: RunResult = {
         timings,
@@ -128,6 +138,8 @@ export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<
         atlasHash,
         spriteAtlasChanged: !!spriteAtlasHash && spriteAtlasHash !== prevSpriteAtlasHash,
         spriteAtlasHash,
+        audioAtlasChanged: !!audioAtlasHash && audioAtlasHash !== prevAudioAtlasHash,
+        audioAtlasHash,
         iconsWritten: [],
     };
 

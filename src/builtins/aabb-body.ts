@@ -3,6 +3,7 @@ import { pack } from '../api/pack';
 import { prop } from '../api/prop';
 import { control, sync, syncRate, type TraitType, trait } from '../api/traits';
 import * as AabbPhysics from '../core/physics/aabb-physics';
+import { COLLISION_GROUP_NODES } from '../core/physics/crashcat';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 
 // lightweight axis-aligned body trait. wraps an `AabbPhysics.Body` from the
@@ -26,7 +27,7 @@ export const AabbBodyTrait = trait('aabbbody', {
 
     gravityFactor: 1,
 
-    collisionGroups: 0xffffffff,
+    collisionGroups: COLLISION_GROUP_NODES,
 
     collisionMask: 0xffffffff,
 

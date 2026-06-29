@@ -32,6 +32,13 @@ export const OBJECT_LAYER_EDITOR_NODES = addObjectLayer(settings, BROADPHASE_LAY
  *  layer; only external crashcat-managed bodies see impostors. */
 export const OBJECT_LAYER_AABB_IMPOSTOR = addObjectLayer(settings, BROADPHASE_LAYER_MOVING);
 
+// crashcat collision groups (the per-body groups/mask bitfields, distinct from
+// the baked object layers above). the engine reserves the low bits to tag its
+// own bodies — the voxel terrain body and node rigid bodies — so games can
+// filter against them; games use 1 << 2 and up for their own groups.
+export const COLLISION_GROUP_VOXELS = 1 << 0;
+export const COLLISION_GROUP_NODES = 1 << 1;
+
 enableCollision(settings, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_VOXELS);
 enableCollision(settings, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_NODE_MOVING);
 enableCollision(settings, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_NODE_NOT_MOVING);

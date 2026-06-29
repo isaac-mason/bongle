@@ -56,6 +56,7 @@ import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import * as VoxelResources from '../render/voxels/voxel-resources';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
+import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
 import * as Net from './net';
 
@@ -370,6 +371,20 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
             state.renderer.environmentResources,
         );
     }
+}
+
+/**
+ * Re-fetch `audio-manifest.json` + `audio-atlas.mp3` into the engine-global
+ * `AudioResources`, rebuilding the decoded clip buffers in place. Called from
+ * the `bongle:audio-atlas-updated` HMR listener in the boot template — a sound
+ * source-file edit has no registry change to ride, so this is the only path
+ * that propagates it to the live client. `Audio.refreshResources` mutates the
+ * shared `clips` map's contents, so every room sees the new buffers with no
+ * per-room re-init (unlike the sprite/voxel atlases, which rebind GPU
+ * resources); in-flight playbacks keep their started buffers and finish.
+ */
+export async function refreshAudioResources(state: EngineClient): Promise<void> {
+    await Audio.refreshResources(state.audioResources);
 }
 
 // per-kind toast labels. singular when one id changed, plural for many.
