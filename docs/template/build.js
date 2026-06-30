@@ -51,7 +51,9 @@ function getAllSourceFiles(dir) {
     return files;
 }
 
-const sourceFiles = getAllSourceFiles(srcDir);
+// src/ is the public surface; interface/ holds shared wire/result types
+// (`bongle/interface`) that some signatures reference, so include it too.
+const sourceFiles = [...getAllSourceFiles(srcDir), ...getAllSourceFiles(path.join(libDir, 'interface'))];
 
 const tsProgram = ts.createProgram(sourceFiles, {
     allowJs: false,
@@ -230,9 +232,18 @@ function getType(typeName, scopeFile = null, displayName = null) {
                     );
                     found = (jsDoc ? `${jsDoc}\n` : '') + printer.printNode(ts.EmitHint.Unspecified, sigNode, sourceFile);
                 } else {
+                    // explicit annotation if present, else infer ONLY for object-
+                    // literal consts (like `gameStorage`), whose inferred type is the
+                    // clean method-signature surface. call-result consts (e.g.
+                    // `trait(...)`) infer to huge `import(...)` types, so leave those bare.
+                    const typeNode =
+                        decl.type ??
+                        (init && ts.isObjectLiteralExpression(init)
+                            ? checker.typeToTypeNode(checker.getTypeAtLocation(init), node, ts.NodeBuilderFlags.NoTruncation)
+                            : undefined);
                     const varNode = ts.factory.createVariableStatement(
                         [ts.factory.createModifier(ts.SyntaxKind.ExportKeyword)],
-                        ts.factory.createVariableDeclarationList([ts.factory.createVariableDeclaration(name, undefined, decl.type, undefined)], node.declarationList.flags),
+                        ts.factory.createVariableDeclarationList([ts.factory.createVariableDeclaration(name, undefined, typeNode, undefined)], node.declarationList.flags),
                     );
                     found = (jsDoc ? `${jsDoc}\n` : '') + printer.printNode(ts.EmitHint.Unspecified, varNode, sourceFile);
                 }
@@ -273,6 +284,45 @@ function getSource(typeName) {
 
 // ── rendering ───────────────────────────────────────────────────────
 
+// pretty-print a one-line declaration: break object-type members onto their own
+// lines (depth-aware) so a rendered object const (e.g. `gameStorage`) or a type
+// alias is readable. only touches single-line decls with an object type — leaves
+// function signatures (no braces) and already-multiline interfaces/classes alone. a
+// leading JSDoc/comment block is preserved verbatim.
+function formatSignature(code) {
+    const m = code.match(/^(\s*\/\*[\s\S]*?\*\/\s*\n)/);
+    const lead = m ? m[1] : '';
+    const decl = code.slice(lead.length);
+    if (decl.includes('\n') || !decl.includes('{')) return code;
+    let out = '';
+    let depth = 0;
+    const pad = () => '    '.repeat(depth);
+    for (let i = 0; i < decl.length; i++) {
+        const c = decl[i];
+        if (c === '{') {
+            depth++;
+            out += `{\n${pad()}`;
+            let j = i + 1;
+            while (decl[j] === ' ') j++;
+            i = j - 1;
+        } else if (c === '}') {
+            depth = Math.max(0, depth - 1);
+            out = `${out.replace(/[ \t]+$/, '')}\n${pad()}}`;
+        } else if (c === ';') {
+            out += ';';
+            let j = i + 1;
+            while (decl[j] === ' ') j++;
+            if (j < decl.length && decl[j] !== '}') {
+                out += `\n${pad()}`;
+                i = j - 1;
+            }
+        } else {
+            out += c;
+        }
+    }
+    return lead + out;
+}
+
 // parse a `select` expression: "module:symbol" or just "symbol".
 // the module (a path under src, e.g. "api/transforms") scopes the lookup so
 // re-export aliases resolve to their real declaration; the symbol may itself
@@ -308,7 +358,8 @@ function renderSymbol(attrs) {
         console.warn(`Render: symbol not found: ${attrs.select}`);
         return `<!-- Render: not found: ${attrs.select} -->`;
     }
-    const block = `\`\`\`ts\n${code.trim()}\n\`\`\``;
+    const rendered = attrs.source ? code : formatSignature(code);
+    const block = `\`\`\`ts\n${rendered.trim()}\n\`\`\``;
     if (!attrs.heading) return block;
     const display = (attrs.as ? `${attrs.as}.` : '') + exportName;
     return `#### \`${display}\`\n\n${block}`;
@@ -337,7 +388,7 @@ function renderModule(attrs) {
         const scope = tsProgram.getSourceFile(exp.originFile) ?? null;
         const symbolName = exp.exportName.split('.').pop();
         const code = getType(exp.localName, scope, symbolName);
-        if (code) parts.push(`#### \`${exp.exportName}\`\n\n\`\`\`ts\n${code.trim()}\n\`\`\``);
+        if (code) parts.push(`#### \`${exp.exportName}\`\n\n\`\`\`ts\n${formatSignature(code).trim()}\n\`\`\``);
         else unresolved.push(exp.exportName);
     }
     if (unresolved.length) parts.push(`Also exported: ${unresolved.map((n) => `\`${n}\``).join(', ')}.`);

@@ -849,7 +849,11 @@ Define traits and the schemas behind editor controls (`prop`) and network packin
  * the diff compares against the rate's `threshold`. body-agnostic: a node moved by
  * a rigid body, an AABB body, a script, or an animation all measure the same way.
  */
-export const syncMetric;
+export const syncMetric: {
+    distance(a: ArrayLike<number>, b: ArrayLike<number>): number;
+    angle(a: ArrayLike<number>, b: ArrayLike<number>): number;
+    scalar(a: number, b: number): number;
+};
 ```
 
 #### `syncRate`
@@ -861,7 +865,11 @@ export const syncMetric;
  * `rate: syncRate.distance(0.05)`. for an exotic metric, write the raw
  * `{ threshold, metric }` form instead.
  */
-export const syncRate;
+export const syncRate: {
+    distance: (threshold: number) => ThresholdRate;
+    angle: (threshold: number) => ThresholdRate;
+    scalar: (threshold: number) => ThresholdRate;
+};
 ```
 
 #### `ControlDef`
@@ -1621,7 +1629,11 @@ export function error(ctx: ScriptContext, ...args: unknown[]): void;
  * Note: there is no `env.edit` or `env.play`. Mode is per-room and
  * available on the script context as `ctx.mode`.
  */
-export const env;
+export const env: {
+    client: boolean;
+    server: boolean;
+    editor: boolean;
+};
 ```
 #### `platform`
 
@@ -1641,7 +1653,10 @@ export const env;
  * `state.adActive` while the ad runs, and the client update loop reconciles the
  * engine's audio output mute against it each frame. Games don't think about it.
  */
-export const platform;
+export const platform: {
+    commercialBreak(ctx: ScriptContext): Promise<void>;
+    rewardedBreak(ctx: ScriptContext): Promise<boolean>;
+};
 ```
 
 ## Assets
@@ -3266,7 +3281,11 @@ export type TextureRef = BlockTextureDef | string;
  *
  * returns a handle used for getting global state ids in gameplay code.
  */
-export function block<const P extends PropsDef = {}>(id: string, options: BlockOptions<P> = {}): BlockHandle<P>;
+export function block<const P extends PropsDef = {
+
+}>(id: string, options: BlockOptions<P> = {
+
+}): BlockHandle<P>;
 ```
 
 #### `blockTexture`
@@ -4209,7 +4228,22 @@ export const ShadowCasterTrait;
  *  into `particle({ ..., update: particleUpdate.X })`, or compose the
  *  primitives into a custom fn. all share the `(pool, i, dt, voxels)`
  *  per-particle signature. */
-export const particleUpdate;
+export const particleUpdate: {
+    gravity: (pool: ParticlePool, i: number, dt: number, g: number) => void;
+    drag: (pool: ParticlePool, i: number, dt: number, k: number) => void;
+    integrate: (pool: ParticlePool, i: number, dt: number) => void;
+    collideSlide: (pool: ParticlePool, i: number, _dt: number, voxels: Voxels) => void;
+    collideLand: (pool: ParticlePool, i: number, _dt: number, voxels: Voxels) => void;
+    collideBounce: (pool: ParticlePool, i: number, _dt: number, voxels: Voxels, b: number) => void;
+    collideDestroy: (pool: ParticlePool, i: number, _dt: number, voxels: Voxels) => void;
+    fadeRgb: (pool: ParticlePool, i: number, dt: number, rate: number) => void;
+    fadeAlpha: (pool: ParticlePool, i: number, dt: number, rate: number) => void;
+    dust: UpdateFn;
+    smoke: UpdateFn;
+    spark: UpdateFn;
+    snow: UpdateFn;
+    rain: UpdateFn;
+};
 ```
 
 #### `ParticleHandle`
@@ -5659,7 +5693,16 @@ Server-only key-value stores.
 
 ```ts
 /** Game-scoped KV, shared across every room and player of this game. */
-export const gameStorage;
+export const gameStorage: {
+    get(ctx: ScriptContext, key: string): Promise<StorageEntry | null>;
+    set(ctx: ScriptContext, key: string, value: JsonValue, opts?: {
+        ifVersion?: string;
+    }): Promise<StorageSetResult>;
+    delete(ctx: ScriptContext, key: string, opts?: {
+        ifVersion?: string;
+    }): Promise<StorageDeleteResult>;
+    list(ctx: ScriptContext, opts?: StorageListOpts): Promise<StorageListPage>;
+};
 ```
 
 #### `userStorage`
@@ -5670,7 +5713,16 @@ export const gameStorage;
  * is the durable platform identity (`User.id`). Resolve it from a
  * `Client` via `clientToUser(ctx, client).id`.
  */
-export const userStorage;
+export const userStorage: {
+    get(ctx: ScriptContext, userId: string, key: string): Promise<StorageEntry | null>;
+    set(ctx: ScriptContext, userId: string, key: string, value: JsonValue, opts?: {
+        ifVersion?: string;
+    }): Promise<StorageSetResult>;
+    delete(ctx: ScriptContext, userId: string, key: string, opts?: {
+        ifVersion?: string;
+    }): Promise<StorageDeleteResult>;
+    list(ctx: ScriptContext, userId: string, opts?: StorageListOpts): Promise<StorageListPage>;
+};
 ```
 
 ## Multiplayer & rooms
@@ -5785,7 +5837,9 @@ export const HARD_MAX_PLAYERS_PER_ROOM;
  * scripts/traits/etc. only the first call wins, a second call throws so
  * conflicts don't sit hidden.
  */
-export function matchmaking(opts: MatchmakingOptions = {}): MatchmakingConfig;
+export function matchmaking(opts: MatchmakingOptions = {
+
+}): MatchmakingConfig;
 ```
 #### `rooms.create`
 
@@ -6032,7 +6086,12 @@ Also exported: `chat.ArgType`, `chat.CommandHandle`, `chat.CommandInvocation`, `
  *
  * Use cases: gamemode switches, team splits, lobby→game transitions.
  */
-export const client;
+export const client: {
+    matchmake(ctx: ScriptContext, opts: {
+        gameOptions: Record<string, string | number | boolean>;
+        joinData?: Record<string, JsonValue>;
+    }): void;
+};
 ```
 #### `clientToUser`
 

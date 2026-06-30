@@ -67,6 +67,40 @@ bongle upgrade
 bongle migrate [--check]
 ```
 
+## Project structure
+
+A scaffolded project is a small npm package. The pieces you work with:
+
+```text
+my-game/
+├── src/
+│   ├── index.ts        your game code (the entry point the engine loads)
+│   └── generated/      typed handles the pipeline writes (do not edit)
+├── assets/             source files: glTF, textures, audio, sprites
+├── content/            editor-authored scenes (.scene.json)
+├── dist/               build output: bundle.zip, from `bongle build`
+├── package.json        the `bongle` dependency and scripts
+└── tsconfig.json
+```
+
+- **`src/index.ts`** is where your code lives, the entry the engine loads. Split it
+  into more files and import them as the game grows.
+- **`src/generated/`** is written for you, not by hand. The asset pipeline scans
+  `assets/` and `content/` and regenerates typed handles (`models.ts`, `sounds.ts`,
+  `scenes.ts`) so `model('id')` and friends resolve and type-check. Never edit these;
+  every build and editor session overwrites them.
+- **`assets/`** holds the raw files you reference: a `.gltf` for `model()`, a `.png`
+  for `blockTexture()` or `sprite()`, an `.ogg` for `sound()`. Point a declaration's
+  `src` at one with `new URL('./assets/...', import.meta.url)`.
+- **`content/`** holds what you author in the editor, scenes saved as `.scene.json`.
+  The editor regenerates `src/generated/scenes.ts` so code references them by name.
+- **`dist/`** is the output of `bongle build`: a self-contained `bundle.zip` of
+  client, server, and content, ready to serve or deploy.
+
+Commit `src/index.ts`, `assets/`, `content/`, and the config files. The generated
+`src/generated/`, the pipeline's intermediate `resources/`, `dist/`, and
+`node_modules/` are all regenerated, and the scaffold gitignores them.
+
 ## Your first game
 
 `bongle new my-game` scaffolds a project whose `src/index.ts` is already a
@@ -162,7 +196,7 @@ programming model](#the-programming-model)): set a value on the server and
 clients receive it. Use `'realtime'` for fields that change every tick, like
 position or health, and `'dirty'` for fields you set once and rarely touch. When
 you need to send a discrete message instead of replicating state, reach for RPC,
-covered in [Multiplayer, in depth](#multiplayer-in-depth).
+covered in [Multiplayer](#multiplayer).
 
 ## The programming model
 
@@ -178,7 +212,7 @@ scoped to one **room**, and that matters from the start: a server runs many room
 once, each its own independent world, and your script runs once per node in each
 room. So per-room state belongs on `ctx`-reachable things, a trait or the world
 itself, never in a module-scope variable, which every room in the process would
-share. Rooms get a fuller treatment in [Multiplayer, in depth](#rooms).
+share. Rooms get a fuller treatment in [Multiplayer](#rooms).
 
 ### Nodes and the scene graph
 
@@ -194,11 +228,15 @@ reads it back later (or `null` if absent), and `hasTrait` tests presence.
 `findByName` runs a depth-first search from a node for the first descendant with
 a given name.
 
-Every node has a **realm** that decides which sides it lives on. By default a
-node inherits its parent's realm, which resolves to `'shared'` under the scene
-root: it exists on the server and every client and replicates between them. Pass
-`realm: 'server'` to `createNode` for server-only nodes that never replicate, or
-`realm: 'client'` for purely local client nodes.
+Every node has a **realm** that decides which sides it lives on. By default a node
+inherits its parent's realm, which resolves to `'shared'` under the scene root: a
+shared node exists on the server and every client, with the server authoritative and
+its state replicated out to clients. The other realms never replicate: `realm:
+'server'` lives only on the server, `realm: 'client'` only on the client that created
+it, and `realm: 'each'` gives the server and every client their own independent copy.
+Realm decides where a node exists; [replication and
+authority](#replication-and-authority) decides what crosses the wire and who may
+write it.
 
 ### Traits
 
@@ -324,7 +362,98 @@ build time. Put authoritative simulation on the server and read its results on
 the client through replication: a `sync` on a trait is the usual path, where the
 server writes the field and every client receives it at the configured rate. For
 discrete events rather than continuous state, use RPC, covered in
-[Multiplayer, in depth](#multiplayer-in-depth).
+[Multiplayer](#multiplayer).
+
+## Multiplayer
+
+[The multiplayer model](#the-multiplayer-model) introduced replication, where most
+state crosses the wire for free. This chapter goes deeper: how `sync` replication,
+authority, and ownership actually work; client-side prediction; explicit messages
+with RPC; and managing multiple rooms.
+
+### Replication and authority
+
+Replication only concerns shared-realm nodes (the [realm](#nodes-and-the-scene-graph)
+section covers the rest). Most multiplayer state on them never needs an explicit
+message: a trait field with a `sync` is serialized on its authoritative side and
+applied everywhere else. The sync's `rate` controls how often it emits: `'realtime'`
+(the default) emits on every change, for positions and health; `'dirty'` emits only
+when you call the returned handle's `dirty()`, for fields you set once; a number caps
+the rate in Hz; and a threshold rate such as `syncRate.distance(0.1)` re-emits only
+once the value has moved that far, which is how a body coming to rest goes quiet on
+the wire.
+
+**Authority** decides which side may write a synced field. By default it is the
+server, so writes from clients are ignored. Set `authority: 'owner'` on the sync to
+let the node's owning client write it instead, which is how player-controlled and
+client-predicted entities work.
+
+**Ownership** is the separate axis behind that. Each shared node has an **owner**, a
+player or none: a player's own node is owned by their client from the moment they
+join, and an unowned node is driven by the server. `isOwner(ctx, node)` answers "do I
+have write authority here": on the server it is true for unowned nodes, and on a
+client it is true only for that client's own nodes, so one shared script can run on
+both sides and act only where it has authority. On a client, a node it does not own
+is a **proxy**: it renders the replicated state but does not drive it. The engine
+assigns ownership; you read it with `isOwner` but do not reassign it.
+
+### Client-side prediction
+
+Waiting for the server to confirm every action would make the game feel laggy, so
+predicted entities run their simulation locally and reconcile against the server
+afterward. A client simulates the entity the instant it needs to, from your own input
+or a dynamic body moving between server snapshots; the server runs the authoritative
+version; and when the server's result arrives the client blends its transform toward
+it rather than snapping. Your own inputs feel instant while the server stays the
+source of truth.
+
+Rigid bodies predict by default. With `RigidBodyTrait`'s `prediction` flag on (the
+default), each client runs the dynamic body locally instead of only snapping to
+snapshots, so it stays smooth between updates; where a body has a client owner, that
+owner runs it ahead of the server and reconciles. The player controller predicts a
+player's own movement the same way. Set `def.prediction: false` on a body where a
+brief snap on correction is fine and you would rather not pay the cost, such as
+distant, low-stakes objects.
+
+### RPC
+
+Replication suits continuous state; for a one-off event, send a message instead.
+Declare a command with `command(id, direction, schema)`. The direction is
+`CLIENT_TO_SERVER` or `SERVER_TO_CLIENT`, and the schema both types the payload and
+serializes it. Handle incoming commands with `listen`, and send with `send` (or
+`broadcast` to reach every client).
+
+<Snippet source="multiplayer.snippet.ts" select="rpc" />
+
+That schema is a `pack` schema. `pack` is the engine's binary wire-format builder,
+from [packcat](https://github.com/isaac-mason/packcat): you compose a payload shape
+from `pack.object`, `pack.float32`, `pack.string`, `pack.list`, `pack.boolean`, and
+the rest, plus bongle helpers such as `pack.quaternion()`, and the command serializes to
+a compact binary frame rather than JSON. The same `pack` schemas back trait `sync`
+replication under the hood, so it is the one wire format the whole engine speaks.
+Do not confuse it with `prop` (from the [trait `control`](#traits) schema), which
+describes editor-inspectable and persisted fields, not what crosses the network.
+
+### Rooms
+
+A **room** is one running instance of your game: its own copy of the scene,
+voxels, physics, and the players currently in it. Everything a script reaches
+through `ctx` belongs to its room, and most games run many rooms at once so no
+single instance fills up or slows the others.
+
+`matchmaking(config)` decides how arriving players are grouped into rooms (the
+starter caps a room at 32 players). When you need rooms beyond the ones
+matchmaking creates, for lobbies, private matches, or instanced dungeons, manage
+them yourself: `rooms.create` opens one from a scene, `rooms.join` and `rooms.swap`
+move a client between rooms, and `rooms.list` and `rooms.view` inspect them.
+
+A client can also re-enter matchmaking itself with `client.matchmake`, handing
+over new `gameOptions` to switch gamemodes or move from a lobby into a match.
+
+<Snippet source="multiplayer.snippet.ts" select="rematch" />
+
+`chat` carries text messages within a room, and `clientToUser` resolves a
+connected client to its durable `User`.
 
 ## Transforms
 
@@ -548,6 +677,7 @@ for anything they do not:
 - [Models and meshes](#models-and-meshes): bringing in glTF geometry (the 99% path) and the low-level mesh trait.
 - [glTF support](#gltf-support): exactly which glTF/GLB features are imported.
 - [Characters](#characters): rigged humanoids that players and NPCs render as.
+- [Avatars](#avatars): the model a humanoid renders with, and spawning NPCs.
 - [Animation](#animation): playing a model's glTF clips.
 - [Procedural animation](#procedural-animation): posing bones from code each frame.
 - [Voxel meshes](#voxel-meshes): standalone, movable block meshes.
@@ -573,12 +703,12 @@ server-only `configureFloodFillLighting`.
 
 <Snippet source="visuals.snippet.ts" select="lighting" />
 
+### Models and meshes
+
 Most visible 3D content is glTF. A plain **model** is any glTF you place in the
 world, such as a prop, a pickup, or a piece of scenery. A **character** is a rigged
 humanoid that animates and that players and NPCs render as. They share the loading
-machinery below but differ in how you drive them.
-
-### Models and meshes
+machinery here but differ in how you drive them.
 
 In almost every case you bring 3D geometry into the world by declaring a model and
 instancing it, not by building meshes by hand. `model(id, { src })` declares a model
@@ -637,16 +767,54 @@ separate bone nodes (see [Animation](#animation)).
 
 A character is a node with a `CharacterTrait`, which carries its model, sounds, and
 effects and pairs with the `CharacterControllerTrait` from [Physics](#physics).
-Player nodes get one automatically from their avatar (see [Avatars](#avatars)); for
-NPCs you assign one yourself.
+Player nodes get one automatically from their avatar (covered just below); for NPCs
+you assign one yourself.
 
-Character models follow a canonical humanoid rig (the `6bone` rig, whose structure
-is laid out under [Avatars](#avatars)). You author them in
+Character models follow a canonical humanoid rig, the `6bone` rig: a `waist` hub with
+`body`, `head`, `arm_left`, `arm_right`, `leg_left`, and `leg_right` bones, plus three
+attach sockets for gear, `hand_left`, `hand_right`, and `back`:
+
+```text
+waist
+├── body
+│   └── back          (socket)
+├── head
+├── arm_left
+│   └── hand_left     (socket)
+├── arm_right
+│   └── hand_right    (socket)
+├── leg_left
+└── leg_right
+```
+
+The feet are origined at world y=0. The bones may sit at scene root or under whatever
+parent the authoring tool produced; the rig contract only requires the seven bones be
+present somewhere reachable, so resolve any of them by name with
+`findByName(node, 'head')`. The three sockets are always built as persistent rig
+nodes for mounting held items and back-mounted props; when an avatar doesn't author
+one, the engine derives its rest position from the parent bone's geometry, so
+creators get usable mount points for free, while an authored socket keeps its own
+transform.
+
+You author character models in
 [bongle-blockbench](https://github.com/isaac-mason/bongle-blockbench), a build of
-[Blockbench](https://www.blockbench.net/) set up for bongle. It starts you from
-that rig, validates it as you work, and exports an engine-ready glTF in one click.
-Run it online at [blockbench.bongle.io](https://blockbench.bongle.io), or install
-it into the Blockbench desktop app.
+[Blockbench](https://www.blockbench.net/) set up for bongle. It starts you from that
+rig, validates it as you work, and exports an engine-ready glTF in one click. Run it
+online at [blockbench.bongle.io](https://blockbench.bongle.io), or install it into
+the Blockbench desktop app.
+
+### Avatars
+
+An avatar is the model a humanoid renders with. Player nodes receive one
+automatically on join, resolved by the platform, so you rarely touch avatars for
+players directly. The script-facing API is mainly for **NPCs**, ambient characters
+you spawn yourself: `sampleAvatars` pulls a batch of platform avatars (it resolves to
+an empty array off-server, so fall back to a default), and `loadAvatar` loads one and
+returns the `{ modelId, rigType }` you hand to `assignAvatar`, which points a node's
+`CharacterTrait` at that model. Balance each `loadAvatar` with a `releaseAvatar` when
+the NPC despawns, and `randomDisplayName` gives ambient NPCs a plausible name.
+
+<Snippet source="avatars.snippet.ts" select="spawn-npc" />
 
 ### Animation
 
@@ -731,7 +899,8 @@ bundles ready-made presets under `particlePresets` in `bongle/starter`.
 
 bongle has two physics systems, both running per room, colliding with the voxel
 world, simulating on the server, and replicating to clients (optionally with
-client-side prediction). **Rigid-body physics** is the full solver: bodies with
+[client-side prediction](#client-side-prediction)). **Rigid-body physics** is the
+full solver: bodies with
 mass, friction, and restitution that collide and respond realistically. **AABB
 physics** is a lighter axis-aligned system for large numbers of simple movers that
 do not need that fidelity. Reach for rigid bodies for props and ragdolls, AABB
@@ -961,48 +1130,6 @@ show touch controls at all.
 
 <Snippet source="input.snippet.ts" select="touch" />
 
-## Avatars
-
-An avatar is the model a humanoid renders with. Player nodes receive one
-automatically on join, resolved by the platform, so you rarely touch avatars for
-players directly. The script-facing API is mainly for **NPCs**: ambient
-characters you spawn yourself.
-
-Every avatar follows the `6bone` rig: a `waist` hub with `body`, `head`,
-`arm_left`, `arm_right`, `leg_left`, and `leg_right` bones, plus three attach sockets
-for gear, `hand_left`, `hand_right`, and `back`. Its canonical shape:
-
-```text
-waist
-├── body
-│   └── back          (socket)
-├── head
-├── arm_left
-│   └── hand_left     (socket)
-├── arm_right
-│   └── hand_right    (socket)
-├── leg_left
-└── leg_right
-```
-
-The feet are origined at world y=0. The bones may sit at scene root or under
-whatever parent the authoring tool produced; the rig contract only requires the
-seven bones be present somewhere reachable, so resolve any of them by name with
-`findByName(playerNode, 'head')`.
-
-The three sockets are always built as persistent rig nodes, there to mount held
-items and back-mounted props onto. When an avatar doesn't author one, the engine
-derives its rest position from the parent bone's geometry, so creators get usable
-mount points for free; an avatar that does author the socket keeps its own transform.
-
-`sampleAvatars` pulls a batch of platform avatars (it resolves to an empty array
-off-server, so fall back to a default). `loadAvatar` loads one and returns the
-`{ modelId, rigType }` you hand to `assignAvatar`, which points a node's
-`CharacterTrait` at that model. Balance each `loadAvatar` with a `releaseAvatar`
-when the NPC despawns. `randomDisplayName` gives ambient NPCs a plausible name.
-
-<Snippet source="avatars.snippet.ts" select="spawn-npc" />
-
 ## Audio
 
 Audio plays from declared sound handles. `sound(id, { src })` declares a sound at
@@ -1045,75 +1172,36 @@ key-value stores.
 
 <Snippet source="storage.snippet.ts" select="store" />
 
+Both scopes expose the same four async operations, `get`, `set`, `delete`, and
+`list`. They take `ctx` first; the user store also takes a `userId` (resolve it with
+`clientToUser(ctx, client).id`):
+
+<Render select="api/storage:gameStorage" heading />
+<Render select="api/storage:userStorage" heading />
+
+`get` returns the stored entry or `null`. The value comes back wrapped with a storage
+`version`:
+
+<Render select="StorageEntry" heading />
+
+`set` and `delete` return a result you should check rather than assume succeeded: a
+write can fail with a `version_conflict` (another writer got there first) or a limit
+such as `too_large`:
+
+<Render select="StorageSetResult" heading />
+
+`list` pages through a scope's keys, optionally filtered by `prefix`, and returns a
+`nextCursor` to pass back for the next page:
+
+<Render select="StorageListOpts" heading />
+<Render select="StorageListPage" heading />
+
 Stamp a `version` field inside every value you store. When the shape changes in a
 later release, you read that version and fold old saves forward on load, the way
 `loadSave` does above, so existing players keep their data. This is your own schema
-version, and it is separate from the storage `version` that each `get` and `set`
-returns: that one is a concurrency token you pass back as `ifVersion` on a write to
-reject changes that raced with another writer.
-
-Both stores also expose `delete` and `list` alongside `get` and `set`.
-
-## Multiplayer, in depth
-
-[The multiplayer model](#the-multiplayer-model) covered replication, where most
-state crosses the wire for free. This chapter covers the rest: explicit messages
-and multiple rooms.
-
-### RPC
-
-When you need to send a discrete message rather than replicate a field, declare a
-command with `command(id, direction, schema)`. The direction is `CLIENT_TO_SERVER`
-or `SERVER_TO_CLIENT`, and the schema both types the payload and serializes it.
-Handle incoming commands with `listen`, and send with `send` (or `broadcast` to
-reach every client).
-
-<Snippet source="multiplayer.snippet.ts" select="rpc" />
-
-That schema is a `pack` schema. `pack` is the engine's binary wire-format builder,
-from [packcat](https://github.com/isaac-mason/packcat): you compose a payload shape
-from `pack.object`, `pack.float32`, `pack.string`, `pack.list`, `pack.boolean`, and
-the rest, plus bongle helpers such as `pack.quaternion()`, and the command serializes to
-a compact binary frame rather than JSON. The same `pack` schemas back trait `sync`
-replication under the hood, so it is the one wire format the whole engine speaks.
-Do not confuse it with `prop` (from the [trait `control`](#traits) schema), which
-describes editor-inspectable and persisted fields, not what crosses the network.
-
-### Replication and authority
-
-Most multiplayer state never needs an explicit message: a trait field with a
-`sync` is serialized on the server and applied on every client. The sync's `rate`
-controls how often it emits. `'realtime'` emits on every change, for positions and
-health; `'dirty'` emits only when you call the returned handle's `dirty()`, for
-fields you set once; and a number caps the rate in Hz.
-
-Authority decides which side may write a synced field. By default it is the
-server, so writes from clients are ignored. Set `authority: 'owner'` on the sync
-to let the node's owning client write it instead, which is how player-controlled
-and client-predicted entities work. `isOwner(ctx, node)` reports whether the
-caller holds that authority, so one shared script can run on both sides and each
-act only on the nodes it owns.
-
-### Rooms
-
-A **room** is one running instance of your game: its own copy of the scene,
-voxels, physics, and the players currently in it. Everything a script reaches
-through `ctx` belongs to its room, and most games run many rooms at once so no
-single instance fills up or slows the others.
-
-`matchmaking(config)` decides how arriving players are grouped into rooms (the
-starter caps a room at 32 players). When you need rooms beyond the ones
-matchmaking creates, for lobbies, private matches, or instanced dungeons, manage
-them yourself: `rooms.create` opens one from a scene, `rooms.join` and `rooms.swap`
-move a client between rooms, and `rooms.list` and `rooms.view` inspect them.
-
-A client can also re-enter matchmaking itself with `client.matchmake`, handing
-over new `gameOptions` to switch gamemodes or move from a lobby into a match.
-
-<Snippet source="multiplayer.snippet.ts" select="rematch" />
-
-`chat` carries text messages within a room, and `clientToUser` resolves a
-connected client to its durable `User`.
+version, separate from the storage `version` above, which is a concurrency token: pass
+it back as `opts.ifVersion` on a write to reject changes that raced with another
+writer.
 
 ## Building & deploying
 
@@ -1124,6 +1212,33 @@ locally, so you can play the production build before shipping it.
 Deploying that bundle lands it as a **draft**. Promoting a draft to live is a
 separate, deliberate step, so a deploy never changes what players see until you
 publish it.
+
+## Examples
+
+The [`examples/`](../examples) directory holds small, self-contained programs, each
+isolating one feature. Clone the repo and run any of them, as the
+[Getting Started](#getting-started) section shows.
+
+Feature examples:
+
+- [audio](../examples/audio): playing sounds, non-positional, pitch-shifted, and a spatial source that follows a node.
+- [blocks](../examples/blocks): defining block types with `block` and `blockPreset`, including procedural `draw()` textures.
+- [sprites](../examples/sprites): the `SpriteTrait` billboard modes alongside particles.
+- [dom-ui](../examples/dom-ui): the UI traits, `HtmlTrait` and `CanvasTrait`.
+- [voxel-model](../examples/voxel-model): a movable `VoxelModel` with a collider, a floating boat you can stand on.
+- [terrain](../examples/terrain): a fuller scene, generated terrain with blocks and an animated character.
+- [persistent-data](../examples/persistent-data): per-player and game-wide progress with `userStorage` and `gameStorage`.
+- [rooms](../examples/rooms): managing multiple rooms and moving clients between them.
+
+Performance stress tests, each loading one subsystem heavily:
+
+- [performance-terrain](../examples/performance-terrain): large terrain generation and streaming.
+- [performance-chunks](../examples/performance-chunks): heavy voxel chunk edits and remeshing.
+- [performance-lighting](../examples/performance-lighting): voxel flood-fill lighting under load.
+- [performance-meshes](../examples/performance-meshes): many static glTF meshes.
+- [performance-animated-meshes](../examples/performance-animated-meshes): many animated character models at once.
+- [performance-physics-rigid-body](../examples/performance-physics-rigid-body): many rigid bodies in one simulation.
+- [performance-physics-aabb-body](../examples/performance-physics-aabb-body): many lightweight AABB bodies.
 
 ## API reference
 
