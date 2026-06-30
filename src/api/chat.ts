@@ -109,6 +109,26 @@ export function onMessage(ctx: ScriptContext, fn: MessageHandler): () => void {
  * emit a chat message. on the server, broadcasts to every client in the
  * room (appears as a system message). on the client, forwards the text to
  * the server as if the user typed it — useful for programmatic /me, etc.
+ *
+ * the text may carry inline `[…]` formatting tags, applied by the chat panel
+ * as it renders:
+ *
+ * - `[#rrggbb]` — set the colour to any 24-bit hex (e.g. `[#ff8800]`),
+ *   case-insensitive.
+ * - `[b]` `[i]` `[u]` `[s]` — turn bold / italic / underline / strike ON.
+ * - `[/]` — reset colour and every style back to the default.
+ *
+ * formatting is cumulative: a colour tag swaps only the colour and leaves any
+ * active styles intact (`[b][#ff8800]bold orange`), so colours and styles
+ * layer freely — only `[/]` clears them. any bracketed run that isn't a known
+ * tag (`[lol]`, `[1]`, an emote) renders verbatim, so ordinary text using
+ * brackets is never eaten. tags ride inside the plain string — there's no
+ * structured payload — so they degrade gracefully to readable text anywhere
+ * the panel isn't doing the rendering.
+ *
+ * @example
+ * // "Alice" aqua+bold, the verb grey, "Bob" red+bold
+ * chat.message(ctx, `[#55ffff][b]Alice[/] [#aaaaaa]slew[/] [#ff5555][b]Bob[/]`);
  */
 export function message(ctx: ScriptContext, text: string): void {
     if (env.server && ctx.server?.room) {

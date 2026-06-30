@@ -16,6 +16,7 @@ export type {
     TouchInput,
 } from '../client/input';
 export {
+    consumeTouchButtonLookDrag,
     getCanvasTouch,
     getCanvasTouches,
     getCanvasTouchesJustEnded,

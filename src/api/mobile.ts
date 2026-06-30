@@ -10,10 +10,23 @@
 import type { ScriptContext } from '../core/scene/scripts';
 import { env } from './env';
 
-/** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. */
+/** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. true on
+ *  touchscreen laptops too — use `isTouchPrimary` to gate touch controls. */
 export function isTouchDevice(ctx: ScriptContext): boolean {
     if (!env.client) return false;
     return ctx.client?.state?.device.touch ?? false;
+}
+
+/**
+ * Touch is the PRIMARY pointer (matchMedia('(pointer: coarse)')). Unlike
+ * `isMobile` this is viewport-INDEPENDENT, so it stays true on a tablet or a
+ * phone held in landscape; unlike `isTouchDevice` it's false on a touchscreen
+ * laptop driven by its trackpad. This is the "should I show on-screen touch
+ * controls (joystick, action buttons)" check. Resolved once at client boot.
+ */
+export function isTouchPrimary(ctx: ScriptContext): boolean {
+    if (!env.client) return false;
+    return ctx.client?.state?.device.touchPrimary ?? false;
 }
 
 const MOBILE_VIEWPORT_BREAKPOINT_PX = 768;
@@ -25,7 +38,10 @@ export function isMobileViewport(): boolean {
     return window.innerWidth < MOBILE_VIEWPORT_BREAKPOINT_PX;
 }
 
-/** isTouchDevice() && isMobileViewport(). The "should I show touch HUD" check. */
+/** isTouchDevice() && isMobileViewport(). A small touch SCREEN — use this to
+ *  pick a compact/phone HUD LAYOUT. For gating touch CONTROLS (joystick, action
+ *  buttons) use `isTouchPrimary` instead: this is false on a tablet or a phone
+ *  in landscape (viewport ≥ breakpoint), where you still want the controls. */
 export function isMobile(ctx: ScriptContext): boolean {
     return isTouchDevice(ctx) && isMobileViewport();
 }

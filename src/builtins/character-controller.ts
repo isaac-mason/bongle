@@ -21,6 +21,7 @@
  *                isClimbing, …) for animations, sfx, vfx, debug, etc.
  */
 
+import type { RigidBody } from 'crashcat';
 import { rigidBody } from 'crashcat';
 import type { Quat, Spherical, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec2, vec3 } from 'mathcat';
@@ -31,6 +32,7 @@ import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scri
 import { sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
+import { pushVccContact, type World as RigidWorld } from '../core/physics/rigid-physics';
 import * as vcc from '../core/physics/vcc';
 import {
     BLOCK_FLAG_CLIMBABLE,
@@ -69,6 +71,10 @@ const _bodyYawQuat = quat.create();
 let _vccListenerIsIntentional = false;
 let _vccListenerTerrainBodyId = -1;
 let _vccListenerBlockRest: Float32Array | null = null;
+// rigid world the VCC's body contacts are replayed into (see pushVccContact /
+// ingestVccContacts). set before each vcc.move so the listener can record the
+// bodies the character touched this frame.
+let _vccListenerRigid: RigidWorld | null = null;
 
 // minimum downward speed (m/s) at landing to consider a bounce. avoids
 // reflecting near-zero velocities (settled rest contacts).
@@ -98,7 +104,35 @@ const BODY_YAW_RESPONSE_RATE = 12;
 const BODY_YAW_BACK_CONE_RAD = degreesToRadians(30);
 const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 
+// surface every body the VCC touches into the contact stream. the VCC slides
+// the character off these bodies and teleport-follows its kinematic inner body,
+// so the solver never forms the manifold — replaying the contact is the only way
+// a fast body (an arrow) that passed "through" the character produces a contact
+// event on both bodies' ContactsTrait. added + persisted both report (a body can
+// linger a frame before the reactor that consumes the hit removes it).
+function recordVccBodyContact(vccInstance: vcc.VCC, body: RigidBody, contactPosition: Vec3, contactNormal: Vec3): void {
+    if (_vccListenerRigid === null) return;
+    pushVccContact(
+        _vccListenerRigid,
+        vccInstance.innerBodyId,
+        body.id,
+        contactPosition[0],
+        contactPosition[1],
+        contactPosition[2],
+        contactNormal[0],
+        contactNormal[1],
+        contactNormal[2],
+        0,
+    );
+}
+
 const _vccListener: vcc.VccListener = {
+    onContactAdded(vccInstance, body, _subShapeId, contactPosition, contactNormal) {
+        recordVccBodyContact(vccInstance, body, contactPosition, contactNormal);
+    },
+    onContactPersisted(vccInstance, body, _subShapeId, contactPosition, contactNormal) {
+        recordVccBodyContact(vccInstance, body, contactPosition, contactNormal);
+    },
     onContactSolve(
         _vccInstance,
         _body,
@@ -204,9 +238,8 @@ type CharacterControllerConfig = {
      *  (≈ 0.546 at 20Hz on default blocks ⇒ -ln(0.546)/0.05 ≈ 12.1). */
     groundDragRate: number;
     /** drag rate in air (1/s). softer than MC's 1.9/s — sprint-jumpers
-     *  keep more of their liftoff momentum without needing a big kick
-     *  to compensate. paired with a small `sprintJumpImpulse` so
-     *  continuous sprint-jumping still edges ahead of running. */
+     *  keep more of their liftoff momentum, so a chain of sprint-jumps
+     *  carries well ahead of plain running. */
     airDragRate: number;
     /** wish-direction acceleration applied in air (m/s²). much smaller
      *  than the implicit ground accel so jumps feel committed: you can
@@ -214,9 +247,8 @@ type CharacterControllerConfig = {
      *  MC's `0.02/tick` air control coefficient. */
     airAccel: number;
     /** horizontal kick (m/s) added along the wish direction at jump
-     *  takeoff when sprinting. MC's value is +4 m/s; we use a smaller
-     *  kick that still tilts continuous sprint-jumping faster than
-     *  running without feeling like a launch. */
+     *  takeoff when sprinting — MC's +4 m/s, so sprint-jumping carries
+     *  noticeably faster than running. */
     sprintJumpImpulse: number;
     /** vertical climb speed when in a climbable block / climbOverride. */
     climbSpeed: number;
@@ -422,8 +454,8 @@ export const CharacterControllerTrait = trait(
                 standing: vec3.fromValues(0.3, 0.9, 0.3),
                 crouching: vec3.fromValues(0.3, 0.75, 0.3),
             },
-            walkSpeed: 4.317,
-            sprintSpeed: 5.612,
+            walkSpeed: 5,
+            sprintSpeed: 6.5,
             crouchSpeed: 1.3,
             jumpSpeed: 7,
             terminalVelocity: 40,
@@ -432,7 +464,7 @@ export const CharacterControllerTrait = trait(
             groundDragRate: 12,
             airDragRate: 0.6,
             airAccel: 2,
-            sprintJumpImpulse: 2,
+            sprintJumpImpulse: 4,
             climbSpeed: 3,
             climbDescendSpeed: 1.5,
             swimSpeed: 4,
@@ -1235,6 +1267,7 @@ export function tickCharacterController(
     _vccListenerIsIntentional = state.isIntentionalMovement;
     _vccListenerTerrainBodyId = physics.rigid.terrainBody.id;
     _vccListenerBlockRest = registry.restitution;
+    _vccListenerRigid = physics.rigid;
 
     vcc.move(world, voxels, aabbWorld, v, dt, _vccListener);
 

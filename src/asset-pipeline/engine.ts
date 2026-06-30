@@ -55,9 +55,9 @@ export type BootOptions = {
  * Seed the URL registry (`resources.models`) from the model registry.
  *
  * The client/server populate theirs by draining `registry.models.pendingChanges`
- * in their registry-dispatch. The pipeline can't: it shares the server runner
- * graph, so EngineServer's dispatch has already drained `pendingChanges` to zero
- * before any icon render runs. So we re-seed wholesale from `byId` (the same set
+ * in their registry-dispatch. The pipeline doesn't drain that queue — it runs in
+ * its own worker runner (no EngineServer dispatch there to consume
+ * `pendingChanges`), so we re-seed wholesale from `byId` (the same set
  * EngineClient.seedModels uses), every boot + before every render pass.
  *
  * Idempotent: re-`setModel`-ing an unchanged id leaves its payload untouched, so

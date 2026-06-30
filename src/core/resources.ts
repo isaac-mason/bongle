@@ -111,13 +111,20 @@ export type ModelPayload = {
      *  may be retried. systems poll `ensureModel` every tick — without
      *  this, a single missing model bin would flood the network. */
     _nextRetryAt: number;
+    /** deferred for the awaited (non-tick-driven) load path, created lazily
+     *  by `whenModelReady`. Resolved on 'ready', rejected on give-up or
+     *  release. Its mere existence signals "someone is awaiting with no
+     *  external pump", so `ensureModel` self-schedules its own retry while
+     *  it's set — tick-driven consumers (where this stays null) keep
+     *  driving retries by polling `ensureModel` themselves. */
+    _ready: PromiseWithResolvers<ModelHandle> | null;
 };
 
 /** initial backoff after the first failure, in milliseconds. doubles per
  *  attempt up to BACKOFF_MAX_MS. */
 const BACKOFF_INITIAL_MS = 500;
 const BACKOFF_MAX_MS = 30_000;
-export const BACKOFF_GIVE_UP_AFTER = 6;
+const BACKOFF_GIVE_UP_AFTER = 6;
 
 // ── resources state ─────────────────────────────────────────────────
 
@@ -277,6 +284,7 @@ export function ensureModel(resources: Resources, modelId: string): void {
             model: null,
             _failedAttempts: 0,
             _nextRetryAt: 0,
+            _ready: null,
         };
         resources.modelPayloads.set(modelId, payload);
     }
@@ -302,6 +310,13 @@ export function ensureModel(resources: Resources, modelId: string): void {
                 `[Resources] failed to load "${modelId}" (attempt ${p._failedAttempts}${giveUp ? ', giving up' : `, retry in ${delay}ms`}):`,
                 err,
             );
+            _settleWaiter(resources, modelId); // rejects iff this attempt hit give-up
+            if (!giveUp && p._ready) {
+                // awaited load with no tick-driver to re-poll us — self-drive the
+                // retry once the backoff elapses. `ensureModel` is idempotent, so
+                // this is harmless if a tick-driven consumer also exists.
+                setTimeout(() => ensureModel(resources, modelId), delay);
+            }
         });
 }
 
@@ -347,6 +362,28 @@ function _onPayloadReady(resources: Resources, modelId: string, model: Model): v
     if (entry?.source === 'runtime' && entry.handle) {
         hydrateRuntimeHandle(entry.handle, model);
     }
+
+    _settleWaiter(resources, modelId);
+}
+
+/**
+ * Settle the awaited-load deferred (`payload._ready`) against the payload's
+ * CURRENT terminal state — resolve on 'ready', reject at the backoff give-up.
+ * No-op while still loading/retrying, or when nothing is awaiting. Idempotent
+ * (re-settling a settled promise does nothing), so every state-transition site
+ * — and `whenModelReady` itself — can call it without tracking waiters.
+ */
+function _settleWaiter(resources: Resources, modelId: string): void {
+    const payload = resources.modelPayloads.get(modelId);
+    const deferred = payload?._ready;
+    if (!deferred) return;
+    if (payload.state === 'ready') {
+        const handle = modelHandle(resources, modelId);
+        if (handle) deferred.resolve(handle);
+        else deferred.reject(new Error(`[Resources] "${modelId}" ready but no handle`));
+    } else if (payload.state === 'failed' && payload._failedAttempts >= BACKOFF_GIVE_UP_AFTER) {
+        deferred.reject(new Error(`[Resources] "${modelId}" failed after ${payload._failedAttempts} attempts`));
+    }
 }
 
 /**
@@ -362,8 +399,36 @@ export function releaseModel(resources: Resources, modelId: string): void {
     payload.clips.clear();
     payload.model = null;
     payload.state = 'unloaded';
+    payload._ready?.reject(new Error(`[Resources] "${modelId}" released before ready`));
 
     resources.modelPayloads.delete(modelId);
+}
+
+/**
+ * Promise that settles with the model's handle once its payload is ready,
+ * or rejects if the load gives up after backoff (or the entry is released
+ * mid-flight). The awaited sibling of the `hasModel`/`modelHandle` poll
+ * pair: same payload state machine, surfaced as a promise off the actual
+ * fetch chain rather than a poll over the state it sets.
+ *
+ * Pair with `ensureModel` (or `acquireRuntimeModel` + `ensureModel`) so a
+ * load is actually in flight — this only attaches to it. Registering the
+ * deferred also opts the load into self-driven retries: tick-driven
+ * consumers re-poll `ensureModel` themselves, but an awaited one-shot has
+ * no such pump, so the failure path re-schedules itself while a waiter is
+ * attached.
+ */
+export function whenModelReady(resources: Resources, modelId: string): Promise<ModelHandle> {
+    const payload = resources.modelPayloads.get(modelId);
+    if (!payload) {
+        return Promise.reject(new Error(`[Resources] whenModelReady "${modelId}": no payload; call ensureModel first`));
+    }
+    payload._ready ??= Promise.withResolvers<ModelHandle>();
+    // Settle now if the payload already reached a terminal state before any
+    // awaiter existed — the transition sites only fire on the edge, not
+    // retroactively.
+    _settleWaiter(resources, modelId);
+    return payload._ready.promise;
 }
 
 /* ── helpers ── */

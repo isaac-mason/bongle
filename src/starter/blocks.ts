@@ -222,18 +222,18 @@ export const oakFence = blockPreset.fence(
 );
 export const torch = blockPreset.torch('starter:torch', tex.torch, { name: 'Torch', sounds: soundPreset.wood });
 
-// rgb variants — same preset, custom lightEmission per channel.
-export const redTorch = blockPreset.torch('starter:red_torch', tex.torch, {
+// rgb variants — same preset, colored-flame texture + custom lightEmission per channel.
+export const redTorch = blockPreset.torch('starter:red_torch', tex.redTorch, {
     name: 'Red Torch',
     lightEmission: [15, 0, 0],
     sounds: soundPreset.wood,
 });
-export const greenTorch = blockPreset.torch('starter:green_torch', tex.torch, {
+export const greenTorch = blockPreset.torch('starter:green_torch', tex.greenTorch, {
     name: 'Green Torch',
     lightEmission: [0, 15, 0],
     sounds: soundPreset.wood,
 });
-export const blueTorch = blockPreset.torch('starter:blue_torch', tex.torch, {
+export const blueTorch = blockPreset.torch('starter:blue_torch', tex.blueTorch, {
     name: 'Blue Torch',
     lightEmission: [0, 0, 15],
     sounds: soundPreset.wood,

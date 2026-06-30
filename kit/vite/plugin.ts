@@ -20,8 +20,9 @@
  *      Cascade terminates when every importer in the chain decides patch.
  *
  *   3. **Registry dispatch.** Once the cascade settles, `__kit.flush()`'s
- *      microtask drains each env's registered handler — engine dispatch
- *      on the client, engine dispatch + asset pipeline on the server.
+ *      microtask drains each env's registered handler — engine dispatch on
+ *      both the client and server envs. (The asset pipeline reacts the same
+ *      way, but in its own worker env — see concern 4.)
  *      `applyRegistryChanges*` (engine/src/{client,server}/registry-dispatch.ts)
  *      walks each registry's `pendingChanges` and reacts wholesale per
  *      branch. The most invasive branches:
@@ -36,12 +37,12 @@
  *          rooms preserve live instances across the edit.
  *      Rooms, connections, GPU device, and play-mode state survive rung 3.
  *
- *   4. **Pipeline (re-)render.** `AssetPipeline.run` (concern 4) boots its
- *      render engine once (lazily, on the first icon render) and re-renders
- *      only the icons whose hashes moved. Atlas-bytes changes do NOT re-boot
- *      it: `applyRegistryChanges` re-reads the atlas in place
- *      (`VoxelResources.refresh`), same as the live client. The main client
- *      never boots an engine here.
+ *   4. **Pipeline (re-)render.** The worker-hosted `AssetPipeline.run`
+ *      (concern 4) re-bakes and re-renders only the icons whose hashes moved.
+ *      Atlas-bytes changes do NOT re-boot its render engine:
+ *      `applyRegistryChanges` re-reads the atlas in place
+ *      (`VoxelResources.refresh`), same as the live client. Its GPU work runs
+ *      in the pipeline worker, off the editor's main thread.
  *
  * Four concerns, one plugin factory:
  *
@@ -57,8 +58,8 @@
  *     boundary: Vite's default walk on src/ changes terminates here
  *     instead of falling back to fullReload. The accept callback also
  *     calls `__kit.flush()`, scheduling a microtask drain that runs each
- *     env's registered flush handler (engine dispatch on the client; engine
- *     dispatch + asset pipeline on the server).
+ *     env's registered flush handler (engine dispatch on the client and
+ *     server; the asset pipeline reacts the same way in its own worker env).
  *
  *     No try/finally — Vite-preserved top-level exports must stay
  *     statement-position. `__kit.pop` is unconditional after the user
@@ -104,19 +105,23 @@
  *     its own render engine directly. `fire()` here just calls a wake hook
  *     the pipeline plugin installed; no HMR channel for undeclared scenes.
  *
- *  4. **Asset pipeline.** The one `AssetPipeline` (the engine, behind
- *     `engine-asset-pipeline`) runs inside the server runner — the same graph
- *     as EngineServer, sharing the registries. This plugin is its dev driver:
- *     it `init`s it once, registers a flush handler that `run`s it on each
- *     settled HMR cascade (under a coalescing lock), and also `run`s it when
- *     the scene/asset watchers fire. `run` bakes (atlas + models + scenes +
- *     audio + sprites; matchmaking config returned for `build.ts`) then renders
- *     the dirty icons — all revision/hash-gated — and writes sharp-encoded PNGs
- *     onto `resources/client/` directly. We piggyback on the server graph (not
- *     a third env) because its registries already hold every declarative entry
- *     the pipeline reads.
+ *  4. **Asset-pipeline driver.** The pipeline itself does not run in this
+ *     process — it lives in the worker-hosted `pipeline` env
+ *     (vite/pipeline-env.ts + runtime/pipeline-host.ts), a Node worker_thread
+ *     so its Dawn (WebGPU) GPU churn lands on the worker's heap, never the
+ *     editor's. There it self-drives: its own runner registers the
+ *     `AssetPipeline.run` flush handler and re-runs on each settled HMR cascade
+ *     (under a coalescing lock), plus on the scene/asset wakes relayed below.
+ *     Each `run` bakes (atlas + models + scenes + audio + sprites; matchmaking
+ *     config returned for `build.ts`) then renders the dirty icons — all
+ *     revision/hash-gated — writing sharp-encoded PNGs onto `resources/client/`
+ *     directly.
  *
- *     The plugin forwards each `RunResult` to the live client:
+ *     This plugin is only the main-thread driver of that worker (reached via
+ *     `getPipelineWorkerHandle()`). It relays asset/scene file changes to the
+ *     worker (`triggerRun`), forwards each `RunResult` the worker reports to the
+ *     live client, and serves the `/__bongle/ready` editor gate off the worker
+ *     handle's first-run state. Forwarded per result:
  *     `bongle:block-texture-atlas-updated` / `bongle:sprite-atlas-updated`
  *     (→ in-place `refreshBlockResources` / `SpriteResources.refresh`, no
  *     reboot) and `bongle:icons-ready` per written icon (→ editor re-fetches
@@ -125,22 +130,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from 'bongle/engine-server';
 import MagicString from 'magic-string';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
 import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from './dep-resolve';
+import { getPipelineWorkerHandle, type PipelineWorkerOutbound } from './pipeline-env';
 import { virtualEntriesPlugin } from './virtual-entries';
-
-let resolveIconsRendered: () => void = () => {};
-/** Resolves once the pipeline has finished its first full run on cold start —
- *  every block/scene/prefab icon is on disk and the render engine is warm.
- *  The dev CLI awaits this before the
- *  ready banner so "started!" reflects the whole pipeline, not just the dev
- *  server being up. Resolved (never rejected) even on a launch/render fault,
- *  so a pipeline failure can't wedge the banner. One-shot per process. */
-export const iconsRendered: Promise<void> = new Promise((resolve) => {
-    resolveIconsRendered = resolve;
-});
 
 export interface BongleOptions {
     /** absolute path to the project root (the dir containing `src/`, `resources/`). */
@@ -503,22 +499,16 @@ if (import.meta.hot) {
             // icons → the editor re-fetches the thumbnails.
             name: 'bongle:pipeline',
             async configureServer(server) {
-                const serverEnv = server.environments.server as RunnableDevEnvironment | undefined;
-                if (!serverEnv) {
-                    console.warn('[bongle:pipeline] server env missing; skipping pipeline registration');
+                // The pipeline itself runs in the worker-hosted `pipeline` env
+                // (see vite/pipeline-env.ts + runtime/pipeline-host.ts). This
+                // plugin owns only the main-thread side: forwarding settled
+                // passes to the browser, the editor-load gate, and relaying
+                // scene/asset file changes to the worker.
+                const pipelineWorker = getPipelineWorkerHandle();
+                if (!pipelineWorker) {
+                    console.warn('[bongle:pipeline] pipeline worker env missing; skipping pipeline wiring');
                     return;
                 }
-
-                // Pull __kit + AssetPipeline through the server runner so the
-                // pipeline binds to the SAME registry instances user code
-                // upserts into (the runner graph's singletons, not the main
-                // Node graph's). init() only captures the registry reference,
-                // so calling it here — before user code has evaluated — is fine.
-                const internal = (await serverEnv.runner.import('bongle/internal')) as typeof import('bongle/internal');
-                const { AssetPipeline } = (await serverEnv.runner.import(
-                    'bongle/engine-asset-pipeline',
-                )) as typeof import('bongle/engine-asset-pipeline');
-                const pipeline = AssetPipeline.init({ projectDir, mode: 'edit', cache: true, renderIcons: true });
 
                 // Project-rooted source paths the pipeline reads (gltf/png/ogg).
                 // Refreshed after every run so freshly-declared model()/sound()
@@ -526,38 +516,11 @@ if (import.meta.hot) {
                 // when one of these files changes (registry revs don't move).
                 let assetSrcs: Set<string> = new Set();
 
-                // Editor-load gate + status label. /__bongle/ready holds the
-                // editor's load() until the first run settles, so it loads into a
-                // warm pipeline instead of a flash of missing thumbnails.
-                // `openReadyGate` flips both and resolves `iconsRendered` (the
-                // CLI's ready signal) exactly once — on the first run's settle, or
-                // the timeout guard below — so a fault never wedges the editor.
-                // Passing `warm` logs the cold-start banner: total wall-clock plus
-                // the per-builder breakdown (concurrent, overlapping — longest
-                // pole first; empty on a no-op first run).
-                let firstPipelineRunComplete = false;
-                let pipelineStatus: string | null = 'Starting…';
-                let firstRunTimer: ReturnType<typeof setTimeout> | null = null;
-                const openReadyGate = (warm?: { ms: number; timings: Record<string, number> }) => {
-                    if (firstPipelineRunComplete) return;
-                    firstPipelineRunComplete = true;
-                    pipelineStatus = null;
-                    if (firstRunTimer) clearTimeout(firstRunTimer);
-                    if (warm) {
-                        console.log(`[bongle] pipeline warm in ${warm.ms.toFixed(0)}ms`);
-                        const breakdown = Object.entries(warm.timings)
-                            .sort((a, b) => b[1] - a[1])
-                            .map(([label, ms]) => `${label} ${ms.toFixed(0)}ms`)
-                            .join(', ');
-                        if (breakdown) console.log(`[bongle]   assets: ${breakdown}`);
-                    }
-                    resolveIconsRendered();
-                };
-
                 // Forward a settled run's outputs to the browser env: atlas/sprite
                 // refreshes and per-icon thumbnail re-fetches. No client env (e.g.
                 // headless) → nothing to do.
-                const forwardToClient = (result: Awaited<ReturnType<typeof AssetPipeline.run>>) => {
+                type PipelineResult = Extract<PipelineWorkerOutbound, { type: 'result' }>['result'];
+                const forwardToClient = (result: PipelineResult) => {
                     const clientHot = server.environments.client?.hot;
                     if (!clientHot) return;
                     // Atlas moved → client refreshBlockResources + remesh.
@@ -572,57 +535,22 @@ if (import.meta.hot) {
                         clientHot.send('bongle:icons-ready', { kind: icon.kind, id: icon.id });
                 };
 
-                // One driver: coalesces concurrent triggers into a run plus at
-                // most one tail run. Pure gating lives inside AssetPipeline.run;
-                // this owns the lock, the watch-set refresh, forwarding the
-                // RunResult to the browser, and opening the editor-load gate.
-                let busy = false;
-                let queued = false;
-                let queuedForceAll = false;
-                const runPipeline = async (forceAll = false) => {
-                    if (forceAll) queuedForceAll = true;
-                    if (busy) {
-                        queued = true;
-                        return;
-                    }
-                    busy = true;
-                    const passStart = performance.now();
-                    try {
-                        do {
-                            queued = false;
-                            const passForceAll = queuedForceAll;
-                            queuedForceAll = false;
-                            pipelineStatus = 'Building assets…';
-                            let result: Awaited<ReturnType<typeof AssetPipeline.run>>;
-                            try {
-                                result = await AssetPipeline.run(pipeline, { forceAll: passForceAll });
-                            } catch (err) {
-                                console.error('[bongle:pipeline] pass failed:', err);
-                                continue;
-                            }
-                            // New declarations are now in scope; removed ones drop out.
-                            assetSrcs = AssetPipeline.assetSources(pipeline);
-                            forwardToClient(result);
-                            // First successful run → log the warm banner + open the
-                            // gate. (The gate also opens in `finally`, silently, so
-                            // a fault still releases the editor.)
-                            if (!firstPipelineRunComplete) {
-                                openReadyGate({ ms: performance.now() - passStart, timings: result.timings });
-                            }
-                        } while (queued);
-                    } finally {
-                        busy = false;
-                        openReadyGate();
-                    }
-                };
-
-                // Scene-watcher wake + the settled HMR flush both drive one run.
-                notifyPipelineOfSceneChange = () => {
-                    void runPipeline();
-                };
-                internal.__kit.registerFlush(() => {
-                    void runPipeline();
+                // The worker self-drives per-edit runs (HMR re-evals user code in
+                // its own isolate). On this side we react only to 'result' — forward
+                // the settled pass's outputs to the browser and refresh the asset
+                // watch-set. Lifecycle ('warm'/'gate'/'error') and the first-run
+                // gate are owned by the worker handle (see vite/pipeline-env.ts).
+                pipelineWorker.onControl((msg: PipelineWorkerOutbound) => {
+                    if (msg.type !== 'result') return;
+                    // New declarations are now in scope; removed ones drop out.
+                    assetSrcs = new Set(msg.assetSources);
+                    forwardToClient(msg.result);
                 });
+
+                // Scene-watcher wake → force a worker pass.
+                notifyPipelineOfSceneChange = () => {
+                    pipelineWorker.triggerRun(false);
+                };
 
                 // GET /__bongle/ready — editor client polls this before
                 // EngineClient.load(). `ready` flips true only once the first
@@ -636,7 +564,28 @@ if (import.meta.hot) {
                     }
                     res.setHeader('Content-Type', 'application/json');
                     res.setHeader('Cache-Control', 'no-cache');
-                    res.end(JSON.stringify({ ready: firstPipelineRunComplete, status: pipelineStatus }));
+                    res.end(JSON.stringify({ ready: pipelineWorker.ready, status: pipelineWorker.status }));
+                });
+
+                // GET /__bongle/avatars/<slug>.glb — the dev fallback avatars
+                // driver (sampleAvatars) serves the engine's example .glb off
+                // disk, same-origin, so the client rides the runtime-avatar
+                // fetch path with no extra port. (connect strips the mount
+                // prefix from req.url, so rebuild the full path for the resolver.)
+                server.middlewares.use(SAMPLE_AVATAR_ROUTE_PREFIX, (req, res, next) => {
+                    if (req.method !== 'GET') return next();
+                    const tail = (req.url ?? '/').split('?')[0]!.replace(/^\//, '');
+                    const file = resolveSampleAvatarFile(SAMPLE_AVATAR_ROUTE_PREFIX + tail);
+                    if (!file) return next();
+                    try {
+                        const stat = fs.statSync(file);
+                        res.setHeader('Content-Type', 'model/gltf-binary');
+                        res.setHeader('Content-Length', stat.size);
+                        res.setHeader('Cache-Control', 'no-cache');
+                        fs.createReadStream(file).pipe(res);
+                    } catch {
+                        next();
+                    }
                 });
 
                 // External-asset watcher. Registry revisions only move on
@@ -655,31 +604,12 @@ if (import.meta.hot) {
                     if (assetDebounce) clearTimeout(assetDebounce);
                     assetDebounce = setTimeout(() => {
                         assetDebounce = null;
-                        void runPipeline(true);
+                        pipelineWorker.triggerRun(true);
                     }, ASSET_DEBOUNCE_MS);
                 };
                 server.watcher.on('change', onAssetChange);
                 server.watcher.on('add', onAssetChange);
                 server.watcher.on('unlink', onAssetChange);
-
-                // Cold-start guard. The first run is driven by edit-server's boot
-                // `__kit.flush()`, not kicked here, and we don't `await` it inline
-                // (it can't happen until edit-server boots, after this
-                // configureServer returns — awaiting would deadlock startup). The
-                // warm banner + gate open from `runPipeline` on the first settle.
-                // An edit-server boot *throw* already surfaces at `initGameEnv`;
-                // this guard covers the other failure mode — a first run that
-                // never returns (a wedged GPU/IO await, which `runPipeline`'s
-                // try/finally can't unblock) — by opening the gate anyway so the
-                // CLI/editor don't hang forever.
-                const FIRST_RUN_TIMEOUT_MS = 60_000;
-                firstRunTimer = setTimeout(() => {
-                    console.error(
-                        `[bongle:pipeline] first run did not complete within ${FIRST_RUN_TIMEOUT_MS / 1000}s — ` +
-                            'opening the editor anyway (icons may be missing).',
-                    );
-                    openReadyGate();
-                }, FIRST_RUN_TIMEOUT_MS);
             },
         },
 

@@ -260,34 +260,37 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
         }
     }
 
-    // Hold the banner until the in-process pipeline worker has rendered
-    // every icon, so "started!" means the whole pipeline is warm, not
-    // just the dev server listening. Resolves even on a pipeline fault.
+    // Hold the banner until the pipeline worker's first pass has settled, so
+    // "started!" means the whole pipeline is warm, not just the dev server
+    // listening. Resolves even on a pipeline fault.
     const stepIcons = step('rendering icons');
-    await handle.iconsRendered;
+    await handle.firstPipelineRun;
     stepIcons.done();
 
     printReady(links);
 
-    const cleanup = () => {
+    const cleanup = async () => {
         try {
             tunnel?.kill('SIGTERM');
         } catch {
             /* nothing to do */
         }
-        handle?.close().catch(() => {});
+        await handle?.close().catch(() => {});
     };
 
+    // Await the graceful teardown (it lets the pipeline worker self-exit so Dawn
+    // can't napi-FATAL) before exiting. The signal paths own the await; the
+    // sync `exit` handler is only a last-resort fallback.
     process.on('SIGINT', () => {
         console.log('\n[bongle] shutting down...');
-        cleanup();
-        process.exit(0);
+        void cleanup().finally(() => process.exit(0));
     });
     process.on('SIGTERM', () => {
-        cleanup();
-        process.exit(0);
+        void cleanup().finally(() => process.exit(0));
     });
-    process.on('exit', cleanup);
+    process.on('exit', () => {
+        void cleanup();
+    });
 }
 
 // `cloudflared tunnel --url` prints the assigned `*.trycloudflare.com`

@@ -63,11 +63,7 @@ export type LoadModelOptions = {
     hash?: string;
     /** Payload size in bytes; informational. */
     size?: number;
-    /** Override the default ready-poll cadence. Mainly for tests. */
-    pollIntervalMs?: number;
 };
-
-const DEFAULT_POLL_INTERVAL_MS = 16;
 
 /**
  * Register a runtime model and resolve once its payload is hydrated.
@@ -80,8 +76,9 @@ const DEFAULT_POLL_INTERVAL_MS = 16;
  * cheap (the entry sits in memory for the engine's life) but accretes.
  *
  * Rejects with the underlying fetch/parse error if the payload reaches
- * its retry give-up. Until then, transient failures retry in the
- * background and the promise stays pending.
+ * its retry give-up, or if the model is released before it loads. Until
+ * then, transient failures retry in the background and the promise stays
+ * pending — the load self-drives its own retries while awaited.
  */
 export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOptions): Promise<ModelHandle> {
     const resources = ctx._runtime?.resources;
@@ -101,26 +98,7 @@ export function loadModel(ctx: ScriptContext, id: string, options: LoadModelOpti
         size: options.size,
     });
     Resources.ensureModel(resources, id);
-
-    const intervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-
-    return new Promise<ModelHandle>((resolve, reject) => {
-        const tick = () => {
-            const payload = resources.modelPayloads.get(id);
-            if (payload?.state === 'ready') {
-                const handle = Resources.modelHandle(resources, id);
-                if (handle) resolve(handle);
-                else reject(new Error(`[bongle] loadModel: '${id}' ready but no handle`));
-                return;
-            }
-            if (payload?.state === 'failed' && payload._failedAttempts >= Resources.BACKOFF_GIVE_UP_AFTER) {
-                reject(new Error(`[bongle] loadModel: '${id}' failed after ${payload._failedAttempts} attempts`));
-                return;
-            }
-            setTimeout(tick, intervalMs);
-        };
-        tick();
-    });
+    return Resources.whenModelReady(resources, id);
 }
 
 /**

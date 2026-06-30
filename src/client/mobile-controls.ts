@@ -168,6 +168,10 @@ export type CreateTouchButtonOpts = {
     width: number;
     height: number;
     label?: string;
+    /** also rotate the camera while held — slide the finger to aim. the button
+     *  captures its pointer, so the drag is forwarded into the look pipeline via
+     *  `consumeTouchButtonLookDrag` (PlayerController reads it). default false. */
+    look?: boolean;
 };
 
 export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButtonOpts): { dispose(): void } | null {
@@ -178,7 +182,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     if (touch._buttons.has(opts.id)) {
         warn(ctx, `createTouchButton: id '${opts.id}' already registered; replacing previous button`);
     }
-    const state: TouchButtonState = { down: false, _prevDown: false };
+    const state: TouchButtonState = { down: false, _prevDown: false, look: !!opts.look, _dragX: 0, _dragY: 0 };
     touch._buttons.set(opts.id, state);
 
     const root = document.createElement('div');
@@ -198,6 +202,10 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     applyEdges(root, opts);
 
     let activePointerId: number | null = null;
+    // last pointer position while held — `look` buttons accumulate the per-move
+    // delta into state so PlayerController can aim from it (drag-to-look).
+    let lastX = 0;
+    let lastY = 0;
 
     const setDown = (down: boolean): void => {
         state.down = down;
@@ -208,12 +216,27 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     const onDown = (e: PointerEvent): void => {
         if (activePointerId !== null) return;
         activePointerId = e.pointerId;
+        lastX = e.clientX;
+        lastY = e.clientY;
         try {
             root.setPointerCapture(e.pointerId);
         } catch {
             // capture can fail; events still fire on the element.
         }
         setDown(true);
+        e.preventDefault();
+    };
+
+    const onMove = (e: PointerEvent): void => {
+        if (activePointerId !== e.pointerId) return;
+        // pointer capture keeps moves coming even past the button bounds, so the
+        // aim drag isn't clipped to the little button rect.
+        if (state.look) {
+            state._dragX += e.clientX - lastX;
+            state._dragY += e.clientY - lastY;
+        }
+        lastX = e.clientX;
+        lastY = e.clientY;
         e.preventDefault();
     };
 
@@ -224,6 +247,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     };
 
     root.addEventListener('pointerdown', onDown);
+    root.addEventListener('pointermove', onMove);
     root.addEventListener('pointerup', onUp);
     root.addEventListener('pointercancel', onUp);
     root.addEventListener('pointerleave', onUp);
@@ -233,6 +257,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     return {
         dispose(): void {
             root.removeEventListener('pointerdown', onDown);
+            root.removeEventListener('pointermove', onMove);
             root.removeEventListener('pointerup', onUp);
             root.removeEventListener('pointercancel', onUp);
             root.removeEventListener('pointerleave', onUp);

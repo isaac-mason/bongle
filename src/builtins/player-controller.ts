@@ -32,8 +32,16 @@ import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
 import { warn } from '../api/debug';
 import { env } from '../api/env';
-import { getCanvasTouches, getJoystick, type Input, isKeyDown, isKeyJustDown, isTouchButtonDown } from '../api/input';
-import { isMobile, isTouchDevice } from '../api/mobile';
+import {
+    consumeTouchButtonLookDrag,
+    getCanvasTouches,
+    getJoystick,
+    type Input,
+    isKeyDown,
+    isKeyJustDown,
+    isTouchButtonDown,
+} from '../api/input';
+import { isTouchDevice, isTouchPrimary } from '../api/mobile';
 import { createJoystick, createTouchButton } from '../api/mobile-controls';
 import type { Physics } from '../api/physics';
 import { prop } from '../api/prop';
@@ -148,6 +156,11 @@ type PlayerControllerConfig = {
 
 type PlayerControllerState = {
     currentFov: number;
+    /** game-set multiplier on the target FOV (folded in before the ease) —
+     *  < 1 zooms in, > 1 widens. lets game code drive transient FOV effects
+     *  (aim-down-sights, a bow-draw zoom, a speed-line widen) without fighting
+     *  the controller's own sprint-FOV easing. reset to 1 to clear. */
+    fovScale: number;
     currentCameraDistance: number;
     elapsed: number;
     lastJumpDownTime: number;
@@ -174,6 +187,7 @@ export const PlayerControllerTrait = trait(
 
         state: (): PlayerControllerState => ({
             currentFov: degreesToRadians(75),
+            fovScale: 1,
             currentCameraDistance: 0,
             elapsed: 0,
             lastJumpDownTime: -1,
@@ -290,6 +304,12 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
             cc.input.look[2] -= touch.dy * TOUCH_LOOK_SENSITIVITY;
         }
     }
+    // `look:true` touch buttons (e.g. a fire button you aim with) feed the same
+    // look channel — position-independent, so unlike canvasLook there's no
+    // half-screen gate. additive with the above, clamped together below.
+    const buttonLook = consumeTouchButtonLookDrag(t);
+    cc.input.look[1] -= buttonLook.dx * TOUCH_LOOK_SENSITIVITY;
+    cc.input.look[2] -= buttonLook.dy * TOUCH_LOOK_SENSITIVITY;
     cc.input.look[2] = Math.max(CHARACTER_PHI_MIN, Math.min(CHARACTER_PHI_MAX, cc.input.look[2]));
 
     // move — keyboard + joystick additive, clamp to [-1, 1].
@@ -821,7 +841,7 @@ script(
         };
 
         /* ── mobile HUD (reactive) ── */
-        // Each piece reconciles per-tick against (controls.enabled && isMobile(ctx)
+        // Each piece reconciles per-tick against (controls.enabled && isTouchPrimary(ctx)
         // && controls.touch.<flag>). flipping any of those mounts or disposes
         // the corresponding DOM helper on the next sync, so pause menus and
         // settings UIs that toggle controls.* "just work".
@@ -859,8 +879,10 @@ script(
             }
             prevControlsEnabled = on;
 
-            const mobile = isMobile(ctx);
-            const wantHud = on && mobile;
+            // touch controls show whenever touch is the primary input — viewport size
+            // independent, so tablets and landscape phones get them too (a width gate
+            // would wrongly drop them).
+            const wantHud = on && isTouchPrimary(ctx);
 
             reconcileHud('joystick', wantHud && pc.controls.touch.joystick, () =>
                 createJoystick(ctx, {
@@ -1077,7 +1099,7 @@ script(
 
             // eye-height (incl. the crouch drop) is eased on CharacterControllerTrait
             // now — `state.eyeHeight`, which the camera reads above.
-            const targetFov = cc.input.sprint ? pc.config.fovSprint : pc.config.fov;
+            const targetFov = (cc.input.sprint ? pc.config.fovSprint : pc.config.fov) * pc.state.fovScale;
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });
 

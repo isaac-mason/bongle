@@ -9,8 +9,7 @@ const noVoxels = null as unknown as Parameters<typeof nav.floodFill>[0];
 // 4-connected open grid in the z-plane, bounded to [0, n)².
 const gridActions =
     (n: number): nav.Actions =>
-    (_voxels, x, y, z) => {
-        const steps: nav.Step[] = [];
+    (_voxels, x, y, z, step) => {
         for (const [dx, dy] of [
             [1, 0],
             [-1, 0],
@@ -19,9 +18,8 @@ const gridActions =
         ] as const) {
             const nx = x + dx;
             const ny = y + dy;
-            if (nx >= 0 && nx < n && ny >= 0 && ny < n) steps.push({ x: nx, y: ny, z, cost: 1 });
+            if (nx >= 0 && nx < n && ny >= 0 && ny < n) step(nx, ny, z, 1);
         }
-        return steps;
     };
 
 const has = (cells: readonly number[][], c: number[]): boolean =>

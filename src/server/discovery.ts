@@ -496,8 +496,11 @@ export function acceptOwnerFields(
         codec.apply(entry.data, instance);
 
         // 2. update the per-instance snapshot to the just-applied bytes so the
-        //    byte-diff in diffNode sees no change and doesn't re-bump.
-        sync.bytes[i] = codec.pack(instance, node);
+        //    byte-diff in diffNode sees no change and doesn't re-bump. reuse the
+        //    shared scratch (in-place store) rather than allocating a fresh
+        //    buffer per owner field — owner writes land every tick for
+        //    player-controlled entities.
+        writeSnapshot(codec, instance, node, i, sync);
 
         // for a ThresholdRate slice, keep the value snapshot in lockstep with the
         // bytes so the next diffNode measures against this just-applied value and

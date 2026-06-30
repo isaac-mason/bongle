@@ -888,7 +888,12 @@ export default function DebugPanel({ tab }: { tab: DebugTab }) {
         <div
             style={{
                 position: 'absolute',
-                inset: 8,
+                top: 8,
+                left: 8,
+                bottom: 8,
+                // a third of the viewport wide rather than full-width, leaving an
+                // 8px gutter on each side of the column.
+                width: 'calc(33.333vw - 16px)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8,

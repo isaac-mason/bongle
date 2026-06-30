@@ -147,6 +147,27 @@ export type World = {
 
     /** cached query for trait sync — built once at create. */
     _bodyQuery: ReturnType<typeof query<[typeof RigidBodyTrait, typeof TransformTrait]>>;
+
+    /** body contacts gathered by character VCCs during `runOnTick` (which runs
+     *  before the rigid solver). a VCC depenetrates its character off the bodies
+     *  it touches and teleport-follows its kinematic inner body, so by the time
+     *  the solver steps there's no overlap and no manifold — a fast projectile
+     *  would pass straight through with no contact event. these are replayed into
+     *  the contact stream each tick (see {@link ingestVccContacts}) so they reach
+     *  both bodies' `ContactsTrait` like any solver contact. `vccContactCount` is
+     *  the live length; the records are reused (no per-frame allocation). */
+    vccContacts: VccBodyContact[];
+    vccContactCount: number;
+};
+
+/** one body contact reported by a character VCC, pending replay into the
+ *  contact stream. body ids (not refs) so a body removed mid-tick is skipped. */
+type VccBodyContact = {
+    innerBodyId: BodyId;
+    otherBodyId: BodyId;
+    point: Vec3;
+    normal: Vec3;
+    penetrationDepth: number;
 };
 
 export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): World {
@@ -168,7 +189,60 @@ export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): W
         propertySnapshots: new Map(),
         lastPhysicsTransform: new Map(),
         _bodyQuery: query(nodes, [RigidBodyTrait, TransformTrait]),
+        vccContacts: [],
+        vccContactCount: 0,
     };
+}
+
+/** record a body contact a character VCC saw this frame, to be replayed into
+ *  the contact stream by {@link ingestVccContacts}. called from the character
+ *  controller's VCC listener during `runOnTick`. `innerBodyId` is the VCC's
+ *  kinematic inner body (maps back to the character node); `otherBodyId` is the
+ *  body it touched (e.g. an arrow). `normal` is surface→character (VCC
+ *  convention). */
+export function pushVccContact(
+    world: World,
+    innerBodyId: BodyId,
+    otherBodyId: BodyId,
+    pointX: number,
+    pointY: number,
+    pointZ: number,
+    normalX: number,
+    normalY: number,
+    normalZ: number,
+    penetrationDepth: number,
+): void {
+    let rec = world.vccContacts[world.vccContactCount];
+    if (!rec) {
+        rec = { innerBodyId: -1, otherBodyId: -1, point: vec3.create(), normal: vec3.create(), penetrationDepth: 0 };
+        world.vccContacts[world.vccContactCount] = rec;
+    }
+    rec.innerBodyId = innerBodyId;
+    rec.otherBodyId = otherBodyId;
+    rec.point[0] = pointX;
+    rec.point[1] = pointY;
+    rec.point[2] = pointZ;
+    rec.normal[0] = normalX;
+    rec.normal[1] = normalY;
+    rec.normal[2] = normalZ;
+    rec.penetrationDepth = penetrationDepth;
+    world.vccContactCount++;
+}
+
+/** replay this tick's VCC body contacts into the contact stream, then clear the
+ *  buffer. MUST run inside the contacts frame (after the solver tick, before the
+ *  frame ends) so the pairs diff and fan out like solver contacts. a pair the
+ *  solver also recorded (a slow body the VCC didn't depenetrate clear of) shares
+ *  the same key, so this just refreshes it — no double contact. */
+export function ingestVccContacts(world: World, contacts: PhysicsContacts, pool: ContactPairPool): void {
+    for (let i = 0; i < world.vccContactCount; i++) {
+        const rec = world.vccContacts[i]!;
+        const innerBody = rigidBody.get(world.world, rec.innerBodyId);
+        const otherBody = rigidBody.get(world.world, rec.otherBodyId);
+        if (!innerBody || !otherBody) continue;
+        recordBodyContact(world, contacts, pool, innerBody, otherBody, rec.point, rec.normal, rec.penetrationDepth);
+    }
+    world.vccContactCount = 0;
 }
 
 /** tear down all node-tracked bodies before discarding the crashcat world. */
@@ -842,6 +916,46 @@ function recordContactFromManifold(
     pair.normal[1] = manifold.worldSpaceNormal[1];
     pair.normal[2] = manifold.worldSpaceNormal[2];
     pair.penetrationDepth = manifold.penetrationDepth;
+
+    const aLin = bodyA.motionProperties?.linearVelocity;
+    const bLin = bodyB.motionProperties?.linearVelocity;
+    pair.relativeVelocity[0] = (bLin?.[0] ?? 0) - (aLin?.[0] ?? 0);
+    pair.relativeVelocity[1] = (bLin?.[1] ?? 0) - (aLin?.[1] ?? 0);
+    pair.relativeVelocity[2] = (bLin?.[2] ?? 0) - (aLin?.[2] ?? 0);
+}
+
+/** record a body↔body contact from an explicit point/normal (no manifold) —
+ *  used to replay VCC contacts. side A is the character's inner body, side B the
+ *  body it touched; the pair fans out to both nodes' `ContactsTrait`. */
+function recordBodyContact(
+    world: World,
+    contacts: PhysicsContacts,
+    pool: ContactPairPool,
+    bodyA: RigidBody,
+    bodyB: RigidBody,
+    point: Vec3,
+    normal: Vec3,
+    penetrationDepth: number,
+): void {
+    const kindA = resolveSide(_sideA, world, bodyA, 0);
+    const kindB = resolveSide(_sideB, world, bodyB, 0);
+    if (kindA === 'unresolved' || kindB === 'unresolved') return;
+
+    const key = pairKey(sideKey(_sideA), sideKey(_sideB));
+    const pair = recordContactPair(contacts, pool, key);
+
+    writePairSide(pair, 'a', _sideA);
+    writePairSide(pair, 'b', _sideB);
+
+    pair.point[0] = point[0];
+    pair.point[1] = point[1];
+    pair.point[2] = point[2];
+    // VCC `normal` is surface→character; A is the character (inner body), so A→B
+    // (pair convention) is the opposite direction.
+    pair.normal[0] = -normal[0];
+    pair.normal[1] = -normal[1];
+    pair.normal[2] = -normal[2];
+    pair.penetrationDepth = penetrationDepth;
 
     const aLin = bodyA.motionProperties?.linearVelocity;
     const bLin = bodyB.motionProperties?.linearVelocity;

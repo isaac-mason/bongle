@@ -70,6 +70,15 @@ export const oakPlanks = blockTexture('starter:oak_planks', {
 export const torch = blockTexture('starter:torch', {
     src: new URL('./assets/textures/torch.png', import.meta.url),
 });
+export const redTorch = blockTexture('starter:red_torch', {
+    src: new URL('./assets/textures/red_torch.png', import.meta.url),
+});
+export const greenTorch = blockTexture('starter:green_torch', {
+    src: new URL('./assets/textures/green_torch.png', import.meta.url),
+});
+export const blueTorch = blockTexture('starter:blue_torch', {
+    src: new URL('./assets/textures/blue_torch.png', import.meta.url),
+});
 export const oakLogTop = blockTexture('starter:oak_log_top', {
     src: new URL('./assets/textures/oak_log_top.png', import.meta.url),
 });

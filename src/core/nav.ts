@@ -79,15 +79,16 @@ export function groundWalkable(size: Vec3 = [1, 2, 1]): Walkable {
 /** one candidate offset for the fixed-move case — input to `gridActions`. */
 export type Move = { offset: Vec3; cost: number };
 
-/** a reachable neighbour cell (a resolved move) yielded by `Actions`. */
-export type Step = { x: number; y: number; z: number; cost: number };
+/** the sink a successor calls once per reachable neighbour cell — its coords plus
+ *  the move cost. the search supplies it, so a successor never builds a list. */
+export type StepFn = (x: number, y: number, z: number, cost: number) => void;
 
 /** the pluggable successor function `findPath`/`floodFill` search over: expand a
- *  cell into its reachable neighbour `Step`s. the candidate moves AND per-cell
- *  walkability both live here, so movement can be context-dependent (ladders,
- *  liquids, variable cost). returns a fresh array per call (pathfinding isn't a
- *  hot path). */
-export type Actions = (voxels: Voxels, x: number, y: number, z: number) => Step[];
+ *  cell by calling `step(nx, ny, nz, cost)` for each reachable neighbour. the
+ *  candidate moves AND per-cell walkability both live here, so movement can be
+ *  context-dependent (ladders, liquids, variable cost). emitting rather than
+ *  returning a list means a hot search allocates nothing per expansion. */
+export type Actions = (voxels: Voxels, x: number, y: number, z: number, step: StepFn) => void;
 
 /** admissible-ish distance estimate between two cells. */
 export type Heuristic = (fromX: number, fromY: number, fromZ: number, toX: number, toY: number, toZ: number) => number;
@@ -101,15 +102,13 @@ export type Shortcut = (voxels: Voxels, from: Vec3, to: Vec3) => boolean;
  *  cell becomes a reachable step. compose `groundMoves`/`groundWalkable` here, or
  *  swap in your own moves/walkability, for custom movement. */
 export function gridActions(moves: readonly Move[], walkable: Walkable): Actions {
-    return (voxels, x, y, z) => {
-        const steps: Step[] = [];
+    return (voxels, x, y, z, step) => {
         for (const move of moves) {
             const nx = x + move.offset[0];
             const ny = y + move.offset[1];
             const nz = z + move.offset[2];
-            if (walkable(voxels, nx, ny, nz)) steps.push({ x: nx, y: ny, z: nz, cost: move.cost });
+            if (walkable(voxels, nx, ny, nz)) step(nx, ny, nz, move.cost);
         }
-        return steps;
     };
 }
 
@@ -142,6 +141,49 @@ export const groundMoves: readonly Move[] = GROUND_OFFSETS.map((offset) => ({ of
  *  to add/restrict steps, or rebuild via `gridActions(groundMoves, groundWalkable(...))`
  *  for a different agent. */
 export const groundActions: Actions = gridActions(groundMoves, groundWalkable());
+
+/** the four directions an agent can step off a ledge into. */
+const CARDINAL_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+];
+
+/** ground successor that ALSO lets the agent walk off a ledge and drop straight down to
+ *  the first landing below — to any depth up to `maxDrop`. the fixed ground moves (flat,
+ *  ±1 step) come from the standard ground actions; this adds, per cardinal, the one cell
+ *  the agent falls to after stepping off the edge. the fall column must stay clear the
+ *  whole way (no overhang clips the 2-high body) and the landing needs solid support
+ *  below. `maxDrop` MUST be finite: out-of-world reads are air, so a void column has no
+ *  floor and the scan would never terminate — the cap doubles as the "don't path off into
+ *  the abyss" guard. `dropCost` is the extra cost per block fallen on top of the unit move
+ *  (keep it small so drops are taken when they shortcut, but stairs win when costs tie). */
+export function groundDropActions(opts?: { size?: Vec3; maxDrop?: number; dropCost?: number }): Actions {
+    const size = opts?.size ?? [1, 2, 1];
+    const maxDrop = opts?.maxDrop ?? 64;
+    const dropCost = opts?.dropCost ?? 0.2;
+    const base = gridActions(groundMoves, groundWalkable(size));
+    return (voxels, x, y, z, step) => {
+        base(voxels, x, y, z, step); // flat + ±1-step neighbours
+        for (const [dx, dz] of CARDINAL_OFFSETS) {
+            const nx = x + dx;
+            const nz = z + dz;
+            // step off the edge only if the body fits in the neighbour column at our level.
+            if (!isClear(voxels, nx, y, nz, size)) continue;
+            // descend the column for the first floor below; the body must stay clear the whole way.
+            for (let ly = y - 1; y - ly <= maxDrop; ly--) {
+                if (!isClear(voxels, nx, ly, nz, size)) break; // overhang / wall → can't fall through
+                if (isSupport(voxels, nx, ly - 1, nz)) {
+                    // floor beneath this clear cell → a landing. ly === y-1 is the −1 step the
+                    // base actions already emit, so only add genuine drops (two or more down).
+                    if (ly < y - 1) step(nx, ly, nz, 1 + (y - ly) * dropCost);
+                    break;
+                }
+            }
+        }
+    };
+}
 
 // ── A* ──────────────────────────────────────────────────────────────
 
@@ -222,7 +264,125 @@ function heapPop(heap: NodeHeap): Node {
     return top;
 }
 
-const key = (x: number, y: number, z: number): string => `${x},${y},${z}`;
+// ── visited table (gScore + closed), reused across searches ─────────
+// open-addressing map (x,y,z) → a slot holding the cell's best gScore and closed
+// flag. replaces the string-keyed Map/Set: no per-cell string, and a generation
+// stamp resets it in O(1) between searches (no array clearing). it grows +
+// rehashes when one search's live set passes the load factor, so there's NO
+// world-size, search-extent, or cell-count cap — only available memory bounds it.
+// NOT re-entrancy safe; like the node pool, search()/floodFill() never nest.
+let htCap = 1 << 12;
+let htMask = htCap - 1;
+let htKeyX = new Int32Array(htCap);
+let htKeyY = new Int32Array(htCap);
+let htKeyZ = new Int32Array(htCap);
+let htG = new Float64Array(htCap);
+let htClosed = new Uint8Array(htCap);
+let htGen = new Int32Array(htCap); // 0 = never claimed; a slot is live iff === generation
+let generation = 0; // bumped per search
+let htCount = 0; // live slots this generation (drives the grow decision)
+/** set by htSlot: true when the returned slot was freshly claimed this search. */
+let htInserted = false;
+const HT_MAX_LOAD = 0.7;
+
+function htReset(): void {
+    htCount = 0;
+    generation++;
+    // generation is an Int32 stamp; on the (astronomically rare) wrap, clear the
+    // stamps so no stale slot can alias the reused value.
+    if (generation === 0x7fffffff) {
+        htGen.fill(0);
+        generation = 1;
+    }
+}
+
+// Teschner et al. spatial hash. `^`/`*` coerce through int32 — fine for a hash
+// (we only need spread + determinism) and it handles negative coords.
+function hashCoord(x: number, y: number, z: number): number {
+    const h = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
+    return (h >>> 0) & htMask;
+}
+
+// return (x,y,z)'s slot, claiming a fresh one (g=Infinity, open) on first touch
+// this search. sets `htInserted` so callers can tell new from existing.
+function htSlot(x: number, y: number, z: number): number {
+    if (htCount >= htCap * HT_MAX_LOAD) htGrow();
+    let i = hashCoord(x, y, z);
+    for (;;) {
+        if (htGen[i] !== generation) {
+            htGen[i] = generation;
+            htKeyX[i] = x;
+            htKeyY[i] = y;
+            htKeyZ[i] = z;
+            htG[i] = Infinity;
+            htClosed[i] = 0;
+            htCount++;
+            htInserted = true;
+            return i;
+        }
+        if (htKeyX[i] === x && htKeyY[i] === y && htKeyZ[i] === z) {
+            htInserted = false;
+            return i;
+        }
+        i = (i + 1) & htMask;
+    }
+}
+
+// double capacity and re-insert this search's live slots. one-off (the bigger
+// arrays persist), so warmed-up searches never hit it.
+function htGrow(): void {
+    const oldCap = htCap;
+    const oldKeyX = htKeyX;
+    const oldKeyY = htKeyY;
+    const oldKeyZ = htKeyZ;
+    const oldG = htG;
+    const oldClosed = htClosed;
+    const oldGen = htGen;
+
+    htCap = oldCap << 1;
+    htMask = htCap - 1;
+    htKeyX = new Int32Array(htCap);
+    htKeyY = new Int32Array(htCap);
+    htKeyZ = new Int32Array(htCap);
+    htG = new Float64Array(htCap);
+    htClosed = new Uint8Array(htCap);
+    htGen = new Int32Array(htCap);
+
+    for (let s = 0; s < oldCap; s++) {
+        if (oldGen[s] !== generation) continue;
+        let i = hashCoord(oldKeyX[s]!, oldKeyY[s]!, oldKeyZ[s]!);
+        while (htGen[i] === generation) i = (i + 1) & htMask;
+        htGen[i] = generation;
+        htKeyX[i] = oldKeyX[s]!;
+        htKeyY[i] = oldKeyY[s]!;
+        htKeyZ[i] = oldKeyZ[s]!;
+        htG[i] = oldG[s]!;
+        htClosed[i] = oldClosed[s]!;
+    }
+}
+
+// ── A* search state (module scratch; search() is non-re-entrant) ────
+// hoisting these lets `relax` be one shared StepFn — zero closure/array
+// allocation per expansion. all set fresh at the top of each search().
+const sOpen: NodeHeap = [];
+let sGoalX = 0;
+let sGoalY = 0;
+let sGoalZ = 0;
+let sGreedy = false;
+let sHeuristic: Heuristic = euclidean;
+let sCurrent: Node | null = null;
+
+// the successor sink handed to `actions`: relax one neighbour against the open
+// set, reading the cell being expanded + goal/heuristic from the search state.
+const relax: StepFn = (nx, ny, nz, cost) => {
+    const slot = htSlot(nx, ny, nz);
+    if (htClosed[slot] === 1) return;
+    const g = sCurrent!.g + cost;
+    if (g >= htG[slot]!) return; // htG seeds Infinity, so a first touch always wins
+    htG[slot] = g;
+    const h = sHeuristic(nx, ny, nz, sGoalX, sGoalY, sGoalZ);
+    heapPush(sOpen, requestNode(nx, ny, nz, sCurrent, g, sGreedy ? h : g + h));
+};
 
 /** how the frontier is scored. 'shortest' = classic A* (g + h); 'greedy' =
  *  best-first (h only) — faster, not optimal. */
@@ -261,37 +421,32 @@ function search(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, optio
     const heuristic = options?.heuristic ?? euclidean;
 
     releaseSearchNodes(); // return the previous search's nodes to the pool
-    const open: NodeHeap = [];
-    const gScore = new Map<string, number>();
-    const closed = new Set<string>();
+    htReset(); // O(1) reset of the visited table
+    sOpen.length = 0;
+    sGoalX = gx;
+    sGoalY = gy;
+    sGoalZ = gz;
+    sGreedy = greedy;
+    sHeuristic = heuristic;
 
+    const startSlot = htSlot(start[0], start[1], start[2]);
+    htG[startSlot] = 0;
     const h0 = heuristic(start[0], start[1], start[2], gx, gy, gz);
-    heapPush(open, requestNode(start[0], start[1], start[2], null, 0, h0));
-    gScore.set(key(start[0], start[1], start[2]), 0);
+    heapPush(sOpen, requestNode(start[0], start[1], start[2], null, 0, h0));
 
     let iterations = 0;
-    while (open.length > 0) {
-        const current = heapPop(open);
-        const ck = key(current.x, current.y, current.z);
-        if (closed.has(ck)) continue; // stale duplicate from lazy deletion
+    while (sOpen.length > 0) {
+        const current = heapPop(sOpen);
+        const slot = htSlot(current.x, current.y, current.z);
+        if (htClosed[slot] === 1) continue; // stale duplicate from lazy deletion
 
         if (current.x === gx && current.y === gy && current.z === gz) return current;
 
         if (++iterations > maxIterations) return null;
-        closed.add(ck);
+        htClosed[slot] = 1;
 
-        for (const step of actions(voxels, current.x, current.y, current.z)) {
-            const nk = key(step.x, step.y, step.z);
-            if (closed.has(nk)) continue;
-
-            const g = current.g + step.cost;
-            const prev = gScore.get(nk);
-            if (prev !== undefined && g >= prev) continue;
-            gScore.set(nk, g);
-
-            const h = heuristic(step.x, step.y, step.z, gx, gy, gz);
-            heapPush(open, requestNode(step.x, step.y, step.z, current, g, greedy ? h : g + h));
-        }
+        sCurrent = current;
+        actions(voxels, current.x, current.y, current.z, relax);
     }
 
     return null;
@@ -374,17 +529,19 @@ export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut 
  *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
  *  `findPath` takes); the result includes the frontier discovered up to that bound. */
 export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[] {
+    htReset(); // the visited table doubles as the "seen" set (htInserted = first touch)
     const queue: Vec3[] = [start];
-    const seen = new Set<string>([key(start[0], start[1], start[2])]);
+    htSlot(start[0], start[1], start[2]);
     let head = 0;
+    // one closure per floodFill call (cold path), not per cell. the returned cells
+    // must escape, so the Vec3s here are genuine output, not churn.
+    const enqueue: StepFn = (x, y, z) => {
+        htSlot(x, y, z);
+        if (htInserted) queue.push([x, y, z]);
+    };
     while (head < queue.length && head < maxIterations) {
         const cell = queue[head++]!;
-        for (const step of actions(voxels, cell[0], cell[1], cell[2])) {
-            const k = key(step.x, step.y, step.z);
-            if (seen.has(k)) continue;
-            seen.add(k);
-            queue.push([step.x, step.y, step.z]);
-        }
+        actions(voxels, cell[0], cell[1], cell[2], enqueue);
     }
     return queue;
 }

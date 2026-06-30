@@ -144,6 +144,12 @@ export function tick(physics: Physics, nodes: Nodes, dt: number): void {
     // uniformly.
     AabbPhysics.tick(physics.aabb, physics.rigid.world, dt, physics.aabbPairSink);
 
+    // replay this tick's character-VCC body contacts (gathered in runOnTick,
+    // before the solver) into the same stream. without this a VCC depenetrates
+    // its character off a fast body and the solver never forms the manifold, so
+    // the contact is silently lost (e.g. an arrow passing through a player).
+    RigidPhysics.ingestVccContacts(physics.rigid, physics.contacts, physics.contactPairPool);
+
     endPhysicsContactsFrame(physics.contacts);
 
     // fan out pairs - writes to per-node ContactsTrait traits

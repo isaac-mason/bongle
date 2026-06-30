@@ -17,7 +17,11 @@ import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ServerApp } from 'bongle/interface';
-import { createFallbackAvatarsDriver, createInMemoryStorageDriver } from 'bongle/engine-server';
+import {
+    createFallbackAvatarsDriver,
+    createInMemoryStorageDriver,
+    resolveSampleAvatarFile,
+} from 'bongle/engine-server';
 import { attachGameTransport, type GameTransport } from 'bongle/kit/runtime/transport';
 
 export type StartHostOptions = {
@@ -127,20 +131,41 @@ await app.load(state)
 const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/game'
 const ws = new WebSocket(wsUrl); ws.binaryType = 'arraybuffer'
 ws.onmessage = (ev) => { if (typeof ev.data !== 'string') app.getInbox(state).push(new Uint8Array(ev.data)) }
-const TICK = 1000/60; let last = performance.now()
-setInterval(() => {
-    const now = performance.now(); const dt = (now-last)/1000; last = now
+// drive the client off requestAnimationFrame (vsync-aligned), NOT setInterval — the
+// browser client renders, so it must match edit/play (engine interpolation keys off the
+// per-paint dt, and a timer in a backgrounded tab throttles to ~1s, spiralling the sim).
+let last = performance.now()
+function frame(now) {
+    const dt = (now - last) / 1000; last = now
     app.update(state, dt)
     const outbox = app.getOutbox(state)
     for (const msg of outbox) if (ws.readyState === WebSocket.OPEN) ws.send(msg)
     app.clearOutbox(state)
-}, TICK)
+    requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
     </script>
 </body>
 </html>
 `;
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(body);
+        return;
+    }
+
+    // Sample-avatar .glb served off the engine's lib/avatars (the dev fallback
+    // avatars driver points the client here) — same-origin, same port as the
+    // game. Resolves to null (→ falls through to the static dir / 404) outside
+    // a source checkout, matching the driver's existsSync gating.
+    const avatarFile = resolveSampleAvatarFile(pathname);
+    if (avatarFile) {
+        const stat = statSync(avatarFile);
+        res.writeHead(200, {
+            'Content-Type': 'model/gltf-binary',
+            'Content-Length': stat.size,
+            'Cache-Control': 'no-cache',
+        });
+        createReadStream(avatarFile).pipe(res);
         return;
     }
 

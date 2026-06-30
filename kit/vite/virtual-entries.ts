@@ -6,9 +6,10 @@
  *
  *   virtual:bongle/edit-client
  *   virtual:bongle/edit-server     (game-env.ts imports this through the
- *                                   server runner and calls boot(ctx); the
- *                                   asset pipeline rides this same graph via
- *                                   the bongle:pipeline plugin)
+ *                                   server runner and calls boot(ctx))
+ *   virtual:bongle/pipeline-host   (the pipeline worker's runner imports this
+ *                                   and calls boot(ctx); boots AssetPipeline in
+ *                                   its own worker env — see pipeline-env.ts)
  *   virtual:bongle/build-client    (lib.entry for `bongle build` client)
  *   virtual:bongle/build-server    (lib.entry for `bongle build` server)
  *   virtual:bongle/user-src        (dynamic-imported by the edit
@@ -18,13 +19,13 @@
  *                                   the HMR self-accept cascade)
  *
  * Env-set-ordering invariant: the env-owning dev entries (edit-client /
- * edit-server) call into `runtime/*.start()`, which sets `env.{client,
- * server,editor}` BEFORE awaiting `opts.userEntry()`. The userEntry thunk
- * dynamic-imports `virtual:bongle/user-src` so user code's top-level
- * `model()/block()/script()/...` declarations evaluate AFTER env is set.
- * ESM static-import hoisting can't reorder past the dynamic import. The asset
- * pipeline sets no env — it runs inside the server graph and inherits the env
- * edit-server already set.
+ * edit-server / pipeline-host) call into `runtime/*.start()`, which sets
+ * `env.{client,server,editor}` BEFORE awaiting `opts.userEntry()`. The
+ * userEntry thunk dynamic-imports `virtual:bongle/user-src` so user code's
+ * top-level `model()/block()/script()/...` declarations evaluate AFTER env is
+ * set. ESM static-import hoisting can't reorder past the dynamic import. The
+ * pipeline worker sets the same compile-time env as the server (client=false,
+ * server=true, editor=true) inside its own start().
  *
  * Build entries don't need a dynamic boundary — `play-{client,server}`
  * set env inside their `init()`, not at module top level — so the
@@ -66,7 +67,7 @@ const INDEX_HTML = `<!doctype html>
 const PREFIX = 'virtual:bongle/';
 const RESOLVED_PREFIX = '\0' + PREFIX;
 
-const NAMES = new Set(['edit-client', 'edit-server', 'build-client', 'build-server', 'user-src']);
+const NAMES = new Set(['edit-client', 'edit-server', 'pipeline-host', 'build-client', 'build-server', 'user-src']);
 
 export interface VirtualEntriesOptions {
     projectDir: string;
@@ -100,6 +101,18 @@ import { start } from 'bongle/kit/runtime/edit-server';
 export function boot(ctx) {
     return start({
         httpServer: ctx.httpServer,
+        projectDir: ctx.projectDir,
+        bongleDir: ctx.bongleDir,
+        userEntry: () => import('virtual:bongle/user-src'),
+    });
+}
+`;
+                case 'pipeline-host':
+                    return /* js */ `
+import { start } from 'bongle/kit/runtime/pipeline-host';
+export function boot(ctx) {
+    return start({
+        control: ctx.control,
         projectDir: ctx.projectDir,
         bongleDir: ctx.bongleDir,
         userEntry: () => import('virtual:bongle/user-src'),

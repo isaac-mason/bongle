@@ -257,6 +257,13 @@ export type TouchButtonState = {
     down: boolean;
     /** previous-frame `down`, mirrors the _prevButtons trick above. */
     _prevDown: boolean;
+    /** `look:true` buttons also drive the camera while held (a fire button you
+     *  can aim with). their drag is forwarded into the same look pipeline as a
+     *  right-half canvas drag — see `consumeTouchButtonLookDrag`. */
+    look: boolean;
+    /** CSS-px drag accumulated since the last consume; meaningful only when `look`. */
+    _dragX: number;
+    _dragY: number;
 };
 
 export type TouchInput = {
@@ -387,6 +394,23 @@ export function isTouchButtonJustDown(t: TouchInput, id: string): boolean {
 export function isTouchButtonJustUp(t: TouchInput, id: string): boolean {
     const b = t._buttons.get(id);
     return b ? !b.down && b._prevDown : false;
+}
+
+/** Sum the drag accumulated by every `look:true` button since the last call,
+ *  zeroing it. CSS px, same units as a canvas touch's `dx/dy`, so the caller
+ *  applies it with the touch look sensitivity. Lets a fire button double as an
+ *  aim surface: hold to act, slide to look. Returns `{dx:0, dy:0}` when none. */
+export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: number } {
+    let dx = 0;
+    let dy = 0;
+    for (const b of t._buttons.values()) {
+        if (!b.look) continue;
+        dx += b._dragX;
+        dy += b._dragY;
+        b._dragX = 0;
+        b._dragY = 0;
+    }
+    return { dx, dy };
 }
 
 /* ── canvas touch listeners ───────────────────────────────────────── */

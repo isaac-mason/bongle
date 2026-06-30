@@ -13,15 +13,15 @@
  *  2. Await `opts.userEntry()` so registries populate before
  *     `EngineServer.load()` snapshots them.
  *  3. Init + load EngineServer with the storage/avatars drivers.
- *  4. Register server-side `applyRegistryChanges` as a flush handler. The
- *     bongle:pipeline plugin entry has already registered its Node-side
- *     pipeline handler against this env's `bongle/internal` — both fire
- *     on each settled HMR cascade.
+ *  4. Register server-side `applyRegistryChanges` as this env's flush
+ *     handler — the only flush consumer here. The asset pipeline runs in a
+ *     separate worker env (its own runner + flush handler, see
+ *     vite/pipeline-env.ts), not this graph.
  *  5. Attach `/game` WS transport (the runtime transport.ts).
  *  6. 60Hz frame loop.
- *  7. Kick the initial `__kit.flush()` — dispatch is no-op on clean boot;
- *     the pipeline handler is the meaningful consumer (atlas + models +
- *     scenes + matchmaking config on pipeline state).
+ *  7. Kick the initial `__kit.flush()` — engine dispatch only, a no-op on
+ *     clean boot. The pipeline's cold-start pass runs in its worker, kicked
+ *     from dev/start.ts after the server is listening.
  */
 
 import type { Server as HttpServer } from 'node:http';

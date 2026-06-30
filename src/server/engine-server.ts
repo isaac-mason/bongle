@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { env } from 'bongle';
 import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
@@ -81,7 +82,9 @@ export function init(opts: InitOptions) {
     // resourcesDir (asset-pipeline's SERVER_URL_PREFIX). resolveModelBin
     // joins it onto the absolute resourcesDir baked above — independent
     // of process cwd. Runtime-source models (avatars) carry absolute
-    // https URLs (R2) — branch on scheme.
+    // https URLs (R2) — branch on scheme. The dev fallback avatars driver
+    // hands an absolute local path (the engine's example .glb on disk) —
+    // read it directly rather than re-rooting it under resourcesDir.
     const resources = Resources.init(
         {
             loadBytes: (url) => {
@@ -91,6 +94,7 @@ export function init(opts: InitOptions) {
                         return new Uint8Array(await r.arrayBuffer());
                     });
                 }
+                if (path.isAbsolute(url)) return fs.readFile(url);
                 return fs.readFile(ResourceManager.resolveModelBin(resourceManager, url));
             },
         },
