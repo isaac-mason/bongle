@@ -5,27 +5,27 @@
  * `isTouchButtonDown(t, id)` for read-side polling.
  *
  * Both factories early-return `null` on the server so call sites can
- * write `createJoystick(ctx, ...)` unconditionally.
+ * write `createTouchJoystick(ctx, ...)` unconditionally.
  */
 
 import {
-    type CreateJoystickOpts,
     type CreateTouchButtonOpts,
-    createJoystickImpl,
+    type CreateTouchJoystickOpts,
     createTouchButtonImpl,
-} from '../client/mobile-controls';
+    createTouchJoystickImpl,
+} from '../client/touch-controls';
 import { env } from './env';
 import type { ScriptContext } from './scripts';
 
-export type { CreateJoystickOpts, CreateTouchButtonOpts };
+export type { CreateTouchJoystickOpts, CreateTouchButtonOpts };
 
 /**
  * Mounts a virtual joystick under the room's touch overlay. Returns a
  * disposer (call from `onDispose`). Returns `null` on the server.
  */
-export function createJoystick(ctx: ScriptContext, opts: CreateJoystickOpts): { dispose(): void } | null {
+export function createTouchJoystick(ctx: ScriptContext, opts: CreateTouchJoystickOpts): { dispose(): void } | null {
     if (!env.client) return null;
-    return createJoystickImpl(ctx, opts);
+    return createTouchJoystickImpl(ctx, opts);
 }
 
 /**

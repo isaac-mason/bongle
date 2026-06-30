@@ -24,7 +24,7 @@ export * from './api/input';
 export * from './api/lighting';
 export * from './api/matchmaking';
 export * from './api/mobile';
-export * from './api/mobile-controls';
+export * from './api/touch-controls';
 export * from './api/models';
 export * from './api/nav';
 export * from './api/pack';

@@ -30,7 +30,7 @@ function applyEdges(el: HTMLDivElement, opts: { left?: number; right?: number; t
 
 /* ── joystick ────────────────────────────────────────────────────── */
 
-export type CreateJoystickOpts = {
+export type CreateTouchJoystickOpts = {
     id: string;
     left?: number;
     right?: number;
@@ -42,13 +42,13 @@ export type CreateJoystickOpts = {
     deadzone?: number;
 };
 
-export function createJoystickImpl(ctx: ScriptContext, opts: CreateJoystickOpts): { dispose(): void } | null {
+export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoystickOpts): { dispose(): void } | null {
     const mount = getOverlay(ctx);
     if (!mount) return null;
     const { overlay, touch } = mount;
 
     if (touch._joysticks.has(opts.id)) {
-        warn(ctx, `createJoystick: id '${opts.id}' already registered; replacing previous joystick`);
+        warn(ctx, `createTouchJoystick: id '${opts.id}' already registered; replacing previous joystick`);
     }
     const state: JoystickState = { x: 0, y: 0, active: false, _prevActive: false };
     touch._joysticks.set(opts.id, state);

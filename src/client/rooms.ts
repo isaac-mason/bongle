@@ -249,7 +249,7 @@ export type ClientRoom = {
 
     /**
      * per-room touch overlay div — sibling of canvas under `viewport`, mounted
-     * after the html UI overlay so it stacks above by DOM order. mobile-controls
+     * after the html UI overlay so it stacks above by DOM order. touch controls
      * helpers append their joystick / button roots here. removed with the
      * viewport on dispose.
      */

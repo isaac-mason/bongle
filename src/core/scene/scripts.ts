@@ -120,7 +120,7 @@ export type ClientContext = {
     /**
      * per-room touch overlay div, sibling of canvas under `viewport` and
      * appended AFTER the html UI overlay so it stacks visually above
-     * everything by DOM order alone. mobile-controls helpers (joystick /
+     * everything by DOM order alone. touch controls helpers (joystick /
      * button) mount their roots here; pointer events live on the
      * helper roots, not on this container (which stays
      * `pointer-events: none`).

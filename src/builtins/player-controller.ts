@@ -42,7 +42,7 @@ import {
     isTouchButtonDown,
 } from '../api/input';
 import { isTouchDevice, isTouchPrimary } from '../api/mobile';
-import { createJoystick, createTouchButton } from '../api/mobile-controls';
+import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import type { Physics } from '../api/physics';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
@@ -885,7 +885,7 @@ script(
             const wantHud = on && isTouchPrimary(ctx);
 
             reconcileHud('joystick', wantHud && pc.controls.touch.joystick, () =>
-                createJoystick(ctx, {
+                createTouchJoystick(ctx, {
                     id: PlayerControllerTouchIds.moveJoystick,
                     left: 24,
                     bottom: 24,
