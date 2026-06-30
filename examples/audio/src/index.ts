@@ -22,7 +22,7 @@ import {
     addTrait,
     BLOCK_AIR,
     CharacterControllerTrait,
-    characterLook,
+    setCharacterLook,
     cloneModel,
     createNode,
     env,
@@ -80,7 +80,7 @@ script(ExampleTrait, 'spawn', (ctx) => {
         setPosition(t, [0, 1, 0]);
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
         // theta=π → face +Z so the orbiter at (0,2,4) is straight ahead.
-        characterLook(cc, Math.PI);
+        setCharacterLook(cc, Math.PI);
     });
 });
 

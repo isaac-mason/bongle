@@ -1085,7 +1085,7 @@ function processCrouchGuard(cc: CharacterControllerTrait, voxels: Voxels, dt: nu
 
 const MAX_SLOPE_ANGLE = degreesToRadians(45);
 
-export function ensureVCC(cc: CharacterControllerTrait, transform: TransformTrait, physics: Physics): void {
+function ensureVCC(cc: CharacterControllerTrait, transform: TransformTrait, physics: Physics): void {
     if (cc.state.vcc) return;
     const feet = getWorldPosition(transform);
     cc.state.vcc = vcc.create(physics.rigid.world, physics.rigid.terrainShape.voxels, {
@@ -1101,7 +1101,7 @@ export function ensureVCC(cc: CharacterControllerTrait, transform: TransformTrai
     physics.rigid.bodyToNode.set(cc.state.vcc.innerBodyId, cc._node.id);
 }
 
-export function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void {
+function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void {
     if (!cc.state.vcc) return;
     physics.rigid.bodyToNode.delete(cc.state.vcc.innerBodyId);
     vcc.destroy(physics.rigid.world, cc.state.vcc);
@@ -1118,7 +1118,7 @@ export function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void
 // `crouchAmount` (presentation only) eases to catch up in `updateCharacterBob`.
 // note: replicated input arrives ~50–150ms after the owner, so the shape
 // flips later on non-owner sides; during that window shapes briefly disagree.
-export function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics): void {
+function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics): void {
     const v = cc.state.vcc;
     if (!v) return;
     const state = cc.state;
@@ -1133,7 +1133,7 @@ export function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics
 
 // ── per-tick movement ─────────────────────────────────────────────────
 
-export function tickCharacterController(
+function tickCharacterController(
     cc: CharacterControllerTrait,
     transform: TransformTrait,
     physics: Physics,
@@ -1534,7 +1534,7 @@ function getBobStatus(cc: CharacterControllerTrait, horizontalSpeed: number): Bo
     return 'idle';
 }
 
-export function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistry, dt: number): void {
+function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistry, dt: number): void {
     const state = cc.state;
     const config = cc.config;
     const input = cc.input;
@@ -1656,17 +1656,17 @@ function writeLook(cc: CharacterControllerTrait, theta: number, phi: number | un
 }
 
 /** point a character at yaw (+ optional pitch). leaves pitch alone if omitted. */
-export function characterLook(cc: CharacterControllerTrait, yaw: number, pitch?: number): void {
+export function setCharacterLook(cc: CharacterControllerTrait, yaw: number, pitch?: number): void {
     writeLook(cc, yaw, pitch);
 }
 
-/** orient a character at a world target. uses character's current world
- *  position + `eyeHeight` as the look origin so head-height entities aim
- *  through their eyes, not their feet. */
-export function characterLookAt(cc: CharacterControllerTrait, transform: TransformTrait, target: Vec3, eyeHeight = 1.62): void {
+/** orient a character at a world target. uses the character's current world
+ *  position + its `state.eyeHeight` as the look origin so head-height entities
+ *  aim through their eyes, not their feet. */
+export function setCharacterLookAt(cc: CharacterControllerTrait, transform: TransformTrait, target: Vec3): void {
     const p = getWorldPosition(transform);
     const dx = target[0] - p[0];
-    const dy = target[1] - (p[1] + eyeHeight);
+    const dy = target[1] - (p[1] + cc.state.eyeHeight);
     const dz = target[2] - p[2];
     const horiz = Math.sqrt(dx * dx + dz * dz);
     // engine forward = (-sinθsinφ, -cosφ, -cosθsinφ); θ from horiz components,
@@ -1675,9 +1675,9 @@ export function characterLookAt(cc: CharacterControllerTrait, transform: Transfo
 }
 
 /** world-space forward unit vector from a `[_, yaw, pitch]` look spherical.
- *  engine convention: yaw=0, pitch=π/2 → -Z (matches the camera + glTF). shared
- *  by the camera composition, npc aim, and `view.direction`. */
-export function lookForward(look: Vec3, out: Vec3): Vec3 {
+ *  engine convention: yaw=0, pitch=π/2 → -Z (matches the camera + glTF).
+ *  module-private: only `updateCharacterView` needs it. */
+function lookForward(look: Vec3, out: Vec3): Vec3 {
     const theta = look[1];
     const phi = look[2];
     const sinPhi = Math.sin(phi);
@@ -1691,7 +1691,7 @@ export function lookForward(look: Vec3, out: Vec3): Vec3 {
  *  so any script can read the character's look ray from its eyes. eye height eases
  *  `eyeHeight`↔`crouchEyeHeight` by `crouchAmount` (climbing keeps full height).
  *  run per-frame for every character — players and npcs alike. */
-export function updateCharacterView(cc: CharacterControllerTrait, transform: TransformTrait): void {
+function updateCharacterView(cc: CharacterControllerTrait, transform: TransformTrait): void {
     const config = cc.config;
     const state = cc.state;
     const crouchT = state.isClimbing ? 0 : state.crouchAmount;

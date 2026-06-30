@@ -3,7 +3,7 @@ import {
     BLOCK_AIR,
     blockPreset,
     blockTexture,
-    characterLook,
+    setCharacterLook,
     draw,
     env,
     getTrait,
@@ -434,6 +434,6 @@ script(GameplayTrait, 'session', (ctx) => {
 
         // theta=π → forward = +Z (engine: forward = (-sinθsinφ, -cosφ, -cosθsinφ))
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
-        characterLook(cc, Math.PI);
+        setCharacterLook(cc, Math.PI);
     });
 });

@@ -23,7 +23,7 @@ import {
     addTrait,
     BLOCK_AIR,
     CharacterControllerTrait,
-    characterLook,
+    setCharacterLook,
     createNode,
     env,
     ExtrudedSpriteMeshTrait,
@@ -77,7 +77,7 @@ script(SpritesDemoTrait, 'spawn', (ctx) => {
         setPosition(t, [0, 1, -6]);
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
         // face +Z so the zones (placed at z=2) are straight ahead.
-        characterLook(cc, Math.PI);
+        setCharacterLook(cc, Math.PI);
     });
 });
 
