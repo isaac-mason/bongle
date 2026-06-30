@@ -43,30 +43,6 @@ project. Open it in the cloud with one click:
 It boots a container, installs dependencies, and starts the editor (forwarded on
 `:3002`). You can also clone it and run `npm install && npm run edit` locally.
 
-## CLI Reference
-
-```sh
-# scaffold a new project in `./[dir]/`
-bongle new [dir]
-
-# the below commands run in an existing project:
-
-# start the editor for the current project
-bongle edit
-
-# build the project into a `dist/bundle.zip`
-bongle build
-
-# serve a built dist/ locally
-bongle start
-
-# bump the `bongle` dep, install, run migrate
-bongle upgrade
-
-# migrates editor-managed content in ./content/* to the latest version
-bongle migrate [--check]
-```
-
 ## Project structure
 
 A scaffolded project is a small npm package. The pieces you work with:
@@ -1365,6 +1341,33 @@ locally, so you can play the production build before shipping it.
 Deploying that bundle lands it as a **draft**. Promoting a draft to live is a
 separate, deliberate step, so a deploy never changes what players see until you
 publish it.
+
+### CLI reference
+
+The `bongle` CLI covers the whole workflow, from scaffolding a project to building
+the bundle you deploy:
+
+```sh
+# scaffold a new project in `./[dir]/`
+bongle new [dir]
+
+# the below commands run in an existing project:
+
+# start the editor for the current project
+bongle edit
+
+# build the project into a `dist/bundle.zip`
+bongle build
+
+# serve a built dist/ locally
+bongle start
+
+# bump the `bongle` dep, install, run migrate
+bongle upgrade
+
+# migrates editor-managed content in ./content/* to the latest version
+bongle migrate [--check]
+```
 
 ## Examples
 
