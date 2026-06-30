@@ -1359,6 +1359,7 @@ for anything they do not:
 - [Lighting and sky](#lighting-and-sky): sky presets, time of day, and voxel lighting.
 - [Models and meshes](#models-and-meshes): bringing in glTF geometry (the 99% path) and the low-level mesh trait.
 - [glTF support](#gltf-support): exactly which glTF/GLB features are imported.
+- [Visual modifiers](#visual-modifiers): per-instance tint, flash, glow, unlit, and dither.
 - [Characters](#characters): rigged humanoids that players and NPCs render as.
 - [Avatars](#avatars): the model a humanoid renders with, and spawning NPCs.
 - [Animation](#animation): playing a model's glTF clips.
@@ -1495,6 +1496,32 @@ Everything else is ignored: skinning, morph targets, vertex colors, tangents,
 cameras, lights, and glTF extensions. Because there is no skinning, animation moves
 whole nodes rather than deforming a mesh, which is why character rigs are built from
 separate bone nodes (see [Animation](#animation)).
+
+### Visual modifiers
+
+Every rendered mesh carries a set of per-instance, client-only visual fields you drive
+from script to restyle an instance without touching its geometry or material. The same
+vocabulary recurs across the renderer, on sprites, voxel meshes, and characters, and
+particles expose it through their `update` pool (`tintR/G/B/A`, `glow`).
+
+| Setter | Field | Does |
+| --- | --- | --- |
+| `setMeshTint(t, [r,g,b,a])` | `tint` | recolour toward `rgb` at intensity `a`, lightness-preserving |
+| `setMeshFlash(t, [r,g,b,a])` | `flash` | a transient overlay over the tint but under lighting |
+| `setMeshGlow(t, n)` | `glow` | self-illumination 0–1: light the mesh in its own colour, `1` = shadow-free |
+| `setMeshLitMin(t, n)` | `litMin` | a minimum light floor so it stays readable in the dark |
+| `setMeshUnlit(t, b)` | `unlit` | skip world lighting entirely and render the texture flat |
+| `setMeshDither(t, n)` | `dither` | a screen-door fade 0–1 that drops fragments to fade an instance out |
+
+`tint` and `flash` both recolour, but `tint` is the persistent one (a team colour you
+set once) while `flash` is the momentary one you pulse and decay (a red hit-flash, a
+charge-up glow). `litMin`, `glow`, and `unlit` are three points on a lighting-override
+scale: `litMin` lifts the dark floor a little, `glow` lights the instance in its own
+colour up to shadow-free, and `unlit` drops world lighting altogether, for UI overlays,
+icon meshes, and hologram-style effects. `dither` is a transparency you can afford in
+bulk: fragments are discarded against a dither pattern, so it stays in the opaque pass
+with no sorting or blending (the cost is a slightly pixelly edge). It is how a character
+mesh fades out when the camera pushes inside it.
 
 ### Characters
 
@@ -1676,9 +1703,11 @@ platforms and boats exactly this way.
 ### Sprites
 
 `SpriteTrait` draws 2D art as a billboard that always faces the camera. Point its
-`sprite` at a `sprite()` handle, size it with `width` and `height` (in source
-pixels) and `worldScale`, and set `fps` to play a multi-frame sprite as an
-animation. Billboards suit items, pickups, foliage, and cheap characters.
+`sprite` at a `sprite()` handle, whose `src` is a file, a procedural
+[`draw()` descriptor](#assets), or an array of either for animation frames. Size it
+with `width` and `height` (in source pixels) and `worldScale`, and set `fps` to play
+those frames as an animation. Billboards suit items, pickups, foliage, and cheap
+characters.
 `ExtrudedSpriteMeshTrait` takes the same sprite art but extrudes it into a 3D slab
 of `depth`, the chunky paper-craft look (think Crossy Road) that reads from any
 angle rather than only head-on.
@@ -1693,9 +1722,10 @@ and the `maxDistance` it searches downward for a surface.
 
 Particles are short-lived sprites for effects like smoke, sparks, and dust.
 Declare a particle type with `particle(id, { sprite, playback, update })`, pairing
-a sprite with a motion `update` (the `particleUpdate.*` helpers cover the common
-ones), then emit instances at a position with `spawnParticle`. The starter pack
-bundles ready-made presets under `particlePresets` in `bongle/starter`.
+a sprite with a motion `update`, then emit instances at a position with
+`spawnParticle`. The quickest path is a ready-made `update`: `particleUpdate` ships
+complete behaviours (`smoke`, `dust`, `spark`, `snow`, `rain`), and the starter pack
+bundles whole presets under `particlePresets` in `bongle/starter`.
 
 ```ts
 // a particle type pairs a sprite with a motion update
@@ -1710,6 +1740,62 @@ script(WorldTrait, 'smoke-puffs', (ctx) => {
     onInit(ctx, () => {
         // emit one at a position; no-ops on the server
         spawnParticle(ctx, SmokeParticle, [0, 2, 0]);
+    });
+});
+```
+
+For anything past the presets, write your own `update`. It runs once per live particle
+each tick with `(pool, i, dt, voxels)`, a structure-of-arrays pool where you mutate the
+`i`-th particle directly: `velX/Y/Z` for motion, `posX/Y/Z` for position, `size`,
+`glow`, and the `tintR/G/B/A` multiplier (`A` is alpha). Kill one early by setting
+`pool.expiresAt[i] = 0`. Build the body from the composable `particleUpdate.*`
+primitives, each taking a strength argument, rather than from scratch:
+
+| Primitive | Effect |
+| --- | --- |
+| `gravity(pool, i, dt, g)` | accelerate downward |
+| `drag(pool, i, dt, k)` | damp velocity toward zero |
+| `integrate(pool, i, dt)` | advance position by velocity |
+| `collideSlide` / `collideBounce` / `collideLand` | resolve against voxels |
+| `fadeAlpha(pool, i, dt, rate)` / `fadeRgb(...)` | fade alpha or colour out |
+
+Variety comes from the spawn as much as the update. `spawnParticle`'s options
+randomize each instance, `velX/Y/Z`, `lifetime`, `size`, `tint`, `glow`, and an
+explicit `seed`, so a single burst scatters instead of moving in lockstep. The
+per-particle `seed` is also readable inside the update for stable per-particle noise.
+
+```ts
+// for effects past the presets, write your own update: it runs per live particle each
+// tick over a pooled buffer, composing the particleUpdate.* primitives and mutating
+// the particle's velocity, size, and tint directly.
+const SparkSprite = sprite('spark', { src: new URL('./assets/spark.png', import.meta.url) });
+const SparkParticle = particle('spark', {
+    sprite: SparkSprite,
+    playback: 'stretch', // map age across the sprite's frames over the lifetime
+    glow: 1, // self-lit, ignores world shadow
+    update: (pool, i, dt, voxels) => {
+        particleUpdate.gravity(pool, i, dt, -14); // pull down
+        particleUpdate.drag(pool, i, dt, 0.98); // air resistance
+        particleUpdate.integrate(pool, i, dt); // advance position by velocity
+        particleUpdate.collideBounce(pool, i, dt, voxels, 0.3); // bounce off blocks
+        particleUpdate.fadeAlpha(pool, i, dt, 1.2); // fade the alpha out over time
+        pool.size[i]! *= 0.99; // shrink a little each tick
+    },
+});
+
+script(WorldTrait, 'sparks', (ctx) => {
+    onInit(ctx, () => {
+        // a scattered burst: randomize each particle's velocity, lifetime, and size at
+        // spawn so no two move alike.
+        for (let n = 0; n < 24; n++) {
+            spawnParticle(ctx, SparkParticle, [0, 3, 0], {
+                velX: (Math.random() - 0.5) * 6,
+                velY: Math.random() * 8,
+                velZ: (Math.random() - 0.5) * 6,
+                lifetime: 0.6 + Math.random() * 0.6,
+                size: 0.2 + Math.random() * 0.2,
+            });
+        }
     });
 });
 ```

@@ -58,3 +58,39 @@ script(WorldTrait, 'smoke-puffs', (ctx) => {
     });
 });
 /* SNIPPET_END: particles */
+
+/* SNIPPET_START: varied */
+// for effects past the presets, write your own update: it runs per live particle each
+// tick over a pooled buffer, composing the particleUpdate.* primitives and mutating
+// the particle's velocity, size, and tint directly.
+const SparkSprite = sprite('spark', { src: new URL('./assets/spark.png', import.meta.url) });
+const SparkParticle = particle('spark', {
+    sprite: SparkSprite,
+    playback: 'stretch', // map age across the sprite's frames over the lifetime
+    glow: 1, // self-lit, ignores world shadow
+    update: (pool, i, dt, voxels) => {
+        particleUpdate.gravity(pool, i, dt, -14); // pull down
+        particleUpdate.drag(pool, i, dt, 0.98); // air resistance
+        particleUpdate.integrate(pool, i, dt); // advance position by velocity
+        particleUpdate.collideBounce(pool, i, dt, voxels, 0.3); // bounce off blocks
+        particleUpdate.fadeAlpha(pool, i, dt, 1.2); // fade the alpha out over time
+        pool.size[i]! *= 0.99; // shrink a little each tick
+    },
+});
+
+script(WorldTrait, 'sparks', (ctx) => {
+    onInit(ctx, () => {
+        // a scattered burst: randomize each particle's velocity, lifetime, and size at
+        // spawn so no two move alike.
+        for (let n = 0; n < 24; n++) {
+            spawnParticle(ctx, SparkParticle, [0, 3, 0], {
+                velX: (Math.random() - 0.5) * 6,
+                velY: Math.random() * 8,
+                velZ: (Math.random() - 0.5) * 6,
+                lifetime: 0.6 + Math.random() * 0.6,
+                size: 0.2 + Math.random() * 0.2,
+            });
+        }
+    });
+});
+/* SNIPPET_END: varied */
