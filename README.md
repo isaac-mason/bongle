@@ -23,6 +23,7 @@ New here? The guide's [Getting Started](./docs/guide.md#getting-started) walks y
 These are multiplayer games built on bongle, each living in their own repo:
 
 - [bongle-wizard-game](https://github.com/isaac-mason/bongle-wizard-game), a multiplayer wizard arena.
+- [bongle-one-shot](https://github.com/isaac-mason/bongle-one-shot), a bow pvp game.
 
 ## Examples
 

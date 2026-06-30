@@ -1,6 +1,6 @@
 // docs generator — expands authored markdown templates into committed docs.
 //
-//   template/guide.template.md  ->  guide.md   (read top-to-bottom guide)
+//   template/docs.template.md   ->  docs.md    (read top-to-bottom guide)
 //   template/api.template.md    ->  api.md     (curated API reference)
 //
 // templates are hand-authored (thematic ordering + prose); a small set of
@@ -446,7 +446,7 @@ function expandTemplate(text) {
 
 // ── build ───────────────────────────────────────────────────────────
 
-for (const [tpl, out] of [['guide.template.md', 'guide.md'], ['api.template.md', 'api.md']]) {
+for (const [tpl, out] of [['docs.template.md', 'docs.md'], ['api.template.md', 'api.md']]) {
     const tplPath = path.join(templateDir, tpl);
     if (!fs.existsSync(tplPath)) {
         console.warn(`skipping ${tpl}: not found`);

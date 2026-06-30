@@ -2,7 +2,7 @@
 
 The exhaustive signature list for the public `bongle` surface, generated from the
 package's exports. For a guided, read-top-to-bottom introduction with runnable
-examples, see [the guide](./guide.md).
+examples, see [the guide](./docs.md).
 
 ## Scene graph & nodes
 
