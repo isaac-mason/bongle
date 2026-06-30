@@ -34,7 +34,10 @@ const SAMPLE_AVATARS: SampleAvatar[] = [
     { modelId: 'avatar:pigeon', slug: 'pigeon', file: 'pigeon/pigeon.glb' },
 ];
 
-const avatarsDir = fileURLToPath(new URL('../../avatars/', import.meta.url));
+// Server-only: resolved at runtime against the module's on-disk location so we
+// can read the engine's example `.glb`s off disk. It's a directory, not a file,
+// so there's no build-time asset for Vite to emit — tell it to leave it as-is.
+const avatarsDir = fileURLToPath(new URL(/* @vite-ignore */ '../../avatars/', import.meta.url));
 const filePathFor = (a: SampleAvatar): string => path.join(avatarsDir, a.file);
 
 export function createFallbackAvatarsDriver(): ServerDriver['avatars'] {
