@@ -19,7 +19,7 @@ import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
-import { getControlCamera, setActivePlayer } from '../client/rooms';
+import { getPovCamera, setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -489,11 +489,11 @@ script(
         // closures inside transformToolState read state.store on user
         // interaction. Create the tool first with a placeholder store,
         // then create the store, then patch transformToolState.store.
-        // resolve the initial control camera for the gizmo. TransformControls
+        // resolve the initial POV camera for the gizmo. TransformControls
         // holds its own camera ref internally; the per-frame sync below
         // (`transformToolState.gizmo.camera = camera`) keeps it pointing
         // at the active POV so swaps don't strand the gizmo on a stale ref.
-        const initialCamera = getControlCamera(room) as PerspectiveCamera;
+        const initialCamera = getPovCamera(room) as PerspectiveCamera;
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
             client.domElement,
@@ -554,7 +554,7 @@ script(
         // motion. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getControlCamera(room) as PerspectiveCamera | null;
+            const camera = getPovCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             TransformTool.prePhysicsGrab(transformToolState, room.physics, camera);
         });
@@ -569,7 +569,7 @@ script(
         // fly nor character controller swings the camera.
         onInput(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getControlCamera(room) as PerspectiveCamera | null;
+            const camera = getPovCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             const mk = client.input.mouseKeyboard;
             const grab = transformToolState.grab!;
@@ -708,12 +708,12 @@ script(
         onFrame(ctx, () => {
             // editor visuals + tool dispatch only run when POV is the
             // editor's camera. for play rooms, that means the lens is up
-            // AND the user is on the inspect-client sub-tab (control.node
+            // AND the user is on the inspect-client sub-tab (pov.node
             // is the lens). for edit rooms, the player node IS the editor
             // camera. when not active, force-hide every editor visual so
             // they don't leak into the player view, and short-circuit.
             const editorViewActive =
-                room.playerMode === 'edit' || (!!room.editor && room.control.node === room.editor.editorNode);
+                room.playerMode === 'edit' || (!!room.editor && room.pov.node === room.editor.editorNode);
             if (!editorViewActive) {
                 gridVisualsState.minorLines.visible = false;
                 gridVisualsState.majorLines.visible = false;
@@ -741,7 +741,7 @@ script(
             // is reflected in the gizmo's projection without rebuilding.
             // TransformControls is third-party and holds its own camera
             // ref, there's no way to avoid this sync.
-            const camera = getControlCamera(room) as PerspectiveCamera | null;
+            const camera = getPovCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 

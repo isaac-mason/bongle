@@ -296,7 +296,7 @@ export function render(
 
     // env flush + screen tint, only the active camera defines what world
     // context the post-chain should see this frame. when camera is null
-    // (e.g. boot before a control is bound) we still render whatever the
+    // (e.g. boot before a POV camera is bound) we still render whatever the
     // pipeline last saw, the room will compose with stale env, which is
     // fine for the rare null window.
     if (camera) {

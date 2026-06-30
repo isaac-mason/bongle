@@ -92,7 +92,7 @@ const _focusQuat: Quat = [0, 0, 0, 1];
  * bind-pose AABB (transformed by the node's world matrix). otherwise, target
  * the node's interpolated position.
  *
- * resolves the active camera-node TransformTrait via the control node's
+ * resolves the active camera-node TransformTrait via the POV node's
  * CameraRefTrait and writes pose directly there (renderer composes the
  * render camera from this transform each frame).
  *
@@ -106,9 +106,9 @@ export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Re
     const transform = getTrait(node, TransformTrait);
     if (!transform) return;
 
-    const controlNode = room.control.node;
-    if (!controlNode) return;
-    const cameraTrait = getTrait(controlNode, CameraRefTrait)?.camera;
+    const povNode = room.pov.node;
+    if (!povNode) return;
+    const cameraTrait = getTrait(povNode, CameraRefTrait)?.camera;
     const cameraNode = cameraTrait?._node;
     const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
     if (!cameraTransform) return;

@@ -67,6 +67,7 @@ Define block types, read and write the voxel grid, and react to changes.
 The camera, lighting and sky, and the traits that draw a node.
 
 <RenderModule select="builtins/camera" />
+<RenderModule select="api/pov" />
 <RenderModule select="api/lighting" />
 <RenderModule select="api/environment" />
 <RenderModule select="builtins/mesh" />

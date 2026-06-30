@@ -386,7 +386,7 @@ export async function load(state: EngineClient) {
         // resize all room canvas targets so they're ready when switched to.
         // camera aspect/projection is no longer event-driven, the renderer
         // pulls viewport size from canvasTarget each frame in `bindRenderCamera`
-        // and writes aspect into the active control camera.
+        // and writes aspect into the active POV camera.
         for (const room of state.rooms.rooms.values()) {
             room.canvasTarget.setPixelRatio(window.devicePixelRatio);
             room.canvasTarget.setSize(w, h);
@@ -1187,15 +1187,15 @@ export function update(state: EngineClient, delta: number) {
         // protocol messages.
         Chat.tick(room.chat, state.net, room.roomId);
 
-        // resolve the active POV camera (control node's CameraTrait) and
+        // resolve the active POV camera (POV node's CameraTrait) and
         // bind it to the renderer. pulls viewport aspect from canvasTarget,
-        // writes it back into the control camera (gated on aspect change),
+        // writes it back into the POV camera (gated on aspect change),
         // then reassigns the scene pass camera so the next render reads it
         // directly. must run AFTER user frame scripts (they write pose/fov
-        // on the control camera) and BEFORE any consumer that reads it.
-        const controlCamera = Rooms.getControlCamera(room);
+        // on the POV camera) and BEFORE any consumer that reads it.
+        const povCamera = Rooms.getPovCamera(room);
         Renderer.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
-        if (!controlCamera) continue;
+        if (!povCamera) continue;
 
         // per-mesh frustum cull with the fresh camera. Refits each renderable
         // cull entry from this frame's transforms and writes `cull.visible`,
@@ -1208,7 +1208,7 @@ export function update(state: EngineClient, delta: number) {
         // cull, same Euclidean sphere so a sprite/rig fades at the same
         // boundary the chunks it sits on do.
         Debug.begin(room.clientMetrics, 'visibility');
-        Visibility.update(room.visibility, controlCamera, perfSettings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
+        Visibility.update(room.visibility, povCamera, perfSettings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
         Debug.end(room.clientMetrics, 'visibility');
 
         // sample voxel light at each visible model's world-space AABB
@@ -1245,7 +1245,7 @@ export function update(state: EngineClient, delta: number) {
                 state.voxelResources,
                 room.voxels,
                 room.voxels.registry,
-                controlCamera.position,
+                povCamera.position,
                 perfSettings.voxelMainThreadRemeshBudget,
             );
             Debug.end(room.clientMetrics, 'mesh');
@@ -1286,11 +1286,11 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'model');
 
         Debug.begin(room.clientMetrics, 'dom-ui');
-        DomUi.update(room.domUi, controlCamera, state.viewport);
+        DomUi.update(room.domUi, povCamera, state.viewport);
         Debug.end(room.clientMetrics, 'dom-ui');
 
         Debug.begin(room.clientMetrics, 'sprite');
-        SpriteVisuals.update(room.spriteVisuals, state.spriteResources, room.voxels, controlCamera, room.visibility);
+        SpriteVisuals.update(room.spriteVisuals, state.spriteResources, room.voxels, povCamera, room.visibility);
         Debug.end(room.clientMetrics, 'sprite');
 
         Debug.begin(room.clientMetrics, 'extruded-sprite');
@@ -1298,7 +1298,7 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'extruded-sprite');
 
         Debug.begin(room.clientMetrics, 'shadow');
-        ShadowVisuals.update(room.shadowVisuals, room.voxels, controlCamera);
+        ShadowVisuals.update(room.shadowVisuals, room.voxels, povCamera);
         Debug.end(room.clientMetrics, 'shadow');
 
         // particle visuals reads pool[0..count) directly, no scene-graph
@@ -1320,7 +1320,7 @@ export function update(state: EngineClient, delta: number) {
         // TODO: be smarter :)
         activeRoom.scene.updateWorldMatrix();
 
-        const activeCamera = Rooms.getControlCamera(activeRoom);
+        const activeCamera = Rooms.getPovCamera(activeRoom);
 
         Debug.begin(activeRoom.clientMetrics, 'render');
         Renderer.render(state.renderer, activeRoom, activeCamera, state.voxelResources, perfSettings.voxelViewChunkRadius);

@@ -20,7 +20,8 @@ import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat'
 import { env } from '../api/env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { getTrait } from '../api/scene-graph';
-import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
+import { getPov } from '../api/pov';
+import { onDispose, onFrame, script } from '../api/scripts';
 import { type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
@@ -157,7 +158,7 @@ script(
         const zoomScale = (delta: number): number => 0.95 ** (ZOOM_SPEED * Math.abs(delta * 0.01));
 
         onFrame(ctx, (_args) => {
-            if (getControlNode(ctx) !== ctx.node) return;
+            if (getPov(ctx) !== ctx.node) return;
             // Skip until the viewport has a real size, the ResizeObserver
             // hasn't fired yet on the first frame(s) after attach. Without
             // this, the `viewport.height || 1` fallback below divides mouse

@@ -31,6 +31,7 @@ export * from './api/pack';
 export * from './api/particles';
 export * from './api/physics';
 export { platform } from './api/platform';
+export * from './api/pov';
 export * from './api/prefabs';
 export * from './api/prop';
 export * as rooms from './api/rooms';

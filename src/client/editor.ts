@@ -23,7 +23,7 @@ import { getTrait } from '../core/scene/nodes';
 import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
 import { useEditor } from '../editor/editor-store';
 import { EditorTrait } from '../editor/editor-trait';
-import { buildRoomViews, type ClientRoom, getControlCamera, seedCameraRef, setControlNode } from './rooms';
+import { buildRoomViews, type ClientRoom, getPovCamera, seedCameraRef } from './rooms';
 
 /**
  * Toggle the editor for `room`. The mechanism depends on room type:
@@ -76,7 +76,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
  * plus a lens-private camera node, point editorNode's CameraRefTrait at it,
  * seed the lens camera from the outgoing view, attach FlyControllerTrait
  * and EditorTrait (the trait is what activates the editor script), set
- * `room.editor`, and swap control to it. The editor's controller-swap
+ * `room.editor`, and swap the POV to it. The editor's controller-swap
  * reconcile (in editor/index.ts) may swap to the user's chosen control
  * mode on its next tick. No-op when a lens is already up.
  *
@@ -88,9 +88,9 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
 export function enterLocalEditorView(room: ClientRoom): void {
     if (room.editor) return;
 
-    // snapshot src pose BEFORE creating any nodes, getControlCamera returns
-    // the play room's player camera while room.control.node is still the body.
-    const src = getControlCamera(room);
+    // snapshot src pose BEFORE creating any nodes, getPovCamera returns
+    // the play room's player camera while room.pov.node is still the body.
+    const src = getPovCamera(room);
     const srcPos = src ? ([src.position[0], src.position[1], src.position[2]] as [number, number, number]) : null;
     const srcQuat = src
         ? ([src.quaternion[0], src.quaternion[1], src.quaternion[2], src.quaternion[3]] as [number, number, number, number])
@@ -126,7 +126,8 @@ export function enterLocalEditorView(room: ClientRoom): void {
     room.editor = { id: crypto.randomUUID(), editorNode, cameraNode };
     Nodes.addTrait(editorNode, EditorTrait);
 
-    setControlNode(room, editorNode);
+    // host write to the shared POV box (scripts swap POV via `setPov(ctx)`).
+    room.pov.node = editorNode;
     const store = useEditor.getState();
     store.setRoomView(room.playerId, 'edit');
     // editor POV now exists, refresh the RoomView snapshot so consumers
@@ -138,7 +139,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
 export function exitLocalEditorView(room: ClientRoom): void {
     const lens = room.editor;
     if (!lens) return;
-    setControlNode(room, room.playerNode);
+    room.pov.node = room.playerNode;
     Nodes.destroyNode(room.nodes, lens.editorNode);
     Nodes.destroyNode(room.nodes, lens.cameraNode);
     room.editor = null;
@@ -150,7 +151,7 @@ export function exitLocalEditorView(room: ClientRoom): void {
 
 /**
  * Switch which perspective `room` is viewed through. Drives the imperative
- * POV swap (`setControlNode`) and writes the resulting view into the editor
+ * POV swap (`room.pov.node`) and writes the resulting view into the editor
  * store so tab UIs can render active state. No-op on edit rooms (lens
  * doesn't apply, player node already is the editor camera).
  */
@@ -158,8 +159,8 @@ export function setRoomView(room: ClientRoom, view: 'edit' | 'play'): void {
     const lens = room.editor;
     if (!lens) return;
     const target = view === 'edit' ? lens.editorNode : room.playerNode;
-    if (room.control.node === target) return;
-    setControlNode(room, target);
+    if (room.pov.node === target) return;
+    room.pov.node = target;
     useEditor.getState().setRoomView(room.playerId, view);
 }
 

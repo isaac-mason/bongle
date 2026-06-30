@@ -1127,7 +1127,7 @@ export type ClientId = number;
 ```ts
 export type ClientContext = {
     scene: Scene;
-    control: ControlClientState;
+    pov: PovState;
     player: nodes.Node;
     camera: nodes.Node;
     domElement: HTMLCanvasElement;
@@ -1137,25 +1137,6 @@ export type ClientContext = {
     input: Input;
     state?: EngineClient;
     room?: ClientRoom;
-};
-```
-
-#### `ControlClientState`
-
-```ts
-/**
- * mutable POV pointer, the node whose CameraTrait the renderer binds into
- * the scene pass each frame, and which scripts compare against via
- * `getControlNode(ctx) === ctx.node`. wrapped in an object (not a bare
- * field) so ClientRoom and ClientContext can share a single reference:
- * swapping the pointer is a single in-place write that every existing
- * handle observes.
- *
- * default: room.playerNode. swapped by `setControlNode` when entering a
- * local editor view, taking control of an NPC, or peeking at another POV.
- */
-export type ControlClientState = {
-    node: nodes.Node | null;
 };
 ```
 
@@ -1320,22 +1301,6 @@ export function filter<const Args extends nodes.ConditionArgs[]>(ctx: ScriptCont
 
 ```ts
 export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandle<T>): T | null;
-```
-
-#### `getControlNode`
-
-```ts
-/**
- * resolve the room's current control node, the POV the engine renders
- * through and routes input through. scripts compare to their own ctx.node
- * to gate per-frame work that should only run on the active POV (camera
- * writes, input-driven movement, etc.); non-control nodes still run other
- * hooks (animation, state ticks) unconditionally.
- *
- * server-side, ctx.client is undefined and this returns null. that's
- * intentional: server scripts shouldn't conditionalize on POV.
- */
-export function getControlNode(ctx: ScriptContext): nodes.Node | null;
 ```
 
 #### `isOwner`
@@ -3920,7 +3885,7 @@ export const CameraTrait;
 
 ```ts
 /**
- * pointer attached to the control node, references the CameraTrait the
+ * pointer attached to the POV node, references the CameraTrait the
  * renderer should compose the active render camera from. Controllers
  * (builtin or DIY) add this on init and set `camera` to the trait on
  * whichever node they want the renderer to see; clear / detach on dispose.
@@ -3934,17 +3899,17 @@ export const CameraTrait;
 export const CameraRefTrait;
 ```
 
-#### `getControlCamera`
+#### `getPovCamera`
 
 ```ts
 /**
- * resolve the active control node's render camera from a script ctx. on the
+ * resolve the active POV node's render camera from a script ctx. on the
  * client this returns the per-room renderer-owned PerspectiveCamera, freshly
  * synced from the active CameraTrait + camera-node Transform. returns null
  * on the server, when no room is wired, or when no controller has spun up
  * its camera node yet.
  */
-export function getControlCamera(ctx: ScriptContext): PerspectiveCamera | null;
+export function getPovCamera(ctx: ScriptContext): PerspectiveCamera | null;
 ```
 
 #### `resolveCamera`
@@ -3963,6 +3928,41 @@ export function resolveCamera(ctx: ScriptContext): {
     node: Node;
 };
 ```
+#### `getPov`
+
+```ts
+/**
+ * resolve the room's current POV node, the node the engine renders
+ * through and routes input through. scripts compare to their own ctx.node
+ * to gate per-frame work that should only run on the active POV (camera
+ * writes, input-driven movement, etc.); non-POV nodes still run other
+ * hooks (animation, state ticks) unconditionally.
+ *
+ * server-side, ctx.client is undefined and this returns null. that's
+ * intentional: server scripts shouldn't conditionalize on POV.
+ */
+export function getPov(ctx: ScriptContext): nodes.Node | null;
+```
+
+#### `setPov`
+
+```ts
+/**
+ * swap the room's POV pointer. writes `ctx.client.pov.node` in place, the
+ * same box `room.pov` and every script's `ctx.client.pov` reference, so the
+ * swap is observed everywhere without re-seating. pass `null` to clear (no
+ * POV node, input still routes via room.input, but `getPov(ctx)` returns
+ * null everywhere and rendering bails for this room until a POV node is set
+ * again).
+ *
+ * client-only: a no-op on the server (ctx.client is undefined), like getPov.
+ * the renderer reads the active POV camera each frame via `getPovCamera`, so
+ * POV swaps need no pipeline rebuild.
+ */
+export function setPov(ctx: ScriptContext, node: nodes.Node | null): void;
+```
+
+Also exported: `PovState`.
 #### `configureFloodFillLighting`
 
 ```ts
@@ -5635,7 +5635,7 @@ export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, o
  * Client-only override hook for the room's audio listener pose source.
  *
  * By default the audio runtime (`client/audio/audio.ts`) reads listener
- * position + orientation from `room.control.node`'s TransformTrait, the
+ * position + orientation from `room.pov.node`'s TransformTrait, the
  * same node the renderer derives the active camera from. That's the
  * right pick for first-person and most third-person cameras, where the
  * "ears" and the "eyes" sit at the same node.
@@ -5643,7 +5643,7 @@ export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, o
  * Attach this trait to a different node when you want to decouple them,
  * e.g. a third-person camera that orbits the player but should hear
  * the world from the player's head, not from the camera's pose. The
- * first node carrying an active `AudioListenerTrait` wins; the control
+ * first node carrying an active `AudioListenerTrait` wins; the POV
  * node is only consulted as a fallback.
  *
  * `persist: false` because this is a runtime camera/audio routing

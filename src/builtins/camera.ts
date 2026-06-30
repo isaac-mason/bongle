@@ -34,7 +34,7 @@ export const CameraTrait = trait(
 export type CameraTrait = TraitType<typeof CameraTrait>;
 
 /**
- * pointer attached to the control node, references the CameraTrait the
+ * pointer attached to the POV node, references the CameraTrait the
  * renderer should compose the active render camera from. Controllers
  * (builtin or DIY) add this on init and set `camera` to the trait on
  * whichever node they want the renderer to see; clear / detach on dispose.
@@ -58,16 +58,16 @@ export const CameraRefTrait = trait(
 export type CameraRefTrait = TraitType<typeof CameraRefTrait>;
 
 /**
- * resolve the active control node's render camera from a script ctx. on the
+ * resolve the active POV node's render camera from a script ctx. on the
  * client this returns the per-room renderer-owned PerspectiveCamera, freshly
  * synced from the active CameraTrait + camera-node Transform. returns null
  * on the server, when no room is wired, or when no controller has spun up
  * its camera node yet.
  */
-export function getControlCamera(ctx: ScriptContext): PerspectiveCamera | null {
+export function getPovCamera(ctx: ScriptContext): PerspectiveCamera | null {
     const room = ctx.client?.room;
     if (!room) return null;
-    return Rooms.getControlCamera(room);
+    return Rooms.getPovCamera(room);
 }
 
 /**

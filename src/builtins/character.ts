@@ -120,7 +120,8 @@ import {
     isLocalNode,
     type Node,
 } from '../api/scene-graph';
-import { getControlNode, isOwner, onFrame, query, script } from '../api/scripts';
+import { getPov } from '../api/pov';
+import { isOwner, onFrame, query, script } from '../api/scripts';
 import { sync, type TraitType, trait } from '../api/traits';
 import { setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
@@ -132,7 +133,7 @@ import type { ScriptContext } from '../core/scene/scripts';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
 import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
 import { AnimatorTrait } from './animator';
-import { getControlCamera } from './camera';
+import { getPovCamera } from './camera';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
 import { MeshTrait, setMeshDither } from './mesh';
@@ -372,8 +373,8 @@ script(
         const qLocomotion = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
 
         onFrame(ctx, ({ delta }) => {
-            const controlNode = getControlNode(ctx);
-            const camera = getControlCamera(ctx);
+            const povNode = getPov(ctx);
+            const camera = getPovCamera(ctx);
 
             // ── pass 1: every character ─────────────────────────────
             for (const [t, transform] of qChars.matches) {
@@ -435,7 +436,7 @@ script(
                 // Steady-state characters (loaded, out of fade range) write
                 // zero, compare-equals the cache, and skip the walk.
                 let finalDither: number;
-                if (controlNode === node) {
+                if (povNode === node) {
                     const pc = getTrait(node, PlayerControllerTrait);
                     const hide =
                         (pc && pc.config.perspective === 'first') ||
@@ -554,7 +555,7 @@ script(
         });
         // editor: true → this presentation runs in edit mode too, so the editor lens
         // gets the real avatar (reconciler), procedural locomotion, and the
-        // first-person POV-hide when viewing through the character (control.node ===
+        // first-person POV-hide when viewing through the character (pov.node ===
         // playerNode), not just in play.
     },
     { editor: true },

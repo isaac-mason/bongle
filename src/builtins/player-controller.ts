@@ -46,7 +46,8 @@ import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import type { Physics } from '../api/physics';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
-import { getControlNode, isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
+import { getPov } from '../api/pov';
+import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
 import { control, type TraitType, trait } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { UILayer } from '../client/ui-layers';
@@ -1063,7 +1064,7 @@ script(
             // touched. owner-only state (perspective, fov lerp) is implied,
             // control => owner, since only owners can hold control of their
             // own player node.
-            if (getControlNode(ctx) !== ctx.node) return;
+            if (getPov(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc) return;
 
@@ -1107,7 +1108,7 @@ script(
             // noclip drives the player's transform from input (cc.move/jump).
             // gated on control so a non-control player can't keep flying
             // around after the POV moves elsewhere.
-            if (getControlNode(ctx) !== ctx.node) return;
+            if (getPov(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc?.input.noclip) return;
             const transform = getTrait(ctx.node, TransformTrait);
@@ -1125,7 +1126,7 @@ script(
             // to its CameraTrait or paints the HUD overlay. when POV swaps
             // away, the crosshair is torn down so a stale tickmark doesn't
             // linger over whatever lens is now active.
-            if (getControlNode(ctx) === ctx.node) {
+            if (getPov(ctx) === ctx.node) {
                 if (cameraTransform && cameraTrait) {
                     updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
                 }

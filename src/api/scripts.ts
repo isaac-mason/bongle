@@ -1,7 +1,6 @@
 export type { ClientId } from '../core/client';
 export type {
     ClientContext,
-    ControlClientState,
     EditRoomState,
     FrameArgs,
     JoinArgs,
@@ -17,7 +16,6 @@ export {
     broadcast,
     filter,
     first,
-    getControlNode,
     isOwner,
     listen,
     onBlockBreak,

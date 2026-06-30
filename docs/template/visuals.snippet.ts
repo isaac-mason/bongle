@@ -5,14 +5,19 @@ import {
     CameraTrait,
     configureFloodFillLighting,
     ENVIRONMENT_OVERWORLD,
+    getPov,
+    getPovCamera,
     getTrait,
+    onFrame,
     onInit,
     particle,
     particleUpdate,
     script,
     setEnvironment,
+    setPov,
     spawnParticle,
     sprite,
+    trait,
     WorldTrait,
 } from 'bongle';
 
@@ -26,6 +31,31 @@ script(WorldTrait, 'camera-setup', (ctx) => {
     });
 });
 /* SNIPPET_END: camera */
+
+/* SNIPPET_START: pov */
+// the POV is the node the engine renders through and routes input to. attach
+// a trait to a node and gate view-only work to whichever node is the POV.
+const Viewpoint = trait('viewpoint');
+script(Viewpoint, 'pov', (ctx) => {
+    onFrame(ctx, () => {
+        // only the active POV node runs this; everything else returns early
+        if (getPov(ctx) !== ctx.node) return;
+        // the live render camera: world pose + projection, synced this frame
+        const camera = getPovCamera(ctx);
+        if (camera) {
+            // read camera.position, aim a crosshair, raycast from the eye, ...
+        }
+    });
+
+    onInit(ctx, () => {
+        // swap the POV to another node for a spectator target, a vehicle a
+        // player enters, or a death cam. client-only and purely local: it
+        // changes what this client sees and controls, not ownership. pass
+        // null to clear it.
+        setPov(ctx, ctx.node);
+    });
+});
+/* SNIPPET_END: pov */
 
 /* SNIPPET_START: lighting */
 // sky preset + voxel flood-fill lighting, set once on the world

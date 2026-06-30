@@ -211,7 +211,7 @@ export type TransformToolState = {
 // circular-dependency hazard.
 //
 // the gizmo holds its own `camera` ref (third-party TransformControls);
-// callers must keep `state.gizmo.camera` pointed at the active control
+// callers must keep `state.gizmo.camera` pointed at the active POV
 // camera each frame so POV swaps don't strand the gizmo on a stale ref.
 // per-call camera params on enterGrab/prePhysicsGrab/etc. avoid a second
 // stale mirror on TransformToolState itself.

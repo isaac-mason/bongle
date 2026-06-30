@@ -19,7 +19,8 @@ import { env } from '../api/env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
-import { getControlNode, onDispose, onFrame, script } from '../api/scripts';
+import { getPov } from '../api/pov';
+import { onDispose, onFrame, script } from '../api/scripts';
 import { control, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { resolveCamera } from './camera';
@@ -202,7 +203,7 @@ script(
         });
 
         onFrame(ctx, ({ delta }) => {
-            if (getControlNode(ctx) !== ctx.node) return;
+            if (getPov(ctx) !== ctx.node) return;
             const fly = ctx.trait;
 
             // rebase if the camera quaternion was changed externally

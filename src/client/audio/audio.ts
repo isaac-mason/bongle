@@ -26,7 +26,7 @@
  * this is the natural place to satisfy the autoplay policy.
  *
  * Listener pose: read from the room's `AudioListenerTrait` node if one
- * is present and active, else from `room.control.node`. Pose source is
+ * is present and active, else from `room.pov.node`. Pose source is
  * the TransformTrait via `getVisualWorldPosition` /
  * `getVisualWorldMatrix` so interpolation is folded in for free. We
  * write to the listener's modern AudioParam interface where available
@@ -574,7 +574,7 @@ export function updateForFrame(audio: Audio, room: AudioRoomLike): void {
  *  type (which would pull in the entire client module graph). */
 export type AudioRoomLike = {
     nodes: NodesType;
-    control: { node: Node | null };
+    pov: { node: Node | null };
 };
 
 function cleanup(audio: Audio, p: ActivePlayback): void {
@@ -680,7 +680,7 @@ function resolveListenerNode(room: AudioRoomLike): Node | null {
     for (const [trait] of Nodes.query(room.nodes, [AudioListenerTrait])) {
         if (trait.active) return trait._node!;
     }
-    return room.control.node;
+    return room.pov.node;
 }
 
 /* ── node position helper ──────────────────────────────────────────── */

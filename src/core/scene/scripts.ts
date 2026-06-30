@@ -31,15 +31,14 @@ export type Unsubscribe = () => void;
 /**
  * mutable POV pointer, the node whose CameraTrait the renderer binds into
  * the scene pass each frame, and which scripts compare against via
- * `getControlNode(ctx) === ctx.node`. wrapped in an object (not a bare
- * field) so ClientRoom and ClientContext can share a single reference:
- * swapping the pointer is a single in-place write that every existing
- * handle observes.
+ * `getPov(ctx) === ctx.node`. wrapped in an object (not a bare field) so
+ * ClientRoom and ClientContext can share a single reference: swapping the
+ * pointer is a single in-place write that every existing handle observes.
  *
- * default: room.playerNode. swapped by `setControlNode` when entering a
- * local editor view, taking control of an NPC, or peeking at another POV.
+ * default: room.playerNode. swapped by `setPov` when entering a local
+ * editor view, taking control of an NPC, or peeking at another POV.
  */
-export type ControlClientState = {
+export type PovState = {
     node: nodes.Node | null;
 };
 
@@ -82,12 +81,12 @@ export type ClientContext = {
     scene: Scene;
 
     /**
-     * mutable POV state, same object as `room.control`. scripts read
-     * `ctx.client.control.node` to know which node currently drives the
-     * camera + input. swap via `setControlNode(room, node)`. read the
-     * active render camera with `getControlCamera(ctx)`.
+     * mutable POV state, same object as `room.pov`. scripts read
+     * `ctx.client.pov.node` to know which node currently drives the
+     * camera + input. swap via `setPov(ctx, node)`. read the
+     * active render camera with `getPovCamera(ctx)`.
      */
-    control: ControlClientState;
+    pov: PovState;
 
     /** local player body node, alias for `room.playerNode`. */
     player: nodes.Node;
@@ -455,20 +454,6 @@ export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandl
     const node = nodes.findAncestor(ctx.node, [trait]);
     if (!node) return null;
     return node[0];
-}
-
-/**
- * resolve the room's current control node, the POV the engine renders
- * through and routes input through. scripts compare to their own ctx.node
- * to gate per-frame work that should only run on the active POV (camera
- * writes, input-driven movement, etc.); non-control nodes still run other
- * hooks (animation, state ticks) unconditionally.
- *
- * server-side, ctx.client is undefined and this returns null. that's
- * intentional: server scripts shouldn't conditionalize on POV.
- */
-export function getControlNode(ctx: ScriptContext): nodes.Node | null {
-    return ctx.client?.control.node ?? null;
 }
 
 /* ── hook functions ────────────────────────────────────────────────── */
@@ -892,7 +877,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
     // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
     // instantiate (the room object doesn't exist yet at this point), so hold
     // the reference directly, a copy here would freeze those fields as
-    // `undefined` forever, breaking isOwner / playMono / getControlNode for
+    // `undefined` forever, breaking isOwner / playMono / getPov for
     // editor:true world systems. The editor lens is reachable via
     // `ctx.client.room?.editor`.
     const client = runtime.client;

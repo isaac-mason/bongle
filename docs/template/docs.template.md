@@ -1,8 +1,27 @@
 # bongle
 
-Read this top to bottom to learn the engine and its API, with examples and
-guidance. Reach for the [API reference](./api.md) when you want the exhaustive
-signature list.
+Read this guide top to bottom to learn the engine and its API, with examples and
+guidance. Reach for the [API reference](./api.md) for the exhaustive signature list.
+
+## What is bongle
+
+bongle is a multiplayer voxel game engine built for the web. It powers
+[bongle.io](https://bongle.io) and is free, open-source software.
+
+At its core is a programmable voxel world: terrain made of blocks you can shape,
+break, and rebuild while the game runs, with a scene of nodes living inside it that
+you bring to life through scripts. Games are multiplayer by default, authoritative on
+the server and rendered in every player's browser. The engine gives you:
+
+- a built-in **editor** with client and server hot-module-reload
+- an **asset pipeline** for blocks, textures, models, sounds, and sprites
+- **voxel editing** with WorldEdit-style patterns and masks
+- an opinionated voxel **world**, with APIs that leave broad creative freedom within it
+- **client-server multiplayer** with distributed entity authority
+- one-click **share**, to edit a world alongside anyone, anywhere
+
+The chapters build this up from zero: scaffold a project, then nodes, traits, and
+scripts; the multiplayer model; then rendering, physics, voxels, and the rest.
 
 ## Getting Started
 
@@ -851,6 +870,19 @@ controllers (orbit, fly, player) write its pose each frame, but you can read the
 trait to adjust field of view or seed a pose before adding a controller.
 
 <Snippet source="visuals.snippet.ts" select="camera" />
+
+Each room renders through one point of view (POV): the node whose `CameraTrait`
+the renderer composes into the scene each frame. On the client, `getPov(ctx)`
+returns that node. Builtin controllers and view-only scripts gate their per-frame
+work on it with `getPov(ctx) === ctx.node`, so only the active POV writes the
+camera or consumes input. `getPovCamera(ctx)` returns the live render camera
+(world pose plus projection, already synced for this frame) for aiming, reticles,
+or raycasts from the eye. To move the POV elsewhere, such as a spectator target, a
+vehicle a player enters, or a death cam, call `setPov(ctx, node)`. It is
+client-only and purely local: it changes what that client sees and controls
+without affecting ownership. Pass `null` to clear it.
+
+<Snippet source="visuals.snippet.ts" select="pov" />
 
 ### Lighting and sky
 
