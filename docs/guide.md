@@ -314,9 +314,10 @@ script(HealthTrait, 'regen', (ctx) => {
 });
 ```
 
-Two registrars extend a trait. `control` exposes a field to the editor inspector
-and saves it in scene files. Its `schema`, built with the `prop` helpers such as
-`prop.number()` or `prop.vec3()`, describes the field's type:
+Two registrars extend a trait. `control` exposes a field to the editor inspector and
+saves it in scene files; `sync` replicates a field across the network. Each takes a
+`schema`: `control` uses a `prop` schema (for the editor and persistence), `sync` uses
+a `pack` schema (the binary wire format). The two vocabularies mirror each other.
 
 #### `control`
 
@@ -328,6 +329,17 @@ and saves it in scene files. Its `schema`, built with the `prop` helpers such as
  * the inspector lookup key.
  */
 export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void;
+```
+#### `sync`
+
+```ts
+/**
+ * register a sync on a trait. callable multiple times per trait.
+ * `id` is a stable string used for debug and per-attachment diff tracking.
+ * returns a SyncHandle for producer-side dirty hints; wire envelope still
+ * keys by `SyncHandle.index` (the slot in def.sync).
+ */
+export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: string, body: SyncBody<T, S>): SyncHandle<T>;
 ```
 
 The `prop` builders cover the field types the inspector can edit:
@@ -342,21 +354,23 @@ The `prop` builders cover the field types the inspector can edit:
 | `prop.optional(of)`, `prop.nullable(of)`, `prop.nullish(of)` | wrap any of the above as maybe-absent |
 | `prop.mesh()`, `prop.prefab()`, `prop.block()` | an asset reference picker |
 
-`sync` replicates a field across the network. Its rate and authority (which side
-may write it) get a fuller treatment under
-[replication and authority](#replication-and-authority).
+The `pack` builders (from [packcat](https://github.com/isaac-mason/packcat)) mirror
+them for the wire, with explicit sizes since bytes matter:
 
-#### `sync`
+| Builder | Wire type |
+| --- | --- |
+| `pack.boolean()`, `pack.string()` | a boolean, a length-prefixed string |
+| `pack.uint8()` … `pack.uint32()`, `pack.int8()` … `pack.int32()` | sized integers |
+| `pack.varuint()`, `pack.varint()` | variable-length integers (small values cost fewer bytes) |
+| `pack.float32()`, `pack.float64()`, `pack.quantized(...)` | floats, or a compressed fixed-range float |
+| `pack.enumeration([...])`, `pack.literal(...)` | a fixed choice |
+| `pack.list(of)`, `pack.tuple([...])` | a variable or fixed array |
+| `pack.object({ ... })`, `pack.record(of)`, `pack.union(...)` | a struct, keyed map, or tagged variant |
+| `pack.optional(of)`, `pack.nullable(of)` | maybe-absent / maybe-null |
+| `pack.quat()`, and bongle's `pack.position()` / `pack.quaternion()` / `pack.scale()` | rotation and engine vector helpers |
 
-```ts
-/**
- * register a sync on a trait. callable multiple times per trait.
- * `id` is a stable string used for debug and per-attachment diff tracking.
- * returns a SyncHandle for producer-side dirty hints; wire envelope still
- * keys by `SyncHandle.index` (the slot in def.sync).
- */
-export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: string, body: SyncBody<T, S>): SyncHandle<T>;
-```
+`sync`'s rate and authority (which side may write a field) get a fuller treatment
+under [replication and authority](#replication-and-authority).
 
 ### Scripts and lifecycle
 
@@ -434,14 +448,44 @@ camera and visual-following work in `onFrame`.
 
 Lifecycle hooks hand you a `delta`, but for cooldowns, durations, and scheduled
 events read the room clock. `ctx.clock.time` is the local tick-aligned time in
-seconds, and `ctx.clock.server` is the shared server time, equal on every client,
-for anything that must agree across the network.
+seconds, and `ctx.clock.server` is the shared server time, the same on every client,
+for anything that must agree across the network ([Server time](#server-time) covers
+it in depth).
+
+```ts
+script(WeaponTrait, 'fire-cooldown', (ctx) => {
+    let nextFireAt = 0; // a moment on the room clock, in seconds
+
+    onTick(ctx, () => {
+        // ctx.clock.time is local tick-aligned time, ideal for cooldowns and
+        // durations. for a deadline every client must agree on, use ctx.clock.server.
+        if (ctx.clock.time < nextFireAt) return; // still cooling down
+        nextFireAt = ctx.clock.time + ctx.trait.cooldown;
+        // ... fire the weapon ...
+    });
+});
+```
 
 ### Logging
 
 Use `log`, `warn`, and `error` instead of bare `console.log`. Each tags the
 message with the script's trait and node and surfaces it in the editor as well as
 the console, so you can tell which script and entity it came from.
+
+```ts
+script(HealthTrait, 'health-log', (ctx) => {
+    onInit(ctx, () => {
+        // log/warn/error tag the message with this script's trait and node, so the
+        // editor and console show what logged it.
+        log(ctx, 'spawned with', ctx.trait.hp, 'hp'); // routine info
+        if (ctx.trait.max <= 0) warn(ctx, 'max hp is not positive'); // a smell
+    });
+
+    onTick(ctx, () => {
+        if (ctx.trait.hp < 0) error(ctx, 'hp went negative:', ctx.trait.hp); // a bug
+    });
+});
+```
 
 ### Queries
 
@@ -505,6 +549,98 @@ server writes the field and every client receives it at the configured rate. For
 discrete events rather than continuous state, use RPC, covered in
 [Multiplayer](#multiplayer).
 
+## Transforms
+
+Every node with a `TransformTrait` has a position, rotation, and scale. You
+write **local-space** values with setters and read **world-space** values with
+getters. Setters propagate a dirty flag down the subtree; getters lazily
+recompute only when something upstream changed, so reading is cheap when
+nothing moved.
+
+The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
+`setTransform` to write all three at once:
+
+```ts
+/** set local position and mark dirty. only the position slice replicates. */
+export function setPosition(t: TransformTrait, v: Vec3): void;
+```
+
+The world getters read where a node actually ended up after its parents' transforms
+apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
+`getWorldMatrix`.
+
+```ts
+/** get world-space position, decomposing from worldMatrix if needed. */
+export function getWorldPosition(t: TransformTrait): Vec3;
+```
+
+To place a node at an absolute world position or orientation regardless of its
+parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
+the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
+**interpolated** transform rather than the logic one, which is what camera work and
+other `onFrame` code should read (see
+[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
+
+In practice you add a `TransformTrait` to a node, set its local position, then
+read back where it lands in world space:
+
+```ts
+// give a node a transform, then position it in local space
+const crate = createNode({ name: 'crate' });
+const transform = addTrait(crate, TransformTrait);
+setPosition(transform, [4, 1, -2]);
+
+// read where it ended up in world space (after any parent transforms apply)
+const worldPos = getWorldPosition(transform);
+console.log(worldPos);
+```
+
+See the [API reference](./api.md#transforms--scene-graph) for the full set of
+transform setters and getters.
+
+## Math
+
+bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
+small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
+tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
+import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
+
+The API is gl-matrix style, so if you know gl-matrix you already know it: an
+operation takes its output target first and writes into it, avoiding allocation, as
+in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
+do vector math yourself, such as steering, aiming, or camera work.
+
+That output-first shape is built for **scratch buffers**: allocate a few reusable
+vectors once and write through them every tick rather than creating a new vector per
+operation, which matters in hot paths like `onTick`. Declare them in the script
+factory so each script instance gets its own, and prefix them with an underscore
+(`_toTarget`) to mark them as throwaway working memory, not state anything reads
+later.
+
+```ts
+script(MoverTrait, 'move-to-target', (ctx) => {
+    // scratch buffers live in the script and are reused every tick, so the hot
+    // path allocates nothing. the leading underscore marks them as throwaway
+    // working memory, not state to read elsewhere.
+    const _toTarget: Vec3 = vec3.create();
+    const _step: Vec3 = vec3.create();
+    const target: Vec3 = [10, 1, 5];
+
+    onTick(ctx, ({ delta }) => {
+        const transform = getTrait(ctx.node, TransformTrait);
+        if (!transform) return;
+        const position = getWorldPosition(transform);
+
+        // step `speed` metres/second toward the target, writing through the
+        // scratch buffers instead of allocating a new vector each tick
+        vec3.subtract(_toTarget, target, position);
+        vec3.normalize(_toTarget, _toTarget);
+        vec3.scaleAndAdd(_step, position, _toTarget, ctx.trait.speed * delta);
+        setPosition(transform, _step);
+    });
+});
+```
+
 ## Multiplayer
 
 [The multiplayer model](#the-multiplayer-model) introduced replication, where most
@@ -529,6 +665,29 @@ only after the value moves that far, so a body coming to rest goes quiet on the 
 server, so writes from clients are ignored. Set `authority: 'owner'` on the sync to
 let the node's owning client write it instead, which is how player-controlled and
 client-predicted entities work.
+
+```ts
+// `score` is server-authoritative (the default) and emitted on every change.
+sync(PlayerStateTrait, 'score', {
+    schema: pack.uint32(),
+    pack: (t) => t.score,
+    unpack: (value, t) => {
+        t.score = value;
+    },
+});
+
+// `aimX` is written by the node's owning client (authority: 'owner'), and throttled
+// with a threshold rate so it only re-emits once it has moved 0.1 units.
+sync(PlayerStateTrait, 'aimX', {
+    schema: pack.float32(),
+    pack: (t) => t.aimX,
+    unpack: (value, t) => {
+        t.aimX = value;
+    },
+    authority: 'owner',
+    rate: syncRate.distance(0.1),
+});
+```
 
 **Ownership** is the separate axis behind that. Each shared node has an **owner**, a
 player or none: a player's own node is owned by their client from the moment they
@@ -643,6 +802,67 @@ player's own movement the same way. Set `def.prediction: false` on a body where 
 brief snap on correction is fine and you would rather not pay the cost, such as
 distant, low-stakes objects.
 
+### Server time
+
+`ctx.clock.time` is a private per-side timeline: it starts at 0 on each side and is
+not comparable across the wire, so it is only for local cooldowns and durations. For
+anything that must agree across clients, a projectile's spawn instant, an ability's
+deadline, a round timer, use `ctx.clock.server`, which reads the same timeline on the
+server and every client.
+
+On the server `clock.server` is just the tick clock. On a client it is a continuously
+synced *estimate* of the server's clock, and deliberately not "now": it is held about
+one-way latency behind true server-now, plus a small jitter buffer. The client seeds
+it from the join handshake, then locks onto the server clock that rides each tick
+packet, converging smoothly and snapping only on a large gap (the first sync, or a
+backgrounded tab catching up).
+
+That render-behind offset is the point, not a flaw: it makes a server-stamped event
+line up. Stamp the event's time on the server with `ctx.clock.server`, replicate the
+stamp, and on the client compare against `ctx.clock.server`. Because the client's clock
+sits one-way latency behind, the event's data arrives just as the local clock crosses
+its timestamp, so a projectile appears at the muzzle as you see it fired, not already
+downrange.
+
+```ts
+const ProjectileTrait = trait('projectile', { spawnTime: 0 });
+
+// spawnTime is stamped by the server and replicated (server-authoritative)
+sync(ProjectileTrait, 'spawnTime', {
+    schema: pack.float32(),
+    pack: (t) => t.spawnTime,
+    unpack: (value, t) => {
+        t.spawnTime = value;
+    },
+});
+
+script(ProjectileTrait, 'projectile', (ctx) => {
+    // stamp the spawn instant in the shared server clock, on the server
+    if (ctx.server) {
+        onInit(ctx, () => {
+            ctx.trait.spawnTime = ctx.clock.server;
+        });
+    }
+
+    onFrame(ctx, () => {
+        // age in that same shared timeline. the client's clock.server is held about
+        // one-way latency behind, so a server-stamped event lines up: the projectile
+        // appears at the muzzle as clock.server crosses spawnTime, not already downrange.
+        const age = Math.max(0, ctx.clock.server - ctx.trait.spawnTime);
+        if (age > 5) return; // past its 5s lifetime
+        // ... advance the projectile and its trail by `age` ...
+    });
+});
+```
+
+Use it carefully. Treat `clock.server` as "when the things I am seeing happened on the
+server", not as a precise current time, and clamp a derived age to be non-negative
+(`Math.max(0, now - stamp)`), since a just-arrived stamp can sit a hair ahead of the
+local clock. It can jump on a snap, so do not write logic that breaks on a
+discontinuity. And for smooth per-frame visuals that never cross the wire, read
+`ctx.clock.wall` instead: it advances every frame by real elapsed time and never
+stalls, but it is local to each side.
+
 ### RPC
 
 Replication suits continuous state; for a one-off event, send a message instead.
@@ -672,27 +892,9 @@ script(WorldTrait, 'weapon-rpc', (ctx) => {
 });
 ```
 
-That schema is a `pack` schema. `pack` is the engine's binary wire-format builder,
-from [packcat](https://github.com/isaac-mason/packcat): you compose a payload shape
-and the command serializes to a compact binary frame rather than JSON. The same `pack`
-schemas back trait `sync` replication under the hood, so it is the one wire format the
-whole engine speaks. It mirrors `prop`'s shapes but with explicit sizes, since bytes
-matter on the wire:
-
-| Builder | Wire type |
-| --- | --- |
-| `pack.boolean()`, `pack.string()` | a boolean, a length-prefixed string |
-| `pack.uint8()` … `pack.uint32()`, `pack.int8()` … `pack.int32()` | sized integers |
-| `pack.varuint()`, `pack.varint()` | variable-length integers (small values cost fewer bytes) |
-| `pack.float32()`, `pack.float64()`, `pack.quantized(...)` | floats, or a compressed fixed-range float |
-| `pack.enumeration([...])`, `pack.literal(...)` | a fixed choice |
-| `pack.list(of)`, `pack.tuple([...])` | a variable or fixed array |
-| `pack.object({ ... })`, `pack.record(of)`, `pack.union(...)` | a struct, keyed map, or tagged variant |
-| `pack.optional(of)`, `pack.nullable(of)` | maybe-absent / maybe-null |
-| `pack.quat()`, and bongle's `pack.position()` / `pack.quaternion()` / `pack.scale()` | rotation and engine vector helpers |
-
-Do not confuse `pack` with `prop` (from the [trait `control`](#traits) schema), which
-describes editor-inspectable and persisted fields, not what crosses the network.
+The schema is a `pack` schema, composed from the same `pack` builders that back trait
+`sync` ([tabled under Traits](#traits)), so the command serializes to a compact binary
+frame rather than JSON.
 
 ### Rooms
 
@@ -780,98 +982,6 @@ script(WorldTrait, 'commands', (ctx) => {
             log(ctx, 'teleport', from, args.x, args.z);
         });
     }
-});
-```
-
-## Transforms
-
-Every node with a `TransformTrait` has a position, rotation, and scale. You
-write **local-space** values with setters and read **world-space** values with
-getters. Setters propagate a dirty flag down the subtree; getters lazily
-recompute only when something upstream changed, so reading is cheap when
-nothing moved.
-
-The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
-`setTransform` to write all three at once:
-
-```ts
-/** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void;
-```
-
-The world getters read where a node actually ended up after its parents' transforms
-apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
-`getWorldMatrix`.
-
-```ts
-/** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3;
-```
-
-To place a node at an absolute world position or orientation regardless of its
-parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
-the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
-**interpolated** transform rather than the logic one, which is what camera work and
-other `onFrame` code should read (see
-[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
-
-In practice you add a `TransformTrait` to a node, set its local position, then
-read back where it lands in world space:
-
-```ts
-// give a node a transform, then position it in local space
-const crate = createNode({ name: 'crate' });
-const transform = addTrait(crate, TransformTrait);
-setPosition(transform, [4, 1, -2]);
-
-// read where it ended up in world space (after any parent transforms apply)
-const worldPos = getWorldPosition(transform);
-console.log(worldPos);
-```
-
-See the [API reference](./api.md#transforms--scene-graph) for the full set of
-transform setters and getters.
-
-## Math
-
-bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
-small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
-tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
-import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
-
-The API is gl-matrix style, so if you know gl-matrix you already know it: an
-operation takes its output target first and writes into it, avoiding allocation, as
-in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
-do vector math yourself, such as steering, aiming, or camera work.
-
-That output-first shape is built for **scratch buffers**: allocate a few reusable
-vectors once and write through them every tick rather than creating a new vector per
-operation, which matters in hot paths like `onTick`. Declare them in the script
-factory so each script instance gets its own, and prefix them with an underscore
-(`_toTarget`) to mark them as throwaway working memory, not state anything reads
-later.
-
-```ts
-script(MoverTrait, 'move-to-target', (ctx) => {
-    // scratch buffers live in the script and are reused every tick, so the hot
-    // path allocates nothing. the leading underscore marks them as throwaway
-    // working memory, not state to read elsewhere.
-    const _toTarget: Vec3 = vec3.create();
-    const _step: Vec3 = vec3.create();
-    const target: Vec3 = [10, 1, 5];
-
-    onTick(ctx, ({ delta }) => {
-        const transform = getTrait(ctx.node, TransformTrait);
-        if (!transform) return;
-        const position = getWorldPosition(transform);
-
-        // step `speed` metres/second toward the target, writing through the
-        // scratch buffers instead of allocating a new vector each tick
-        vec3.subtract(_toTarget, target, position);
-        vec3.normalize(_toTarget, _toTarget);
-        vec3.scaleAndAdd(_step, position, _toTarget, ctx.trait.speed * delta);
-        setPosition(transform, _step);
-    });
 });
 ```
 

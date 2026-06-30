@@ -252,11 +252,13 @@ object of fields; each value is either a literal default or a factory
 
 <Snippet source="define-trait.snippet.ts" select="define" />
 
-Two registrars extend a trait. `control` exposes a field to the editor inspector
-and saves it in scene files. Its `schema`, built with the `prop` helpers such as
-`prop.number()` or `prop.vec3()`, describes the field's type:
+Two registrars extend a trait. `control` exposes a field to the editor inspector and
+saves it in scene files; `sync` replicates a field across the network. Each takes a
+`schema`: `control` uses a `prop` schema (for the editor and persistence), `sync` uses
+a `pack` schema (the binary wire format). The two vocabularies mirror each other.
 
 <Render select="api/traits:control" heading />
+<Render select="api/traits:sync" heading />
 
 The `prop` builders cover the field types the inspector can edit:
 
@@ -270,11 +272,23 @@ The `prop` builders cover the field types the inspector can edit:
 | `prop.optional(of)`, `prop.nullable(of)`, `prop.nullish(of)` | wrap any of the above as maybe-absent |
 | `prop.mesh()`, `prop.prefab()`, `prop.block()` | an asset reference picker |
 
-`sync` replicates a field across the network. Its rate and authority (which side
-may write it) get a fuller treatment under
-[replication and authority](#replication-and-authority).
+The `pack` builders (from [packcat](https://github.com/isaac-mason/packcat)) mirror
+them for the wire, with explicit sizes since bytes matter:
 
-<Render select="api/traits:sync" heading />
+| Builder | Wire type |
+| --- | --- |
+| `pack.boolean()`, `pack.string()` | a boolean, a length-prefixed string |
+| `pack.uint8()` … `pack.uint32()`, `pack.int8()` … `pack.int32()` | sized integers |
+| `pack.varuint()`, `pack.varint()` | variable-length integers (small values cost fewer bytes) |
+| `pack.float32()`, `pack.float64()`, `pack.quantized(...)` | floats, or a compressed fixed-range float |
+| `pack.enumeration([...])`, `pack.literal(...)` | a fixed choice |
+| `pack.list(of)`, `pack.tuple([...])` | a variable or fixed array |
+| `pack.object({ ... })`, `pack.record(of)`, `pack.union(...)` | a struct, keyed map, or tagged variant |
+| `pack.optional(of)`, `pack.nullable(of)` | maybe-absent / maybe-null |
+| `pack.quat()`, and bongle's `pack.position()` / `pack.quaternion()` / `pack.scale()` | rotation and engine vector helpers |
+
+`sync`'s rate and authority (which side may write a field) get a fuller treatment
+under [replication and authority](#replication-and-authority).
 
 ### Scripts and lifecycle
 
@@ -319,14 +333,19 @@ camera and visual-following work in `onFrame`.
 
 Lifecycle hooks hand you a `delta`, but for cooldowns, durations, and scheduled
 events read the room clock. `ctx.clock.time` is the local tick-aligned time in
-seconds, and `ctx.clock.server` is the shared server time, equal on every client,
-for anything that must agree across the network.
+seconds, and `ctx.clock.server` is the shared server time, the same on every client,
+for anything that must agree across the network ([Server time](#server-time) covers
+it in depth).
+
+<Snippet source="time.snippet.ts" select="cooldown" />
 
 ### Logging
 
 Use `log`, `warn`, and `error` instead of bare `console.log`. Each tags the
 message with the script's trait and node and surfaces it in the editor as well as
 the console, so you can tell which script and entity it came from.
+
+<Snippet source="logging.snippet.ts" select="logging" />
 
 ### Queries
 
@@ -376,6 +395,61 @@ server writes the field and every client receives it at the configured rate. For
 discrete events rather than continuous state, use RPC, covered in
 [Multiplayer](#multiplayer).
 
+## Transforms
+
+Every node with a `TransformTrait` has a position, rotation, and scale. You
+write **local-space** values with setters and read **world-space** values with
+getters. Setters propagate a dirty flag down the subtree; getters lazily
+recompute only when something upstream changed, so reading is cheap when
+nothing moved.
+
+The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
+`setTransform` to write all three at once:
+
+<Render select="api/transforms:setPosition" />
+
+The world getters read where a node actually ended up after its parents' transforms
+apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
+`getWorldMatrix`.
+
+<Render select="api/transforms:getWorldPosition" />
+
+To place a node at an absolute world position or orientation regardless of its
+parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
+the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
+**interpolated** transform rather than the logic one, which is what camera work and
+other `onFrame` code should read (see
+[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
+
+In practice you add a `TransformTrait` to a node, set its local position, then
+read back where it lands in world space:
+
+<Snippet source="transforms.snippet.ts" select="place-node" />
+
+See the [API reference](./api.md#transforms--scene-graph) for the full set of
+transform setters and getters.
+
+## Math
+
+bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
+small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
+tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
+import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
+
+The API is gl-matrix style, so if you know gl-matrix you already know it: an
+operation takes its output target first and writes into it, avoiding allocation, as
+in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
+do vector math yourself, such as steering, aiming, or camera work.
+
+That output-first shape is built for **scratch buffers**: allocate a few reusable
+vectors once and write through them every tick rather than creating a new vector per
+operation, which matters in hot paths like `onTick`. Declare them in the script
+factory so each script instance gets its own, and prefix them with an underscore
+(`_toTarget`) to mark them as throwaway working memory, not state anything reads
+later.
+
+<Snippet source="math.snippet.ts" select="scratch" />
+
 ## Multiplayer
 
 [The multiplayer model](#the-multiplayer-model) introduced replication, where most
@@ -400,6 +474,8 @@ only after the value moves that far, so a body coming to rest goes quiet on the 
 server, so writes from clients are ignored. Set `authority: 'owner'` on the sync to
 let the node's owning client write it instead, which is how player-controlled and
 client-predicted entities work.
+
+<Snippet source="sync.snippet.ts" select="sync" />
 
 **Ownership** is the separate axis behind that. Each shared node has an **owner**, a
 player or none: a player's own node is owned by their client from the moment they
@@ -470,6 +546,38 @@ player's own movement the same way. Set `def.prediction: false` on a body where 
 brief snap on correction is fine and you would rather not pay the cost, such as
 distant, low-stakes objects.
 
+### Server time
+
+`ctx.clock.time` is a private per-side timeline: it starts at 0 on each side and is
+not comparable across the wire, so it is only for local cooldowns and durations. For
+anything that must agree across clients, a projectile's spawn instant, an ability's
+deadline, a round timer, use `ctx.clock.server`, which reads the same timeline on the
+server and every client.
+
+On the server `clock.server` is just the tick clock. On a client it is a continuously
+synced *estimate* of the server's clock, and deliberately not "now": it is held about
+one-way latency behind true server-now, plus a small jitter buffer. The client seeds
+it from the join handshake, then locks onto the server clock that rides each tick
+packet, converging smoothly and snapping only on a large gap (the first sync, or a
+backgrounded tab catching up).
+
+That render-behind offset is the point, not a flaw: it makes a server-stamped event
+line up. Stamp the event's time on the server with `ctx.clock.server`, replicate the
+stamp, and on the client compare against `ctx.clock.server`. Because the client's clock
+sits one-way latency behind, the event's data arrives just as the local clock crosses
+its timestamp, so a projectile appears at the muzzle as you see it fired, not already
+downrange.
+
+<Snippet source="server-time.snippet.ts" select="server-clock" />
+
+Use it carefully. Treat `clock.server` as "when the things I am seeing happened on the
+server", not as a precise current time, and clamp a derived age to be non-negative
+(`Math.max(0, now - stamp)`), since a just-arrived stamp can sit a hair ahead of the
+local clock. It can jump on a snap, so do not write logic that breaks on a
+discontinuity. And for smooth per-frame visuals that never cross the wire, read
+`ctx.clock.wall` instead: it advances every frame by real elapsed time and never
+stalls, but it is local to each side.
+
 ### RPC
 
 Replication suits continuous state; for a one-off event, send a message instead.
@@ -480,27 +588,9 @@ serializes it. Handle incoming commands with `listen`, and send with `send` (or
 
 <Snippet source="multiplayer.snippet.ts" select="rpc" />
 
-That schema is a `pack` schema. `pack` is the engine's binary wire-format builder,
-from [packcat](https://github.com/isaac-mason/packcat): you compose a payload shape
-and the command serializes to a compact binary frame rather than JSON. The same `pack`
-schemas back trait `sync` replication under the hood, so it is the one wire format the
-whole engine speaks. It mirrors `prop`'s shapes but with explicit sizes, since bytes
-matter on the wire:
-
-| Builder | Wire type |
-| --- | --- |
-| `pack.boolean()`, `pack.string()` | a boolean, a length-prefixed string |
-| `pack.uint8()` … `pack.uint32()`, `pack.int8()` … `pack.int32()` | sized integers |
-| `pack.varuint()`, `pack.varint()` | variable-length integers (small values cost fewer bytes) |
-| `pack.float32()`, `pack.float64()`, `pack.quantized(...)` | floats, or a compressed fixed-range float |
-| `pack.enumeration([...])`, `pack.literal(...)` | a fixed choice |
-| `pack.list(of)`, `pack.tuple([...])` | a variable or fixed array |
-| `pack.object({ ... })`, `pack.record(of)`, `pack.union(...)` | a struct, keyed map, or tagged variant |
-| `pack.optional(of)`, `pack.nullable(of)` | maybe-absent / maybe-null |
-| `pack.quat()`, and bongle's `pack.position()` / `pack.quaternion()` / `pack.scale()` | rotation and engine vector helpers |
-
-Do not confuse `pack` with `prop` (from the [trait `control`](#traits) schema), which
-describes editor-inspectable and persisted fields, not what crosses the network.
+The schema is a `pack` schema, composed from the same `pack` builders that back trait
+`sync` ([tabled under Traits](#traits)), so the command serializes to a compact binary
+frame rather than JSON.
 
 ### Rooms
 
@@ -547,61 +637,6 @@ matched command is consumed rather than shown as a chat line. Each argument has 
 receives the parsed `args`, any `flags`, and the `from` client.
 
 <Snippet source="chat.snippet.ts" select="command" />
-
-## Transforms
-
-Every node with a `TransformTrait` has a position, rotation, and scale. You
-write **local-space** values with setters and read **world-space** values with
-getters. Setters propagate a dirty flag down the subtree; getters lazily
-recompute only when something upstream changed, so reading is cheap when
-nothing moved.
-
-The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
-`setTransform` to write all three at once:
-
-<Render select="api/transforms:setPosition" />
-
-The world getters read where a node actually ended up after its parents' transforms
-apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
-`getWorldMatrix`.
-
-<Render select="api/transforms:getWorldPosition" />
-
-To place a node at an absolute world position or orientation regardless of its
-parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
-the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
-**interpolated** transform rather than the logic one, which is what camera work and
-other `onFrame` code should read (see
-[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
-
-In practice you add a `TransformTrait` to a node, set its local position, then
-read back where it lands in world space:
-
-<Snippet source="transforms.snippet.ts" select="place-node" />
-
-See the [API reference](./api.md#transforms--scene-graph) for the full set of
-transform setters and getters.
-
-## Math
-
-bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
-small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
-tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
-import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
-
-The API is gl-matrix style, so if you know gl-matrix you already know it: an
-operation takes its output target first and writes into it, avoiding allocation, as
-in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
-do vector math yourself, such as steering, aiming, or camera work.
-
-That output-first shape is built for **scratch buffers**: allocate a few reusable
-vectors once and write through them every tick rather than creating a new vector per
-operation, which matters in hot paths like `onTick`. Declare them in the script
-factory so each script instance gets its own, and prefix them with an underscore
-(`_toTarget`) to mark them as throwaway working memory, not state anything reads
-later.
-
-<Snippet source="math.snippet.ts" select="scratch" />
 
 ## Scenes & prefabs
 
