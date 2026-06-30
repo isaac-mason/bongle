@@ -1,7 +1,7 @@
 // Typechecked snippets for Multiplayer, in depth.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { CLIENT_TO_SERVER, client, command, env, listen, onInit, pack, script, send, WorldTrait } from 'bongle';
+import { CLIENT_TO_SERVER, client, command, env, listen, log, onInit, pack, script, send, WorldTrait } from 'bongle';
 
 /* SNIPPET_START: rpc */
 // a typed client-to-server command
@@ -11,7 +11,7 @@ script(WorldTrait, 'weapon-rpc', (ctx) => {
     // the server is the only side that handles an incoming client command
     if (env.server) {
         listen(ctx, FireWeaponCommand, (data, from) => {
-            console.log('fire', data.charge, 'from', from);
+            log(ctx, 'fire', data.charge, 'from', from);
         });
     }
 

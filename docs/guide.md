@@ -526,6 +526,55 @@ both sides and act only where it has authority. On a client, a node it does not 
 is a **proxy**: it renders the replicated state but does not drive it. The engine
 assigns ownership; you read it with `isOwner` but do not reassign it.
 
+Ownership in bongle is fixed this way rather than transferable at runtime: there is no
+take-ownership call. A player owns their own node and nothing else; everything else is
+server-owned. For an entity a player should control, like a vehicle they enter or an
+object they carry, keep it server-authoritative and route that player's input to it
+(over RPC, or by reading their owned player node), rather than handing the entity
+itself to the client.
+
+### Client-only nodes
+
+A `shared` node replicates to every client; there is no per-client visibility filter
+that shows it to some clients and hides it from others. When you want something to
+exist on one client only, make it a **client-only node**: create it with
+`realm: 'client'` and it lives on that client alone, never replicated and never
+serialized.
+
+The common pattern is to hang client-only nodes under a server-authoritative parent
+for purely local visuals: a name tag, a particle trail, a held-item model, a
+selection highlight. The shared parent replicates, and each client builds its own
+decoration as a child that rides the parent's transform and is removed automatically
+when the parent goes away. Build it in a client context (guard with `ctx.client` or
+`env.client`), and make creation idempotent, since a client script can run every
+frame: check whether the child already exists before adding it.
+
+```ts
+// give every player a client-only name tag, built and kept entirely on the client
+script(PlayerTrait, 'nametag', (ctx) => {
+    if (!ctx.client) return; // a local visual; this never runs on the server
+
+    onFrame(ctx, () => {
+        // client scripts run every frame, so create the child once, idempotently
+        if (findChildByName(ctx.node, 'nametag')) return;
+
+        // realm 'client': lives on this client alone, never replicated or serialized.
+        // as a child of the shared player node it rides the player's transform and is
+        // removed automatically when the player leaves.
+        const tag = createNode({ realm: 'client', name: 'nametag' });
+        setPosition(addTrait(tag, TransformTrait), [0, 2.2, 0]);
+        addTrait(tag, CanvasTrait, { mode: 'y-billboard', worldScale: 1 / 64 });
+        addChild(ctx.node, tag);
+        // then paint its canvas to draw the player's name
+    });
+});
+```
+
+The server never knows these nodes exist, so you animate and update them freely on the
+client without touching replication. This is also the answer to showing something to
+only some players: there is no visibility flag, so create the node client-side instead
+of making it shared.
+
 ### Client-side prediction
 
 Waiting for the server to confirm every action would make the game feel laggy, so
@@ -560,7 +609,7 @@ script(WorldTrait, 'weapon-rpc', (ctx) => {
     // the server is the only side that handles an incoming client command
     if (env.server) {
         listen(ctx, FireWeaponCommand, (data, from) => {
-            console.log('fire', data.charge, 'from', from);
+            log(ctx, 'fire', data.charge, 'from', from);
         });
     }
 
@@ -590,10 +639,11 @@ through `ctx` belongs to its room, and most games run many rooms at once so no
 single instance fills up or slows the others.
 
 `matchmaking(config)` decides how arriving players are grouped into rooms (the
-starter caps a room at 32 players). When you need rooms beyond the ones
-matchmaking creates, for lobbies, private matches, or instanced dungeons, manage
-them yourself: `rooms.create` opens one from a scene, `rooms.join` and `rooms.swap`
-move a client between rooms, and `rooms.list` and `rooms.view` inspect them.
+starter caps a room at 32 players). When you need rooms beyond the ones matchmaking
+creates, for lobbies, private matches, or instanced dungeons, manage them yourself:
+`rooms.create` opens one from a scene; `rooms.join`, `rooms.swap`, and `rooms.leave`
+move a client in and out; `rooms.list` and `rooms.view` inspect them; `rooms.active`
+and `rooms.observed` report which room a client is in; and `rooms.stop` closes one.
 
 A client can also re-enter matchmaking itself with `client.matchmake`, handing
 over new `gameOptions` to switch gamemodes or move from a lobby into a match.
@@ -607,8 +657,68 @@ script(WorldTrait, 'switch-mode', (ctx) => {
 });
 ```
 
-`chat` carries text messages within a room, and `clientToUser` resolves a
-connected client to its durable `User`.
+`clientToUser` resolves a connected client to its durable `User`, the cross-session
+identity you key [persistence](#persistence) by.
+
+### Chat
+
+Every room has a chat channel. `chat.message(ctx, text)` emits a message: on the
+server it broadcasts to every client as a system line; on a client it sends the text
+as if the player typed it. The text carries inline formatting tags that the chat
+panel applies as it renders, `[#rrggbb]` for colour, `[b]`, `[i]`, `[u]`, and `[s]`
+for bold, italic, underline, and strike, and `[/]` to reset, so you can colour a kill
+feed or highlight an announcement. `chat.onMessage(ctx, fn)`, client-only, fires for
+the plain messages players type.
+
+```ts
+script(WorldTrait, 'announcer', (ctx) => {
+    onInit(ctx, () => {
+        // a system message broadcast to everyone in the room. inline tags style
+        // the text: [#rrggbb] colour, [b]/[i]/[u]/[s] for bold/italic/underline/
+        // strike, and [/] to reset back to the default.
+        if (ctx.server) chat.message(ctx, `[#ffcc00][b]Round starting![/]`);
+    });
+
+    // react to the plain chat players type (client-only). msg is { from, text, kind }.
+    chat.onMessage(ctx, (msg) => {
+        log(ctx, `${msg.from}: ${msg.text}`);
+    });
+});
+```
+
+Chat is also a command surface. `chat.command(ctx, spec)` registers a typed slash
+command from a `{ name, description, args }` spec and returns a handle; `chat.listen`
+attaches the handler that runs it. Register the command in a shared script so it
+exists on both sides, the client gets autocomplete and argument validation as the
+player types, then `listen` on the side that should execute it, usually the server. A
+matched command is consumed rather than shown as a chat line. Each argument has a
+`type`, a built-in like `'string'` or `'number'`, or one you build with
+`chat.argType` or `chat.enumType` for custom resolvers and inline enums; the handler
+receives the parsed `args`, any `flags`, and the `from` client.
+
+```ts
+// a typed slash command: `/tp <x> <z>`
+script(WorldTrait, 'commands', (ctx) => {
+    // register the spec on both sides (this is a shared script), so the client
+    // gets autocomplete and argument validation as the player types.
+    const teleport = chat.command(ctx, {
+        name: '/tp',
+        description: 'teleport to coordinates',
+        args: [
+            { name: 'x', type: 'number' },
+            { name: 'z', type: 'number' },
+        ],
+    });
+
+    // execute it on the server, where it has authority. a matched command is
+    // consumed (not shown as a normal chat line); `from` is the client that ran it.
+    if (ctx.server) {
+        chat.listen(ctx, teleport, ({ args, from }) => {
+            log(ctx, 'teleport', from, args.x, args.z);
+        });
+    }
+});
+```
 
 ## Transforms
 
