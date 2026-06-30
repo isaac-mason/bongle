@@ -1366,7 +1366,6 @@ for anything they do not:
 - [Procedural animation](#procedural-animation): posing bones from code each frame.
 - [Voxel meshes](#voxel-meshes): standalone, movable block meshes.
 - [Sprites](#sprites): 2D billboards and extruded sprite slabs.
-- [Shadows](#shadows): cheap blob shadows under a node.
 - [Particles](#particles): short-lived sprite effects such as smoke, sparks, and dust.
 
 ### Camera
@@ -1712,12 +1711,6 @@ characters.
 of `depth`, the chunky paper-craft look (think Crossy Road) that reads from any
 angle rather than only head-on.
 
-### Shadows
-
-`ShadowCasterTrait` drops a soft blob shadow onto the ground beneath a node, a cheap
-way to ground characters and props without full shadow mapping. Tune its `radius`
-and the `maxDistance` it searches downward for a surface.
-
 ### Particles
 
 Particles are short-lived sprites for effects like smoke, sparks, and dust.
@@ -2039,10 +2032,37 @@ it.
 
 ### The player controller
 
-`PlayerControllerTrait` drives a player node from input, handling first and
-third-person movement and the camera so you do not write that math by hand. Add it
-to the player node and it consumes input each frame. Input itself is covered in
-[Players & input](#players--input).
+`PlayerControllerTrait` drives a player node from input: each frame it reads movement
+and look and moves the [character controller](#character-controller) and the camera, so
+you do not write that math by hand. Every player node already carries it (see
+[Players](#players)), and it ships first-person by default with a built-in `C` key that
+cycles through the perspectives while playing.
+
+Configure it through its `config`. The camera and field of view are per-client view
+concerns, so set them on the controlling client:
+
+| `config` field | Default | Controls |
+| --- | --- | --- |
+| `perspective` | `'first'` | the view: `'first'`, `'third-back'`, or `'third-front'` |
+| `thirdPersonDistance` | `4` | camera distance behind the player in third-person |
+| `cameraCollisionMargin` | `0.2` | how far the camera stays off walls it would clip through |
+| `fov` | 75° | field of view, in radians |
+| `fovSprint` | 85° | field of view while sprinting |
+| `fovLerpSpeed` | `10` | how fast the fov eases between the two |
+
+```ts
+// view config is per-client, so configure it on the client. actor-style: one instance
+// per PlayerControllerTrait node, gated to our own player.
+script(PlayerControllerTrait, 'view-setup', (ctx) => {
+    if (!ctx.client || ctx.node !== ctx.client.player) return;
+
+    onInit(ctx, () => {
+        ctx.trait.config.perspective = 'third-back';
+        ctx.trait.config.thirdPersonDistance = 6;
+        ctx.trait.config.fov = (80 * Math.PI) / 180; // radians
+    });
+});
+```
 
 ## Scene queries
 
