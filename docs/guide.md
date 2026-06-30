@@ -101,12 +101,12 @@ Commit `src/index.ts`, `assets/`, `content/`, and the config files. The generate
 `src/generated/`, the pipeline's intermediate `resources/`, `dist/`, and
 `node_modules/` are all regenerated, and the scaffold gitignores them.
 
-## Your first game
+## Your first scripts
 
-`bongle new my-game` scaffolds a project whose `src/index.ts` is already a
-complete, playable game. It is short enough to read in full, so we will walk it
-top to bottom. Everything below is imported from `bongle`, except the starter
-blocks, which come from `bongle/starter`.
+`bongle new my-game` scaffolds a project whose `src/index.ts` is already a complete,
+playable game, built from a few short scripts. They are short enough to read in full,
+so we will walk them top to bottom. Everything below is imported from `bongle`, except
+the starter blocks, which come from `bongle/starter`.
 
 First, register content and size the room:
 
