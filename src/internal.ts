@@ -1,4 +1,4 @@
-// internal api — not for end users.
+// internal api, not for end users.
 // exposes engine internals needed by the cli, asset pipeline, and
 // other tooling that runs outside the normal client/server paths.
 
@@ -19,12 +19,12 @@ export type ModuleVersion = {
     models: Map<string, ModelHandleType>;
     scenes: Map<string, SceneHandleType>;
 };
-// Skyline atlas core — pure algorithm + types, consumed by both the
+// Skyline atlas core, pure algorithm + types, consumed by both the
 // runtime model atlas (`render/models/model-atlas.ts`) and the bake-time
 // sprite-atlas pass in `lib/kit/src/asset-pipeline/sprite-atlas.ts`.
 export type { Region, SkylineNode } from './core/atlas/skyline';
 export { addSkylineLevel, emptySkyline, findBestFit } from './core/atlas/skyline';
-// dependency graph — on-demand reads for tooling that walks a consumer's
+// dependency graph, on-demand reads for tooling that walks a consumer's
 // closure itself (e.g. the offline icon pipeline's selective re-render gating).
 export type { DepKey } from './core/capture/dep-graph';
 export { directProducersOf } from './core/capture/dep-graph';
@@ -55,14 +55,14 @@ export type {
 } from './core/sprites/sprites';
 export { draw, normalizeImageSource } from './core/sprites/sprites';
 export type { BlockRegistry } from './core/voxels/block-registry';
-// block registry builder — pure data computation that takes the raw
+// block registry builder, pure data computation that takes the raw
 // BlockDef / BlockHandle / BlockTextureDef maps and produces the flat
 // lookup tables consumed by the voxel mesher + ResourceManager. The
 // asset-pipeline plugin handler calls this to assemble a partial
 // ProjectModule view from the typed registries.
 export { buildBlockRegistry } from './core/voxels/block-registry';
 export type { BlockDef, BlockHandle, BlockTextureDef } from './core/voxels/blocks';
-// __kit — runtime namespace called by kit-generated code (Vite transform
+// __kit, runtime namespace called by kit-generated code (Vite transform
 // prelude/postlude, model + scene codegen barrels, kit boot entries).
 // See src/kit.ts for the full surface + injection sites.
 export { __kit } from './kit';

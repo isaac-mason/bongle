@@ -1,4 +1,4 @@
-// dbvt.ts — a dynamic bounding-volume tree (broadphase) over fat AABBs.
+// dbvt.ts, a dynamic bounding-volume tree (broadphase) over fat AABBs.
 //
 // Generic: it knows nothing about culling. Each LEAF carries an opaque
 // numeric `data` payload (callers use it as an index into their own array);

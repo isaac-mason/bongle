@@ -64,7 +64,7 @@ describe('getCameraTint', () => {
         // simulates deep water with maxHeight < 1: every cell has the
         // same fluidGroup and a small air gap at its top. eye in the
         // gap should remain tinted because the cell above is the same
-        // fluid — i.e. we're mid-column, not at the actual surface.
+        // fluid, i.e. we're mid-column, not at the actual surface.
         const registry = buildRegistry([
             {
                 id: 'water',
@@ -85,7 +85,7 @@ describe('getCameraTint', () => {
         setChunkBlock(chunk, 5, 6, 5, 'water', registry);
 
         const out: [number, number, number, number] = [0, 0, 0, 0];
-        // eye in the 1/16 air gap at the top of the lower cell — the
+        // eye in the 1/16 air gap at the top of the lower cell, the
         // cell above is still water, so we keep tinting.
         expect(getCameraTint(out, voxels, 5.5, 5.97, 5.5)).toBe(true);
         expect(out[3]).toBeCloseTo(0.3);

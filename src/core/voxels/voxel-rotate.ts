@@ -1,4 +1,4 @@
-// voxel-rotate.ts — rotate a Voxels instance by an arbitrary quaternion,
+// voxel-rotate.ts, rotate a Voxels instance by an arbitrary quaternion,
 // snapping to the nearest 90-degree orientation.
 //
 // pipeline (runtime, per call):
@@ -10,9 +10,9 @@
 //      state by replaying the sequence through rotateBlockKey
 //   4. shift so min-corner = (0,0,0), return a fresh Voxels
 //
-// the table is built once at module load — see CUBE_ROTATIONS below.
+// the table is built once at module load, see CUBE_ROTATIONS below.
 //
-// no client imports — safe to use in core/ and server/ contexts.
+// no client imports, safe to use in core/ and server/ contexts.
 
 import type { Quat, Vec3 } from 'mathcat';
 import { vec3 } from 'mathcat';
@@ -22,7 +22,7 @@ import { rotateBlockKey } from './block-transform';
 import type { Voxels } from './voxels';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock } from './voxels';
 
-// scratch vec3 for basis projection — avoids allocations in the hot path
+// scratch vec3 for basis projection, avoids allocations in the hot path
 const _scratch: Vec3 = [0, 0, 0];
 
 // ── public api ────────────────────────────────────────────────────

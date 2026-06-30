@@ -1,4 +1,4 @@
-// key-level rotate/flip — the bridge between blueprint/voxel-rotate
+// key-level rotate/flip, the bridge between blueprint/voxel-rotate
 // (which work on string keys) and the block-def hooks (which work on
 // stateIds).
 //

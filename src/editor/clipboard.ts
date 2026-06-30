@@ -1,4 +1,4 @@
-// clipboard.ts — system clipboard copy/cut/paste handlers for the editor.
+// clipboard.ts, system clipboard copy/cut/paste handlers for the editor.
 //
 // extracts the clipboard event logic from index.ts so that onInit stays thin.
 // handlers are created once on init and registered via document.addEventListener.

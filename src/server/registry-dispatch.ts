@@ -1,10 +1,10 @@
 /**
- * registry-dispatch.ts — drains pending changes from the unified `registry`
+ * registry-dispatch.ts, drains pending changes from the unified `registry`
  * singleton and applies them to the server-side engine state. invoked by
  * the bongle() vite plugin's hmr-end hook after a hot reload settles.
  *
  * dispatch order is encoded as call order here, not as a numeric priority
- * on each kind. ordering rule: producers before consumers — block textures
+ * on each kind. ordering rule: producers before consumers, block textures
  * must rebuild atlas before blocks rewire voxels, models before model
  * handles, traits late so script swap sees settled state. each branch
  * gates on its kind store's pendingChanges length to keep no-op flushes
@@ -68,17 +68,17 @@ export function applyRegistryChanges(state: EngineServer): void {
     logPendingChanges('server', allStores);
 
     // resolve the DepGraph dirty consumer set BEFORE any branch drains its
-    // queue — `collectDirtyByRegistry` reads `pendingChanges` arrays. each
+    // queue, `collectDirtyByRegistry` reads `pendingChanges` arrays. each
     // dispatch branch below clears its own queue once it acts, so the
     // dirty map captures the full flush before we lose it.
     const dirtyByRegistry = collectDirtyByRegistry(allStores);
     const dirtyPrefabIds = dirtyByRegistry.get('prefabs') ?? new Set<string>();
     const dirtyScriptIds = dirtyByRegistry.get('scripts') ?? new Set<string>();
-    // direct script-store changes feed the same applyTraitSwap path — keys
+    // direct script-store changes feed the same applyTraitSwap path, keys
     // already match `ScriptDef.key` (`${traitId}.${scriptId}`). a removed
     // script (its `script()` call deleted from source) is pruned from the
     // owning trait def here so applyTraitSwap disposes the live instance and
-    // instantiateTraitScripts can't resurrect it — see pruneRemovedScript.
+    // instantiateTraitScripts can't resurrect it, see pruneRemovedScript.
     for (const ch of registry.scripts.pendingChanges) {
         dirtyScriptIds.add(ch.handle.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
@@ -93,7 +93,7 @@ export function applyRegistryChanges(state: EngineServer): void {
 
     // block textures feed into BlockRegistry (textures map + texAnimData), so
     // either queue draining requires a wholesale rebuild + per-room rewire.
-    // server has no atlas / GPU work — chunks just remesh on next tick. read
+    // server has no atlas / GPU work, chunks just remesh on next tick. read
     // the rebuilt registry once via the lazy `blockRegistry` getter so every
     // room points at the same instance.
     if (registry.blocks.pendingChanges.length > 0 || registry.blockTextures.pendingChanges.length > 0) {
@@ -113,7 +113,7 @@ export function applyRegistryChanges(state: EngineServer): void {
                 Resources.deleteModel(state.resources, id);
                 Resources.releaseModel(state.resources, id);
             } else {
-                // added or changed — re-register with both per-side urls and
+                // added or changed, re-register with both per-side urls and
                 // drop any stale payload so the next ensureModel() refetches.
                 Resources.releaseModel(state.resources, id);
                 Resources.setModel(state.resources, id, {
@@ -127,7 +127,7 @@ export function applyRegistryChanges(state: EngineServer): void {
         registry.models.pendingChanges.length = 0;
     }
 
-    // trait def changes — swap every live script instance against the
+    // trait def changes, swap every live script instance against the
     // current `registry.traits`. factory closures re-run; onSwap preserves
     // opt-in state. removed traits/scripts get disposed inside applyTraitSwap.
     //
@@ -175,7 +175,7 @@ export function applyRegistryChanges(state: EngineServer): void {
 
     // prefabs: mark dirty anchors in edit rooms so the next prefab tick
     // re-instantiates them with the fresh def + dep content. play rooms
-    // stay stable across HMR (preserves gameplay state) — only setPrefab /
+    // stay stable across HMR (preserves gameplay state), only setPrefab /
     // registerSubtree dirty anchors there. dirtyPrefabIds folds both
     // directly-changed prefabs and transitive dep-change consumers.
     if (dirtyPrefabIds.size > 0) {
@@ -192,7 +192,7 @@ export function applyRegistryChanges(state: EngineServer): void {
 
     // controls / sync / scripts: per-trait registrations whose runtime
     // effect is consumed via the trait def. drain so the queue doesn't
-    // grow unbounded — script swap was already handled above through the
+    // grow unbounded, script swap was already handled above through the
     // merged `dirtyScriptIds`.
     registry.controls.pendingChanges.length = 0;
     registry.sync.pendingChanges.length = 0;
@@ -201,7 +201,7 @@ export function applyRegistryChanges(state: EngineServer): void {
     registry.prefabs.pendingChanges.length = 0;
     registry.matchmaking.pendingChanges.length = 0;
 
-    // sounds: server has no playback runtime — drain so the queue doesn't
+    // sounds: server has no playback runtime, drain so the queue doesn't
     // grow unbounded across HMR flushes.
     registry.sounds.pendingChanges.length = 0;
 

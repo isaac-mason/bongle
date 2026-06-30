@@ -1,5 +1,5 @@
-// api/environment.ts — script-facing per-room sky / sun / moon / stars /
-// clouds. all motion derives from one shared `envTime` uniform —
+// api/environment.ts, script-facing per-room sky / sun / moon / stars /
+// clouds. all motion derives from one shared `envTime` uniform,
 // `setTime` is the hot path (one f32 write), `setEnvironment` shallow-
 // merges into the config buffer.
 
@@ -20,7 +20,7 @@ export type SkyStop = {
     nadir: Vec3;
 };
 
-/** input shape — every field optional. shallow-merges into current state. */
+/** input shape, every field optional. shallow-merges into current state. */
 export type EnvironmentConfig = {
     enabled?: boolean;
     sky?: { preset?: SkyPreset; stops?: SkyStop[] };
@@ -29,7 +29,7 @@ export type EnvironmentConfig = {
     stars?: { enabled?: boolean; density?: number };
     /**
      * planar cloud layer at `altitude` world-units. `thickness` controls the
-     * virtual depth the fragment shader marches through to fake 3D volume —
+     * virtual depth the fragment shader marches through to fake 3D volume,
      * larger values give chunkier, more parallaxing clouds. `density` is
      * coverage [0,1]; `wind` is a 2D drift velocity applied to the noise
      * field over `envTime`.
@@ -46,10 +46,10 @@ const rgb = srgbBytesToLinear;
 
 /**
  * minecraft-like temperate sky. four stops keyed to time-of-day:
- *   t=0    midnight — deep navy, stars dominate
- *   t=0.25 sunrise  — muted lavender twilight (orange comes from FOG_SUN_TINT)
- *   t=0.5  noon     — bright sky blue
- *   t=0.75 sunset   — muted lavender twilight
+ *   t=0    midnight, deep navy, stars dominate
+ *   t=0.25 sunrise, muted lavender twilight (orange comes from FOG_SUN_TINT)
+ *   t=0.5  noon, bright sky blue
+ *   t=0.75 sunset, muted lavender twilight
  *
  * the orange sunset glow is procedural in the shader (`fog_sun_tint` near
  * the sun direction); the LUT itself only carries the ambient sky tone.
@@ -62,7 +62,7 @@ const OVERWORLD: SkyStop[] = [
 ];
 
 /**
- * named sky LUT tables. only `overworld` is tuned right now — additional
+ * named sky LUT tables. only `overworld` is tuned right now, additional
  * presets will land alongside their target room art (overcast, desert, etc.)
  * so the LUT and game palette get authored together.
  */
@@ -96,7 +96,7 @@ function activeEnv(ctx: ScriptContext): ClientEnvironment.Environment | null {
 }
 
 /**
- * advance the environment time, in hours. hot path — one f32 uniform write.
+ * advance the environment time, in hours. hot path, one f32 uniform write.
  * safe to call every frame.
  *
  *   0 = midnight, 6 = sunrise, 12 = noon, 18 = sunset. wraps mod 24.
@@ -118,7 +118,7 @@ export function getEnvironmentTime(ctx: ScriptContext): number {
 }
 
 /**
- * merge a partial config into the room's environment. slow path — writes
+ * merge a partial config into the room's environment. slow path, writes
  * the config storage buffer. call from script init or in response to game
  * events, not every frame.
  *

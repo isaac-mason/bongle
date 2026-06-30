@@ -1,6 +1,6 @@
-// SpriteTrait — textured quad sampled from the engine-global sprite atlas.
+// SpriteTrait, textured quad sampled from the engine-global sprite atlas.
 //
-// Mirrors `CanvasTrait`'s shape (mode/width/height/worldScale/center) —
+// Mirrors `CanvasTrait`'s shape (mode/width/height/worldScale/center),
 // only the pixel source differs: `CanvasTrait` paints into a per-instance
 // OffscreenCanvas, `SpriteTrait` samples a uvRect of the shared
 // `SpriteResources.atlas`. The three quad orientations (`'billboard'`,
@@ -61,7 +61,7 @@ export const SpriteTrait = trait('sprite', {
     /**
      * voxel-light contribution [sky, r, g, b], each 0-1. client-only.
      * auto-sampled each frame by `SpriteVisuals` from the room's voxel
-     * light grid at the node's world position — same composition as
+     * light grid at the node's world position, same composition as
      * `MeshTrait.light`. ignored when `unlit` is true.
      */
     light: [0, 0, 0, 0] as Vec4,
@@ -87,7 +87,7 @@ export const SpriteTrait = trait('sprite', {
     /**
      * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
      * Fragments drop via `discard` against an interleaved-gradient
-     * threshold — stays in the opaque pipeline, no sort/blend. Pixelly,
+     * threshold, stays in the opaque pipeline, no sort/blend. Pixelly,
      * not smooth alpha. client-only.
      */
     dither: 0,
@@ -99,7 +99,7 @@ export const SpriteTrait = trait('sprite', {
     visible: true,
 
     /**
-     * version counter — bumped by setters when tint/light/glow change so
+     * version counter, bumped by setters when tint/light/glow change so
      * the renderer can re-upload only on mismatch. mirrors
      * `MeshTrait._version`.
      */

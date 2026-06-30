@@ -147,7 +147,7 @@ export type BlockStateDef<P extends PropsDef = PropsDef> = {
     with<K extends string & keyof P>(index: number, prop: K, value: PropValue<P[K]>): number;
 
     /**
-     * the stride (place-value multiplier) of a single property — the
+     * the stride (place-value multiplier) of a single property, the
      * amount the encoded local index changes when this prop's value
      * advances by 1. for an all-bool schema the strides are 1, 2, 4, 8…
      * (a bitmask); for mixed schemas they're a mixed-radix sequence.

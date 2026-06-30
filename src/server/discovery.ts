@@ -43,9 +43,9 @@ import * as RoomsModule from './rooms';
  * run diff detection on a scene graph: compare each trait's current sync values
  * against the per-instance snapshots (`instance._sync.bytes/values`), bumping
  * versions and updating the snapshot when a slice changed. diffs both property
- * and sync fields regardless of mode — scripts can mutate either at any time.
+ * and sync fields regardless of mode, scripts can mutate either at any time.
  *
- * per-slice state lives on the instance, so it's reaped with the node via GC —
+ * per-slice state lives on the instance, so it's reaped with the node via GC,
  * no side-map to scan or clean up.
  *
  * call once per tick, after scripts have run.
@@ -75,7 +75,7 @@ function diffNode(sg: Nodes, node: Node): void {
             const bit = 1 << (i & 31);
             if ((sync.dirty[word] & bit) !== 0) {
                 sync.dirty[word] &= ~bit;
-                // ThresholdRate slices consume the dirty bit but do NOT emit on it —
+                // ThresholdRate slices consume the dirty bit but do NOT emit on it,
                 // the threshold branch below decides if the change is big enough.
                 // (else setPosition / physics dirtying would bypass the threshold.)
                 if (typeof def.sync[i].rate !== 'object') {
@@ -85,7 +85,7 @@ function diffNode(sg: Nodes, node: Node): void {
                 }
             }
 
-            // 'dirty' rate skips cold-path byte-diff entirely — only
+            // 'dirty' rate skips cold-path byte-diff entirely, only
             // SyncHandle.dirty() above can flag emission.
             if (def.sync[i].rate === 'dirty') continue;
 
@@ -105,7 +105,7 @@ type TraitKnowledge = {
     version: number;
     // Per-field knowledge as dense arrays indexed by sync field index (0..def.sync.length).
     // The trait is already selected by the enclosing `traits` map (keyed by def.id), so
-    // the field only needs its index — no per-tick key to build. Sized + zero-filled once
+    // the field only needs its index, no per-tick key to build. Sized + zero-filled once
     // when the trait knowledge is created (0 = never sent / unknown, matching the old
     // `?? 0` semantics).
     versions: number[];
@@ -114,7 +114,7 @@ type TraitKnowledge = {
 };
 
 // Build a zero-filled PACKED_SMI array. `new Array(n)` (even `.fill(0)`'d) stays
-// HOLEY elements-kind forever — and a single holey `versions`/`lastSentTicks`
+// HOLEY elements-kind forever, and a single holey `versions`/`lastSentTicks`
 // array would make every `known.versions[i]` read polymorphic. Pushing from `[]`
 // keeps them all PACKED so those hot reads stay monomorphic.
 function zeros(n: number): number[] {
@@ -140,7 +140,7 @@ type ClientNodeKnowledge = {
 type ClientVoxelKnowledge = {
     /** chunks sent as voxel_chunk_full and kept in sync with chunk_ops/light. */
     knownChunks: Set<string>;
-    /** chunks announced as empty via voxel_chunk_empty — client holds an
+    /** chunks announced as empty via voxel_chunk_empty, client holds an
      *  all-air stub so collision can distinguish "known air" from "unknown". */
     knownEmptyChunks: Set<string>;
     knownLightEpoch: number;
@@ -170,7 +170,7 @@ type ClientVoxelKnowledge = {
      *  shipping to a client once it hits MAX_IN_FLIGHT_FULL, so a slow
      *  (decode-bound) client throttles the server. an ack removes the key,
      *  freeing a slot. disjoint from pendingFull (ship moves the key across)
-     *  and a subset of knownChunks. pure pacing — TCP handles delivery. */
+     *  and a subset of knownChunks. pure pacing, TCP handles delivery. */
     inFlightFull: Set<string>;
 };
 
@@ -195,7 +195,7 @@ type ClientState = {
     /**
      * per-Player voxel chunk knowledge. key is PlayerId. Each Player has
      * its own streaming anchor (its player node's chunk coord) and its own
-     * known-chunks set, so views stay isolated — particularly important
+     * known-chunks set, so views stay isolated, particularly important
      * when a client holds two Players in the same room (e.g. dev edit
      * camera + dev play character) whose positions diverge.
      */
@@ -204,7 +204,7 @@ type ClientState = {
     /**
      * Set of runtime-source model ids this client has been told about via
      * `register_model`. Drives a per-tick diff against
-     * `resources.models` — new entries → `register_model`, vanished
+     * `resources.models`, new entries → `register_model`, vanished
      * entries → `unregister_model`. Bundled entries never enter this set;
      * they ship with the engine build on both sides.
      */
@@ -287,8 +287,8 @@ export function invalidateRoomList(state: Discovery): void {
 }
 
 /**
- * Call when a Player is allocated (or its scene is structurally invalidated
- * — e.g. a hot-reload or scene rebuild). Synchronously emits a join_room
+ * Call when a Player is allocated (or its scene is structurally invalidated,
+ * e.g. a hot-reload or scene rebuild). Synchronously emits a join_room
  * for this Player on the per-client outbox and re-snapshots per-Player
  * knowledge against current scene state. Initializes fresh voxel knowledge
  * for the Player so its chunk view streams from scratch.
@@ -321,7 +321,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
         inFlightFull: new Set(),
     });
 
-    // Catch this client up on any runtime model entries that exist now —
+    // Catch this client up on any runtime model entries that exist now,
     // emit synchronously so they precede `join_room` on the outbox. The
     // packed scene may reference these modelIds via trait fields; the
     // client's `ensureModel` needs a URL entry in hand when it tries to
@@ -378,7 +378,7 @@ export function notifyPlayerLeft(state: Discovery, net: ServerNet, player: Playe
  * Diff `resources.models` (runtime entries only) against this client's
  * `knownModels` set. Returns the messages to bring the client into sync;
  * mutates `knownModels` to match the new state so the caller doesn't have
- * to. Bundled entries are skipped — both sides ship them with their build.
+ * to. Bundled entries are skipped, both sides ship them with their build.
  */
 function computeModelRegistrations(cs: ClientState, resources: Resources): ServerMessage[] {
     const msgs: ServerMessage[] = [];
@@ -410,7 +410,7 @@ function computeModelRegistrations(cs: ClientState, resources: Resources): Serve
  * stamp the current node state into the originating client's knowledge
  * after a mutation. prevents discovery from echoing the change back.
  *
- * Stamps every Player the client holds in the room — the mutation came
+ * Stamps every Player the client holds in the room, the mutation came
  * from the client connection, so all of that client's views into the
  * room should suppress the echo.
  */
@@ -469,7 +469,7 @@ export function acceptOwnerFields(
 ): void {
     // play mode: only accept owner fields for replicable nodes. non-shared
     // nodes aren't synced to other clients, so an owner-authority write
-    // would silently never reach anyone — reject loudly instead.
+    // would silently never reach anyone, reject loudly instead.
     if (mode === 'play' && !isReplicable(node)) return;
 
     const codecs = getSyncCodecs(def);
@@ -478,7 +478,7 @@ export function acceptOwnerFields(
     const sync = instance._sync;
     if (!sync) return;
 
-    // collect every Player the client holds in this room — we stamp all of
+    // collect every Player the client holds in this room, we stamp all of
     // their knowledge so none echo this owner-authority write back.
     const cs = state.clients.get(client);
     const targetPlayers: Player[] = cs ? RoomsModule.getPlayersForClient(rooms, client).filter((p) => p.roomId === roomId) : [];
@@ -498,7 +498,7 @@ export function acceptOwnerFields(
         // 2. update the per-instance snapshot to the just-applied bytes so the
         //    byte-diff in diffNode sees no change and doesn't re-bump. reuse the
         //    shared scratch (in-place store) rather than allocating a fresh
-        //    buffer per owner field — owner writes land every tick for
+        //    buffer per owner field, owner writes land every tick for
         //    player-controlled entities.
         writeSnapshot(codec, instance, node, i, sync);
 
@@ -587,7 +587,7 @@ export function flush(
     };
 
     for (const [client, cs] of state.clients) {
-        // runtime model registrations — diff `resources.models` against
+        // runtime model registrations, diff `resources.models` against
         // per-client knowledge. Push BEFORE scene_sync so any new trait
         // field carrying a freshly-registered modelId can resolve to a URL
         // entry on the client by the time the field lands.
@@ -595,7 +595,7 @@ export function flush(
             out.push([client, msg]);
         }
 
-        // incremental scene sync — per-Player, mode-aware
+        // incremental scene sync, per-Player, mode-aware
         for (const player of RoomsModule.getPlayersForClient(rooms, client)) {
             if (!cs.knownPlayers.has(player.id)) continue;
 
@@ -649,9 +649,9 @@ export function flush(
         clearVoxelChanges(auth.changes);
         // clear lightDirty flags after all clients have absorbed into their
         // per-client pendingLight queues. compressedLight stays cached across
-        // ticks — writeChunkLight / markChunkDirty (light.ts) null it on the
+        // ticks, writeChunkLight / markChunkDirty (light.ts) null it on the
         // next actual change. dirty.light is reset so next tick starts empty.
-        // mask + count are NOT cleared here — dispatchLight already cleared
+        // mask + count are NOT cleared here, dispatchLight already cleared
         // them for shipped chunks; unshipped (cap-exhausted) chunks keep
         // their accumulated delta info for next tick.
         for (const chunk of room.voxels.dirty.light) {
@@ -683,10 +683,10 @@ function nodeDepth(node: Node): number {
 
 /**
  * build incremental SceneSync updates for a single client's knowledge of a single
- * room — driven by the room's per-tick dirty set (nodes touched this tick), not a
+ * room, driven by the room's per-tick dirty set (nodes touched this tick), not a
  * whole-tree walk. per dirty node, the same per-client diff as before decides
  * create / update / destroy against this client's knowledge (a destroyed node is a
- * dirty node that's no longer live — `node.scene === null`); the baseline for nodes
+ * dirty node that's no longer live, `node.scene === null`); the baseline for nodes
  * that never change comes from the join snapshot. reads pre-serialized trait bytes
  * from each instance's `_sync.bytes`.
  *
@@ -708,7 +708,7 @@ function buildSceneSyncUpdates(
         const known = nodeKnowledge.get(node.id);
 
         // detached at flush = destroyed this tick. (a node destroyed then re-added
-        // the same tick is live again here — node.scene is set — so it flows to the
+        // the same tick is live again here, node.scene is set, so it flows to the
         // create/update path below, never here. that makes add→remove→add correct
         // with no id bookkeeping.)
         if (node.scene === null) {
@@ -720,7 +720,7 @@ function buildSceneSyncUpdates(
         }
 
         // relevance: edit sees everything; play sees only replicable subtrees.
-        // (this is the seam AOI extends later — `&& inAOI(...)`.)
+        // (this is the seam AOI extends later, `&& inAOI(...)`.)
         const visible = mode === 'edit' || isReplicable(node);
         if (visible) {
             if (!known) creates.push(node);
@@ -750,7 +750,7 @@ function buildSceneSyncUpdates(
  * walk a node tree in parent-first (pre-order) order. in play mode prunes
  * subtrees whose effective realm isn't `'shared'`. `inheritedRealm` is the
  * effective realm of the parent (root callers pass `'shared'`); `'inherit'`
- * nodes resolve to that value. iterative — no recursion, no stack growth on
+ * nodes resolve to that value. iterative, no recursion, no stack growth on
  * deep trees.
  */
 function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callback: (node: Node) => void): void {
@@ -771,7 +771,7 @@ function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callb
  * read all controls for a trait as control-shaped BinaryField entries.
  * used for full-state events (node_created, node_trait_added) where the
  * receiver wants every editable/persisted field, not just sync slices.
- * packs fresh — controls aren't snapshotted on the instance.
+ * packs fresh, controls aren't snapshotted on the instance.
  */
 function readAllFields(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
@@ -790,7 +790,7 @@ function readAllFields(node: Node, traitSlot: number, instance: TraitBase): Bina
 /**
  * read all sync slices for a trait as sync-shaped BinaryField entries.
  * used for full-state events to seed initial replicated state on the
- * receiver — pairs with readAllFields (controls).
+ * receiver, pairs with readAllFields (controls).
  */
 function readAllSyncs(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
@@ -878,7 +878,7 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
             syncs: readAllSyncs(node, traitSlot, instance),
         });
     }
-    // include unresolved traits (no wire-index entry — fall back to string id)
+    // include unresolved traits (no wire-index entry, fall back to string id)
     for (const [id] of node._unresolvedTraits) {
         traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
     }
@@ -939,7 +939,7 @@ function diffNodeKnowledge(
         known.owner = node.owner;
     }
 
-    // trait changes — per-field granularity with per-field rate gating
+    // trait changes, per-field granularity with per-field rate gating
     const currentTraitIds = new Set<string>();
     const wireIndex = registry.traitWireIndex;
 
@@ -951,7 +951,7 @@ function diffNodeKnowledge(
         const traitKnowledge = known.traits.get(def.id);
 
         if (!traitKnowledge) {
-            // new trait — send add with full state (controls + syncs, no rate gating)
+            // new trait, send add with full state (controls + syncs, no rate gating)
             updates.push({
                 type: 'node_trait_added',
                 id: node.id,
@@ -961,7 +961,7 @@ function diffNodeKnowledge(
                 syncs: readAllSyncs(node, traitSlot, instance),
             });
 
-            // snapshot knowledge for this new trait — dense PACKED arrays by field index.
+            // snapshot knowledge for this new trait, dense PACKED arrays by field index.
             const len = def.sync.length;
             const versions: number[] = [];
             const lastSentTicks: number[] = [];
@@ -975,7 +975,7 @@ function diffNodeKnowledge(
                 lastSentTicks,
             });
         } else {
-            // existing trait — send only changed fields, with per-field rate gating
+            // existing trait, send only changed fields, with per-field rate gating
             const sentFields: Array<{ index: number; version: number }> = [];
             const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, sentFields);
             if (changedFields.length > 0) {
@@ -1015,7 +1015,7 @@ function diffNodeKnowledge(
         // so we don't need to check version diffs for them
     }
 
-    // removed traits — wire-compress when the id still has a current
+    // removed traits, wire-compress when the id still has a current
     // entry; fall back to the string id for traits that disappeared from
     // the registry between snapshot and now (rare HMR edge).
     for (const traitId of known.traits.keys()) {
@@ -1031,7 +1031,7 @@ function diffNodeKnowledge(
         }
     }
 
-    // prefab config change — edit mode only
+    // prefab config change, edit mode only
     if (mode === 'edit') {
         const currentPrefab = node.prefab ? encodePrefabConfig(node.prefab) : null;
         if (known.prefab !== currentPrefab) {
@@ -1044,7 +1044,7 @@ function diffNodeKnowledge(
         }
     }
 
-    // update node version — if any fields were throttled (not yet sent), keep nodeVersion
+    // update node version, if any fields were throttled (not yet sent), keep nodeVersion
     // stale so the node is re-checked next tick. we detect this by comparing each trait's
     // field knowledge against the current field versions.
     let allFieldsCurrent = true;
@@ -1065,7 +1065,7 @@ function diffNodeKnowledge(
     if (allFieldsCurrent) {
         known.nodeVersion = node._sync.version;
     }
-    // if not all fields are current, nodeVersion stays stale — the node will
+    // if not all fields are current, nodeVersion stays stale, the node will
     // be re-checked next tick and the throttled fields will be retried
 }
 
@@ -1081,7 +1081,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
 
-        // snapshot per-sync versions for this trait — dense PACKED arrays by field
+        // snapshot per-sync versions for this trait, dense PACKED arrays by field
         // index (0 = never bumped → lastSentTick stays 0, matching the old "no entry").
         const len = def.sync.length;
         const versions: number[] = [];
@@ -1119,7 +1119,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
 
 /**
  * snapshot every (replicable) node in the scene graph into a knowledge map.
- * in play mode skips non-shared subtrees — those are never replicated and
+ * in play mode skips non-shared subtrees, those are never replicated and
  * should not appear in client knowledge.
  */
 function snapshotAllNodeKnowledge(sg: Nodes, nodeKnowledge: Map<number, ClientNodeKnowledge>, mode: RoomMode): void {
@@ -1149,7 +1149,7 @@ function snapshotAllNodeKnowledge(sg: Nodes, nodeKnowledge: Map<number, ClientNo
 //   - promotion threshold (too many ops → re-send as chunk_full)
 //   - light epoch for full-recompute detection
 
-/** max voxel_chunk_full messages per client per tick — burst limiter on the
+/** max voxel_chunk_full messages per client per tick, burst limiter on the
  *  room-level dispatchFull, mirroring LIGHT_CHUNKS_PER_CLIENT_PER_TICK. bounds
  *  the cold-start decode burst when many chunks are queued at once; the
  *  steady-state ceiling will come from in-flight acks (Part C). */
@@ -1159,7 +1159,7 @@ const FULL_CHUNKS_PER_CLIENT_PER_TICK = 6;
  *  client. the in-flight window: dispatchFull won't ship past this until acks
  *  free slots, so a decode-bound client throttles the server. Luanti uses 40
  *  against slower mesh-acks; we ack on decode, so start lower. effective
- *  throughput ≈ MAX_IN_FLIGHT_FULL / RTT — tune up for high-RTT clients. */
+ *  throughput ≈ MAX_IN_FLIGHT_FULL / RTT, tune up for high-RTT clients. */
 const MAX_IN_FLIGHT_FULL = 24;
 
 /** stop the per-player discovery walk once pendingFull reaches this size.
@@ -1170,18 +1170,18 @@ const MAX_IN_FLIGHT_FULL = 24;
 const DISCOVERY_BACKLOG_CAP = 64;
 
 /** max empty-chunk announcements per client per tick. each entry is ~12
- *  bytes so we can be generous — empties race ahead of full chunks so the
+ *  bytes so we can be generous, empties race ahead of full chunks so the
  *  client establishes the "known air" frontier quickly. */
 const EMPTY_CHUNKS_PER_TICK = 256;
 
 /** fallback view radius in chunks when the player node has no PlayerTrait
- *  (shouldn't happen in practice — createPlayerNode always adds it — but
+ *  (shouldn't happen in practice, createPlayerNode always adds it, but
  *  guards the flush against a partially-constructed scene). */
 const DEFAULT_VIEW_RADIUS = 8;
 
 /** hysteresis band (chunks) added to viewRadius to compute the eviction
  *  radius. chunks in [viewRadius, viewRadius + VIEW_RADIUS_MARGIN] are kept if
- *  already known but not freshly loaded — prevents thrash when the player
+ *  already known but not freshly loaded, prevents thrash when the player
  *  jitters across a chunk boundary at the load frontier. */
 const VIEW_RADIUS_MARGIN = 4;
 
@@ -1200,7 +1200,7 @@ const LIGHT_CHUNKS_PER_CLIENT_PER_TICK = 8;
  *  small edits. above the threshold, whole-chunk is more compact. */
 const LIGHT_DELTA_THRESHOLD = 100;
 
-/** virtual "max users" used in the global light cap formula — same shape
+/** virtual "max users" used in the global light cap formula, same shape
  *  as luanti's max_users knob, sets the global ceiling for small rooms.
  *  globalCap = (currentPlayers + ROOM_MAX_USERS) * per_client_cap / 4 + 1.
  *  with 1 player and the default per-client cap, globalCap >> per-client
@@ -1210,7 +1210,7 @@ const ROOM_MAX_USERS = 8;
 
 /* ── voxel knowledge reset ── */
 
-/** called on hot reload — reset all voxel knowledge so chunks re-stream */
+/** called on hot reload, reset all voxel knowledge so chunks re-stream */
 export function resetAllVoxelKnowledge(state: Discovery): void {
     for (const cs of state.clients.values()) {
         for (const k of cs.voxelKnowledge.values()) {
@@ -1227,8 +1227,8 @@ export function resetAllVoxelKnowledge(state: Discovery): void {
 
 /** apply a client's voxel_ack: free the in-flight slots for the chunks it has
  *  decoded + applied, letting dispatchFull ship more. lookup by (client,
- *  playerId) is inherently scoped — a client's voxelKnowledge only holds its
- *  own players — and unknown keys (already evicted / re-sent / promoted) are
+ *  playerId) is inherently scoped, a client's voxelKnowledge only holds its
+ *  own players, and unknown keys (already evicted / re-sent / promoted) are
  *  ignored, so a stale or spoofed ack is a harmless no-op. */
 export function handleVoxelAck(state: Discovery, client: Client, message: VoxelAck): void {
     const cs = state.clients.get(client);
@@ -1347,9 +1347,9 @@ function getPlayerChunkCoord(room: Room, playerId: PlayerId): [number, number, n
 /* ── voxel flush ── */
 
 /**
- * produce voxel messages for every Player in a room — each Player has its
+ * produce voxel messages for every Player in a room, each Player has its
  * own streaming anchor and chunk-knowledge set, so views stay isolated
- * (matters when a client holds two Players in the same room — e.g. a
+ * (matters when a client holds two Players in the same room, e.g. a
  * dev's edit camera + their play character).
  */
 function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Array<[Client, ServerMessage]>): void {
@@ -1360,7 +1360,7 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
 
     // per-player phase: cursor walks → pendingFull, ops, and absorb newly-dirty
     // light chunks into each client's pendingLight set. nothing is shipped for
-    // full/light yet — dispatch happens room-wide below.
+    // full/light yet, dispatch happens room-wide below.
     const players: Player[] = [];
     for (const player of RoomsModule.getPlayersInRoom(rooms, room)) {
         const cs = state.clients.get(player.client);
@@ -1388,7 +1388,7 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
     // room-wide dispatch after every player has discovered + absorbed.
     // dispatchFull runs first and returns the chunks it shipped as
     // voxel_chunk_full this tick: those payloads carry fresh light, so
-    // dispatchLight clears their masks (and skips them — they were still in
+    // dispatchLight clears their masks (and skips them, they were still in
     // pendingFull, not knownChunks, when the per-player light-absorb ran).
     const fullShippedChunks = dispatchFull(state, room, voxels, players, out);
     dispatchLight(state, room, voxels, players, out, fullShippedChunks);
@@ -1401,7 +1401,7 @@ type DispatchCandidate = { d2: number; key: string; pid: PlayerId; chunk: Chunk 
  * gathered into one candidate list ranked by d² from that player's anchor, then
  * shipped nearest-first under a per-client cap + a global cap (luanti's
  * GetNextBlocks → PrioritySortedBlockTransfer → SendBlocks shape). one message
- * per shipped chunk — the transport coalesces a tick's messages into one
+ * per shipped chunk, the transport coalesces a tick's messages into one
  * ServerPacket, so per-chunk keeps the dispatch unit uniform across channels.
  *
  * `ship` emits the channel's message + any per-winner bookkeeping; the generic
@@ -1417,7 +1417,7 @@ function dispatchChannel(
     ship: (c: DispatchCandidate, knowledge: ClientVoxelKnowledge, client: Client) => void,
     // optional in-flight window (full channel): skip a client once this many
     // chunks are outstanding (shipped, awaiting ack). pending and in-flight are
-    // disjoint — ship moves the key across — so this is the only gate needed.
+    // disjoint, ship moves the key across, so this is the only gate needed.
     inFlight?: { max: number; select: (k: ClientVoxelKnowledge) => Set<string> },
 ): Set<Chunk> {
     const candidates: DispatchCandidate[] = [];
@@ -1438,7 +1438,7 @@ function dispatchChannel(
         for (const key of pending) {
             const chunk = voxels.chunks.get(key);
             if (!chunk) {
-                // chunk deleted between queueing and dispatch — drop it.
+                // chunk deleted between queueing and dispatch, drop it.
                 pending.delete(key);
                 continue;
             }
@@ -1480,7 +1480,7 @@ function dispatchChannel(
 
 /**
  * room-wide chunk_full dispatch. drains each player's pendingFull (filled by
- * discovery) nearest-first. returns the chunks shipped — handed to
+ * discovery) nearest-first. returns the chunks shipped, handed to
  * dispatchLight as fullShippedChunks so their light masks get cleared (the full
  * payload already carried fresh light).
  *
@@ -1526,7 +1526,7 @@ function dispatchFull(
 /**
  * room-wide light dispatch. drains each player's pendingLight nearest-first,
  * shipping a per-voxel delta when the dirty count is small, else a whole-chunk
- * light. then clears the light masks of chunks fully synced this tick — light
+ * light. then clears the light masks of chunks fully synced this tick, light
  * shipped here, or chunk_full shipped earlier (its payload carried fresh light).
  * unshipped (cap-exhausted) chunks keep their mask + count for next tick; new
  * writes OR into the same mask via setLight.
@@ -1549,7 +1549,7 @@ function dispatchLight(
         (c, _knowledge, client) => {
             const dirtyCount = c.chunk.lightDirtyCount;
             if (dirtyCount > 0 && dirtyCount <= LIGHT_DELTA_THRESHOLD) {
-                // per-voxel delta path — iterate set bits in the mask.
+                // per-voxel delta path, iterate set bits in the mask.
                 const mask = c.chunk.lightDirtyMask;
                 const light = c.chunk.light;
                 const changes: Array<{ index: number; light: number }> = new Array(dirtyCount);
@@ -1591,9 +1591,9 @@ function dispatchLight(
  * sweep this player's known/knownEmpty sets and evict any chunks outside the
  * `evictRadius` sphere centered at `(pcx,pcy,pcz)`. emits voxel_chunk_del for
  * each evicted known chunk so the client drops its mesh + memory; empty
- * stubs are dropped silently (client keeps the all-air alias — harmless).
+ * stubs are dropped silently (client keeps the all-air alias, harmless).
  *
- * called only on chunk-coord transitions in flushVoxelsForPlayer — known sets
+ * called only on chunk-coord transitions in flushVoxelsForPlayer, known sets
  * can be large at edit-radius scale (~58k entries) so per-tick walking would
  * be wasteful when nothing has changed.
  */
@@ -1635,7 +1635,7 @@ function evictOutOfRange(
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
         knowledge.knownEmptyChunks.delete(key);
     }
-    // pendingFull entries are neither known nor empty yet — drop any that
+    // pendingFull entries are neither known nor empty yet, drop any that
     // drifted out of range before dispatchFull got to them (no chunk_del:
     // the client never received them).
     for (const key of knowledge.pendingFull) {
@@ -1661,7 +1661,7 @@ function flushVoxelsForPlayer(
 ): void {
     const client = player.client;
 
-    // 0. light epoch check — if server did a full recompute, reset client
+    // 0. light epoch check, if server did a full recompute, reset client
     //    knowledge. clear the discovery queue too: pendingFull holds chunks
     //    that would otherwise ship against the stale epoch; the cursor rewind
     //    re-discovers them with fresh light.
@@ -1676,7 +1676,7 @@ function flushVoxelsForPlayer(
 
     const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
 
-    // per-player view radius — server picks 8 (play) or 24 (edit) at
+    // per-player view radius, server picks 8 (play) or 24 (edit) at
     // createPlayerNode time. fall back to the default if PlayerTrait is
     // somehow missing.
     const playerNode = room.playerNodes.get(player.id);
@@ -1684,7 +1684,7 @@ function flushVoxelsForPlayer(
     const viewRadius = playerTrait?.viewRadius ?? DEFAULT_VIEW_RADIUS;
     const expansionOrder = getExpansionOrder(viewRadius);
 
-    // 1a. eviction — only on chunk-boundary crossings. evict knownChunks
+    // 1a. eviction, only on chunk-boundary crossings. evict knownChunks
     //     (sending chunk_del) and silently drop knownEmptyChunks that drifted
     //     beyond viewRadius + VIEW_RADIUS_MARGIN. empty stubs are cheap on the
     //     client (aliased EMPTY_DATA) so we leave them in voxels.chunks; only
@@ -1704,7 +1704,7 @@ function flushVoxelsForPlayer(
         knowledge.cursor = 0;
     }
 
-    // 1b. addedChunks drain — chunks created this tick. drop any
+    // 1b. addedChunks drain, chunks created this tick. drop any
     //     known-empty entry that's now occupied, and rewind the cursor so the
     //     walk picks them up (visited entries short-circuit cheaply on re-walk).
     if (changes.addedChunks.size > 0) {
@@ -1715,7 +1715,7 @@ function flushVoxelsForPlayer(
         knowledge.cursor = 0;
     }
 
-    // 2. chunk_full / chunk_empty — resume the sphere walk from the cursor.
+    // 2. chunk_full / chunk_empty, resume the sphere walk from the cursor.
     //    each tick we drain forward until the per-tick budget is hit; visited
     //    entries (knownChunks / knownEmptyChunks) short-circuit. when the
     //    cursor reaches expansionOrder.length the sphere is fully discovered
@@ -1738,7 +1738,7 @@ function flushVoxelsForPlayer(
         const chunk = voxels.chunks.get(key);
         if (chunk) {
             if (knowledge.pendingFull.size >= DISCOVERY_BACKLOG_CAP) {
-                // backlog full — rewind one step so we revisit this offset
+                // backlog full, rewind one step so we revisit this offset
                 // next tick once dispatchFull has drained the queue.
                 knowledge.cursor--;
                 break;
@@ -1764,14 +1764,14 @@ function flushVoxelsForPlayer(
         ]);
     }
 
-    // 3. block ops — coalesce and send for known chunks
+    // 3. block ops, coalesce and send for known chunks
     if (changes.ops.length > 0) {
         const blockChanges = coalesceBlockOps(changes.ops, knowledge.knownChunks, voxels.chunks);
 
         // promote chunks with too many block changes to a chunk_full re-send:
         // drop from knownChunks (+ any queued light) and re-queue directly into
         // pendingFull so dispatchFull re-ships the whole chunk. no cursor
-        // rewind needed — the chunk is back in the dispatch queue, and the
+        // rewind needed, the chunk is back in the dispatch queue, and the
         // pendingFull guard in the walk keeps re-discovery from duplicating it.
         for (const [key, entry] of blockChanges) {
             if (entry.changes.size > PROMOTION_THRESHOLD) {
@@ -1820,7 +1820,7 @@ function flushVoxelsForPlayer(
         }
     }
 
-    // 4. light — absorb newly-dirty chunks into this client's pendingLight
+    // 4. light, absorb newly-dirty chunks into this client's pendingLight
     //    queue. actual dispatch happens at the room level after all players
     //    have absorbed, so we can apply a globally-sorted priority + per-tick
     //    cap across the room (luanti-style global priority + per-client cap).

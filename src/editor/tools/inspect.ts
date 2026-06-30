@@ -1,4 +1,4 @@
-// inspect.ts — per-frame update for the inspect and transform tools.
+// inspect.ts, per-frame update for the inspect and transform tools.
 //
 // handles:
 //   - gizmo + pivot point sync (transform mode)
@@ -57,7 +57,7 @@ function resolveSelectionTarget(hitNode: Node, selectedNodeIds: Set<number>, sce
     return chain[0];
 }
 
-// scratch vecs reused per call — not safe if called concurrently (it's not)
+// scratch vecs reused per call, not safe if called concurrently (it's not)
 const _nearWorld: [number, number, number] = [0, 0, 0];
 const _farWorld: [number, number, number] = [0, 0, 0];
 const _rayDir: [number, number, number] = [0, 0, 0];
@@ -65,7 +65,7 @@ const MAX_RAY_DIST = 1024;
 
 /**
  * right-click tap → raycast, refine selection, open viewport context menu at
- * the cursor. callers gate by activeTool — wired in inspect + the dedicated
+ * the cursor. callers gate by activeTool, wired in inspect + the dedicated
  * selection tools (box/magic/lasso-select) where right-click is otherwise
  * unused. drags are filtered out: only fires on release if the press never
  * crossed the input layer's drag threshold.
@@ -115,7 +115,7 @@ export function openViewportContextMenu(
 
     if (!voxelWins && nodeHit) {
         // right-click on a node: if it isn't part of the current selection,
-        // make it the selection (topmost transform-bearing ancestor — no drill-down
+        // make it the selection (topmost transform-bearing ancestor, no drill-down
         // on right-click; menu acts on whatever the user sees highlighted).
         let target: Node = nodeHit.node;
         let cur: Node | null = nodeHit.node.parent;
@@ -162,7 +162,7 @@ export function updateInspect(
         }
     }
 
-    // snapshot hover state before we clear it — used by transform placement raycast
+    // snapshot hover state before we clear it, used by transform placement raycast
     const s = store.getState();
     const hoverVoxelAtFrame = s.hoverVoxel;
     const hoverNormalAtFrame = s.hoverNormal;
@@ -244,8 +244,8 @@ export function updateInspect(
     const clicked = pointerJustDown(pointer, client.input);
     // right-click trigger is mode-aware, mirroring the build tool: when the
     // pointer is already locked (RMB unambiguous) fire on down for a snappy
-    // commit; when the cursor is visible (fly / orbit) fire only on a tap —
-    // a release that didn't cross the drag threshold — so a right-drag look
+    // commit; when the cursor is visible (fly / orbit) fire only on a tap,
+    // a release that didn't cross the drag threshold, so a right-drag look
     // doesn't also commit the placement.
     const pointerLocked = !!document.pointerLockElement;
     const rightClicked = pointerLocked
@@ -287,7 +287,7 @@ export function updateInspect(
                     h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
             );
             if (nodeHit) {
-                // grab always targets the topmost transform-bearing ancestor —
+                // grab always targets the topmost transform-bearing ancestor,
                 // no drill-down. drilling into subnodes mid-grab leads to
                 // grabbing the wrong child of an already-selected parent.
                 let target: Node = nodeHit.node;
@@ -316,7 +316,7 @@ export function updateInspect(
         // the selection at its current cursor-driven position. left → switch to
         // translate for fine-tune; right → exit place mode (back to translate).
         if (clicked || rightClicked) {
-            // explicit confirm — commit cursor-follow as a history entry
+            // explicit confirm, commit cursor-follow as a history entry
             TransformTool.commitPlaceSelection(transformToolState, room.nodes, ctx);
             store.setState({ transformMode: 'translate' });
         }
@@ -347,7 +347,7 @@ export function updateInspect(
         const editorNode = room.editor?.editorNode;
 
         // find the nearest node hit (excluding player) and nearest voxel hit.
-        // hits are distance-sorted — use the nearest of each type, then let
+        // hits are distance-sorted, use the nearest of each type, then let
         // distance arbitrate which one wins when both are present.
         const nodeHit = hits.find(
             (h): h is Selector.NodeHit =>
@@ -434,6 +434,6 @@ export function updateInspect(
         }
     }
 
-    // (inspect mesh update is hoisted out — see editor/index.ts so the
+    // (inspect mesh update is hoisted out, see editor/index.ts so the
     // selection outline is drawn for every tool, not just inspect/transform.)
 }

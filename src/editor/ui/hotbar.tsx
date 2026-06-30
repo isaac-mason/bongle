@@ -1,5 +1,5 @@
 /**
- * hotbar — fixed bottom-center bar with HOTBAR_SIZE slots.
+ * hotbar, fixed bottom-center bar with HOTBAR_SIZE slots.
  *
  * each slot is a click target. when no item is carried, click activates the
  * slot. when carrying an inventory item (minecraft-style), click drops it

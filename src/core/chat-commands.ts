@@ -1,6 +1,6 @@
 /**
  * shared slash-command primitives: arg types, command specs, parser,
- * suggestion engine, listener registry, local dispatch. side-agnostic — both
+ * suggestion engine, listener registry, local dispatch. side-agnostic, both
  * client and server compose this into their own per-side chat module
  * (`client/chat.ts` ChatClient, `server/chat.ts` ChatServer) which add
  * transport + lines/UI as appropriate.
@@ -51,7 +51,7 @@ export function getArgType(name: string): ArgType<unknown> | undefined {
     return argTypes.get(name);
 }
 
-/** inline factory — one-off enums don't pollute the global registry. */
+/** inline factory, one-off enums don't pollute the global registry. */
 export function enumType<T extends string>(values: T[]): ArgType<T> {
     const set = new Set<string>(values);
     return {
@@ -84,7 +84,7 @@ defineArgType<string>({
     parse: (s) => {
         const handle = registry.blockRegistry.idToHandle.get(s);
         if (handle) return { ok: true, value: handle.defaultKey() };
-        // fully-qualified key (`oak_log[axis=y]`) — accept verbatim if its id is known
+        // fully-qualified key (`oak_log[axis=y]`), accept verbatim if its id is known
         const parsed = parseKey(s);
         if (parsed && registry.blockRegistry.defs.some((d) => d.id === parsed.blockId)) {
             return { ok: true, value: s };
@@ -210,7 +210,7 @@ function hasCompoundHead(cmds: ChatCommands, head: string): boolean {
     return false;
 }
 
-/** strips exactly one leading '/' — `//set` keeps the second '/' as part of
+/** strips exactly one leading '/', `//set` keeps the second '/' as part of
  *  the command name. quoting is intentionally not supported yet. */
 export function tokenize(input: string): Token[] {
     const tokens: Token[] = [];
@@ -260,7 +260,7 @@ export function parseLine(cmds: ChatCommands | null, input: string, cursor: numb
     const headName = cmdToken?.value ?? '';
 
     // try compound (`<tok0> <tok1>`) first, then fall back to flat. cmdTokenCount
-    // is how many leading tokens belong to the command name itself — args start
+    // is how many leading tokens belong to the command name itself, args start
     // counting from there.
     let cmdName = headName;
     let cmd: CommandSpec | null = null;
@@ -355,7 +355,7 @@ export function parseLine(cmds: ChatCommands | null, input: string, cursor: numb
 export function suggestAt(cmds: ChatCommands | null, state: ParseState): Suggestion[] {
     if (state.cursorIsSubcommand && cmds) {
         // suggest the second word of a compound command (e.g. `/select <here>`).
-        // `text` is just the suffix — the chat UI replaces the current token
+        // `text` is just the suffix, the chat UI replaces the current token
         // without a leading '/', so the result is `/select box`.
         const head = state.tokens[0]?.value ?? '';
         const prefix = `${head} `;

@@ -76,7 +76,7 @@ export function init(scene: Scene, resources: CloudResources): CloudVisuals {
 const _cpuFrustum = frustum.create();
 
 /** WGSL `fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)`. JS does
- *  the math in f64 which is fine — visible/culled decisions don't have
+ *  the math in f64 which is fine, visible/culled decisions don't have
  *  to bit-exact match a GPU shader because the GPU side is gone now. */
 function hash2f(x: number, y: number): number {
     const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -92,7 +92,7 @@ export function update(_visuals: CloudVisuals, resources: CloudResources, env: E
     const windTime = (performance.now() - resources.windStartMs) / 1000;
     const gridSpacing = (camera.far * SAFE_FAR_FRACTION) / (GRID_DIM / 2);
 
-    // frustum planes — same math as the old WGSL cull.
+    // frustum planes, same math as the old WGSL cull.
     frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
 
     const enabled = cfg.enabled && cfg.clouds.enabled;
@@ -188,7 +188,7 @@ export function update(_visuals: CloudVisuals, resources: CloudResources, env: E
 
 export function dispose(visuals: CloudVisuals): void {
     visuals.scene.remove(visuals.mesh);
-    // material/geometry/buffers are engine-global — owned by CloudResources.
+    // material/geometry/buffers are engine-global, owned by CloudResources.
 }
 
 // ── helpers ─────────────────────────────────────────────────────────

@@ -98,9 +98,9 @@ export const snow = blockTexture('starter:snow', {
     src: new URL('./assets/textures/snow.png', import.meta.url),
 });
 
-// wool — 15 dye colors. names follow Minecraft's palette (textures sourced
-// from minetest_game's wool mod, MIT-licensed). there's no `light_blue` —
-// MC's 16th color — without a hand-tinted texture; skip for now.
+// wool, 15 dye colors. names follow Minecraft's palette (textures sourced
+// from minetest_game's wool mod, MIT-licensed). there's no `light_blue`,
+// MC's 16th color, without a hand-tinted texture; skip for now.
 export const woolWhite = blockTexture('starter:wool_white', {
     src: new URL('./assets/textures/wool_white.png', import.meta.url),
 });

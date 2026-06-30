@@ -1,4 +1,4 @@
-// ShadowResources — engine-global shadow material.
+// ShadowResources, engine-global shadow material.
 //
 // One instance per `EngineClient`, shared across rooms. Per-room
 // `ShadowVisuals` owns the geometry + per-instance storage buffer
@@ -39,7 +39,7 @@ export const SHADOW_INSTANCE_STRIDE = layoutStrideOf(ShadowInstance);
 // ── public type ─────────────────────────────────────────────────────
 
 export type ShadowResources = {
-    /** engine-global shadow material — binds the per-instance storage
+    /** engine-global shadow material, binds the per-instance storage
      *  buffer by name (`instance`). */
     material: Material;
 };
@@ -80,7 +80,7 @@ function createShadowMaterial(): Material {
         name: 'shadow-batched',
         vertex: clipPos,
         fragment,
-        // shadow disc has no back face (it's flat on the ground) — but
+        // shadow disc has no back face (it's flat on the ground), but
         // 'none' is cheaper than picking a side and matches sprite.
         cullMode: 'none',
         depthTest: true,

@@ -7,8 +7,8 @@
 //     in the prioritised remesh path)
 //   - per-room frame counter
 //
-// the heavy state — arenas, SectionTables, ArenaPacker, PassRender,
-// Geometries — all lives on engine-global `VoxelResources`. on room
+// the heavy state, arenas, SectionTables, ArenaPacker, PassRender,
+// Geometries, all lives on engine-global `VoxelResources`. on room
 // activation, the new active room's chunks are re-meshed into the
 // shared arena via the existing prioritised remesh path.
 //
@@ -51,7 +51,7 @@ import {
 const VISIBLE_SLICE_U32S = VISIBLE_SLICE_STRIDE / 4;
 const WG_INFO_U32S = WG_INFO_STRIDE / 4;
 
-/** 0=+X,1=-X,2=+Y,3=-Y,4=+Z,5=-Z — matches SectionEntry.face* ordering.
+/** 0=+X,1=-X,2=+Y,3=-Y,4=+Z,5=-Z, matches SectionEntry.face* ordering.
  *  index 6 (UNASSIGNED) is never cone-culled. */
 const FACE_AXIS = [0, 0, 1, 1, 2, 2] as const;
 /** sign of the outward normal along FACE_AXIS for facing 0..5. */
@@ -126,7 +126,7 @@ const MAIN_THREAD_REMESH_RADIUS_CHUNKS = 2;
  *
  * dirty flags are cleared on (re)mesh OR on successful enqueue; chunks
  * with zero geometry (all air) are evicted from the arena. Worker
- * results are drained at the top of update() — stale results (chunk
+ * results are drained at the top of update(), stale results (chunk
  * meshGen has moved on) are discarded.
  */
 export function update(
@@ -142,12 +142,12 @@ export function update(
 
     // give the packer this frame's camera so its OOM eviction policy
     // (farthest-from-camera) has a reference point. null in the offline
-    // path — packer falls back to evicting an arbitrary chunk.
+    // path, packer falls back to evicting an arbitrary chunk.
     packerSetCameraPos(arenas.packer, cameraPos ?? null);
 
     // drain worker results from last frame. each result carries the
     // meshGen we dispatched at; chunk.meshGen has only stayed equal if
-    // nothing mutated it since — otherwise drop (chunk is back in
+    // nothing mutated it since, otherwise drop (chunk is back in
     // dirty.blocks for a fresh dispatch).
     if (voxelResources.pendingMeshResults.length > 0) {
         const pending = voxelResources.pendingMeshResults;
@@ -228,7 +228,7 @@ export function update(
             const chebyshevChunks = Math.max(Math.abs(chunk.cx - camCx), Math.abs(chunk.cy - camCy), Math.abs(chunk.cz - camCz));
             const canSync = syncDone < remeshBudget && chebyshevChunks <= MAIN_THREAD_REMESH_RADIUS_CHUNKS;
 
-            // all-air chunks have no geometry to mesh — evict any prior
+            // all-air chunks have no geometry to mesh, evict any prior
             // arena entry inline rather than shipping a ~700 KB no-op job
             // to a worker. matches the sync path's check in `remeshChunk`.
             if (chunk.aggregate === 0) {
@@ -369,7 +369,7 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
     const cy = camera.position[1];
     const cz = camera.position[2];
 
-    // shared frustum + view-radius cull — one test per chunk, AABB lives on
+    // shared frustum + view-radius cull, one test per chunk, AABB lives on
     // ChunkAlloc. `viewChunkRadius` is read live from settings by the caller,
     // so a tier flip or settings-panel slider applies on the next frame.
     const viewDist = viewChunkRadius * CHUNK_SIZE;
@@ -443,7 +443,7 @@ export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChun
     }
 
     // reverse loop (far→near): translucent. one slice per section, no
-    // facing fan-out — quadOrder handles in-section ordering.
+    // facing fan-out, quadOrder handles in-section ordering.
     const sliceOutTr = rTr.visibleSlicesData;
     const wgOutTr = rTr.wgInfoData;
     const dataCountTr = tTr.cpuDataCount;
@@ -493,7 +493,7 @@ function commitPass(r: PassRender, c: _PassCounters): void {
     r.indirectBuffer.needsUpdate = true;
 }
 
-/** engine-global expansion compute dispatches — fans every visible slice
+/** engine-global expansion compute dispatches, fans every visible slice
  *  out into per-quad `visibleQuads` entries. push into the renderer's
  *  per-frame dispatch list before `renderer.compute(...)`. one dispatch
  *  per pass; skipped if the pass has zero visible slices this frame. */
@@ -530,7 +530,7 @@ export function removeChunkMesh(voxelResources: VoxelResources, key: string): vo
  *  path. resets the new room's first-seen tracking too. */
 export function activateRoom(voxelResources: VoxelResources, state: VoxelVisuals, voxels: Voxels): void {
     packerClearAll(voxelResources.arenas.packer);
-    // skip aggregate=0 chunks — those are sparse "discovered empty" stubs
+    // skip aggregate=0 chunks, those are sparse "discovered empty" stubs
     // pushed by `voxel_chunk_empty`. they have no blocks to mesh and would
     // otherwise pollute `remeshCandidates` (sort cost) and waste budget on
     // applyRemesh early-returns.

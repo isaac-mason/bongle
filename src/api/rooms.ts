@@ -1,4 +1,4 @@
-// api/rooms.ts — script-facing rooms surface.
+// api/rooms.ts, script-facing rooms surface.
 //
 // Polymorphic verbs: most accept any ScriptContext and dispatch on
 // ctx.server vs ctx.client. Membership verbs (join/leave/swap) are
@@ -6,7 +6,7 @@
 //
 // Namespace gating: every authored verb requires the target room to
 // be in the caller's namespace. Reaching into another namespace from
-// authored code is rejected — only the editor's Admin path bypasses
+// authored code is rejected, only the editor's Admin path bypasses
 // this gate.
 
 import { env } from 'bongle';
@@ -94,12 +94,12 @@ export function stop(ctx: ScriptContext, roomId: string): void {
  *
  * The fresh room loads pristine voxels from disk and re-runs every script
  * onInit (fresh authored/spawned entities), and each client re-joins via the
- * normal onJoin path (reset to spawn) — i.e. a whole-map reset for a new round.
+ * normal onJoin path (reset to spawn), i.e. a whole-map reset for a new round.
  * The successor runs the same scripts, so a round timer driving this restarts
  * on its own.
  *
- * Runs inline (no deferral): the old room is torn down with destroyRoom — the
- * direct, non-cascading teardown — which is safe mid-tick because every
+ * Runs inline (no deferral): the old room is torn down with destroyRoom, the
+ * direct, non-cascading teardown, which is safe mid-tick because every
  * downstream tick stage iterates queries, and destroyNode removes dying nodes
  * from every query as it goes, so those stages simply see nothing this frame.
  */
@@ -108,7 +108,7 @@ export function recreate(ctx: ScriptContext): void {
     const state = ctx.server.state;
     const old = ctx.server.room;
 
-    // fresh room from the same scene, in the same namespace — gameOptions and
+    // fresh room from the same scene, in the same namespace, gameOptions and
     // matchmaking are namespace-scoped, so they carry over untouched.
     const fresh = ServerRooms.createRoomInNamespace(state, old.sceneId, old.mode, old.namespace, old.sourceRoomId ?? undefined);
 
@@ -126,7 +126,7 @@ export function recreate(ctx: ScriptContext): void {
         Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
     }
 
-    // retire the old room — its now-inactive players and all its nodes are
+    // retire the old room, its now-inactive players and all its nodes are
     // cleaned up here.
     ServerRooms.destroyRoom(state.rooms, old.id);
 }
@@ -134,7 +134,7 @@ export function recreate(ctx: ScriptContext): void {
 /* ── active control ──────────────────────────────────────────────── */
 
 /**
- * Activate a room — make it the focused view.
+ * Activate a room, make it the focused view.
  *
  * Server form (4 args): instructs `client` to activate (roomId, mode).
  * Sends an `activate_room` message over the per-client outbox.
@@ -200,7 +200,7 @@ export function activate(
 /* ── enumeration ─────────────────────────────────────────────────── */
 
 /**
- * List rooms visible to the caller — all roomIds in the caller's
+ * List rooms visible to the caller, all roomIds in the caller's
  * namespace (server) or all roomIds the client observes (client).
  */
 export function list(ctx: ScriptContext): string[] {
@@ -221,8 +221,8 @@ export function list(ctx: ScriptContext): string[] {
 /**
  * Return a ScriptContext pointing at another room. Returns null if the
  * target is unknown (or in a different namespace, server) or not
- * observed (client). Mutation through the returned context is allowed
- * — advanced; it bypasses the calling room's tick boundaries.
+ * observed (client). Mutation through the returned context is allowed,
+ * advanced; it bypasses the calling room's tick boundaries.
  */
 export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode }): ScriptContext | null {
     if (env.server && ctx.server) {
@@ -293,7 +293,7 @@ export function join(ctx: ScriptContext, client: Client, roomId: string, o?: { m
 
 /**
  * Remove `client`'s Player from `roomId`. Does NOT auto-destroy the
- * room when empty — use rooms.stop explicitly.
+ * room when empty, use rooms.stop explicitly.
  */
 export function leave(ctx: ScriptContext, client: Client, roomId: string, o?: { mode?: PlayerMode }): void {
     if (!env.server) throw new Error('[bongle] rooms.leave: server-only');

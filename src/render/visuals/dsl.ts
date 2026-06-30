@@ -1,6 +1,6 @@
 // Shared shader-node helpers (gpucat DSL) for the visual traits. A single
-// home for the small pieces of fragment logic that every albedo-based trait
-// — mesh, sprite, extruded sprite, voxel mesh — needs to agree on, so they
+// home for the small pieces of fragment logic that every albedo-based trait,
+// mesh, sprite, extruded sprite, voxel mesh, needs to agree on, so they
 // can't drift apart in per-trait copies.
 
 import { add, Discard, d, div, dot, Fn, f32, fract, fragCoord, If, max, mix, mul, type Node, vec3f } from 'gpucat';
@@ -10,19 +10,19 @@ import { add, Discard, d, div, dot, Fn, f32, fract, fragCoord, If, max, mix, mul
 // The per-instance colour/lighting knobs, in one place so every trait
 // agrees on what they mean. Four orthogonal axes, each owning one thing:
 //
-//   tint  — persistent recolour, luminance-preserving. rgb is the target
+//   tint, persistent recolour, luminance-preserving. rgb is the target
 //           colour, a the intensity (0 = untouched, 1 = full); white or
 //           a = 0 is a no-op. Keeps the surface's own lightness, so it
 //           shifts colour without darkening (red tint → red, not dark red).
-//           NEVER changes coverage — fade/cutout is the `dither` axis.
-//   flash — transient overlay. Lerps toward a flat colour on top of the
+//           NEVER changes coverage, fade/cutout is the `dither` axis.
+//   flash, transient overlay. Lerps toward a flat colour on top of the
 //           tint but underneath lighting (damage flash, charge-up).
-//   glow  — emission as a lighting floor in the surface's OWN colour
+//   glow, emission as a lighting floor in the surface's OWN colour
 //           (glow=1 → fully lit, shadow-free) rather than adding white,
 //           which would wash it out. Capped, not additive: there's no bloom
 //           pass for overbright to feed. `litMin` shares this axis and is
 //           already folded into `light` by the caller.
-//   unlit — bypasses lighting entirely (0..1), showing the tinted+flashed
+//   unlit, bypasses lighting entirely (0..1), showing the tinted+flashed
 //           surface. A hard flag, separate from glow/litMin because it also
 //           lets the CPU path skip light sampling.
 
@@ -69,9 +69,9 @@ export function shadeTinted(
  *
  *   fade = dither   // 0 = solid, 1 = gone
  *
- * Cheap (a few fracts) and stays in the opaque pipeline — no sort, no blend.
+ * Cheap (a few fracts) and stays in the opaque pipeline, no sort, no blend.
  * Returns `color`, or discards the fragment. `dither = 0` is a pure cutout
- * (the no-fade fast path). Tint never feeds this — it can't gate coverage.
+ * (the no-fade fast path). Tint never feeds this, it can't gate coverage.
  */
 export function ditherDiscard(color: Node<d.vec4f>, alpha: Node<d.f32>, dither: Node<d.f32>): Node<d.vec4f> {
     const discard = Fn(

@@ -2,12 +2,12 @@
  * Script-facing particle API.
  *
  * Three surfaces from one barrel:
- *   - `particle(id, options)` — module-scope declaration primitive
+ *   - `particle(id, options)`, module-scope declaration primitive
  *     (parallel to `sprite()` / `sound()` / `block()`).
- *   - `spawnParticle(ctx, type, pos, opts?)` — runtime spawn into the
+ *   - `spawnParticle(ctx, type, pos, opts?)`, runtime spawn into the
  *     per-room pool. server-safe (returns `null` when there's no client
  *     room), per `feedback_no_callbacks_on_primitives` semantics.
- *   - `particleUpdate.*` — curated motion vocabulary used inside a
+ *   - `particleUpdate.*`, curated motion vocabulary used inside a
  *     particle's `update` fn (see `core/particles/particle-update.ts`).
  *
  * Type re-exports cover everything a script needs to type a handle or
@@ -37,7 +37,7 @@ export type { SpawnOpts } from '../render/particles/particles';
  *
  * `pos` is splatted into `posX/posY/posZ`; `opts` overrides the
  * universal default-init fields (velocity, lifetime, size, seed,
- * spawnTime — see `SpawnOpts`). type-specific knobs live inside the
+ * spawnTime, see `SpawnOpts`). type-specific knobs live inside the
  * particle's `update` fn, not on this call.
  */
 export function spawnParticle(ctx: ScriptContext, type: ParticleHandle, pos: Vec3, opts?: SpawnOpts): number | null {

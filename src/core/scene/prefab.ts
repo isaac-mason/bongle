@@ -1,17 +1,17 @@
-// core/scene/prefab.ts — prefab instantiation tick driver.
+// core/scene/prefab.ts, prefab instantiation tick driver.
 //
 // called every tick for every room (server and client, edit and play).
 // drains the `_prefabsDirty` set, reconciling each anchor by re-running its
 // def's `apply`. dirty entries arrive from three sources:
-//   - `registerSubtree` / `setPrefab` — first-time init + args/config edits
-//   - `markPrefabAnchorsDirty` — DepGraph propagation from
+//   - `registerSubtree` / `setPrefab`, first-time init + args/config edits
+//   - `markPrefabAnchorsDirty`, DepGraph propagation from
 //     `applyRegistryChanges*` (a dep producer changed, transitively reaches
 //     this prefab id)
-// no version comparisons here — membership in `_prefabsDirty` *is* the
+// no version comparisons here, membership in `_prefabsDirty` *is* the
 // staleness signal. resource reads happen entirely through the dep handles
 // closed over by `def.apply`.
 //
-// no server/client imports — same struct on both.
+// no server/client imports, same struct on both.
 
 import type { Quat } from 'mathcat';
 import { collapseTransformIntoChildren, getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
@@ -38,8 +38,8 @@ import type { NodesContext } from './scripts';
 /**
  * resolve a node's *effective* realm by walking up parent pointers until
  * a non-`'inherit'` ancestor is found. roots are explicitly `'shared'`,
- * so this terminates without a sentinel. cheap — typical chains are a
- * few links deep — and runs only over the tracked prefab set, not the
+ * so this terminates without a sentinel. cheap, typical chains are a
+ * few links deep, and runs only over the tracked prefab set, not the
  * full tree.
  */
 function effectiveRealm(node: Node): Realm {
@@ -69,7 +69,7 @@ export function prefabHasNodes(def: PrefabDef): boolean {
  * are all of `def.deps` populated? handles start at `version: 0` with empty
  * content; the engine bumps to ≥1 once the resource arrives (codegen barrel
  * at boot, bongle:scene-update HMR event in dev). gating reconcile on this
- * lets `fn` assume every version-bearing dep handle has real content — no
+ * lets `fn` assume every version-bearing dep handle has real content, no
  * null guards. nodes whose deps aren't ready stay in `_prefabsDirty`; the
  * dispatch flush that populates the dep also re-marks the anchor dirty,
  * giving the next tick another shot.
@@ -79,7 +79,7 @@ export function prefabHasNodes(def: PrefabDef): boolean {
  * stays at version 0 forever, so apply just never fires there.
  *
  * versionless handles (blocks, traits, commands, …) carry no unpopulated
- * state — they're ready immediately and skip the gate.
+ * state, they're ready immediately and skip the gate.
  */
 function depsReady(def: PrefabDef): boolean {
     for (const dep of def.deps) {
@@ -114,7 +114,7 @@ function collectInstantiatedNodes(children: Node[]): Node[] {
 export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
     /**
      * the prefab anchor. by convention, `ctx.root` carries only identity
-     * (uuid + scene-level transform + prefab config) — attach content as
+     * (uuid + scene-level transform + prefab config), attach content as
      * children via `addChild(ctx.root, …)`, do NOT `addTrait(ctx.root, …)`.
      * children added here are marked `persist: false` automatically so the
      * destroy/re-instantiate cycle cleans them up.
@@ -122,7 +122,7 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
      * play-mode bake (after first successful expand): the anchor's
      * `TransformTrait` is collapsed into the first-encountered
      * `TransformTrait` in each child subtree, then removed from the anchor,
-     * and `node.prefab` is nulled — the anchor becomes a transformless
+     * and `node.prefab` is nulled, the anchor becomes a transformless
      * container and no further reconcile fires. edit mode keeps the live
      * link for HMR.
      */
@@ -138,7 +138,7 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
 };
 
 export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): PrefabApplyContext {
-    // snapshot existing children before user fn runs — `all` reflects whatever
+    // snapshot existing children before user fn runs, `all` reflects whatever
     // was there pre-fn. (today this is empty since reconcile tears down before
     // expand; kept for forward compat.)
     const snapshot = collectInstantiatedNodes(root.children);
@@ -156,7 +156,7 @@ export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): Pref
  * editor ghost cache), or null otherwise.
  *
  * does NOT touch existing children, persist flags, _prefabState, or world
- * voxels — those are reconciliation concerns layered on top by
+ * voxels, those are reconciliation concerns layered on top by
  * `reconcilePrefabNode`. callers that just need the content (the editor's
  * blueprint bake) call this directly.
  */
@@ -177,7 +177,7 @@ export function expandPrefab(
         voxels = createVoxels(blockRegistry);
     }
 
-    // single def.apply call — fn does all the work
+    // single def.apply call, fn does all the work
     try {
         def.apply(buildPrefabApplyContext(node, voxels), config.args);
     } catch (err) {
@@ -191,7 +191,7 @@ export function expandPrefab(
  * runtime tick driver: ensure `node`'s children match its current prefab
  * config. tears down stale (non-persistent) children, expands the def fresh,
  * marks new children non-persistent so the next tick can clean them up, and
- * (in play mode) stamps voxel content into the world. idempotent — safe to
+ * (in play mode) stamps voxel content into the world. idempotent, safe to
  * call repeatedly; only does work when the node is stale.
  */
 export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesContext, worldVoxels: Voxels | null): void {
@@ -209,18 +209,18 @@ export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesCont
 
     const preparedVoxels = expandPrefab(node, runtime, worldVoxels?.registry ?? null);
 
-    // children added during apply are prefab outputs — mark non-persistent so
+    // children added during apply are prefab outputs, mark non-persistent so
     // the next instantiation tick destroys them before re-running the fn.
     for (const child of node.children) {
         if (!beforeApply.has(child)) child.persist = false;
     }
 
     // stamp rotated voxels into the world.
-    // only in play mode — edit mode uses the ghost visual from prefab-visuals.ts.
+    // only in play mode, edit mode uses the ghost visual from prefab-visuals.ts.
     if (def && prefabHasVoxels(def) && worldVoxels && nodes.roomMode === 'play' && preparedVoxels) {
         const t = getTrait(node, TransformTrait);
 
-        // anchor's world pose — local is wrong when the anchor has a
+        // anchor's world pose, local is wrong when the anchor has a
         // transformed ancestor (the bake's collapseTransformIntoChildren
         // resolves children to world space, voxels must match).
         const wp = t ? getWorldPosition(t) : null;
@@ -241,7 +241,7 @@ export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesCont
                         const paletteIdx = chunk.data[(ly << (CHUNK_BITS + CHUNK_BITS)) | (lz << CHUNK_BITS) | lx]!;
                         const key = chunk.paletteKeys[paletteIdx];
                         if (!key || key === BLOCK_AIR) continue;
-                        // BULK — prefab paste writes potentially thousands of cells;
+                        // BULK, prefab paste writes potentially thousands of cells;
                         // server end-of-tick runBlockEventHooks drains them in one pass.
                         setBlock(
                             worldVoxels,
@@ -300,7 +300,7 @@ function hasPrefabCycle(node: Node): boolean {
  */
 function dissolveAnchor(sg: Nodes, anchor: Node): void {
     const parent = anchor.parent;
-    if (!parent) return; // detached or root — leave it
+    if (!parent) return; // detached or root, leave it
     const anchorIdx = parent.children.indexOf(anchor);
     const childrenSnapshot = anchor.children.slice();
     for (const child of childrenSnapshot) {
@@ -317,17 +317,17 @@ function dissolveAnchor(sg: Nodes, anchor: Node): void {
 
 /**
  * tick the prefab system for a room. call once per fixed timestep tick,
- * after scripts have run. drains `_prefabsDirty` — handles first-time
+ * after scripts have run. drains `_prefabsDirty`, handles first-time
  * init, args / config edits (via `setPrefab`), and edit-mode dep changes
  * (via `markPrefabAnchorsDirty` driven by the dispatch DepGraph) uniformly
  * on both server and client.
  *
- * worldVoxels is the room's live voxel state — needed to stamp prefab
+ * worldVoxels is the room's live voxel state, needed to stamp prefab
  * voxels into the world when the def's `type` includes voxels. pass null
  * if the room has no voxels (shouldn't happen in practice).
  *
- * side: 'server' — process nodes that live on the server (`shared`, `server`, `each`)
- *       'client' — process nodes that live on the client (`shared`, `client`, `each`)
+ * side: 'server', process nodes that live on the server (`shared`, `server`, `each`)
+ *       'client', process nodes that live on the client (`shared`, `client`, `each`)
  *
  * `each` runs on both sides (independent copies), `shared` runs everywhere
  * (replicated copy), `server`/`client` run only on their respective side.
@@ -339,7 +339,7 @@ export function tick(
     worldVoxels: Voxels | null,
     side: 'server' | 'client',
 ): void {
-    // edit rooms bypass realm gating — the editor instantiates everything
+    // edit rooms bypass realm gating, the editor instantiates everything
     // regardless of where it would run at play time, so it can render and
     // mutate every node. play rooms still bake voxels even when an edit
     // Player is observing.
@@ -349,7 +349,7 @@ export function tick(
     // (driven by the dispatch DepGraph propagation) feeds dep-content
     // changes. steady state is empty in both modes → tick is O(churn).
     const isEdit = sg.roomMode === 'edit';
-    // snapshot so we can mutate the dirty set during iteration —
+    // snapshot so we can mutate the dirty set during iteration,
     // reconcilePrefabNode destroys nested prefab outputs which can also be
     // anchors (nested prefabs), and the drain mutates `_prefabsDirty`.
     const work = Array.from(sg._prefabsDirty);
@@ -379,7 +379,7 @@ export function tick(
                 continue;
             }
         }
-        // wait for deps to be populated — apply expects real content.
+        // wait for deps to be populated, apply expects real content.
         // leave the node in the dirty set so we retry next tick.
         if (!depsReady(def)) continue;
         if (hasPrefabCycle(node)) {
@@ -392,12 +392,12 @@ export function tick(
 
         // play-mode bake: sever the prefab link, collapse the anchor's
         // transform into its children's first TransformTrait, then dissolve
-        // the anchor — splice its children into its parent's slot and
+        // the anchor, splice its children into its parent's slot and
         // destroy it. spawned bodies become top-level (no perma parent
         // matmul; top-level interpolation branch handles prediction blend)
         // and the anchor leaves no trace in the live tree. both sides bake
         // deterministically from the same initial state, so this stays
-        // local — no replication. edit mode keeps the live link for HMR.
+        // local, no replication. edit mode keeps the live link for HMR.
         if (!isEdit) {
             collapseTransformIntoChildren(node);
             removeTrait(node, TransformTrait);

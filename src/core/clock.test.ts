@@ -16,7 +16,7 @@ describe('Clock server-clock sync', () => {
         const clock = Clock.init(100);
         Clock.tick(clock, 1 / 60);
         expect(clock.server).toBeCloseTo(100 + 1 / 60, 6);
-        // not yet synced — syncServer must leave the dead-reckoned value alone.
+        // not yet synced, syncServer must leave the dead-reckoned value alone.
         Clock.syncServer(clock, 5, 1 / 60);
         expect(clock.server).toBeCloseTo(100 + 1 / 60, 6);
     });
@@ -43,7 +43,7 @@ describe('Clock server-clock sync', () => {
         expect(clock.sync.appliedOffset).toBeCloseTo(serverClock - recvTime, 9);
 
         Clock.syncServer(clock, recvTime, 1 / 60);
-        // server == the server-time we observed, minus the interp buffer — i.e. behind
+        // server == the server-time we observed, minus the interp buffer, i.e. behind
         // true server-now by the one-way latency the push took PLUS the jitter buffer.
         // that lag is what lines up server-stamped events without pop-in.
         expect(clock.server).toBeCloseTo(serverClock - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
@@ -57,7 +57,7 @@ describe('Clock server-clock sync', () => {
         // a MORE delayed push (smaller offset) is ignored.
         Clock.observeSample(clock, 101.0, 1.5); // offset 99.5
         expect(clock.sync.targetOffset).toBeCloseTo(100.0, 9);
-        // a LESS delayed push (larger offset) wins — it's the freshest/tightest.
+        // a LESS delayed push (larger offset) wins, it's the freshest/tightest.
         Clock.observeSample(clock, 102.4, 2.2); // offset 100.2
         expect(clock.sync.targetOffset).toBeCloseTo(100.2, 9);
     });
@@ -112,7 +112,7 @@ describe('Clock server-clock sync', () => {
         // server clock = local-monotonic + trueOffset; the old code dead-reckoned from
         // a single seed and drifted without bound. continuous push-sync must hold server
         // locked a steady one-way latency (L) behind true server-now for the whole
-        // session — the lag that makes server-stamped events line up.
+        // session, the lag that makes server-stamped events line up.
         const clock = Clock.init(0);
         const trueOffset = 1234.5;
         const L = 0.04; // one-way push latency

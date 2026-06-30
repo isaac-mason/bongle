@@ -3,7 +3,7 @@
 // for each `model('id', { src })` declared in user code:
 //   - reads the source gltf via gltf-transform
 //   - projects it onto the engine's ModelBin schema (meshes + clips + images)
-//   - packs twice — server bin (no images) + client bin (with images)
+//   - packs twice, server bin (no images) + client bin (with images)
 //   - writes client bin to resources/client/models/<id>.<hash8>.client.bin
 //     (kit serves resources/client/* in dev and copies it into dist/client/
 //     at build time; reachable at /models/...)
@@ -12,19 +12,19 @@
 //     so the server bin ships with the bundle and never leaks into the client output)
 // then writes a single barrel src/generated/models.ts with every model's
 // scene + handle constructed inline (each model wrapped in an IIFE so
-// per-model locals — _node_*, _clip_*, _scene — don't collide).
+// per-model locals, _node_*, _clip_*, _scene, don't collide).
 //
 // single-file rationale: cold start writes one file instead of N+1,
 // eliminating HMR-wall noise when many models are declared. The barrel
 // also declaration-merges `ModelHandleMap` and seeds the registry via
-// `__kit.registerModel(id, handle)` — same wire as before.
+// `__kit.registerModel(id, handle)`, same wire as before.
 //
 // incrementality: an in-memory `Map<id, ModelsCacheEntry>` owned by the
 // pipeline orchestrator (`PipelineState.modelsCache`) carries srcHash +
 // bin paths across calls within a session. cache hit + bins still on disk
 // → skip pack+write, reuse cached outputs; the barrel is always re-emitted
 // (cheap, keeps generated types in sync). cross-process warmth is
-// intentionally not preserved — every fresh process pays a cold pack.
+// intentionally not preserved, every fresh process pays a cold pack.
 
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -45,14 +45,14 @@ import { resolveSrcToAbsPath, writeFileIfChanged } from './util';
 
 // ── paths ──────────────────────────────────────────────────────────
 
-// URL prefixes (bundle-relative — engine resolves via `assetUrl()` which
+// URL prefixes (bundle-relative, engine resolves via `assetUrl()` which
 // either prefixes the bundle's import.meta.url in prod or the dev origin
 // root in dev). Not filesystem paths.
 const CLIENT_URL_PREFIX = 'models';
 const SERVER_URL_PREFIX = 'models';
 
 // Filesystem paths are derived per-call from BuildModelsOptions.projectDir
-// inside buildModels — no module-scope path constants, no cwd reliance.
+// inside buildModels, no module-scope path constants, no cwd reliance.
 type Paths = {
     clientBinDir: string;
     serverBinDir: string;
@@ -79,10 +79,10 @@ export type ModelsCacheEntry = {
 
 export type BuildModelsOptions = {
     /** absolute path to the project root. All input + output paths resolve
-     *  against this — no reliance on process.cwd(). */
+     *  against this, no reliance on process.cwd(). */
     projectDir: string;
     /** session-scoped incremental cache, mutated in place per call. Owned
-     *  by `PipelineState`. Lost on process restart by design — cross-process
+     *  by `PipelineState`. Lost on process restart by design, cross-process
      *  warm starts aren't supported. */
     cache: Map<string, ModelsCacheEntry>;
 };
@@ -111,7 +111,7 @@ type ModelPayload = {
     sceneNodes: SceneNodeInfo[];
     /** every unique node name (for `ModelHandle.nodes` index). */
     nodeNames: string[];
-    /** mesh-bearing entries — name + local AABB, in stable order. */
+    /** mesh-bearing entries, name + local AABB, in stable order. */
     meshes: ModelMeshInfo[];
     /** animation clip names. */
     clipNames: string[];
@@ -120,7 +120,7 @@ type ModelPayload = {
      *  identity + non-mesh + non-animated (the runtime's `parent transform`
      *  walk skips trait-less nodes, so those are pure overhead). */
     animatedNodeNames: string[];
-    /** bind-pose AABB in root-local space — union of mesh AABBs transformed by their node's TRS chain. */
+    /** bind-pose AABB in root-local space, union of mesh AABBs transformed by their node's TRS chain. */
     aabb: Box3;
 };
 
@@ -147,7 +147,7 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     const cache = opts.cache;
 
     if (models.size === 0) {
-        // no declarations — emit empty barrel + GC any leftover bins
+        // no declarations, emit empty barrel + GC any leftover bins
         ensureDir(path.dirname(paths.barrelPath));
         writeFileIfChanged(paths.barrelPath, EMPTY_BARREL);
         gcOrphanBins(paths, new Set());
@@ -166,11 +166,11 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
         if (e.fresh) anyFresh = true;
     }
 
-    // single barrel — re-emit unconditionally so the typed signatures stay
+    // single barrel, re-emit unconditionally so the typed signatures stay
     // in sync with current handle metadata.
     emitBarrel(paths, entries);
 
-    // rewrite cache in place to mirror the current build — drop ids no
+    // rewrite cache in place to mirror the current build, drop ids no
     // longer present, refresh entries for current ids.
     cache.clear();
     for (const e of entries) {
@@ -206,7 +206,7 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
 /**
  * Read a gltf source and run the optimization passes used at every emit:
  * weld → dedup → reorder. Skip Draco (300KB decoder is overkill for our
- * tiny assets) and skip KTX2/BasisU on textures (would smear pixel atlases —
+ * tiny assets) and skip KTX2/BasisU on textures (would smear pixel atlases,
  * leave as PNG/JPEG). reorder uses 'performance' because we ship a custom
  * packcat bin (not GLB), so vertex cache locality is what matters; transmission
  * size is handled at the bin level.
@@ -236,7 +236,7 @@ async function processModel(
     const srcBytes = fs.readFileSync(absPath);
     const srcHash = sha256Hex(srcBytes);
 
-    // cache hit path — skip pack + write, but still parse + optimize the doc
+    // cache hit path, skip pack + write, but still parse + optimize the doc
     // to derive structural payload for the sidecar. transforms must run here
     // too: dedup() can collapse identical meshes, so projecting the
     // unoptimized doc would emit sidecar references the bin doesn't contain.
@@ -262,7 +262,7 @@ async function processModel(
         }
     }
 
-    // cold path — load + optimize, project, then pack + write.
+    // cold path, load + optimize, project, then pack + write.
     const doc = await loadAndOptimize(absPath);
     const { payload, meshes, clips, images } = projectDocument(doc);
 
@@ -270,7 +270,7 @@ async function processModel(
     // (.glb uploads) carry the same fields in their parsed ModelBin so
     // the runtime hydrator works format-agnostically; declared models
     // still source their authoritative handle from the codegen barrel
-    // (see `renderModelConstruction` below) — these fields are the
+    // (see `renderModelConstruction` below), these fields are the
     // engine's fallback / parity story, not the primary path.
     const sceneNodes = payload.sceneNodes.map((sn) => ({
         name: sn.name,
@@ -355,7 +355,7 @@ function projectDocument(doc: Document): ProjectedDocument {
         imageIndexByTexture.set(tex, idx);
     }
 
-    // depth-first flatten — same traversal used for sidecar + clip channels.
+    // depth-first flatten, same traversal used for sidecar + clip channels.
     const flat: { node: GltfNode; parentIndex: number }[] = [];
     function flatten(n: GltfNode, parentIdx: number) {
         const idx = flat.length;
@@ -366,7 +366,7 @@ function projectDocument(doc: Document): ProjectedDocument {
         for (const child of scene.listChildren()) flatten(child, -1);
     }
 
-    // dedupe node names — first occurrence keeps bare name, suffix the rest.
+    // dedupe node names, first occurrence keeps bare name, suffix the rest.
     const usedNodeNames = new Set<string>();
     function uniqueNodeName(base: string): string {
         if (!usedNodeNames.has(base)) {
@@ -478,7 +478,7 @@ function projectDocument(doc: Document): ProjectedDocument {
                     property = 'scale';
                     break;
                 default:
-                    continue; // skip 'weights' (morph targets) — out of scope
+                    continue; // skip 'weights' (morph targets), out of scope
             }
 
             const interp = sampler.getInterpolation();
@@ -582,7 +582,7 @@ function computeModelAabb(sceneNodes: SceneNodeInfo[], meshes: Map<string, Model
     }
 
     if (!Number.isFinite(minX)) {
-        // no meshes — empty model. zero box at origin.
+        // no meshes, empty model. zero box at origin.
         return [0, 0, 0, 0, 0, 0];
     }
     return [minX, minY, minZ, maxX, maxY, maxZ];
@@ -606,7 +606,7 @@ function extractMesh(
     let maxY = -Infinity;
     let maxZ = -Infinity;
 
-    /** first primitive's baseColor texture wins (importer flattens primitives —
+    /** first primitive's baseColor texture wins (importer flattens primitives,
      *  see model-bin.ts comment). undefined if no primitive has one. */
     let imageIndex: number | undefined;
 
@@ -697,7 +697,7 @@ function renderBarrel(entries: BuildEntry[]): string {
     lines.push(``);
     lines.push(`import { type ClipDef, type ModelHandle, MeshTrait, TransformTrait } from 'bongle';`);
     // `__kit` is provided in module scope by the kit Vite plugin's
-    // prelude (see kit/src/vite/plugin.ts) — re-importing it here would
+    // prelude (see kit/src/vite/plugin.ts), re-importing it here would
     // collide with the prelude's top-level `import { __kit }` and parse
     // as "Identifier '__kit' has already been declared".
     lines.push(`import { addChild, addTrait, createNode } from 'bongle/internal';`);
@@ -793,7 +793,7 @@ function renderModelConstruction(e: BuildEntry, lines: string[]): void {
     // directly; otherwise wrap multiple roots under a synthetic detached
     // node named after the model id. The synthetic wrapper isn't added to
     // `nodes` (no name to give it that wouldn't risk colliding with a
-    // real gltf node) — user reaches it via `handle.scene`.
+    // real gltf node), user reaches it via `handle.scene`.
     const rootIndices: number[] = [];
     for (let i = 0; i < sceneNodes.length; i++) {
         if (sceneNodes[i]!.parent < 0) rootIndices.push(i);
@@ -906,7 +906,7 @@ function sanitizeIdent(id: string): string {
     return s;
 }
 
-/** TRS within `TRS_EPS` of identity — gltf bake noise absorbs the slack. */
+/** TRS within `TRS_EPS` of identity, gltf bake noise absorbs the slack. */
 const TRS_EPS = 1e-6;
 function isIdentityTRS(sn: SceneNodeInfo): boolean {
     const [px, py, pz] = sn.position;

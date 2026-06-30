@@ -1,4 +1,4 @@
-// api/lighting.ts — script-facing voxel-lighting controls.
+// api/lighting.ts, script-facing voxel-lighting controls.
 //
 // Server-only: configures how the voxel world propagates light. The
 // default (`enabled: true`) runs the BFS flood-fill on every block change
@@ -10,12 +10,12 @@ import type { ScriptContext } from '../core/scene/scripts';
 /**
  * configure flood-fill light propagation for this room's voxel world.
  *
- * fields default to their current value — pass only what you want to
+ * fields default to their current value, pass only what you want to
  * change. shallow merge.
  *
  * - `enabled`: when false, `setBlock` and new chunks skip the BFS queue
  *   and inline-seed `chunk.light` from block emission + `minLevel` sky.
- * - `minLevel`: sky-channel seed used by inline writes (0–15). `15`
+ * - `minLevel`: sky-channel seed used by inline writes (0-15). `15`
  *   keeps the world fully lit; `0` is pitch black except for block
  *   emission.
  */

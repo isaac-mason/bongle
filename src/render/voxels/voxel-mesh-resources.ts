@@ -1,11 +1,11 @@
-// VoxelMeshResources — engine-global baked-mesh material.
+// VoxelMeshResources, engine-global baked-mesh material.
 //
 // builds one Material per `EngineClient`; shared across all rooms. each
 // room's per-instance buffers (meshQuads, instanceData, slotMap,
 // chunkInfoTable) are routed by name via `geometry.setBuffer(...)`.
 //
 // the baked path mirrors the chunk path's unified all-quads format
-// (14 u32/quad — header + per-corner light interleaved; see
+// (14 u32/quad, header + per-corner light interleaved; see
 // voxel-material.ts and chunk-mesher.ts PassMesh), but uses HW instancing:
 //   - one DrawIndirect per (model × source-chunk) bucket; instanceCount =
 //     number of currently-visible VoxelMeshTraits referencing that model.
@@ -66,7 +66,7 @@ import {
 export const InstanceParams = struct('VoxelMeshInstanceParams', {
     /** rgb is the recolour target, a the intensity (lightness-preserving). */
     tint: d.vec4f,
-    /** transient overlay — rgb is the colour, a the strength (lerp). */
+    /** transient overlay, rgb is the colour, a the strength (lerp). */
     flash: d.vec4f,
     /** per-instance light floor [sky, r, g, b] sampled at the instance
      *  origin. combined as a floor on the per-corner `meshLight` so a
@@ -82,7 +82,7 @@ export const InstanceParams = struct('VoxelMeshInstanceParams', {
 });
 
 // Per-slot stable instance record. Merges world matrix + InstanceParams
-// into one binding — same shape as model-resources.ModelInstance. Layout:
+// into one binding, same shape as model-resources.ModelInstance. Layout:
 // mat4x4f (64B, align 16) then InstanceParams (64B, align 16, no pad)
 // → 128B per slot, struct align 16.
 export const ModelInstance = struct('VoxelMeshModelInstance', {
@@ -116,7 +116,7 @@ export const MAX_BUCKETS = 1 << (32 - SLOT_BITS);
 // ── resources ───────────────────────────────────────────────────────
 
 export type VoxelMeshResources = {
-    /** engine-global baked-mesh material — binds per-room buffers by name. */
+    /** engine-global baked-mesh material, binds per-room buffers by name. */
     material: Material;
 };
 
@@ -174,7 +174,7 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
     const { chunkLocalByte, uv, modelNormal } = decodeQuadCorner(meshQuads, realQuadId, cornerIdx);
     // inverse of mesher pos16's 255/16 scale (byte 0 → 0, byte 255 → 16).
     // matches chunk shader so sub-chunk boundaries within a baked mesh
-    // meet seamlessly — the old 1/16 scale left a ~0.0625-voxel gap at
+    // meet seamlessly, the old 1/16 scale left a ~0.0625-voxel gap at
     // every byte=255 corner.
     const chunkLocal = chunkLocalByte.mul(f32(16.0 / 255.0)).toVar('chunkLocal');
 

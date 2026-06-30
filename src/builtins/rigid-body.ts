@@ -142,7 +142,7 @@ export const RigidBodyTrait = trait('rigidbody', {
     def: null as RigidBodyDef | null,
 
     /**
-     * the live crashcat body — either installer-built (from `def`) or
+     * the live crashcat body, either installer-built (from `def`) or
      * script-adopted. trait owns teardown either way: removed on dispose
      * unless the script nulls `body` first (escape hatch for bodies shared
      * across traits).
@@ -150,7 +150,7 @@ export const RigidBodyTrait = trait('rigidbody', {
     body: null as RigidBody | null,
 
     /**
-     * intent — drives `effectiveMotionType` under authority/prediction
+     * intent, drives `effectiveMotionType` under authority/prediction
      * rules. seeded from `def.motionType` at install time when present;
      * otherwise defaults to DYNAMIC. user can reassign at runtime.
      */

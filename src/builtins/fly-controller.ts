@@ -1,5 +1,5 @@
 /**
- * fly controller — trait + script.
+ * fly controller, trait + script.
  *
  * the trait holds tunables (speed, look sensitivity, scroll-adjust bounds)
  * so they can be edited in the inspector. on init the script resolves the
@@ -27,7 +27,7 @@ import { TransformTrait } from './transform';
 
 const _EPS = 0.000001;
 
-// scratch — single-threaded, safe to share
+// scratch, single-threaded, safe to share
 const _forward: Vec3 = [0, 0, 0];
 const _right: Vec3 = [0, 0, 0];
 const _moveDir: Vec3 = [0, 0, 0];
@@ -66,8 +66,8 @@ export const FlyControllerTrait = trait(
 
         /**
          * smoothing half-life in seconds for both translation and look.
-         * 0 = off (instant, snappy — default).
-         * higher = smoother for cinematic / video capture (try 0.1–0.3).
+         * 0 = off (instant, snappy, default).
+         * higher = smoother for cinematic / video capture (try 0.1-0.3).
          */
         damping: 0,
     },
@@ -130,7 +130,7 @@ script(
         const room = client.room!;
         const { domElement, input } = client;
 
-        // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
+        // ── camera, resolved through CameraRefTrait on ctx.node (with fallback
         // to the room's default at client.camera), so editor lenses that point
         // editorNode's CameraRefTrait at a lens-private camera drive their own
         // camera and survive play↔edit toggles. the camera node lives at the
@@ -144,7 +144,7 @@ script(
         // (a separate scene-root camera node), so ctx.node's TransformTrait never
         // moves. that matters because:
         //  - real edit room: ctx.node === room.playerNode, server-authoritative.
-        //    server's Discovery.getPlayerChunkCoord reads this trait — without
+        //    server's Discovery.getPlayerChunkCoord reads this trait, without
         //    a write here, the anchor stays stuck at spawn.
         //  - local editor lens: ctx.node is a realm:'client' editorNode the
         //    server never sees; we additionally mirror into room.playerNode so
@@ -160,7 +160,7 @@ script(
         // applied yaw/pitch; lerps toward target* when damping > 0
         let yawDelta = 0;
         let pitchDelta = 0;
-        // raw input accumulators — receive mouse delta directly
+        // raw input accumulators, receive mouse delta directly
         let targetYawDelta = 0;
         let targetPitchDelta = 0;
         // absolute world-pitch baked into baseQuat. the clamp below enforces
@@ -182,7 +182,7 @@ script(
             pitchDelta = 0;
             targetYawDelta = 0;
             targetPitchDelta = 0;
-            // kill momentum on rebase — focusNode teleports / takeover should
+            // kill momentum on rebase, focusNode teleports / takeover should
             // not preserve velocity from the prior orientation.
             vec3.set(_velocity, 0, 0, 0);
             vec3.set(_forward, 0, 0, -1);
@@ -206,7 +206,7 @@ script(
             const fly = ctx.trait;
 
             // rebase if the camera quaternion was changed externally
-            // (e.g. focusNode teleport) — adopt the new orientation as base
+            // (e.g. focusNode teleport), adopt the new orientation as base
             // and zero deltas so the next frame produces it exactly.
             const camQuat = getWorldQuaternion(cameraTransform);
             const dot =
@@ -239,7 +239,7 @@ script(
                 targetPitchDelta = Math.max(-PITCH_LIMIT - basePitch, Math.min(PITCH_LIMIT - basePitch, targetPitchDelta));
             }
 
-            // exponential smoothing factor — k=1 when damping=0 (instant snap,
+            // exponential smoothing factor, k=1 when damping=0 (instant snap,
             // preserves the original snappy behavior). higher damping → slower
             // lerp, smoother camera for video capture.
             const k = fly.damping > 0 ? 1 - Math.exp(-delta / fly.damping) : 1;
@@ -256,7 +256,7 @@ script(
                     fly.speed = Math.max(fly.minSpeed, fly.speed / fly.speedScrollFactor);
                 }
                 // flySpeedShownAt is per-room editor state. play rooms have no
-                // edit-room store registered — the write silently no-ops there.
+                // edit-room store registered, the write silently no-ops there.
                 room.editorStore?.setState({ flySpeedShownAt: performance.now() });
             }
 
@@ -279,7 +279,7 @@ script(
                 ? (isKeyDown(input.mouseKeyboard, 'Space') ? 1 : 0) -
                   (isKeyDown(input.mouseKeyboard, 'ShiftLeft') || isKeyDown(input.mouseKeyboard, 'ShiftRight') ? 1 : 0)
                 : 0;
-            // build target velocity in world-space (zero when no input — lerps
+            // build target velocity in world-space (zero when no input, lerps
             // velocity back to zero on key-up for smooth deceleration).
             vec3.set(_targetVel, 0, 0, 0);
             if (fwd !== 0 || strafe !== 0 || vertical !== 0) {

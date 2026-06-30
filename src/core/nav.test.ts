@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as nav from './nav';
 
 // floodFill only forwards `voxels` to `actions`, so the BFS can be exercised with a
-// stub Actions over a synthetic grid — no Voxels world needed.
+// stub Actions over a synthetic grid, no Voxels world needed.
 const noVoxels = null as unknown as Parameters<typeof nav.floodFill>[0];
 
 // 4-connected open grid in the z-plane, bounded to [0, n)².

@@ -1,22 +1,22 @@
 /**
- * registry-dispatch.ts — drains pending changes from the unified `registry`
+ * registry-dispatch.ts, drains pending changes from the unified `registry`
  * singleton and applies them to the client-side engine state. invoked by
  * the bongle() vite plugin's hmr-end hook after a hot reload settles.
  *
  * mirror of `server/registry-dispatch.ts`. dispatch order is encoded as
  * call order here, not as a numeric priority on each kind. ordering rule:
- * producers before consumers — block textures rebuild atlas before blocks
+ * producers before consumers, block textures rebuild atlas before blocks
  * rewire voxels, models before model handles, traits late. each branch
  * gates on its kind store's pendingChanges length to keep no-op flushes
  * cheap; branches clear their own queues; one final `bumpVersion` marks
  * the flush boundary.
  *
  * client-side `resolveAllChunks` marks every chunk dirty, which the mesher
- * picks up on the next frame — no explicit `remeshWorld` call needed.
+ * picks up on the next frame, no explicit `remeshWorld` call needed.
  *
  * because blockTextures feed into BlockRegistry (textures + texAnimData)
  * and into VoxelResources (atlas + animation buffer), the two stores
- * drain together — a wholesale BlockRegistry rebuild covers both.
+ * drain together, a wholesale BlockRegistry rebuild covers both.
  * VoxelResources.refresh internally short-circuits when the atlas hash
  * and texAnimData are unchanged, so a blocks-only edit doesn't thrash
  * per-room visuals.
@@ -94,23 +94,23 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     logPendingChanges('client', allStores);
 
     // resolve the DepGraph dirty consumer set BEFORE any branch drains its
-    // queue — `collectDirtyByRegistry` reads `pendingChanges` arrays. each
+    // queue, `collectDirtyByRegistry` reads `pendingChanges` arrays. each
     // dispatch branch below clears its own queue once it acts, so the
     // dirty map captures the full flush before we lose it.
     const dirtyByRegistry = collectDirtyByRegistry(allStores);
     const dirtyPrefabIds = dirtyByRegistry.get('prefabs') ?? new Set<string>();
     const dirtyScriptIds = dirtyByRegistry.get('scripts') ?? new Set<string>();
-    // direct script-store changes feed the same applyTraitSwap path — keys
+    // direct script-store changes feed the same applyTraitSwap path, keys
     // already match `ScriptDef.key` (`${traitId}.${scriptId}`). a removed
     // script (its `script()` call deleted from source) is pruned from the
     // owning trait def here so applyTraitSwap disposes the live instance and
-    // instantiateTraitScripts can't resurrect it — see pruneRemovedScript.
+    // instantiateTraitScripts can't resurrect it, see pruneRemovedScript.
     for (const ch of registry.scripts.pendingChanges) {
         dirtyScriptIds.add(ch.handle.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
     }
 
-    // editor HMR toasts — one per kind with pending changes, plus one
+    // editor HMR toasts, one per kind with pending changes, plus one
     // for script-instance swaps reaching via DepGraph (when trait body
     // didn't change but a producer did). gated on env.editor so shipped
     // builds skip the store churn.
@@ -124,7 +124,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const prevCommandIds = registry.commandWireIndex.indexToId;
 
     // block textures feed BlockRegistry (textures + texAnimData) AND drive the
-    // GPU atlas — refresh() short-circuits on hash + texAnimData equality, so
+    // GPU atlas, refresh() short-circuits on hash + texAnimData equality, so
     // a blocks-only edit (no texture change) keeps the same VoxelResources.
     // when the atlas does change, per-room visuals (which hold material refs)
     // must be disposed + re-init'd; mesh visuals also bind the atlas + anim
@@ -142,7 +142,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
                 Resources.deleteModel(state.resources, id);
                 Resources.releaseModel(state.resources, id);
             } else {
-                // added or changed — re-register with both per-side urls and
+                // added or changed, re-register with both per-side urls and
                 // drop any stale payload so the next ensureModel() refetches.
                 Resources.releaseModel(state.resources, id);
                 Resources.setModel(state.resources, id, {
@@ -156,11 +156,11 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         registry.models.pendingChanges.length = 0;
     }
 
-    // trait def changes — swap every live script instance against the
+    // trait def changes, swap every live script instance against the
     // current `registry.traits`. client and server envs HMR independently;
     // each side owns its own script swap. there is no server→client rejoin
     // signal on trait edits, so the client must swap server-backed rooms
-    // too — gating on `room.local` would leave them stuck on old defs.
+    // too, gating on `room.local` would leave them stuck on old defs.
     //
     // dual path:
     //   - trait body change → wholesale swap (every instance), since trait
@@ -200,7 +200,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
 
     // prefabs: mark dirty anchors in edit rooms so the next prefab tick
     // re-instantiates them with the fresh def + dep content. play rooms
-    // stay stable across HMR (preserves gameplay state) — only setPrefab /
+    // stay stable across HMR (preserves gameplay state), only setPrefab /
     // registerSubtree dirty anchors there. dirtyPrefabIds folds both
     // directly-changed prefabs and transitive dep-change consumers.
     if (dirtyPrefabIds.size > 0) {
@@ -219,7 +219,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // effect is consumed via the trait def (controlsById, syncById,
     // scriptsById). codec WeakMaps keyed on TraitDef are dropped when
     // the parent trait swaps identity (replaceIdentity on the traits
-    // store) — drain so the queue doesn't grow unbounded.
+    // store), drain so the queue doesn't grow unbounded.
     registry.controls.pendingChanges.length = 0;
     registry.sync.pendingChanges.length = 0;
     registry.scripts.pendingChanges.length = 0;
@@ -273,8 +273,8 @@ function idListsEqual(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * Rebuild the BlockRegistry from current registry contents, refresh
- * VoxelResources (atlas + animation buffer) — short-circuits when the atlas
- * manifest hash and texAnimData are byte-identical to the previous build —
+ * VoxelResources (atlas + animation buffer), short-circuits when the atlas
+ * manifest hash and texAnimData are byte-identical to the previous build,
  * then repoint every room's `voxels.registry` and remesh all chunks. If
  * `VoxelResources.refresh` reports an atlas swap, rebuild each room's
  * per-room voxel materials (they bind the GPU TextureArray + per-room
@@ -317,7 +317,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
         if (voxelResourcesChanged) {
             // engine-global voxel arenas + geometries + materials all live
             // on the rebuilt `state.voxelResources`. per-room visuals just
-            // hold three `Mesh` wrappers pointing at those — re-init drops
+            // hold three `Mesh` wrappers pointing at those, re-init drops
             // the stale meshes (which still reference the disposed
             // geometries) and adds fresh ones bound to the new resources.
             VoxelVisuals.dispose(room.voxelVisuals, room.scene);
@@ -350,14 +350,14 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
  * TextureNode in place; the extruded + particle materials hold their own
  * TextureNodes against the same atlas and need an explicit rebind. The
  * extruded-sprite per-room geometry pool is baked from atlas pixels and
- * is invalidated wholesale — dispose + re-init so it re-bakes lazily.
+ * is invalidated wholesale, dispose + re-init so it re-bakes lazily.
  */
 export async function refreshSpriteResources(state: EngineClient): Promise<void> {
     const changed = await SpriteResources.refresh(state.spriteResources);
     if (!changed) return;
     ExtrudedSpriteResources.rebindAtlas(state.extrudedSpriteResources, state.spriteResources.atlas);
     ParticleResources.rebindAtlas(state.particleResources, state.spriteResources.atlas);
-    // wipe the engine-global silhouette pool — every bake is stale against
+    // wipe the engine-global silhouette pool, every bake is stale against
     // the new atlas pixels. per-room visuals dispose+re-init so their alive
     // states (holding now-dangling GeometrySlot refs) drop, and next frame's
     // update lazily re-acquires into the freshly-cleared pool.
@@ -376,7 +376,7 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
 /**
  * Re-fetch `audio-manifest.json` + `audio-atlas.mp3` into the engine-global
  * `AudioResources`, rebuilding the decoded clip buffers in place. Called from
- * the `bongle:audio-atlas-updated` HMR listener in the boot template — a sound
+ * the `bongle:audio-atlas-updated` HMR listener in the boot template, a sound
  * source-file edit has no registry change to ride, so this is the only path
  * that propagates it to the live client. `Audio.refreshResources` mutates the
  * shared `clips` map's contents, so every room sees the new buffers with no
@@ -425,7 +425,7 @@ function pushHmrToasts(stores: ReadonlyArray<KindStore<unknown>>, dirtyScriptIds
     }
     // script-instance swaps via DepGraph (producer-only change reaching
     // `scripts:<id>` whose body itself didn't move). suppressed when the
-    // trait body OR the script body itself changed — those already
+    // trait body OR the script body itself changed, those already
     // toasted under `traits` / `scripts` above.
     const directScriptIds = new Set(registry.scripts.pendingChanges.map((ch) => ch.handle.id));
     const propagatedScriptIds = [...dirtyScriptIds].filter((id) => !directScriptIds.has(id));

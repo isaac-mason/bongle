@@ -1,4 +1,4 @@
-// tools/transform.ts — gizmo-based transform tool for scene nodes + placement mode.
+// tools/transform.ts, gizmo-based transform tool for scene nodes + placement mode.
 //
 // two responsibilities:
 //
@@ -59,7 +59,7 @@ type TransformSnapshot = {
     scale: Vec3;
 };
 
-// pivot preset — controls where the gizmo sits relative to the blueprint.
+// pivot preset, controls where the gizmo sits relative to the blueprint.
 // 'min'    → [0, 0, 0]           (min corner of voxel AABB)
 // 'center' → [sx/2, sy/2, sz/2]  (center of voxel AABB)
 // 'max'    → [sx, sy, sz]         (max corner of voxel AABB)
@@ -80,14 +80,14 @@ export type PlacementState = {
     // the voxel-rotated blueprint variant (rebuilt when rotation changes)
     rotatedBlueprint: BlueprintData;
 
-    // root ghost node id — the single pivot the gizmo attaches to.
+    // root ghost node id, the single pivot the gizmo attaches to.
     rootId: number;
 
     // whether we've placed (clicked once) - switches from following cursor to gizmo-driven
     placed: boolean;
 
     // separate standalone node holding VoxelMeshTrait for the voxel ghost.
-    // NOT a scene-graph child of root — its interpolatedPosition is set manually
+    // NOT a scene-graph child of root, its interpolatedPosition is set manually
     // each frame in _syncProxyFromPlacementRoot.
     voxelNodeId: number | null;
 
@@ -129,7 +129,7 @@ export type PlacementState = {
 
 // transient grab-mode state. lives on TransformToolState as a single nullable
 // object so enter/exit are one assignment. the body is created directly in
-// the physics world (not via RigidBodyTrait) — gone the moment grab ends.
+// the physics world (not via RigidBodyTrait), gone the moment grab ends.
 export type GrabState = {
     nodeId: number;
     bodyId: BodyId;
@@ -140,7 +140,7 @@ export type GrabState = {
     anchorOffsetCS: Vec3;
     // body orientation in camera space at grab-start, so the relative rotation
     // (body's "facing direction") is preserved as we look around. pitch/roll
-    // are physically locked by the body's allowedDegreesOfFreedom — the
+    // are physically locked by the body's allowedDegreesOfFreedom, the
     // controller still targets the full camera orientation; the rigid body
     // just refuses to rotate on locked axes.
     anchorQuatCS: Quat;
@@ -204,7 +204,7 @@ export type TransformToolState = {
 
 // ── create / dispose ───────────────────────────────────────────────
 
-// note: `store` is patched in by the caller right after construction —
+// note: `store` is patched in by the caller right after construction,
 // the closures below access `state.store` only on user interaction (gizmo
 // drag, grab handle), never synchronously during create. This lets the
 // edit-room store reference transformToolState in its closures without a
@@ -329,7 +329,7 @@ export function createTransformTool(
             quat.multiply(deltaQ, proxy.quaternion, invStart);
 
             // snap rotation to 90deg increments whenever voxel content is in
-            // play — raw voxels can only sit on the integer grid in cardinal
+            // play, raw voxels can only sit on the integer grid in cardinal
             // orientations. covers both placement and selected voxel-bearing
             // prefab nodes (gizmo on already-placed instance).
             const snapToCardinal = state.placement
@@ -339,7 +339,7 @@ export function createTransformTool(
             if (snapToCardinal) {
                 // extract per-axis angles from the delta quaternion. the gizmo
                 // constrains to one axis at a time, so usually only one
-                // component is significant — check all three to be robust.
+                // component is significant, check all three to be robust.
                 const axes: Array<{ axis: 'x' | 'y' | 'z'; idx: 0 | 1 | 2 }> = [
                     { axis: 'x', idx: 0 },
                     { axis: 'y', idx: 1 },
@@ -463,7 +463,7 @@ export function createTransformTool(
         state.dragging = false;
         if (state.snapshots.length === 0) return;
 
-        // placement drags are ephemeral — no undo entry until commit
+        // placement drags are ephemeral, no undo entry until commit
         if (state.placement) return;
 
         const finals: TransformSnapshot[] = [];
@@ -607,7 +607,7 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
 
     // sync gizmo settings from store. when voxel content is involved (placement
     // blueprint or selected voxel-bearing prefab) force grid-aligned snaps and
-    // block scale mode — voxels live on the integer grid in cardinal orientations
+    // block scale mode, voxels live on the integer grid in cardinal orientations
     // and can't be sub-unit scaled. effective snaps are applied at the gizmo
     // level without mutating the store, preserving the user's preferred values.
     let gizmoMode = transformMode as 'translate' | 'rotate' | 'scale';
@@ -673,7 +673,7 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
             vec3.copy(state.proxy.position, _centroid);
             quat.identity(state.proxy.quaternion);
         }
-        // keep proxy scale at identity — non-uniform scale on the proxy would
+        // keep proxy scale at identity, non-uniform scale on the proxy would
         // corrupt the worldQuaternion that mat4.decompose extracts in the gizmo,
         // making the gizmo visuals distort. node scale is tracked in snapshots
         // and applied as ratios in onObjectChange instead.
@@ -853,7 +853,7 @@ export function enterPlacement(
 
     // ── create root ghost pivot ──
     // sits at blueprint.origin + pivotOffset in world space.
-    // has no geometry — pure pivot for the gizmo.
+    // has no geometry, pure pivot for the gizmo.
     const rootNode = createNode({ name: '__placement_root', persist: false });
     addChild(nodes.root, rootNode);
     const rootTransform = addTrait(rootNode, TransformTrait);
@@ -928,7 +928,7 @@ export function enterPlacement(
     vec3.set(state.proxy.scale, 1, 1, 1);
 
     // force 1-voxel translation snap + 90deg rotation snap for voxel blueprints.
-    // for node-only blueprints, only force place mode — preserve the user's
+    // for node-only blueprints, only force place mode, preserve the user's
     // chosen snaps (sub-voxel placement of nodes is fine).
     if (blueprint.hasVoxels) {
         state.store.setState({ rotationSnap: 90, translationSnap: 1, transformMode: 'place' });
@@ -967,7 +967,7 @@ export function updatePlacementFromRaycast(
     const [hx, hy, hz] = hitVoxel;
 
     // no active placement: drive currently-selected nodes from cursor.
-    // place mode is just a transform interaction — moves the selection to the
+    // place mode is just a transform interaction, moves the selection to the
     // hovered face, with snapTo controlling the alignment (face-center vs corner).
     if (!placement) {
         const selectedNodeIds = state.store.getState().selection.nodes;
@@ -1246,7 +1246,7 @@ export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: Script
     const nodeIds = Array.from(storeState.selection.nodes);
     if (nodeIds.length === 0) return;
 
-    // caller already applied the appropriate snap (and sign) — use angle as-is.
+    // caller already applied the appropriate snap (and sign), use angle as-is.
     // do NOT override with storeState.rotationSnap: that strips sign and ignores
     // caller-side voxel-content forced 90deg.
     quat.setAxisAngle(_nudgeRotQ, axis, angle);
@@ -1500,12 +1500,12 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
         : [0, 0, 0, 1];
 
     // prefab-source path: emit one wrapper node carrying the prefab config so
-    // the runtime re-instantiates the contents on the real node — keeps the
+    // the runtime re-instantiates the contents on the real node, keeps the
     // linkage alive instead of concretizing the snapshot. voxel ops + per-entry
     // node creates are skipped; the reconciler stamps voxels and rebuilds child
     // nodes from the prefab def. wrapper.quaternion combines gizmo rotation
-    // (rootTransform.quaternion) with keyboard/drag R-key rotation (voxelQuat
-    // — accumulated in rotatePlacement). matches the convention used by
+    // (rootTransform.quaternion) with keyboard/drag R-key rotation (voxelQuat,
+    // accumulated in rotatePlacement). matches the convention used by
     // buildNodePaste (pre-multiply: world rotation outside, local inside).
     const sourcePrefab = blueprint.sourcePrefab;
     const wrapperQuat: Quat = sourcePrefab ? quat.multiply(quat.create(), rotation, placement.voxelQuat) : rotation;
@@ -1549,7 +1549,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
         label: isCut ? 'cut-paste' : sourcePrefab ? 'place-prefab' : 'paste',
         do() {
             if (sourcePrefab) {
-                // single wrapper carrying the prefab config — runtime materializes
+                // single wrapper carrying the prefab config, runtime materializes
                 // voxels + child nodes on the real node.
                 send(ctx, CreateNodeCommand, {
                     id: createdIds[0]!,
@@ -1577,7 +1577,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
             if (voxelForward.length > 0) {
                 commitVoxelOps(ctx, voxelForward);
             }
-            // create nodes — buildNodePaste already re-anchored each entry's
+            // create nodes, buildNodePaste already re-anchored each entry's
             // top-level transform to world space. children carry parent-relative
             // positions and ride along through the children blob.
             for (let i = 0; i < nodePasteEntries.length; i++) {
@@ -1654,7 +1654,7 @@ export function cancelPlacement(state: TransformToolState, nodes: Nodes, ctx: Sc
 /**
  * revert place-mode-with-selection cursor-follow back to the snapshot positions.
  * called on cancel paths (mode-key, escape, tool change) so the cursor follow
- * acts as a non-destructive preview — no history entry is created.
+ * acts as a non-destructive preview, no history entry is created.
  */
 export function revertPlaceSelection(state: TransformToolState, nodes: Nodes): void {
     const snaps = state.placeSnapshots;
@@ -1677,7 +1677,7 @@ export function revertPlaceSelection(state: TransformToolState, nodes: Nodes): v
  * from the captured snapshots → current positions, persists via setTraitProps,
  * and replicates via SetTraitCommand. clears state.placeSnapshots.
  *
- * called only on explicit confirm (click) — see revertPlaceSelection for the
+ * called only on explicit confirm (click), see revertPlaceSelection for the
  * cancel path. no-op when nothing actually moved (avoids noise in undo stack).
  */
 export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ctx: ScriptContext): void {
@@ -1741,7 +1741,7 @@ export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ct
  * enter placement mode for a prefab. instantiates the prefab into a synthetic
  * scratch node, snapshots its voxels and child nodes into a Blueprint, and
  * feeds that Blueprint through the standard placement path. the prefab's
- * voxels become first-class blueprint voxels — rotation, pivot, snap, and
+ * voxels become first-class blueprint voxels, rotation, pivot, snap, and
  * commit all reuse the copy/paste codepath verbatim.
  *
  * the placed result is "frozen": the prefab linkage is dropped at commit time.
@@ -1776,7 +1776,7 @@ export function enterPrefabPlacement(
  * enter placement mode for a saved blueprint scene. reads the scene's
  * payload from the registry and feeds it through the standard placement
  * path. unlike prefabs, blueprint placements don't preserve any source
- * linkage — they paste raw nodes + voxels.
+ * linkage, they paste raw nodes + voxels.
  */
 export function enterBlueprintPlacement(
     state: TransformToolState,
@@ -1881,7 +1881,7 @@ function _exitPlacementState(state: TransformToolState): void {
 // (mouseup) destroys the body and commits a single transform-undo entry.
 //
 // the body is created directly via crashcat (not via RigidBodyTrait) so it
-// only exists for the duration of the grab — no edit-mode/play-mode sync,
+// only exists for the duration of the grab, no edit-mode/play-mode sync,
 // no replication. the node's TransformTrait is written each frame from the
 // body's pose; the existing OBJECT_LAYER_EDITOR_NODES sensor for the node
 // stays put (different broadphase layer, doesn't fight us).
@@ -1895,7 +1895,7 @@ const GRAB_LIN_VMAX = 60; // m/s clamp
 const GRAB_ANG_VMAX = 30; // rad/s clamp
 const GRAB_FALLBACK_HALF = 0.5;
 const GRAB_ROT_SENS = 0.005; // rad per pixel of mouse delta during R-rotate
-// resting DOF: yaw-only rotation. matches enterGrab default — held things stay upright.
+// resting DOF: yaw-only rotation. matches enterGrab default, held things stay upright.
 const GRAB_DOF_REST = /* @__PURE__ */ dof(true, true, true, false, true, false);
 // rotate DOF: all axes free. used while R is held so user can pitch/roll the body.
 const GRAB_DOF_ROTATE = /* @__PURE__ */ dof(true, true, true, true, true, true);
@@ -1966,7 +1966,7 @@ export function enterGrab(
 
     // body pose: AABB-center position + node's interpolated quaternion. using
     // AABB center (rather than transform.position) keeps off-pivot models
-    // from flailing on grab-start — the held point is the visual center.
+    // from flailing on grab-start, the held point is the visual center.
     const center: Vec3 = [0, 0, 0];
     const half: Vec3 = [0, 0, 0];
     _grabBodyAabb(node, resources, center, half);
@@ -1982,7 +1982,7 @@ export function enterGrab(
         gravityFactor: 0,
         friction: 0.5,
         restitution: 0,
-        // lock pitch and roll — only yaw (world Y) follows the camera by default.
+        // lock pitch and roll, only yaw (world Y) follows the camera by default.
         // matches gmod physgun feel: held things stay upright when you swing the view.
         // widened to all axes on R-hold (see beginRotate).
         allowedDegreesOfFreedom: GRAB_DOF_REST,
@@ -2044,7 +2044,7 @@ export function enterGrab(
 }
 
 /**
- * per-frame grab input — handles scroll wheel for grab distance. body PD
+ * per-frame grab input, handles scroll wheel for grab distance. body PD
  * runs in prePhysicsGrab (fixed step); transform write runs in
  * postPhysicsGrab (also fixed step) so render-frame interpolation smooths
  * the body's pose between ticks.
@@ -2077,8 +2077,8 @@ export function prePhysicsGrab(state: TransformToolState, physics: Physics, came
 
     // target world pose:
     //   pos = cam.pos + cam.fwd * grabDistance + anchorOffsetCS rotated into world
-    //   quat = (rotating) targetQuat — user-driven via mouse
-    //          (resting)  cam.quat * anchorQuatCS — follows the camera
+    //   quat = (rotating) targetQuat, user-driven via mouse
+    //          (resting)  cam.quat * anchorQuatCS, follows the camera
     vec3.set(_grabCamFwd, 0, 0, -1);
     vec3.transformQuat(_grabCamFwd, _grabCamFwd, camera.quaternion);
     vec3.transformQuat(_grabRel, grab.anchorOffsetCS, camera.quaternion);
@@ -2169,7 +2169,7 @@ export function postPhysicsGrab(state: TransformToolState, nodes: Nodes, physics
  * begin gmod-physgun-style free-rotate. while held, mouse delta drives the
  * body's orientation directly via targetQuat; body's allowedDegreesOfFreedom
  * is widened to all axes so it physically responds. linear PD continues
- * tracking the camera anchor — the body still moves with you, just freely
+ * tracking the camera anchor, the body still moves with you, just freely
  * rotating to whatever the user dials in.
  *
  * caller is expected to be inside an active grab.
@@ -2388,7 +2388,7 @@ export function handleTransformKeys(
                     // camera-forward aligns with X when fwdX != 0, else Z
                     const fwdAxis: 'x' | 'z' = fwdX !== 0 ? 'x' : 'z';
                     const rgtAxis: 'x' | 'z' = fwdX !== 0 ? 'z' : 'x';
-                    // sign of the cardinal component along each axis —
+                    // sign of the cardinal component along each axis,
                     // flip rotation direction when facing negative so
                     // "forward tilt" and "roll" feel consistent
                     const fwdSign = (fwdX !== 0 ? fwdX : fwdZ) as 1 | -1;
@@ -2501,7 +2501,7 @@ export function handleTransformKeys(
                 // left/right = rotate around Y
                 // up/down = rotate around camera-right axis (pitch)
                 // [ / ] = rotate around camera-forward axis (roll)
-                // voxel content forces 90deg regardless of user's rotationSnap —
+                // voxel content forces 90deg regardless of user's rotationSnap,
                 // any other value produces non-cardinal quats which don't round-trip
                 // through rotateVoxelsByQuat.
                 const baseSnapDeg = state.store.getState().rotationSnap ?? 45;

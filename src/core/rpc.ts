@@ -31,7 +31,7 @@ export type RpcDriver = {
 };
 
 /**
- * registered listener entry. `room` is the roomId the handler is scoped to —
+ * registered listener entry. `room` is the roomId the handler is scoped to,
  * dispatch matches it against the inbound message's roomId.
  */
 export type ListenerEntry = {
@@ -42,11 +42,11 @@ export type ListenerEntry = {
 
 /**
  * one Rpc state per side. the driver carries side-specific send impls;
- * `listeners` is a per-room registry — entries scoped by roomId, matched
+ * `listeners` is a per-room registry, entries scoped by roomId, matched
  * against `message.roomId` at dispatch time.
  *
  * the command wire-index table lives on `ProjectModule.commandWireIndex`,
- * not here — callers of `send`/`dispatchNetMessage` pass it in. that way
+ * not here, callers of `send`/`dispatchNetMessage` pass it in. that way
  * one rebuild (`getProjectModule()`) covers every wire-index table the
  * project derives from its registries (commands, traits).
  */
@@ -64,7 +64,7 @@ export function init(driver: RpcDriver): Rpc {
 /**
  * register a handler for a command, scoped to `room`. returns the
  * registered entry so callers can hold it as data and pass it to
- * `unlisten` later — no closure-based unsubscribe, callers are
+ * `unlisten` later, no closure-based unsubscribe, callers are
  * responsible for the bookkeeping.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,7 +124,7 @@ export function dispatchNetMessage(rpc: Rpc, commandWireIndex: WireIndex, messag
 }
 
 /**
- * resolve, pack, and dispatch an outbound command. side-agnostic — server
+ * resolve, pack, and dispatch an outbound command. side-agnostic, server
  * and client both reach the wire via the same path. the script `send(ctx,
  * ...)` API in scene/scripts wraps this with ctx-derived runtime/rpc/roomId.
  * `client` is the addressee for server-side targeted sends; omit for the
@@ -132,7 +132,7 @@ export function dispatchNetMessage(rpc: Rpc, commandWireIndex: WireIndex, messag
  *
  * commandIndex via `commandWireIndex` (caller passes it from the current
  * ProjectModule); serdes via the live `commandsRegistry`. stale
- * `CommandHandle.serdes` captured in user closures is not used — closures
+ * `CommandHandle.serdes` captured in user closures is not used, closures
  * resolve fresh serdes on every send.
  */
 export function send<S extends pack.Schema, D extends RpcDirection>(
@@ -167,7 +167,7 @@ export function send<S extends pack.Schema, D extends RpcDirection>(
 /** a command handle returned by command(). */
 export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
     readonly id: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'commands'; id: string };
     readonly direction: D;
     readonly schema: S;
@@ -191,7 +191,7 @@ export type CommandDef = {
  * - CLIENT_TO_SERVER: client sends to server (routed via room), server listens per-room
  * - SERVER_TO_CLIENT: server sends/broadcasts to client, client listens
  *
- * handlers are NOT in the definition — they are registered in scripts via listen().
+ * handlers are NOT in the definition, they are registered in scripts via listen().
  *
  * ```ts
  * const placeBlock = command('place_block', CLIENT_TO_SERVER, p.object({

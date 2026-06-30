@@ -1,7 +1,7 @@
-// ParticleResources — engine-global particle material.
+// ParticleResources, engine-global particle material.
 //
 // One instance per `EngineClient`, shared across rooms. The atlas Texture
-// is owned by `SpriteResources` — this struct holds a TextureNode bound at
+// is owned by `SpriteResources`, this struct holds a TextureNode bound at
 // build time and exposes `rebindAtlas()` so the registry-dispatch atlas
 // swap can retarget it without rebuilding the compiled pipeline.
 //
@@ -61,7 +61,7 @@ export const InstanceMaterial = struct('ParticleInstanceMaterial', {
 export const INSTANCE_POSE_STRIDE = layoutStrideOf(InstancePose);
 export const INSTANCE_MATERIAL_STRIDE = layoutStrideOf(InstanceMaterial);
 
-// sky-brightness curve — must match voxel-material + voxel-mesh-visuals
+// sky-brightness curve, must match voxel-material + voxel-mesh-visuals
 // so particles shade the same as the world they hang in.
 const NIGHT_SKY_BRIGHTNESS = 0.05;
 const DAY_SKY_BRIGHTNESS = 0.9;
@@ -70,7 +70,7 @@ const DISABLED_SKY_BRIGHTNESS = 1.0;
 // ── public type ─────────────────────────────────────────────────────
 
 export type ParticleResources = {
-    /** engine-global particle material — binds per-instance + env buffers
+    /** engine-global particle material, binds per-instance + env buffers
      *  by name. The atlas Texture is bound via `atlasTexNode`; atlas
      *  swaps rebind that node without rebuilding the material. */
     material: Material;
@@ -158,7 +158,7 @@ function createParticleMaterial(atlas: Texture): { material: Material; atlasTexN
     const skyContribParticle = vec3f(skySkyScalar, skySkyScalar, skySkyScalar).toVar('pvSkyContrib');
     const blockLightParticle = vInstLight.yzw.toVar('pvBlockLight');
     const voxelLight = max(blockLightParticle, skyContribParticle).toVar('pvVoxelLight');
-    // glow raises the lighting floor — a script-driven self-illumination
+    // glow raises the lighting floor, a script-driven self-illumination
     // knob that lights the particle in its OWN colour (glow=1 → fully
     // lit, shadow-free) rather than blending lit↔raw. matches mesh /
     // sprite `glow`.
@@ -175,7 +175,7 @@ function createParticleMaterial(atlas: Texture): { material: Material; atlasTexN
         fragment,
         cullMode: 'none',
         depthTest: true,
-        // particles don't write depth — overlapping puffs should blend
+        // particles don't write depth, overlapping puffs should blend
         // rather than punch holes in each other.
         depthWrite: false,
         transparent: true,

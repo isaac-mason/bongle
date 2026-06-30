@@ -29,12 +29,12 @@ import { beginSnapshotSession, captureTile, endSnapshotSession } from '../snapsh
 const ICON_PX = 128;
 const CAM_DIST = 64;
 
-// half-extent of the ortho frustum — frames a single block with the
+// half-extent of the ortho frustum, frames a single block with the
 // isometric rotation. a unit cube projects to ~1.4 units wide at 45deg
 // azimuth, so 1.0 gives a snug fit with a small margin.
 const HALF_EXTENT = 1.0;
 
-// shared chunk key — every icon reuses the same arena slot via the
+// shared chunk key, every icon reuses the same arena slot via the
 // packer's upsert-replace path.
 const ICON_CHUNK_KEY = '0,0,0';
 
@@ -74,7 +74,7 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
     // skyBrightness to DISABLED_SKY_BRIGHTNESS (1.0), and sun.intensity=0
     // drops the directional sunShade term to 1.0 on every face. that
     // leaves only the per-face directional factor (top 1.0, sides 0.6/0.8)
-    // to give the cube its 3D read — the classic inventory-icon look. (a
+    // to give the cube its 3D read, the classic inventory-icon look. (a
     // lit env at noon instead crushes the two visible side faces, which
     // sit perpendicular to the overhead sun, down to ~0.3-0.4.) disabling
     // the env also hides the sky + cloud meshes so they don't bleed in.
@@ -105,7 +105,7 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
 
     const session = beginSnapshotSession(renderer, ICON_PX);
 
-    // isometric camera setup — same angle for every block, centered on
+    // isometric camera setup, same angle for every block, centered on
     // the block at voxel (1,1,1). the mesher places vertices from
     // (1,1,1) to (2,2,2), so the center is (1.5, 1.5, 1.5).
     const elev = Math.PI / 6;

@@ -1,4 +1,4 @@
-// server/content-manager.ts — disk i/o for authored content.
+// server/content-manager.ts, disk i/o for authored content.
 //
 // scenes today are one file per scene: a single combined node tree + optional
 // voxel chunk payload. future: any other authored data type (settings,
@@ -12,7 +12,7 @@
 // responsibilities:
 // - scan/list scenes from disk
 // - load/save scene payloads (nodes + optional chunks, single file)
-// - self-write detection via `_lastWritten` — `saveScene` skips identical
+// - self-write detection via `_lastWritten`, `saveScene` skips identical
 //   re-writes so editor → save → file-watcher → HMR re-apply cycles don't
 //   churn. external file watching (dev HMR fan-out) lives in the kit's
 //   bongle:scenes Vite plugin, not here.
@@ -51,7 +51,7 @@ export type ContentManager = {
     entries: SceneEntry[];
     /**
      * last json string we wrote per scene id. `saveScene` consults this to
-     * skip identical re-writes — that's the entire purpose now that the
+     * skip identical re-writes, that's the entire purpose now that the
      * engine no longer owns a file watcher.
      */
     _lastWritten: Map<string, string>;
@@ -99,7 +99,7 @@ export function serializeScenePayload(payload: ScenePayload): string {
 /**
  * scan the content/scenes/ directory recursively for .scene.json files.
  * scene ids are the path relative to scenes/, with `.scene.json` stripped
- * and path separators normalized to `/` — so
+ * and path separators normalized to `/`, so
  *   content/scenes/blueprints/foo.scene.json  →  "blueprints/foo"
  *   content/scenes/main.scene.json            →  "main"
  *
@@ -189,7 +189,7 @@ export function loadSceneRaw(state: ContentManager, sceneId: string): { data: Sc
 /**
  * seed the `_lastWritten` dedup cache with the exact raw bytes for a scene
  * (typically just read off disk, or the payload we just applied to a handle).
- * lets the first flush after a load/apply skip a redundant identical write —
+ * lets the first flush after a load/apply skip a redundant identical write,
  * and the dev file-watcher echo that write would otherwise cause. seed with
  * real bytes (not a re-serialized snapshot) so the comparison is exact.
  */
@@ -201,7 +201,7 @@ export function seedLastWrittenRaw(state: ContentManager, sceneId: string, raw: 
  * save a scene to disk.
  *
  * the edit room is the single authoritative writer for its scene, so this just
- * writes the room's state — it does not reconcile against the on-disk file.
+ * writes the room's state, it does not reconcile against the on-disk file.
  * `_lastWritten` lets us skip an identical re-write (and the dev file-watcher
  * echo it would trigger). external edits to a scene that a live edit room owns
  * are intentionally overwritten by the room's next flush; agentic/external
@@ -213,7 +213,7 @@ export function saveScene(state: ContentManager, sceneId: string, payload: Scene
     const file = payloadToFile(payload);
     const content = JSON.stringify(file, null, 2);
     const prev = state._lastWritten.get(sceneId);
-    if (content === prev) return false; // no change — skip disk write entirely
+    if (content === prev) return false; // no change, skip disk write entirely
 
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     state._lastWritten.set(sceneId, content);

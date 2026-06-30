@@ -1,11 +1,11 @@
-// voxel model — pure voxel data container.
+// voxel model, pure voxel data container.
 //
 // holds a Voxels grid plus derived bounds, dimensions, voxel count, and
-// a default origin (center of the occupied bounding box). renderer-agnostic
-// — VoxelMeshTrait references one for rendering, and the same data can drive
+// a default origin (center of the occupied bounding box). renderer-agnostic,
+// VoxelMeshTrait references one for rendering, and the same data can drive
 // crashcat shape factories, collision, etc.
 //
-// the underlying Voxels should not be mutated after construction —
+// the underlying Voxels should not be mutated after construction,
 // consumers (VoxelMeshVisuals) cache derived geometry keyed by VoxelModel
 // identity and assume the data is immutable.
 
@@ -14,7 +14,7 @@ import { AIR, MISSING } from './block-registry';
 import { CHUNK_SIZE, type Chunk, type Voxels, voxelIndex } from './voxels';
 
 export class VoxelModel {
-    // the source voxel data. treated as immutable after construction —
+    // the source voxel data. treated as immutable after construction,
     // modifying it after creating the VoxelModel is undefined behavior.
     voxels: Voxels;
 

@@ -7,9 +7,9 @@
 //
 // future home for shared transport orchestration (subscribe / push)
 // once the metrics poll is replaced with push. for now both Metrics
-// and Logs are pure local-state collectors — the protocol still polls.
+// and Logs are pure local-state collectors, the protocol still polls.
 
-const MAX_HISTORY = 600; // ~10s at 60Hz — enough history to read trends/spikes in the panel
+const MAX_HISTORY = 600; // ~10s at 60Hz, enough history to read trends/spikes in the panel
 
 // ── metrics ─────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ type MetricEntry = {
 export type Metrics = {
     entries: Map<string, MetricEntry>;
     /** when false, begin/end/record noop. used to skip per-frame timer cost on
-     *  clients while the debug panel is closed — those samples would never be
+     *  clients while the debug panel is closed, those samples would never be
      *  read. server always runs enabled (its metrics ship to the panel). */
     enabled: boolean;
 };
@@ -95,7 +95,7 @@ export function getValues(metrics: Metrics, id: string): number[] | undefined {
     return metrics.entries.get(id)?.values;
 }
 
-/** get the unit string for a metric. returns 'ms' for unknown ids — that's
+/** get the unit string for a metric. returns 'ms' for unknown ids, that's
  *  the default for any new entry, so panel rendering stays consistent. */
 export function getUnit(metrics: Metrics, id: string): string {
     return metrics.entries.get(id)?.unit ?? 'ms';
@@ -143,7 +143,7 @@ export type LogEntry = {
 const LOG_DEFAULT_CAP = 2000;
 
 export type Logs = {
-    /** entries in arrival order. capped at `cap` — oldest dropped on overflow. */
+    /** entries in arrival order. capped at `cap`, oldest dropped on overflow. */
     entries: LogEntry[];
     /** monotonic count of entries ever pushed. lets subscribers track a delta cursor across drops. */
     pushed: number;
@@ -163,7 +163,7 @@ export function pushLog(logs: Logs, entry: LogEntry): void {
 /**
  * read entries pushed after `cursor`. returns the entries and a fresh
  * cursor to pass next call. if `cursor < pushed - entries.length`,
- * caller missed entries that fell off the buffer — `dropped` indicates
+ * caller missed entries that fell off the buffer, `dropped` indicates
  * how many. caller can show a "… N entries dropped" marker.
  */
 export function readDelta(

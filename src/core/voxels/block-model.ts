@@ -3,7 +3,7 @@ import type { BlockQuad, CubeTextures, MaterialType, TextureRef } from './blocks
 
 type CullFace = BlockQuad['cullFace'];
 
-/** default quad uvs — full texture. V=0 at top of image, V=1 at bottom. */
+/** default quad uvs, full texture. V=0 at top of image, V=1 at bottom. */
 const DEFAULT_QUAD_UVS: [Vec2, Vec2, Vec2, Vec2] = [
     [0, 1],
     [1, 1],
@@ -12,7 +12,7 @@ const DEFAULT_QUAD_UVS: [Vec2, Vec2, Vec2, Vec2] = [
 ];
 
 /**
- * create a single quad. quad-only authoring is the convention —
+ * create a single quad. quad-only authoring is the convention,
  * the mesher rejects non-quad input at registry-build time.
  *
  * @param verts - 4 vertices in CCW order, block-local [0,1] space
@@ -67,9 +67,9 @@ export function box(
         material?: MaterialType;
         /**
          * uv mapping mode.
-         *   'stretch' (default) — full texture stretched across each face.
+         *   'stretch' (default), full texture stretched across each face.
          *     mostly useful for full-block boxes where the face is 1×1.
-         *   'local' — sample only the texture sub-rect matching the face's
+         *   'local', sample only the texture sub-rect matching the face's
          *     world-local extent. preserves pixel density across boxes of
          *     different sizes (post + arms, torches, panels).
          */
@@ -340,7 +340,7 @@ function rotateNormal(n: Vec3, steps: number): Vec3 {
  * rotate an array of BlockQuad around the Y axis by `steps` × 90° CW.
  * positions rotate around block center (0.5, y, 0.5).
  * normals and cullFace directions rotate accordingly.
- * uvs are preserved — texture orientation stays the same relative to the face.
+ * uvs are preserved, texture orientation stays the same relative to the face.
  */
 export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[] {
     const s = ((steps % 4) + 4) % 4;
@@ -358,7 +358,7 @@ export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[] {
 
 // ── mirror (X) helper ───────────────────────────────────────────────
 //
-// reflect across the plane x = 0.5 to produce the chiral opposite — used
+// reflect across the plane x = 0.5 to produce the chiral opposite, used
 // for left/right-handed variants (door hinge, etc.). a reflection flips
 // winding, so per-quad vertex + uv order reverses to keep faces outward;
 // the x-normal flips and east↔west cullFaces swap. because uvs reverse in
@@ -402,7 +402,7 @@ export function mirrorX(quads: BlockQuad[]): BlockQuad[] {
 // cover the off-axis cases (tilted geometry like a wall torch): a
 // free-form rotation about an arbitrary axis through a pivot, and a
 // plain translation. faces of tilted geometry no longer sit flush with
-// the block boundary, so rotateAxis clears cullFace — build the source
+// the block boundary, so rotateAxis clears cullFace, build the source
 // box with `cull: false`.
 
 /** rotate a position about `axis` through `pivot` by `cos`/`sin` of the angle. */
@@ -462,7 +462,7 @@ export function rotateAxis(quads: BlockQuad[], axis: 'x' | 'y' | 'z', angleDeg: 
  * `delta` along `axis`, with a proportional shift in between. unlike
  * rotateAxis (which introduces sin/cos and pulls vertices off the lattice),
  * a shear by lattice-aligned `delta`/`ySpan` keeps every input vertex on the
- * 1/16 grid — so geometry survives the voxel vertex format's 1/16 position
+ * 1/16 grid, so geometry survives the voxel vertex format's 1/16 position
  * quantization with uniform thickness, instead of rounding unevenly per
  * corner. used for the wall torch's grid-aligned lean. normals are left
  * as-is: callers shear emissive geometry (face-shade bypassed) and gpucat
@@ -506,7 +506,7 @@ export function translate(quads: BlockQuad[], delta: Vec3): BlockQuad[] {
 // ── cross helper ────────────────────────────────────────────────────
 //
 // two diagonal planes, each double-sided (4 quads).
-// double-sided because gpucat uses backface culling by default —
+// double-sided because gpucat uses backface culling by default,
 // without reversed-winding duplicates, one side of each plane
 // would be invisible. no z-fighting because only the camera-facing
 // side rasterizes fragments at any given pixel.
@@ -528,7 +528,7 @@ const CROSS_BACK_UVS: [Vec2, Vec2, Vec2, Vec2] = [
 ];
 
 /**
- * create two intersecting diagonal planes (4 quads — front + back per plane).
+ * create two intersecting diagonal planes (4 quads, front + back per plane).
  * used for vegetation: flowers, tall grass, saplings, mushrooms, etc.
  */
 export function cross(texture: TextureRef, options?: { material?: MaterialType }): BlockQuad[] {

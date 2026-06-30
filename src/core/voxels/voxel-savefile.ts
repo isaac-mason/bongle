@@ -1,16 +1,16 @@
-// voxel-savefile — disk persistence for Voxels chunk data.
+// voxel-savefile, disk persistence for Voxels chunk data.
 //
 // scope: filesystem boundary only (autosave, scene save, blueprint
-// export, room boot). NOT a generic wire codec — network transport of
+// export, room boot). NOT a generic wire codec, network transport of
 // chunk state goes through discovery.ts's chunk_full/chunk_ops messages
 // which read the live chunk by reference.
 //
 // distinction from a future "ser/des":
-//   - save/load (this file) — converts to/from a portable byte form.
+//   - save/load (this file), converts to/from a portable byte form.
 //     `saveVoxels` compacts each chunk's palette in the OUTPUT bytes
 //     only; the live chunk is never mutated. `loadVoxels` replaces the
 //     target Voxels' chunks entirely.
-//   - ser/des (does not exist today) — would be for in-memory or
+//   - ser/des (does not exist today), would be for in-memory or
 //     network transport. must never mutate the source. add only when a
 //     concrete consumer needs it.
 //
@@ -19,8 +19,8 @@
 // `palette` on load using the registry.
 //
 // per-chunk binary buffers (`blocks`, `light`) are gzip-compressed then
-// base64-encoded — palette indices repeat heavily so gzip typically buys
-// a 5–10× reduction on disk and over HMR.
+// base64-encoded, palette indices repeat heavily so gzip typically buys
+// a 5-10× reduction on disk and over HMR.
 
 import { gunzipSync, gzipSync } from 'fflate';
 import type { BlockRegistry } from './block-registry';
@@ -42,10 +42,10 @@ import {
 export type SavedChunk = {
     /** string-keyed palette entries (stable across registry rebuilds) */
     palette: string[];
-    /** base64(gzip(raw Uint16Array bytes)) — per-voxel palette index */
+    /** base64(gzip(raw Uint16Array bytes)), per-voxel palette index */
     blocks: string;
-    /** base64(gzip(raw Uint16Array bytes)) — baked light (CHUNK_VOLUME entries).
-     *  missing or empty on pre-bake-format scenes — those load dark until the
+    /** base64(gzip(raw Uint16Array bytes)), baked light (CHUNK_VOLUME entries).
+     *  missing or empty on pre-bake-format scenes, those load dark until the
      *  editor rebake-light command is run. */
     light: string;
 };
@@ -99,11 +99,11 @@ function unpackChunkBytes(b64: string): Uint16Array {
 /**
  * produce a save-file payload from a Voxels instance.
  *
- * compacts each chunk's palette in the OUTPUT BYTES only — uses
+ * compacts each chunk's palette in the OUTPUT BYTES only, uses
  * `repackChunkSnapshot` so the live chunk's `paletteKeys`/`data` are
  * never mutated (see invariant on Chunk.paletteKeys).
  *
- * skips chunks whose aggregate is zero (all air) — they're created
+ * skips chunks whose aggregate is zero (all air), they're created
  * lazily by setBlock + ensureChunk but never pruned at runtime.
  */
 export function saveVoxels(voxels: Voxels): SavedVoxels {
@@ -127,7 +127,7 @@ export function saveVoxels(voxels: Voxels): SavedVoxels {
 //
 // the gzip-per-chunk in `saveVoxels` dominates flush cost on a big world.
 // `saveVoxelsIncremental` re-serializes only chunks whose persisted-data
-// `version` moved since the last flush, reusing cached bytes for the rest —
+// `version` moved since the last flush, reusing cached bytes for the rest,
 // so an auto-flush after a small edit pays only for the chunks that changed.
 
 /** per-chunk serialized-byte cache, keyed by chunkKey. holds the bytes last
@@ -144,7 +144,7 @@ export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): Sa
         if (chunk.aggregate === 0) continue;
         const cached = cache.get(key);
         if (cached && cached.version === chunk.version) {
-            result.chunks[key] = cached.saved; // unchanged — skip the re-gzip
+            result.chunks[key] = cached.saved; // unchanged, skip the re-gzip
             continue;
         }
         const snap = repackChunkSnapshot(chunk);
@@ -166,7 +166,7 @@ export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): Sa
 }
 
 /** seed a save cache from a just-loaded scene so the first flush is already
- *  incremental — an unedited chunk reuses its on-disk bytes verbatim. call
+ *  incremental, an unedited chunk reuses its on-disk bytes verbatim. call
  *  right after `loadVoxels` with the same payload. */
 export function seedVoxelSaveCache(voxels: Voxels, saved: SavedVoxels): VoxelSaveCache {
     const cache: VoxelSaveCache = new Map();
@@ -263,7 +263,7 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
         };
 
         voxels.chunks.set(chunkKey(cx, cy, cz), chunk);
-        // chunk seeded dirty=true above — mirror into the renderer index.
+        // chunk seeded dirty=true above, mirror into the renderer index.
         voxels.dirty.blocks.add(chunk);
         linkChunkNeighbors(voxels, chunk);
     }

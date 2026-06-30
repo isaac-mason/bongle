@@ -4,7 +4,7 @@
 // this instead of each registering their own event listeners.
 //
 // the hover raycast runs once per frame in editor/index.ts and writes
-// editor.hoverVoxel — tools read that for hit voxel position.
+// editor.hoverVoxel, tools read that for hit voxel position.
 
 import type { Input } from '../client/input';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../client/input';
@@ -20,7 +20,7 @@ export type PointerState = {
     screenY: number;
 
     // canvas-sourced click/held/release flags (left button only).
-    // under pointer lock, canvas events are suppressed — callers should
+    // under pointer lock, canvas events are suppressed, callers should
     // fall back to the engine input system (isMouseJustDown etc).
     _justClicked: number; // incremented by mousedown, consumed each frame
     _mouseHeld: boolean;
@@ -49,7 +49,7 @@ export function createPointerState(canvas: HTMLCanvasElement): PointerState {
     };
 
     state._onMouseMove = (e: MouseEvent) => {
-        // under pointer lock the cursor is hidden and bound to crosshair —
+        // under pointer lock the cursor is hidden and bound to crosshair,
         // freeze ndc at (0, 0) so editor raycasts hit screen center.
         if (document.pointerLockElement) return;
         const rect = canvas.getBoundingClientRect();
@@ -121,7 +121,7 @@ export function pointerJustUp(pointer: PointerState, input: Input): boolean {
     return pointer._justUp;
 }
 
-/** right-click down edge — used by stroke-based tools (elevation/brush/smooth)
+/** right-click down edge, used by stroke-based tools (elevation/brush/smooth)
  *  as a "cancel in-progress stroke" affordance. canvas-level right-button
  *  events aren't tracked here (no shared per-frame state needed beyond
  *  cancellation), so this always defers to the engine input system. */

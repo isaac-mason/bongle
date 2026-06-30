@@ -1,14 +1,14 @@
 // In-process StorageServerDriver. Used by `lib/runtime` standalone
-// (kit dev `./dev.sh`) and the editor — anywhere there is no
+// (kit dev `./dev.sh`) and the editor, anywhere there is no
 // bongle service to talk to. Persists for the lifetime of the
 // process; restarting the dev server wipes it.
 //
 // Semantics match the HTTP service:
 //   - `version` is a fresh uuid on every successful set.
-//   - `ifVersion` is CAS — mismatch returns `{ ok: false, code: 'version_conflict' }`.
+//   - `ifVersion` is CAS, mismatch returns `{ ok: false, code: 'version_conflict' }`.
 //   - list returns sorted keys, paginated by cursor (key > cursor).
 //   - prefix filter is exact prefix match; null prefix → all.
-// Rate-limit / cap codes are unreachable here — there's no I/O to
+// Rate-limit / cap codes are unreachable here, there's no I/O to
 // bound and no shared quota to enforce.
 
 import { randomUUID } from 'node:crypto';
@@ -32,7 +32,7 @@ function listFromMap(map: Map<string, Row>, opts: StorageListOpts | undefined): 
     const cursor = opts?.cursor ?? '';
     const limit = Math.min(opts?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
-    // Sort keys so cursor pagination is deterministic — matches the
+    // Sort keys so cursor pagination is deterministic, matches the
     // service's `order by key` over a B-tree index.
     const keys = [...map.keys()].filter((k) => (prefix === '' || k.startsWith(prefix)) && k > cursor).sort();
 

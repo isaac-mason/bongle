@@ -1,4 +1,4 @@
-// server/resource-manager.ts — disk i/o for generated non-code resources.
+// server/resource-manager.ts, disk i/o for generated non-code resources.
 //
 // today: model bins (the asset pipeline emits per-id `.server.bin` files
 // that the engine streams at runtime). future: any other generated

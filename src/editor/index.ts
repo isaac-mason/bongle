@@ -117,7 +117,7 @@ import * as PivotPoint from './visuals/pivot-point';
 import * as PrefabVisuals from './visuals/prefab-visuals';
 import { createSelectionMeshState, disposeSelectionMeshState, updateSelectionMeshes } from './visuals/selection-mesh';
 
-/* ── server-only module refs — populated by registerServer before any script inits ── */
+/* ── server-only module refs, populated by registerServer before any script inits ── */
 
 type RoomsMod = typeof import('../server/rooms');
 type DiscoveryMod = typeof import('../server/discovery');
@@ -133,7 +133,7 @@ const _nearWorld: Vec3 = [0, 0, 0];
 const _farWorld: Vec3 = [0, 0, 0];
 const _rayDir: Vec3 = [0, 0, 0];
 
-// brush hover key cache — avoids allocating a new Selection.T every frame
+// brush hover key cache, avoids allocating a new Selection.T every frame
 let _brushHoverKey = '';
 let _brushCornerA: [number, number, number] | null = null;
 let _brushCornerB: [number, number, number] | null = null;
@@ -141,7 +141,7 @@ let _brushCornerB: [number, number, number] | null = null;
 // server-side editor concerns. attached to the room root by the server
 // when an edit room is created (in dev / env.editor builds). holds the
 // authoritative voxel/scene mutation listeners and the /relight command.
-// no client side — replicated to clients only as a marker, the script
+// no client side, replicated to clients only as a marker, the script
 // body early-returns there.
 script(
     EditorServerTrait,
@@ -149,7 +149,7 @@ script(
     (ctx) => {
         if (!env.server) return;
 
-        // //relight — full recompute of sky + rgb light for the room. only
+        // //relight, full recompute of sky + rgb light for the room. only
         // the server has authoritative light state, so the listener lives
         // here. clients without the editor enabled never see the spec; play
         // clients with /relight typed fall through to plain-chat, which the
@@ -167,10 +167,10 @@ script(
             chat.message(ctx, `light repropagated in ${ms}ms`);
         });
 
-        // capability gate — does this client have permission to mutate scene
+        // capability gate, does this client have permission to mutate scene
         // state in this room? Today the only signal is `env.editor` (dev builds
         // grant edit to any connected client; prod builds grant to no one).
-        // Future: real auth — project owner, role, etc. Decoupled from player
+        // Future: real auth, project owner, role, etc. Decoupled from player
         // mode so a play-mode client with editor toggled on can still issue
         // edit RPCs.
         const canEdit = (_client: Client) => env.editor;
@@ -181,7 +181,7 @@ script(
                 fn(args, client);
             };
 
-        // editGated; on a body that actually mutated (returns true — guard
+        // editGated; on a body that actually mutated (returns true, guard
         // early-returns don't), flag the room dirty (broadcast to clients via the
         // room list). wraps the mutating listeners below.
         const editMutate = <T>(fn: (args: T, client: Client) => boolean | undefined) =>
@@ -196,7 +196,7 @@ script(
             ctx,
             VoxelEditCommand,
             editMutate(({ ops }) => {
-                // batched edit — append all ops first, drain once at the end.
+                // batched edit, append all ops first, drain once at the end.
                 // per-op inline drain would be catastrophic on large brushes
                 // (87000× worse on a dense 16×16 fence grid; see setblock.bench).
                 for (const op of ops) {
@@ -207,7 +207,7 @@ script(
             }),
         );
 
-        // save-as-blueprint — client extracts the ScenePayload from its
+        // save-as-blueprint, client extracts the ScenePayload from its
         // local selection and ships it here as JSON; server validates the
         // name (or allocates one), then writes a scene file under
         // `content/scenes/blueprints/<name>.scene.json`.
@@ -450,7 +450,7 @@ script(
 //   - the client-local `room.editor.editorNode` lens spawned by Shift+`
 //     into a play room (enterLocalEditorView)
 //
-// the trait's *presence* is the on/off switch — no parallel reactive flag,
+// the trait's *presence* is the on/off switch, no parallel reactive flag,
 // no imperative reconcile. attach → script body runs → editor is alive.
 // detach (via RemoveTraitCommand on the player node, or destruction of the
 // lens node) → onDispose tears it down. env.client gates server-side
@@ -462,7 +462,7 @@ script(
         if (!env.client) return;
         // server-attached EditorTrait on a player node replicates to *every*
         // client in the room (not just the owner). Gate on ownership so the
-        // script only activates on the client that actually owns this node —
+        // script only activates on the client that actually owns this node,
         // otherwise inspect-server would spin up the editor on the play
         // client too, registering under the wrong playerId. For lens-spawned
         // EditorTrait (Shift+`), the lens node is client-local with no
@@ -471,7 +471,7 @@ script(
         const lensActivation = ctx.client?.room?.editor?.editorNode === ctx.node;
         if (!lensActivation && !isOwner(ctx, ctx.node)) return;
 
-        // wire up scene-list cold-fetch + HMR. idempotent — first room
+        // wire up scene-list cold-fetch + HMR. idempotent, first room
         // to reach here arms the subscriptions for the whole process.
         initBlueprints();
 
@@ -538,7 +538,7 @@ script(
         installEditorChatCommands(room.chat, store, ctx, unsubs);
         installSelectionChatCommands(room.chat, store, ctx, room.physics, nodeBodies, unsubs);
 
-        // //relight — client-side spec only; the listener lives on the
+        // //relight, client-side spec only; the listener lives on the
         // server. registered here so it disappears in play mode.
         ClientChat.registerCommand(room.chat, {
             name: '/relight',
@@ -652,7 +652,7 @@ script(
                         }
                     }
                 } else {
-                    // category key released — commit cycle if not consumed
+                    // category key released, commit cycle if not consumed
                     if (!categoryConsumed) {
                         const s = store.getState();
                         const currentCat = findCategoryByTool(s.activeTool);
@@ -740,7 +740,7 @@ script(
             // it into the gizmo so a POV swap (player ↔ editor freecam)
             // is reflected in the gizmo's projection without rebuilding.
             // TransformControls is third-party and holds its own camera
-            // ref — there's no way to avoid this sync.
+            // ref, there's no way to avoid this sync.
             const camera = getControlCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
@@ -751,7 +751,7 @@ script(
             // redraw the per-node selection AABB outlines. called from
             // every tool's exit path so node selection is visible whether
             // the user is in inspect, transform, or any voxel tool.
-            // during voxel-placement, the placement root has no geometry —
+            // during voxel-placement, the placement root has no geometry,
             // swap in the ghost's voxel node so the box reflects content.
             function redrawInspectMesh() {
                 const selectedNodeIds = store.getState().selection.nodes;
@@ -774,7 +774,7 @@ script(
 
             const { activeTool } = store.getState();
 
-            // hover raycast — always active regardless of tool.
+            // hover raycast, always active regardless of tool.
             // pointer.ndcX/Y is auto-frozen to (0,0) under pointer
             // lock, so this implicitly fires from the crosshair.
             unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
@@ -798,7 +798,7 @@ script(
                 ? [_hoverRayResult.voxelX, _hoverRayResult.voxelY, _hoverRayResult.voxelZ]
                 : null;
 
-            // tight collider-AABB for the hovered block — drives the hover
+            // tight collider-AABB for the hovered block, drives the hover
             // outline so it hugs the actual shape (slabs, stairs, fences)
             // instead of the full voxel cell. cube colliders (cid=0) and the
             // synthesized air-mode hover both fall back to the unit cube.
@@ -862,7 +862,7 @@ script(
                 lastHoverVoxel: hoverVoxel ?? cur.lastHoverVoxel,
             }));
 
-            // debug collider visualization — runs every frame regardless of active tool
+            // debug collider visualization, runs every frame regardless of active tool
             DebugVisuals.update(debugVisualsState, room.physics.rigid.world, store.getState().showPhysicsColliders);
 
             // grid visualization
@@ -873,7 +873,7 @@ script(
 
             // force-release any active grab when we leave transform/grab.
             // covers tool switches and transformMode flips that happen
-            // between frames — updateInspect won't fire to clean up
+            // between frames, updateInspect won't fire to clean up
             // when the new tool isn't inspect/transform.
             if (TransformTool.isInGrab(transformToolState)) {
                 const tm = store.getState().transformMode;
@@ -883,7 +883,7 @@ script(
             }
 
             // force-cancel any active placement when leaving transform.
-            // symmetric with the grab guard above — otherwise the
+            // symmetric with the grab guard above, otherwise the
             // __placement_root / __placement_voxels ghost nodes
             // linger because cancelPlacement is only reachable via
             // Escape/Enter while still in transform.
@@ -956,7 +956,7 @@ script(
             pointerFlush(pointer);
 
             // r = reset selection or cancel in-progress tool
-            // (skipped while grab is active — R drives free-rotate there)
+            // (skipped while grab is active, R drives free-rotate there)
             const sBefore = store.getState();
             const hasSelection = !Selection.isEmpty(sBefore.selection);
             const hasInProgressTool = !!sBefore.boxSelect || !!sBefore.lasso;
@@ -1028,7 +1028,7 @@ script(
             }
 
             // build brush selection each frame.
-            // lasso has its own screen-space overlay — suppress the
+            // lasso has its own screen-space overlay, suppress the
             // world-space hover brush so it doesn't add visual noise.
             if (activeTool === 'lasso-select') {
                 if (store.getState().brush !== null) {
@@ -1043,7 +1043,7 @@ script(
             }
             // brush + paint + smooth + elevation drive state.brush
             // themselves (shape-at-hover preview when idle, accumulated
-            // stroke during drag) — skip the single-voxel / box logic below.
+            // stroke during drag), skip the single-voxel / box logic below.
             if (
                 activeTool === 'brush' ||
                 activeTool === 'brush-select' ||
@@ -1113,7 +1113,7 @@ script(
             redrawInspectMesh();
         });
 
-        // controller swap — reconcile attached trait vs desired control mode each tick.
+        // controller swap, reconcile attached trait vs desired control mode each tick.
         // targets the local editor node when a lens is up (Shift+` peek into a play room),
         // else the player node (edit-mode flow).
         //
@@ -1121,7 +1121,7 @@ script(
         // in onDispose). naïve swap snaps pose back to whatever default the incoming
         // controller seeds; we want the user's view preserved. snapshot the outgoing
         // camera-node pose, swap, then:
-        //   1. write pose back onto the new camera node — fly's tick rebases off this,
+        //   1. write pose back onto the new camera node, fly's tick rebases off this,
         //      and player's edit-mode tick derives cc.look off it.
         //   2. seed any per-controller closure state that doesn't fall out of (1):
         //      - orbit: its focal point. derive `target = camPos + forward * 5` so it
@@ -1284,7 +1284,7 @@ export async function registerServer(_state: EngineServer): Promise<void> {
 /**
  * fetch the pre-built block icon atlas (written by the offline renderer
  * during dev) into the global editor store. project-wide asset; loaded once
- * per page and shared across every editor activation. fire-and-forget — late
+ * per page and shared across every editor activation. fire-and-forget, late
  * resolution onto a doomed store at page teardown is harmless.
  *
  * The block atlas is the only icon artifact fetched into the store: scene +
@@ -1297,7 +1297,7 @@ function loadEditorAssets(): void {
     // Cold-start race: the editor's boot-time fetch can beat the kit's first
     // block-icon render, in which case the artifact isn't on disk yet and
     // Vite's SPA fallback returns `index.html`. `bongle:icons-ready` (sent by
-    // kit/vite/plugin.ts after each icon write) triggers a retry — but only
+    // kit/vite/plugin.ts after each icon write) triggers a retry, but only
     // for the block atlas. Per-id scene/prefab icon events load by direct URL
     // and would just cause a pointless atlas refetch, so they're ignored here.
     if (import.meta.hot && !iconsReadyWired) {
@@ -1309,7 +1309,7 @@ function loadEditorAssets(): void {
 
     fetch(assetUrl('voxels-icons.json'))
         // not-ok = the artifact isn't on disk yet (cold start wipes it; the
-        // pipeline regenerates it shortly). Skip quietly — the `bongle:icons-
+        // pipeline regenerates it shortly). Skip quietly, the `bongle:icons-
         // ready` retry above re-runs this once block-icons finishes writing.
         // Parsing a 404 body would throw "Unexpected end of JSON input".
         .then((r) => (r.ok ? r.json() : null))

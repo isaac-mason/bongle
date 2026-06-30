@@ -1,4 +1,4 @@
-// dom-ui — per-room visuals for the two UI traits (HtmlTrait, CanvasTrait).
+// dom-ui, per-room visuals for the two UI traits (HtmlTrait, CanvasTrait).
 //
 // One init/update/dispose handles both kinds. They share enough
 // concerns (mount under `room.viewport`, CSS-px projection, 3D
@@ -11,11 +11,11 @@
 //   `billboard` / `y-billboard` modes are stubbed for v1 (warn-once).
 // - CanvasTrait: per-instance Mesh + `OffscreenCanvas` quad. User
 //   scripts paint directly and flip `needsUpdate`. DOM-in-canvas (the
-//   former HtmlCanvasTrait use case) is a userland recipe on top —
+//   former HtmlCanvasTrait use case) is a userland recipe on top,
 //   user mounts an off-screen div themselves and `drawElement`s into
 //   the canvas. See plan-ui-traits.md appendix.
 //
-// Canvas uses one Mesh per instance for v1 — readable and shippable.
+// Canvas uses one Mesh per instance for v1, readable and shippable.
 // GPU-batched instancing (à la model-visuals) is a later optimisation
 // if perf bites.
 
@@ -55,7 +55,7 @@ type CanvasQuadState = {
     canvas: OffscreenCanvas;
     /** The trait's `_version` observed at last config refresh (size, mode, …). */
     versionAtRefresh: number;
-    /** Frame counter — used to detect stale states for cleanup. */
+    /** Frame counter, used to detect stale states for cleanup. */
     lastSeenFrame: number;
     width: number;
     height: number;
@@ -162,8 +162,8 @@ function updateHtml(domUi: DomUi, camera: Camera, viewport: Viewport, frameId: n
 
         let scaleStr = '';
         if (trait.distanceFactor !== null) {
-            // distance from camera to the anchor (any positive scalar works
-            // — drei uses cameraDistance and the scale = factor / dist).
+            // distance from camera to the anchor (any positive scalar works,
+            // drei uses cameraDistance and the scale = factor / dist).
             const cam = camera.position;
             const dx = wx - cam[0];
             const dy = wy - cam[1];
@@ -217,7 +217,7 @@ function installHtml(domUi: DomUi, trait: HtmlTrait): HtmlState {
 }
 
 function disposeHtml(domUi: DomUi, state: HtmlState): void {
-    // Detach from the overlay but leave trait.element intact — the trait
+    // Detach from the overlay but leave trait.element intact, the trait
     // owns the div. Userland keeps any references it stashed.
     state.element.remove();
     domUi.htmlStates.delete(state.trait);
@@ -297,7 +297,7 @@ function refreshCanvasConfig(state: CanvasState, trait: CanvasTrait): void {
 }
 
 function disposeCanvas(domUi: DomUi, state: CanvasState): void {
-    // trait.canvas stays — userland may still hold the ref / context.
+    // trait.canvas stays, userland may still hold the ref / context.
     domUi.scene.remove(state.mesh);
     state.mesh.geometry.dispose();
     state.mesh.material.dispose();
@@ -343,7 +343,7 @@ function applyQuadPose(
         mesh.quaternion[2] = 0;
         mesh.quaternion[3] = c;
     } else {
-        // 'world' — copy node world rotation.
+        // 'world', copy node world rotation.
         quat.fromMat4(mesh.quaternion as Quat, worldMat);
     }
 

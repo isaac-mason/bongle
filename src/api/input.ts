@@ -1,5 +1,5 @@
 /**
- * public input api — polled per-frame mouse/keyboard/touch state for scripts.
+ * public input api, polled per-frame mouse/keyboard/touch state for scripts.
  *
  * access via `ctx.client!.input.mouseKeyboard` / `.touch`. predicates take
  * the input instance as their first arg so they're tree-shakeable and

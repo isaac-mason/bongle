@@ -55,7 +55,7 @@ export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, chil
                 <div className="relative flex flex-col min-h-0 overflow-y-auto" style={resizable ? { height } : undefined}>
                     {children}
 
-                    {/* bottom-edge resize handle — only when resizable */}
+                    {/* bottom-edge resize handle, only when resizable */}
                     {resizable && (
                         <div
                             onPointerDown={onPointerDown}

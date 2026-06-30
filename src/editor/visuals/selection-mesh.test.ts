@@ -7,7 +7,7 @@ import * as Selection from '../../core/scene/selection';
 import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
 import { buildMeshEdgeSegments, buildSelectionGeometry } from './selection-mesh';
 
-// reference edge classifier — the original per-voxel + Selection.has +
+// reference edge classifier, the original per-voxel + Selection.has +
 // Map<string, Set<number>> implementation. compared against the
 // bitmask-native rewrite below.
 const TANGENTS: readonly (readonly [number, number])[] = [
@@ -287,7 +287,7 @@ describe('buildSelectionGeometry — bitmask-native vs reference', () => {
             expect(positionCount(a)).toBe(positionCount(b));
 
             if (a && b) {
-                // exact position-buffer match — meshOccupancy is deterministic, so
+                // exact position-buffer match, meshOccupancy is deterministic, so
                 // identical occupancy must produce byte-identical positions.
                 const pa = a.getBuffer('position')!.array as Float32Array;
                 const pb = b.getBuffer('position')!.array as Float32Array;

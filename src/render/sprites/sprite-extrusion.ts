@@ -1,4 +1,4 @@
-// Pixel-extrusion bake — turns a sprite's union silhouette into a 3D
+// Pixel-extrusion bake, turns a sprite's union silhouette into a 3D
 // mesh suitable for the "MC item/generated" look.
 //
 // Input: SpriteResources (atlas pixels + per-sprite frame regions).
@@ -9,15 +9,15 @@
 //   2. Build the UNION silhouette across all frames: a pixel (i, j) in
 //      sprite-local coords is "extruded" if it is opaque in *any* frame.
 //      Animated sprites whose silhouette shifts per-frame thus share one
-//      mesh — frames where a pixel is transparent simply sample alpha=0
+//      mesh, frames where a pixel is transparent simply sample alpha=0
 //      at render time (the local-uv → atlas-uv remap in the material
 //      hits the current frame's atlas region).
 //   3. For each opaque pixel emit a unit-pixel cube (1 × 1 × 1 in source
 //      pixels). Front + back faces always; side faces only on
 //      boundaries with non-opaque neighbours (greedy-mesh-lite). Per
 //      face: 4 vertices + 6 indices.
-//   4. Per-vertex UVs are constant per pixel — `(i + 0.5)/W`,
-//      `(j + 0.5)/H` in sprite-local [0..1] space — so all faces of a
+//   4. Per-vertex UVs are constant per pixel, `(i + 0.5)/W`,
+//      `(j + 0.5)/H` in sprite-local [0..1] space, so all faces of a
 //      pixel sample that pixel's centre. The material then remaps
 //      local-uv → atlas-uv via the current frame's `uvRect` uniform,
 //      so frame swaps cost one uniform update (not a re-bake).
@@ -37,7 +37,7 @@ import type { SpriteAtlasMetadata, SpriteResources } from './sprite-resources';
 
 // ── public api ──────────────────────────────────────────────────────
 
-/** Raw bake output — vertex/index arrays ready to upload into an
+/** Raw bake output, vertex/index arrays ready to upload into an
  *  uber-buffer pool. `pixelWidth/pixelHeight` carry the native sprite
  *  dims so the caller can size each instance's transform correctly. */
 export type ExtrudedSpriteMesh = {
@@ -51,10 +51,10 @@ export type ExtrudedSpriteMesh = {
 /**
  * Bake a sprite's union-silhouette extruded mesh into raw vertex/index
  * arrays. Returns `null` when the sprite isn't ready (atlas/metadata
- * absent, sprite unknown, fully-transparent silhouette) — caller
+ * absent, sprite unknown, fully-transparent silhouette), caller
  * should retry next frame.
  *
- * Bake is depth-agnostic (Z spans -0.5..+0.5 — one source pixel of
+ * Bake is depth-agnostic (Z spans -0.5..+0.5, one source pixel of
  * depth, centred); the caller scales each instance's transform Z by
  * `depth * worldScale` so the same mesh renders at any thickness.
  */
@@ -73,7 +73,7 @@ function bakeExtrudedGeometry(
     entry: SpriteAtlasMetadata['sprites'][string],
 ): ExtrudedSpriteMesh | null {
     // every frame of a sprite has the same dimensions by construction
-    // (the atlas pipeline asserts this) — read W/H off frame 0.
+    // (the atlas pipeline asserts this), read W/H off frame 0.
     const f0 = entry.frames[0]!;
     const W = f0.w;
     const H = f0.h;
@@ -102,7 +102,7 @@ function bakeExtrudedGeometry(
         for (let i = 0; i < W; i++) {
             if (!silhouette[j * W + i]) continue;
 
-            // sprite-local UV for every vertex of this pixel's box —
+            // sprite-local UV for every vertex of this pixel's box,
             // pixel centre, constant across the 6 faces (the front /
             // back face samples its own pixel; sides too, because the
             // extruded surface is a single pixel's silhouette).
@@ -145,7 +145,7 @@ function bakeExtrudedGeometry(
             );
             idxCount += 6;
 
-            // back (+Z): always — winding reversed so it faces +Z
+            // back (+Z): always, winding reversed so it faces +Z
             vertCount = emitQuad(
                 positions,
                 uvs,
@@ -169,7 +169,7 @@ function bakeExtrudedGeometry(
             );
             idxCount += 6;
 
-            // sides — emit only on boundary with non-opaque neighbour
+            // sides, emit only on boundary with non-opaque neighbour
             // -X (left)
             if (i === 0 || !silhouette[j * W + (i - 1)]) {
                 vertCount = emitQuad(
@@ -345,7 +345,7 @@ function emitQuad(
 
 /**
  * Union of opaque pixels across every frame, in sprite-local (W, H)
- * coords. Returns a Uint8Array of length W*H — 1 = opaque in at least
+ * coords. Returns a Uint8Array of length W*H, 1 = opaque in at least
  * one frame, 0 = transparent in all frames.
  *
  * "Opaque" means alpha > 0; the atlas was emitted with premultiplied

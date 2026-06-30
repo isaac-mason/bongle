@@ -1,8 +1,8 @@
-// SpriteVisuals — per-room instanced renderer for SpriteTrait instances.
+// SpriteVisuals, per-room instanced renderer for SpriteTrait instances.
 //
 // Material lives engine-global on `SpriteResources`. This per-room struct
 // owns the geometry, per-instance pose+material buffers, and a compacting
-// slot allocator. Slots are dense `[0, head)` — invisible/freed slots are
+// slot allocator. Slots are dense `[0, head)`, invisible/freed slots are
 // swap-popped out so the draw is a single instanced `drawIndexed(6, head, 0)`
 // with no shader-side visibility gate. Buffers route to the engine-global
 // material by name via `geometry.setBuffer(name, buf)`.
@@ -23,7 +23,7 @@
 // state during swap-pop and rewrite its `state.slot`.
 //
 // Atlas-swap handling: `SpriteResources.refresh` rebinds the material's
-// atlas TextureNode in place — no per-room work needed. The compiled
+// atlas TextureNode in place, no per-room work needed. The compiled
 // pipeline survives across reloads.
 
 import { type Camera, createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, packTo, type Scene } from 'gpucat';
@@ -75,14 +75,14 @@ export type SpriteVisualState = {
      *  Reassigned by `freeSlot`'s swap-pop. */
     slot: number;
     trait: SpriteTrait;
-    /** this sprite's own frustum-cull entry — registered with the shared
+    /** this sprite's own frustum-cull entry, registered with the shared
      *  Visibility culler at install, which writes `cull.visible` each frame. */
     cull: Visibility.CullState;
-    /** sprite id observed at install — re-install on swap. */
+    /** sprite id observed at install, re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
     entry: SpriteEntry;
-    /** performance.now() at install — drives flipbook frame selection. */
+    /** performance.now() at install, drives flipbook frame selection. */
     installedAtMs: number;
     /** frame counter of the most recent update pass that touched this
      *  state. cleanup at end of update destroys stale entries. */
@@ -96,7 +96,7 @@ export type SpriteVisuals = {
     instancePoseBuf: GpuBufferType;
     instanceMaterialBuf: GpuBufferType;
 
-    /** dense head — `[0, head)` are visible-this-frame slots, drawn as
+    /** dense head, `[0, head)` are visible-this-frame slots, drawn as
      *  `drawIndexed(6, head, 0)` via `mesh.count`. Grows monotonically up
      *  to `instanceCapacity`; free is swap-pop, not freelist push. */
     head: number;
@@ -123,7 +123,7 @@ export type SpriteVisuals = {
 export function init(scene: Scene, nodes: Nodes, resources: SpriteResources, env: EnvironmentResources): SpriteVisuals {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
-    // Shared 1×1 plane geometry — positions in [-0.5..0.5] × [-0.5..0.5],
+    // Shared 1×1 plane geometry, positions in [-0.5..0.5] × [-0.5..0.5],
     // uvs in [0..1]. All sprites use this single geometry; per-instance
     // pose + material drive the actual world placement and atlas region.
     const geometry = createPlaneGeometry(1, 1);
@@ -147,7 +147,7 @@ export function init(scene: Scene, nodes: Nodes, resources: SpriteResources, env
     const mesh = new Mesh(geometry, resources.material);
     mesh.name = 'sprite-visuals';
     mesh.frustumCulled = false;
-    // Mesh.count defaults to 1 — override so the first frame before
+    // Mesh.count defaults to 1, override so the first frame before
     // update() runs draws nothing instead of one garbage instance.
     mesh.count = 0;
     scene.add(mesh);
@@ -400,7 +400,7 @@ function extractBasis(m: Mat4, rightOut: [number, number, number], upOut: [numbe
 
 // gpucat tracks buffer swaps by GpuBuffer identity; resizing in-place
 // silently destroys the GPUBuffer that bind groups still hold. Allocate
-// a fresh GpuBuffer wrapper and route it by name through the geometry —
+// a fresh GpuBuffer wrapper and route it by name through the geometry,
 // `geometry.setBuffer(name, newBuf)` bumps geometry.version so the
 // shared material's bind groups rebuild against the new buffer.
 function growInstanceBuffers(visuals: SpriteVisuals, newCapacity: number): void {

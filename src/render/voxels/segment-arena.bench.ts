@@ -9,7 +9,7 @@
 // the standalone OffsetAllocator/first-fit benches keep providing an
 // algorithm-only comparison.
 //
-// the metrics test ("fragmentation profile") is not a `bench` — it runs
+// the metrics test ("fragmentation profile") is not a `bench`, it runs
 // once and prints peak-used-before-OOM, which `bench` can't report.
 
 import { bench, describe } from 'vitest';
@@ -19,7 +19,7 @@ import { arenaAlloc, arenaFree, createQuadArena, type QuadArena } from './voxel-
 // ── workload ───────────────────────────────────────────────────────
 //
 // bimodal alloc-size distribution mirroring real chunks: most chunks
-// hold a few hundred quads, a long tail hits 1k–7k.
+// hold a few hundred quads, a long tail hits 1k-7k.
 
 const CAPACITY_SLOTS = 100_000;
 const SMALL_MIN = 1;
@@ -184,7 +184,7 @@ describe('SegmentArena — per-op throughput', () => {
                     const start = arenaAlloc(arena, op.size);
                     live.set(op.id, { start, size: op.size });
                 } catch {
-                    /* OOM — skip */
+                    /* OOM, skip */
                 }
             } else {
                 const seg = live.get(op.id);
@@ -199,5 +199,5 @@ describe('SegmentArena — per-op throughput', () => {
     });
 });
 
-// fragmentation profile lives in segment-arena-fragmentation.test.ts —
+// fragmentation profile lives in segment-arena-fragmentation.test.ts,
 // vitest bench mode only picks up `bench` blocks.

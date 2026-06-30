@@ -2,7 +2,7 @@
 // envelope. each visited body becomes a candidate that the slide loop
 // will narrow-phase via crashcat's `castShapeVsShape`.
 //
-// no shape special-casing — sphere, capsule, hull, mesh, compound, or
+// no shape special-casing, sphere, capsule, hull, mesh, compound, or
 // rotated box, they all flow through the same path. voxels are excluded
 // at the layer filter (handled by `voxel-aabb-sweep`).
 //
@@ -35,7 +35,7 @@ export type BodyCandidateGather = {
     out: BodyCandidate[];
     /** id of the body to skip (the controller's own inner body). */
     selfBodyId: BodyId;
-    /** broadphase visitor — owns its own state so multiple gathers can coexist. */
+    /** broadphase visitor, owns its own state so multiple gathers can coexist. */
     visitor: BodyVisitor;
 };
 

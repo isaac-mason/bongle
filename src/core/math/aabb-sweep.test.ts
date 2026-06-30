@@ -31,7 +31,7 @@ describe('sweepAabbVsAabb', () => {
 
     it('moves into wall on +X, hits at the right toi', () => {
         // character at x=0 (extent 0.5), wall starting at x=2 (so face at 2)
-        // toi = (1.5) / 5 = 0.3 — distance from char +X face (0.5) to wall face (2) is 1.5
+        // toi = (1.5) / 5 = 0.3, distance from char +X face (0.5) to wall face (2) is 1.5
         const r = sweepUnit(0, 0, 0, 5, 0, 0, [2, -10, -10, 3, 10, 10]);
         expect(r.axis).toBe(AXIS_X);
         expect(r.sign).toBe(-1);
@@ -57,7 +57,7 @@ describe('sweepAabbVsAabb', () => {
     });
 
     it('horizontal move misses a box that is above', () => {
-        // walking forward in +X but the wall is high up — Y slab never overlaps.
+        // walking forward in +X but the wall is high up, Y slab never overlaps.
         const r = sweepUnit(0, 0, 0, 5, 0, 0, [2, 100, -10, 3, 101, 10]);
         expect(r.axis).toBe(AXIS_NONE);
     });
@@ -73,7 +73,7 @@ describe('sweepAabbVsAabb', () => {
     it('flush with floor moving up → no hit (jump regression)', () => {
         // character bottom flush with slab top: char center y=0.5 (extent 0.5
         // → bottom at 0), slab top at y=0. moving up at +Y must NOT report a
-        // contact — without this, the slide kills the upward jump velocity.
+        // contact, without this, the slide kills the upward jump velocity.
         const r = sweepUnit(0, 0.5, 0, 0, 1, 0, [-10, -1, -10, 10, 0, 10]);
         expect(r.axis).toBe(AXIS_NONE);
     });
@@ -98,7 +98,7 @@ describe('sweepAabbVsAabb', () => {
     it('overlapping with motion into wall → negative TOI depenetration', () => {
         // char at x=0 (extent 0.5 → +X face at 0.5) overlapping wall x=[0.4..1]
         // by 0.1 on the +X axis. moving further into the wall at +X. the new
-        // model emits tEnter < 0 with axis=X, sign=-1 — caller applies
+        // model emits tEnter < 0 with axis=X, sign=-1, caller applies
         // `pos += disp * tEnter` for backward depenetration onto the face.
         const r = sweepUnit(0, 0, 0, 0.1, 0, 0, [0.4, -10, -10, 1, 10, 10]);
         expect(r.axis).toBe(AXIS_X);
@@ -110,7 +110,7 @@ describe('sweepAabbVsAabb', () => {
 
     it('overlapping past inner-margin midline → no hit', () => {
         // char center x=0.6 (extent 0.5 → +X face at 1.1) and the wall is
-        // x=[0.4..1]. char center is past the wall's mid-line (0.7) — moving
+        // x=[0.4..1]. char center is past the wall's mid-line (0.7), moving
         // +X would depenetrate to the wrong side. inner-margin gate rejects.
         const r = sweepUnit(0.85, 0, 0, 0.1, 0, 0, [0.4, -10, -10, 1, 10, 10]);
         expect(r.axis).toBe(AXIS_NONE);
@@ -125,7 +125,7 @@ describe('sweepAabbVsAabb', () => {
     it('hits Y first when both X and Y could collide (corner case)', () => {
         // moving diagonally toward a box; whichever axis enters last is the hit axis
         // box at [1..2, 1..2, -1..1]. character extent 0.5 at origin, displace (5, 5, 0).
-        // X enters at (1 - 0.5)/5 = 0.1; Y enters at (1 - 0.5)/5 = 0.1 — tie. axis defaults to X (first).
+        // X enters at (1 - 0.5)/5 = 0.1; Y enters at (1 - 0.5)/5 = 0.1, tie. axis defaults to X (first).
         // shift slightly so Y enters later.
         const r = sweepUnit(0, 0, 0, 5, 4, 0, [1, 1, -1, 2, 2, 1]);
         // X enter: 0.5 / 5 = 0.1; Y enter: 0.5 / 4 = 0.125 → Y is later → axis=Y
@@ -134,7 +134,7 @@ describe('sweepAabbVsAabb', () => {
     });
 
     it('zero displacement on one axis with separation on that axis → no hit', () => {
-        // dy=0 and char y is below the box — never enters Y slab.
+        // dy=0 and char y is below the box, never enters Y slab.
         const r = sweepUnit(0, -10, 0, 1, 0, 1, [1, 5, 1, 2, 6, 2]);
         expect(r.axis).toBe(AXIS_NONE);
     });

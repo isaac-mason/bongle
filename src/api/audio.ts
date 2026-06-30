@@ -1,7 +1,7 @@
 /**
  * Script-facing audio playback API.
  *
- * Three play primitives — mono (non-positional), at (fixed world pos),
+ * Three play primitives, mono (non-positional), at (fixed world pos),
  * onNode (follows a node). Same surface covers atlas-backed and
  * `long: true` sounds; the runtime owns the transport choice via
  * `audio-manifest.json`.
@@ -12,11 +12,11 @@
  *
  * Implementation forwards into the per-room `Audio` coordinator
  * (`client/audio/audio.ts`). PlaybackHandle is the only thing the
- * script holds onto — `setVolume`/`setDetune`/`stop` are imperative
+ * script holds onto, `setVolume`/`setDetune`/`stop` are imperative
  * mutators on the active source's gain/panner/buffer chain.
  *
  * Per `feedback_no_callbacks_on_primitives`, there are no callbacks on
- * these primitives — auto-stop when a node-bound source's node is
+ * these primitives, auto-stop when a node-bound source's node is
  * removed lives in the runtime's per-frame reaper, not in trait
  * callbacks. Reactive lifecycle (lifetime-tie-to-node, fade-on-room-exit,
  * …) belongs in a trait layer if/when we add one.
@@ -32,7 +32,7 @@ export type PlayOpts = Audio.PlayOpts;
 export type SpatialOpts = Audio.SpatialOpts;
 export type Falloff = Audio.Falloff;
 
-/** non-positional play — output goes straight to the room's master gain.
+/** non-positional play, output goes straight to the room's master gain.
  *  use for UI sounds, music, and anything else that shouldn't pan. */
 export function playMono(ctx: ScriptContext, sound: SoundHandle, opts?: PlayOpts): PlaybackHandle | null {
     const room = ctx.client?.room;
@@ -41,7 +41,7 @@ export function playMono(ctx: ScriptContext, sound: SoundHandle, opts?: PlayOpts
 }
 
 /** play at a fixed world-space position. position is sampled once at
- *  call time — for moving sources use `playOnNode` instead. */
+ *  call time, for moving sources use `playOnNode` instead. */
 export function playAt(
     ctx: ScriptContext,
     sound: SoundHandle,
@@ -53,7 +53,7 @@ export function playAt(
     return Audio.playAt(room.audio, sound.soundId, pos, opts);
 }
 
-/** play following a scene node — panner position refreshes every frame
+/** play following a scene node, panner position refreshes every frame
  *  from the node's interpolated world transform. cancels automatically
  *  when the node is removed from the scene graph. */
 export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, opts?: SpatialOpts): PlaybackHandle | null {

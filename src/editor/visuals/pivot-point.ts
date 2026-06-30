@@ -1,4 +1,4 @@
-// pivot-point.ts — small sphere rendered at the transform tool gizmo pivot point.
+// pivot-point.ts, small sphere rendered at the transform tool gizmo pivot point.
 //
 // always rendered on top (depthTest:false) so it's visible through geometry.
 // shown whenever the transform tool is active and a selection exists.

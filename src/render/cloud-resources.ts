@@ -15,7 +15,7 @@
 //   - compactedInstanceBuf,
 //     indirectBuf               (per-frame cull output, one writer)
 //   - shapes, maxIndexCount     (CPU-side cull metadata)
-//   - windStartMs               (wall-clock anchor — global on purpose,
+//   - windStartMs               (wall-clock anchor, global on purpose,
 //                                so clouds drift consistently across
 //                                room switches)
 //
@@ -72,7 +72,7 @@ import { EnvConfig, type EnvironmentResources } from './environment';
 // daytime + night cloud RGB.
 const CLOUD_DAY: [number, number, number] = [1, 1, 1];
 const CLOUD_NIGHT: [number, number, number] = [0.12, 0.14, 0.2];
-// sunrise/sunset glow tint — matches the sky shader's FOG_SUN_TINT.
+// sunrise/sunset glow tint, matches the sky shader's FOG_SUN_TINT.
 const CLOUD_SUNSET_TINT_SRGB: [number, number, number] = [244, 125, 29];
 const CLOUD_SUNSET_STRENGTH = 0.55;
 
@@ -122,7 +122,7 @@ export type CloudResources = {
     indirectBuf: GpuBufferAny;
     indirectData: Uint32Array;
 
-    /** static storage buffers — uploaded once, read by VS via storage. */
+    /** static storage buffers, uploaded once, read by VS via storage. */
     positionStorageBuf: GpuBufferAny;
     normalStorageBuf: GpuBufferAny;
     indexStorageBuf: GpuBufferAny;
@@ -161,7 +161,7 @@ export function init(envResources: EnvironmentResources): CloudResources {
     const indirectBuf = createIndirectBuffer(d.array(DrawIndirect), indirectData);
     geometry.indirect = indirectBuf;
 
-    // static per-vertex/per-index storage — uploaded once. positions and
+    // static per-vertex/per-index storage, uploaded once. positions and
     // normals are padded to vec4 because `array<vec3f>` has 16-byte
     // element stride in WGSL std430.
     const positionsVec4 = padVec3ToVec4(positions);
@@ -171,7 +171,7 @@ export function init(envResources: EnvironmentResources): CloudResources {
     const indexStorageBuf = new GpuBuffer(d.array(d.u32), { data: indices, usage: 'storage' });
 
     // route named storage refs once. `env` is the engine-global
-    // envConfig buffer — only the active room writes into it, so the
+    // envConfig buffer, only the active room writes into it, so the
     // material always sees that room's config.
     geometry.setBuffer('env', envResources.envConfigBuffer);
     geometry.setBuffer('compactedInstances', compactedInstanceBuf);
@@ -225,7 +225,7 @@ function createCloudMaterial(): Material {
     const cfg = storage('env', EnvConfig, 'read').fields();
     const instances = storage('compactedInstances', d.array(CompactedCloudInstance), 'read');
     // stored as vec4f (w=0) since `array<vec3f>` has 16-byte element
-    // stride in WGSL — uploading tight 12-byte vec3s would misalign.
+    // stride in WGSL, uploading tight 12-byte vec3s would misalign.
     const positions = storage('positionStorage', d.array(d.vec4f), 'read');
     const normals = storage('normalStorage', d.array(d.vec4f), 'read');
     const indices = storage('indexStorage', d.array(d.u32), 'read');
@@ -255,14 +255,14 @@ function createCloudMaterial(): Material {
     const worldPos3 = vec3f(worldX, worldY, worldZ).toVar('cloudWP');
 
     const realClip = mul(cameraProjectionMatrix, mul(cameraViewMatrix, vec4f(worldPos3, f32(1)))).toVar('cloudRealClip');
-    // degenerate clip pos for vertices past shape.indexCount — places the
+    // degenerate clip pos for vertices past shape.indexCount, places the
     // vertex well outside the [-w, w] clip volume so the triangle gets
     // culled entirely. since indexCount is always a multiple of 3, all
     // three verts of any past-the-end triangle take this branch together.
     const degenClip = vec4f(f32(2), f32(2), f32(2), f32(1));
     const clipPos = inRange.select(realClip, degenClip);
 
-    // CPU-precomputed fade — flat across the instance, so we just pass
+    // CPU-precomputed fade, flat across the instance, so we just pass
     // it through. needed per-fragment for the IGN dither below.
     const vFadeOut = varying(instFadeOut, 'cloudFadeOut').setInterpolation('flat');
 

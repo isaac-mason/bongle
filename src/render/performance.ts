@@ -27,7 +27,7 @@ export type Tier = (typeof TIER_ORDER)[number];
 
 export type Settings = {
     /** how far from the camera (in chunks) voxel chunks remain visible.
-     *  cullCPU drops chunks past this — meshing/eviction is unaffected. */
+     *  cullCPU drops chunks past this, meshing/eviction is unaffected. */
     voxelViewChunkRadius: number;
     /** desired megabytes for the voxel quad+order arenas, clamped to
      *  25 % of `limits.maxArenaBytes` at allocation time. */
@@ -36,14 +36,14 @@ export type Settings = {
     voxelMaxSections: number;
     /** max simultaneous SegmentArena allocations (node-pool size for the
      *  OffsetAllocator). target: live + free-node headroom across all 3
-     *  passes — voxelMaxSections × 3 × 2 rounded to a power of two. */
+     *  passes, voxelMaxSections × 3 × 2 rounded to a power of two. */
     voxelArenaMaxAllocs: number;
     // ── remesh dispatch ─────────────────────────────────────────────
     // Two paths share the dirty-chunk queue every frame:
-    //   1. main-thread sync — camera-prioritised, capped by
+    //   1. main-thread sync, camera-prioritised, capped by
     //      `voxelMainThreadRemeshBudget`. Lowest latency, blocks the
     //      frame, so the cap stays tiny.
-    //   2. worker pool — absorbs the rest off-thread. The pool can hold
+    //   2. worker pool, absorbs the rest off-thread. The pool can hold
     //      `voxelWorkerCount × voxelWorkerQueueDepth` jobs in flight at
     //      once; results land in `pendingMeshResults` and are drained
     //      at the top of the next `voxel-visuals.update` call.
@@ -52,11 +52,11 @@ export type Settings = {
     // (pool capacity − currently in flight). No explicit per-frame cap.
 
     /** sync remeshes per frame on the main thread (the camera-prioritised
-     *  fast-path inside `voxel-visuals.update`). Keep small — every one
+     *  fast-path inside `voxel-visuals.update`). Keep small, every one
      *  of these blocks the frame. */
     voxelMainThreadRemeshBudget: number;
     /** size of the mesh worker pool. 0 disables workers entirely (every
-     *  remesh runs on the main thread synchronously — useful for tests and
+     *  remesh runs on the main thread synchronously, useful for tests and
      *  the asset-pipeline path). */
     voxelWorkerCount: number;
     /** per-worker FIFO queue depth. Worker drains its queue with no
@@ -105,7 +105,7 @@ export type Source = 'auto' | 'user';
 export type Platform = 'ios' | 'android' | 'desktop';
 
 export type Limits = {
-    /** min(maxStorageBufferBindingSize, maxBufferSize) — every subsystem
+    /** min(maxStorageBufferBindingSize, maxBufferSize), every subsystem
      *  derives its arena budget against this cap, never above it. */
     maxArenaBytes: number;
     maxStorageBufferBindingSize: number;
@@ -120,7 +120,7 @@ export type Profile = {
     autoDetected: Tier;
     source: Source;
     limits: Limits;
-    /** kept for telemetry — not currently used in dispatch. */
+    /** kept for telemetry, not currently used in dispatch. */
     adapterInfo: { vendor: string; architecture: string; description: string };
     platform: Platform;
 };
@@ -146,14 +146,14 @@ function detectAutoTier(_adapter: GPUAdapter, _platform: Platform): Tier {
 
     if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) return 'low';
 
-    // ChromeOS — overwhelmingly integrated Intel/ARM GPUs on entry-level hw.
+    // ChromeOS, overwhelmingly integrated Intel/ARM GPUs on entry-level hw.
     if (typeof navigator.userAgent === 'string' && /CrOS/.test(navigator.userAgent)) return 'low';
 
     return 'standard';
 }
 
 // Sandboxed iframes (deployed game-client) expose `localStorage` as a
-// property whose getter throws SecurityError — `typeof` alone trips it.
+// property whose getter throws SecurityError, `typeof` alone trips it.
 // Same envelope handles disabled-storage / quota-exceeded.
 function readStoredTier(): Tier | null {
     try {
@@ -202,7 +202,7 @@ export function setActive(profile: Profile, tier: Tier, source: Source): void {
         try {
             localStorage.setItem(STORAGE_KEY, tier);
         } catch {
-            // sandboxed iframe / quota exceeded / storage disabled — drop
+            // sandboxed iframe / quota exceeded / storage disabled, drop
         }
     }
 }

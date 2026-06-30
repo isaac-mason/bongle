@@ -1,5 +1,5 @@
 /**
- * Engine-global viewport — cached dimensions of the React-mounted `<Viewport>`
+ * Engine-global viewport, cached dimensions of the React-mounted `<Viewport>`
  * div. Updated by the engine-client resize hook so per-frame consumers (e.g.
  * the player controller's touch left/right-half split) never trigger layout
  * via `clientWidth` / `clientHeight`.

@@ -1,8 +1,8 @@
 /**
- * chat panel — minecraft-style bottom-of-viewport overlay.
+ * chat panel, minecraft-style bottom-of-viewport overlay.
  *
  *   closed: last few lines float bottom-left and fade after RECENT_LIFETIME_MS.
- *           non-interactive — the game keeps the clicks.
+ *           non-interactive, the game keeps the clicks.
  *   open:   fullscreen-ish history pane appears above the input, scrolled to
  *           the bottom. clicking inside is allowed; clicking outside or Esc
  *           closes. opens with seed '/' (slash key) or '' (t key).
@@ -32,11 +32,11 @@ const OPEN_HISTORY_LINES = 100;
 const CLOSED_RECENT_LINES = 5;
 /** how long a fresh line stays visible while the panel is closed. */
 const RECENT_LIFETIME_MS = 10_000;
-/** trailing fade window — opacity ramps from 1→0 over this slice at the end. */
+/** trailing fade window, opacity ramps from 1→0 over this slice at the end. */
 const RECENT_FADE_MS = 1_000;
 
 /** panel-local open + seed state. shared across the (one) on-screen panel
- *  instance — the active room's `ChatClient` owns the line buffer. */
+ *  instance, the active room's `ChatClient` owns the line buffer. */
 export type ChatPanelStore = {
     isOpen: boolean;
     /** consumed and cleared by the panel on mount. */
@@ -82,12 +82,12 @@ function formatLine(l: ChatLine): string {
 // Inline formatting tags, square-bracket delimited so messages still read as
 // plain text where they aren't understood: `[#rrggbb]` sets a 24-bit colour,
 // `[b]`/`[i]`/`[u]`/`[s]` turn bold/italic/underline/strike ON, and `[/]`
-// resets everything. State is cumulative — a colour tag changes only the
+// resets everything. State is cumulative, a colour tag changes only the
 // colour and leaves any active styles intact (only `[/]` clears them), so
 // colours and styles layer freely. Any bracketed run that isn't a known tag
 // (`[lol]`, `[1]`, an emote) renders verbatim, so ordinary chat that happens
-// to use brackets is never eaten. Tags ride inside a normal chat string — no
-// protocol change — so any script can style a line via `chat.message(ctx, …)`.
+// to use brackets is never eaten. Tags ride inside a normal chat string, no
+// protocol change, so any script can style a line via `chat.message(ctx, …)`.
 const HEX_TAG_RE = /^#[0-9a-f]{6}$/i;
 
 type Segment = { text: string; color?: string; bold: boolean; italic: boolean; underline: boolean; strike: boolean };
@@ -121,7 +121,7 @@ function parseFormatCodes(text: string): Segment[] {
                     else if (tag === 'i') italic = true;
                     else if (tag === 'u') underline = true;
                     else if (tag === 's') strike = true;
-                    else color = tag; // `#rrggbb` — a colour change leaves styles intact
+                    else color = tag; // `#rrggbb`, a colour change leaves styles intact
                     i = end; // skip past the tag; the loop's i++ lands after ']'
                     continue;
                 }
@@ -164,7 +164,7 @@ function FormattedText({ text }: { text: string }) {
     );
 }
 
-/** module-scoped command history — survives ChatPanel mount/unmount
+/** module-scoped command history, survives ChatPanel mount/unmount
  *  (e.g. editor toggled off/on) so prior submissions stay recallable. */
 const submitHistory: string[] = [];
 
@@ -183,7 +183,7 @@ export function ChatPanel() {
     const [historyCursor, setHistoryCursor] = useState(-1);
 
     // ticking "now" for closed-mode fade. only runs while there's at least
-    // one line still within the lifetime window — pauses when chat is open
+    // one line still within the lifetime window, pauses when chat is open
     // (history pane renders in full, no fade math needed) and when no recent
     // line exists.
     const [now, setNow] = useState(() => Date.now());

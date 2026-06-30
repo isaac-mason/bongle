@@ -1,4 +1,4 @@
-// voxel mesh visuals — per-room HW-instanced rendering for VoxelMeshTrait
+// voxel mesh visuals, per-room HW-instanced rendering for VoxelMeshTrait
 // instances. mirrors model-visuals.ts: one DrawIndirect per (model ×
 // source-chunk) bucket, with instanceCount = number of currently-visible
 // traits referencing that model.
@@ -26,7 +26,7 @@
 //   chunk      = chunkInfoTable[bucketId]   // subOrigin, quadStart
 //   instance   = instanceData[realSlot]     // worldMatrix, params
 //
-// no GPU cull compute — Visibility does the frustum work via DBVT.
+// no GPU cull compute, Visibility does the frustum work via DBVT.
 
 import type { Scene } from 'gpucat';
 import {
@@ -117,14 +117,14 @@ type ModelEntry = {
 // ── per-trait state ─────────────────────────────────────────────────
 
 export type VoxelMeshState = {
-    /** stable instanceData slot — indexes into the merged transform+params buffer. */
+    /** stable instanceData slot, indexes into the merged transform+params buffer. */
     slot: number;
     trait: VoxelMeshTrait;
     /** pointer-stable VoxelModel currently bound. compared by `===`. */
     modelRef: VoxelModel | null;
     /** resolved model entry (refcounted geometry). */
     modelEntry: ModelEntry | null;
-    /** this instance's own frustum-cull entry — registered with the shared
+    /** this instance's own frustum-cull entry, registered with the shared
      *  Visibility culler at alloc, seeded from the VoxelModel's local AABB.
      *  The culler writes `cull.visible`. */
     cull: Visibility.CullState;
@@ -145,7 +145,7 @@ export type VoxelMeshVisuals = {
     mesh: Mesh;
     geometry: Geometry;
 
-    /** shared interleaved quad arena — packs every registered model's
+    /** shared interleaved quad arena, packs every registered model's
      *  quads with per-corner light at u32[10..13] of each 14-u32 stride. */
     meshArena: SegmentArena<{
         meshQuads: { schema: d.u32; perSlot: number };
@@ -183,7 +183,7 @@ export type VoxelMeshVisuals = {
 
     /** ref-counted geometry registry. */
     modelEntries: Map<VoxelModel, ModelEntry>;
-    /** monotonic id for ModelEntry.id — used in bucket keys. */
+    /** monotonic id for ModelEntry.id, used in bucket keys. */
     nextModelId: number;
 
     _query: VoxelMeshQuery;
@@ -293,7 +293,7 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
             continue;
         }
 
-        // existing state with a different model — destroy + recreate so
+        // existing state with a different model, destroy + recreate so
         // refcounts on the old/new model settle and bucket key updates.
         if (state !== null) destroyInstance(visuals, vmTrait, visibility);
 
@@ -358,7 +358,7 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
         const slot = state.slot;
         const slotBase = slot * MODEL_INSTANCE_STRIDE_F32;
 
-        // ── transform upload — gated on TransformTrait._version ──
+        // ── transform upload, gated on TransformTrait._version ──
         const worldMatrix = getVisualWorldMatrix(transformTrait);
         const transformVersion = transformTrait._version;
         if (transformVersion !== state.transformVersionAtUpload) {
@@ -367,10 +367,10 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
             instanceDataDirty = true;
         }
 
-        // ── lighting + params — written every visible frame ──
+        // ── lighting + params, written every visible frame ──
         // per-corner light (`meshLight`, sampled in the VS) is the primary
         // source. instParams.light is a per-instance floor sampled at the
-        // origin — useful while baked-mesh light is placeholder and for
+        // origin, useful while baked-mesh light is placeholder and for
         // instances drifting between cells. shared-light home: ModelTrait
         // ancestor's light if present, else sample the room's voxel light.
         const light = trait.light;
@@ -458,7 +458,7 @@ export function update(visuals: VoxelMeshVisuals, voxels: Voxels, visibility: Vi
         const off = bucketId * DRAW_INDIRECT_STRIDE_U32;
         indirectArr[off + 0] = chunk.quadCount * 6;
         indirectArr[off + 1] = len;
-        indirectArr[off + 2] = 0; // firstVertex — chunkInfoTable carries quadStart, VS adds it
+        indirectArr[off + 2] = 0; // firstVertex, chunkInfoTable carries quadStart, VS adds it
         indirectArr[off + 3] = firstInstance;
 
         firstInstance += len;
@@ -491,7 +491,7 @@ export function dispose(visuals: VoxelMeshVisuals, scene: Scene, visibility: Vis
 // ── invalidate ──────────────────────────────────────────────────────
 
 /** drop a VoxelModel's baked geometry so the next reference re-bakes.
- *  required after mutating the model's voxels — bakes are immutable
+ *  required after mutating the model's voxels, bakes are immutable
  *  otherwise. live instances referencing this model are torn down and
  *  rebuilt on the next update tick. */
 export function invalidateVoxelModel(visuals: VoxelMeshVisuals, model: VoxelModel, visibility: Visibility.Visibility): void {
@@ -577,7 +577,7 @@ function deregisterGeometry(visuals: VoxelMeshVisuals, model: VoxelModel): void 
 }
 
 function modelEntryById(visuals: VoxelMeshVisuals, id: number): ModelEntry | null {
-    // linear scan — modelEntries is typically tiny (one per unique
+    // linear scan, modelEntries is typically tiny (one per unique
     // VoxelModel in use this room). beats holding a parallel id→entry map.
     for (const entry of visuals.modelEntries.values()) {
         if (entry.id === id) return entry;
@@ -589,7 +589,7 @@ function modelEntryById(visuals: VoxelMeshVisuals, id: number): ModelEntry | nul
 
 /** mesh every non-empty source chunk of `model.voxels` and pack the
  *  opaque + transparent + translucent quads into the shared meshArena.
- *  translucent quads are baked into the same opaque stream — no per-quad
+ *  translucent quads are baked into the same opaque stream, no per-quad
  *  depth sort across instances. acceptable for object-scale models; the
  *  chunk path still handles in-world translucents with proper ordering. */
 function bakeModel(visuals: VoxelMeshVisuals, model: VoxelModel): SourceChunkAlloc[] {
@@ -674,7 +674,7 @@ function growInstanceBuffers(visuals: VoxelMeshVisuals, newCapacity: number): vo
         visuals.instanceDataBuf = newBuf;
     }
 
-    // slotMap — rebuilt every frame, no need to preserve.
+    // slotMap, rebuilt every frame, no need to preserve.
     {
         const newBuf = new GpuBuffer(d.array(d.u32), {
             data: new Uint32Array(newCapacity),

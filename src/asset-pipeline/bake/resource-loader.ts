@@ -1,5 +1,5 @@
 /**
- * src/asset-pipeline/bake/resource-loader.ts — the asset pipeline's `ResourceLoader`.
+ * src/asset-pipeline/bake/resource-loader.ts, the asset pipeline's `ResourceLoader`.
  *
  * The Node-only counterpart to the browser's `browserResourceLoader`: byte
  * loading off disk + a `sharp` image decoder. `sharp` is only reachable through

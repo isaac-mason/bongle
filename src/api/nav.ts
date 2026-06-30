@@ -1,5 +1,5 @@
 /**
- * public navigation api — grid A* pathfinding + flood-fill reachability over the
+ * public navigation api, grid A* pathfinding + flood-fill reachability over the
  * voxel cells (see core/nav).
  *
  * `findPath`/`floodFill` take a successor function (`Actions`) and return raw cells.

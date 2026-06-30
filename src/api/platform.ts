@@ -2,12 +2,12 @@ import type { ScriptContext } from '../core/scene/scripts';
 
 /**
  * Game-facing bridge to the active host portal (CrazyGames / Poki / none).
- * Client-only. The transport lives on the ClientDriver supplied at engine init
- * — this just hands off to it. Standalone / kit-dev hosts wire these to an
+ * Client-only. The transport lives on the ClientDriver supplied at engine init,
+ * this just hands off to it. Standalone / kit-dev hosts wire these to an
  * inert impl, so a game can call them unconditionally regardless of where it's
  * running.
  *
- * Loading/gameplay lifecycle is NOT here — the host infers that from the
+ * Loading/gameplay lifecycle is NOT here, the host infers that from the
  * connection. These are the ad moments only the game knows the timing of
  * (between rounds, on death, etc.).
  *
@@ -36,7 +36,7 @@ export const platform = {
 
 /** Flag the engine as showing an ad for the lifetime of `run`, clearing it
  *  whatever the outcome. The audio mute is driven off this flag in the update
- *  loop — see `EngineClient.update`. */
+ *  loop, see `EngineClient.update`. */
 function whileAdActive<T>(state: { adActive: boolean }, run: () => Promise<T>): Promise<T> {
     state.adActive = true;
     return run().finally(() => {

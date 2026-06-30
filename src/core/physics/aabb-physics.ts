@@ -8,10 +8,10 @@
 // shape mirrors crashcat: `World` + body factories + per-tick
 // step + queries, all behind one cohesive API. the top-level `Physics`
 // holds a single `aabbWorld` handle and calls `tick` from
-// its tick — it does not own Body state, broadphase, or impostors.
+// its tick, it does not own Body state, broadphase, or impostors.
 //
 // collision is analytical (`sweepAabbVsAabb`, `sweepAabbVsVoxels`). pair
-// recording is gated on `_nodeId !== null` — imperative bodies created
+// recording is gated on `_nodeId !== null`, imperative bodies created
 // without a trait emit no pairs and pay no observer overhead. consumers
 // that need reactive contact events attach an `BodyTrait`; the trait
 // owns the contact API via `ContactsTrait` fan-out.
@@ -103,7 +103,7 @@ export type Body = {
     _prevResting: [number, number, number];
 
     /** per-axis stateId of the block the body is currently resting against.
-     *  0 (AIR sentinel) for AABB-vs-AABB hits — registry tables return the
+     *  0 (AIR sentinel) for AABB-vs-AABB hits, registry tables return the
      *  neutral defaults (friction=1, restitution=0) for it. drives the
      *  per-block restitution combine in `applyPostImpactBounce`. */
     _restingStateId: [number, number, number];
@@ -154,7 +154,7 @@ export type BodyOpts = {
     nodeId?: number | null;
 };
 
-/** writer surface — the top-level Physics passes one of these in so this
+/** writer surface, the top-level Physics passes one of these in so this
  *  module stays decoupled from the contact-pair pool / stream. */
 export type PairSink = {
     record(pair: PairInfo): void;
@@ -164,12 +164,12 @@ export type PairSink = {
  *  Body and the voxel terrain. the sink translates this into the global
  *  `ContactPair` stream. emitted only when at least one body has `_nodeId !== null`. */
 export type PairInfo = {
-    // side A — always an Body.
+    // side A, always an Body.
     aBodyId: BodyId;
     aNodeId: number | null;
     aIsSensor: boolean;
 
-    // side B — either Body or voxel.
+    // side B, either Body or voxel.
     bKind: 'aabbBody' | 'voxel';
     // when bKind === 'aabbBody':
     bBodyId: BodyId;
@@ -199,7 +199,7 @@ export type PairInfo = {
 // ── broadphase: mutable uniform spatial hash ────────────────────────
 //
 // **mutable**: bodies are inserted on create, removed on destroy, and the
-// cell-range is updated incrementally each tick via `moveInBroadphase` — no
+// cell-range is updated incrementally each tick via `moveInBroadphase`, no
 // teardown-and-rebuild on every step. each body caches its last cell range
 // (`_bpI*`), so "didn't move out of its cells" is an O(1) comparison and a
 // no-op. asleep bodies stay in the hash as obstacles; they pay nothing per
@@ -207,11 +207,11 @@ export type PairInfo = {
 //
 // one cellSize for the whole world. fine for the expected workload (items /
 // particles, halfExtents typically ≤ 1m). for wildly mixed sizes (e.g. 16m
-// sensors next to 0.1m particles), revisit with a two-level hash or DBVT —
+// sensors next to 0.1m particles), revisit with a two-level hash or DBVT,
 // don't pre-build that.
 
 // pack 3 signed 17-bit cell coords into a plain Number (51 bits used; JS safe-int is 53).
-// ±65536 cells × cellSize=2 = ±131k world units — way beyond any realistic voxel world.
+// ±65536 cells × cellSize=2 = ±131k world units, way beyond any realistic voxel world.
 // BigInt was ~10× slower here and allocated per call; this is alloc-free.
 const CELL_BITS = 17;
 const CELL_MASK = (1 << CELL_BITS) - 1; // 0x1ffff
@@ -261,7 +261,7 @@ function removeBodyFromBucket(h: SpatialHash, key: number, id: BodyId): void {
 
 /** wake any sleeping (non-STATIC) body sharing a cell with `body`'s current
  *  broadphase footprint. used when `body` is about to move, teleport, or be
- *  destroyed — anything resting on it would otherwise stay frozen in midair
+ *  destroyed, anything resting on it would otherwise stay frozen in midair
  *  because the awake-set loop never visits it and nothing else re-checks
  *  support. no-op if `body` was never inserted (sentinel cell range). */
 function wakeSleepingNeighbors(world: World, body: Body): void {
@@ -316,7 +316,7 @@ function moveInBroadphase(world: World, body: Body): void {
         return;
     }
 
-    // cells about to change — anything sleeping in the cells we currently
+    // cells about to change, anything sleeping in the cells we currently
     // occupy might have been resting against us. wake them so they can
     // re-evaluate support next tick. cascades the wake up a stack as each
     // layer moves out from under the next.
@@ -437,7 +437,7 @@ export type World = {
     /** for bodies with rigidBodyImpostor on: impostor BodyId → BodyId. */
     impostorToBody: Map<crashcat.BodyId, BodyId>;
 
-    /** broadphase. mutable — incrementally maintained on create / destroy /
+    /** broadphase. mutable, incrementally maintained on create / destroy /
      *  per-tick `moveInBroadphase`. asleep bodies stay in the hash. */
     broadphase: SpatialHash;
 
@@ -453,7 +453,7 @@ export type World = {
     // tests and headless callers leave this null; the top-level `Physics`
     // coordinator wires it up so the same World carries trait→world sync.
     // we don't import `AabbBodyTrait` as a value (would form a cycle with
-    // `aabb-body.ts`'s `AabbPhysics.MotionType` reference) — the coordinator
+    // `aabb-body.ts`'s `AabbPhysics.MotionType` reference), the coordinator
     // passes the handle in so the query can be built here.
     _bodyQuery: ReturnType<typeof query<[TraitHandle<AabbBodyTraitInstance>, typeof TransformTrait]>> | null;
 };
@@ -503,7 +503,7 @@ export function create(voxels: Voxels, opts?: CreateWorldOpts): World {
  * mirror trait state into bodies (and back). Idempotent: calling twice
  * replaces the binding.
  *
- * Called by the top-level `Physics` coordinator only — tests and headless
+ * Called by the top-level `Physics` coordinator only, tests and headless
  * callers leave this unbound and skip `preStep`/`postStep`.
  */
 export function bindNodeSync(world: World, nodes: Nodes, bodyTrait: TraitHandle<AabbBodyTraitInstance>): void {
@@ -528,7 +528,7 @@ export function dispose(world: World, crashcatWorld: crashcat.World): void {
 // ── awake-set bookkeeping ───────────────────────────────────────────
 //
 // O(1) add / remove via swap-remove. `body._awakeIndex` mirrors the array
-// slot — every move keeps it in sync. STATIC bodies never enter the set.
+// slot, every move keeps it in sync. STATIC bodies never enter the set.
 
 function addToAwakeSet(world: World, body: Body): void {
     if (body._awakeIndex !== -1) return;
@@ -595,7 +595,7 @@ export function createBody(world: World, crashcatWorld: crashcat.World, opts: Bo
         _prevRestingStateId: [0, 0, 0],
         _sleepFrameCount: SLEEP_RESET_FRAMES,
         _asleep: false,
-        // "not inserted" sentinel — moveInBroadphase below flips this.
+        // "not inserted" sentinel, moveInBroadphase below flips this.
         _broadphaseCellMinX: 1,
         _broadphaseCellMinY: 0,
         _broadphaseCellMinZ: 0,
@@ -620,7 +620,7 @@ export function destroyBody(world: World, crashcatWorld: crashcat.World, body: B
     }
     // wake anything resting against us BEFORE we vanish from the broadphase.
     // without this, the stack above a destroyed body keeps sleeping where it
-    // was and floats in midair — the awake-set loop never visits it, and no
+    // was and floats in midair, the awake-set loop never visits it, and no
     // other pass re-checks support for sleeping bodies.
     wakeSleepingNeighbors(world, body);
     removeFromAwakeSet(world, body);
@@ -633,7 +633,7 @@ export function destroyBody(world: World, crashcatWorld: crashcat.World, body: B
 //
 // every API that nudges a body wakes it AND ensures it's in `awakeBodies`
 // so the next tick visits it. callers (trait sync, scripts, VCC pushes)
-// MUST go through these helpers rather than poking fields directly — that
+// MUST go through these helpers rather than poking fields directly, that
 // would leave the body asleep + skipped by the tick loop.
 
 /** wake a body and (re-)insert it into the awake set. cheap; no-op when already awake. */
@@ -724,7 +724,7 @@ export function setBodyImpostor(world: World, crashcatWorld: crashcat.World, bod
     }
 }
 
-/** rebuild the impostor's shape — used when halfExtents change. */
+/** rebuild the impostor's shape, used when halfExtents change. */
 export function reinstallBodyImpostor(world: World, crashcatWorld: crashcat.World, body: Body): void {
     if (!body._impostor) return;
     world.impostorToBody.delete(body._impostor.id);
@@ -805,7 +805,7 @@ function makeEmptyPair(): PairInfo {
  *   - bodies that sleep this tick are swap-removed from `awakeBodies` inside
  *     `tickBody` → `sleepBody`. the index-walk loop accounts for that.
  *   - if `awakeBodies` is empty we short-circuit and skip the per-tick work
- *     entirely — important for piles that have fully settled.
+ *     entirely, important for piles that have fully settled.
  */
 export function tick(world: World, crashcatWorld: crashcat.World, dt: number, recordedPairs: PairSink): void {
     const awake = world.awakeBodies;
@@ -819,7 +819,7 @@ export function tick(world: World, crashcatWorld: crashcat.World, dt: number, re
         const lenBefore = awake.length;
         const body = world.bodies.get(awake[i]!);
         if (!body) {
-            // stale id — heal by swap-removing in place and re-checking i.
+            // stale id, heal by swap-removing in place and re-checking i.
             const last = awake.length - 1;
             if (i !== last) awake[i] = awake[last]!;
             awake.pop();
@@ -874,7 +874,7 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
     }
 
     // snapshot the POST-INTEGRATION velocity. this is the velocity that would
-    // have driven the body through the surface — it IS the impact velocity.
+    // have driven the body through the surface, it IS the impact velocity.
     // slideResolve will zero the normal component when it lands a contact;
     // the bounce step then reads this snapshot to apply -rest × impactVel.
     const vImpactX = body.linearVelocity[0];
@@ -886,7 +886,7 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
 
     // 4. post-impact bounce. slideResolve has already zeroed the normal
     //    component on any resting axis, so the bounce only needs to ADD
-    //    -rest × impactVel along that axis (not (1+rest) × — that would
+    //    -rest × impactVel along that axis (not (1+rest) ×, that would
     //    inject 50% extra energy every hit). gated by `minBounceVelocity`
     //    to kill perpetual micro-bounces near terminal velocity.
     if (body.restitution > 0) {
@@ -894,10 +894,10 @@ function tickBody(world: World, crashcatWorld: crashcat.World, body: Body, dt: n
     }
 
     // 5. broadphase reslot (cell-range cache makes this O(1) when AABB hasn't
-    //    crossed a cell boundary — the common micro-movement case).
+    //    crossed a cell boundary, the common micro-movement case).
     moveInBroadphase(world, body);
 
-    // 6. impostor mirror (kinematic) — only on awake bodies; asleep bodies'
+    // 6. impostor mirror (kinematic), only on awake bodies; asleep bodies'
     //    impostors were already at the right transform when they slept.
     if (body._impostor) {
         crashcat.rigidBody.setTransform(crashcatWorld, body._impostor, body.position, IDENTITY_QUAT, true);
@@ -981,7 +981,7 @@ function updateSleepState(world: World, body: Body): void {
     const groundedLastTick = (body._prevResting[0] | body._prevResting[1] | body._prevResting[2]) !== 0;
 
     if (v2 < world.sleepVelocityEpsSq) {
-        // FAST PATH — two consecutive grounded + slow ticks ⇒ confidently settled.
+        // FAST PATH, two consecutive grounded + slow ticks ⇒ confidently settled.
         if (groundedThisTick && groundedLastTick) {
             sleepBody(world, body);
             return;
@@ -1014,7 +1014,7 @@ function updateSleepState(world: World, body: Body): void {
             if (hitVoxel || groundedThisTick) {
                 sleepBody(world, body);
             } else {
-                // in free space — clamp budget to 1 so we re-check next tick.
+                // in free space, clamp budget to 1 so we re-check next tick.
                 body._sleepFrameCount = 1;
             }
         }
@@ -1135,7 +1135,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         }
 
         if (bestTOI === Infinity) {
-            // no hit — advance freely and stop.
+            // no hit, advance freely and stop.
             body.position[0] += dx;
             body.position[1] += dy;
             body.position[2] += dz;
@@ -1146,7 +1146,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         const sensorHit = bestOther !== null && (body.sensor || bestOther.sensor);
 
         // advance by TOI (clamped to >= 0; analytical can return small
-        // negative values for already-overlapping pairs — depenetrate).
+        // negative values for already-overlapping pairs, depenetrate).
         const t = bestTOI < 0 ? 0 : bestTOI;
         body.position[0] += dx * t;
         body.position[1] += dy * t;
@@ -1174,7 +1174,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
         }
 
         if (sensorHit) {
-            // sensors don't resolve — finish the unblocked motion this frame.
+            // sensors don't resolve, finish the unblocked motion this frame.
             const tRem = 1 - t;
             body.position[0] += dx * tRem;
             body.position[1] += dy * tRem;
@@ -1218,7 +1218,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
                 // resting[axis] = -sign(normal_axis). floor (n=+Y) ⇒ resting[1] = -1.
                 // _restingStateId[axis] tracks the block we're resting against for
                 // per-block friction + restitution combine. AABB-vs-AABB hits write
-                // 0 (AIR sentinel) — registry tables return neutral defaults for it.
+                // 0 (AIR sentinel), registry tables return neutral defaults for it.
                 const restStateId = bestVoxel ? bestStateId : 0;
                 if (bestNX !== 0) {
                     body.resting[0] = bestNX > 0 ? -1 : 1;
@@ -1234,7 +1234,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
                 }
             }
         }
-        // else: already separating along normal — leave velocity untouched.
+        // else: already separating along normal, leave velocity untouched.
 
         // remaining displacement is the unused portion of this step.
         const tRem = 1 - t;
@@ -1282,7 +1282,7 @@ function emitPair(
         _pairOut.bVoxelZ = vz;
         _pairOut.bStateId = stateId;
         _pairOut.bSubAabbIndex = subAabbIndex;
-        // voxels are static — relVel is just -aLin.
+        // voxels are static, relVel is just -aLin.
         _pairOut.relVelX = -a.linearVelocity[0];
         _pairOut.relVelY = -a.linearVelocity[1];
         _pairOut.relVelZ = -a.linearVelocity[2];
@@ -1396,7 +1396,7 @@ export function getBodyByNodeId(world: World, nodeId: number): Body | undefined 
 // shape mirrors crashcat's CastRay api so consumer code reads the same way:
 // status enum, hit struct (pool-friendly), settings, and a collector
 // interface with three canonical implementations (All / Any / Closest). pools
-// are hand-rolled inline — no external pool dep, no external alloc per ray.
+// are hand-rolled inline, no external pool dep, no external alloc per ray.
 //
 // the underlying primitive is slab-test ray-vs-AABB. broadphase candidates
 // come from an envelope-AABB query of the ray segment. asleep bodies stay in
@@ -1410,7 +1410,7 @@ export enum CastRayStatus {
 
 export type CastRayHit = {
     status: CastRayStatus;
-    /** fraction along the ray where the hit occurred — 0 at origin, 1 at origin + dir*length. */
+    /** fraction along the ray where the hit occurred, 0 at origin, 1 at origin + dir*length. */
     fraction: number;
     /** id of the body that was hit. -1 ⇒ no hit. */
     bodyId: BodyId;
@@ -1474,7 +1474,7 @@ export type CastRayCollector = {
 const INITIAL_EARLY_OUT_FRACTION = 1.0 + 1e-4;
 const SHOULD_EARLY_OUT_FRACTION = 0.0;
 
-/** collects every hit along the ray. hits are pooled — calling `reset()`
+/** collects every hit along the ray. hits are pooled, calling `reset()`
  *  returns the buffer to the pool without re-allocating. */
 export class AllCastRayCollector implements CastRayCollector {
     bodyId: BodyId = -1;
@@ -1579,7 +1579,7 @@ export function createClosestCastRayCollector(): ClosestCastRayCollector {
     return new ClosestCastRayCollector();
 }
 
-/** scratch hit handed to `collector.addHit` per candidate — the collector
+/** scratch hit handed to `collector.addHit` per candidate, the collector
  *  copies values out, so reusing this is safe. */
 const _castRayHit: CastRayHit = createCastRayHit();
 
@@ -1674,7 +1674,7 @@ function rayVsAabbWithNormal(
     if (nAxis === 0) _castRayHit.normalX = dx > 0 ? -1 : 1;
     else if (nAxis === 1) _castRayHit.normalY = dy > 0 ? -1 : 1;
     else if (nAxis === 2) _castRayHit.normalZ = dz > 0 ? -1 : 1;
-    // nAxis === -1 only when the ray origin is already inside every slab —
+    // nAxis === -1 only when the ray origin is already inside every slab,
     // treat that as fraction 0 with an undefined normal (consumer can detect
     // by zero normal). matches crashcat's "treatConvexAsSolid" default for
     // rays starting inside a shape.
@@ -1689,7 +1689,7 @@ function rayVsAabbWithNormal(
  *
  * `dx,dy,dz` is the (unnormalized) ray direction; `length` is the multiplier
  * applied to it. `fraction` in hits is the [0..length] parameter divided by
- * `length` — same as crashcat. ray = origin + (dir * length) * fraction.
+ * `length`, same as crashcat. ray = origin + (dir * length) * fraction.
  */
 export function castRay(
     world: World,
@@ -1710,7 +1710,7 @@ export function castRay(
 
     // envelope of the ray: a bounding box around the segment. broadphase
     // candidates are anything in cells overlapping this envelope. for very
-    // long rays this becomes coarse — revisit with DDA cell-walk if it
+    // long rays this becomes coarse, revisit with DDA cell-walk if it
     // shows up in profiles.
     const ex = dx * length;
     const ey = dy * length;
@@ -1775,7 +1775,7 @@ export function castRay(
 
 // ── trait → world sync ────────────────────────────────────────────────
 //
-// the AabbBody struct IS our snapshot — every field is a plain JS write on
+// the AabbBody struct IS our snapshot, every field is a plain JS write on
 // memory we own, so we mirror trait → body unconditionally each preStep.
 // only halfExtents and rigidBodyImpostor require special handling (the
 // impostor's crashcat body has to be rebuilt when either changes).
@@ -1799,7 +1799,7 @@ function syncAabbBodyTraitToWorld(
     identity: PlayerId | null,
     simulate: boolean,
 ): void {
-    // first install — create the body. companion-trait (Interpolate, Contacts)
+    // first install, create the body. companion-trait (Interpolate, Contacts)
     // attachment lives in the top-level Physics coordinator.
     if (!t.body) {
         const wp = getWorldPosition(transform);
@@ -1858,7 +1858,7 @@ function syncAabbBodyTraitToWorld(
     // snap, zero velocity, and wake (setter handles all three).
     //
     // if the script ALSO set t.linearVelocity in the same tick (the common
-    // "respawn with new velocity" pattern), pick it up after the zero — this
+    // "respawn with new velocity" pattern), pick it up after the zero, this
     // is the only sanctioned way to inject velocity into a DYNAMIC body from
     // script. otherwise teleports preserve "fresh start, no momentum" semantics.
     const wp = getWorldPosition(transform);
@@ -1869,7 +1869,7 @@ function syncAabbBodyTraitToWorld(
         }
     }
 
-    // client-side replication smoothing for non-owner KINEMATIC bodies —
+    // client-side replication smoothing for non-owner KINEMATIC bodies,
     // sync'd linearVelocity drives integration between sparse pose updates.
     if (identity !== null && t._node.owner !== identity && body.motionType === MotionType.KINEMATIC) {
         setBodyVelocity(world, body, t.linearVelocity[0], t.linearVelocity[1], t.linearVelocity[2]);

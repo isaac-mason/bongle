@@ -23,7 +23,7 @@
 //
 // OPTIMIZATION: all BFS queue entries carry (chunk, voxelIndex, sourceDir)
 // instead of world coordinates. neighbor resolution uses chunk.neighbors[]
-// for cross-chunk traversal — zero string-keyed map lookups in the hot
+// for cross-chunk traversal, zero string-keyed map lookups in the hot
 // path. all light/state/dirty access goes through the chunk ref directly.
 
 import type { Vec4 } from 'mathcat';
@@ -86,10 +86,10 @@ export function setBlue(packed: number, val: number): number {
 // CullType encoding: NONE=0, SOLID=1, SELF=2, PARTIAL=3
 
 const DEFAULT_OPACITY_BY_CULL: readonly number[] = [
-    0, // NONE (air) — fully transparent
-    15, // SOLID — fully opaque
-    1, // SELF (leaves, water, glass) — slight filtering
-    0, // PARTIAL (stairs/slopes) — transparent to light
+    0, // NONE (air), fully transparent
+    15, // SOLID, fully opaque
+    1, // SELF (leaves, water, glass), slight filtering
+    0, // PARTIAL (stairs/slopes), transparent to light
 ];
 
 export function defaultLightOpacity(encodedCull: number): number {
@@ -128,7 +128,7 @@ export function getEmissionB(packed: number): number {
 // model translates continuously through world space its light fades
 // continuously too rather than snapping a full 1/15 step every voxel
 // crossing. corner lookups that fall in unloaded chunks fall back to
-// open sky (sky=1, no block light) — same policy as the single-voxel
+// open sky (sky=1, no block light), same policy as the single-voxel
 // path, so far-away models don't render pitch-black before chunks stream in.
 
 const INV_15 = 1 / 15;
@@ -252,7 +252,7 @@ function chGetEmission(emission: number, ch: number): number {
 // chunk + neighbor voxel index. uses chunk.neighbors[] for cross-chunk
 // traversal. returns null chunk if neighbor is unloaded.
 //
-// scratch variables for the result — avoids any allocation.
+// scratch variables for the result, avoids any allocation.
 
 let _nchunk: Chunk | null = null;
 let _nindex = 0;
@@ -271,7 +271,7 @@ function resolveNeighbor(chunk: Chunk, lx: number, ly: number, lz: number, dir: 
         return;
     }
 
-    // crossed a chunk boundary — use neighbor ref
+    // crossed a chunk boundary, use neighbor ref
     _nchunk = chunk.neighbors[dir];
     if (_nchunk) {
         _nindex = voxelIndex(nlx & CHUNK_MASK, nly & CHUNK_MASK, nlz & CHUNK_MASK);
@@ -305,7 +305,7 @@ function writeChunkLight(voxels: Voxels, chunk: Chunk, index: number, value: num
 // ── chunk dirty marking ─────────────────────────────────────────────
 
 function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
-    if (chunk.lightDirty) return; // already dirty — skip redundant stores
+    if (chunk.lightDirty) return; // already dirty, skip redundant stores
     chunk.lightDirty = true;
     chunk.dirty = true;
     voxels.dirty.blocks.add(chunk);
@@ -318,7 +318,7 @@ function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
 // ── world coord → chunk + index resolution ──────────────────────────
 //
 // used by seeding code to resolve a world position to (chunk, index).
-// this is the ONE place we do a map lookup — at seed time, not in BFS.
+// this is the ONE place we do a map lookup, at seed time, not in BFS.
 
 function resolveWorldPos(voxels: Voxels, wx: number, wy: number, wz: number): Chunk | null {
     const chunk = voxels.chunks.get(chunkKey(toChunkCoord(wx), toChunkCoord(wy), toChunkCoord(wz)));
@@ -411,7 +411,7 @@ const _spreadQueue = createBucketQueue();
 //   - after checking all neighbors: if brightest_neighbor > 1, push the
 //     current (removed) node to relightQueue at (brightest_neighbor - 1)
 //     with direction = opposite of brightest neighbor dir.
-//     this is minetest's approach — the removed node becomes the relight
+//     this is minetest's approach, the removed node becomes the relight
 //     seed, not the bright neighbor.
 //
 // no sky-specific logic here. sky column handling is entirely in the
@@ -425,7 +425,7 @@ function unspreadChannel(
     relightQueue: BucketQueue,
 ): void {
     const { lightOpacity, lightEmission } = registry;
-    // hoist channel shift/mask once per BFS — ch is fixed for the entire
+    // hoist channel shift/mask once per BFS, ch is fixed for the entire
     // pop loop, so the per-cell chGet/chSet array indexing collapses to
     // direct shifts.
     const shift = CHANNEL_SHIFT[ch]!;
@@ -442,7 +442,7 @@ function unspreadChannel(
         const lz = (index >> 4) & CHUNK_MASK;
         const ly = index >> 8;
 
-        // this node's state — needed for emission check
+        // this node's state, needed for emission check
         const nodeState = chunk.palette[chunk.data[index]!]!;
         const nodeEmission = chGetEmission(lightEmission[nodeState]!, ch);
 
@@ -470,14 +470,14 @@ function unspreadChannel(
             // minetest: if (propagates && level < oldLevel) → removal, else → border.
             // opaque neighbors (!propagates) always go to the border branch.
             if (neighborOpacity < 15 && neighborLevel < oldLevel) {
-                // this neighbor propagates light and got its light from us — remove it
+                // this neighbor propagates light and got its light from us, remove it
                 if (neighborLevel > 0) {
                     setLight(nchunk, nindex, neighborPacked & mask);
                     markChunkDirty(voxels, nchunk);
                     bqPush(removalQueue, neighborLevel, nchunk, nindex, dir);
                 }
             } else {
-                // border — this neighbor has light from elsewhere (or is opaque).
+                // border, this neighbor has light from elsewhere (or is opaque).
                 // boost to at least its own emission (minetest:
                 // if neighbor_light < neighbor_f.light_source then
                 //   neighbor_light = neighbor_f.light_source)
@@ -578,7 +578,7 @@ export function propagateAllLight(voxels: Voxels): void {
     const registry = voxels.registry;
     const { lightEmission, lightOpacity } = registry;
 
-    // defensive reconcile — test/bench code paths bypass ensureChunk and
+    // defensive reconcile, test/bench code paths bypass ensureChunk and
     // drop chunks straight into voxels.chunks, so voxels.columns can be
     // stale. cheap rebuild from the authoritative chunks map.
     rebuildColumns(voxels);
@@ -602,7 +602,7 @@ export function propagateAllLight(voxels: Voxels): void {
     //
     // seed sky=15 in transparent columns top-down. writes go direct to
     // chunk.light[] (no ops). since everything starts at 0, unspread
-    // queue is empty — but we run the same pipeline anyway.
+    // queue is empty, but we run the same pipeline anyway.
 
     bqClear(_removalQueue);
     bqClear(_relightQueue);
@@ -633,7 +633,7 @@ export function propagateAllLight(voxels: Voxels): void {
         }
     }
 
-    // unspread (noop — removal queue empty) → init-write (noop) → spread
+    // unspread (noop, removal queue empty) → init-write (noop) → spread
     unspreadChannel(voxels, voxels.registry, CH_SKY, _removalQueue, _relightQueue);
     spreadChannel(voxels, voxels.registry, CH_SKY, _spreadQueue);
 
@@ -687,13 +687,13 @@ export function propagateAllLight(voxels: Voxels): void {
         chunk.dirty = true;
         chunk.meshGen++;
         // full rebake rewrites light[] for every chunk (incl. the fill(0) clear
-        // above, which bypasses setLight) — so bump the persisted-data version
+        // above, which bypasses setLight), so bump the persisted-data version
         // here to mark every chunk save-dirty.
         chunk.version++;
         voxels.dirty.blocks.add(chunk);
     }
 
-    // bump light epoch (full recompute — clients discard incremental ops)
+    // bump light epoch (full recompute, clients discard incremental ops)
     if (voxels.authority) {
         voxels.authority.changes.lightEpoch++;
         // invalidate all snapshots
@@ -738,7 +738,7 @@ function seedNewChunkSky(voxels: Voxels, chunk: Chunk): void {
                 const aboveOpacity = lightOpacity[aboveState]!;
                 aboveIsSky = aboveSky === 15 && aboveOpacity === 0;
             } else {
-                // no chunk above — the void IS the sky
+                // no chunk above, the void IS the sky
                 aboveIsSky = true;
             }
 
@@ -842,7 +842,7 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
                 const newBlocksSky = newOpacity > 0;
 
                 if (!oldBlocksSky && newBlocksSky) {
-                    // opaque block placed in a sky column — remove sky below
+                    // opaque block placed in a sky column, remove sky below
                     // first remove sky at this node
                     if (currentLevel > 0) {
                         writeChunkLight(voxels, chunk, index, chSet(packed, ch, 0));
@@ -879,9 +879,9 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
                         curLy--;
                     }
                 } else if (oldBlocksSky && !newBlocksSky) {
-                    // opaque block removed — check if sky can now reach here
+                    // opaque block removed, check if sky can now reach here
                     // look up: is the block above sky-lit at 15?
-                    // if no chunk above exists, the void IS the sky — treat as sky=15.
+                    // if no chunk above exists, the void IS the sky, treat as sky=15.
                     resolveNeighbor(chunk, lx, ly, lz, DIR_UP);
                     const aboveSky = _nchunk ? chGet(_nchunk.light[_nindex]!, ch) : 15;
 
@@ -933,7 +933,7 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
                 // but there may still be sky light changes from opacity changes.
                 // that's handled by the generic removal/relight below if needed.
                 if (oldBlocksSky === newBlocksSky) {
-                    // non-sky-blocking change — handle like block light
+                    // non-sky-blocking change, handle like block light
                     handleChannelChange(
                         voxels,
                         chunk,
@@ -977,9 +977,9 @@ export function updateLightBatch(voxels: Voxels, changes: LightChange[]): void {
         // step 3: removal BFS
         unspreadChannel(voxels, registry, ch, _removalQueue, _relightQueue);
 
-        // step 4: init-write — write relight seed values to the map
+        // step 4: init-write, write relight seed values to the map
         // iterate _relightQueue and write each seed's level to the map.
-        // we don't pop them — we need them for spreading. so we iterate
+        // we don't pop them, we need them for spreading. so we iterate
         // the parallel arrays directly.
         const initShift = CHANNEL_SHIFT[ch]!;
         const initMask = CHANNEL_MASK[ch]!;
@@ -1029,7 +1029,7 @@ function handleChannelChange(
     const newEmission = chGetEmission(lightEmission[newState]!, ch);
 
     if (newOpacity >= 15) {
-        // block is fully opaque — light cannot enter or be stored here.
+        // block is fully opaque, light cannot enter or be stored here.
         // zero any residual light first (push removal so neighbors re-evaluate).
         if (currentLevel > 0) {
             writeChunkLight(voxels, chunk, index, chSet(packed, ch, 0));
@@ -1042,24 +1042,24 @@ function handleChannelChange(
             bqPush(relightQueue, newEmission, chunk, index, DIR_NONE);
         }
     } else if (newOpacity < 15) {
-        // block is transparent — figure out if light increased or decreased.
+        // block is transparent, figure out if light increased or decreased.
         // compute what the light level should be from neighbors + emission.
         const newLevel = computeNewLevel(chunk, lx, ly, lz, registry, ch, minSafeLight);
 
         if (currentLevel > 0 && newLevel < currentLevel) {
-            // light decreased — zero and push to removal.
+            // light decreased, zero and push to removal.
             // unspread will find the correct border seeds.
             writeChunkLight(voxels, chunk, index, chSet(packed, ch, 0));
             bqPush(removalQueue, currentLevel, chunk, index, DIR_NONE);
 
             // if the node itself still emits, seed relight at emission
-            // (NOT at newLevel — neighbors have stale light values that
+            // (NOT at newLevel, neighbors have stale light values that
             // unspread will clean up. only self-emission is trustworthy.)
             if (newEmission > 0) {
                 bqPush(relightQueue, newEmission, chunk, index, DIR_NONE);
             }
         } else if (newLevel > currentLevel) {
-            // light increased — seed directly
+            // light increased, seed directly
             writeChunkLight(voxels, chunk, index, chSet(packed, ch, newLevel));
             bqPush(relightQueue, newLevel, chunk, index, DIR_NONE);
         } else if (oldOpacity !== newOpacity && currentLevel === 0) {
@@ -1075,7 +1075,7 @@ function handleChannelChange(
 // ── helper: compute what a node's light level should be ─────────────
 //
 // checks emission + max of (neighbor_level - decay) for all 6 neighbors.
-// uses chunk refs for neighbor resolution — zero map lookups.
+// uses chunk refs for neighbor resolution, zero map lookups.
 //
 // minSafeLight (minetest step 0): neighbors with light below this
 // threshold may have stale values from other batch changes. only
@@ -1110,7 +1110,7 @@ function computeNewLevel(
             const abovePacked = _nchunk.light[_nindex]!;
             const aboveSky = chGet(abovePacked, ch);
             if (aboveSky === 15) {
-                // check above block's opacity — if transparent, we're in a sky column
+                // check above block's opacity, if transparent, we're in a sky column
                 const aboveState = _nchunk.palette[_nchunk.data[_nindex]!]!;
                 const aboveOpacity = lightOpacity[aboveState]!;
                 if (aboveOpacity === 0) {
@@ -1118,7 +1118,7 @@ function computeNewLevel(
                 }
             }
         } else {
-            // no chunk above — the void IS the sky. sky column continues.
+            // no chunk above, the void IS the sky. sky column continues.
             best = 15;
         }
     }

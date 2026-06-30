@@ -1,4 +1,4 @@
-// node-aabb.ts — shared helpers for computing a node's mesh-or-voxel AABB,
+// node-aabb.ts, shared helpers for computing a node's mesh-or-voxel AABB,
 // both in local space (for bind-pose envelopes, e.g. animator gating) and in
 // world space (for broadphase shape sizing, grab tool, etc.).
 //

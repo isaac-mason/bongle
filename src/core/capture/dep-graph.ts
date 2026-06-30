@@ -1,5 +1,5 @@
 /**
- * core/capture/dep-graph.ts — producer→consumer edges across registries.
+ * core/capture/dep-graph.ts, producer→consumer edges across registries.
  *
  * Each registry can declare an `extractDeps(payload)` that returns the set
  * of (registry, id) producers a consumer payload depends on. `upsert`
@@ -9,7 +9,7 @@
  *
  * Dispatch reads `getDirtyConsumers(directlyChanged)` to expand a direct
  * pendingChanges set into the transitive set of consumers that need
- * reaction — covering the cases where the consumer's own hash didn't
+ * reaction, covering the cases where the consumer's own hash didn't
  * change (closure-bound refs, AST-only refs) but a producer it relies on
  * did. Reaction still lives in `applyRegistryChanges*`; the graph only
  * answers "who is affected".
@@ -22,8 +22,8 @@ export type DepKey = { registry: string; id: string };
 /**
  * Any producer handle that carries a DepGraph `dependency` stamp. The
  * unified `deps: [...]` field on `prefab()` and `script()` accepts
- * anything matching this shape — scene, model, block, trait, command,
- * prefab handles, etc. — and reads `h.dependency` to build edges.
+ * anything matching this shape, scene, model, block, trait, command,
+ * prefab handles, etc., and reads `h.dependency` to build edges.
  */
 export type DepHandle = { dependency: DepKey };
 
@@ -41,13 +41,13 @@ const forward = new Map<string, Set<string>>();
 /** consumer → set of producer keys (the consumer's current dep set) */
 const reverse = new Map<string, Set<string>>();
 /** bump on every mutation. dev-only debug surfaces poll this to know when
- *  to rebuild a snapshot — saves walking the maps every frame. */
+ *  to rebuild a snapshot, saves walking the maps every frame. */
 let version = 0;
 
 /**
  * Replace the consumer's dep set with `producers`. Detaches any stale
  * reverse edges, attaches any new ones. Returns `true` if the dep set
- * actually differed from the previous one — `upsert` uses this to elevate
+ * actually differed from the previous one, `upsert` uses this to elevate
  * a "content hash unchanged but deps shifted" case (e.g. a block model
  * factory that now closes over a different `BlockTextureDef`) into a
  * `changed` event on the consumer's registry. The dep set itself is the
@@ -149,7 +149,7 @@ export function clearDeps(consumer: DepKey): void {
  * its own consumers (e.g. blockTexture → block → scene), so the frontier
  * grows until no new entries appear.
  *
- * Result includes consumers only — producers passed in are not in the
+ * Result includes consumers only, producers passed in are not in the
  * output. Callers union with their direct `pendingChanges` set to get
  * the full reaction set.
  */
@@ -180,7 +180,7 @@ export function hasConsumers(producer: DepKey): boolean {
 
 /**
  * The consumer's direct producers (one hop of its current dep set). On-demand
- * read of the reverse map — pays nothing unless called. Used by tooling that
+ * read of the reverse map, pays nothing unless called. Used by tooling that
  * needs to walk a consumer's dependency closure itself (e.g. the offline icon
  * pipeline deciding which icons a producer edit invalidates), rather than the
  * forward `getDirtyConsumers` propagation the runtime uses.
@@ -192,8 +192,8 @@ export function directProducersOf(consumer: DepKey): DepKey[] {
 
 /** Bumped on every setDeps/addDeps/clearDeps that actually changed an edge.
  *  Dev surfaces (debug panel deps tab) poll this to know when to rebuild
- *  their snapshot — saves walking the maps every frame. */
-/** tests only — wipe all producer/consumer edges. */
+ *  their snapshot, saves walking the maps every frame. */
+/** tests only, wipe all producer/consumer edges. */
 export function _reset(): void {
     forward.clear();
     reverse.clear();
@@ -228,7 +228,7 @@ export function snapshotDepGraph(): DepGraphSnapshot {
         }
     }
     // consumers with no producers (or producers with no consumers but
-    // registered via reverse) — fold in too so the list view shows them.
+    // registered via reverse), fold in too so the list view shows them.
     for (const consumerKey of reverse.keys()) nodeKeys.add(consumerKey);
     const nodes = Array.from(nodeKeys, decode);
     return { version, nodes, edges };
@@ -238,7 +238,7 @@ export function snapshotDepGraph(): DepGraphSnapshot {
  * For dispatch: take the union of direct producers (everything in each
  * registry's `pendingChanges` queue) and their transitive consumers, and
  * group by registry name. Used by side-specific `applyRegistryChanges*` to
- * scope reactions — e.g. extract the set of prefab IDs that need
+ * scope reactions, e.g. extract the set of prefab IDs that need
  * re-instantiation, or the set of script IDs whose factory body must
  * re-run, without iterating every consumer in every room.
  *
@@ -247,7 +247,7 @@ export function snapshotDepGraph(): DepGraphSnapshot {
  * appears in its own pendingChanges *and* a `prefabs:bar` reached via a
  * scene-dep edge both land in `result.get('prefabs')`.
  *
- * Result includes only registries that actually had dirty entries — empty
+ * Result includes only registries that actually had dirty entries, empty
  * registries are absent. Callers default missing entries to an empty set.
  */
 export type DispatchRegistry = {

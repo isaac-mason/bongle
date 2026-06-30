@@ -1,10 +1,10 @@
-// blueprint — captured snapshot of voxels and/or nodes for copy/paste.
+// blueprint, captured snapshot of voxels and/or nodes for copy/paste.
 //
 // a blueprint stores voxel data in a Voxels instance (local space, with
 // the AABB min corner at the voxel origin) and node data as serialized
 // trait snapshots with positions relative to the blueprint origin.
 //
-// voxel data uses the same Voxels type as the world — no custom chunk
+// voxel data uses the same Voxels type as the world, no custom chunk
 // format needed. this means setBlock/getBlock/createVoxelModel all
 // work directly on blueprint voxels.
 //
@@ -28,7 +28,7 @@ import { useEditor } from './editor-store';
 
 // ── types ──────────────────────────────────────────────────────────
 //
-// nodes are stored as SerializedNode trees — the same format scene files
+// nodes are stored as SerializedNode trees, the same format scene files
 // use. each top-level node's transform.position is **origin-relative**
 // (we shift it during bake). children carry their normal parent-relative
 // positions and rotate naturally with their parent.
@@ -55,7 +55,7 @@ export type Blueprint = {
     // node positions are stored relative to this.
     origin: Vec3;
 
-    // human-readable label ("3x2x3 — 14 blocks, 2 nodes")
+    // human-readable label ("3x2x3, 14 blocks, 2 nodes")
     label: string;
 
     // what content types this blueprint contains
@@ -66,7 +66,7 @@ export type Blueprint = {
     // snapshotted voxels/nodes, but commit emits a single wrapper node
     // carrying this config so the placed instance stays linked to the prefab
     // (children re-instantiated by the runtime). cleared when the user copies
-    // the blueprint to the clipboard — that path is explicit "freeze".
+    // the blueprint to the clipboard, that path is explicit "freeze".
     sourcePrefab?: PrefabConfig;
 };
 
@@ -78,7 +78,7 @@ type TransformProps = { position: Vec3; quaternion: Quat; scale: Vec3 };
  * find the transform trait on a serialized node and return its controls as
  * typed Vec3/Quat tuples. returns null if no transform trait is present.
  *
- * the returned object has fresh tuples — mutate or replace freely without
+ * the returned object has fresh tuples, mutate or replace freely without
  * affecting the source. caller is responsible for writing back via
  * `setTransformProps` if mutation is desired on the source node.
  */
@@ -112,7 +112,7 @@ let nextBlueprintId = 1;
 
 /**
  * copy selected voxels and/or nodes into a Blueprint.
- * captures whatever the selection contains — voxels, nodes, or both.
+ * captures whatever the selection contains, voxels, nodes, or both.
  *
  * voxel data is copied into a fresh Voxels instance with coords shifted
  * so the AABB min corner sits at local (0,0,0).
@@ -242,7 +242,7 @@ export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Sele
 // ── selection → ScenePayload (blueprint persistence) ──────────────
 //
 // captures the same content as `copySelection` but emits a ScenePayload
-// ready to hand to `ContentManager.saveScene` — a synthetic root with the
+// ready to hand to `ContentManager.saveScene`, a synthetic root with the
 // selected nodes as children + serialized voxels in local space. used by
 // the "save selection as blueprint" flow (chat command, context menu).
 
@@ -267,7 +267,7 @@ export function selectionToScenePayload(worldVoxels: Voxels, nodes: Nodes, selec
 //
 // build a Blueprint from a registered scene's payload. blueprint scenes
 // (saved via selectionToScenePayload) carry voxels in local space and a
-// synthetic root whose children are origin-relative nodes — exactly the
+// synthetic root whose children are origin-relative nodes, exactly the
 // shape Blueprint already wants. we just deserialize voxels, scan the
 // AABB for size, and clone children.
 
@@ -313,7 +313,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
         }
         if (blockCount > 0) {
             // saved blueprints are already local-space (min ≈ 0). general scenes
-            // may not be — shift into local space so buildPasteOps can use
+            // may not be, shift into local space so buildPasteOps can use
             // `chunk.wx + anchor` directly.
             if (minX === 0 && minY === 0 && minZ === 0) {
                 voxels = tmp;
@@ -370,7 +370,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
  * build a Blueprint by instantiating a prefab into a synthetic root and
  * snapshotting the resulting voxels + child nodes. this lets prefab placement
  * flow through the same `enterPlacement` / `rotatePlacement` / `commitPlacement`
- * code path as ctrl+v paste — the preview shows the expanded content cheaply
+ * code path as ctrl+v paste, the preview shows the expanded content cheaply
  * without re-running the prefab fn on every ghost frame.
  *
  * the resulting blueprint carries `sourcePrefab`, so commit emits a single
@@ -515,7 +515,7 @@ export function createPrefabBlueprint(
 
 /**
  * rotate a blueprint around the Y axis by 90-degree increments.
- * returns a new Blueprint — the original is not mutated.
+ * returns a new Blueprint, the original is not mutated.
  *
  * voxel data: grid is remapped. for each voxel at (x, y, z) in a
  * volume of size (sx, sy, sz):
@@ -691,7 +691,7 @@ export function rotate(blueprint: Blueprint, turns: 0 | 1 | 2 | 3): Blueprint {
 // ── flip ──────────────────────────────────────────────────────────
 //
 // mirror across the plane perpendicular to `axis` passing through the
-// blueprint origin. companion to rotateAxis — uses flipBlockKey from
+// blueprint origin. companion to rotateAxis, uses flipBlockKey from
 // block-transform for per-block state handling.
 
 /**
@@ -849,7 +849,7 @@ export function buildPasteOps(
  * parent-relative and the engine compounds at render time).
  *
  * the caller is responsible for actually creating nodes and sending
- * commands — this function only produces the data.
+ * commands, this function only produces the data.
  *
  * returns empty entries if the blueprint has no nodes.
  */

@@ -16,7 +16,7 @@ export type FlattenedNode = {
     index: number;
     childCount: number;
     collapsed: boolean;
-    /** false if this node OR any ancestor is non-persistent — used for gray/italic styling */
+    /** false if this node OR any ancestor is non-persistent, used for gray/italic styling */
     effectivePersist: boolean;
 };
 
@@ -24,7 +24,7 @@ export type FlattenedNode = {
 
 /**
  * Flatten a scene graph's root children into a flat list suitable for
- * dnd-kit sortable. The root node itself is NOT included — it's always
+ * dnd-kit sortable. The root node itself is NOT included, it's always
  * the implicit parent. Only its descendants are flattened.
  *
  * Collapsed nodes' children are excluded from the flat list.
@@ -42,7 +42,7 @@ export function flattenSceneGraph(sg: Nodes, collapsedIds: Set<number>): Flatten
         parentId: null,
         depth: 0,
         index: 0,
-        // childCount only used to render the collapsed-badge in tree-item.tsx —
+        // childCount only used to render the collapsed-badge in tree-item.tsx,
         // skip the recursive count for expanded nodes. for the typical large
         // tree where most nodes are expanded this avoids O(N²) cost.
         childCount: rootCollapsed ? countDescendants(sg.root) : 0,
@@ -105,7 +105,7 @@ function countDescendants(node: Node): number {
 /**
  * Flatten only nodes whose name matches `query` (case-insensitive substring),
  * along with all their ancestors so the tree path stays visible. The collapsed
- * state is ignored — every ancestor of a match is shown.
+ * state is ignored, every ancestor of a match is shown.
  *
  * Used when the hierarchy filter input is non-empty.
  */
@@ -246,7 +246,7 @@ export function applyFlattenedOrder(sg: Nodes, flatItems: FlattenedNode[], remov
     if (removedItems.length > 0) {
         // Find the dragged item (the one whose children were removed)
         // The removed items' original parent structure is preserved
-        // relative to each other — just splice them back in after
+        // relative to each other, just splice them back in after
         // the dragged node.
         const draggedId = removedItems[0].parentId;
         const draggedIndex = allItems.findIndex((item) => item.id === draggedId);
@@ -317,7 +317,7 @@ export type ReparentInstruction = { nodeId: number; parentId: number; index: num
 /**
  * given the final flattened list after a drag operation, compute the
  * reparent instructions needed to make the scene graph match. this does NOT
- * mutate the scene graph — pass each instruction to reparentAction/reorderAction.
+ * mutate the scene graph, pass each instruction to reparentAction/reorderAction.
  *
  * parentId in FlattenedNode is String(node.id). null means child of root.
  */

@@ -6,7 +6,7 @@
  *     local scripts / physics. `snapshot()` at the top of each fixed
  *     tick captures `position` → `prev`; `interpolate()` per-frame
  *     lerps `prev` → `position` with the fixed-step alpha. classic
- *     prev→cur interpolation — godot-style.
+ *     prev→cur interpolation, godot-style.
  *
  *   remote (non-owner): position changes whenever a `pose` sync lands
  *     (jittery, not tick-aligned). `interpolate()` chase-lerps
@@ -15,7 +15,7 @@
  *     frame) snaps instead of lerping so a discontinuity doesn't
  *     smear visually.
  *
- *   predicted physics (owner with prediction): separate path —
+ *   predicted physics (owner with prediction): separate path,
  *     world-space correction-blend against an authoritative pose with
  *     stateful frame-carry. opt-in via RigidBody.prediction.
  *
@@ -24,8 +24,8 @@
  *
  * participation is explicit: callers opt nodes in via `setInterpolation`
  * (mirrors godot's `set_physics_interpolated`). this also seeds prev =
- * current immediately, mirroring godot's `reset_physics_interpolation`
- * — which avoids the "interpolating from (0,0,0)" failure that occurs
+ * current immediately, mirroring godot's `reset_physics_interpolation`,
+ * which avoids the "interpolating from (0,0,0)" failure that occurs
  * when prev is filled on the first snapshot tick but the node's first
  * render fires before that.
  *
@@ -50,9 +50,9 @@ export { resetInterpolation, setInterpolation } from '../builtins/transform';
 
 // ── constants ───────────────────────────────────────────────────────────
 
-/** errors smaller than this are an exact match — no blend needed. */
+/** errors smaller than this are an exact match, no blend needed. */
 const CORRECTION_SNAP_THRESHOLD = 0.01;
-/** errors larger than this are a desync — hard-snap immediately. */
+/** errors larger than this are a desync, hard-snap immediately. */
 const CORRECTION_HARD_SNAP_THRESHOLD = 2.0;
 /** frames over which to blend a small correction */
 const CORRECTION_BLEND_FRAMES = 6;
@@ -76,7 +76,7 @@ const _authWorldScale: Vec3 = vec3.create();
 
 export type Interpolation = {
     _nodes: Nodes;
-    /** room player id — used per-frame to route owner vs remote path
+    /** room player id, used per-frame to route owner vs remote path
      *  for each enrolled transform. fixed for the room's lifetime. */
     _playerId: PlayerId;
 };
@@ -92,7 +92,7 @@ export function init(nodes: Nodes, playerId: PlayerId): Interpolation {
  * fields. call at the top of each fixed tick so the owner-driven
  * (prev→cur) path has a stable "from" state. remote-driven transforms
  * don't read prev, so they're left out of the drain even when present
- * in `_transformDirty` — their `markWorldDirty` lights up the dirty
+ * in `_transformDirty`, their `markWorldDirty` lights up the dirty
  * bits but doesn't enroll them in the snapshot set.
  */
 export function snapshot(state: Interpolation): void {
@@ -116,7 +116,7 @@ export function snapshot(state: Interpolation): void {
  * produce per-frame world-space interpolated values for smooth rendering.
  *
  * iterates `_interpolating` (populated by `setInterpolation`). writes into
- * `interpolatedWorld*` fields — the rendering chain that descendants
+ * `interpolatedWorld*` fields, the rendering chain that descendants
  * compose against. each written node also marks its descendants'
  * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
  * ancestor on next read.
@@ -174,7 +174,7 @@ function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, out
  * a frame-rate-independent rate. teleport edge snaps instead of
  * smearing across the discontinuity.
  *
- * works directly in world space — top-level nodes have world === local
+ * works directly in world space, top-level nodes have world === local
  * so the chase target is `position`; nested nodes resolve their world
  * target via `getWorldMatrix`'s lazy recompute (already invalidated by
  * pose unpack's `markWorldDirty`), decomposed for slerp.
@@ -218,7 +218,7 @@ function sampleWorldPose(t: TransformTrait, outPos: Vec3, outQuat: Quat, outScal
  * pose. top-level uses position/quaternion directly (local === world);
  * nested composes through the parent's world matrix and decomposes the
  * result to get the auth world TRS, then rebuilds interpolatedWorldMatrix
- * post-blend (without re-multiplying parent — the blend output is already
+ * post-blend (without re-multiplying parent, the blend output is already
  * world-space TRS).
  *
  * separate from the prev→cur sample-and-write path because the blend is

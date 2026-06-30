@@ -19,7 +19,7 @@ export type BlockTextureOptions = {
      * `draw()` bake-time descriptor for procedural / composed textures.
      *
      * the URL form lets 3rd-party packs ship textures bundled alongside
-     * their modules — vite rewrites the `new URL(...)` call in client
+     * their modules, vite rewrites the `new URL(...)` call in client
      * bundles, and the asset pipeline resolves the `file://` URL via
      * fileURLToPath to a real disk path sharp can read. URLs are
      * normalized to `.href` strings at registration; nested DrawSources
@@ -35,7 +35,7 @@ export type BlockTextureOptions = {
 export type BlockTextureDef = {
     /** texture string id (e.g. 'lava') */
     id: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'blockTextures'; id: string };
     /** source declarations, post-URL-normalization. each entry is either
      *  a path string or a `DrawSource` descriptor; the asset-pipeline
@@ -80,7 +80,7 @@ export function resolveTextureRef(ref: TextureRef): string {
     return typeof ref === 'string' ? ref : ref.id;
 }
 
-/** UV rotation for a cube face — 0/90/180/270 ccw. default 0. */
+/** UV rotation for a cube face, 0/90/180/270 ccw. default 0. */
 export type CubeFaceRotation = 0 | 90 | 180 | 270;
 
 /** per-face slot for a cube model. rotation defaults to 0 if omitted. */
@@ -99,13 +99,13 @@ export type CubeTextures =
           west: CubeFaceSpec;
       };
 
-/** cube model — standard solid block. */
+/** cube model, standard solid block. */
 export type CubeModel = {
     type: 'cube';
     textures: CubeTextures;
 };
 
-/** custom model — quad list for arbitrary block shapes. */
+/** custom model, quad list for arbitrary block shapes. */
 export type CustomModel = {
     type: 'custom';
     /** list of quads. the mesher emits these directly.
@@ -195,14 +195,14 @@ export function collectModelTextureIds(model: BlockModel, out: Set<string>): voi
 // ── cull type ───────────────────────────────────────────────────────
 //
 // controls **only** face culling between adjacent blocks. no render
-// routing — that's handled by MaterialType.
+// routing, that's handled by MaterialType.
 //
-//   SOLID   — full block. culls all neighbors. self-culls. (stone, dirt)
-//   SELF    — culled by solid. self-culls with **same block id only**.
-//             (leaves, water, glass — leaves don't cull water)
-//   PARTIAL — culled by solid. never culls neighbors. no self-cull.
+//   SOLID, full block. culls all neighbors. self-culls. (stone, dirt)
+//   SELF, culled by solid. self-culls with **same block id only**.
+//             (leaves, water, glass, leaves don't cull water)
+//   PARTIAL, culled by solid. never culls neighbors. no self-cull.
 //             (stairs, slabs, stained glass that shouldn't self-cull)
-//   NONE    — invisible / no geometry (air). never culls anything.
+//   NONE, invisible / no geometry (air). never culls anything.
 
 export enum CullType {
     NONE,
@@ -216,10 +216,10 @@ export enum CullType {
 // controls which render pass geometry goes to. completely independent
 // of CullType.
 //
-//   OPAQUE      — no discard, no blend; early-Z survives (stone, dirt, ores)
-//   TRANSPARENT — alpha cutout via Discard() at alpha<0.5; depth-write on
+//   OPAQUE, no discard, no blend; early-Z survives (stone, dirt, ores)
+//   TRANSPARENT, alpha cutout via Discard() at alpha<0.5; depth-write on
 //                 (leaves, glass-pane, plant cross-quads)
-//   TRANSLUCENT — alpha blending; depth-write off; cullMode none (water)
+//   TRANSLUCENT, alpha blending; depth-write off; cullMode none (water)
 
 export enum MaterialType {
     OPAQUE = 0,
@@ -232,10 +232,10 @@ export enum MaterialType {
 // opt-in vertex displacement in the shader. the mesher outputs an
 // animation type attribute per vertex so the shader knows what to do.
 //
-//   NONE             — no vertex animation (default)
-//   WAVE             — gentle wind sway, full-block (leaves, vines)
-//   SWAY             — heavier movement, full-block (banners, hanging signs)
-//   PLANT_WIND_SWAY  — bottom-anchored bend; tip moves, base stays planted
+//   NONE, no vertex animation (default)
+//   WAVE, gentle wind sway, full-block (leaves, vines)
+//   SWAY, heavier movement, full-block (banners, hanging signs)
+//   PLANT_WIND_SWAY, bottom-anchored bend; tip moves, base stays planted
 //                      (tall grass, wheat, saplings, flowers)
 
 export enum VertexAnimation {
@@ -278,16 +278,16 @@ export type OnNeighbourChangedFn = (ctx: BlockChangeCtx) => void;
  * half from where on the face the player clicked), and the placer's
  * camera orientation as yaw/pitch.
  *
- * facing (cardinal) and look vector are both derivable from yaw/pitch —
+ * facing (cardinal) and look vector are both derivable from yaw/pitch,
  * use `snapCardinal(yaw)` from editor/camera for the 90% case, or
  * trig on yaw/pitch when richer pitch-aware logic is needed.
  */
 export type BlockPlaceCtx = {
-    /** target cell (where the block will land — adjacent to the clicked one). */
+    /** target cell (where the block will land, adjacent to the clicked one). */
     worldX: number;
     worldY: number;
     worldZ: number;
-    /** hit-face normal — points away from the clicked block. */
+    /** hit-face normal, points away from the clicked block. */
     normalX: number;
     normalY: number;
     normalZ: number;
@@ -303,7 +303,7 @@ export type BlockPlaceCtx = {
 
 /** read/write seam handed to a `place` hook. the caller binds it: the editor
  *  records each `set` as an undoable edit op; gameplay writes authoritative
- *  voxels; tests mock it. `place` never touches voxels directly — same string
+ *  voxels; tests mock it. `place` never touches voxels directly, same string
  *  block-key currency as `getBlock`/`setBlock`, so a hook decodes a neighbour
  *  via `parseKey` with no registry. `get` reflects this place-action's own
  *  pending writes ('air' for an empty cell). */
@@ -313,7 +313,7 @@ export type PlaceIO = {
 };
 
 /** imperative placement (= Luanti `on_place`). validate via `io.get`, then
- *  `io.set` the cell(s) — multiple sets for a footprint (door = 2). return
+ *  `io.set` the cell(s), multiple sets for a footprint (door = 2). return
  *  early to abort (no writes). optional on the def; when absent the build tool
  *  writes the block's default/selected state at the target cell. */
 export type PlaceFn = (ctx: BlockPlaceCtx, io: PlaceIO) => void;
@@ -346,7 +346,7 @@ export type ScreenTintSpec = {
 };
 
 /**
- * Block-level sound config — one handle array per category. Multiple
+ * Block-level sound config, one handle array per category. Multiple
  * handles per slot let the driving system round-robin or random-cycle
  * across clips for variation; an empty array silences the category.
  *
@@ -356,10 +356,10 @@ export type ScreenTintSpec = {
  *
  * NOTE: the systems that actually drive playback off these handles
  * (character-controller footstep tick, voxel break/place hooks) are
- * not yet wired — for now this is stored on the def for future use.
+ * not yet wired, for now this is stored on the def for future use.
  */
 export type BlockSoundConfig = {
-    /** played while the character walks on top of this block — and, for
+    /** played while the character walks on top of this block, and, for
      *  liquid blocks, on the feet-enter edge (entry splash) and once
      *  per swim stroke while submerged. one slot covers all three; the
      *  controller swaps which block is sampled and the character trait
@@ -375,7 +375,7 @@ export type BlockSoundConfig = {
 
 /**
  * named particle slots on a block. slot names describe the particle's
- * visual *type*, not the event that emits it — the same `dust` handle
+ * visual *type*, not the event that emits it, the same `dust` handle
  * is reused across footstep / landing / mining-in-progress, while
  * `build` and `break` are distinct because their physics differ.
  *
@@ -404,7 +404,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     states?: BlockStateDef<P>;
 
     /**
-     * authoritative default state — drives `defaultId()`/`defaultKey()`, the
+     * authoritative default state, drives `defaultId()`/`defaultKey()`, the
      * inventory icon, and any caller that places this block without specifying
      * props. when omitted, the default is the first encoded state (local index
      * 0), which can look broken for neighbour-driven shapes (standalone
@@ -423,7 +423,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     model?: (props: PropsValues<P>) => BlockModel;
 
     /**
-     * cull type — controls face culling between adjacent blocks.
+     * cull type, controls face culling between adjacent blocks.
      * defaults to CullType.SOLID. can be a static value or a function
      * of props for per-state cull behavior (called once per state at
      * freeze time).
@@ -431,7 +431,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     cull?: CullType | ((props: PropsValues<P>) => CullType);
 
     /**
-     * material type — controls which render pass geometry goes to.
+     * material type, controls which render pass geometry goes to.
      * defaults to MaterialType.OPAQUE. can be a static value or a
      * function of props for per-state material (called once per state
      * at freeze time). for per-tri material on custom models, set
@@ -502,7 +502,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
 
     /**
      * climbable: when true, the character controller treats this block as a
-     * ladder — gravity is bypassed inside it, jump ascends, crouch descends.
+     * ladder, gravity is bypassed inside it, jump ascends, crouch descends.
      * climbable blocks usually want `collision: false` so the character can
      * actually enter them. defaults to false.
      * @default false
@@ -510,7 +510,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     climbable?: boolean | ((props: PropsValues<P>) => boolean);
 
     /**
-     * liquid: when set, the character swims while submerged in this block —
+     * liquid: when set, the character swims while submerged in this block,
      * gravity is replaced by a small downward sink, drag scales with
      * `viscosity` (0..1), and jump/crouch swim up/down. liquids should usually
      * have `collision: false`.
@@ -563,7 +563,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
     flags?: number;
 
     /**
-     * surface height (0..1) — opts this block into MODEL_LIQUID. the mesher
+     * surface height (0..1), opts this block into MODEL_LIQUID. the mesher
      * emits a cube with the top quad lowered to this height and the side
      * quads height-clipped. omit for normal full-cube blocks. can be
      * state-dependent so a single block can register multiple heights.
@@ -594,7 +594,7 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      * static config applies to every state of the block. for blocks
      * whose sounds vary per state (e.g. waterlogged → water footsteps,
      * lit/unlit redstone → different break clip), pass a function of
-     * decoded props instead — called once per state at registry freeze
+     * decoded props instead, called once per state at registry freeze
      * time, baked into a per-state lookup table for hot-path reads.
      */
     sounds?: BlockSoundConfig | ((props: PropsValues<P>) => BlockSoundConfig);
@@ -605,14 +605,14 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      * read neighbours via ctx.voxels; return a new global state id, or the
      * same id for "no change". the engine fast-paths the unchanged case.
      *
-     * runs in both editor and server runtime — must be pure (no world
+     * runs in both editor and server runtime, must be pure (no world
      * mutation beyond returning a new stateId).
      */
     onNeighbourUpdate?: OnNeighbourUpdateFn;
 
     /**
      * imperative side-effect hook fired after any neighbour changes. drop
-     * items, schedule ticks, ignite, etc. server-only — never runs in editor.
+     * items, schedule ticks, ignite, etc. server-only, never runs in editor.
      */
     onNeighbourChanged?: OnNeighbourChangedFn;
 
@@ -644,21 +644,21 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
      * within is omitted), missing slots default to 3 auto-derived
      * `<id>:particle{0,1,2}` dust variants baked from the top-face
      * texture of the default state (cube models only; cost is 3 sprite
-     * + 3 particle registrations per block at module-scope eval — free
+     * + 3 particle registrations per block at module-scope eval, free
      * at runtime).
      *
      * static config applies to every state. pass a function of decoded
-     * props for per-state slots — called once per state at registry
+     * props for per-state slots, called once per state at registry
      * freeze, baked into a per-state lookup. authors who want per-state
      * particles should hoist `particle()` declarations to module scope
      * (free dedup by id) and just reference them per state.
      *
      * default dust is derived **once from the default state's model**
-     * and shared across every state — this is the dedup escape hatch
+     * and shared across every state, this is the dedup escape hatch
      * for blocks with many states (the registry never multiplies the
      * auto-dust set by state count).
      *
-     * pass `false` to opt out entirely for all states — no dust
+     * pass `false` to opt out entirely for all states, no dust
      * derivation, no slot defaults. invisible blocks (no model) never
      * derive regardless.
      *
@@ -676,13 +676,13 @@ export type BlockOptions<P extends PropsDef = PropsDef> = {
 export type BlockDef<P extends PropsDef = PropsDef> = {
     /** string id (e.g. 'oak_log') */
     id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
     /** block state schema (empty schema if stateless) */
     states: BlockStateDef<P>;
     /** local state index for the block's default state. omitted (or 0)
-     *  when no `defaultState` was supplied — default is the first encoded
+     *  when no `defaultState` was supplied, default is the first encoded
      *  state. drives `defaultId()`/`defaultKey()` on the handle. */
     defaultLocalIdx?: number;
     /** model function (undefined for invisible blocks like air) */
@@ -719,9 +719,9 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
     sneakGuard?: boolean | ((props: PropsValues<P>) => boolean);
     /** extra bits OR'd into flags (e.g. BLOCK_FLAG_FENCE for fence presets). */
     flags?: number;
-    /** surface height (0..1) — opts into MODEL_LIQUID rendering. */
+    /** surface height (0..1), opts into MODEL_LIQUID rendering. */
     surfaceHeight?: number | ((props: PropsValues<P>) => number);
-    /** fluid group string — shared id for same-fluid face culling. */
+    /** fluid group string, shared id for same-fluid face culling. */
     fluidGroup?: string;
     /** screen tint applied while camera is inside this block. */
     screenTint?: ScreenTintSpec | ((props: PropsValues<P>) => ScreenTintSpec | undefined);
@@ -754,10 +754,10 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
 export type BlockHandle<P extends PropsDef = PropsDef> = {
     /** block string id (e.g. 'oak_log') */
     readonly id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     readonly name: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'blocks'; id: string };
     /** the block's state schema */
     readonly states: BlockStateDef<P>;
@@ -805,12 +805,12 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
 const EMPTY_STATES = bs.create({});
 
 /**
- * declare a block type. called at module scope — the definition is
+ * declare a block type. called at module scope, the definition is
  * captured and frozen into a registry when the module is loaded.
  *
  * returns a handle used for getting global state ids in gameplay code.
  */
-// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default — it stays assignable to BlockHandle<PropsDef>, which Record<string, never> does not
+// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default, it stays assignable to BlockHandle<PropsDef>, which Record<string, never> does not
 export function block<const P extends PropsDef = {}>(id: string, options: BlockOptions<P> = {}): BlockHandle<P> {
     const states = (options.states ?? EMPTY_STATES) as BlockStateDef<P>;
     const cull = options.cull ?? CullType.SOLID;
@@ -885,7 +885,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
 
     const stored = upsert(registry.blocks, id, handle as BlockHandle);
     // presence-only snapshot record. block content changes propagate via
-    // the flush path — `applyRegistryChanges` rebuilds BlockRegistry,
+    // the flush path, `applyRegistryChanges` rebuilds BlockRegistry,
     // refreshes the atlas, repoints per-room `voxels.registry`, and
     // `resolveAllChunks` triggers a remesh on the next tick. when upsert
     // returns the existing wrapper (content unchanged), we keep the
@@ -902,7 +902,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
 // declaration calls (3× `sprite()` + 3× `particle()`) per block-with-a-
 // cube-model, registering `<id>:particle{0,1,2}` against the same
 // registries user-authored sprites + particles land in. No engine-special
-// ownership path — the derived entries are attributed to the same module
+// ownership path, the derived entries are attributed to the same module
 // that called `block()`, so deletion is automatic.
 //
 // Three variants because Minecraft picks a random 4×4 slice of the face
@@ -913,16 +913,16 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
 // atlas cost.
 //
 // Slices are drawn from one mulberry32 PRNG seeded by FNV-1a of the
-// block id — sequential calls produce uncorrelated (sx, sy) pairs, so
+// block id, sequential calls produce uncorrelated (sx, sy) pairs, so
 // the 3 variants tend to cover different regions of the face. Hardcoded
-// 16×16 source dims to match the engine's default block texture size —
+// 16×16 source dims to match the engine's default block texture size,
 // non-default sizes will read out of bounds; widen when a real case
 // forces it.
 //
 // The draw fn is hashed via `Function.prototype.toString()` for asset-
 // pipeline invalidation, so the seed rides through `params` (which DOES
 // participate in the structural hash). `createMulberry32Generator` is a
-// stable published algorithm — the closure-capture-not-hashed gap is a
+// stable published algorithm, the closure-capture-not-hashed gap is a
 // theoretical concern only.
 
 const DUST_SIZE = 4;
@@ -931,7 +931,7 @@ const DUST_VARIANT_COUNT = 3;
 
 /** FNV-1a 32-bit string hash. used as the per-block dust slice seed.
  *  inlined here rather than imported from a util so the dust deriver
- *  stays self-contained — sole consumer, no other hash needs. */
+ *  stays self-contained, sole consumer, no other hash needs. */
 function hashStringFnv1a(s: string): number {
     let h = 2166136261 >>> 0;
     for (let i = 0; i < s.length; i++) {
@@ -942,7 +942,7 @@ function hashStringFnv1a(s: string): number {
 
 /** resolve a TextureRef (string id or BlockTextureDef handle) to the
  *  first-frame `NormalizedImageSource`. returns `null` if a string ref
- *  doesn't resolve — the deriver silently skips in that case (block
+ *  doesn't resolve, the deriver silently skips in that case (block
  *  authoring order would have to be wrong for this to fire). */
 function resolveTextureFrame(ref: TextureRef): NormalizedImageSource | null {
     const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref)?.payload : ref;
@@ -973,13 +973,13 @@ function pickDustSourceTexture(model: BlockModel): TextureRef | null {
  *  source-texture pick:
  *    - cube: `all` / `top`, depending on which the texture map exposes.
  *    - custom: the first quad with an upward-facing normal (ny > 0.5);
- *      falls back to the first quad if no upward face exists (rare —
+ *      falls back to the first quad if no upward face exists (rare,
  *      e.g. hanging vines). stairs/slabs land on their top slab face,
  *      which is what we'd hand-pick anyway.
  *
  *  the seed passed into `draw()`'s `params` is `hash(id) + idx` rather
  *  than per-variant PRNG draws so each variant's structural hash is
- *  stable independent of the others — adding a 4th variant later won't
+ *  stable independent of the others, adding a 4th variant later won't
  *  bust the cache for variants 0..2.
  *
  *  returns the derived `ParticleHandle`s (one per variant) so the caller

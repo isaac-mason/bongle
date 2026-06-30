@@ -1,18 +1,18 @@
 // Type definitions for the new model handle system.
 //
 // Handle values themselves come from codegen'd per-model sidecar files
-// (`src/generated/models/<id>.ts`) — this file is types-only.
+// (`src/generated/models/<id>.ts`), this file is types-only.
 //
 // Sub-asset references mirror commercial-engine patterns:
 //   - meshes by compound id { modelId, meshName } (Unity GUID+fileID, Unreal path+sub-name)
-//   - clips by ClipDef ref identity (three.js style — sidecar exports refs, animator keys by identity)
+//   - clips by ClipDef ref identity (three.js style, sidecar exports refs, animator keys by identity)
 
 import type { Box3 } from 'mathcat';
 import type { Node } from '../scene/nodes';
 
 /**
  * Compound id for a single mesh inside a model.
- * modelId is the user-chosen string id from `model('wizard', { src })` —
+ * modelId is the user-chosen string id from `model('wizard', { src })`,
  * scopes by model file. meshName scopes within the file.
  *
  * Wire format: length-prefixed modelId + length-prefixed meshName.
@@ -26,7 +26,7 @@ export type MeshId = {
 export type ClipChannelProperty = 'translation' | 'rotation' | 'scale';
 
 /**
- * One animated property of one node — keyframes-only, sampling lives in
+ * One animated property of one node, keyframes-only, sampling lives in
  * the animator (W3.3). Times are seconds, monotonically increasing.
  * Values stride is 3 for translation/scale, 4 for rotation (xyzw quats).
  */
@@ -44,7 +44,7 @@ export type ClipChannel = {
 };
 
 /**
- * Parsed clip data — channels + clip duration. Stored in
+ * Parsed clip data, channels + clip duration. Stored in
  * `Resources.modelPayloads[modelId].clips[name]` once the bin loads;
  * consumed by the animator via `Resources.modelClipChannels(resources, clip)`.
  */
@@ -56,7 +56,7 @@ export type ClipChannels = {
 
 /**
  * Singleton clip ref. Per (model, clip name), exported by reference from
- * the sidecar (`wizard.animations.idle`). Pure value type — channel data
+ * the sidecar (`wizard.animations.idle`). Pure value type, channel data
  * lives in `Resources.modelPayloads[modelId].clips[name]` and is fetched
  * lazily when the model bin loads. User code passes the ref to
  * `Animation.clip()`; the animator keys its action Map by ref identity,
@@ -69,8 +69,8 @@ export type ClipDef = {
 };
 
 /**
- * Static handle for a single model. Codegen'd into `<basename>.glb.generated.ts`
- * — never constructed at runtime.
+ * Static handle for a single model. Codegen'd into `<basename>.glb.generated.ts`,
+ * never constructed at runtime.
  *
  * Fully typed against the source gltf:
  *   - NodeNames: union of all named gltf nodes (mesh-bearing or not)
@@ -84,10 +84,10 @@ export type ModelHandle<
 > = {
     /** User-chosen id from `model('wizard', { src })`. Stable handle. */
     readonly modelId: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `modelId` when the author didn't supply one. */
     readonly name: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'models'; id: string };
     /** Source path (relative to project root, e.g. 'characters/wizard.glb'). Informational. */
     readonly src: string;
@@ -110,7 +110,7 @@ export type ModelHandle<
      */
     readonly scene: Node;
     /**
-     * Bind-pose axis-aligned bounding box in root-local space — union of every
+     * Bind-pose axis-aligned bounding box in root-local space, union of every
      * mesh's AABB transformed by its node's accumulated TRS chain to the scene
      * root. Static (computed at codegen). Use for spawn/framing/coarse colliders;
      * animation can push verts outside this box at runtime.
@@ -121,14 +121,14 @@ export type ModelHandle<
     readonly aabb: Box3;
     /**
      * Flat-name index of every named gltf node (mesh-bearing or not).
-     * Each value is a by-reference pointer into `scene` — clone with
+     * Each value is a by-reference pointer into `scene`, clone with
      * cloneNode() to materialize, or reference by name via `model(handle, nodeName)`.
      */
     readonly nodes: { readonly [K in NodeNames]: Node };
     /**
      * Flat-name index for mesh-surgery: `meshTrait.meshId = wizard.meshes.HatA.id`.
      * Each entry also carries the mesh's bind-pose local-space AABB
-     * (mathcat `Box3`) — handy for mesh-level framing or coarse colliders
+     * (mathcat `Box3`), handy for mesh-level framing or coarse colliders
      * without paying for the runtime payload fetch.
      */
     readonly meshes: { readonly [K in MeshNames]: { readonly id: MeshId; readonly aabb: Box3 } };

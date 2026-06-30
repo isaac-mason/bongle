@@ -1,4 +1,4 @@
-// brush (build) tool update function — the build-category brush that stamps
+// brush (build) tool update function, the build-category brush that stamps
 // voxels. its selection-category sibling is `brush-select.ts`.
 //
 // called each frame from EditorScript onFrame (client only). the accumulate-

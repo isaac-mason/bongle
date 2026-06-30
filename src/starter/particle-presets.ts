@@ -1,7 +1,7 @@
 /**
  * Thin `particle()` wrappers bundling a curated `particleUpdate.*` motion
  * fn with a sensible `playback` default. Discoverability anchor on top of
- * the engine vocabulary — drop one in for one-line authoring of common
+ * the engine vocabulary, drop one in for one-line authoring of common
  * visual fx:
  *
  *   import { particlePresets } from 'bongle/starter';
@@ -13,11 +13,11 @@
  *   const Motes  = particlePresets.dust('motes',   { sprite: MoteSprite });
  *
  * Each preset returns the `ParticleHandle` from the underlying `particle()`
- * call — pass it straight to `spawnParticle(ctx, handle, pos)`.
+ * call, pass it straight to `spawnParticle(ctx, handle, pos)`.
  *
  * Drop to `particle()` directly when you want a non-default `playback`/
  * `fps` or want to compose a custom `update` fn from `particleUpdate.*`
- * primitives — presets carry no data-rich knobs because none exist
+ * primitives, presets carry no data-rich knobs because none exist
  * (motion lives inside the update fn, which is the swap point).
  *
  * Lives in starter (not engine core) for the same reason `block-sound-

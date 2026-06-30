@@ -31,7 +31,7 @@ export async function runSceneIcon(state: State, id: string): Promise<SceneIconR
     if (!handleEntry) {
         return { pixels: new Uint8Array(0), pxSize: SUBJECT_ICON_PX };
     }
-    // _payload holds the canonical serialized form — handle.node/voxels are
+    // _payload holds the canonical serialized form, handle.node/voxels are
     // mutated in place by populateScene on every reload.
     const payload = handleEntry.payload._payload as {
         nodes: { root: { children: unknown[] } };
@@ -53,7 +53,7 @@ export async function runSceneIcon(state: State, id: string): Promise<SceneIconR
         for (const childData of payload.nodes.root.children) {
             addChild(room.nodes.root, deserializeNode(childData as Parameters<typeof deserializeNode>[0]));
         }
-        // instantiate any embedded prefabs the scene authored — matches the
+        // instantiate any embedded prefabs the scene authored, matches the
         // live render (engine-client ticks prefabs each frame). drained to a
         // fixpoint so nested prefabs (a scene embedding a prefab that embeds a
         // prefab…) fully resolve; without this the icon omits that content.

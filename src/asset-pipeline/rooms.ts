@@ -1,5 +1,5 @@
 /**
- * src/asset-pipeline/rooms.ts — the offline asset pipeline's room.
+ * src/asset-pipeline/rooms.ts, the offline asset pipeline's room.
  *
  * A third room composition alongside `src/client` (createRoomCore) and
  * `src/server`. Like the server, it builds the engine's core simulation
@@ -8,11 +8,11 @@
  * render subsystems an icon render needs: a Scene + voxel/voxel-mesh/model
  * visuals + a (disabled) Environment + visibility + interpolation.
  *
- * Deliberately absent — the asset pipeline never needs them: canvas / viewport /
+ * Deliberately absent, the asset pipeline never needs them: canvas / viewport /
  * touch overlay / dom-ui (no presentation), input, audio, sprite / extruded /
  * particle / cloud-presentation / shadow visuals, networking, multi-room
  * bookkeeping, a player/camera node (tasks build their own framing camera), and
- * ModelLighting (icons render unlit — see asset-pipeline/subject.ts).
+ * ModelLighting (icons render unlit, see asset-pipeline/subject.ts).
  */
 
 import { Scene } from 'gpucat';
@@ -40,7 +40,7 @@ import type * as VoxelResources from '../render/voxels/voxel-resources';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 
 /** No real player exists offline; Interpolation needs a PlayerId. No node is
- *  owned by this id, so every node interpolates uniformly — fine for a static
+ *  owned by this id, so every node interpolates uniformly, fine for a static
  *  icon frame. */
 const ASSET_PIPELINE_PLAYER_ID = -1 as PlayerId;
 
@@ -108,7 +108,7 @@ export function createRoom(deps: AssetPipelineRoomDeps): AssetPipelineRoom {
     const visibility = Visibility.init();
     const interpolation = Interpolation.init(nodes, ASSET_PIPELINE_PLAYER_ID);
 
-    // host trait at the root — its env onInit no-ops offline (no live scene
+    // host trait at the root, its env onInit no-ops offline (no live scene
     // graph init runs), matching the client's offline room.
     attachWorldTrait(nodes.root);
 

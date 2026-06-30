@@ -8,7 +8,7 @@
 //   4. renderPopulatedRoom → wait for models, light, frame, render, capture
 //
 // Always-render now: hash-gating + iteration over the prefab set lives in
-// the orchestrator (one PNG per prefab, like scenes — no atlas).
+// the orchestrator (one PNG per prefab, like scenes, no atlas).
 
 import { registry as engineRegistry } from '../../core/registry';
 import { addChild, createNode, createPrefabConfig } from '../../core/scene/nodes';

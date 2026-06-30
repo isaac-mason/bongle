@@ -45,7 +45,7 @@ export function has(bitset: Bitset, traitId: number): boolean {
 export function containsAll(bitset: Bitset, mask: Bitset): boolean {
     for (let i = 0; i < mask.length; i++) {
         const word = i < bitset.length ? bitset[i] : 0;
-        // words are stored unsigned (`>>> 0`), but `&` yields a signed Int32 — a
+        // words are stored unsigned (`>>> 0`), but `&` yields a signed Int32, a
         // word with bit 31 set comes back negative and would never equal the
         // unsigned `mask[i]`. normalise back to unsigned before comparing, else
         // any query requiring a trait at slot 31/63/… silently never matches.

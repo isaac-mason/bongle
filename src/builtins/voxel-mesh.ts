@@ -1,8 +1,8 @@
-// voxel mesh trait — renders a VoxelModel.
+// voxel mesh trait, renders a VoxelModel.
 //
 // set model to a VoxelModel instance and the engine creates an instance
 // slot in VoxelMeshVisuals on the client. multiple traits can reference
-// the same VoxelModel — geometry is shared, each gets its own instance.
+// the same VoxelModel, geometry is shared, each gets its own instance.
 //
 // model is runtime-only (not persisted, not synced). tint, flash, light,
 // glow, unlit, litMin, and dither are client-only per-instance rendering
@@ -59,7 +59,7 @@ export const VoxelMeshTrait = trait(
          * grid at the node's world position, so voxel meshes shade like the
          * voxels around them. combined in-shader as a floor on the per-corner
          * `meshLight` so a moving instance never goes darker than its origin
-         * cell — useful while baked-mesh per-corner light is still placeholder
+         * cell, useful while baked-mesh per-corner light is still placeholder
          * or for instances drifting between cells.
          */
         light: [0, 0, 0, 0] as Vec4,
@@ -86,7 +86,7 @@ export const VoxelMeshTrait = trait(
         /**
          * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
          * Fragments drop via `discard` against an interleaved-gradient
-         * threshold — stays in the opaque pipeline, no sort/blend. client-only.
+         * threshold, stays in the opaque pipeline, no sort/blend. client-only.
          */
         dither: 0,
 
@@ -96,7 +96,7 @@ export const VoxelMeshTrait = trait(
          */
         visible: true,
 
-        /** renderer-internal allocation state (includes the frustum-cull entry —
+        /** renderer-internal allocation state (includes the frustum-cull entry,
          *  see `VoxelMeshState.cull`). */
         _state: null as VoxelMeshState | null,
     },

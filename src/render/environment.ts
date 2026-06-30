@@ -1,5 +1,5 @@
 /**
- * environment — sky, sun, moon, stars, clouds.
+ * environment, sky, sun, moon, stars, clouds.
  *
  * the GPU side is engine-global: two storage buffers (`envConfig`,
  * `envSky`) live on `EnvironmentResources` and are bound by name by every
@@ -11,11 +11,11 @@
  * activation so a freshly-switched room's sky/config replaces the
  * previously-active room's contents.
  *
- *   `envConfig` — scalar/vector knobs incl. `time` (time-of-day, [0,1))
+ *   `envConfig`, scalar/vector knobs incl. `time` (time-of-day, [0,1))
  *                 and `wallTime` (monotonic seconds since room boot), plus
  *                 sun intensity, star density, cloud params, master
  *                 `enabled`.
- *   `envSky`    — 4-stop sky LUT (12 vec3s: zenith/horizon/nadir × 4 stops).
+ *   `envSky`, 4-stop sky LUT (12 vec3s: zenith/horizon/nadir × 4 stops).
  *
  * the sky material reads both and renders:
  *   - LUT-driven vertical sky gradient (zenith→horizon→nadir, interp by time)
@@ -23,7 +23,7 @@
  *   - procedural stars hashed from quantized view dir
  *   - horizon tint near the sun direction (orange sunrise/sunset)
  *
- * voxel + model + cloud materials bind the same `envConfig` — `skyBrightness`
+ * voxel + model + cloud materials bind the same `envConfig`, `skyBrightness`
  * and `sunDirection` derive from `cfg.time` in their fragment shaders, so
  * one EnvConfig write animates the whole active room's sky + world.
  */
@@ -47,12 +47,12 @@ export type ResolvedEnvironment = {
 };
 
 /**
- * engine-global env GPU handles. one set across the whole engine — every
+ * engine-global env GPU handles. one set across the whole engine, every
  * env-aware shader (sky, voxel, model, sprite, cloud) binds the same
  * `envConfigBuffer` + `envSkyBuffer` by name. only the active
  * room's per-room CPU shadow flushes into these buffers each frame (see
  * `updateForCamera`), so background rooms can mutate their own `Environment`
- * via `setTime`/`setEnvironment` without ever touching GPU state — and the
+ * via `setTime`/`setEnvironment` without ever touching GPU state, and the
  * buffers always reflect exactly one room's intent.
  */
 export type EnvironmentResources = {
@@ -63,14 +63,14 @@ export type EnvironmentResources = {
 export type Environment = {
     /** time-of-day driver, wraps in [0,1). 0=midnight, 0.25=sunrise, 0.5=noon. */
     time: number;
-    /** resolved CPU shadow — every field concrete, no optionals. */
+    /** resolved CPU shadow, every field concrete, no optionals. */
     config: ResolvedEnvironment;
 
     /** per-room sky sphere (added to room.scene). */
     skyMesh: gpu.Mesh;
 
     /** per-room scene anchor for the engine-global cloud system. just a
-     *  Mesh + Scene pair — all heavy state (material, geometry, buffers)
+     *  Mesh + Scene pair, all heavy state (material, geometry, buffers)
      *  lives on `CloudResources`. The CPU cull runs against `camera` in
      *  `updateForCamera` and writes into the *shared* compacted instance
      *  buffer; safe because only the active room renders per frame. */
@@ -80,17 +80,17 @@ export type Environment = {
      *  mutate this; `updateForCamera` (active room only) flushes it to the
      *  engine-global `envConfigBuffer`. */
     _packed: Float32Array;
-    /** per-room CPU shadow of the sky LUT payload. mirrors `_packed` —
+    /** per-room CPU shadow of the sky LUT payload. mirrors `_packed`,
      *  active-room flush copies it to `envSkyBuffer`. */
     _skyPacked: Float32Array;
-    /** epoch for `wallTime` — `performance.now()` at room creation. */
+    /** epoch for `wallTime`, `performance.now()` at room creation. */
     _wallStartMs: number;
     /** dirty flags: only the active room writes to GPU. flushed on tick. */
     _configDirty: boolean;
     _skyDirty: boolean;
-    /** engine-global GPU buffers — flushed into on tick (active room only). */
+    /** engine-global GPU buffers, flushed into on tick (active room only). */
     _resources: EnvironmentResources;
-    /** engine-global cloud resources — shared material/geometry/buffers.
+    /** engine-global cloud resources, shared material/geometry/buffers.
      *  Held here so `updateForCamera` can drive the CPU cull without
      *  threading cloudResources through every per-frame call site. */
     _cloudResources: CloudResources.CloudResources;
@@ -105,7 +105,7 @@ export type Environment = {
  *
  * `time` (time-of-day driver) and `wallTime` (monotonic seconds since
  * room boot) live here too so name-based storage lookups from per-mesh
- * geometry resolve every env input in a single binding — no separate
+ * geometry resolve every env input in a single binding, no separate
  * uniforms for materials to capture by reference.
  *
  * `enabled` is a u32 mask read by both sky + voxel materials. 0 = sky
@@ -147,7 +147,7 @@ const SUNSET_DEEP_TINT: Vec3 = srgbBytesToLinear(255, 70, 30); // #ff461e
 const FOG_MOON_TINT: Vec3 = srgbBytesToLinear(127, 153, 204); // #7f99cc
 // sun + moon are squares (blocky aesthetic). HALF_SIZE is the half-extent
 // in the sun-local tangent plane (≈ sin of angular half-width). FEATHER
-// is the smoothstep band — narrow so edges read as crisp, wide enough to
+// is the smoothstep band, narrow so edges read as crisp, wide enough to
 // avoid shader aliasing without MSAA on the sky.
 const SUN_HALF_SIZE = 0.05;
 const SUN_FEATHER = 0.005;
@@ -177,7 +177,7 @@ function packConfig(config: ResolvedEnvironment, time: number, wallTime: number)
     );
 }
 
-// EnvConfig field order is time, wallTime, ... — both f32, both at the
+// EnvConfig field order is time, wallTime, ..., both f32, both at the
 // head of the struct with no preceding padding, so they live at element
 // indices 0 and 1 of the packed Float32Array. callers patch these
 // directly on hot paths (`applyTime`, `updateForCamera`) instead of
@@ -210,7 +210,7 @@ function packSkyStops(stops: SkyStop[]): Float32Array {
 
 /**
  * allocate the engine-global env buffers, seeded from `initial`. shape
- * and sizing are fixed once here — every per-room `Environment` flushes
+ * and sizing are fixed once here, every per-room `Environment` flushes
  * into the same two buffers; only one room's state is live on the GPU
  * at a time (the active one).
  */
@@ -258,7 +258,7 @@ const {
 } = gpu;
 
 /**
- * david hoskins' "hash without sine" — float-bit-mixing in [0,1) with no
+ * david hoskins' "hash without sine", float-bit-mixing in [0,1) with no
  * visible banding for smoothly-varying inputs (unlike fract(sin(dot(...))*K)).
  * 3D → 1D channel.
  */
@@ -271,7 +271,7 @@ function hoskinsHash(p: gpu.Node<typeof gpu.d.vec3f>): gpu.Node<typeof gpu.d.f32
 }
 
 /**
- * engine-global sky material. shader reads env via name-based storage —
+ * engine-global sky material. shader reads env via name-based storage,
  * each per-room mesh resolves the `env` + `envSky` buffer names through
  * its own geometry, so one compiled pipeline serves every room. lazy-
  * initialized on first `createSkyMesh` call (must run after the WebGPU
@@ -337,7 +337,7 @@ function getSkyMaterial(): gpu.Material {
     // sunDir in that plane: (-sin, cos, 0). cross-axis is world Z. project
     // viewDir onto both axes, then test max(|u|,|v|) < HALF_SIZE.
     // hemisphere mask (step on cdot) keeps the antipodal point from also
-    // lighting up — without it, dir=-sunDir would project to (0,0).
+    // lighting up, without it, dir=-sunDir would project to (0,0).
     const sunTangent = vec3f(sub(f32(0), sin(sunAngle)), cos(sunAngle), f32(0)).toVar('sunTangent');
     const worldZ = vec3f(f32(0), f32(0), f32(1));
 
@@ -385,7 +385,7 @@ function getSkyMaterial(): gpu.Material {
     //           always present, brightens at dusk.
     //   - wash: broad warm band reaching ~90-120° off the sun direction
     //           (near-linear falloff), only fires during sunset.
-    // sum, clamped — gives a hot disc-adjacent glow blended into a
+    // sum, clamped, gives a hot disc-adjacent glow blended into a
     // wider rosy spread, instead of a single point-sourced gradient.
     const cdotSunC = clamp(cdotSun, f32(0), f32(1)).toVar('cdotSunC');
     const sunCorePow = mix(f32(8), f32(5), sunsetFactor).toVar('sunCorePow');
@@ -409,7 +409,7 @@ function getSkyMaterial(): gpu.Material {
 
     // darken the ambient sky during sunset. multiplying baseSky before
     // the tint mix preserves full-brightness orange where sunTintW≈1, so
-    // only the un-tinted directions go dim — exactly the contrast we want.
+    // only the un-tinted directions go dim, exactly the contrast we want.
     const skyDim = sub(f32(1), mul(sunsetFactor, f32(0.35))).toVar('skyDim');
     const baseSkyDimmed = mul(baseSky, skyDim).toVar('baseSkyDimmed');
 
@@ -418,7 +418,7 @@ function getSkyMaterial(): gpu.Material {
     // -- stars: round dots scattered in 3D dir space --
     // quantize `dir` into cells, then test the fragment's distance to its
     // cell center (in cell-unit space). this gives uniformly round dots
-    // independent of how the sphere chord cuts the cube — the earlier
+    // independent of how the sphere chord cuts the cube, the earlier
     // "cell membership" test produced irregular blob shapes because the
     // sphere intersected each cube in a different-shaped patch.
     const STAR_CELLS = f32(160);
@@ -446,8 +446,8 @@ function getSkyMaterial(): gpu.Material {
     // per-star magnitude spread so the field doesn't look uniform.
     const starBrightness = add(f32(0.5), mul(h5, f32(0.5))).toVar('starBrightness');
 
-    // brightness pulse — per-star phase, ~3 sec full cycle. wide band
-    // (0.25–1.0) so the rise/fall reads at a glance.
+    // brightness pulse, per-star phase, ~3 sec full cycle. wide band
+    // (0.25-1.0) so the rise/fall reads at a glance.
     const TAU2 = f32(Math.PI * 2);
     const twinkleSpeed = f32(2.2);
     const twinklePhase = mul(hPhase, TAU2).toVar('twinklePhase');
@@ -459,7 +459,7 @@ function getSkyMaterial(): gpu.Material {
     const occlusion = mul(sub(f32(1), sunDisc), sub(f32(1), moonDisc)).toVar('occlusion');
 
     const starsEnabled = cfg.starsEnabled.toF32().toVar('starsEnabled');
-    // hide stars below the horizon — they read as bugs poking through the
+    // hide stars below the horizon, they read as bugs poking through the
     // ground plane when the camera tilts down. narrow smoothstep band
     // around y=0 keeps the cutoff from aliasing along the horizon line.
     const aboveHorizon = smoothstep(f32(0), f32(0.04), y).toVar('starAboveHorizon');
@@ -520,7 +520,7 @@ export function init(
     scene.add(skyMesh);
     const clouds = CloudVisuals.init(scene, cloudResources);
 
-    // per-room CPU shadow — every script-driven mutation lands here.
+    // per-room CPU shadow, every script-driven mutation lands here.
     // 0.6 (past midday) seeds an off-axis sun so faces differentiate
     // via N·L the moment a room boots.
     const time = 0.6;
@@ -545,7 +545,7 @@ export function init(
 
 export function dispose(env: Environment): void {
     env.skyMesh.removeFromParent();
-    // sky material is engine-global (cached) — do NOT dispose; geometry
+    // sky material is engine-global (cached), do NOT dispose; geometry
     // is per-room and disposed transitively when the mesh drops.
     CloudVisuals.dispose(env.clouds);
     // resources are engine-global; not disposed here.
@@ -553,7 +553,7 @@ export function dispose(env: Environment): void {
 
 /** run the CPU cloud cull + pack the compacted instance buffer, advance
  *  the wall-clock field, and flush any pending CPU→GPU writes for the
- *  env buffers. ACTIVE ROOM ONLY — the engine-global resource buffers
+ *  env buffers. ACTIVE ROOM ONLY, the engine-global resource buffers
  *  hold exactly one room's state at a time, the currently rendered one. */
 export function updateForCamera(env: Environment, camera: gpu.Camera): void {
     CloudVisuals.update(env.clouds, env._cloudResources, env, camera);
@@ -564,7 +564,7 @@ export function updateForCamera(env: Environment, camera: gpu.Camera): void {
 }
 
 /** force a full push of this room's CPU shadow into the engine-global
- *  buffers. call when a room becomes active — its `_packed`/`_skyPacked`
+ *  buffers. call when a room becomes active, its `_packed`/`_skyPacked`
  *  may have drifted from the GPU contents while another room was active. */
 export function flushActive(env: Environment): void {
     env._configDirty = true;
@@ -587,19 +587,19 @@ function flush(env: Environment): void {
 
 /* ── writes ───────────────────────────────────────────────────────── */
 
-/** hot path — patch one f32 in the per-room EnvConfig CPU shadow + mark
+/** hot path, patch one f32 in the per-room EnvConfig CPU shadow + mark
  *  dirty. NO GPU write here: background rooms must not touch the engine-
  *  global buffer. the active room flushes its own shadow each frame via
  *  `updateForCamera`. */
 export function applyTime(env: Environment, t: number): void {
-    // wrap to [0,1) — accepts unwrapped game time too.
+    // wrap to [0,1), accepts unwrapped game time too.
     const wrapped = ((t % 1) + 1) % 1;
     env.time = wrapped;
     env._packed[TIME_F32_INDEX] = wrapped;
     env._configDirty = true;
 }
 
-/** slow path — shallow-merge config groups, repack per-room CPU shadow(s),
+/** slow path, shallow-merge config groups, repack per-room CPU shadow(s),
  *  mark dirty. CPU only; GPU flush happens on the active room's tick. */
 export function applyConfig(env: Environment, input: EnvironmentConfig, presets: Record<SkyPreset, SkyStop[]>): void {
     const cfg = env.config;
@@ -631,13 +631,13 @@ export function applyConfig(env: Environment, input: EnvironmentConfig, presets:
         if (input.clouds.thickness !== undefined) cfg.clouds.thickness = input.clouds.thickness;
     }
 
-    // master-enabled toggles mesh visibility — voxel materials read it
+    // master-enabled toggles mesh visibility, voxel materials read it
     // from the buffer too. mesh visibility is per-room state on the
     // per-room sky/cloud meshes, so it's safe to flip immediately.
     env.skyMesh.visible = cfg.enabled;
     env.clouds.mesh.visible = cfg.enabled;
 
-    // preserve current time + wallTime through the repack — they live in
+    // preserve current time + wallTime through the repack, they live in
     // the same buffer but are driven independently by `applyTime` /
     // `updateForCamera` and would be clobbered if we re-read them from
     // the resolved config (which has no notion of them).

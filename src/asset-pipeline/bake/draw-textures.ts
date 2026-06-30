@@ -3,7 +3,7 @@
 // sprites), depth-first resolves each draw's inputs (path strings via
 // `loadImage`, nested DrawSources by recursion), invokes the user fn
 // against a fresh canvas, and memoizes results by the descriptor's
-// referential identity. No disk cache — the registry payload hash already
+// referential identity. No disk cache, the registry payload hash already
 // invalidates downstream atlases when any fn body or input path changes,
 // and skia-canvas is fast enough to bake from scratch on every dirty pass
 // (see `spikes/skia-canvas-bench/bench.mjs` for the back-of-envelope).
@@ -13,7 +13,7 @@
 // re-entry throws with the cycle root so the user sees the bad ref
 // instead of a hung pipeline.
 //
-// Output type — `BakedDraws = Map<DrawSource, Canvas>` — is opaque to
+// Output type, `BakedDraws = Map<DrawSource, Canvas>`, is opaque to
 // callers; both atlas builders treat the `Canvas` as a raw pixel source
 // via `canvas.getContext('2d').getImageData(...)`.
 
@@ -84,7 +84,7 @@ function isDrawSource(s: NormalizedImageSource): s is DrawSource {
 /**
  * Bake one DrawSource: depth-first resolve inputs, run the user fn
  * against a fresh canvas, store in `baked`. Memoized by descriptor
- * identity — sharing a draw descriptor between multiple frames bakes
+ * identity, sharing a draw descriptor between multiple frames bakes
  * once.
  */
 async function bakeOne(
@@ -117,7 +117,7 @@ async function bakeOne(
     const canvas = new Canvas(ds.size[0], ds.size[1]);
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
     // user fn is typed against the DOM CanvasRenderingContext2D + DOM
-    // CanvasImageSource — skia-canvas types are structurally compatible
+    // CanvasImageSource, skia-canvas types are structurally compatible
     // for the subset draw fns actually use (drawImage, fillStyle, etc).
     (
         ds.fn as unknown as (
@@ -154,7 +154,7 @@ async function resolveInput(
     return img;
 }
 
-/** 16×16 magenta canvas — substituted for a missing draw input so the
+/** 16×16 magenta canvas, substituted for a missing draw input so the
  *  user fn can still run (likely producing a visibly-broken output)
  *  rather than crashing the pipeline. Returned as a `Canvas` since the
  *  resolveInput return type already widens to `Image | Canvas` and

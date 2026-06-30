@@ -1,12 +1,12 @@
 /**
- * core/capture/module-scope.ts — owning-module stack + per-module reload diff.
+ * core/capture/module-scope.ts, owning-module stack + per-module reload diff.
  *
  * the bongle() vite plugin injects `__pushModule(import.meta.url)` at the
  * top of every user file and `__popModule(prev)` at the bottom. while a
  * module's body evaluates, `owningModule()` returns its url, so `upsert`
  * calls in registry.ts can stamp each handle with its owning module.
  *
- * the stack handles nested module evaluation under esm — child modules
+ * the stack handles nested module evaluation under esm, child modules
  * evaluate fully (push + body + pop) before the parent's body resumes.
  *
  * per-module snapshots: every declarative api (block, blockTexture, model,
@@ -16,11 +16,11 @@
  * patch vs invalidate.
  *
  * the snapshot tracks two things:
- *   • presence — id sets for every declarative api. recorded for visibility
+ *   • presence, id sets for every declarative api. recorded for visibility
  *     and future introspection (debug panels, what-did-this-file-declare
  *     queries). not consulted by the diff today; wholesale consumer
  *     rebuilds via registry flush already propagate any content change.
- *   • shape — for traits, the body hash; for scripts, the set of declared
+ *   • shape, for traits, the body hash; for scripts, the set of declared
  *     keys (`${traitId}.${scriptId}`). a change here requires importer
  *     cascade: a trait body delta can change the field shape scripts
  *     destructure, and adding/removing/renaming a script key changes the
@@ -99,30 +99,30 @@ export function onModulePop(fn: (moduleId: string) => void): void {
  * the framework for what each field tracks: a resource contributes to the
  * patch-vs-invalidate diff only if user code (or engine consumers) captures
  * its content **by value** at evaluation time. resources captured by
- * **stable reference** (handle mutated in place by the engine — scenes,
+ * **stable reference** (handle mutated in place by the engine, scenes,
  * models) or looked up **by id at use time** (prefabs, atlas) are presence-
  * only and propagate via wholesale registry flush; their stale closures
  * see new data through the same reference, or fetch fresh on next call.
  *
- *   presence-only sets — blockTextures, blocks, models, prefabs, scenes,
+ *   presence-only sets, blockTextures, blocks, models, prefabs, scenes,
  *     matchmaking, commands. recorded for visibility
  *     (debug overlays, "what does this file declare?") but not read by
  *     diffSnapshots. block content edits propagate via the flush path:
  *     `applyRegistryChanges` rebuilds BlockRegistry, refreshes the atlas,
  *     repoints per-room `voxels.registry`, and `resolveAllChunks` triggers
  *     a remesh on the next tick. Stale BlockHandle references in script
- *     closures keep their old state encoder — accepted limitation, since
+ *     closures keep their old state encoder, accepted limitation, since
  *     invalidating on block edits would cascade past userSrcDir into the
  *     .bongle bootstrap entry (no self-accept there) and force a full
  *     page reload.
- *   traits — `bodyHash` over the entire trait body. scripts destructure
+ *   traits, `bodyHash` over the entire trait body. scripts destructure
  *     trait params by name, capturing field shape; any body delta is an
  *     api contract change → invalidate.
- *   scripts — set of declared keys (`${traitId}.${scriptId}`). the key is a
+ *   scripts, set of declared keys (`${traitId}.${scriptId}`). the key is a
  *     script's binding identity (instance map key + registry id); set
  *     equality means only factory bodies changed (swapped in place via the
  *     flush path), any key delta is a shape change → invalidate.
- *   commands — wire indexing is decoupled from registration order via
+ *   commands, wire indexing is decoupled from registration order via
  *     explicit protocol negotiation (server pushes the ordered command
  *     list on connect and on registry change); `send`/`broadcast` resolve
  *     serdes by id from the live `commandsRegistry` rather than embedding
@@ -139,7 +139,7 @@ export type ModuleSnapshot = {
     scenes: Set<string>;
     matchmaking: Set<string>;
     traits: Map<string, { bodyHash: string }>;
-    /** declared script keys (`${traitId}.${scriptId}`); set equality ⇒ patch — see shape note above. */
+    /** declared script keys (`${traitId}.${scriptId}`); set equality ⇒ patch, see shape note above. */
     scripts: Set<string>;
     commands: Set<string>;
 };
@@ -192,7 +192,7 @@ export function getModuleSnapshot(id: string): ModuleSnapshot | null {
 }
 
 /**
- * tests only — drop the module stack + all per-module snapshots so the
+ * tests only, drop the module stack + all per-module snapshots so the
  * next test starts with no "previous" snapshot poisoning the patch/invalidate
  * diff. paired with `registry.__resetForTests` from tst/e2e/harness.ts.
  */
@@ -258,7 +258,7 @@ export function recordMatchmaking(id: string): void {
 /**
  * record one trait registration's shape. bodyHash is a structural hash over
  * the entire body (literals by value, factories by toString). any change to
- * the body — added/removed key, default value tweak, factory swap — flips
+ * the body, added/removed key, default value tweak, factory swap, flips
  * the hash and forces importer cascade. rationale: a default value change
  * can silently be a type change (number → string, vec3 factory → quat
  * factory), so we treat any body delta as needing fresh script closures.
@@ -293,20 +293,20 @@ export function __decideReload(id: string): ReloadDecision {
  *
  *   1. trait id sets equal AND every shared trait's bodyHash identical.
  *   2. declared script-key sets equal (a script's key is its binding
- *      identity — same set means only factory bodies changed, which the
+ *      identity, same set means only factory bodies changed, which the
  *      registry flush path swaps in place; a key added/removed/renamed or
  *      reparented to another trait is a shape change → invalidate).
  *
  * everything else (blockTextures, blocks, models, prefabs,
  * scenes, commands, matchmaking) is presence-only and propagates via the
- * flush path — `applyRegistryChanges` does a wholesale rebuild on
+ * flush path, `applyRegistryChanges` does a wholesale rebuild on
  * `blocksRegistry.pendingChanges` / `blockTexturesRegistry.pendingChanges`:
  * BlockRegistry rebuilt, atlas refreshed (short-circuits on hash equality),
  * per-room `voxels.registry` repointed, `resolveAllChunks` marks every
  * chunk dirty for the next mesher tick. Stale BlockHandle references in
  * script-factory closures keep their old state encoder, which is an
  * accepted limitation (script-factory swaps are the trait/script path,
- * not the block path) — invalidating on block edits would cascade past
+ * not the block path), invalidating on block edits would cascade past
  * the userSrcDir boundary into the .bongle bootstrap entry, which has
  * no self-accept and forces a full page reload.
  */

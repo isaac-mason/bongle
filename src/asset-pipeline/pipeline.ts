@@ -1,5 +1,5 @@
 /**
- * src/asset-pipeline/pipeline.ts — AssetPipeline, the one asset pipeline.
+ * src/asset-pipeline/pipeline.ts, AssetPipeline, the one asset pipeline.
  *
  * It lives in the engine because it USES the engine: it reads the registries,
  * bakes assets (atlas/models/scenes/audio/sprites), and boots
@@ -7,13 +7,13 @@
  * `engine-asset-pipeline` entrypoint (edit + build), so its Node deps
  * (sharp/skia/gltf/ffmpeg/Dawn) never enter the play bundles.
  *
- * Surface — the house pattern: `init(ctx) -> State`, `run(state) -> RunResult`,
+ * Surface, the house pattern: `init(ctx) -> State`, `run(state) -> RunResult`,
  * `dispose(state)`, plus `assetSources(state)` for the dev file-watcher.
  *
  * One `run` is the whole job, start to end: bake (revision-gated per builder)
  * then, when `renderIcons`, render the dirty icons (hash-gated). One `State`
  * folds both gating machines + the lazily-booted render engine. No worker, no
- * transport, no reboot — it's an in-graph object that the bake either feeds in
+ * transport, no reboot, it's an in-graph object that the bake either feeds in
  * place (`applyRegistryChanges` → `VoxelResources.refresh`) or, on the first
  * pass, boots once.
  *
@@ -41,7 +41,7 @@ import { computeBlockIconsHash, computePrefabIconHashes, computeSceneIconHashes 
 
 export type InitCtx = {
     projectDir: string;
-    /** kit invocation mode — controls scene barrel discovery (see buildScenes). */
+    /** kit invocation mode, controls scene barrel discovery (see buildScenes). */
     mode: 'edit' | 'play';
     /** forwarded to the atlas builders as their `cache` option (true in dev HMR). */
     cache: boolean;
@@ -74,7 +74,7 @@ export type RunResult = {
 
 export type State = {
     ctx: InitCtx;
-    /** typed registry view the bake reads — built from the engine's own barrel. */
+    /** typed registry view the bake reads, built from the engine's own barrel. */
     internal: PipelineInternal;
     /** bake revision gates + caches + matchmaking config. */
     bake: PipelineState;
@@ -83,14 +83,14 @@ export type State = {
     gpu: { device: GPUDevice; adapter: GPUAdapter } | null;
     /** render engine, booted lazily on the first icon render. */
     engine: EngineAssetPipeline.State | null;
-    // render gates — sceneId/prefabId/blockHash → last applied/rendered.
+    // render gates, sceneId/prefabId/blockHash → last applied/rendered.
     appliedSceneHashes: Map<string, string>;
     lastBlockIconsHash: string | null;
     lastPrefabIconHashes: Map<string, string>;
     lastSceneIconHashes: Map<string, string>;
 };
 
-// Keep created Dawn instances referenced for the process lifetime — Dawn's
+// Keep created Dawn instances referenced for the process lifetime, Dawn's
 // background ProcessEvents pump segfaults on a GC'd instance.
 const liveGpuInstances: unknown[] = [];
 
@@ -109,14 +109,14 @@ export function init(ctx: InitCtx): State {
 }
 
 /** Run one full pass: bake, then (when `renderIcons`) render the dirty icons.
- *  Idempotent and internally gated — coalescing and when-to-fire are the
+ *  Idempotent and internally gated, coalescing and when-to-fire are the
  *  caller's concern. */
 export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<RunResult> {
     const { projectDir, mode, cache, renderIcons } = s.ctx;
     const dir = clientResourcesDir(s);
     const atlasJsonPath = path.join(dir, 'voxels-atlas.json');
     const spriteAtlasJsonPath = path.join(dir, 'sprites-atlas.json');
-    // the audio manifest doubles as its own sidecar — its combined `hash` field
+    // the audio manifest doubles as its own sidecar, its combined `hash` field
     // is exactly what readArtifactHashSync reads (see asset-pipeline/bake/audio.ts).
     const audioManifestPath = path.join(dir, 'audio-manifest.json');
 
@@ -149,7 +149,7 @@ export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<
     return result;
 }
 
-/** Files the pipeline reads off disk (gltf/png/ogg/...) — the dev watcher uses
+/** Files the pipeline reads off disk (gltf/png/ogg/...), the dev watcher uses
  *  this to force a pass when an asset's bytes change without a registry move. */
 export function assetSources(s: State): Set<string> {
     return collectAssetSources(s.internal, s.ctx.projectDir);
@@ -170,7 +170,7 @@ function clientResourcesDir(s: State): string {
 async function renderIcons_(s: State, atlasHash: string | null, result: RunResult): Promise<void> {
     // The engine loads the atlas at boot, so the first render needs one on disk.
     // The bake above just wrote it; if there's still none (cold pass before any
-    // blocks exist), defer — a later run with an atlas boots the engine then.
+    // blocks exist), defer, a later run with an atlas boots the engine then.
     if (!s.engine) {
         if (!atlasHash) return;
         await boot(s);
@@ -178,7 +178,7 @@ async function renderIcons_(s: State, atlasHash: string | null, result: RunResul
     const engine = s.engine;
     if (!engine) return;
 
-    // Atlas + registry edits land in place — no reboot.
+    // Atlas + registry edits land in place, no reboot.
     await EngineAssetPipeline.applyRegistryChanges(engine);
 
     // Scene corpus delta off disk (source of truth for which scenes exist).
@@ -253,7 +253,7 @@ async function renderIcons_(s: State, atlasHash: string | null, result: RunResul
 async function boot(s: State): Promise<void> {
     if (!s.gpu) {
         // Lazy + dynamic so `webgpu` (Dawn) is only loaded when icons are
-        // rendered — the play build (`renderIcons: false`) never touches it.
+        // rendered, the play build (`renderIcons: false`) never touches it.
         const { create, globals } = await import('webgpu');
         Object.assign(globalThis, globals);
         const gpu = create([]);

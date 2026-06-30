@@ -1,8 +1,8 @@
-// build-runtime-handle.ts — construct a `ModelHandle` from a parsed
+// build-runtime-handle.ts, construct a `ModelHandle` from a parsed
 // `Model`. Used by `Resources.ensureModel` to hydrate the empty handle
 // that `setModel` created for runtime models (avatars, uploaded assets).
 // Structurally mirrors the kit pipeline's codegen barrel
-// (`renderModelConstruction` in kit/src/asset-pipeline/models.ts) — the
+// (`renderModelConstruction` in kit/src/asset-pipeline/models.ts), the
 // codegen path is still the source of truth for *declared* models
 // because it gives a synchronous typed handle at module-eval; this
 // function is the runtime equivalent for models that have no codegen
@@ -19,7 +19,7 @@ import { addChild, addTrait, createNode, type Node } from '../scene/nodes';
 import type { ClipDef, MeshId, ModelHandle } from './handle';
 import type { Model, ModelNode } from './model';
 
-/** TRS within `TRS_EPS` of identity — gltf bake noise absorbs the slack. */
+/** TRS within `TRS_EPS` of identity, gltf bake noise absorbs the slack. */
 const TRS_EPS = 1e-6;
 
 /**
@@ -28,7 +28,7 @@ const TRS_EPS = 1e-6;
  * tree, flat node index, mesh ref index, clip ref index, root-local
  * AABB. Bumps `handle.version`.
  *
- * Identity isn't preserved across re-hydration — fresh `Node` objects
+ * Identity isn't preserved across re-hydration, fresh `Node` objects
  * are created each call. Re-hydration isn't part of the normal flow
  * anyway: model swap goes via setModel + a fresh handle for a different id.
  */
@@ -86,7 +86,7 @@ export function hydrateRuntimeHandle(handle: ModelHandle, model: Model): void {
         animations[c.name] = { name: c.name, modelId };
     }
 
-    // mutate the same handle object in place — user refs (and the
+    // mutate the same handle object in place, user refs (and the
     // resources-side entry from setModel) stay valid.
     const target = handle as {
         -readonly [K in keyof ModelHandle]: ModelHandle[K];

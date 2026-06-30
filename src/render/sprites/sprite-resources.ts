@@ -1,4 +1,4 @@
-// SpriteResources — engine-global GPU resources backing all sprite rendering.
+// SpriteResources, engine-global GPU resources backing all sprite rendering.
 //
 // One instance per `EngineClient`, shared across rooms. Owns:
 //   - the sprite atlas texture (sync placeholder + async real-atlas swap)
@@ -9,16 +9,16 @@
 // atlas + builds the material against it, then `load()` fetches the real
 // atlas + sidecar. When the atlas swaps, `load()` allocates a new Texture
 // (size can grow/shrink between asset rebuilds) and rebinds the material's
-// TextureNode to it — no material rebuild needed. Same compiled pipeline
+// TextureNode to it, no material rebuild needed. Same compiled pipeline
 // survives across atlas reloads.
 //
 // Material binds per-instance + env buffers by name (`instancePose`,
 // `instanceMaterial`, `env`). Each per-room SpriteVisuals routes its
 // buffers to those names via `geometry.setBuffer(name, buf)` and sets
-// `mesh.count = head` (alive slot count) per frame — slots are compacted
+// `mesh.count = head` (alive slot count) per frame, slots are compacted
 // CPU-side via swap-pop, so the draw needs no per-instance visibility gate.
 //
-// The pixel-extrusion bake cache is NOT on this struct — it lives privately
+// The pixel-extrusion bake cache is NOT on this struct, it lives privately
 // inside `ExtrudedSpriteVisuals`'s geometry pool (per-room, refcounted by
 // spriteId). Atlas swaps wipe the visuals wholesale via
 // `registry-dispatch.ts:refreshSpriteResources`, so no cross-subsystem
@@ -84,7 +84,7 @@ export type SpriteAtlasMetadata = {
     hash: string;
 };
 
-// ── runtime LUT shape — pixel uvs normalized into 0..1 sampler space ──
+// ── runtime LUT shape, pixel uvs normalized into 0..1 sampler space ──
 
 export type SpriteFrameUv = {
     /** top-left u in [0..1]. */
@@ -120,7 +120,7 @@ export const InstanceMaterial = struct('SpriteInstanceMaterial', {
     uvRect: d.vec4f,
     // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
-    // flash: transient overlay — rgb is the colour, a the strength (lerp).
+    // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
     light: d.vec4f,
     glow: d.f32,
@@ -156,7 +156,7 @@ export type SpriteResources = {
     /** sidecar hash this struct was loaded against (`null` if no real
      *  sidecar yet). Compared in `refresh` for the short-circuit. */
     atlasHash: string | null;
-    /** engine-global batched-sprite material — binds per-instance + env
+    /** engine-global batched-sprite material, binds per-instance + env
      *  buffers by name. The atlas Texture is bound via `atlasTexNode`;
      *  atlas swaps rebind that node without rebuilding the material. */
     material: Material;
@@ -171,8 +171,8 @@ export type SpriteResources = {
 /**
  * Sync construct an empty SpriteResources with a magenta-placeholder
  * texture, plus the engine-global material bound against it. `load()`
- * fetches the real atlas and rebinds the material's TextureNode in place
- * — same compiled pipeline survives the atlas swap.
+ * fetches the real atlas and rebinds the material's TextureNode in place,
+ * same compiled pipeline survives the atlas swap.
  */
 export function init(): SpriteResources {
     const atlas = createPlaceholderTexture();
@@ -191,7 +191,7 @@ export function init(): SpriteResources {
 /**
  * Fetch the sprite atlas PNG + sidecar and populate `res` in place. On
  * atlas swap, allocates a fresh `Texture` and rebinds the material's
- * atlas TextureNode to it — the compiled pipeline is preserved. Returns
+ * atlas TextureNode to it, the compiled pipeline is preserved. Returns
  * `true` when the atlas swapped.
  */
 export async function load(res: SpriteResources): Promise<boolean> {
@@ -219,7 +219,7 @@ export async function load(res: SpriteResources): Promise<boolean> {
     return true;
 }
 
-/** Alias for `load()` — semantic match for HMR + registry-dispatch
+/** Alias for `load()`, semantic match for HMR + registry-dispatch
  *  call sites that conceptually "refresh" an already-loaded set. */
 export const refresh = load;
 
@@ -237,7 +237,7 @@ export function dispose(res: SpriteResources): void {
 // dispose the old atlas + rebind the material's TextureNode at the new
 // one. gpucat caches GPUTextures by GpuTexture identity, and the
 // per-frame upload path doesn't reallocate when width/height change on
-// an existing GpuTexture — so we always swap to a fresh Texture, then
+// an existing GpuTexture, so we always swap to a fresh Texture, then
 // retarget the binding+sampler nodes that the material captured at
 // build time. material itself stays alive across reloads.
 function swapAtlas(res: SpriteResources, next: Texture): void {
@@ -412,7 +412,7 @@ function createSpriteMaterial(atlas: Texture): { material: Material; atlasTexNod
     const atlasTexNode = texture(atlas);
     const sampled = atlasTexNode.sample(vUv).toVar('svSampled');
 
-    // lighting — no ndotl (billboards have no consistent normal).
+    // lighting, no ndotl (billboards have no consistent normal).
     const cfg = storage('env', EnvConfig, 'read').fields();
     const TAU = f32(Math.PI * 2);
     const sunAngle = mul(sub(cfg.time, f32(0.25)), TAU).toVar('svSunAngle');

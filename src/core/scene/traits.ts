@@ -8,10 +8,10 @@ import type { ScriptDef } from './scripts';
 /* ── trait body types ── */
 
 /**
- * trait body — a plain object literal whose values are either:
+ * trait body, a plain object literal whose values are either:
  * - a literal (number, string, boolean, null) shared as the default, or
  * - a factory `() => T` called once per instance to build a fresh value
- *   (required for any mutable default — Vec3, Quat, Mat4, arrays, objects).
+ *   (required for any mutable default, Vec3, Quat, Mat4, arrays, objects).
  *
  * trait-level options (e.g. persist) live in the third arg to `trait()`,
  * keeping the body purely instance-field shaped.
@@ -28,7 +28,7 @@ export type TraitOptions = {
      * default `true`. set to `false` for traits attached at runtime that
      * should never appear on disk (e.g. character controllers, gizmos).
      * for tag traits (no controls), `persist: false` still strips the
-     * trait from saved scenes — its mere presence on the node is the data
+     * trait from saved scenes, its mere presence on the node is the data
      * being filtered.
      */
     persist?: boolean;
@@ -60,7 +60,7 @@ export type TraitInstance<S extends TraitBody> = TraitBase & {
 /** identifying stamp shared by every per-trait registration. */
 type TraitChildStamp<KindIdKey extends string> = { traitId: string } & { [K in KindIdKey]: string };
 
-/** body passed by the user to `control()` — fields only, no stamps. */
+/** body passed by the user to `control()`, fields only, no stamps. */
 export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
     label?: string;
     schema: prop.Schema;
@@ -74,28 +74,28 @@ export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
 
-/** measures how much a sync value changed — receives the previously-emitted value
+/** measures how much a sync value changed, receives the previously-emitted value
  *  and the current one, returns a magnitude compared against a `ThresholdRate`'s
  *  `threshold`. `syncMetric.{distance,angle,scalar}` cover the common shapes. */
 export type SyncMetric = (previous: any, current: any) => number;
 
 /** threshold-gated rate: re-emit only once `metric(previous, current)` reaches
  *  `threshold` since the last emit. sub-threshold changes accumulate against the
- *  last emitted value, so slow drift still reconciles. body-agnostic — it reads the
+ *  last emitted value, so slow drift still reconciles. body-agnostic, it reads the
  *  field's own value, so it works for any field and any driver (rigid body, AABB
  *  body, script, animation). this replaces the old velocity-based 'movement' rate. */
 export type ThresholdRate = { threshold: number; metric: SyncMetric };
 
 /**
  * sync rate category or explicit Hz cap for per-sync rate gating.
- * - 'realtime'     — emit whenever bytes change (no throttle)
- * - 'dirty'        — never auto-emit; only when SyncHandle.dirty() is called
- * - number         — explicit Hz cap for the cold-path byte diff
- * - ThresholdRate  — emit only on a significant value change (movement/rotation/etc.)
+ * - 'realtime', emit whenever bytes change (no throttle)
+ * - 'dirty', never auto-emit; only when SyncHandle.dirty() is called
+ * - number, explicit Hz cap for the cold-path byte diff
+ * - ThresholdRate, emit only on a significant value change (movement/rotation/etc.)
  */
 export type SyncRateConfig = 'realtime' | 'dirty' | number | ThresholdRate;
 
-/** body passed by the user to `sync()` — fields only, no stamps. */
+/** body passed by the user to `sync()`, fields only, no stamps. */
 export type SyncBody<T extends TraitBase = TraitBase, S = unknown> = {
     schema: pack.Schema;
     pack: (instance: T) => S;
@@ -114,7 +114,7 @@ export type SyncDef<T extends TraitBase = TraitBase, S = unknown> = SyncBody<T, 
  * returned by sync() at registration time. carries the sync index and a
  * producer-side hint to skip byte-diffing.
  *   const poseSync = sync(TransformTrait, { schema, pack, unpack });
- *   poseSync.dirty(t);   // "I changed this — emit on next diff pass
+ *   poseSync.dirty(t);   // "I changed this, emit on next diff pass
  *                        //  without bothering to byte-diff."
  */
 export type SyncHandle<T extends TraitBase = TraitBase> = {
@@ -126,32 +126,32 @@ export type SyncHandle<T extends TraitBase = TraitBase> = {
 
 /**
  * per-instance replication working-state, array-indexed by sync slice (parallel
- * to `_def.sync`) — so the diff is array indexing, not keyed side-map lookups.
+ * to `_def.sync`), so the diff is array indexing, not keyed side-map lookups.
  */
 export type TraitSyncState = {
-    /** one "locally dirty" bit per slice — set by producers (SyncHandle.dirty),
+    /** one "locally dirty" bit per slice, set by producers (SyncHandle.dirty),
      *  consumed + cleared by the diff pass; cleared by clearSyncDirty on an
      *  applied replicated write. */
     dirty: Uint32Array;
     /** [i] = last-emitted serialized bytes for slice i (the byte-diff snapshot). */
     bytes: Array<Uint8Array | undefined>;
-    /** [i] = last-emitted value for slice i — ThresholdRate slices only. */
+    /** [i] = last-emitted value for slice i, ThresholdRate slices only. */
     values: unknown[];
     /** [i] = monotonic replication version for slice i. f64 because the version
      *  counter grows unbounded and must not wrap an int32. */
     versions: Float64Array;
-    /** max of this trait's field versions — the send-path trait-level gate. */
+    /** max of this trait's field versions, the send-path trait-level gate. */
     traitVersion: number;
 };
 
-/** base shape of every trait instance — has `_node` back-ref + def back-ref. */
+/** base shape of every trait instance, has `_node` back-ref + def back-ref. */
 export type TraitBase = {
     /** reference to the node this trait instance belongs to */
     _node: Node;
     /** the TraitDef this instance was built from */
     _def: TraitDef;
     /**
-     * per-instance replication working-state — dirty bits + diff snapshots,
+     * per-instance replication working-state, dirty bits + diff snapshots,
      * array-indexed by sync slice. allocated in buildTraitInstance when the
      * trait has syncs; undefined otherwise (helpers no-op in that case).
      */
@@ -171,7 +171,7 @@ export function setSyncDirty(instance: TraitBase, idx: number): void {
 
 /**
  * clear the dirty flag for sync `idx`. used when a replicated write is
- * applied — the value was just synced from the wire, so it isn't a local
+ * applied, the value was just synced from the wire, so it isn't a local
  * change to re-emit. (`idx >> 5` picks the Uint32 word, `idx & 31` is the
  * bit inside it.)
  */
@@ -191,7 +191,7 @@ export function clearSyncDirty(instance: TraitBase, idx: number): void {
 export type TraitHandle<T extends TraitBase = TraitBase> = {
     readonly _id: string;
     /**
-     * runtime slot — stable integer identity assigned the first time `trait(id, ...)`
+     * runtime slot, stable integer identity assigned the first time `trait(id, ...)`
      * runs, cached in `traitSlots[id]` for the process lifetime. Used as the key
      * in `node._traits: Map<number, TraitBase>` and anywhere runtime code indexes
      * a trait. Distinct from the *wire index* (sort-by-id position computed at flush,
@@ -199,9 +199,9 @@ export type TraitHandle<T extends TraitBase = TraitBase> = {
      */
     readonly _slot: number;
     readonly _def: TraitDef;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'traits'; id: string };
-    /** phantom — carries the instance type for inference. not present at runtime. */
+    /** phantom, carries the instance type for inference. not present at runtime. */
     readonly __type: T;
 };
 
@@ -212,16 +212,16 @@ export type TraitType<H extends TraitHandle> = H['__type'];
 
 export type TraitDef = {
     id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
     /**
-     * runtime slot — see `TraitHandle._slot`. Distinct from any wire index;
+     * runtime slot, see `TraitHandle._slot`. Distinct from any wire index;
      * `node._traits` is keyed by `slot`, while the wire encoding uses a
      * sort-by-id position computed fresh per flush at the rpc/replication layer.
      */
     slot: number;
-    /** raw body of the trait — literals + factories, indexed by field name. */
+    /** raw body of the trait, literals + factories, indexed by field name. */
     body: Record<string, unknown>;
     /** whether instances of this trait are saved to scene files. default true. */
     persist: boolean;
@@ -247,7 +247,7 @@ export type TraitDef = {
      * same handle the original `trait()` call returned. Used for
      * by-id attach paths (e.g. optional/conditionally-loaded traits like
      * the editor trait) where the call site cannot import the handle
-     * directly. Forms a `def.handle._def === def` cycle — fine for GC,
+     * directly. Forms a `def.handle._def === def` cycle, fine for GC,
      * but means TraitDef must never be JSON.stringify'd.
      */
     handle: TraitHandle;
@@ -259,7 +259,7 @@ let slotCounter = 0;
 
 /**
  * stable mapping from trait string id to runtime slot. Cached for the
- * process lifetime — a trait id always gets the same slot, even if its
+ * process lifetime, a trait id always gets the same slot, even if its
  * registry entry is removed and re-added during HMR. Used as the integer
  * key into `node._traits` and friends.
  */
@@ -329,8 +329,8 @@ export function trait<S extends TraitBody = Record<string, never>>(
 
     upsert(registry.traits, id, def);
     // bodyHash = structural hash of the trait body (literals by value,
-    // factories by toString). any body delta — added/removed key, default
-    // tweak, factory swap — flips the hash and forces importer cascade.
+    // factories by toString). any body delta, added/removed key, default
+    // tweak, factory swap, flips the hash and forces importer cascade.
     // a default change can silently be a type change (e.g. number → string,
     // vec3 factory → quat factory), so we treat any body delta as needing
     // fresh script closures rather than try to classify "safe" tweaks.
@@ -398,10 +398,10 @@ export function sync<T extends TraitBase, S>(handle: TraitHandle<T>, syncId: str
 
 /**
  * build a trait instance from a TraitDef and optional override props
- * (from scene-pack deserialization). overrides keyed by control id —
+ * (from scene-pack deserialization). overrides keyed by control id,
  * fields without a matching control just take the body default.
  *
- * override values are taken by reference — callers that pass cached/
+ * override values are taken by reference, callers that pass cached/
  * shared source data are responsible for cloning so runtime mutations
  * don't bleed back.
  */

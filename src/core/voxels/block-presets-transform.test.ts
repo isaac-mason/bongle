@@ -6,7 +6,7 @@
 //   - placement helpers produce the expected key from hit context
 //
 // chirality (stair inner_left ↔ inner_right under x/z flip) flips on every
-// horizontal mirror regardless of facing — left and right always swap when
+// horizontal mirror regardless of facing, left and right always swap when
 // you reflect the world horizontally. facing only flips when it has a
 // component along the mirror axis (e.g. facing=east under flip-x).
 
@@ -103,7 +103,7 @@ describe('rotate × 4 = identity (Y axis)', () => {
 
 describe('rotate × 4 = identity (X axis)', () => {
     // x-axis 90° turns can map facing→up/down for blocks that don't have
-    // up/down in their enum — those fall back to the original key (no
+    // up/down in their enum, those fall back to the original key (no
     // change), so 4× still composes to identity.
     const keys = [
         'test:stairs[facing=north,half=bottom,shape=straight]',

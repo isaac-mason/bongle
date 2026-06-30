@@ -1,8 +1,8 @@
-// skyline rectangle packer — pure data structure + algorithms.
+// skyline rectangle packer, pure data structure + algorithms.
 //
 // shared by `render/models/model-atlas.ts` (runtime gltf textures) and
 // `lib/kit/src/asset-pipeline/sprite-atlas.ts` (bake-time sprite atlas).
-// no GPU state, no allocator harness — callers wrap this with their own
+// no GPU state, no allocator harness, callers wrap this with their own
 // `regions` map + pixel buffer + texture handle.
 //
 // invariant: skyline nodes cover [0, size] contiguously, no gaps, no
@@ -20,7 +20,7 @@ export type Region = {
     h: number;
 };
 
-/** one segment of the skyline — a horizontal span at height `y`. */
+/** one segment of the skyline, a horizontal span at height `y`. */
 export type SkylineNode = {
     x: number;
     y: number;

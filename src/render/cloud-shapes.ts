@@ -27,7 +27,7 @@ export const CLOUD_DIM_X = 24;
 export const CLOUD_DIM_Y = 10;
 export const CLOUD_DIM_Z = 24;
 
-// world units per voxel — bumps the visual block size without producing
+// world units per voxel, bumps the visual block size without producing
 // more polygons. higher = chunkier, more minecraft-y. effective cloud
 // world-extent is CLOUD_DIM_* × CLOUD_VOXEL_SCALE.
 const CLOUD_VOXEL_SCALE = 4;
@@ -37,7 +37,7 @@ const CLOUD_VOXEL_SCALE = 4;
 // + N_SATELLITES medium blobs offset from the centre
 // + N_SATELLITES × N_MICROS_PER_SATELLITE small "bumps" on each
 //   satellite's surface
-// the micros are what give clouds their cauliflower silhouette — each
+// the micros are what give clouds their cauliflower silhouette, each
 // satellite gets a few smaller bumps clustered on its outside, so the
 // union surface has detail at two scales instead of one.
 const N_SATELLITES = 7;
@@ -111,7 +111,7 @@ function generateBlobs(shapeIdx: number): BlobField {
     const data = new Float32Array(BLOBS_PER_SHAPE * BLOB_STRIDE);
     let cursor = 0;
 
-    // primary central blob — anchors the body, big enough to overlap
+    // primary central blob, anchors the body, big enough to overlap
     // all satellites so the union reads as one cloud not many.
     writeBlob(
         data,
@@ -124,7 +124,7 @@ function generateBlobs(shapeIdx: number): BlobField {
         CLOUD_DIM_Z * 0.32,
     );
 
-    // satellites — wide xy-range, narrow y-range so they stay in the
+    // satellites, wide xy-range, narrow y-range so they stay in the
     // body band. each gets a few micro-blobs jittered around its
     // surface for the cauliflower silhouette.
     for (let i = 0; i < N_SATELLITES; i++) {
@@ -142,7 +142,7 @@ function generateBlobs(shapeIdx: number): BlobField {
         const srz = CLOUD_DIM_Z * r;
         writeBlob(data, cursor++, scx, scy, scz, srx, sry, srz);
 
-        // micros — small bumps placed near the parent's surface. each
+        // micros, small bumps placed near the parent's surface. each
         // is 30..55% of the parent's radii and offset by ~1 parent
         // radius in a random direction (slight upward bias keeps the
         // silhouette domed rather than spiky on all sides).
@@ -180,7 +180,7 @@ function generateOccupancy(shapeIdx: number): Uint8Array {
 
                 // find the minimum normalised squared distance to any
                 // blob centre. AABB pre-reject skips the squared-distance
-                // test for blobs whose extents don't enclose the voxel —
+                // test for blobs whose extents don't enclose the voxel,
                 // critical for micros (~21 of the ~29 blobs are tiny).
                 let minD2 = Infinity;
                 for (let b = 0; b < bn; b++) {
@@ -244,7 +244,7 @@ export type CloudUberGeometry = {
     maxIndexCount: number;
 };
 
-// CPU-side build product — renderer-agnostic, so we cache this at module
+// CPU-side build product, renderer-agnostic, so we cache this at module
 // scope and rebuild the cheap gpu.Geometry wrapper per call. fbm +
 // greedy-mesh is the expensive part (hundreds of ms); GPU buffer
 // construction is microseconds.
@@ -281,7 +281,7 @@ function buildCloudCpu(): CloudCpuBuild {
         });
 
         // pathological case: a shape's hash gated everything out. unlikely
-        // with current params but cheap to handle — emit an empty range so
+        // with current params but cheap to handle, emit an empty range so
         // its slots draw nothing (instanceCount=0 in the indirect entry).
         if (!mesh?.normals) {
             shapes.push({
@@ -297,7 +297,7 @@ function buildCloudCpu(): CloudCpuBuild {
         // anchor positions: X and Z centred on the shape origin so wind
         // and placement transforms feel symmetric; Y base-anchored at 0
         // so the cloud sits ABOVE its world anchor. this gives
-        // cloudsAltitude the meaning "cloud floor altitude" — a bigger
+        // cloudsAltitude the meaning "cloud floor altitude", a bigger
         // cloud reaches higher into the sky, never down into the world.
         const cx = CLOUD_DIM_X * 0.5;
         const cz = CLOUD_DIM_Z * 0.5;

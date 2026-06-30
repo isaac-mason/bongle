@@ -5,7 +5,7 @@ import type { ScriptContext } from '../core/scene/scripts';
  * Drop this client from the current allocation and re-enter the matchmaker
  * with new gameOptions / joinData. Client-only. The transport (engine
  * `play` message in dev, iframe-bridge re-enqueue in deployed) lives on the
- * ClientDriver supplied at engine init — this just hands off to it.
+ * ClientDriver supplied at engine init, this just hands off to it.
  *
  * Use cases: gamemode switches, team splits, lobby→game transitions.
  */

@@ -1,5 +1,5 @@
 /**
- * core/registry.ts — unified declarative-content registry.
+ * core/registry.ts, unified declarative-content registry.
  *
  * one module-scope singleton (`registry`) bundles every declared kind
  * (blocks, blockTextures, models, traits, scripts, …) into a single
@@ -12,7 +12,7 @@
  *
  * derived views (`blockRegistry`, `traitsBySlot`, `commandWireIndex`,
  * `traitWireIndex`) memoise against the source kind's `revision` and
- * recompute lazily on next read. there is no `ProjectModule` snapshot —
+ * recompute lazily on next read. there is no `ProjectModule` snapshot,
  * the singleton itself is the read surface.
  */
 
@@ -62,7 +62,7 @@ export type KindStore<T> = {
     /**
      * monotonic counter bumped every time a change is appended to
      * `pendingChanges` (add / change / remove). independent of the
-     * draining lifecycle — consumers that run AFTER the engine drains
+     * draining lifecycle, consumers that run AFTER the engine drains
      * `pendingChanges` (e.g. the asset pipeline flush handler) compare
      * their last-seen revision to the current to decide whether to
      * re-run their builders. tied to actual content change via the
@@ -71,16 +71,16 @@ export type KindStore<T> = {
      */
     revision: number;
     /**
-     * optional — returns `true` when `a` and `b` should be treated as
+     * optional, returns `true` when `a` and `b` should be treated as
      * different. when omitted, any re-`upsert` of an existing id fires
      * `changed` (react-refresh-style: the module re-evaluated, so the
-     * payload is fresh by definition — no point comparing). suitable for
+     * payload is fresh by definition, no point comparing). suitable for
      * cheap-to-react kinds like scripts where over-swap is harmless.
      */
     diff?: (a: T, b: T) => boolean;
     hash: (t: T) => string;
     /**
-     * optional — returns the set of producer keys this payload depends on.
+     * optional, returns the set of producer keys this payload depends on.
      * runtime-resolved deps that wouldn't be visible to `hash` (e.g.
      * BlockDef.model is a factory; closed-over BlockTextureDef refs are
      * invisible to `Function.prototype.toString()`). called on every
@@ -91,7 +91,7 @@ export type KindStore<T> = {
      * when true, every `upsert` call overwrites `byId.<id>.payload` with
      * the freshly-passed payload, even when the hash is unchanged (no
      * `changed` event fires in that case). used by stores whose payload
-     * carries mutable sibling collections — TraitDef's controls / sync /
+     * carries mutable sibling collections, TraitDef's controls / sync /
      * scripts arrays are repopulated on every module re-eval by the
      * per-kind registrars; without identity replacement, the registry
      * would keep returning the previous-run def with stale collections
@@ -113,7 +113,7 @@ export type KindStoreOptions<T> = {
 /**
  * structural hash that handles functions, maps, sets, plain objects, and
  * primitives. used by every kind's `hash` to detect payload changes.
- * not crypto-grade — purpose is hmr change-detection only.
+ * not crypto-grade, purpose is hmr change-detection only.
  */
 export function structuralHash(value: unknown): string {
     return djb2(stringify(value));
@@ -227,7 +227,7 @@ function endModuleRun<T>(store: KindStore<T>, moduleId: string): void {
 /**
  * synthetic owner for entries that exist before any "real" module has
  * claimed them. today's only producer is `model()`'s pre-codegen
- * placeholder — the user code calls `model('id')` before the codegen
+ * placeholder, the user code calls `model('id')` before the codegen
  * barrel has emitted `_registerModelHandle('id', ...)`, so we still
  * need an entry in the registry (so the cli's pipeline read picks the
  * id up) but no real module owns it yet. When the real owner finally
@@ -263,12 +263,12 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
 
     if (existing.module !== module) {
         // PLACEHOLDER_OWNER entries are claimed via `claimOwnership` +
-        // mutate-in-place, not via upsert — so any module-mismatch here
+        // mutate-in-place, not via upsert, so any module-mismatch here
         // is a genuine redeclaration conflict.
         throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`);
     }
 
-    // when `diff` is omitted, any re-upsert is a change — module
+    // when `diff` is omitted, any re-upsert is a change, module
     // re-evaluation produced a fresh payload, that's the only way we got
     // here (cf. react-refresh, which also doesn't compare bodies).
     const changed = store.diff ? store.diff(existing.payload, payload) : true;
@@ -283,7 +283,7 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
 
     if (!changed && !depsChanged) {
         if (store.replaceIdentity) {
-            // payload identity moved even though content hash didn't —
+            // payload identity moved even though content hash didn't,
             // derived caches keyed on `revision` (e.g. `traitsBySlot`) hold
             // refs to the prior payload and would return a stale def.
             existing.payload = payload;
@@ -307,7 +307,7 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
 
 /**
  * Re-hash an existing handle in place and fire `changed` if hash or dep set
- * moved. The handle's payload identity is preserved — callers mutate
+ * moved. The handle's payload identity is preserved, callers mutate
  * `handle.<field>` directly (e.g. SceneHandle._payload on HMR, ModelHandle.bin
  * on bin reload) and then call `touch()` so the registry detects the change
  * without losing the user-code-held reference.
@@ -356,7 +356,7 @@ function removeOwnership<T>(store: KindStore<T>, module: string, id: string): vo
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
- * Register an entry without claiming module-scope ownership — for cases
+ * Register an entry without claiming module-scope ownership, for cases
  * where the caller knows the entry needs to exist in the store now
  * (so downstream readers can see it) but the "real" owner will arrive
  * later via a normal `upsert` or `claimOwnership`. The next claim
@@ -401,7 +401,7 @@ export function upsertPlaceholder<T>(store: KindStore<T>, id: string, payload: T
  * pre-codegen placeholder. No-op when the entry is already owned by
  * the calling module.
  *
- * Throws when the entry is owned by a different real module — this
+ * Throws when the entry is owned by a different real module, this
  * catches duplicate `model('id', ...)` / `block('id', ...)` declarations
  * across files, same as `upsert`'s mismatch guard.
  */
@@ -436,7 +436,7 @@ export function getHandle<T>(store: KindStore<T>, id: string): Handle<T> | undef
 /**
  * Drain every store's `pendingChanges` queue without acting on it. Called
  * once per side at the end of `EngineClient.load` / `EngineServer.load` to
- * discard the initial-population `added` events — the engine consumes the
+ * discard the initial-population `added` events, the engine consumes the
  * live registry directly, so those events are redundant and would
  * otherwise drown out the actual first edit in the dispatch log.
  */
@@ -499,16 +499,16 @@ export function logPendingChanges(side: 'client' | 'server', stores: ReadonlyArr
 
 /**
  * what a prefab produces when instantiated.
- *   - 'voxels'   — voxel content only
- *   - 'nodes'    — node children only
- *   - 'composite'— both voxels and nodes
+ *   - 'voxels', voxel content only
+ *   - 'nodes', node children only
+ *   - 'composite', both voxels and nodes
  */
 export type PrefabType = 'voxels' | 'nodes' | 'composite';
 
 /**
  * Any producer handle that carries a DepGraph `dependency` stamp. The
  * unified `deps: [...]` field on `prefab()` and `script()` accepts
- * anything matching this shape — scene, model, block, trait, command,
+ * anything matching this shape, scene, model, block, trait, command,
  * prefab handles, etc.
  */
 export type DepHandle = { dependency: DepKey };
@@ -519,7 +519,7 @@ export type PrefabDef = {
     type: PrefabType;
     /**
      * producer handles whose changes trigger re-instantiation in edit mode.
-     * each handle carries a DepGraph `dependency` stamp — `extractPrefabDeps`
+     * each handle carries a DepGraph `dependency` stamp, `extractPrefabDeps`
      * reads it to wire reverse edges so DepGraph dirty propagation flags
      * this prefab when any closed-over producer flips.
      */
@@ -543,14 +543,14 @@ export function depId(dep: DepHandle): string {
 /**
  * sort-by-id wire-index table over a kind store. encode via `idToIndex`,
  * decode via `indexToId`. recomputed lazily per `registry.<kind>.revision`.
- * both peers derive identical tables from their own store mirrors — no
+ * both peers derive identical tables from their own store mirrors, no
  * handshake.
  */
 export type WireIndex = { idToIndex: Map<string, number>; indexToId: string[] };
 
 /** build a `WireIndex` from an id set (sort-by-id). also used by inbound-
  *  table rebuilds in engine-server/engine-client when a `wire_swap` message
- *  arrives — the incoming id list is already sorted by the sender, but we
+ *  arrives, the incoming id list is already sorted by the sender, but we
  *  re-sort here to keep the helper a single canonical place where
  *  wire-index shape is established. */
 export function buildWireIndex(ids: Iterable<string>): WireIndex {
@@ -563,8 +563,8 @@ export function buildWireIndex(ids: Iterable<string>): WireIndex {
 /**
  * resolve a wire trait ref (netIndex preferred, id string as fallback) to
  * a trait id. takes a `WireIndex` directly (not the registry) so callers
- * can pass an inbound wire-index table — the one received via `wire_swap`
- * from the sending peer — rather than the local outbound table.
+ * can pass an inbound wire-index table, the one received via `wire_swap`
+ * from the sending peer, rather than the local outbound table.
  */
 export function resolveTraitWireRef(
     traitWireIndex: WireIndex,
@@ -588,7 +588,7 @@ export type Registry = {
     /**
      * per-trait control registrations, keyed `${traitId}.${controlId}`. one
      * entry per `control()` call. lets HMR diff individual controls without
-     * tripping a wholesale trait change — `traitHash` covers body + meta
+     * tripping a wholesale trait change, `traitHash` covers body + meta
      * only, so re-eval that flips a single control body fires here, not on
      * `registry.traits`.
      */
@@ -614,13 +614,13 @@ export type Registry = {
     /** sort-by-id wire-index over traits. */
     readonly traitWireIndex: WireIndex;
     /**
-     * matchmaking config — `matchmakingRegistry` is single-keyed (id
+     * matchmaking config, `matchmakingRegistry` is single-keyed (id
      * 'main'); falls back to `DEFAULT_MATCHMAKING_CONFIG` when the user
      * didn't call `matchmaking()`.
      */
     readonly matchmakingConfig: MatchmakingConfig;
 
-    /** tests only — wipes every KindStore + derived-view cache. */
+    /** tests only, wipes every KindStore + derived-view cache. */
     _reset(): void;
 };
 
@@ -632,7 +632,7 @@ const particleHash = (p: ParticleHandle) => structuralHash(p);
 
 /**
  * blocks store the handle (not just the def) so the consumer can patch
- * `_baseStateId` / `_index` / `_hooks` directly. hash reads `_def` only —
+ * `_baseStateId` / `_index` / `_hooks` directly. hash reads `_def` only,
  * the slot fields are populated by the consumer at build time and would
  * otherwise feed back as spurious change detection.
  */
@@ -641,7 +641,7 @@ const blockHash = (h: BlockHandle) => structuralHash(h._def);
 /**
  * `extractDeps` resolves the model factory across every state and collects
  * referenced BlockTexture ids. The factory typically closes over
- * BlockTextureDef refs which `Function.prototype.toString()` can't see —
+ * BlockTextureDef refs which `Function.prototype.toString()` can't see,
  * so the content hash stays stable when the closed-over texture is swapped.
  * DepGraph picks the swap up via the dep-set diff and elevates it to a
  * `changed` event, which the block-branch dispatch reacts to.
@@ -668,7 +668,7 @@ const extractBlockDeps = (h: BlockHandle): DepKey[] => {
 // ModelHandle carries a detached `scene: Node` tree (parent pointers form
 // cycles) plus per-side `.bin` URLs. The bin URLs already embed a content
 // hash codegen'd by buildModels, so they're a sufficient change-detection
-// key on their own — hashing the Node tree would just recurse the cycle.
+// key on their own, hashing the Node tree would just recurse the cycle.
 const modelHash = (h: ModelHandle) => structuralHash({ modelId: h.modelId, src: h.src, bin: h.bin });
 
 const prefabHash = (p: PrefabDef) => structuralHash({ id: p.id, type: p.type, args: p.args, node: p.node, apply: p.apply });
@@ -681,12 +681,12 @@ const extractPrefabDeps = (p: PrefabDef): DepKey[] => {
 
 // SceneHandle carries a deserialized `node: Node` tree (parent pointers
 // form cycles) which is runtime state, not authored content. The authored
-// payload (`_payload`) is the change driver — hashing that side-steps the
+// payload (`_payload`) is the change driver, hashing that side-steps the
 // cycle and matches the actual edit surface.
 const sceneHash = (s: SceneHandle) => structuralHash({ id: s.id, client: s.client, server: s.server, payload: s._payload });
 
 /**
- * trait body + meta only — controls / sync / scripts are diffed in their
+ * trait body + meta only, controls / sync / scripts are diffed in their
  * own per-kind stores (registry.controls / registry.sync / registry.scripts).
  * if those collections were folded into traitHash, every script edit on a
  * trait would also fire a wholesale "trait changed" event, drowning the
@@ -762,7 +762,7 @@ export function init(): Registry {
         hash: syncHash,
         diff: wholesaleDiff(syncHash),
     });
-    // no `diff` — script factories close over arbitrary module-scope refs
+    // no `diff`, script factories close over arbitrary module-scope refs
     // that `Function.prototype.toString()` can't see. lean on "module
     // re-evaluated → fresh closure → swap", same approach as react-refresh.
     const scripts = createKindStore<ScriptDef>({
@@ -910,7 +910,7 @@ export function init(): Registry {
         },
     });
 
-    // tests only — wipes every KindStore and derived-view cache so the next
+    // tests only, wipes every KindStore and derived-view cache so the next
     // test's setup starts from a virgin registry. used by tst/e2e/harness.ts.
     reg._reset = () => {
         const stores: KindStore<unknown>[] = [
@@ -951,7 +951,7 @@ export function init(): Registry {
 }
 
 /**
- * bump once per dispatch drain — called by `applyRegistryChanges*` after
+ * bump once per dispatch drain, called by `applyRegistryChanges*` after
  * every branch has reacted. consumers that compare `registry.id` between
  * frames (e.g. cached views) see one increment per HMR cycle.
  */
@@ -959,5 +959,5 @@ export function bumpVersion(reg: Registry): void {
     reg.id++;
 }
 
-/** module-scope singleton — every declarative API upserts into this. */
+/** module-scope singleton, every declarative API upserts into this. */
 export const registry = init();

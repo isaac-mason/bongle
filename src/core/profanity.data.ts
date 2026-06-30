@@ -1,4 +1,4 @@
-// GENERATED FILE — do not edit by hand.
+// GENERATED FILE, do not edit by hand.
 // Regenerate with: npx tsx scripts/gen-profanity.ts <path-to-profanity.csv>
 // Each entry is a normalized token (see normalizeToken in ./profanity.ts).
 export const PROFANITY_WORDS: ReadonlySet<string> = new Set([

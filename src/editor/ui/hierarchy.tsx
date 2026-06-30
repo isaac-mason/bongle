@@ -28,7 +28,7 @@ const INDENTATION = 20;
 const ROW_HEIGHT = 22;
 
 /**
- * shallow-compare two flat lists — returns true if they represent the
+ * shallow-compare two flat lists, returns true if they represent the
  * same visible tree (same ids in same order with same depth/parentId/
  * collapsed/childCount/name/persist). avoids a react re-render when
  * sceneRevision bumps but nothing the hierarchy cares about actually changed.
@@ -73,7 +73,7 @@ export function HierarchyPanel() {
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
     const sceneGraph = room?.nodes ?? null;
 
-    // text filter — when non-empty, the tree shows only matching nodes + their
+    // text filter, when non-empty, the tree shows only matching nodes + their
     // ancestors, ignoring collapsed state.
     const [filter, setFilter] = useState('');
     const filterActive = filter.trim().length > 0;
@@ -86,18 +86,18 @@ export function HierarchyPanel() {
     const [contextNodeId, setContextNodeId] = useState<number | null>(null);
     const contextNode = contextNodeId !== null && sceneGraph ? sceneGraph._idToNode.get(contextNodeId) : null;
 
-    // anchor for shift+click range select — set by plain click and cmd/ctrl+click,
+    // anchor for shift+click range select, set by plain click and cmd/ctrl+click,
     // unchanged by shift+click so a user can extend the range from a fixed anchor.
     const selectionAnchorId = useRef<number | null>(null);
 
-    // collapsed nodes — tracked by numeric node id
+    // collapsed nodes, tracked by numeric node id
     const [collapsedIds, setCollapsedIds] = useState<Set<number>>(() => new Set());
 
-    // node ids we've already auto-collapsed (prefabs + high-fan-out nodes) —
+    // node ids we've already auto-collapsed (prefabs + high-fan-out nodes),
     // guards against re-collapsing a node the user has explicitly expanded.
     const autoCollapsedSeenIds = useRef<Set<number>>(new Set());
 
-    // flattened items state — owned by this component, rebuilt from scene graph
+    // flattened items state, owned by this component, rebuilt from scene graph
     const [flattenedItems, setFlattenedItems] = useState<FlattenedNode[]>([]);
 
     // track initial depth of dragged item
@@ -179,7 +179,7 @@ export function HierarchyPanel() {
 
     const focusItem = useCallback(
         (nodeId: number) => {
-            // tree rows are <li data-node-id="..."> — find and focus the row so
+            // tree rows are <li data-node-id="...">, find and focus the row so
             // subsequent arrow keys originate from the right place. with
             // virtualization the row may be unmounted, so scroll it into view
             // first and focus on the next frame once it's rendered.
@@ -318,7 +318,7 @@ export function HierarchyPanel() {
     // on right-click anywhere in the scroll container, find the row that was
     // clicked (via data-node-id) and stash its id so the shared context menu
     // can target it. also select the node if it isn't already part of the
-    // current selection — preserves multi-select on right-click.
+    // current selection, preserves multi-select on right-click.
     const handleContextMenuTrigger = useCallback(
         (e: React.MouseEvent<HTMLDivElement>) => {
             const li = (e.target as HTMLElement).closest<HTMLElement>('[data-node-id]');

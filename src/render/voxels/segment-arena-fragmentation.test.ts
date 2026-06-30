@@ -3,7 +3,7 @@
 // Companion to segment-arena.bench.ts. Vitest bench mode only runs
 // `bench` blocks; `it` blocks need a `.test.ts` host to be picked up.
 // Fills each allocator with a bimodal workload until first OOM and
-// reports peak-used + alloc count — captured as worklog data for the
+// reports peak-used + alloc count, captured as worklog data for the
 // OffsetAllocator port, not a pass/fail gate.
 
 import { describe, it } from 'vitest';
@@ -97,7 +97,7 @@ describe('fragmentation profile (peak used at first OOM)', () => {
             let firstOomUsed = -1;
             // Steady-state churn: aim for ~60% capacity utilization, then run
             // many ops with a balanced alloc/free coin. OOM happens when a
-            // request can't fit despite enough total free space — i.e. when
+            // request can't fit despite enough total free space, i.e. when
             // fragmentation has carved up the heap. Count OOMs as the metric.
             const TARGET_USED = Math.floor(CAPACITY_SLOTS * 0.6);
             const OPS = 50_000;

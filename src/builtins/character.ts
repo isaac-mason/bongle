@@ -1,27 +1,27 @@
 /**
- * character — presentation layer for a humanoid character entity:
+ * character, presentation layer for a humanoid character entity:
  * visuals (avatar model + procedural limb swing) + sfx (footstep audio) +
- * vfx (block-dust particles). pairs with CharacterControllerTrait —
+ * vfx (block-dust particles). pairs with CharacterControllerTrait,
  * the controller drives state (position, velocity, grounded, bobPhase,
  * sprint, groundBlockState), this trait renders/sounds it.
  *
- * Data-driven: `def.modelId` (intent — what should be mounted) +
- * `state.modelId` (fact — what IS mounted). A single WorldTrait-hosted
+ * Data-driven: `def.modelId` (intent, what should be mounted) +
+ * `state.modelId` (fact, what IS mounted). A single WorldTrait-hosted
  * script reconciles them each frame and, on client, drives presentation:
  *
- *   - rig reconciler — runs on every side. When `def.modelId !==
+ *   - rig reconciler, runs on every side. When `def.modelId !==
  *     state.modelId`: if the target is in `Resources`, unmount the
  *     previous rig (if any) and mount the target; otherwise install
  *     `BUILTIN_BASE_AVATAR_ID` as a placeholder so gameplay code can
  *     name-resolve bones (`head`, `arm_left`, …) from frame zero. The
  *     server avatar pipeline writes `def.modelId` once its load lands
- *     (`server/avatars.ts`) — the reconciler picks it up next frame.
+ *     (`server/avatars.ts`), the reconciler picks it up next frame.
  *     Loading state is `def.modelId !== state.modelId` for any consumer
  *     that needs it.
  *
  *   - locomotion (client). procedural arm/leg swing keyed off
  *     `cc.bobPhase` and horizontal speed, plus head-look orientation.
- *     No clips, no animator state — bones are written directly each
+ *     No clips, no animator state, bones are written directly each
  *     frame, so `AnimatorTrait` ticks (which run after) naturally
  *     override any bones whose channels game code is driving (e.g. an
  *     upper-body emote masks the arm swing while the legs still cycle).
@@ -34,18 +34,18 @@
  *
  *   - sfx + vfx (client). Fires footstep audio + block-dust particles
  *     on bob-phase crossings and landing edges. Owner plays
- *     non-positional (`playMono`) at a louder fixed gain — their own
+ *     non-positional (`playMono`) at a louder fixed gain, their own
  *     footsteps should sit up in the mix and not pan around the
  *     listener; remote characters play positional via `playAt`.
  *     Ground-block resolution: `cc.groundBlockState` (synced uint16)
  *     indexes directly into `BlockRegistry.sounds[]` and `.particles[]`
  *     so owner + remote follow one lookup, no drift. Particles emit on
- *     landing edges always, on phase crossings only when sprinting —
+ *     landing edges always, on phase crossings only when sprinting,
  *     walking is quiet visually, sprinting kicks dust.
  *
  * Crossing-detector "previous" values come from `cc.state.previousGrounded`
  * and `cc.state.previousBobPhase`, snapshotted by the controller at the
- * end of each tick — robust to multiple controller ticks per frame.
+ * end of each tick, robust to multiple controller ticks per frame.
  */
 
 type CharacterConfig = {
@@ -60,11 +60,11 @@ type CharacterConfig = {
 
 type CharacterState = {
     /** what IS currently mounted on the player node (the *fact*, paired
-     *  with `def.modelId` — the *intent*). The WorldTrait reconciler
+     *  with `def.modelId`, the *intent*). The WorldTrait reconciler
      *  converges them each frame: when `state.modelId !== modelId`, it
      *  mounts (placeholder first, then the target once `getModel(ctx, id)`
      *  returns non-null) and writes the new value here. `null` means nothing is
-     *  mounted yet — first reconciler tick after trait add will install
+     *  mounted yet, first reconciler tick after trait add will install
      *  baseAvatar as a placeholder. */
     modelId: string | null;
     /** the resolved ModelHandle for `state.modelId`. The reconciler writes
@@ -83,7 +83,7 @@ type CharacterState = {
     loadingDither: number;
     /** last dither value applied via setCharacterSubtreeDither. Used to
      *  skip the subtree walk on frames where the resolved value didn't
-     *  change — steady-state characters (loaded, out of proximity range)
+     *  change, steady-state characters (loaded, out of proximity range)
      *  pay one numeric compare per frame instead of a full rig traversal. */
     appliedDither: number;
     /** extra screen-door dither a game script can drive (e.g. fading out a
@@ -95,7 +95,7 @@ type CharacterState = {
     externalDither: number;
     /** the current model's nodes that `mountRig` added on top of the enforced
      *  skeleton (its mesh/visual nodes). `unmountRig` removes exactly these on
-     *  a swap and leaves runtime attachments (gear) alone — ownership by node
+     *  a swap and leaves runtime attachments (gear) alone, ownership by node
      *  identity, not name. Per-side, runtime-only; fresh per instance. */
     modelNodes: Set<Node>;
 };
@@ -143,12 +143,12 @@ import { TransformTrait } from './transform';
 import { WorldTrait } from './world';
 
 const TAU = Math.PI * 2;
-// sin(bobPhase) trough — when the camera bob is at its lowest. that's
+// sin(bobPhase) trough, when the camera bob is at its lowest. that's
 // the foot-plant moment in this controller's bob convention.
 const FOOT_PHASE = (3 * Math.PI) / 2;
 
 // max head pitch (rad). real necks crane ~60° up / ~75° down; symmetric
-// 60° is a fine starting point — past this the head would clip into the
+// 60° is a fine starting point, past this the head would clip into the
 // torso visually.
 const HEAD_PITCH_LIMIT_RAD = degreesToRadians(60);
 
@@ -181,7 +181,7 @@ const LIGHT_SAMPLE_HEIGHT = 0.9;
 // character reads as "loading in" rather than as a final asset. Decays
 // linearly to 0 once the target lands so the visual hand-off eases
 // instead of snapping. Driven off a global clock so every loading
-// character pulses in sync — cheaper than per-character phase, and
+// character pulses in sync, cheaper than per-character phase, and
 // a coherent group pulse reads better visually anyway.
 const LOAD_PULSE_RATE_HZ = 1.2;
 const LOAD_PULSE_MIN = 0.35;
@@ -190,7 +190,7 @@ const LOAD_DECAY_PER_SEC = 12; // 1.0 → 0 in ~83ms
 
 // half-range of per-step random detune in cents (100 = 1 semitone). each
 // footstep picks uniformly in ±this so consecutive steps don't read as a
-// metronome. 300 ≈ ±3 semitones — chunky enough to register on repeats
+// metronome. 300 ≈ ±3 semitones, chunky enough to register on repeats
 // without sounding broken.
 const FOOTSTEP_DETUNE_CENTS = 400;
 
@@ -202,7 +202,7 @@ const LEG_SWING_MAX_RAD = degreesToRadians(55);
 const ARM_SWING_MAX_RAD = degreesToRadians(35);
 const SWING_SPEED_REF = 5.0;
 
-// arm outward tilt (Z roll) — minecraft-style. small baseline + slow
+// arm outward tilt (Z roll), minecraft-style. small baseline + slow
 // sine on top of it (~breathing). idle stays subtle; sprinting widens
 // both the baseline and the breathing oscillation.
 const ARM_IDLE_TILT_RAD = degreesToRadians(4);
@@ -216,7 +216,7 @@ const ARM_BREATH_RATE = Math.PI;
 // minecraft-style sneak pose. body bone pitches backward (negative X) so
 // the chest tucks under the head and the silhouette reads as a hunched
 // squat; the waist bone drops in Y so the whole upper subtree (body +
-// head + arms) sinks while the legs — siblings of the waist — stay
+// head + arms) sinks while the legs, siblings of the waist, stay
 // rooted to the feet, giving a knee-bend illusion without knee joints.
 // head pitch is offset by `BODY_PITCH` so the face still aims at
 // `cc.look`. amount is driven by `cc.state.crouchAmount` (eased on the
@@ -227,13 +227,13 @@ const CROUCH_WAIST_DROP = 0.15;
 // shift the waist (and therefore the whole upper subtree) backward in
 // the rig's local frame on top of the drop + pitch. counter-balances
 // the body's forward tuck so the silhouette reads as a real squat
-// rather than a face-plant. small — over-shifting unmoors the head
+// rather than a face-plant. small, over-shifting unmoors the head
 // from the feet in third-person.
 const CROUCH_WAIST_BACK = 0.1;
 
 const _waistPos: Vec3 = [0, 0, 0];
 
-// rotation axes for limb decomposition — X is the forward/back swing
+// rotation axes for limb decomposition, X is the forward/back swing
 // axis (pitch), Z is the outward-tilt axis (roll). compose as `Qx · Qz`
 // so the tilt happens in the body frame first then the swing rides
 // on top of it; both small-angle so order is barely visible anyway.
@@ -250,11 +250,11 @@ const _identityScale: Vec3 = [1, 1, 1];
 export const CharacterTrait = trait(
     'character',
     {
-        /** intent — what should be mounted. Any model id registered with
+        /** intent, what should be mounted. Any model id registered with
          *  `Resources`. Server-set (engine join lifecycle writes the
          *  resolved player avatar here; game scripts write it for NPCs),
          *  dirty-synced to clients via `modelIdSync`. Defaults to
-         *  `BUILTIN_BASE_AVATAR_ID` — the canonical 6-bone rig — so
+         *  `BUILTIN_BASE_AVATAR_ID`, the canonical 6-bone rig, so
          *  characters that never receive a custom assignment render as
          *  the placeholder.
          *
@@ -262,7 +262,7 @@ export const CharacterTrait = trait(
          *  converges them: writes to `state.modelId = modelId` once the
          *  payload is in Resources, mounting the rig in the same pass.
          *  Loading state is `modelId !== state.modelId`. Reassign at
-         *  runtime to swap the avatar — next frame the reconciler does
+         *  runtime to swap the avatar, next frame the reconciler does
          *  the rest. */
         modelId: BUILTIN_BASE_AVATAR_ID as string,
 
@@ -291,9 +291,9 @@ export const CharacterTrait = trait(
         }),
 
         /** runtime bookkeeping. `modelId` + `modelHandle` are the reconciler's
-         *  fact-state (see field doc-comments — start `null`, reconciler
+         *  fact-state (see field doc-comments, start `null`, reconciler
          *  populates on first tick). `breathPhase` is the accumulated
-         *  breath-sine phase (rad) used by the arm idle tilt — advances
+         *  breath-sine phase (rad) used by the arm idle tilt, advances
          *  at `ARM_BREATH_RATE` so idle characters still breathe; wraps
          *  mod 2π. `landingCooldownRemaining` is seconds left on the
          *  landing-thud cooldown (suppresses grounded chatter on stair
@@ -333,35 +333,35 @@ export const modelIdSync = sync(CharacterTrait, 'model-id', {
 // ragdolls), while controller-driven concerns stay gated on having a
 // CharacterControllerTrait.
 //
-// Pass 1 — [CharacterTrait, TransformTrait]:
-//   1. rig reconciler — converges `def.modelId` (intent) toward
+// Pass 1, [CharacterTrait, TransformTrait]:
+//   1. rig reconciler, converges `def.modelId` (intent) toward
 //      `state.modelId` (fact). Runs on BOTH sides. First pass per
 //      character mounts the baseAvatar placeholder so subsequent
 //      frames have bones to write to; once the target `def.modelId`
 //      is in Resources, unmounts and re-mounts the real rig. Loading
 //      state is `def.modelId !== state.modelId`.
-//   2. loading-state pulse — pulsing dither while the target rig
+//   2. loading-state pulse, pulsing dither while the target rig
 //      hasn't resolved; decays off once it lands. max()'d with the
 //      proximity dither below so a loading character near camera
 //      still reads as loading, not as faded.
-//   3. POV visibility / proximity dither — hide own body in
+//   3. POV visibility / proximity dither, hide own body in
 //      first-person / orbit / fly POV; screen-door fade other
 //      characters the active camera is standing inside of.
 //
-// Pass 2 — [CharacterTrait, CharacterControllerTrait, TransformTrait]:
-//   4. locomotion — procedural head/limb pose. Writes bone TRS each
+// Pass 2, [CharacterTrait, CharacterControllerTrait, TransformTrait]:
+//   4. locomotion, procedural head/limb pose. Writes bone TRS each
 //      frame (no clips, no animator state). Inputs (`cc.input.look`,
 //      `cc.state.bobPhase`, player yaw) are synced or locally-
 //      integrated on both sides, so running client-only still
 //      produces the same pose every client sees.
-//   5. footstep + landing thud sfx + dust/droplet vfx — bob-phase
+//   5. footstep + landing thud sfx + dust/droplet vfx, bob-phase
 //      bucket crossings drive cadence, edge detectors drive landings
 //      and liquid entry.
 //
 // (1) runs on every side. The rest is client-only and skips when
-// `state.modelId` is null (no bones yet — first reconciler tick).
+// `state.modelId` is null (no bones yet, first reconciler tick).
 // AnimatorTrait scripts tick after this onFrame and overwrite any
-// bone whose currently-playing clip channels target it — that's the
+// bone whose currently-playing clip channels target it, that's the
 // emote / upper-body-mask path. To opt out of engine-driven limb
 // swing, set `t.config.animation = false` and own the bones yourself.
 script(
@@ -398,7 +398,7 @@ script(
                     }
                 } else {
                     // target not ready (still loading, or its payload was wiped under
-                    // us). Keep the lazy load going and show the placeholder — reverting
+                    // us). Keep the lazy load going and show the placeholder, reverting
                     // a now-stale real model so the null→ready edge re-mounts cleanly.
                     // The player avatar pipeline also ensures on a player's behalf, but
                     // a game that sets `modelId` directly (NPCs) relies on this.
@@ -416,7 +416,7 @@ script(
                 // for logical bone access).
                 if (!env.client) continue;
 
-                // No bones yet — reconciler will install the placeholder
+                // No bones yet, reconciler will install the placeholder
                 // next call. Skip presentation work for this character.
                 if (t.state.modelId === null) continue;
 
@@ -443,7 +443,7 @@ script(
                         !!getTrait(node, FlyControllerTrait);
                     setCharacterSubtreeVisible(node, !hide);
                     // POV character can still be loading (own avatar streaming
-                    // in) — apply the load dither alone; proximity fade never
+                    // in), apply the load dither alone; proximity fade never
                     // applies to own body. a script-driven dither (e.g. own death
                     // fade) still composes in.
                     finalDither = hide ? 0 : Math.max(t.state.loadingDither, t.state.externalDither);
@@ -500,7 +500,7 @@ script(
                 const inLiquid = footBlockState !== 0 && (ctx.blocks.flags[footBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
                 const wasInLiquid = prevFootBlockState !== 0 && (ctx.blocks.flags[prevFootBlockState]! & BLOCK_FLAG_LIQUID) !== 0;
 
-                // entry splash — fires on the bob-tick the foot-sample first
+                // entry splash, fires on the bob-tick the foot-sample first
                 // resolves to a liquid voxel. one-shot, independent of cadence.
                 // played even if the bob hasn't ticked at all (e.g. dropping
                 // straight in from above), so it lives outside the bucket
@@ -544,7 +544,7 @@ script(
                             owner,
                             owner ? t.config.ownFootstepVolume : t.config.footstepVolume,
                             // dust: never while swimming (water doesn't kick
-                            // dust), and on ground only when sprinting — walking
+                            // dust), and on ground only when sprinting, walking
                             // stays visually quiet.
                             cc.state.grounded && cc.input.sprint,
                         );
@@ -565,13 +565,13 @@ script(
  *  velocity within ±BODY_YAW_LIMIT_RAD on the controller side, so this
  *  delta is naturally bounded); pitch is `look[2] - π/2` clamped to
  *  ±HEAD_PITCH_LIMIT_RAD. composed as `Ryaw · Rpitch` so the head pitches
- *  in its own local frame after yawing — matches FPS look feel.
+ *  in its own local frame after yawing, matches FPS look feel.
  *
  *  When the waist is tilted by the sneak pose (driven by
- *  `cc.state.crouchAmount` on the controller — in the flat rig the waist
+ *  `cc.state.crouchAmount` on the controller, in the flat rig the waist
  *  carries head + arms + body), subtract that pitch from the head's local
  *  pitch so the face still aims at the world look direction. Small-angle
- *  approximation — pitch and head yaw don't commute, but at ±28°/±60° the
+ *  approximation, pitch and head yaw don't commute, but at ±28°/±60° the
  *  visual error is below the threshold of notice. */
 function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, transform: TransformTrait): void {
     const headBone = findByName(playerNode, 'head');
@@ -581,7 +581,7 @@ function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, t
 
     // read yaw from the interpolated world quaternion, not the simulation
     // local. the head bone's parent chain renders against the playerNode's
-    // visual (alpha-sampled) yaw — composing the head local against the
+    // visual (alpha-sampled) yaw, composing the head local against the
     // sim yaw would leave a `(visual - sim)` residual that wobbles by up
     // to one tick of body yaw between fixed ticks. playerNode is top-level
     // and its yaw is pure-Y, so interpolatedWorldQuaternion is also pure-Y.
@@ -604,14 +604,14 @@ function updateHeadOrientation(playerNode: Node, cc: CharacterControllerTrait, t
  * rig yet, so code running before the reconciler's first frame sees the bones.
  *
  * The reconciler builds the rig in `onFrame`, which runs *after* the server's
- * join processing — so a server `onJoin` hook that does
+ * join processing, so a server `onJoin` hook that does
  * `findByName(playerNode, 'hand_right')` would otherwise get null. The server
  * calls this at player-node creation (`createPlayerNode`) so bones exist by the
  * time join hooks fire; game code spawning characters that need bones
  * immediately can call it too.
  *
  * Idempotent (no-op once a rig is mounted) and a no-op on a node without
- * `CharacterTrait`. Mounts only the placeholder — the reconciler still swaps in
+ * `CharacterTrait`. Mounts only the placeholder, the reconciler still swaps in
  * the resolved avatar once its model loads.
  */
 export function ensureCharacterRig(node: Node): void {
@@ -626,7 +626,7 @@ export function ensureCharacterRig(node: Node): void {
  * Add `CharacterTrait` to `node` and mount its rig immediately, so the bones
  * (`head`, `hand_right`, …) are available the same tick for attaching held
  * items / accessories. The higher-level sibling of
- * `addTrait(node, CharacterControllerTrait)` — the engine uses it for player
+ * `addTrait(node, CharacterControllerTrait)`, the engine uses it for player
  * nodes (`createPlayerNode`) and game code uses it to spawn character NPCs.
  *
  * Returns the trait. Mounts the base/placeholder rig synchronously (via
@@ -643,10 +643,10 @@ export function addCharacter(node: Node, props?: TraitProps<CharacterTrait>): Ch
 
 /**
  * Canonical 6bone parenting. waist hangs off `playerNode`; body, head, and
- * arms nest under waist as independent siblings (Minecraft-style parts —
+ * arms nest under waist as independent siblings (Minecraft-style parts,
  * each animates around its own pivot, and rotating waist carries the whole
  * upper body). legs are their own roots off `playerNode`, so they stay
- * planted when waist twists. Authoring tools MUST produce this hierarchy —
+ * planted when waist twists. Authoring tools MUST produce this hierarchy,
  * mount copies each loaded bone's *local* TRS onto its matching canonical
  * bone, so a mismatched hierarchy would apply scene-space TRS as if it were
  * local-to-parent and visually shear the rig.
@@ -673,7 +673,7 @@ const RIG_6BONE_PARENT_OF: Record<string, string | null> = {
     head: 'waist',
     arm_left: 'waist',
     arm_right: 'waist',
-    // attach sockets — enforced + persistent; auto-derived from bone geometry
+    // attach sockets, enforced + persistent; auto-derived from bone geometry
     // when the model doesn't author them.
     hand_left: 'arm_left',
     hand_right: 'arm_right',
@@ -692,7 +692,7 @@ const HAND_GRIP_ROTATION = quat.setAxisAngle(quat.create(), [1, 0, 0], degreesTo
 
 /**
  * Ensure the canonical 6bone hierarchy + AnimatorTrait exist under
- * `playerNode`. Idempotent — bones already in place are reused, so this
+ * `playerNode`. Idempotent, bones already in place are reused, so this
  * doubles as the placeholder install (first call from the reconciler)
  * and as the prep step for `mountRig` (re-mount after avatar swap).
  *
@@ -729,7 +729,7 @@ function ensureCanonicalBones(playerNode: Node): void {
  * Install / re-install a model's rig under `playerNode`:
  *
  *   - ensure the canonical 6bone hierarchy + AnimatorTrait exist (first
- *     call also performs the placeholder install — there's no separate
+ *     call also performs the placeholder install, there's no separate
  *     placeholder step).
  *   - canonical bone match (by exact name): copy the loaded node's local
  *     TRS onto the canonical bone. Node identity preserved across swaps
@@ -739,7 +739,7 @@ function ensureCanonicalBones(playerNode: Node): void {
  *     render and decorative bones drive any extra clip channels.
  *
  * Caller (the reconciler) is responsible for calling `unmountRig` first
- * if a different rig is currently mounted — `mountRig` doesn't drop the
+ * if a different rig is currently mounted, `mountRig` doesn't drop the
  * previous decorative children itself.
  *
  * Finally calls `Animation.invalidateRig(animator)` so the animator
@@ -747,7 +747,7 @@ function ensureCanonicalBones(playerNode: Node): void {
  */
 // derive an unauthored attach socket's local rest position from its parent
 // bone's mesh geometry. hands sit at the bottom-centre of the arm (the hand);
-// `back` at the centre of the torso's back (+Z) face — avatars face -Z. rest
+// `back` at the centre of the torso's back (+Z) face, avatars face -Z. rest
 // pose is axis-aligned, so we compose local translate/scale only (no rotation).
 function deriveSocketPosition(boneNode: Node, handle: ModelHandle, socket: string): Vec3 | null {
     const meshes = handle.meshes as Record<string, { aabb: ArrayLike<number> } | undefined>;
@@ -801,7 +801,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     // Who builds the model's mesh nodes: the server builds them for every node it
     // owns and replicates them to clients; a client builds only its own local nodes.
     // For a server-owned rig the meshes arrive via replication, so a client must NOT
-    // clone them here — doing so double-mounts them and (because avatars share mesh
+    // clone them here, doing so double-mounts them and (because avatars share mesh
     // node names) leaves a base/loaded mix on a swap. Bones/sockets are matched +
     // TRS-copied regardless (cheap, idempotent); only the mesh clone is gated.
     const localAuthority = env.server || isLocalNode(playerNode);
@@ -811,7 +811,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     const canonical = new Set<string>(RIG_6BONE_PERSISTENT_NODES);
     // the current model's nodes we add below are recorded on the character so
     // `unmountRig` drops exactly these on a swap, leaving runtime attachments
-    // (gear) alone — ownership by node identity, never by name.
+    // (gear) alone, ownership by node identity, never by name.
     const modelNodes = getTrait(playerNode, CharacterTrait)?.state.modelNodes;
 
     const visit = (loaded: Node, placeholder: Node | null): void => {
@@ -839,7 +839,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
             // non-canonical child (mesh / decorative bone), cloned under whatever
             // placeholder bone we last matched (falls back to playerNode when the
             // loaded root itself was non-canonical, e.g. the synthetic wrapper around
-            // a multi-root scene). Only the locally-authoritative side builds these —
+            // a multi-root scene). Only the locally-authoritative side builds these,
             // a client defers a server-owned rig's meshes to replication (see
             // `localAuthority`). The reconciler always unmounts before mounting, so
             // there's never an existing child to reconcile against: clone fresh and
@@ -853,7 +853,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
     };
 
     // Seed the walk: if the loaded root is itself canonical, match it;
-    // otherwise it's a synthetic / decorative wrapper — skip the TRS
+    // otherwise it's a synthetic / decorative wrapper, skip the TRS
     // copy and just recurse into its children.
     const rootName = loadedRoot.name ?? '';
     const rootPlaceholder = canonical.has(rootName) ? findByName(playerNode, rootName) : null;
@@ -892,7 +892,7 @@ function mountRig(playerNode: Node, handle: ModelHandle): void {
  * Unmount the current model: reset each canonical bone's TRS to identity and
  * remove exactly the model's nodes recorded in `state.modelNodes` (its
  * mesh/visual nodes). Runtime attachments (gear `addChild`'d by the game) are
- * NOT in that set, so they survive untouched — ownership is by node identity,
+ * NOT in that set, so they survive untouched, ownership is by node identity,
  * not by name. The canonical bones themselves are never destroyed (node +
  * AnimatorTrait identity preserved across swaps).
  */
@@ -915,7 +915,7 @@ function unmountRig(playerNode: Node): void {
                 resetBone(child);
             } else if (modelNodes?.has(child)) {
                 // destroyNode (not removeChild) so the removal parks in the discovery
-                // dirty set and replicates as `node_destroyed` — else clients keep the
+                // dirty set and replicates as `node_destroyed`, else clients keep the
                 // old mesh nodes (replicated) and show a base/loaded mix on a swap.
                 destroyNode(child);
             }
@@ -953,7 +953,7 @@ function unmountRig(playerNode: Node): void {
  *     opposing legs are π out of phase; arms counter-swing so the
  *     same-side arm and leg move opposite (matches real gait).
  *
- *   - Z tilt (arms only — outward roll): `baseline + breath * sin(t)`.
+ *   - Z tilt (arms only, outward roll): `baseline + breath * sin(t)`.
  *     idle gives a subtle outward lean that breathes; running widens
  *     both terms via lerp on `amp` so sprinting arms splay further
  *     and oscillate harder. breath phase is an independent slow clock
@@ -972,7 +972,7 @@ function driveProceduralLocomotion(playerNode: Node, t: CharacterTrait, cc: Char
 
     const swing = Math.sin(cc.state.bobPhase) * amp;
 
-    // crouch lean rides `waist` — it carries body + head + arms in the flat rig,
+    // crouch lean rides `waist`, it carries body + head + arms in the flat rig,
     // so one tilt leans the whole upper body while the legs (separate roots) stay
     // planted. head-look cancels this same pitch so the face keeps aiming true.
     applyLimb(playerNode, 'waist', cc.state.crouchAmount * CROUCH_BODY_PITCH_RAD, 0);
@@ -985,7 +985,7 @@ function driveProceduralLocomotion(playerNode: Node, t: CharacterTrait, cc: Char
 
     applyLimb(playerNode, 'leg_left', swing * LEG_SWING_MAX_RAD, 0);
     applyLimb(playerNode, 'leg_right', -swing * LEG_SWING_MAX_RAD, 0);
-    // arms counter-swing fore/aft; tilt outward — opposite Z sign per side.
+    // arms counter-swing fore/aft; tilt outward, opposite Z sign per side.
     applyLimb(playerNode, 'arm_left', -swing * ARM_SWING_MAX_RAD, -tiltOut);
     applyLimb(playerNode, 'arm_right', swing * ARM_SWING_MAX_RAD, tiltOut);
 }
@@ -1003,11 +1003,11 @@ function applyLimb(playerNode: Node, boneName: string, xAngle: number, zAngle: n
 
 /** Sink + shift-back the `waist` bone by `crouchAmount · CROUCH_WAIST_DROP`
  *  in Y and `crouchAmount · CROUCH_WAIST_BACK` in +Z (avatars face -Z),
- *  relative to its rest position. Rest comes from `t.state.modelHandle.nodes.waist`
- *  — the reconciler writes that handle whenever it mounts a rig, so this
+ *  relative to its rest position. Rest comes from `t.state.modelHandle.nodes.waist`,
+ * the reconciler writes that handle whenever it mounts a rig, so this
  *  is one indexed lookup with no `findByName` walk on the rest pose.
  *  Caller guarantees `state.modelId !== null` (skipped at the iteration
- *  guard), but the handle can still be null transiently — bail. */
+ *  guard), but the handle can still be null transiently, bail. */
 function applyWaistCrouchDrop(playerNode: Node, t: CharacterTrait, crouchAmount: number): void {
     if (!t.state.modelHandle) return;
     const restWaist = t.state.modelHandle.nodes.waist;
@@ -1032,7 +1032,7 @@ function applyWaistCrouchDrop(playerNode: Node, t: CharacterTrait, crouchAmount:
  *  footstep branch so the lookup never drifts between the two paths.
  *
  *  `BlockRegistry.sounds` and `.particles` are per-state arrays
- *  indexed directly by global state id — `cc.groundBlockState` is
+ *  indexed directly by global state id, `cc.groundBlockState` is
  *  exactly that id, owner-written each tick from the post-move
  *  contacts (or the feet liquid voxel while swimming) and synced.
  *  no `stateToBlockIndex` indirection, no owner/remote drift. */
@@ -1065,7 +1065,7 @@ function emitFootstep(
     }
 }
 
-/** one-shot on the feet-enter-liquid edge — plays the liquid block's
+/** one-shot on the feet-enter-liquid edge, plays the liquid block's
  *  `footstep` clips (same pool the swim stroke cadence draws from)
  *  at the louder landing volume so it reads as a splash, and spawns
  *  a droplet burst reusing the auto-derived `dust` variants. */
@@ -1087,7 +1087,7 @@ const SPLASH_DROPLET_COUNT = 6;
 /** spawn a small burst of droplets at the character's feet on liquid
  *  entry. reuses the per-block `dust` variants (auto-derived from the
  *  top-face texture, so water blocks ship water-tinted slices for
- *  free) with splashier tuning — wider horizontal spread and higher
+ *  free) with splashier tuning, wider horizontal spread and higher
  *  upward velocity than the footstep puff. */
 function spawnSplashDroplets(ctx: ScriptContext, particles: BlockParticleConfig, pos: Vec3): void {
     const variants = particles.dust;
@@ -1107,7 +1107,7 @@ function spawnSplashDroplets(ctx: ScriptContext, particles: BlockParticleConfig,
 /** spawn a small burst of dust puffs at the character's feet. picks
  *  from the resolved state's `particles.dust` (auto-derived per-block
  *  dust variants by default; user-overridable via `BlockParticleConfig`).
- *  numbers are tuned starting points — `particleUpdate.dust` already
+ *  numbers are tuned starting points, `particleUpdate.dust` already
  *  applies gravity + drag + ground-collide-destroy so the puff settles
  *  on its own. */
 function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, pos: Vec3): void {
@@ -1128,7 +1128,7 @@ function spawnFootstepDust(ctx: ScriptContext, particles: BlockParticleConfig, p
 /** Walk the playerNode subtree and toggle `.visible` on every MeshTrait.
  *  Avatars render as meshes only (sprites / voxel-meshes never appear
  *  under a rig), so MeshTrait alone covers the visual surface.
- *  Idempotent — safe to call every frame. */
+ *  Idempotent, safe to call every frame. */
 function setCharacterSubtreeVisible(root: Node, visible: boolean): void {
     const mesh = getTrait(root, MeshTrait);
     if (mesh) mesh.visible = visible;

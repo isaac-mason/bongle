@@ -4,7 +4,7 @@ import type { ScriptContext } from '../core/scene/scripts';
 /**
  * format args the way `console.log` formats them: strings pass through,
  * objects get JSON.stringify, everything else `String()`s. one level of
- * nesting is enough — log payloads should be small.
+ * nesting is enough, log payloads should be small.
  */
 function formatArgs(args: unknown[]): string {
     const out: string[] = [];
@@ -40,7 +40,7 @@ function emit(ctx: ScriptContext, level: Debug.LogLevel, args: unknown[]): void 
         Debug.pushLog(ctx.client.room.clientLogs, entry);
     }
 
-    // mirror to console for dev visibility — devtools / stdout stay useful
+    // mirror to console for dev visibility, devtools / stdout stay useful
     // until the debug panel is fully wired up.
     const prefix = `[${source.traitId}#${source.nodeId}]`;
     if (level === 'error') console.error(prefix, ...args);

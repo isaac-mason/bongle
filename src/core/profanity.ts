@@ -2,14 +2,14 @@
  * server-side profanity matching. used by the per-room chat server to
  * shadow-filter plain messages: a matched line is delivered back to the
  * sender alone (so their UI shows it as normal) but never fanned to the
- * rest of the room — no error, no masking, no signal to work around.
+ * rest of the room, no error, no masking, no signal to work around.
  *
  * matching is whole-token with leetspeak normalization: each whitespace
  * token is normalized (leet substitutions + non-alpha stripped) and tested
  * for membership in the word set. so `ass` / `a$$` / `a.s.s` match but
  * `assassin` and `class` do not (substrings are never matched).
  *
- * the word set lives in the generated ./profanity.data — see
+ * the word set lives in the generated ./profanity.data, see
  * scripts/gen-profanity.ts. `normalizeToken` is the single source of truth
  * for normalization, shared by the generator (build time) and the matcher
  * (runtime) so the two can never drift.
@@ -17,7 +17,7 @@
 
 import { PROFANITY_WORDS } from './profanity.data';
 
-/** digit leetspeak — always substituted to its letter. */
+/** digit leetspeak, always substituted to its letter. */
 const LEET_DIGITS: Record<string, string> = {
     '0': 'o',
     '1': 'i',
@@ -28,7 +28,7 @@ const LEET_DIGITS: Record<string, string> = {
     '8': 'b',
 };
 
-/** punctuation leetspeak — ambiguous, since these chars are also ordinary
+/** punctuation leetspeak, ambiguous, since these chars are also ordinary
  *  punctuation. matched two ways (see `containsProfanity`): mapped to their
  *  letter (so `sh!t` → `shit`) and dropped (so a trailing `fuck!` → `fuck`
  *  rather than `fucki`, which would bypass the filter). */
@@ -40,7 +40,7 @@ const LEET_PUNCT: Record<string, string> = {
     '+': 't',
 };
 
-/** shortest token we bother matching — guards against `as`, `ad`, etc.
+/** shortest token we bother matching, guards against `as`, `ad`, etc.
  *  must match the floor used when generating ./profanity.data. */
 export const MIN_PROFANITY_LEN = 3;
 
@@ -70,8 +70,8 @@ function fold(raw: string, mapPunct: boolean): string {
 
 /**
  * canonical normalization (punctuation leet mapped to letters). used at
- * build time to canonicalize list entries — since list entries are plain
- * a-z, this is effectively identity for them — and exported for tests.
+ * build time to canonicalize list entries, since list entries are plain
+ * a-z, this is effectively identity for them, and exported for tests.
  */
 export function normalizeToken(raw: string): string {
     return fold(raw, true);
@@ -79,7 +79,7 @@ export function normalizeToken(raw: string): string {
 
 /**
  * true when any whitespace-delimited token of `line`, once normalized, is a
- * known profanity. whole-token only — never matches substrings. each token
+ * known profanity. whole-token only, never matches substrings. each token
  * is tested both with punctuation-leet mapped (`a$$` → `ass`) and stripped
  * (`fuck!` → `fuck`), so neither evasion nor trailing punctuation slips by.
  */

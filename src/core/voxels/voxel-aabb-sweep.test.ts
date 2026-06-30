@@ -29,7 +29,7 @@ function makeVoxels(blocks: TestBlockSpec[]) {
 }
 
 function place(voxels: ReturnType<typeof makeVoxels>['voxels'], wx: number, wy: number, wz: number, key: string) {
-    // place exclusively in chunk 0,0,0 — tests use small worlds.
+    // place exclusively in chunk 0,0,0, tests use small worlds.
     const cx = wx >> 4;
     const cy = wy >> 4;
     const cz = wz >> 4;
@@ -106,7 +106,7 @@ describe('sweepAabbVsVoxels — cube path', () => {
         // body falls through known-empty stubs onto a real floor block.
         const { voxels } = makeVoxels([{ id: 'stone', texId: 'stone' }]);
         stubArea(voxels, -1, -1, -1, 1, 1, 1);
-        // floor block at world (0,-1,0) — its top is at y=0.
+        // floor block at world (0,-1,0), its top is at y=0.
         place(voxels, 0, -1, 0, 'stone');
         const stubChunk = voxels.chunks.get('0,0,0')!;
         // stub shares the singletons (no COW happened because we didn't write).
@@ -127,7 +127,7 @@ describe('sweepAabbVsVoxels — cube path', () => {
         // floor at y=0 (cube spans y=[0,1])
         place(voxels, 0, 0, 0, 'stone');
         const out = createVoxelSweepHit();
-        // character at (0.5, 5.5, 0.5) — center; bottom at y=5. fall by -10.
+        // character at (0.5, 5.5, 0.5), center; bottom at y=5. fall by -10.
         const hit = sweepAabbVsVoxels(voxels, 0.5, 5.5, 0.5, 0.5, 0.5, 0.5, 0, -10, 0, out);
         expect(hit).toBe(true);
         expect(out.axis).toBe(1); // Y
@@ -158,7 +158,7 @@ describe('sweepAabbVsVoxels — cube path', () => {
         place(voxels, 0, 0, 0, 'stone'); // at floor
         place(voxels, 5, 0, 0, 'stone'); // farther wall
         const out = createVoxelSweepHit();
-        // character at (-1, 0.5, 0.5) move +X by 10 — should hit cube at x=0 first (toi: 0.5/10).
+        // character at (-1, 0.5, 0.5) move +X by 10, should hit cube at x=0 first (toi: 0.5/10).
         const hit = sweepAabbVsVoxels(voxels, -1, 0.5, 0.5, 0.5, 0.5, 0.5, 10, 0, 0, out);
         expect(hit).toBe(true);
         expect(out.vx).toBe(0);
@@ -167,7 +167,7 @@ describe('sweepAabbVsVoxels — cube path', () => {
 
     it('skips empty chunks', () => {
         const { voxels } = makeVoxels([{ id: 'stone', texId: 'stone' }]);
-        // populate every chunk the swept envelope touches as empty —
+        // populate every chunk the swept envelope touches as empty,
         // unknown chunks are now treated as solid 16³ cells
         // (CONTENT_IGNORE), so any unloaded neighbour would register a hit
         // and mask the empty-chunk skip we're trying to verify.
@@ -193,7 +193,7 @@ describe('sweepAabbVsVoxels — aabbs path', () => {
         ]);
         place(voxels, 0, 0, 0, 'slab');
         const out = createVoxelSweepHit();
-        // character at (0.5, 5.5, 0.5) falling — bottom at 5, slab top at 0.5.
+        // character at (0.5, 5.5, 0.5) falling, bottom at 5, slab top at 0.5.
         // toi = (5 - 0.5) / 10 = 0.45
         const hit = sweepAabbVsVoxels(voxels, 0.5, 5.5, 0.5, 0.5, 0.5, 0.5, 0, -10, 0, out);
         expect(hit).toBe(true);
@@ -216,7 +216,7 @@ describe('sweepAabbVsVoxels — aabbs path', () => {
         ]);
         place(voxels, 0, 0, 0, 'stair');
         const out = createVoxelSweepHit();
-        // character standing over the back step (z=0.75) falling — bottom at 5 m, top of step at y=1.
+        // character standing over the back step (z=0.75) falling, bottom at 5 m, top of step at y=1.
         const hit = sweepAabbVsVoxels(voxels, 0.5, 5.5, 0.75, 0.5, 0.5, 0.25, 0, -10, 0, out);
         expect(hit).toBe(true);
         expect(out.axis).toBe(1);
@@ -237,7 +237,7 @@ describe('sweepAabbVsVoxels — aabbs path', () => {
         ]);
         place(voxels, 0, 0, 0, 'stair');
         const out = createVoxelSweepHit();
-        // character at x=2, y=0.25 (so y range [0.0, 0.5] — only overlaps bottom slab),
+        // character at x=2, y=0.25 (so y range [0.0, 0.5], only overlaps bottom slab),
         // moving toward -X by 5. half-extent x = 0.4 → -X face at 1.6; bottom slab +X face = 1.
         // toi = (1.6 - 1) / 5 = 0.12
         const hit = sweepAabbVsVoxels(voxels, 2, 0.25, 0.5, 0.4, 0.2, 0.4, -5, 0, 0, out);
@@ -283,7 +283,7 @@ describe('sweepAabbVsVoxels — multi-chunk', () => {
         place(voxels, 15, 0, 0, 'stone');
         place(voxels, 16, 0, 0, 'stone');
         const out = createVoxelSweepHit();
-        // character at (15.5, 5.5, 0.5) falls onto the floor — should pick whichever cube is below.
+        // character at (15.5, 5.5, 0.5) falls onto the floor, should pick whichever cube is below.
         const hit = sweepAabbVsVoxels(voxels, 15.5, 5.5, 0.5, 0.5, 0.5, 0.5, 0, -10, 0, out);
         expect(hit).toBe(true);
         expect(out.axis).toBe(1);

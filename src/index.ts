@@ -1,8 +1,8 @@
-// public engine surface — what user scripts import as `bongle`.
+// public engine surface, what user scripts import as `bongle`.
 //
 // re-exports the two project-facing layers:
-//   - `./api/*` — helper modules (transforms, scene-graph, rpc, ...)
-//   - `./builtins/*` — engine-shipped traits (TransformTrait, CameraTrait, ...)
+//   - `./api/*`, helper modules (transforms, scene-graph, rpc, ...)
+//   - `./builtins/*`, engine-shipped traits (TransformTrait, CameraTrait, ...)
 //
 // engine internals must NOT import from this file. they reach into
 // `./api/<helper>` or `./builtins/<trait>` directly. this rule keeps the

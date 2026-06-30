@@ -1,4 +1,4 @@
-// flags for setBlock — control which hook passes fire inline before the
+// flags for setBlock, control which hook passes fire inline before the
 // call returns. modelled after Minecraft's Constants.BlockFlags.
 //
 // gameplay defaults to settling the op inline (NOTIFY_NEIGHBOURS | FIRE_EVENTS)
@@ -12,9 +12,9 @@ export const SetBlockFlags = {
      *  onNeighbourChanged on the 6 neighbours, inline. */
     FIRE_EVENTS: 1 << 1,
 
-    /** gameplay default — settle this op inline. */
+    /** gameplay default, settle this op inline. */
     DEFAULT: (1 << 0) | (1 << 1),
-    /** bulk default — append-only; caller drains via
+    /** bulk default, append-only; caller drains via
      *  runNeighbourRecompute / runBlockEventHooks. */
     BULK: 0,
 } as const;

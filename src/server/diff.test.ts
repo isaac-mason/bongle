@@ -65,12 +65,12 @@ describe('diff detection', () => {
 
         runDiffDetection(sg);
 
-        // first run initializes snapshots — version stays where addTrait left it
+        // first run initializes snapshots, version stays where addTrait left it
         const versionAfterAdd = node._sync.version;
 
         runDiffDetection(sg);
 
-        // second run with no changes — version unchanged
+        // second run with no changes, version unchanged
         expect(node._sync.version).toBe(versionAfterAdd);
     });
 

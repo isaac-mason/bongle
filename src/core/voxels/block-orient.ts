@@ -1,4 +1,4 @@
-// block orientation primitives — facing / axis enum types shared by the
+// block orientation primitives, facing / axis enum types shared by the
 // preset rotate/flip impls (block-presets.ts) and the rotate/flip hook
 // signatures.
 //

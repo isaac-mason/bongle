@@ -7,8 +7,8 @@ import * as crashcat from 'crashcat';
 // crashcat shapes happens at registry freeze time via blockShapeToShape().
 //
 // taxonomy:
-//   cube  — full unit cube (the implicit default; explicit form accepted too)
-//   aabbs — axis-aligned box list (stairs, slabs, fences, walls, panes, ...)
+//   cube, full unit cube (the implicit default; explicit form accepted too)
+//   aabbs, axis-aligned box list (stairs, slabs, fences, walls, panes, ...)
 
 /** [minX, minY, minZ, maxX, maxY, maxZ] in block-local [0,1]³. */
 export type AABB = readonly [number, number, number, number, number, number];
@@ -89,7 +89,7 @@ export function rotateY(shape: BlockShape, steps: number): BlockShape {
 //
 // called once at registry freeze time. not exported to user API.
 //
-// cube is intentionally absent — the registry handles cubes via the
+// cube is intentionally absent, the registry handles cubes via the
 // colliderId=0 sentinel and never builds a crashcat shape for them.
 
 export function blockShapeToShape(shape: Exclude<BlockShape, BlockShapeCube>): crashcat.Shape {

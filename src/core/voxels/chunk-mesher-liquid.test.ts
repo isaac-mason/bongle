@@ -45,7 +45,7 @@ function buildTestRegistry(blocks: BlockSpec[]) {
     );
 }
 
-/** count quads in a pass. unified all-quads format — cube + liquid + mesh
+/** count quads in a pass. unified all-quads format, cube + liquid + mesh
  *  all live in the same PassMesh; tests rely on per-pass material routing
  *  (lava=opaque liquid, water=translucent liquid, stone=opaque cube) to
  *  isolate sources. */
@@ -55,7 +55,7 @@ function countCubeFaces(mesh: ChunkMeshResult | null, pass: 'opaque' | 'transluc
     return p?.quadCount ?? 0;
 }
 
-/** count liquid faces — same as cube count under unified format; pass
+/** count liquid faces, same as cube count under unified format; pass
  *  routing keeps the two sources separate (caller picks a pass that
  *  contains only liquid). */
 function countLiquidFaces(mesh: ChunkMeshResult | null, pass: 'opaque' | 'translucent'): number {

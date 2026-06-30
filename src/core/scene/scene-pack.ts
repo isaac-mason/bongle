@@ -1,9 +1,9 @@
 /**
  * binary scene graph packing / unpacking for network transfer.
  *
- * packSceneGraph(sg) → Uint8Array  — full scene graph to binary
- * unpackSceneGraph(sg, data)       — binary to scene graph (clears + rebuilds)
- * applySceneSyncUpdate(sg, update) — apply a single incremental scene_sync update
+ * packSceneGraph(sg) → Uint8Array, full scene graph to binary
+ * unpackSceneGraph(sg, data), binary to scene graph (clears + rebuilds)
+ * applySceneSyncUpdate(sg, update), apply a single incremental scene_sync update
  *
  * all trait field data is packcat-encoded. the receiver uses traitId to
  * look up the per-trait serdes for unpacking.
@@ -43,7 +43,7 @@ import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
  *
  * root is the first node in the list with parentId: 0.
  *
- * mode: 'edit' includes node.prefab in packed data. 'play' omits it —
+ * mode: 'edit' includes node.prefab in packed data. 'play' omits it,
  * play mode instantiates children server-side, clients just see normal nodes.
  */
 export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
@@ -51,7 +51,7 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
     const wireIndex = registry.traitWireIndex;
 
     // pack all nodes in parent-first order (root first). in play mode prunes
-    // non-shared subtrees — those are server- or client-local and never
+    // non-shared subtrees, those are server- or client-local and never
     // replicated. edit mode includes everything for the editor.
     const nodes: PackedNode[] = [];
     walkReplicable(root, mode, 'shared', (node) => {
@@ -69,7 +69,7 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
                 syncs: packAllSyncs(def, instance, node),
             });
         }
-        // include unresolved traits (round-trip preservation — no field data).
+        // include unresolved traits (round-trip preservation, no field data).
         // these never have a wire index (no local def), so always emit the
         // string id fallback.
         for (const [id] of node._unresolvedTraits) {
@@ -101,7 +101,7 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
  * the first node in the list is the root (parentId: 0).
  *
  * `traitWireIndex` is the INBOUND wire-index table for the peer that
- * packed `data` — the receiver maintains it from `wire_table` messages
+ * packed `data`, the receiver maintains it from `wire_table` messages
  * and passes it here. callers without a peer (in-process pack/unpack in
  * tests) omit it and the runtime's local table is used.
  */
@@ -309,7 +309,7 @@ export function applySceneSyncUpdate(
  * walk a node tree in parent-first (pre-order) order. in play mode prunes
  * subtrees whose effective realm isn't `'shared'`. `inheritedRealm` is the
  * effective realm of the parent (root callers pass `'shared'`); `'inherit'`
- * nodes resolve to that value. iterative — no recursion, no stack growth on
+ * nodes resolve to that value. iterative, no recursion, no stack growth on
  * deep trees.
  */
 function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callback: (node: Node) => void): void {
@@ -358,14 +358,14 @@ function applyNodeCreated(sg: Nodes, _runtime: NodesContext, pn: PackedNode, tra
         if (instance) applySyncFields(def, bt.syncs, instance);
     }
 
-    // scripts ride on traits — addTraitBySlot above creates instances in the live runtime
+    // scripts ride on traits, addTraitBySlot above creates instances in the live runtime
 
     // move to correct index
     reorderChild(parent, node, pn.index);
 }
 
 /**
- * pack all controls of a trait instance to BinaryField entries (positional —
+ * pack all controls of a trait instance to BinaryField entries (positional,
  * the wire `index` is the control's position in `def.controls`). used by
  * packSceneGraph for full scene serialization.
  */
@@ -381,7 +381,7 @@ function packAllControls(def: TraitDef, instance: TraitBase, node: Node): Binary
 }
 
 /**
- * pack all sync slices of a trait instance to BinaryField entries (positional —
+ * pack all sync slices of a trait instance to BinaryField entries (positional,
  * the wire `index` is the sync's position in `def.syncDefs`). seeds initial
  * replicated state on the receiver so 'dirty'-rate syncs reach the client at
  * join time and non-dirty syncs are aligned with the server's snapshot.

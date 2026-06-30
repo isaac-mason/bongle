@@ -13,7 +13,7 @@
  * Both call sites materialize a partial ProjectModule view (only the
  * fields atlas + models read) from the typed registries and dispatch to
  * `buildBlockTextureAtlas` / `buildModels`. The matchmaking config the
- * bundle manifest needs is exposed via `state.matchmakingConfig` — the
+ * bundle manifest needs is exposed via `state.matchmakingConfig`, the
  * `build.ts` caller reads it directly off pipeline state after the pass.
  */
 
@@ -50,7 +50,7 @@ export type PipelineInternal = {
 
 export type PipelineOpts = {
     projectDir: string;
-    /** kit invocation mode — controls scene barrel discovery (see buildScenes). */
+    /** kit invocation mode, controls scene barrel discovery (see buildScenes). */
     mode: 'edit' | 'play';
     /** forwarded to the two atlas builders as their `cache` option. true
      *  in dev HMR (the upstream revision gate has already decided this
@@ -67,7 +67,7 @@ export type PipelineOpts = {
  * unchanged short-circuits before any disk write. Without this the
  * pipeline writes generated barrels on every flush, the writes wake
  * Vite's watcher, the watcher's HMR re-fires the flush handler via the
- * bongle-capture postlude — and we infini-loop.
+ * bongle-capture postlude, and we infini-loop.
  *
  * `-1` as the cold-start sentinel matches the registries' initial
  * `revision: 0`, so the first pass treats everything as "changed" and
@@ -81,11 +81,11 @@ export type PipelineState = {
     matchmaking: number;
     sounds: number;
     sprites: number;
-    /** Latest observed matchmaking config — refreshed whenever the
+    /** Latest observed matchmaking config, refreshed whenever the
      *  matchmaking registry's revision moves. `build.ts` reads this after
      *  the pass to seed the bundle manifest. */
     matchmakingConfig: { maxPlayers: number } | null;
-    /** Per-id incremental cache for the models builder — replaces the
+    /** Per-id incremental cache for the models builder, replaces the
      *  former `.bongle/cache/models-build.json` disk sidecar. Lives for
      *  the lifetime of the process; cold starts re-pack every model. */
     modelsCache: Map<string, ModelsCacheEntry>;
@@ -118,7 +118,7 @@ export function createPipelineState(): PipelineState {
  */
 export type RunPassOptions = {
     /** Force every builder dirty regardless of registry revision. Used when
-     *  an external asset source file changed on disk — registries didn't
+     *  an external asset source file changed on disk, registries didn't
      *  move, but the bytes the builders read did. Each builder's content-hash
      *  gate still no-ops if nothing actually changed; this just bypasses
      *  the revision short-circuit at the top of the pass. */
@@ -128,7 +128,7 @@ export type RunPassOptions = {
 /** Per-builder wall-clock (ms) for one pass, keyed by display label
  *  ('draw', 'block-atlas', 'sprite-atlas', 'models', 'scenes', 'audio').
  *  Builders run concurrently, so these overlap and won't sum to the pass
- *  total — read them as the long pole. An absent key means the builder was
+ *  total, read them as the long pole. An absent key means the builder was
  *  skipped (nothing dirty). */
 export type PipelinePassTimings = Record<string, number>;
 
@@ -171,7 +171,7 @@ export async function runAssetPipelinePass(
 
     // Build the block registry first when blocks/models/scenes are dirty.
     // `buildBlockRegistry` evaluates each block's default model and, for
-    // cube blocks, calls `deriveBlockDust` — which registers per-block
+    // cube blocks, calls `deriveBlockDust`, which registers per-block
     // `<id>:particle{0..N-1}` sprites whose `src` is a `draw(...)`
     // DrawSource. Those sprites must be in `registry.sprites` BEFORE
     // `bakeDrawTextures` walks it, otherwise their DrawSources never get
@@ -219,13 +219,13 @@ export async function runAssetPipelinePass(
 
     if (soundsDirty) {
         // buildAudio reads the sounds store directly (independent surface
-        // from the partial view above — sounds aren't part of any
+        // from the partial view above, sounds aren't part of any
         // cross-domain composition like blocks/textures/models).
         tasks.push(timed('audio', buildAudio(registry.sounds, { projectDir })).then(() => undefined));
     }
 
     if (spritesDirty) {
-        // buildSpriteAtlas reads the sprites store directly — independent of
+        // buildSpriteAtlas reads the sprites store directly, independent of
         // the block/model view above. `bakedDraws` is the in-memory output
         // of the draw-textures pass above; nullable map entries fall back
         // to magenta inside the builder.
@@ -261,15 +261,15 @@ export async function runAssetPipelinePass(
  * Walk every source-bearing registry and return the union of absolute
  * paths the pipeline reads from disk. The Vite plugin uses this to know
  * which file events on `server.watcher` should trigger a forced pipeline
- * pass — `registry.revision` doesn't move when only a source file's bytes
+ * pass, `registry.revision` doesn't move when only a source file's bytes
  * change, so without an external trigger the pipeline never re-runs.
  *
  * Paths outside `projectDir` (file:// URLs that resolve into node_modules
- * or engine builtins) are filtered out — those assets are immutable in a
+ * or engine builtins) are filtered out, those assets are immutable in a
  * dev session and watching them costs nothing but noise.
  *
  * `DrawSource` entries (procedural draws inside blockTextures/sprites)
- * have no file backing — skipped here. Their bytes-derived input is the
+ * have no file backing, skipped here. Their bytes-derived input is the
  * fn body, which moves with the user-source HMR cascade like any other
  * declaration.
  */

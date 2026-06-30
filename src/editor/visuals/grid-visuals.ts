@@ -1,4 +1,4 @@
-// grid-visuals.ts — simple ground-plane grid using line segments.
+// grid-visuals.ts, simple ground-plane grid using line segments.
 //
 // draws a fixed grid on the Y=0 plane with minor (1-unit) and major (10-unit)
 // lines, plus colored axis lines (red=X, blue=Z).

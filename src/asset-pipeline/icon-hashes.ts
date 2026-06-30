@@ -3,7 +3,7 @@
  * task fns so the orchestrator can hash-gate render verbs before dispatching
  * them. The task fns now always render; gating lives exclusively here.
  *
- * Hash version constants stay aligned with the originals — bumping either
+ * Hash version constants stay aligned with the originals, bumping either
  * side independently would re-render every icon on next boot.
  */
 
@@ -72,7 +72,7 @@ export function computeBlockIconsHash(internal: PipelineInternal, atlasHash: str
 
 /** Per-prefab icon hashes (one PNG per prefab). Each prefab's hash is a pure
  *  function of its own registry `version` plus the versions of its transitive
- *  dependency closure (other prefabs/scenes it pulls in — see icon-deps), so
+ *  dependency closure (other prefabs/scenes it pulls in, see icon-deps), so
  *  editing one prefab re-renders only the icons that actually depend on it.
  *  Block + model inputs stay coarse (atlasHash / registry slice / modelsSlice):
  *  a block-atlas or model edit re-renders all icons. */
@@ -102,9 +102,9 @@ export function computePrefabIconHashes(
 /** Per-scene icon hashes. Self-identity is the disk `bytesHash` (the server
  *  `registry.scenes` is a derived view that lags codegen for new
  *  filesystem-discovered blueprints, so disk stays the source of truth for
- *  *which* scenes exist + their authored bytes — corpus comes from `scanScenes`
+ *  *which* scenes exist + their authored bytes, corpus comes from `scanScenes`
  *  in the orchestrator). On top of that we fold in the scene's transitive
- *  dependency closure (the prefabs it embeds + their deps — see icon-deps), so
+ *  dependency closure (the prefabs it embeds + their deps, see icon-deps), so
  *  editing an embedded prefab re-renders the scene icon even though its bytes
  *  didn't move. Block + model inputs stay coarse. */
 export function computeSceneIconHashes(

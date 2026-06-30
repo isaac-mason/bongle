@@ -6,7 +6,7 @@ import { Viewport } from './viewport';
 
 import './editor.css';
 
-// lazy — same chunk-splitting as edit mode; only loads when the panel opens.
+// lazy, same chunk-splitting as edit mode; only loads when the panel opens.
 const DebugPanel = lazy(() => import('./debug-panel'));
 
 function isInputFocused(): boolean {
@@ -23,7 +23,7 @@ function PlayUI() {
     // `t` / `Enter` open chat (no seed); `/` opens chat seeded with a slash so
     // the user can immediately type a command. mirrors the edit-ui handler but
     // without the editor-enabled gate (edit mode uses Enter only, no `t`).
-    // backtick toggles the debug panel — the editor's backtick chord lives in its
+    // backtick toggles the debug panel, the editor's backtick chord lives in its
     // own input loop, which doesn't run in play, so play mode owns this here.
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
@@ -56,7 +56,7 @@ function PlayUI() {
 }
 
 /**
- * Mount the play-mode UI shell into `container`. No editor chrome — just the
+ * Mount the play-mode UI shell into `container`. No editor chrome, just the
  * viewport. Re-exported from `bongle/engine-client`; the play-mode boot
  * template calls it directly between init and load.
  */

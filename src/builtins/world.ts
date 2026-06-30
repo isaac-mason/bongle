@@ -1,9 +1,9 @@
-// WorldTrait — a scene-scoped script host. lives on `nodes.root`,
+// WorldTrait, a scene-scoped script host. lives on `nodes.root`,
 // auto-attached on every room (server + client) at room creation. carries
 // no data; its sole purpose is to give `script(WorldTrait, …)` factories
 // a place to run exactly once per scene per side.
 //
-// Use this for **systems** — per-frame logic that iterates entities via
+// Use this for **systems**, per-frame logic that iterates entities via
 // `query(ctx, [TraitA, TraitB, …])` rather than running once per entity.
 // A WorldTrait script is the right home when the work spans multiple
 // traits (no single trait is the natural "owner") or when the per-entity
@@ -11,7 +11,7 @@
 //
 // Caveat: `ctx.node` is the scene root. POV / ownership checks
 // (`getControlNode(ctx) === ctx.node`, `isOwner(ctx, ctx.node)`) are
-// meaningless here — they always evaluate against root. Use the entity
+// meaningless here, they always evaluate against root. Use the entity
 // node from the query tuple (`trait._node`) instead.
 //
 // Example:
@@ -39,7 +39,7 @@ export const WorldTrait = trait('world', {}, { persist: false });
 
 export type WorldTrait = TraitType<typeof WorldTrait>;
 
-/** idempotent — attach WorldTrait to the scene root if it isn't already
+/** idempotent, attach WorldTrait to the scene root if it isn't already
  *  there. called from room creation on both sides, and again after
  *  `loadSceneGraph` on the server (which clears `root._traits` and
  *  repopulates from persisted data, which never includes WorldTrait

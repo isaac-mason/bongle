@@ -110,7 +110,7 @@ export type ClientRoom = {
     chat: ChatClient;
 
     /** per-room voxel renderer. always present. owns the per-room voxel
-     *  materials internally — they bind the engine-global env buffers
+     *  materials internally, they bind the engine-global env buffers
      *  (`state.renderer.environmentResources`) by name. */
     voxelVisuals: VoxelVisuals.VoxelVisuals;
 
@@ -142,7 +142,7 @@ export type ClientRoom = {
     cameraNode: Nodes.Node;
 
     /**
-     * mutable POV state — same object as `ctx.client.control` for every
+     * mutable POV state, same object as `ctx.client.control` for every
      * script in this room. `node` defaults to `playerNode` and is swapped
      * by `setControlNode`. each frame `bindRenderCamera` reassigns the
      * scene pass camera to this node's CameraTrait camera; scripts gate
@@ -151,7 +151,7 @@ export type ClientRoom = {
     control: ControlClientState;
 
     /**
-     * editor lens state — null when no editor lens is up. when present, it's
+     * editor lens state, null when no editor lens is up. when present, it's
      * either a real edit room (editorNode === playerNode) or a local-only
      * peek into a play room (editorNode is a `realm: 'client'` node).
      *
@@ -167,10 +167,10 @@ export type ClientRoom = {
     /** server-side metrics received via room_metrics messages */
     serverMetrics: Debug.Metrics;
 
-    /** client-side log buffer — `log(ctx, ...)` calls in client scripts land here. */
+    /** client-side log buffer, `log(ctx, ...)` calls in client scripts land here. */
     clientLogs: Debug.Logs;
 
-    /** server-side log buffer — fed by `debug_logs` packets while subscribed. */
+    /** server-side log buffer, fed by `debug_logs` packets while subscribed. */
     serverLogs: Debug.Logs;
 
     /** per-room voxel model visuals */
@@ -193,14 +193,14 @@ export type ClientRoom = {
     extrudedSpriteVisuals: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals;
 
     /** per-room shadow visuals (ShadowCasterTrait instances). batched
-     *  ground-disc renderer with per-frame downward raycast — no
+     *  ground-disc renderer with per-frame downward raycast, no
      *  external resources, no atlas dependency. */
     shadowVisuals: ShadowVisuals.ShadowVisuals;
 
     /** per-room particle pool. fixed capacity; spawn fills slots,
      *  `Particles.update` compacts dead ones. advanced per-frame (variable
      *  `delta`) with the room's `voxels` ref so collision primitives can
-     *  query the grid. particles are visual fx — framerate-dependent
+     *  query the grid. particles are visual fx, framerate-dependent
      *  motion is acceptable; the fixed-step loop is reserved for
      *  simulation that must stay deterministic. */
     particles: Particles.ParticlePool;
@@ -214,33 +214,33 @@ export type ClientRoom = {
      *  register leaves and read the per-frame visible set. */
     visibility: Visibility.Visibility;
 
-    /** per-room model lighting — samples voxel light at each visible model's
+    /** per-room model lighting, samples voxel light at each visible model's
      *  world-space AABB centroid and writes it into `ModelTrait.light`. Runs
      *  after `Visibility.update` so off-screen models skip the sample. */
     modelLighting: ModelLighting.ModelLighting;
 
-    /** per-room interpolation state — owns the scratch buffers used by
+    /** per-room interpolation state, owns the scratch buffers used by
      *  `Interpolation.snapshot` / `Interpolation.interpolate`. participants
      *  are managed via `setInterpolation(node, on)`. */
     interpolation: Interpolation.Interpolation;
 
-    /** per-room animation state — caches the [AnimatorTrait] query consumed by
+    /** per-room animation state, caches the [AnimatorTrait] query consumed by
      *  `Animation.tick`. */
     animations: Animation.Animations;
 
     /** per-room input data (keys, mouse, deltas). DOM events are routed
-     *  here only when this room is active — see `setActivePlayer`. */
+     *  here only when this room is active, see `setActivePlayer`. */
     input: Input.Input;
 
-    /** per-room canvas element — each room has its own for DOM event
+    /** per-room canvas element, each room has its own for DOM event
      *  isolation. */
     canvas: HTMLCanvasElement;
 
-    /** per-room canvas target — wraps the canvas for gpucat rendering. */
+    /** per-room canvas target, wraps the canvas for gpucat rendering. */
     canvasTarget: CanvasTarget;
 
     /**
-     * per-room viewport div — wraps the canvas and any script-attached HTML
+     * per-room viewport div, wraps the canvas and any script-attached HTML
      * overlays. mounted into the global viewport div alongside other rooms;
      * only the active room's viewport is `display: block`. removed wholesale
      * on dispose, so overlays don't outlive their room.
@@ -248,7 +248,7 @@ export type ClientRoom = {
     viewport: HTMLDivElement;
 
     /**
-     * per-room touch overlay div — sibling of canvas under `viewport`, mounted
+     * per-room touch overlay div, sibling of canvas under `viewport`, mounted
      * after the html UI overlay so it stacks above by DOM order. touch controls
      * helpers append their joystick / button roots here. removed with the
      * viewport on dispose.
@@ -262,13 +262,13 @@ export type ClientRoom = {
     /**
      * per-room editor store. Populated by the editor script on init (only
      * for `roomMode === 'edit'`), cleared on dispose. Non-React script
-     * callers (fly controller, tools, ...) read it directly — no useEditor
+     * callers (fly controller, tools, ...) read it directly, no useEditor
      * import needed. Null on play-only rooms.
      */
     editorStore: EditRoomStoreApi | null;
 
     /**
-     * clipboard handlers — set when this room's editor is active, cleared on
+     * clipboard handlers, set when this room's editor is active, cleared on
      * deactivate. Page-level `document` listeners (installed once in
      * registerClient) dispatch copy/cut/paste/keydown to the *active* room
      * (`useEditor.getState().room`); rooms whose editor is enabled but not
@@ -278,7 +278,7 @@ export type ClientRoom = {
 
     /**
      * the engine-global render pipeline this room renders through. all
-     * rooms share the same instance — stored here for callers that need
+     * rooms share the same instance, stored here for callers that need
      * the active render camera (`getControlCamera`, editor tools) without
      * threading the engine state through their api.
      */
@@ -304,7 +304,7 @@ export function init(): Rooms {
     };
 }
 
-/** prefix used for synthetic local-room ids — server roomIds never collide with this. */
+/** prefix used for synthetic local-room ids, server roomIds never collide with this. */
 export const LOCAL_ROOM_PREFIX = 'local:';
 
 /* ── RoomView ───────────────────────────────────────────────────── */
@@ -355,7 +355,7 @@ export function buildRoomViews(rooms: Iterable<ClientRoom>): Map<RoomViewId, Roo
  * Synthesize a `RoomInfo` for a local-only ClientRoom. Local rooms never
  * appear in server room_list messages, so we manufacture their info from
  * the ClientRoom itself and merge it into `useEditor.roomList` at the
- * startLocalRoom/stopLocalRoom edges — making local + server-driven rooms
+ * startLocalRoom/stopLocalRoom edges, making local + server-driven rooms
  * indistinguishable to downstream consumers (tabs, debug, etc.).
  */
 function makeLocalRoomInfo(room: ClientRoom): RoomInfo {
@@ -411,7 +411,7 @@ export type CreateRoomOptions = {
     /** engine-global audio resources. pass through to createRoomCore so
      *  the per-room Audio coordinator can be set up. */
     audioResources: Audio.AudioResources;
-    /** inbound trait wire-index for decoding `packedNodes` — server's
+    /** inbound trait wire-index for decoding `packedNodes`, server's
      *  outbound table, mirrored on this client. */
     inboundTraitWireIndex: WireIndex;
 };
@@ -490,7 +490,7 @@ type CreateRoomCoreOptions = {
     shadowResources: ShadowResourcesNs.ShadowResources;
     audioResources: Audio.AudioResources;
     /**
-     * pre-populated room core — sceneGraph, voxels, physics, scriptRuntime
+     * pre-populated room core, sceneGraph, voxels, physics, scriptRuntime
      * built by `newRoomCore` and populated by the caller (wire-unpack,
      * SceneHandle clone, or synthetic), plus the owned player node.
      * createRoomCore wires the post-populate state (CameraTrait, control,
@@ -509,7 +509,7 @@ type CreateRoomCoreOptions = {
  * allocate the mutually-dependent core a caller needs *before* populating
  * a fresh room: scene graph, voxels, physics, script runtime. Callers
  * populate these (wire-unpack, SceneHandle clone, or synthetic player
- * node), then hand the bag — plus the discovered/synthesized playerNode —
+ * node), then hand the bag, plus the discovered/synthesized playerNode,
  * into `createRoomCore` for final assembly.
  *
  * `scriptRuntime.client` is left undefined here; `createRoomCore` fills it
@@ -522,7 +522,7 @@ function newRoomCore(opts: {
     roomId: string;
     playerMode: PlayerMode;
     roomMode: RoomMode;
-    /** server clock (seconds) to seed this room's clock from — the join handshake
+    /** server clock (seconds) to seed this room's clock from, the join handshake
      *  supplies it on the networked path; omitted for local rooms (starts at 0). */
     clockSeed?: number;
 }): {
@@ -555,7 +555,7 @@ function newRoomCore(opts: {
 }
 
 /**
- * synthesize a player node — mirrors the server's createPlayerNode. used
+ * synthesize a player node, mirrors the server's createPlayerNode. used
  * by the local and offline room paths (the wire path receives a serialised
  * player node from the server and just queries for it).
  */
@@ -606,13 +606,13 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     canvas.style.height = '100%';
     canvas.style.pointerEvents = 'auto';
     // claim touch gestures so a drag drives the game (look/aim) instead of the
-    // browser hijacking it as pan/zoom — without this the browser fires
+    // browser hijacking it as pan/zoom, without this the browser fires
     // pointercancel a few pixels into any touch-drag and the gesture dies.
     canvas.style.touchAction = 'none';
     viewport.appendChild(canvas);
     const canvasTarget = new CanvasTarget(canvas);
 
-    // shared POV pointer — room.control and ctx.client.control are the
+    // shared POV pointer, room.control and ctx.client.control are the
     // same object. setControlNode mutates `node` in place so existing
     // closures and ctx-builds observe the swap without re-seating.
     const control: ControlClientState = { node: null };
@@ -632,7 +632,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // see the runtime (createNode / addTrait register against it).
     nodes.runtime = scriptRuntime;
 
-    // default camera node — TransformTrait + CameraTrait at the scene root.
+    // default camera node, TransformTrait + CameraTrait at the scene root.
     // builtin controllers (orbit / fly / player) write to this each frame
     // instead of creating their own. recreated on resyncRoom because
     // unpackSceneGraph wipes root's children.
@@ -675,7 +675,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const audio = Audio.init(opts.audioResources);
 
     // post-populate wiring. sceneGraph + voxels came in already populated.
-    // seed the control pointer at the player node — swappable via setControlNode.
+    // seed the control pointer at the player node, swappable via setControlNode.
     // initSceneGraph fires onInit/onEnter for instances registered during populate.
     control.node = playerNode;
 
@@ -811,7 +811,7 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
     // ctx.client.control references held by surviving scripts observe the swap.
     room.control.node = playerNode;
     // unpackSceneGraph wiped the default camera node along with the rest of
-    // root's children — re-create it, re-seed CameraRefTrait on the fresh
+    // root's children, re-create it, re-seed CameraRefTrait on the fresh
     // playerNode, and re-point ctx.client.player / .camera so existing
     // closures see the new nodes.
     room.cameraNode = createDefaultCameraNode(room.nodes, playerNode);
@@ -820,7 +820,7 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
         room.scriptRuntime.client.camera = room.cameraNode;
         room.scriptRuntime.client.player = playerNode;
     }
-    // any local editor lens is invalidated by the scene graph rebuild —
+    // any local editor lens is invalidated by the scene graph rebuild,
     // editorNode was a `realm: 'client'` node, gone with the wind. caller
     // re-enters via enterLocalEditorView if they want it back.
     room.editor = null;
@@ -852,12 +852,12 @@ export function seedCameraRef(povNode: Nodes.Node, cameraNode: Nodes.Node): void
 /**
  * swap the room's POV pointer. mutates `room.control.node` in place so all
  * existing `ctx.client.control` references see the change without re-seating.
- * pass `null` to clear (no control node — input still routes via room.input,
+ * pass `null` to clear (no control node, input still routes via room.input,
  * but `getControlNode(ctx)` returns null everywhere and rendering bails for
  * this room until a control node is set again).
  *
  * the renderer reads `passNode.camera` each frame; `bindRenderCamera`
- * reassigns it to the active control camera before render — POV swaps need
+ * reassigns it to the active control camera before render, POV swaps need
  * no pipeline rebuild.
  */
 export function setControlNode(room: ClientRoom, node: Nodes.Node | null): void {
@@ -866,7 +866,7 @@ export function setControlNode(room: ClientRoom, node: Nodes.Node | null): void 
 
 /**
  * resolve the room's active render camera. reads `CameraRefTrait.camera`
- * on the control node (set by whichever controller — builtin or DIY — is
+ * on the control node (set by whichever controller, builtin or DIY, is
  * driving the view) and composes the engine-global renderer-owned
  * PerspectiveCamera from (camera node Transform + CameraTrait). returns
  * null when no control node is set, the node has no CameraRefTrait, or
@@ -874,7 +874,7 @@ export function setControlNode(room: ClientRoom, node: Nodes.Node | null): void 
  *
  * scripts and editor tools call this for pose, fov, and projection
  * (post-`bindRenderCamera` it has the viewport's aspect). the renderer reads
- * the same camera via `passNode.camera` — no separate mirror; what scripts
+ * the same camera via `passNode.camera`, no separate mirror; what scripts
  * read is what the pass renders. the engine-global pipeline (one shared
  * camera across rooms; pose is rewritten each frame from the active POV)
  * is reached via `room._pipeline`.
@@ -897,7 +897,7 @@ export function getControlCamera(room: ClientRoom): PerspectiveCamera | null {
 
 /**
  * mount a ClientRoom's viewport into the global canvas div and size its
- * canvas target. camera projection is *not* updated here — the renderer
+ * canvas target. camera projection is *not* updated here, the renderer
  * pulls viewport size from canvasTarget each frame in `bindRenderCamera`
  * and writes aspect into the active control camera. caller is responsible
  * for wiring `room.scriptRuntime.client.state`/`.room` and calling
@@ -933,7 +933,7 @@ export type StartLocalRoomOptions = {
  * create a client-only ClientRoom from a declared scene handle, mount
  * its viewport, init the scene graph, and register it in the rooms map.
  * Returns the fully wired ClientRoom. Local rooms never talk to the
- * server — no join_room / set_active_room / net_message traffic flows
+ * server, no join_room / set_active_room / net_message traffic flows
  * out of them.
  */
 export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
@@ -966,14 +966,14 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
 
     // copy declared voxels first (may be null if scene has none). must
     // precede loadSceneGraph: any seed scripts that call setBlock on
-    // onInit would otherwise be wiped — though runtime isn't wired
+    // onInit would otherwise be wiped, though runtime isn't wired
     // until after populate, so onInit defers to initSceneGraph anyway.
     if (handle.voxels) {
         Voxels.copyVoxels(voxels, handle.voxels);
     }
 
     // load the scene from the raw payload so root-level traits land
-    // on sceneGraph.root. iterating handle.node.children drops them —
+    // on sceneGraph.root. iterating handle.node.children drops them,
     // server-mirrored rooms bypass this path via loadSceneGraph on
     // disk data; local rooms need the same treatment.
     const payload = state.content.payloads.get(sceneId);
@@ -1086,8 +1086,8 @@ export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     ShadowVisuals.dispose(room.shadowVisuals);
     ParticleVisuals.dispose(room.particleVisuals);
     Environment.dispose(room.environment);
-    // env GPU buffers are engine-global (state.renderer.environmentResources)
-    // — not disposed here; they live for the lifetime of the engine.
+    // env GPU buffers are engine-global (state.renderer.environmentResources),
+    // not disposed here; they live for the lifetime of the engine.
     if (room.audio) Audio.dispose(room.audio);
     room.disposeCanvasTouchListeners();
     room.viewport.remove();
@@ -1128,14 +1128,14 @@ export function setActivePlayer(
     // overflow absorbed by the worker pool).
     VoxelVisuals.activateRoom(voxelResources, room.voxelVisuals, room.voxels);
 
-    // toggle viewport visibility — only the active room's viewport (and
+    // toggle viewport visibility, only the active room's viewport (and
     // therefore its canvas + script overlays) is shown.
     for (const r of state.rooms.values()) {
         r.viewport.style.display = r === room ? 'block' : 'none';
     }
 
     // route DOM input events into the new active room's Input. Inactive
-    // rooms see no events — this is what makes inactive scripts read zero
+    // rooms see no events, this is what makes inactive scripts read zero
     // input structurally rather than relying on opt-in gates.
     const engineState = room.scriptRuntime.client?.state;
     if (engineState) {
@@ -1151,7 +1151,7 @@ export function setActivePlayer(
     store.setSceneId(room.sceneId);
     store.setRoom(room);
 
-    // notify server about active player (presence) — local rooms have no
+    // notify server about active player (presence), local rooms have no
     // server peer, so suppress the ping.
     if (!room.local) {
         Net.send(net, { type: 'set_active_room', playerId });
@@ -1174,7 +1174,7 @@ export function clearRoomVoxels(room: ClientRoom, voxelResources: VoxelResources
 /**
  * Look up every ClientRoom whose roomId matches (across all Players /
  * modes the client holds in that room). Used by message routing for
- * protocol messages that target a (roomId) without a Player — every
+ * protocol messages that target a (roomId) without a Player, every
  * matching ClientRoom receives the update.
  */
 export function* getRoomsByRoomId(state: Rooms, roomId: string): Generator<ClientRoom> {

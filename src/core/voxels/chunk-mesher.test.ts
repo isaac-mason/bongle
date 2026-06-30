@@ -38,7 +38,7 @@ function countCubeFaces(mesh: ChunkMeshResult | null, pass: 'opaque' | 'transluc
     return p?.quadCount ?? 0;
 }
 
-/** return the unified pass mesh (single bucket — facing slices are internal). */
+/** return the unified pass mesh (single bucket, facing slices are internal). */
 function cubeFaceBuckets(mesh: ChunkMeshResult, pass: 'opaque' | 'translucent'): PassMesh[] {
     const p = pass === 'opaque' ? mesh.opaque : mesh.translucent;
     return p ? [p] : [];
@@ -58,7 +58,7 @@ function quadCornerLight(p: PassMesh, quadIdx: number, corner: number): number {
 }
 
 /** mesh + light a chunk in one call. post Stage 2b: meshChunk emits
- *  geometry+AO+light in one pass — this wrapper now just delegates. */
+ *  geometry+AO+light in one pass, this wrapper now just delegates. */
 function meshAndLight(voxels: Voxels, chunk: Chunk, reg: BlockRegistry): ChunkMeshResult | null {
     return meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
 }
@@ -233,7 +233,7 @@ describe('meshChunk', () => {
     describe('Sodium hierarchical diagFlip in meshChunk', () => {
         it('diagFlip lives in light[0] bit 29 and follows AO primary, light tiebreaker (<=)', () => {
             // meshChunk's emitQuadLight* helpers write diagFlip via
-            // `applyDiagFlipBit` — Sodium hierarchical compare.
+            // `applyDiagFlipBit`, Sodium hierarchical compare.
             // Build an asymmetric corner occluder so AO is non-uniform on
             // the +Y face, then mesh + light the chunk and verify the bit
             // at light[0].29 matches the hierarchical compare against the
@@ -252,7 +252,7 @@ describe('meshChunk', () => {
             const pb = b.opaque!;
             expect(pa.quadCount).toBe(pb.quadCount);
 
-            // bit 23 of flags is reserved now — the bake must leave it zero.
+            // bit 23 of flags is reserved now, the bake must leave it zero.
             // meta (AO) and light[*] must be identical across runs (no
             // per-call drift in either the geometry bake or the light pass).
             let sawAoPrimary = false;
@@ -276,7 +276,7 @@ describe('meshChunk', () => {
 
                 // Sodium hierarchical compare: AO primary with `>`, light
                 // tiebreaker with `<=`. On a quad with strict AO inequality
-                // the AO branch is decisive — light values can't flip it.
+                // the AO branch is decisive, light values can't flip it.
                 const a0 = metaA & 0xf;
                 const a1 = (metaA >>> 4) & 0xf;
                 const a2 = (metaA >>> 8) & 0xf;
@@ -291,7 +291,7 @@ describe('meshChunk', () => {
                     expect(actual).toBe(1);
                     sawAoPrimary = true;
                 } else {
-                    // tied AO — light tiebreaker (<=). Mask channel nibbles
+                    // tied AO, light tiebreaker (<=). Mask channel nibbles
                     // out of bits 28+ to match `applyDiagFlipBit`.
                     const sum = (w: number) => (w & 0xf) + ((w >>> 8) & 0xf) + ((w >>> 16) & 0xf) + ((w >>> 24) & 0xf);
                     const lm02 = sum(l0a) + sum(l2a);
@@ -357,9 +357,9 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            // stone at (5,5,5) — we render its +X face. Face cell is (6,5,5).
-            // Wall edges (relative to +X face): (6,4,5) and (6,5,4) — both stone.
-            // Diagonal: (6,4,4) — air with bright sky=15 (the "lit room behind
+            // stone at (5,5,5), we render its +X face. Face cell is (6,5,5).
+            // Wall edges (relative to +X face): (6,4,5) and (6,5,4), both stone.
+            // Diagonal: (6,4,4), air with bright sky=15 (the "lit room behind
             // the wall corner"). Face cell (6,5,5) is dark air.
             setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
             setChunkBlock(chunk, 6, 4, 5, 'stone', reg); // -Y edge of +X face
@@ -403,7 +403,7 @@ describe('meshChunk', () => {
         it('multi-quad-per-face cache reuse: 6 cube faces all share their face cache', () => {
             // Coverage for `ensureFaceLightCache`'s cache-hit branch. A single
             // isolated stone emits 6 quads (one per face), each on a unique
-            // (face, offset=1) cache slot — second cell would hit identical
+            // (face, offset=1) cache slot, second cell would hit identical
             // output. We assert determinism instead (cheaper than instrumenting
             // a hit counter, equivalent signal: cache-hit and cache-miss must
             // produce bit-identical light words).
@@ -462,7 +462,7 @@ describe('meshChunk', () => {
             // corners equal). proves shape dispatch is actually computing
             // per-corner values rather than the old flat 0xffffffff write.
             // light variation requires propagated light, which the chunk
-            // doesn't have without a lighting pass — relight equivalence
+            // doesn't have without a lighting pass, relight equivalence
             // test below covers the light path.
             //
             // AO lives in the low 16 bits of the meta u32 (qd[9]), packed
@@ -486,7 +486,7 @@ describe('meshChunk', () => {
         it('aligned-outer top quad reads outside-cell light, not host (depth=0 → offset_true)', () => {
             // bug guard: if the depth blend direction is inverted, a
             // mesh quad on the outer face plane (depth=0) blends in the
-            // host cell's lightSlab — which is opaque + dark for solid
+            // host cell's lightSlab, which is opaque + dark for solid
             // mesh hosts. that produces a black band on stair tops next
             // to lit cubes. inject sky-light only into the cell above
             // the stair and assert the upper-step top quad's sky channel
@@ -502,7 +502,7 @@ describe('meshChunk', () => {
             // singling out (5,6,5) only would still get diluted by dark
             // neighbours. lightSlab build copies chunk.light into the 18³
             // padded slab; the host-cell (stair voxel) keeps sky=0 since
-            // we don't write it — that's the dark cell the bug would read.
+            // we don't write it, that's the dark cell the bug would read.
             for (let i = 0; i < chunk.light.length; i++) chunk.light[i] = 15 << 12;
             chunk.light[voxelIndex(5, 5, 5)] = 0;
 
@@ -513,7 +513,7 @@ describe('meshChunk', () => {
             // find at least one quad whose 4 corners all carry the
             // expected bright sky byte. with the bug, depth=0 quads
             // blend with the dark host cell so sky bytes are 0 or near.
-            // raw 4-bit channel — LUT is applied in WGSL.
+            // raw 4-bit channel, LUT is applied in WGSL.
             const brightSky = 15 << 24;
             let sawBrightSky = false;
             for (let q = 0; q < pass.quadCount; q++) {

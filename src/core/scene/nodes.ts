@@ -35,7 +35,7 @@ export type Node = {
     /** runtime-only numeric ID, assigned by the scene graph's incrementing counter. not persisted. */
     id: number;
 
-    /** optional name — a non-unique label. */
+    /** optional name, a non-unique label. */
     name: string | undefined;
 
     /** parent node, or null if this is a root node */
@@ -50,7 +50,7 @@ export type Node = {
     /**
      * which Player owns this node. null = server-owned (default).
      * Ownership is keyed per-Player (not per-Client) so parallel
-     * memberships — same client with multiple Players in a room — don't
+     * memberships, same client with multiple Players in a room, don't
      * collapse onto one body.
      */
     owner: PlayerId | null;
@@ -97,7 +97,7 @@ export type Node = {
 
     /**
      * @internal validation issues per trait (keyed by trait slot). populated
-     * at scene load and at inspector commit time. derived state — not persisted,
+     * at scene load and at inspector commit time. derived state, not persisted,
      * not replicated. use `setTraitIssues` / `clearTraitIssues` to mutate so
      * empty entries are cleaned up.
      */
@@ -106,18 +106,18 @@ export type Node = {
     /**
      * if non-null, this node is a prefab instance. its children are
      * instantiated from the referenced scene. only the prefab config
-     * is persisted — children have persist: false.
+     * is persisted, children have persist: false.
      */
     prefab: PrefabConfig | null;
 
     /**
      * @internal runtime-only prefab instantiation state.
-     * not serialized, not replicated — reconstructed on instantiation.
+     * not serialized, not replicated, reconstructed on instantiation.
      */
     _prefabState: PrefabState | null;
 };
 
-/* uuid — retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
+/* uuid, retained for namespace ids (e.g. `play-<uuid>` rooms); not used for node identity. */
 
 export function generateUuid(): string {
     // use crypto.randomUUID if available (modern browsers + Node 19+),
@@ -155,7 +155,7 @@ function createNodeObject(name?: string, id?: number, persist?: boolean, realm?:
 
 /* version bumping */
 
-/** per-node replication version — the send path's node-level early-out gate.
+/** per-node replication version, the send path's node-level early-out gate.
  *  the trait/field versions live on each trait instance's `_sync`; only this
  *  node-level rollup lives here, since it spans all of a node's traits. */
 export type NodeSyncState = {
@@ -164,7 +164,7 @@ export type NodeSyncState = {
 };
 
 /** mark a node into its scene graph's per-tick discovery dirty set. server-side
- *  only (gated on `!env.client`) — a no-op in the client bundle, where nothing
+ *  only (gated on `!env.client`), a no-op in the client bundle, where nothing
  *  drains the set. every version bump funnels through here, so structural, trait,
  *  and field changes all land in `dirtyNodes` for the per-client fan-out. room
  *  graphs are drained + cleared each tick by `Discovery.flush`. */
@@ -188,7 +188,7 @@ export function bumpTraitVersion(sg: Nodes, node: Node, traitSlot: number): void
 }
 
 /** bump a single field's version (+ the trait + node versions). takes the
- *  instance + slice index directly — the diff already has both in hand. */
+ *  instance + slice index directly, the diff already has both in hand. */
 export function bumpFieldVersion(sg: Nodes, node: Node, instance: TraitBase, i: number): void {
     const v = ++sg._versions.counter;
     if (instance._sync) {
@@ -214,7 +214,7 @@ export type Nodes = {
 
     /**
      * the room's authoritative mode (independent of the viewer). drives
-     * room-level decisions like prefab previews vs voxel baking — an
+     * room-level decisions like prefab previews vs voxel baking, an
      * edit Player attached to a play room still bakes voxels (no
      * preview ghosts), because the room is play.
      */
@@ -258,13 +258,13 @@ export type Nodes = {
 
     /**
      * @internal subset of `_prefabNodes` that needs reconcile. populated by:
-     *   - prefab anchor entering the graph (registerSubtree) — first init
-     *   - setPrefab (set or change) — config / args edits
-     *   - markPrefabAnchorsDirty — dispatch DepGraph propagation
+     *   - prefab anchor entering the graph (registerSubtree), first init
+     *   - setPrefab (set or change), config / args edits
+     *   - markPrefabAnchorsDirty, dispatch DepGraph propagation
      * drained by the prefab tick once each node finishes reconcile (or is
      * filtered out by realm/cycle/deps-not-ready). steady-state size is zero
      * → tick is O(churn), not O(prefab count). same path on both edit and
-     * play modes — play rooms just don't get dispatch-driven dirty marks,
+     * play modes, play rooms just don't get dispatch-driven dirty marks,
      * so they stay stable across HMR.
      */
     _prefabsDirty: Set<Node>;
@@ -273,8 +273,8 @@ export type Nodes = {
      * @internal transforms whose local TRS changed since the last
      * `Interpolation.snapshot` drain. populated by `markTransformDirty`
      * (writes via setPosition/setQuaternion/setScale/sync unpack).
-     * drained by `snapshot()` to refresh prev pose for interpolated nodes
-     * — scales per-frame snapshot cost with motion, not scene size.
+     * drained by `snapshot()` to refresh prev pose for interpolated nodes,
+     * scales per-frame snapshot cost with motion, not scene size.
      */
     _transformDirty: Set<TransformTrait>;
 
@@ -291,7 +291,7 @@ export type Nodes = {
 
     /**
      * @internal server-side discovery driver. nodes touched this tick (created,
-     * structural change, trait add/remove, field change, or destroyed) — the set
+     * structural change, trait add/remove, field change, or destroyed), the set
      * the per-client scene-sync fan-out iterates instead of walking the whole tree.
      * a destroyed node is parked here too; the fan-out recognises it by
      * `node.scene === null` and emits `node_destroyed`. populated by the
@@ -336,7 +336,7 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
         dirtyNodes: new Set(),
     };
 
-    // create root node — always present, cannot be destroyed.
+    // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
     root.id = sg._nextNodeId++;
@@ -366,7 +366,7 @@ export type CreateNodeOptions = {
 };
 
 /**
- * create a new **detached** node — not registered in any scene graph,
+ * create a new **detached** node, not registered in any scene graph,
  * no script init, no queries. attach with `addChild(parent, node)` to
  * make it live; the scene graph allocates an id at attach time (negative
  * on the client, positive on the server).
@@ -395,7 +395,7 @@ export function nodeExists(node: Node): boolean {
 
 /**
  * set a node's owner, keeping `sg.playerIdToOwnedNodes` in sync. all owner
- * writes outside tests should route through here — the index drives the
+ * writes outside tests should route through here, the index drives the
  * client's per-tick owner-sync replication loop, so silent direct assignment
  * to `node.owner` will desync that walk.
  */
@@ -419,14 +419,14 @@ export function setOwner(sg: Nodes, node: Node, owner: PlayerId | null): void {
         set.add(node);
     }
     // owner is replicated (node_owner); mark the change for discovery when the
-    // node is live. (editor/scene-pack paths also bump explicitly — harmless.)
+    // node is live. (editor/scene-pack paths also bump explicitly, harmless.)
     if (node.scene) bumpNodeVersion(node.scene, node);
 }
 
 /**
  * set a node's realm. realm controls which side(s)/clients a node replicates to,
  * so changing it can flip the effective relevance of the whole subtree
- * (descendants inherit) — mark them all dirty so the per-client discovery fan-out
+ * (descendants inherit), mark them all dirty so the per-client discovery fan-out
  * re-evaluates visibility (create on become-visible, destroy on become-hidden).
  * route runtime realm changes through here so the change can't bypass discovery.
  */
@@ -441,14 +441,14 @@ export function setRealm(node: Node, realm: Realm): void {
 }
 
 /**
- * returns true iff this node is replicable from server to clients — i.e. every
+ * returns true iff this node is replicable from server to clients, i.e. every
  * node on the chain from root down to (and including) this one resolves to
  * `'shared'`. a `'shared'` node under a `'server'`/`'each'`/`'client'`
  * ancestor isn't reachable for the client because the ancestor never
  * replicates, so the descendant can't either. `'inherit'` nodes are
- * transparent — they defer to whatever ancestor next sets a concrete realm.
+ * transparent, they defer to whatever ancestor next sets a concrete realm.
  *
- * does not consult `mode` — callers (e.g. discovery in edit mode) decide
+ * does not consult `mode`, callers (e.g. discovery in edit mode) decide
  * whether to bypass the filter.
  */
 export function isReplicable(node: Node): boolean {
@@ -466,7 +466,7 @@ export function isReplicable(node: Node): boolean {
  * replicated in from the server keep their positive server id); a client
  * allocates negative ids for nodes it creates locally (see id assignment in
  * the attach path above). So on a client this is false for server-owned
- * (replicated-in) nodes and true for client-only ones — a true *origin* test,
+ * (replicated-in) nodes and true for client-only ones, a true *origin* test,
  * unlike `isReplicable` (a realm-policy test). Use it to decide who authors a
  * node's derived content (e.g. the character rig): the server builds for its
  * nodes, a client builds only its own local ones and otherwise defers to
@@ -590,12 +590,12 @@ function updateSubtreeTransformPointers(subtreeRoot: Node, ancestor: TransformTr
         // children of this node point to it
         updateChildTransformPointers(subtreeRoot, t);
     } else {
-        // no transform here — children inherit the same ancestor
+        // no transform here, children inherit the same ancestor
         updateChildTransformPointers(subtreeRoot, ancestor);
     }
 }
 
-/** user-facing props for addTrait — only the trait's own declared fields, minus base fields. */
+/** user-facing props for addTrait, only the trait's own declared fields, minus base fields. */
 export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | '_sync'>>;
 
 /**
@@ -704,7 +704,7 @@ function disposeTraitScripts(runtime: NodesContext, node: Node, def: TraitDef): 
 
 /**
  * write a trait instance into a node's trait map and bitset. does not touch
- * the scene graph, queries, or transform parent pointers — those side
+ * the scene graph, queries, or transform parent pointers, those side
  * effects belong to addTrait. used by addTrait and cloneNode.
  */
 function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase): void {
@@ -719,11 +719,11 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
     if (traitSlot === undefined) return;
 
     if (bitset.has(node._bitset, traitSlot)) {
-        // dispose scripts before clearing trait state — onExit fires while
+        // dispose scripts before clearing trait state, onExit fires while
         // the trait value is still resolvable.
         if (scene?.runtime) disposeTraitScripts(scene.runtime, node, handle._def);
 
-        // maintain parent transform pointers — children that pointed to this
+        // maintain parent transform pointers, children that pointed to this
         // transform now inherit this transform's own parent
         if (traitSlot === TransformTrait._slot) {
             const t = getTrait(node, TransformTrait)!;
@@ -735,7 +735,7 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
         bitset.remove(node._bitset, traitSlot);
         if (scene) {
             bumpNodeVersion(scene, node);
-            // reindex this node — callbacks fire while trait value still in _traits
+            // reindex this node, callbacks fire while trait value still in _traits
             reindex(scene, node);
         }
         // now safe to delete the value
@@ -805,7 +805,7 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
     bitset.add(node._bitset, traitSlot);
 
     // maintain parent transform pointers. prev pose seeding is owned by
-    // `setInterpolation(node, true)` — callers that want interpolation
+    // `setInterpolation(node, true)`, callers that want interpolation
     // (physics coordinator, character controller scripts) opt in
     // explicitly, which seeds prev = current at that point and avoids the
     // "addTrait happens before node.scene is wired" hydration race.
@@ -906,7 +906,7 @@ export function refreshTraitIssues(node: Node, def: TraitDef, instance: TraitBas
 /**
  * fire onInit on all uninitialized script instances in a scene graph.
  *
- * scripts are now owned by traits — for each trait on each node, instantiate
+ * scripts are now owned by traits, for each trait on each node, instantiate
  * any missing script instance, then init, then fire enter hooks.
  *
  * call this after the graph is fully built and all runtime context is wired
@@ -1013,7 +1013,7 @@ export function reparent(node: Node, newParent: Node): void {
     const scene = newParent.scene;
     const oldParent = node.parent;
 
-    // fire onExit before detaching — old parent is still set
+    // fire onExit before detaching, old parent is still set
     if (oldParent && node.scene !== null && scene.runtime) {
         fireExitHooks(scene.runtime, node, oldParent);
     }
@@ -1032,7 +1032,7 @@ export function reparent(node: Node, newParent: Node): void {
         if (scene.runtime) fireEnterHooks(scene.runtime, node, newParent);
         // mark the whole moved subtree for discovery: reparenting can flip
         // effective relevance (e.g. moving under a non-shared parent), and
-        // descendants inherit it — the per-client fan-out must re-evaluate them.
+        // descendants inherit it, the per-client fan-out must re-evaluate them.
         const moved: Node[] = [];
         collectSubtree(node, moved);
         for (const n of moved) bumpNodeVersion(scene, n);
@@ -1054,14 +1054,14 @@ export function reorderChild(parent: Node, child: Node, index: number): void {
     parent.children.splice(current, 1);
     parent.children.splice(Math.min(index, parent.children.length), 0, child);
     // index change is a structural change discovery must replicate (it bumped
-    // nothing before — the old per-client walk diffed childIndex directly).
+    // nothing before, the old per-client walk diffed childIndex directly).
     if (child.scene) bumpNodeVersion(child.scene, child);
 }
 
 /**
  * replace all children of `root` with `node`, destroying every other child.
  * `node` must be a direct child of `root`. analogous to the DOM's
- * `replaceChildren()` — useful after eager prefab instantiation when you
+ * `replaceChildren()`, useful after eager prefab instantiation when you
  * want to keep only one sub-node and discard the rest.
  */
 export function replaceChildren(root: Node, node: Node): void {
@@ -1074,7 +1074,7 @@ export function replaceChildren(root: Node, node: Node): void {
         if (scene) {
             destroyNode(scene, child);
         } else {
-            // detached — just unlink
+            // detached, just unlink
             child.parent = null;
         }
     }
@@ -1109,8 +1109,8 @@ function removeChildInternal(parent: Node, child: Node): void {
  * register a node and all its descendants into a scene graph.
  *
  * two-pass for scripts:
- *   pass 1 — register: register nodes, index into queries, create script instances (if runtime present).
- *   pass 2 — init: fire onInit on all newly created script instances.
+ *   pass 1, register: register nodes, index into queries, create script instances (if runtime present).
+ *   pass 2, init: fire onInit on all newly created script instances.
  *
  * this ensures all nodes in the subtree are registered and all scripts
  * have their state available before any onInit fires.
@@ -1140,7 +1140,7 @@ function registerSubtree(sg: Nodes, node: Node): void {
         if (n.id === 0) {
             n.id = env.client ? sg._nextClientNodeId-- : sg._nextNodeId++;
         } else if (n.id >= sg._nextNodeId) {
-            // pre-assigned id (e.g. from network unpack) — bump counter past it
+            // pre-assigned id (e.g. from network unpack), bump counter past it
             sg._nextNodeId = n.id + 1;
         }
         sg._idToNode.set(n.id, n);
@@ -1187,12 +1187,12 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
         unregisterSubtree(sg, node.children[i]);
     }
 
-    // fire onExit before disposing — parent is still set here
+    // fire onExit before disposing, parent is still set here
     if (sg.runtime && node.parent) {
         fireExitHooks(sg.runtime, node, node.parent);
     }
 
-    // dispose all script instances from runtime — scripts re-instantiate
+    // dispose all script instances from runtime, scripts re-instantiate
     // from traits when the subtree re-registers, so we drop the lot here.
     if (sg.runtime) {
         const nodeInstances = sg.runtime.instances.get(node.id);
@@ -1216,12 +1216,12 @@ function unregisterSubtree(sg: Nodes, node: Node): void {
     sg._idToNode.delete(node.id);
     sg._prefabNodes.delete(node);
     sg._prefabsDirty.delete(node);
-    // a node leaving the live graph is a destroy for the discovery fan-out —
+    // a node leaving the live graph is a destroy for the discovery fan-out,
     // symmetric with registerSubtree marking entering nodes dirty. server-only
     // (gated inside markNodeDirty). the node ends this fn in dirtyNodes with
     // scene === null, so the fan-out emits node_destroyed (only to clients that
     // knew it). without this, removing a server-owned (owner === null) node via
-    // removeChild never replicated — setOwner above only dirties when the owner
+    // removeChild never replicated, setOwner above only dirties when the owner
     // actually changes, which it doesn't for an already-server-owned node.
     markNodeDirty(sg, node);
     node.scene = null;
@@ -1242,7 +1242,7 @@ export { traverse } from './traverse';
 
 /* scene-graph-level script driving */
 
-// memoised `script/<hook>/<key>` metric ids — built once per (hook, script) so the
+// memoised `script/<hook>/<key>` metric ids, built once per (hook, script) so the
 // hot path (incl. while the client panel is closed and begin/end no-op) does no
 // string work.
 const perfKeyCache = new Map<string, Map<string, string>>();
@@ -1303,7 +1303,7 @@ export function runOnInput(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): 
 
 /**
  * update all scripts in the scene graph. fires once per frame before the
- * fixed-timestep tick loop — intended for input polling and camera binding.
+ * fixed-timestep tick loop, intended for input polling and camera binding.
  */
 export function runOnUpdate(sg: Nodes, args: UpdateArgs, metrics: Debug.Metrics): void {
     runHook(sg, args, metrics, 'onUpdate', (i) => i.onUpdate);
@@ -1319,7 +1319,7 @@ export function runOnTick(sg: Nodes, args: TickArgs, metrics: Debug.Metrics): vo
 
 /**
  * fire onPrePhysicsStep hooks on all scripts in the scene graph. called after
- * tickSceneGraph but before the physics step. routes through SILENT — it runs
+ * tickSceneGraph but before the physics step. routes through SILENT, it runs
  * from physics.tick, which carries no metrics, and isn't surfaced in the digest.
  */
 export function runOnPrePhysicsStep(sg: Nodes, args: TickArgs): void {
@@ -1328,7 +1328,7 @@ export function runOnPrePhysicsStep(sg: Nodes, args: TickArgs): void {
 
 /**
  * fire onPostPhysicsStep hooks on all scripts in the scene graph. called after
- * the physics step, before frameSceneGraph. SILENT — see runOnPrePhysicsStep.
+ * the physics step, before frameSceneGraph. SILENT, see runOnPrePhysicsStep.
  */
 export function runOnPostPhysicsStep(sg: Nodes, args: TickArgs): void {
     runHook(sg, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
@@ -1352,7 +1352,7 @@ export function runOnFrame(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): 
     runHook(sg, args, metrics, 'onFrame', (i) => i.onFrame);
 }
 
-/* serialization — schema-driven */
+/* serialization, schema-driven */
 
 export type SerializeOptions = {
     /** if true, skip nodes with persist: false and traits with persist: false. */
@@ -1372,7 +1372,7 @@ export type SerializedNode = {
     children: SerializedNode[];
     /** true means the node is persistent. omitted when true (the default). */
     persist?: boolean;
-    /** present only on prefab nodes — references a scene resource. */
+    /** present only on prefab nodes, references a scene resource. */
     prefab?: PrefabConfig;
 };
 
@@ -1390,7 +1390,7 @@ function serializeTrait(traitSlot: number, instance: TraitBase, options?: Serial
         return { id: def.id, controls: undefined };
     }
 
-    // extract control values from the instance. clone — callers (scene save,
+    // extract control values from the instance. clone, callers (scene save,
     // blueprint capture, undo snapshots) retain this and reapply later;
     // sharing references with the live instance would let runtime mutations
     // (vec3.copy on transform.position etc.) corrupt the snapshot.
@@ -1426,7 +1426,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
         serializedTraits.push({ id, controls: data.json });
     }
 
-    // prefab nodes own no authored children — all children are derived
+    // prefab nodes own no authored children, all children are derived
     // from the prefab source and get re-instantiated at load time.
     // never persist them to avoid stale/circular data on disk.
     const children: SerializedNode[] = [];
@@ -1449,7 +1449,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
 }
 
 /**
- * deserialize a node tree from a plain object. the returned node is **detached** —
+ * deserialize a node tree from a plain object. the returned node is **detached**,
  * caller is responsible for `addChild(parent, node)` if attachment is desired.
  *
  * traits are restored from their definitions; their bound scripts are
@@ -1463,7 +1463,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
 export function deserializeNode(data: SerializedNode): Node {
     const node = createNodeObject(data.name, 0, data.persist !== false);
 
-    // clone — node.prefab.args is mutable and the source data is often a cached
+    // clone, node.prefab.args is mutable and the source data is often a cached
     // resource (prefab scene cache, scene file cache) shared across instantiations.
     node.prefab = data.prefab ? structuredClone(data.prefab) : null;
 
@@ -1473,7 +1473,7 @@ export function deserializeNode(data: SerializedNode): Node {
         const def = registry.traits.byId.get(st.id)?.payload;
         if (!def) {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
-            // clone — _unresolvedTraits is read back on re-serialization;
+            // clone, _unresolvedTraits is read back on re-serialization;
             // mutations to control values elsewhere shouldn't corrupt the round-trip.
             node._unresolvedTraits.set(st.id, {
                 json: structuredClone(st.controls),
@@ -1481,7 +1481,7 @@ export function deserializeNode(data: SerializedNode): Node {
             continue;
         }
 
-        // clone control values — trait fields like TransformTrait.position get
+        // clone control values, trait fields like TransformTrait.position get
         // mutated in place (vec3.copy etc.). without this, mutations leak back
         // into the source data, contaminating future deserializations from the
         // same cached resource.
@@ -1502,7 +1502,7 @@ export function deserializeNode(data: SerializedNode): Node {
 }
 
 /**
- * clone a node and all its descendants. the returned subtree is **detached** —
+ * clone a node and all its descendants. the returned subtree is **detached**,
  * it has no parent, is not registered in any scene graph, and its scripts are
  * not instantiated. add it to the graph with `addChild(parent, clone)` to wake
  * it up; `onInit` for any scripts fires at that point.
@@ -1511,7 +1511,7 @@ export function deserializeNode(data: SerializedNode): Node {
  *
  * controls (editor + persisted state) are deep-copied via per-control packcat
  * codecs (`getControlCodecs`). runtime-only fields reset to defaults on the
- * clone — systems re-derive them on first tick (e.g. RigidBodyTrait.body
+ * clone, systems re-derive them on first tick (e.g. RigidBodyTrait.body
  * comes back null, and the installer rebuilds from the cloned `def` on the
  * next preStep).
  *
@@ -1542,7 +1542,7 @@ export function cloneNode(source: Node): Node {
         clone._unresolvedTraits.set(id, { json: data.json });
     }
 
-    // scripts ride on traits — clone needs no script copy; registerSubtree
+    // scripts ride on traits, clone needs no script copy; registerSubtree
     // re-instantiates from the cloned trait list.
 
     for (const child of source.children) {
@@ -1601,7 +1601,7 @@ export type SerializedSceneGraph = {
 
 /**
  * save the scene graph to a JSON-friendly structure for writing to disk.
- * respects persist flags — skips nodes with persist: false and traits with
+ * respects persist flags, skips nodes with persist: false and traits with
  * persist: false. only property fields are included.
  *
  * the root node is serialized as a regular node with its children nested inside.
@@ -1667,7 +1667,7 @@ export function loadSceneGraph(sg: Nodes, data: SerializedSceneGraph): void {
         reindex(sg, root);
     }
 
-    // root scripts ride on traits — instantiate per trait if runtime present
+    // root scripts ride on traits, instantiate per trait if runtime present
     if (sg.runtime) {
         for (const [traitSlot, trait] of root._traits) {
             const def = registry.traitsBySlot.get(traitSlot);
@@ -1766,7 +1766,7 @@ export type Query<Conditions extends Array<Condition>> = {
  * ```
  */
 export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToConditions<Args>>['matches'];
-/** one element of {@link QueryMatches} — the trait tuple a single query result yields. */
+/** one element of {@link QueryMatches}, the trait tuple a single query result yields. */
 export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
 
 function buildConditionBitsets(conditions: ConditionArgs[]): {
@@ -1882,7 +1882,7 @@ export function releaseQuery(sg: Nodes, q: Query<any>): void {
 }
 
 /**
- * one-shot match — returns nodes satisfying `conditions` at call time.
+ * one-shot match, returns nodes satisfying `conditions` at call time.
  *
  * unlike `query()`, no caching, no event subscriptions, no `sg.queries` entry.
  * use this when you need a snapshot (e.g. populating an inspector picker)
@@ -1978,7 +1978,7 @@ function reindex(sg: Nodes, node: Node): void {
  * `[...traitValues]`, or `null` if no ancestor matches. access the ancestor
  * node via any returned trait's `.node` property.
  *
- * this is an ad-hoc traversal — it is **not** reactive. call it when you
+ * this is an ad-hoc traversal, it is **not** reactive. call it when you
  * need to resolve inherited / contextual data from the hierarchy.
  *
  * @example
@@ -2051,7 +2051,7 @@ export type PrefabState = {
 /**
  * set or clear a node's prefab config and reconcile the scene graph's
  * `_prefabNodes` / `_prefabsDirty` indices. callers mutating `node.prefab`
- * on a *live* node (one that's already attached) MUST use this — direct
+ * on a *live* node (one that's already attached) MUST use this, direct
  * assignment leaves the indices stale and the prefab tick driver won't
  * pick the node up.
  *
@@ -2077,7 +2077,7 @@ export function setPrefab(node: Node, config: PrefabConfig | null): void {
 }
 
 /**
- * flip a live node's `persist` flag — controls whether the node is written to
+ * flip a live node's `persist` flag, controls whether the node is written to
  * scene files. use this rather than mutating `node.persist` directly when the
  * node is already attached to a scene graph.
  */
@@ -2091,7 +2091,7 @@ export function setNodePersist(node: Node, persist: boolean): void {
  * `dirtyPrefabIds` for reconcile. called from `applyRegistryChanges*` after
  * `collectDirtyByRegistry` resolves which prefab defs were directly or
  * transitively touched by the flush. drives the edit-mode + play-mode tick
- * uniformly off the same dirty set — neither side scans the full prefab
+ * uniformly off the same dirty set, neither side scans the full prefab
  * node set on its own.
  */
 export function markPrefabAnchorsDirty(sg: Nodes, dirtyPrefabIds: ReadonlySet<string>): void {

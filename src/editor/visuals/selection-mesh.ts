@@ -6,11 +6,11 @@
 // meshing: shared binary greedy mesher (`core/voxels/greedy-mesh.ts`).
 // derives a tight AABB from the Selection.T chunk map + a per-voxel scan,
 // then calls `meshOccupancy` with `Selection.has` as the occupancy probe.
-// normals omitted — the flat-colour material doesn't need them.
+// normals omitted, the flat-colour material doesn't need them.
 //
 // materials are created once and shared.
 //   selection: blue tint, depthTest:false so it overlays everything.
-//   brush:     cyan tint — used for hovered block (idle), wip box-select, future brush shapes.
+//   brush:     cyan tint, used for hovered block (idle), wip box-select, future brush shapes.
 //   hover outline: white aabb outline around the single hovered block (separate from brush mesh).
 
 import {
@@ -72,7 +72,7 @@ function getBrushMaterial(): Material {
     if (!_brushMaterial) {
         // single material; color driven by a vec4f uniform. tools push rgba
         // into the store, selection-mesh forwards new references to this
-        // uniform — no material swap, no mesh rebind. animated colors
+        // uniform, no material swap, no mesh rebind. animated colors
         // (pulse) just allocate a fresh tuple per frame: the reference
         // changes → the uniform writes.
         _brushFillUniform = new Uniform(d.vec4f, BRUSH_FILL_DEFAULT);
@@ -150,12 +150,12 @@ function getHoverOutlineMaterial(): LineMaterial {
 // chunk set are zero by construction.
 //
 // padding: one zero row on each side of Y and Z so reads at (y=-1),
-// (y=SY), (z=-1), (z=SZ) all hit zero rows without a bounds check —
+// (y=SY), (z=-1), (z=SZ) all hit zero rows without a bounds check,
 // critical for the edge-segment classifier which probes ±1 on two axes.
 //
 // chunk layout: bit `(ly << 8) | (lz << 4) | lx`. one u32 word holds
 // two z-rows of 16 lx-bits each (low 16 = lz even, high 16 = lz odd).
-// chunks land on either bit 0 or bit 16 of a dense word — never split.
+// chunks land on either bit 0 or bit 16 of a dense word, never split.
 
 const WORDS_PER_CHUNK = CHUNK_VOLUME >> 5; // 128
 
@@ -259,14 +259,14 @@ export function buildSelectionGeometry(sel: Selection.Selection): Geometry | nul
     const dense = buildDenseSelection(sel);
     if (!dense || dense.empty) return null;
 
-    // tight bit-level bounds — keeps meshOccupancy from scanning empty
+    // tight bit-level bounds, keeps meshOccupancy from scanning empty
     // space in partially-filled chunks (huge win on single voxels / thin slabs).
     const tight = Selection.bounds(sel);
     if (!tight) return null;
 
     const { occ, rowStride, slabStride, minX, minY, minZ, SX, SY, SZ } = dense;
 
-    // dense lookup probe — closed over the populated buffer. ~5 ns per
+    // dense lookup probe, closed over the populated buffer. ~5 ns per
     // call vs ~440 ns for Selection.has; greedy mesher calls this 12×
     // bounds-volume times per pass.
     const denseHas = (wx: number, wy: number, wz: number): boolean => {
@@ -313,7 +313,7 @@ export function buildSelectionGeometry(sel: Selection.Selection): Geometry | nul
 // bitmask-native edge classifier.
 //
 // for each axis-aligned unit edge, look at the 4 cells around it in the
-// perpendicular plane (s00, s10, s01, s11 — indexed by (db, dc)). the
+// perpendicular plane (s00, s10, s01, s11, indexed by (db, dc)). the
 // reference logic counts exposed faces and skips when:
 //   - 0 exposed faces                          → edge isn't on a surface
 //   - 2 exposed faces, both of the same kind   → flat-surface seam
@@ -358,7 +358,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
 
     const { occ, rowStride, slabStride, minX, minY, minZ } = dense;
 
-    // tight local bounds (voxel coords) — set bits live in [lxMin..lxMax] etc.
+    // tight local bounds (voxel coords), set bits live in [lxMin..lxMax] etc.
     const lxMin = tight.min[0] - minX;
     const lxMax = tight.max[0] - minX;
     const lyMin = tight.min[1] - minY;
@@ -368,7 +368,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
 
     // X-word range covering both [lxMin..lxMax] (X-edges) and [lxMin..lxMax+1]
     // (Y/Z edges, which extend one bit past the voxel range on the +X face).
-    // wMax can hit the phantom zero word at wi=wpr — that's the row's padding
+    // wMax can hit the phantom zero word at wi=wpr, that's the row's padding
     // word from buildDenseSelection, so reads remain in-bounds.
     const wMin = lxMin >> 5;
     const wMax = (lxMax + 1) >> 5;
@@ -427,7 +427,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
         }
     }
 
-    // shared state for Y- and Z-edge passes — per-X-position kept word
+    // shared state for Y- and Z-edge passes, per-X-position kept word
     // and run-start tracking. allocated once, reset on each outer slab.
     const prevKept = new Uint32Array(wRange);
     const runStart = new Int32Array(wRange << 5);
@@ -605,7 +605,7 @@ export function buildOutlineSegments(sel: Selection.Selection): number[] | null 
 
 /**
  * 12 edges of the AABB [x0,y0,z0]..[x1,y1,z1] as a flat segment-pair array
- * for LineSegmentsGeometry. coords are passed through verbatim — callers
+ * for LineSegmentsGeometry. coords are passed through verbatim, callers
  * apply any expansion they need before calling.
  */
 export function aabbOutlineSegments(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number[] {
@@ -690,7 +690,7 @@ export function aabbOutlineSegments(x0: number, y0: number, z0: number, x1: numb
 
 /**
  * 12 triangles forming a closed box for the AABB [x0,y0,z0]..[x1,y1,z1].
- * used for the cyan brush mesh when hovering a sub-unit collider — the
+ * used for the cyan brush mesh when hovering a sub-unit collider, the
  * cell-based Selection greedy mesher can't represent <1m shapes, so we
  * synthesize the box directly. brush material has cullMode:'none', so
  * winding doesn't matter.
@@ -777,7 +777,7 @@ export type SelectionMeshState = {
     // wip box-select region, and future arbitrary brush shapes.
     brushMesh: Mesh | null;
     brushEdges: Mesh | null;
-    // single-block aabb outline around the exact hovered voxel — white, tight box.
+    // single-block aabb outline around the exact hovered voxel, white, tight box.
     hoverOutline: Mesh | null;
     scene: Scene;
     // track last updated data to avoid redundant rebuilds
@@ -893,7 +893,7 @@ function setOutlineMesh(
     }
 
     if (current) {
-        // reuse the existing mesh — just swap geometry
+        // reuse the existing mesh, just swap geometry
         current.geometry.dispose();
         current.geometry = new LineSegmentsGeometry(pts);
     } else {
@@ -1000,7 +1000,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
         if (_brushEdgesUniform) _brushEdgesUniform.value = edges;
     }
 
-    // hover outline geometry — tight white box around the hovered block's
+    // hover outline geometry, tight white box around the hovered block's
     // collider AABB. visibility is decided below.
     const hoverKey = hoverAabb
         ? `${hoverAabb[0]},${hoverAabb[1]},${hoverAabb[2]},${hoverAabb[3]},${hoverAabb[4]},${hoverAabb[5]}`

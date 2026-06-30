@@ -1,4 +1,4 @@
-// shared codegen util — skip writes when content is byte-identical to
+// shared codegen util, skip writes when content is byte-identical to
 // avoid pointless vite HMR cascades. compares existing file bytes against
 // the new content before touching the disk.
 //
@@ -33,7 +33,7 @@ export function writeFileIfChanged(filePath: string, content: string | Uint8Arra
         const existing = fs.readFileSync(filePath);
         if (existing.equals(next)) return false;
     } catch {
-        // missing file — fall through to write.
+        // missing file, fall through to write.
     }
     fs.writeFileSync(filePath, next);
     return true;

@@ -1,11 +1,11 @@
-// MeshTrait — single-mesh visual, primitive for model rendering.
+// MeshTrait, single-mesh visual, primitive for model rendering.
 //
 // Sits on a node with a TransformTrait. The renderer (model-visuals, W3.2)
 // allocates an instance slot per (MeshTrait, TransformTrait) pair, then
 // streams worldMatrix + atlas region into the GPU instance buffer.
 //
 // meshId is a compound { modelId, meshName } struct (replicated). The
-// visual fields (tint/light/glow) are client-only — set by user scripts,
+// visual fields (tint/light/glow) are client-only, set by user scripts,
 // not synced, not editor-editable, not persisted.
 
 import { type Vec4, vec4 } from 'mathcat';
@@ -44,7 +44,7 @@ export const MeshTrait = trait('mesh', {
      * Auto-sampled each frame by the renderer from the room's voxel light
      * grid at the node's world position, so meshes shade like adjacent
      * voxels. Combined in-shader as `max(blockRGB, sky*skyBrightness)`,
-     * then modulated by sun-shading with an ambient floor — same formula
+     * then modulated by sun-shading with an ambient floor, same formula
      * as the voxel material. User code can override via `setMeshLight()`
      * but the next frame's auto-sample will overwrite it.
      */
@@ -52,7 +52,7 @@ export const MeshTrait = trait('mesh', {
 
     /**
      * Self-illumination 0-1. Client-only. Raises the lighting floor so the
-     * mesh lights up in its OWN colour (1 = fully lit, shadow-free) — it does
+     * mesh lights up in its OWN colour (1 = fully lit, shadow-free), it does
      * NOT add white. A brighter, script-driven sibling of `litMin`.
      */
     glow: 0,
@@ -73,7 +73,7 @@ export const MeshTrait = trait('mesh', {
     /**
      * Screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
      * Fragments are dropped via `discard` against an interleaved-gradient
-     * threshold, so this stays in the opaque pipeline — no sort, no blend.
+     * threshold, so this stays in the opaque pipeline, no sort, no blend.
      * The cost is "pixelly," not smooth alpha. Drive from script (e.g.
      * fade out a character mesh when the camera is inside it). Client-only.
      */
@@ -81,19 +81,19 @@ export const MeshTrait = trait('mesh', {
 
     /**
      * Whether this mesh renders. false = skip; the slot stays allocated
-     * (no re-upload churn on toggle). applies to the whole mesh slot —
+     * (no re-upload churn on toggle). applies to the whole mesh slot,
      * not to individual sub-meshes within `meshId`. client-only.
      */
     visible: true,
 
     /**
-     * version counter — bumped by the setters when tint/light/glow change.
+     * version counter, bumped by the setters when tint/light/glow change.
      * the renderer caches the version observed at last upload and re-uploads
      * only on mismatch.
      */
     _version: 0,
 
-    /** renderer-internal allocation state (includes the frustum-cull entry —
+    /** renderer-internal allocation state (includes the frustum-cull entry,
      *  see `MeshVisualState.cull`). */
     _state: null as MeshVisualState | null,
 });

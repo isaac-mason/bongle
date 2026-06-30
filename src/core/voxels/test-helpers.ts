@@ -1,4 +1,4 @@
-// test-helpers.ts — shared scaffolding for voxel unit tests.
+// test-helpers.ts, shared scaffolding for voxel unit tests.
 //
 // instead of fabricating BlockDef / BlockHandle objects, tests call the
 // real `block()` / `blockTexture()` APIs so they exercise the same code

@@ -55,7 +55,7 @@ function setupWorld(blocks: { id: string; def: Partial<BlockDef> }[]) {
 
 describe('aabb-physics — friction combine', () => {
     it('block friction multiplies body friction (ice = slippery, stone = grippy)', () => {
-        // run two parallel sims — stone vs ice — same body params, compare
+        // run two parallel sims, stone vs ice, same body params, compare
         // post-tick horizontal velocity. ice (μ=0.1) damps less than stone (μ=1).
         const stone = setupWorld([{ id: 'stone', def: { friction: 1.0 } }]);
         setupFloor(stone.voxels, 'stone');
@@ -90,7 +90,7 @@ describe('aabb-physics — friction combine', () => {
 
         // ice retains more velocity than stone.
         expect(iceVx).toBeGreaterThan(stoneVx);
-        // both lose some — friction was applied (sanity).
+        // both lose some, friction was applied (sanity).
         expect(stoneVx).toBeLessThan(5);
         expect(iceVx).toBeLessThan(5);
         // and the ratio of damping should track block friction ratio (~10x).
@@ -132,7 +132,7 @@ describe('aabb-physics — restitution combine', () => {
         });
         // tick enough for body to reach floor and bounce. impact vY = -10,
         // combined e = 0.5 * 0.8 = 0.4 → post-bounce vY = -10 - (0.4 * -10) = -6
-        // wait — bounce code does `v -= e * vImpact`. After slideResolve zeroes
+        // wait, bounce code does `v -= e * vImpact`. After slideResolve zeroes
         // vY on contact (vY = 0), bounce adds -0.4 * -10 = +4. So vY ≈ +4.
         for (let i = 0; i < 30; i++) AabbPhysics.tick(world, crashWorld, 1 / 60, NULL_SINK);
         expect(body.linearVelocity[1]).toBeGreaterThan(3);

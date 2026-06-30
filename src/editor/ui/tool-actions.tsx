@@ -61,7 +61,7 @@ export function ToolActions() {
     const hasNodes = nodeCount > 0;
     const hasSelectionOrHover = hasSelection || hasHover;
 
-    // inspect with no node selection and transform with no nodes — no actions
+    // inspect with no node selection and transform with no nodes, no actions
     if (isInspect && !hasNodes) return null;
 
     // helper to enter transform mode from inspect or switch gizmo mode in transform
@@ -184,7 +184,7 @@ function ActionBtn({
     icon: React.ElementType;
     disabled: boolean;
     onClick: () => void;
-    /** optional WE-style equivalent — shown as a popover below the button on
+    /** optional WE-style equivalent, shown as a popover below the button on
      *  hover so users can discover the slash form of the same action. */
     slashCmd?: string;
 }) {

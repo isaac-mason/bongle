@@ -1,4 +1,4 @@
-// Minimal `.glb` parser — accepts the canonical-form subset our worker
+// Minimal `.glb` parser, accepts the canonical-form subset our worker
 // emits, projects it onto the `ModelBin` shape used everywhere downstream.
 //
 // Scope, by design: ~5KB gzipped vs ~150KB for `@gltf-transform/core`.
@@ -8,7 +8,7 @@
 //
 //   - single-buffer `.glb` (one BIN chunk, embedded; no external URIs)
 //   - vertex attrs `POSITION`/`NORMAL`/`TEXCOORD_0` as `Float32` only
-//     (NORMAL/TEXCOORD_0 optional — defaults match `extractMesh` in the
+//     (NORMAL/TEXCOORD_0 optional, defaults match `extractMesh` in the
 //      kit pipeline so loose user uploads still render)
 //   - indices as `UNSIGNED_BYTE` / `UNSIGNED_SHORT` / `UNSIGNED_INT`
 //     (upcast to `Uint32Array` to match ModelBin's downstream shape)
@@ -72,7 +72,7 @@ type GltfBufferView = {
     byteLength: number;
     // Interleaved vertex layouts (e.g. POSITION/NORMAL/TEXCOORD_0 sharing
     // one bufferView, each at a different byteOffset, stride = 32B per
-    // vertex) — emitted by gltf-transform's writeBinary by default. We
+    // vertex), emitted by gltf-transform's writeBinary by default. We
     // de-interleave in `readAccessor` when stride is non-tight.
     byteStride?: number;
 };
@@ -149,16 +149,16 @@ const TYPE_COMPONENTS: Record<GltfAccessor['type'], number> = {
 
 /**
  * Parse a `.glb` byte buffer into the engine's runtime `Model` shape.
- * Same shape that the .bin path produces via `toModel(unpack(bytes))` —
+ * Same shape that the .bin path produces via `toModel(unpack(bytes))`,
  * downstream consumers (`Resources`, the runtime handle hydrator) don't
  * care which source format produced it.
  *
  * Throws `Error` on malformed input or out-of-subset content with a
- * message indicating which constraint was violated. Pure function — no
+ * message indicating which constraint was violated. Pure function, no
  * I/O, no mutation of the input bytes. Safe in both browser and node.
  *
  * `modelId` is used to name a synthetic wrapper root when the source
- * glb has multiple top-level nodes — matches the kit codegen barrel's
+ * glb has multiple top-level nodes, matches the kit codegen barrel's
  * convention for declared models.
  */
 export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
@@ -178,7 +178,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     // ── images: build ModelImage refs; map gltf image index → ModelImage ──
     // Canonical .glb from the worker always uses bufferView. Raw .gltf
     // exports often inline images as base64 `data:` URIs on `img.uri`
-    // instead — accept those too. External file URIs still throw.
+    // instead, accept those too. External file URIs still throw.
     const outImages: ModelImage[] = [];
     const imageByGltfIdx = new Map<number, ModelImage>();
     for (let i = 0; i < images.length; i++) {
@@ -219,7 +219,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     /** gltf mesh index → ModelMesh ref. populated lazily. */
     const meshByGltfIdx = new Map<number, ModelMesh>();
 
-    // ── scene walk: DFS — build ModelNode refs in place, wiring children
+    // ── scene walk: DFS, build ModelNode refs in place, wiring children
     //          arrays as we recurse. parent ref is the recursion frame. ──
     const uniqueNodeNames = new Set<string>();
     const nodeNames: string[] = new Array(gltfNodes.length);
@@ -272,7 +272,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
     // orphan-node pass: gltf nodes not reachable via any scene root are
     // still legal (animation targets sometimes). give them a unique name
     // for animator channel lookup, but don't append them to the scene
-    // tree — they're not part of the rig hierarchy by definition.
+    // tree, they're not part of the rig hierarchy by definition.
     for (let i = 0; i < gltfNodes.length; i++) {
         if (nodeNames[i] !== undefined) continue;
         const base = gltfNodes[i]!.name || `node_${i}`;
@@ -350,7 +350,7 @@ function looksLikeGlb(bytes: Uint8Array): boolean {
 
 // .gltf JSON variant: same accepted subset as .glb, but the BIN payload
 // rides as an embedded base64 data: URI on buffers[0]. External URIs are
-// rejected — same constraint as `.glb` image bufferViews above (the
+// rejected, same constraint as `.glb` image bufferViews above (the
 // worker canonicalises everything to embedded before storing).
 function parseGltfJson(bytes: Uint8Array): { json: string; bin: Uint8Array } {
     const json = new TextDecoder('utf-8').decode(bytes);
@@ -587,7 +587,7 @@ function readFloat32Accessor(
     if (r.type !== expectedType) {
         throw new Error(`gltfUnpack: accessor[${idx}] type=${r.type}, expected ${expectedType}`);
     }
-    // copy out of the BIN view — downstream code mutates / retains
+    // copy out of the BIN view, downstream code mutates / retains
     // beyond the lifetime of the input bytes.
     return new Float32Array(r.array as Float32Array);
 }

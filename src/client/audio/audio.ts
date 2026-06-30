@@ -1,9 +1,9 @@
 /**
- * client-side audio runtime — per-room coordinator + Web Audio plumbing.
+ * client-side audio runtime, per-room coordinator + Web Audio plumbing.
  *
  * sibling of `environment.ts` / `physics.ts`: top-level `Audio` namespace
  * with `init` / `dispose` / `updateForFrame` / `play*`, stored as
- * `room.audio` on each `ClientRoom`. server has no playback runtime — the
+ * `room.audio` on each `ClientRoom`. server has no playback runtime, the
  * script-facing `playMono`/`playAt`/`playOnNode` (api/audio.ts) bail to
  * `null` on the server side, so this file is only reached on the client.
  *
@@ -21,7 +21,7 @@
  *
  * AudioContext gating: browsers refuse to play audio in a suspended
  * context. We construct the context lazily on first `play*` call (so SSR
- * imports don't fail) and `resume()` it inside the handler — the calling
+ * imports don't fail) and `resume()` it inside the handler, the calling
  * script almost always runs from a user gesture (key/click handler), so
  * this is the natural place to satisfy the autoplay policy.
  *
@@ -34,7 +34,7 @@
  * Safari, which still ships the legacy setters.
  *
  * Spatial sources use `PannerNode` with HRTF disabled (`panningModel:
- * 'equalpower'`) — the v1 falloff opts (`ref`/`max`/`rolloff`/`model`)
+ * 'equalpower'`), the v1 falloff opts (`ref`/`max`/`rolloff`/`model`)
  * map 1:1 to PannerNode props, so 'inverse' / 'linear' / 'exponential'
  * are direct passthroughs. Mono play skips the panner entirely (gain
  * straight to destination).
@@ -61,7 +61,7 @@ type AudioManifest = {
     standalone: StandaloneEntry[];
 };
 
-/** resolved per-id clip — either a slice of the decoded atlas buffer or
+/** resolved per-id clip, either a slice of the decoded atlas buffer or
  *  a standalone url whose buffer is lazy-decoded on first play. */
 type ResolvedClip =
     | { kind: 'atlas'; buffer: AudioBuffer; offset: number; duration: number }
@@ -78,15 +78,15 @@ type ResolvedClip =
 export type AudioResources = {
     /** browser-owned audio context, lazy-resumed on first play. */
     context: AudioContext;
-    /** engine-global output bus — every room's `masterGain` feeds this, and
+    /** engine-global output bus, every room's `masterGain` feeds this, and
      *  this feeds the context destination. Ramping it to 0 (`setOutputMuted`)
      *  silences all rooms at once; used to auto-mute the game during portal
      *  ads without games having to do anything. */
     outputGain: GainNode;
-    /** last-applied output mute — lets `setOutputMuted` be called every frame
+    /** last-applied output mute, lets `setOutputMuted` be called every frame
      *  (it reconciles from engine state) while only ramping on a real change. */
     muted: boolean;
-    /** clips by sound id — atlas entries ready, standalones lazy. */
+    /** clips by sound id, atlas entries ready, standalones lazy. */
     clips: Map<string, ResolvedClip>;
     /** manifest combined `hash` the clips were built against (`null` when no
      *  manifest loaded). `refreshResources` compares against it to short-circuit
@@ -104,7 +104,7 @@ function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>, 
 
 /** Mute/unmute all engine audio at the output bus, ramping (to avoid clicks)
  *  only on a real change. Called every frame from the client update loop,
- *  reconciling against `state.adActive` — muting during a portal ad is built-in,
+ *  reconciling against `state.adActive`, muting during a portal ad is built-in,
  *  no game code involved. */
 export function setOutputMuted(resources: AudioResources, muted: boolean): void {
     if (resources.muted === muted) return;
@@ -135,7 +135,7 @@ async function fetchManifest(): Promise<AudioManifest | null> {
 async function buildClips(context: AudioContext, manifest: AudioManifest): Promise<Map<string, ResolvedClip>> {
     const clips = new Map<string, ResolvedClip>();
 
-    // eager atlas decode — one fetch + one decodeAudioData covers every
+    // eager atlas decode, one fetch + one decodeAudioData covers every
     // atlas-bucket clip. each id resolves to a (buffer, offset, duration)
     // view into the same shared buffer.
     if (manifest.atlas.length > 0) {
@@ -155,7 +155,7 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
                 });
             }
         } catch (err) {
-            // a failed atlas decode silences *every* atlas sound, not one —
+            // a failed atlas decode silences *every* atlas sound, not one,
             // surface it loudly rather than as a per-play warning.
             console.error(`[bongle] audio atlas failed to load — all ${manifest.atlas.length} atlas sounds will be silent:`, err);
         }
@@ -175,7 +175,7 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
 }
 
 /** load + decode the audio manifest + atlas. Called from
- *  `EngineClient.load()`. Always returns a live `AudioResources` — when
+ *  `EngineClient.load()`. Always returns a live `AudioResources`, when
  *  no manifest is present (pipeline emitted nothing) the clips map is
  *  empty and `play(unknownId, ...)` no-ops cleanly. */
 export async function loadResources(): Promise<AudioResources> {
@@ -196,7 +196,7 @@ export async function loadResources(): Promise<AudioResources> {
  *  room (each holds the same `resources` ref via `Audio.init`) picks up the new
  *  buffers without a reboot. Returns true when the audio actually moved (the
  *  manifest hash changed), false on a no-op. Called from the
- *  `bongle:audio-atlas-updated` HMR listener — the source-file edit has no
+ *  `bongle:audio-atlas-updated` HMR listener, the source-file edit has no
  *  registry change to ride, so this is the only path that reaches the live
  *  client. The AudioContext is reused (sample rate is a fixed constant), and
  *  in-flight playbacks keep their already-started buffers and finish cleanly. */
@@ -206,7 +206,7 @@ export async function refreshResources(resources: AudioResources): Promise<boole
     if (resources.hash !== null && manifest.hash === resources.hash) return false;
 
     const clips = await buildClips(resources.context, manifest);
-    // replace the map's CONTENTS, not the reference — `resources.clips` is read
+    // replace the map's CONTENTS, not the reference, `resources.clips` is read
     // on every play and shared across rooms, so mutating in place propagates.
     resources.clips.clear();
     for (const [id, clip] of clips) resources.clips.set(id, clip);
@@ -222,7 +222,7 @@ export type PlaybackHandle = {
     stop(opts?: { fade?: number }): void;
     /** linear gain in [0,1]. */
     setVolume(v: number): void;
-    /** detune in cents — 100 = +1 semitone, -1200 = -1 octave. */
+    /** detune in cents, 100 = +1 semitone, -1200 = -1 octave. */
     setDetune(cents: number): void;
     readonly isPlaying: boolean;
 };
@@ -235,7 +235,7 @@ export type PlaybackHandle = {
  *  + drops it. */
 type ActivePlayback = {
     handle: PlaybackHandle;
-    /** null until the source actually starts — long-clip plays return a
+    /** null until the source actually starts, long-clip plays return a
      *  handle before the buffer is decoded; the source is created inside
      *  the .then() and assigned here. */
     source: AudioBufferSourceNode | null;
@@ -246,10 +246,10 @@ type ActivePlayback = {
     node: Node | null;
     /** stopped via .stop() OR source ended naturally. drives reaping. */
     _ended: boolean;
-    /** flipped by handle.stop() before buffer resolves — the .then()
+    /** flipped by handle.stop() before buffer resolves, the .then()
      *  callback checks this and bails on start() if true. */
     _cancelled: boolean;
-    /** setDetune called before the long-clip buffer resolved — stashed
+    /** setDetune called before the long-clip buffer resolved, stashed
      *  here so the .then() that creates the source can apply it. */
     _pendingDetune?: number;
 };
@@ -275,14 +275,14 @@ export type SpatialOpts = PlayOpts & { falloff?: Falloff };
 
 export type Audio = {
     resources: AudioResources;
-    /** master gain for the room — all per-play gains hang off this. */
+    /** master gain for the room, all per-play gains hang off this. */
     masterGain: GainNode;
     /** in-flight one-shots, reaped per frame. */
     active: Set<ActivePlayback>;
     /** last listener pose written to the AudioContext.listener AudioParams,
      *  and the audio-context time of that write. used to skip redundant
      *  writes (per-frame AudioParam scheduling accumulates automation
-     *  events and walks them — death by 1k cuts; even at idle we'd burn
+     *  events and walks them, death by 1k cuts; even at idle we'd burn
      *  ms/frame). NaN sentinel forces the first write. */
     _listenerLast: {
         time: number;
@@ -342,7 +342,7 @@ export function dispose(audio: Audio): void {
 
 /* ── play APIs ─────────────────────────────────────────────────────── */
 
-/** non-positional play — gain straight to master, no PannerNode. */
+/** non-positional play, gain straight to master, no PannerNode. */
 export function playMono(audio: Audio, soundId: string, opts: PlayOpts = {}): PlaybackHandle | null {
     return startPlayback(audio, soundId, null, null, opts);
 }
@@ -357,7 +357,7 @@ export function playAt(
     return startPlayback(audio, soundId, null, [pos[0], pos[1], pos[2]], opts);
 }
 
-/** positional play that follows a scene node — panner position is
+/** positional play that follows a scene node, panner position is
  *  refreshed every frame from the node's interpolated world transform.
  *  cancels automatically when the node is removed. */
 export function playOnNode(audio: Audio, soundId: string, node: Node, opts: SpatialOpts = {}): PlaybackHandle | null {
@@ -378,7 +378,7 @@ function startPlayback(
     const clip = resources.clips.get(soundId);
     if (!clip) return null;
 
-    // browsers gate playback on user gesture — resume here. If we're not
+    // browsers gate playback on user gesture, resume here. If we're not
     // called from a gesture this no-ops silently and the source plays
     // when the context auto-resumes later. fire-and-forget.
     if (resources.context.state === 'suspended') {
@@ -393,7 +393,7 @@ function startPlayback(
     let panner: PannerNode | null = null;
     if (spatial) {
         panner = ctx.createPanner();
-        panner.panningModel = 'equalpower'; // skip HRTF — v1 only does basic stereo pan
+        panner.panningModel = 'equalpower'; // skip HRTF, v1 only does basic stereo pan
         const f = (opts as SpatialOpts).falloff;
         panner.distanceModel = f?.model ?? 'inverse';
         panner.refDistance = f?.ref ?? 1;
@@ -486,8 +486,8 @@ function startAtlasSource(
         playback._ended = true;
     };
     playback.source = source;
-    // start(when, offset, duration) — for non-loop, pass duration so the
-    // source stops at the slice end (atlas is a concat — without this we'd
+    // start(when, offset, duration), for non-loop, pass duration so the
+    // source stops at the slice end (atlas is a concat, without this we'd
     // play straight through into the next clip).
     if (source.loop) {
         source.start(0, clip.offset);
@@ -552,7 +552,7 @@ export function updateForFrame(audio: Audio, room: AudioRoomLike): void {
         }
         if (p.node) {
             if (p.node.scene === null) {
-                // node removed — cancel + reap.
+                // node removed, cancel + reap.
                 try {
                     p.source?.stop();
                 } catch {
@@ -615,7 +615,7 @@ function updateListener(audio: Audio, room: AudioRoomLike): void {
 
     const listener = audio.resources.context.listener;
     if (listener.positionX) {
-        // modern AudioParam interface — Chrome, Firefox. matches three.js:
+        // modern AudioParam interface, Chrome, Firefox. matches three.js:
         // use linearRampToValueAtTime over `setValueAtTime` for smoother
         // panning during motion (three.js#14393). schedule the ramp to
         // arrive ~one frame ahead.

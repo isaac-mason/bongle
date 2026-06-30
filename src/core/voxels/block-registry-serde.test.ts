@@ -1,9 +1,9 @@
 // ── block-registry-serde tests ──────────────────────────────────────
 //
 // Two invariants matter at the worker boundary:
-//   1. Byte-equality round-trip — every typed array the mesher reads
+//   1. Byte-equality round-trip, every typed array the mesher reads
 //      survives `serialize → ArrayBuffer → deserialize` unchanged.
-//   2. Functional equivalence — running `meshChunk` against the decoded
+//   2. Functional equivalence, running `meshChunk` against the decoded
 //      partial registry produces byte-identical quad buffers + face
 //      counts vs. running against the source registry.
 
@@ -134,7 +134,7 @@ describe('block-registry-serde', () => {
     });
 
     describe('meshChunk equivalence', () => {
-        // Cast decoded → BlockRegistry — the partial only populates the
+        // Cast decoded → BlockRegistry, the partial only populates the
         // mesher-read subset, but `meshChunk` types its registry param
         // as the full BlockRegistry. The mesher destructures only the
         // populated tables, so this cast is safe for the test.

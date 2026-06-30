@@ -1,10 +1,10 @@
-// api/storage.ts — script-facing persistent KV.
+// api/storage.ts, script-facing persistent KV.
 //
 // Two scopes (matching the service tables `game_storage` /
 // `game_user_storage`):
-//   - `gameStorage.*` — gameId-scoped, shared across all rooms/players.
+//   - `gameStorage.*`, gameId-scoped, shared across all rooms/players.
 //     Use for leaderboards, world state, season buckets.
-//   - `userStorage.*` — (gameId, userId)-scoped, private to one player.
+//   - `userStorage.*`, (gameId, userId)-scoped, private to one player.
 //     Use for inventory, progression, settings.
 //
 // Server-only. Calling from a client context throws. Backed by the
@@ -32,7 +32,7 @@ function requireDriver(ctx: ScriptContext) {
     return ctx.server.state.driver.storage;
 }
 
-/** Game-scoped KV — shared across every room and player of this game. */
+/** Game-scoped KV, shared across every room and player of this game. */
 export const gameStorage = {
     get(ctx: ScriptContext, key: string): Promise<StorageEntry | null> {
         return requireDriver(ctx).game.get(key);
@@ -49,7 +49,7 @@ export const gameStorage = {
 };
 
 /**
- * Per-(game, user) KV — private to one player within this game. `userId`
+ * Per-(game, user) KV, private to one player within this game. `userId`
  * is the durable platform identity (`User.id`). Resolve it from a
  * `Client` via `clientToUser(ctx, client).id`.
  */

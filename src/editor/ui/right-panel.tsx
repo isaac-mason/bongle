@@ -49,7 +49,7 @@ type RightPanelProps = {
 };
 
 /**
- * right panel — scrollable column of collapsible panes.
+ * right panel, scrollable column of collapsible panes.
  * order: hierarchy → tool space → active block → palette → history.
  * to reorder a pane, move its <CollapsiblePane> line.
  * width is controlled by the parent (ui.tsx) via drag handle.

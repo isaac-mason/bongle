@@ -82,9 +82,9 @@ const EXPECTED: boolean[] = [
     false, // 0000  count 0
     true, //  0001  count 1 (c00)
     true, //  0010  count 1 (c01)
-    false, // 0011  count 2 face-shared (c00+c01) — left col when axis=0; same dy/dx so coplanar
+    false, // 0011  count 2 face-shared (c00+c01), left col when axis=0; same dy/dx so coplanar
     true, //  0100  count 1 (c10)
-    false, // 0101  count 2 face-shared (c00+c10) — same dz/dz, opposite dy/dx → coplanar
+    false, // 0101  count 2 face-shared (c00+c10), same dz/dz, opposite dy/dx → coplanar
     true, //  0110  count 2 diagonal (c01+c10)
     true, //  0111  count 3 (missing c11)
     true, //  1000  count 1 (c11)

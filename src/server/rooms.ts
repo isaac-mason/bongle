@@ -56,9 +56,9 @@ export class RoomNotFoundError extends Error {
 export type { RoomMode as RoomKind } from '../core/protocol';
 
 /** server-side state only edit rooms carry. lives on `Room.edit`, which is null
- *  on play rooms — so the type forbids dirtying or persisting a runtime room. */
+ *  on play rooms, so the type forbids dirtying or persisting a runtime room. */
 export type RoomEditState = {
-    /** unsaved edits since the last flush — gates the interval auto-flush. */
+    /** unsaved edits since the last flush, gates the interval auto-flush. */
     dirty: boolean;
     /** per-chunk serialized-byte cache for incremental voxel save: seeded on
      *  load, refreshed on each flush, so `saveRoom` re-gzips only the chunks
@@ -105,7 +105,7 @@ export type Room = {
      *  tick; pauses when ticks don't fire. read via `ctx.clock.time`. */
     clock: Clock.Clock;
 
-    /** per-room animation state — caches the [AnimatorTrait] query consumed by
+    /** per-room animation state, caches the [AnimatorTrait] query consumed by
      *  `Animation.tick`. */
     animations: Animation.Animations;
 
@@ -115,7 +115,7 @@ export type Room = {
     /** per-room performance metrics. */
     metrics: Metrics;
 
-    /** per-room log buffer — script logs and tagged engine logs land here. */
+    /** per-room log buffer, script logs and tagged engine logs land here. */
     logs: Logs;
 
     /** monotonically incrementing tick counter. incremented each update(). */
@@ -133,15 +133,15 @@ export type Room = {
 /* ── Player ─────────────────────────────────────────────────────── */
 
 /**
- * A `Player` is a client's specific instance of being in a room — a child
+ * A `Player` is a client's specific instance of being in a room, a child
  * concept of `Client` (which is the connection itself). One Player exists
  * per (client, room, mode) triple, identified by a server-allocated
  * `PlayerId`. A single client may hold multiple Players in the same room
  * if their modes differ (e.g. an editor view + a play view of the same
  * room, each shown as a separate tab).
  *
- * Each Player owns one in-scene node bearing PlayerTrait — accessed via
- * `room.playerNodes.get(player.id)` — which is where world observation
+ * Each Player owns one in-scene node bearing PlayerTrait, accessed via
+ * `room.playerNodes.get(player.id)`, which is where world observation
  * (camera, input, physics ownership) is anchored.
  */
 export type { PlayerId };
@@ -335,14 +335,14 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
 
     state.rooms.set(id, room);
 
-    // WorldTrait — always-attached scene-scoped script host. lives on
+    // WorldTrait, always-attached scene-scoped script host. lives on
     // root so script(WorldTrait, …) factories fire exactly once per room.
     attachWorldTrait(room.nodes.root);
 
     // server-side editor concerns are always-attached on the room root in
     // dev builds. no-op when env.editor is false (the editor module never
     // registers the trait). per-player client activation lives on player
-    // nodes — see createPlayerNode for edit rooms.
+    // nodes, see createPlayerNode for edit rooms.
     attachEditorServerTrait(room);
 
     return room;
@@ -356,7 +356,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
 /** flip a room's unsaved-edits flag. purely server-side: it gates the interval
  *  auto-flush (see engine-server `update`). set true on edits, false on flush. */
 export function setRoomDirty(room: Room, value: boolean): void {
-    // no-op on play rooms (edit === null) — they never persist.
+    // no-op on play rooms (edit === null), they never persist.
     if (room.edit) room.edit.dirty = value;
 }
 
@@ -397,7 +397,7 @@ export function destroyRoom(state: Rooms, roomId: string): void {
 
     state.rooms.delete(roomId);
 
-    // auto-cleanup empty namespaces (except 'main' and 'editor' — these live
+    // auto-cleanup empty namespaces (except 'main' and 'editor', these live
     // for the process lifetime and are conventional roots). `play`-minted
     // play-<uuid> namespaces vanish when their last room is destroyed.
     if (room.namespace !== 'main' && room.namespace !== 'editor') {
@@ -412,7 +412,7 @@ export function destroyRoom(state: Rooms, roomId: string): void {
  * Editor traits are looked up by id from the global trait registry (registered
  * by the editor module at import time). When env.editor is false the editor
  * module never loads, so these handles resolve to undefined and the helpers
- * no-op — keeping rooms.ts free of any editor/* import.
+ * no-op, keeping rooms.ts free of any editor/* import.
  *
  * Both traits are non-persisted (`persist: false`) so they never reach scene
  * files. The scripts bound to them run automatically as the trait attaches:
@@ -454,7 +454,7 @@ export function findPlayer(state: Rooms, client: Client, roomId: string, mode: P
 }
 
 /**
- * Allocate a Player for a (client, room, mode). Idempotent — returns the
+ * Allocate a Player for a (client, room, mode). Idempotent, returns the
  * existing Player if one already matches.
  *
  * Does NOT create the in-scene player node; that's `createPlayerNode`,
@@ -484,7 +484,7 @@ export function joinRoom(state: Rooms, client: Client, roomId: string, mode: Pla
 }
 
 /**
- * Remove a Player by id. Does NOT destroy the in-scene player node —
+ * Remove a Player by id. Does NOT destroy the in-scene player node,
  * caller's job (typically through leaveClientFromRoom or stopRoomInner /
  * destroyRoom).
  */
@@ -523,7 +523,7 @@ export function leaveAllRooms(state: Rooms, client: Client): void {
 
 /**
  * Set which Player the client has flagged as their active focus. Purely
- * informational — used for presence, not for command routing.
+ * informational, used for presence, not for command routing.
  */
 export function setActivePlayer(state: Rooms, client: Client, playerId: PlayerId): void {
     if (!state.players.has(playerId)) return;
@@ -580,7 +580,7 @@ export function getRoomsForClient(state: Rooms, client: Client): Set<string> {
 }
 
 /**
- * Distinct clients currently in a room — deduped across modes (a client
+ * Distinct clients currently in a room, deduped across modes (a client
  * holding both an edit and a play Player in the same room counts once).
  */
 export function getClientsInRoom(state: Rooms, room: Room): Set<Client> {
@@ -632,7 +632,7 @@ export function findRoomsInNamespace(state: Rooms, namespace: string): Room[] {
 /**
  * The (at most one) room currently occupying the given namespace. Used
  * by the matchmaking-style join flow to find-or-create a play room keyed
- * on canonicalJson(gameOptions). Returns the first match — namespaces
+ * on canonicalJson(gameOptions). Returns the first match, namespaces
  * are unique per session, so there's only ever one root.
  */
 export function findRoomByNamespace(state: Rooms, namespace: string): Room | undefined {
@@ -678,7 +678,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     let snapshotMs = 0;
     if (env.editor && room.mode === 'play' && room.sourceRoomId) {
         const sourceRoom = getRoom(state.rooms, room.sourceRoomId);
-        // flush the source edit room so the play room boots from its live state —
+        // flush the source edit room so the play room boots from its live state,
         // but only if it's actually dirty (clean editor → no disk write), and
         // clear dirty after since this IS a save (no lingering false-dirty).
         if (sourceRoom?.edit?.dirty) {
@@ -689,7 +689,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         }
     }
 
-    // dispose the placeholder physics from createRoom — re-init below.
+    // dispose the placeholder physics from createRoom, re-init below.
     // The Jolt world from createRoom isn't explicitly destroyed (no
     // world-destroy fn exists today); WASM-side leak is one world per
     // room boot.
@@ -720,7 +720,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
         loadSceneGraph(room.nodes, sceneFile.data.nodes);
         sceneParseMs = performance.now() - parseT0;
         // seed dedupe cache so the first flush compares against real disk
-        // bytes — see saveScene / engine-server boot loop for context.
+        // bytes, see saveScene / engine-server boot loop for context.
         ContentManager.seedLastWrittenRaw(state.contentManager, room.sceneId, sceneFile.raw);
     } else if (env.editor && room.mode === 'edit') {
         seedStarterFloor(room);
@@ -736,7 +736,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
 
     // re-attach after loadSceneGraph: it clears root._traits and re-populates
     // from persisted data, which never includes these traits (persist: false).
-    // idempotent — no-op when createRoom already attached and load was skipped.
+    // idempotent, no-op when createRoom already attached and load was skipped.
     attachWorldTrait(room.nodes.root);
     attachEditorServerTrait(room);
 
@@ -850,7 +850,7 @@ export function createPlayRoom(state: EngineServer, sceneId: string, sourceRoomI
 /**
  * Create + initialize a room in an explicit namespace. Used by editor
  * command handlers to mint play-session and editor namespaces. Authored
- * scripts cannot reach this — api/rooms.create inherits the caller's
+ * scripts cannot reach this, api/rooms.create inherits the caller's
  * namespace.
  */
 export function createRoomInNamespace(
@@ -908,7 +908,7 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
 
     // route any client whose active Player was here to a fallback Player
     // they already hold in the fallback room. We don't auto-mint Players in
-    // the fallback — leaveClientFromRoom handles that path explicitly.
+    // the fallback, leaveClientFromRoom handles that path explicitly.
     if (fallback) {
         for (const client of affectedClients) {
             if (state.rooms.activePlayer.has(client)) continue;
@@ -925,7 +925,7 @@ function stopRoomInner(state: EngineServer, roomId: string): void {
 /**
  * Queue a stop to be applied after the current tick block. Use this
  * from any caller that may run inside a per-room tick (script hooks,
- * physics callbacks) — direct stopRoom() during iteration would tear
+ * physics callbacks), direct stopRoom() during iteration would tear
  * down nodes mid-loop.
  */
 export function queueStopRoom(state: Rooms, roomId: string): void {
@@ -1037,7 +1037,7 @@ export function deleteScene(state: EngineServer, sceneId: string): void {
 /**
  * Create the in-scene player node and attach the trait stack every
  * player wears (Transform + Player + Character). Does NOT fire join
- * hooks or drive the avatar lifecycle — both are owned by the caller
+ * hooks or drive the avatar lifecycle, both are owned by the caller
  * (`addClientToRoom` for fresh joins; the reseed branch of
  * `leaveClientFromRoom` for fallback Players).
  *

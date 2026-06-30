@@ -53,7 +53,7 @@ function expectVec3Near(actual: Vec3, expected: Vec3, epsilon = 1e-5) {
 
 /** approximate equality for quat */
 function expectQuatNear(actual: Quat, expected: Quat, epsilon = 1e-5) {
-    // quaternions q and -q represent the same rotation — normalize sign
+    // quaternions q and -q represent the same rotation, normalize sign
     const dot = actual[0] * expected[0] + actual[1] * expected[1] + actual[2] * expected[2] + actual[3] * expected[3];
     const sign = dot < 0 ? -1 : 1;
     const prec = -Math.log10(epsilon);
@@ -243,11 +243,11 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(50, 0, 0),
         });
 
-        // parent has NO transform — just a grouping node
+        // parent has NO transform, just a grouping node
         const parent = createNode({ name: 'NoTransform' });
         addChild(gp, parent);
 
-        // child has transform — should inherit from grandparent
+        // child has transform, should inherit from grandparent
         const child = createNode({ name: 'Child' });
         addChild(parent, child);
         addTrait(child, TransformTrait, {
@@ -371,7 +371,7 @@ describe('parent transform bookkeeping', () => {
         const ct = getTrait(child, TransformTrait)!;
         expect(ct._parent).toBeNull();
 
-        // now add transform to parent — child should update
+        // now add transform to parent, child should update
         addTrait(parent, TransformTrait);
         const pt = getTrait(parent, TransformTrait)!;
         expect(ct._parent).toBe(pt);
@@ -399,7 +399,7 @@ describe('parent transform bookkeeping', () => {
         // initially child → parent
         expect(ct._parent).toBe(pt);
 
-        // remove parent's transform — child should now point to grandparent
+        // remove parent's transform, child should now point to grandparent
         removeTrait(parent, TransformTrait);
         expect(ct._parent).toBe(gpt);
     });
@@ -563,7 +563,7 @@ describe('parent transform bookkeeping', () => {
 
         // child's parent transform should point to parent's transform
         expect(rct._parent).toBe(rpt);
-        // parent is top-level (under root) — no transform ancestor
+        // parent is top-level (under root), no transform ancestor
         expect(rpt._parent).toBeNull();
     });
 });
@@ -1012,7 +1012,7 @@ describe('snapshot', () => {
         });
         setInterpolation(node, true); // seeds prev = (0,0,0)
 
-        // mutate via setPosition — marks dirty and enqueues for snapshot
+        // mutate via setPosition, marks dirty and enqueues for snapshot
         const t = getTrait(node, TransformTrait)!;
         setPosition(t, vec3.fromValues(1, 2, 3));
         setQuaternion(t, rotY90());
@@ -1178,7 +1178,7 @@ describe('interpolate', () => {
         // next interpolate() exercises the lerp path.
         interpolate(initInterpolation(sg, 1), 0, 1);
 
-        // now move parent (the "current" pose) — interpolate at alpha=0.5
+        // now move parent (the "current" pose), interpolate at alpha=0.5
         // should produce parent.visualPos = (5,0,0), so child world =
         // (5,0,0) + (1,0,0) = (6,0,0).
         const pt = getTrait(parent, TransformTrait)!;
@@ -1242,7 +1242,7 @@ describe('interpolate', () => {
             position: vec3.fromValues(7, 8, 9),
         });
 
-        // run interpolate over a scene with no Interp nodes — should not
+        // run interpolate over a scene with no Interp nodes, should not
         // touch this node's _interpolated bit.
         snapshot(initInterpolation(sg, 1));
         interpolate(initInterpolation(sg, 1), 0.5, 0);
@@ -1311,7 +1311,7 @@ describe('interpolate', () => {
         addTrait(child, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
         setInterpolation(child, true);
 
-        // refresh parent.worldMatrix — the chain compose() will read against
+        // refresh parent.worldMatrix, the chain compose() will read against
         computeWorldTransforms(sg);
 
         const pt = getTrait(parent, TransformTrait)!;
@@ -1323,7 +1323,7 @@ describe('interpolate', () => {
 
         interpolate(initInterpolation(sg, 1), 0.5, 0);
 
-        // parent never participated — bit stays 0, boundary takes the
+        // parent never participated, bit stays 0, boundary takes the
         // parent.worldMatrix branch.
         expect(pt._interpolated).toBe(0);
         expect(ct._interpolated).toBe(1);
@@ -1348,7 +1348,7 @@ describe('interpolate', () => {
 
         setInterpolation(node, true);
 
-        // prev now mirrors current — first interpolate frame won't lerp from origin
+        // prev now mirrors current, first interpolate frame won't lerp from origin
         expectVec3Near(t.prevPosition, vec3.fromValues(7, 8, 9));
         expectQuatNear(t.prevQuaternion, rotY90());
         expect(t.interpolate).toBe(1);
@@ -1500,7 +1500,7 @@ describe('round-trip: mutation → compute → verify', () => {
         const desiredWorldPos = vec3.fromValues(120, 0, 0);
         setWorldPosition(ct, desiredWorldPos);
 
-        // recompute — child world position should match desired
+        // recompute, child world position should match desired
         computeWorldTransforms(sg);
         expectVec3Near(getWorldPosition(ct), desiredWorldPos);
     });

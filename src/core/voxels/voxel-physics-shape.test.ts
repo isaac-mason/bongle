@@ -121,7 +121,7 @@ describe('voxelPhysicsShape castRay', () => {
         const collector = createAllCastRayCollector();
         const settings = createDefaultCastRaySettings();
 
-        // ray going +x at y=0.5 — misses block at (5,5,5)
+        // ray going +x at y=0.5, misses block at (5,5,5)
         castRayVsShape(
             collector,
             settings,
@@ -308,7 +308,7 @@ describe('voxelPhysicsShape castRay', () => {
             SHAPE_SCALE_Z,
         );
 
-        // ray passes through the gap above the slab — no hit
+        // ray passes through the gap above the slab, no hit
         expect(collector.hits.length).toBe(0);
     });
 });
@@ -446,7 +446,7 @@ describe('voxelPhysicsShape collision:false', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
         setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
-        // sweep AABB expands by one cell — without these the +Z/-Z
+        // sweep AABB expands by one cell, without these the +Z/-Z
         // neighbor chunks would be CONTENT_IGNORE and produce spurious hits.
         voxels.chunks.set('0,0,-1', createChunk(0, 0, -1));
         voxels.chunks.set('0,0,1', createChunk(0, 0, 1));
@@ -597,7 +597,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
 
-        // point at y=5.25 — within slab AABB
+        // point at y=5.25, within slab AABB
         collidePointVsShape(
             collector,
             settings,
@@ -645,7 +645,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const collector = createAllCollidePointCollector();
         const settings = createDefaultCollidePointSettings();
 
-        // point at y=5.75 — above visual slab (top at y=5.5) but inside unit box [5,6]
+        // point at y=5.75, above visual slab (top at y=5.5) but inside unit box [5,6]
         // no explicit shape → unit box collider → point IS inside
         collidePointVsShape(
             collector,
@@ -727,7 +727,7 @@ describe('voxelPhysicsShape collideShape', () => {
 
         expect(collector.hits.length).toBeGreaterThan(0);
         // penetration: collideConvexVsConvexLocal returns distance-based penetration
-        // positive or negative depending on convention — just check we got a contact
+        // positive or negative depending on convention, just check we got a contact
     });
 
     it('box not overlapping produces no contact', () => {
@@ -961,7 +961,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
 
-        // slab top at y=5.5, box center at y=8 — well above the slab
+        // slab top at y=5.5, box center at y=8, well above the slab
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(0.4, 0.4, 0.4), convexRadius: 0.02 });
 
         const collector = createAllCollideShapeCollector();
@@ -1078,7 +1078,7 @@ describe('voxelPhysicsShape castShape', () => {
         const collector = createAllCastShapeCollector();
         const settings = createDefaultCastShapeSettings();
 
-        // box starts above block, swept upward — away from block
+        // box starts above block, swept upward, away from block
         castShapeVsShape(
             collector,
             settings,
@@ -1132,7 +1132,7 @@ describe('voxelPhysicsShape castShape', () => {
         const settings = createDefaultCastShapeSettings();
 
         // voxel A swept upward against stationary box B at y=8
-        // this is the reversed direction — should still work via reversedCastShapeVsShape
+        // this is the reversed direction, should still work via reversedCastShapeVsShape
         castShapeVsShape(
             collector,
             settings,
@@ -1232,7 +1232,7 @@ describe('voxelPhysicsShape multi-block', () => {
     it('empty world produces no contacts', () => {
         const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
         const voxels = createVoxels(registry);
-        // explicit empty chunk — CONTENT_IGNORE treats unknown chunks as
+        // explicit empty chunk, CONTENT_IGNORE treats unknown chunks as
         // a solid 16³ cell, so leaving (0,0,0) absent would produce phantom
         // hits at the chunk boundary.
         voxels.chunks.set('0,0,0', createChunk(0, 0, 0));

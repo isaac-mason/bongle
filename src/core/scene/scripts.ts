@@ -29,7 +29,7 @@ import type { TraitBase, TraitHandle } from './traits';
 export type Unsubscribe = () => void;
 
 /**
- * mutable POV pointer — the node whose CameraTrait the renderer binds into
+ * mutable POV pointer, the node whose CameraTrait the renderer binds into
  * the scene pass each frame, and which scripts compare against via
  * `getControlNode(ctx) === ctx.node`. wrapped in an object (not a bare
  * field) so ClientRoom and ClientContext can share a single reference:
@@ -45,7 +45,7 @@ export type ControlClientState = {
 
 /**
  * client-side editor lens. when present, this client is in some flavor of
- * edit mode — either a real edit room (server-authoritative, editorNode ===
+ * edit mode, either a real edit room (server-authoritative, editorNode ===
  * playerNode) or a local-only peek into a play room (editorNode is a
  * `realm: 'client'` node carrying EditorTrait + CameraTrait).
  *
@@ -68,7 +68,7 @@ export type EditRoomState = {
     editorNode: nodes.Node;
 
     /**
-     * lens-private camera node — `realm: 'client'` with TransformTrait +
+     * lens-private camera node, `realm: 'client'` with TransformTrait +
      * CameraTrait. editorNode's CameraRefTrait points here so the lens's
      * pose is preserved across play/edit tab toggles, independently of
      * `room.cameraNode` (which the player controller drives while in play
@@ -82,18 +82,18 @@ export type ClientContext = {
     scene: Scene;
 
     /**
-     * mutable POV state — same object as `room.control`. scripts read
+     * mutable POV state, same object as `room.control`. scripts read
      * `ctx.client.control.node` to know which node currently drives the
      * camera + input. swap via `setControlNode(room, node)`. read the
      * active render camera with `getControlCamera(ctx)`.
      */
     control: ControlClientState;
 
-    /** local player body node — alias for `room.playerNode`. */
+    /** local player body node, alias for `room.playerNode`. */
     player: nodes.Node;
 
     /**
-     * default room camera node — alias for `room.cameraNode`. has a
+     * default room camera node, alias for `room.cameraNode`. has a
      * TransformTrait (pose) and a CameraTrait (projection). builtin
      * controllers write to it each frame; scripts can pre-seed pose
      * before adding a controller, override via a CameraRefTrait pointing
@@ -130,10 +130,10 @@ export type ClientContext = {
     /** our own client id */
     clientId: ClientId | undefined;
 
-    /** client input state — read keyboard/mouse here in onFrame hooks */
+    /** client input state, read keyboard/mouse here in onFrame hooks */
     input: Input;
 
-    /** top-level client engine state — populated by engine-client on room creation */
+    /** top-level client engine state, populated by engine-client on room creation */
     state?: EngineClient;
 
     /** the client room this script is running in */
@@ -149,7 +149,7 @@ export type ServerContext = {
 
     /**
      * Matchmaking opts on this room's namespace. Stamped at namespace-creation
-     * time — by the `play` handler for `client.matchmake`-allocated rooms, by
+     * time, by the `play` handler for `client.matchmake`-allocated rooms, by
      * the runtime at boot for the deployed 'main' namespace. Empty for the
      * editor namespace and for dev runs that never received gameOptions.
      */
@@ -168,10 +168,10 @@ export type NodesContext = {
      *  registrations by roomId so per-room handlers don't cross rooms. */
     rpc: Rpc.Rpc;
 
-    /** client-specific context — undefined on server */
+    /** client-specific context, undefined on server */
     client: ClientContext | undefined;
 
-    /** server-specific context — undefined on client */
+    /** server-specific context, undefined on client */
     server: ServerContext | undefined;
 
     /** per-room voxel data */
@@ -183,7 +183,7 @@ export type NodesContext = {
     /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry — flat lookup tables for block type/state info */
+    /** block registry, flat lookup tables for block type/state info */
     blocks: BlockRegistry;
 
     /** live script instances, keyed by node id → script id → instance.
@@ -202,7 +202,7 @@ export type ScriptOptions = {
     /**
      * producer handles whose changes trigger this script to be re-built
      * on its attached trait instances. accepts anything with a DepGraph
-     * `dependency` stamp — scene, model, block, trait, command, prefab
+     * `dependency` stamp, scene, model, block, trait, command, prefab
      * handles, etc. usually injected by the AST rewriter from identifiers
      * the factory body closes over; list manually for procedural cases
      * the rewriter can't see.
@@ -233,7 +233,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     /** per-room game clock (monotonic seconds, advances at tick cadence) */
     clock: Clock;
 
-    /** block registry — flat lookup tables for block type/state info */
+    /** block registry, flat lookup tables for block type/state info */
     blocks: BlockRegistry;
 
     /** client information, safe to ! bang if env.client is true */
@@ -310,7 +310,7 @@ export type ScriptInstance = {
     /** fired during physics step when a contact persists from the previous step */
     onPhysicsContactPersisted: Set<(args: PhysicsContactArgs) => void>;
 
-    /** fired during broadphase to validate body pairs — return false to reject collision */
+    /** fired during broadphase to validate body pairs, return false to reject collision */
     onPhysicsBodyPairValidate: Set<(bodyA: RigidBody, bodyB: RigidBody) => boolean>;
 
     /** swaps out state on module reload */
@@ -320,18 +320,18 @@ export type ScriptInstance = {
      *  queries are evicted from the scene graph's query map. */
     queries: Set<nodes.Query<any>>;
 
-    /** rpc listener registrations owned by this instance — each record is
+    /** rpc listener registrations owned by this instance, each record is
      *  the data needed to remove the entry from `runtime.rpc.listeners`:
      *  the commandId it's keyed under, and the ListenerEntry reference
      *  returned by `Rpc.listen`. disposeScriptInstance walks this array
-     *  and calls `Rpc.unlisten` per record. data-driven cleanup — no
+     *  and calls `Rpc.unlisten` per record. data-driven cleanup, no
      *  closure-based unsubscribes stored anywhere. */
     netListeners: Array<{ commandId: string; entry: Rpc.ListenerEntry }>;
 
     /** runtime env for this instance */
     _runtime: NodesContext;
 
-    /** context passed to the factory — held until initScriptInstance runs the factory, then cleared */
+    /** context passed to the factory, held until initScriptInstance runs the factory, then cleared */
     _ctx: ScriptContext;
 };
 
@@ -346,7 +346,7 @@ export type ScriptBody = {
 
 /**
  * stored ScriptDef. body + `{ traitId, scriptId, key, dependency }`.
- * `key` is the composed `${traitId}.${scriptId}` — used as the instance
+ * `key` is the composed `${traitId}.${scriptId}`, used as the instance
  * Map key, DepGraph dependency id, and log label. don't parse it apart;
  * read `traitId` / `scriptId` directly.
  */
@@ -354,19 +354,19 @@ export type ScriptDef = ScriptBody & {
     traitId: string;
     scriptId: string;
     key: string;
-    /** DepGraph dependency — see SceneHandle.dependency. lets the AST
+    /** DepGraph dependency, see SceneHandle.dependency. lets the AST
      *  rewrite wrap `script(...)` calls with `__addDeps(h, [...])`. */
     dependency: { registry: 'scripts'; id: string };
 };
 
 /**
- * register a script (behavior) on a trait. callable multiple times per trait —
+ * register a script (behavior) on a trait. callable multiple times per trait,
  * each call appends to the trait def's `scripts` array. attaching the trait to
  * a live node instantiates one ScriptInstance per registered script. the
  * factory runs at attach time with `ctx.trait` typed for the handle.
  *
  * `id` is a stable user-supplied string (without trait prefix). the runtime
- * identifier becomes `${trait._id}.${id}` — used as the instance map key,
+ * identifier becomes `${trait._id}.${id}`, used as the instance map key,
  * DepGraph dependency key, and error message label.
  *
  * @example
@@ -395,7 +395,7 @@ export function script<T extends TraitBase>(
     };
     // upsert into the trait def's script list: reuse the slot if this id already
     // exists, else append (`scripts[length] = def` extends the array). re-
-    // registration is normal under HMR — a built-in trait like WorldTrait keeps
+    // registration is normal under HMR, a built-in trait like WorldTrait keeps
     // its def (and `scriptsById`) across a user-file reload, so the same
     // `script()` call re-runs against a populated map; latest factory wins.
     const existing = target.scriptsById.get(scriptId);
@@ -410,7 +410,7 @@ export function script<T extends TraitBase>(
     // patch/invalidate diff sees which scripts the module declares this run.
     // the diff is set-based: an unchanged key set means only factory bodies
     // moved (swapped in place below), while an added/removed/renamed key is a
-    // shape change that invalidates — which is what disposes a script the
+    // shape change that invalidates, which is what disposes a script the
     // user deleted or renamed, even on a persistent (built-in) trait def.
     recordScript(key);
     // wire dep edges so the dirty set covers scripts whose closed-over
@@ -431,7 +431,7 @@ const noop: Unsubscribe = () => {};
  * register (or reuse) a live query tied to this script instance's lifetime.
  * the returned `Query` is the same handle for any caller with identical
  * conditions; calling twice on the same instance dedups to one refcount.
- * the query is released when the script instance disposes — do not hold
+ * the query is released when the script instance disposes, do not hold
  * references across `onSwap` boundaries.
  */
 export function query<const Args extends nodes.ConditionArgs[]>(
@@ -458,7 +458,7 @@ export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandl
 }
 
 /**
- * resolve the room's current control node — the POV the engine renders
+ * resolve the room's current control node, the POV the engine renders
  * through and routes input through. scripts compare to their own ctx.node
  * to gate per-frame work that should only run on the active POV (camera
  * writes, input-driven movement, etc.); non-control nodes still run other
@@ -495,15 +495,15 @@ export type UpdateArgs = { delta: number };
 
 /**
  * register a callback that fires once per frame, before the fixed-timestep tick
- * loop. use this for input polling and camera updates — reads fresh input state
+ * loop. use this for input polling and camera updates, reads fresh input state
  * and drives the camera before any physics/kcc ticks run that frame.
- * client-only — no-op on the server.
+ * client-only, no-op on the server.
  */
 export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
-    // server has no client context — onUpdate is client-only
+    // server has no client context, onUpdate is client-only
     if (!ctx.client) return noop;
     instance.onUpdate.add(fn);
     return () => instance.onUpdate.delete(fn);
@@ -521,18 +521,18 @@ export function onFrame(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsu
 
 /**
  * register a callback that fires at the very start of each frame, before
- * onUpdate / onTick / onFrame. intended for input pre-processing — e.g. an
+ * onUpdate / onTick / onFrame. intended for input pre-processing, e.g. an
  * editor consuming mouse deltas before player controllers read them.
  *
  * iteration order matches onFrame (flat over runtime.instances). consumers
  * relying on "X runs before Y" should rely on script registration order.
- * client-only — no-op on the server.
+ * client-only, no-op on the server.
  */
 export function onInput(ctx: ScriptContext, fn: (args: FrameArgs) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
-    // client-only — server has no local input
+    // client-only, server has no local input
     if (!ctx.client) return noop;
     instance.onInput.add(fn);
     return () => instance.onInput.delete(fn);
@@ -579,14 +579,14 @@ export type JoinArgs = {
      *  builtin) and already stamped onto `playerNode`'s CharacterTrait
      *  before this fires. */
     characterModelId: string;
-    /** Rig contract of that model, e.g. `RIG_TYPE_6BONE` — lets onJoin
+    /** Rig contract of that model, e.g. `RIG_TYPE_6BONE`, lets onJoin
      *  branch on rig family without reaching for the trait. */
     rigType: string;
 };
 
 /**
  * register a callback that fires when a client joins the room.
- * server-only — no-op on the client.
+ * server-only, no-op on the client.
  */
 export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubscribe {
     const instance = ctx._instance;
@@ -605,7 +605,7 @@ export type LeaveArgs = {
 
 /**
  * register a callback that fires when a client leaves the room.
- * server-only — no-op on the client.
+ * server-only, no-op on the client.
  */
 export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsubscribe {
     const instance = ctx._instance;
@@ -620,7 +620,7 @@ export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsu
 
 /**
  * register a callback that fires when a block of `block`'s type is built
- * (placed where air or a different block was). server-only — no-op on the
+ * (placed where air or a different block was). server-only, no-op on the
  * client. handler receives the world coords + new state id; close over
  * `ctx` for scene/room access (e.g. spawn an item, play a sound).
  */
@@ -733,7 +733,7 @@ export function onPostPhysicsStep(ctx: ScriptContext, fn: (args: TickArgs) => vo
 
 /**
  * register a callback that fires after animator sampling, before world-matrix
- * recompute. ideal for procedural post-processing — head-look at the camera,
+ * recompute. ideal for procedural post-processing, head-look at the camera,
  * springs/dampers driven by parent motion, simple constraint clamps. local
  * TRS values are set; world matrices for this tick haven't been recomputed yet.
  */
@@ -745,7 +745,7 @@ export function onPostAnimate(ctx: ScriptContext, fn: (args: TickArgs) => void):
     return () => instance.onPostAnimate.delete(fn);
 }
 
-/** args passed to onPhysicsContact callbacks — raw crashcat types */
+/** args passed to onPhysicsContact callbacks, raw crashcat types */
 export type PhysicsContactArgs = {
     bodyA: RigidBody;
     bodyB: RigidBody;
@@ -755,7 +755,7 @@ export type PhysicsContactArgs = {
 
 /**
  * register a callback that fires during the physics step when a contact is detected.
- * receives raw crashcat body/manifold/settings — you can modify settings to customize
+ * receives raw crashcat body/manifold/settings, you can modify settings to customize
  * contact behavior (e.g. zero friction for ice surfaces, set isSensor).
  */
 export function onPhysicsContact(
@@ -891,7 +891,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
     // ctx.client is the live, shared per-room client context. The engine
     // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
     // instantiate (the room object doesn't exist yet at this point), so hold
-    // the reference directly — a copy here would freeze those fields as
+    // the reference directly, a copy here would freeze those fields as
     // `undefined` forever, breaking isOwner / playMono / getControlNode for
     // editor:true world systems. The editor lens is reachable via
     // `ctx.client.room?.editor`.
@@ -918,7 +918,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
 /* ── script instance lifecycle ───────────────────────────────────── */
 
 /**
- * run the factory body — registers onInit/onSwap/onTick/listen handlers via
+ * run the factory body, registers onInit/onSwap/onTick/listen handlers via
  * ctx hooks. split out from `initScriptInstance` so the swap path can run
  * the factory, restore snapshot via `onSwap.des`, then fire onInit (so
  * onInit hooks see rehydrated state, not factory defaults).
@@ -975,7 +975,7 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
     instance.queries.clear();
 
     // release net listeners by walking the registration data and
-    // unlistening per record — no stored closures, just data.
+    // unlistening per record, no stored closures, just data.
     for (const { commandId, entry } of instance.netListeners) {
         Rpc.unlisten(instance._runtime.rpc, commandId, entry);
     }
@@ -1114,7 +1114,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
     // factory runs first so the new instance registers its onSwap + onInit
     // handlers. then des() rehydrates factory-scope state from the prior
     // instance. only THEN fire onInit, so init code sees restored state
-    // rather than factory defaults — e.g. spawning UI per restored entry,
+    // rather than factory defaults, e.g. spawning UI per restored entry,
     // attaching listeners by restored id, etc.
     runFactory(newInstance);
     if (snapshot !== undefined && newInstance.onSwap) {
@@ -1127,7 +1127,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
 /**
  * re-run every live script factory against the current `traitsRegistry`
  * so edits to script bodies (handlers, init code, constants) take effect
- * on HMR. factory-closure locals are reset by design — `onSwap` is the
+ * on HMR. factory-closure locals are reset by design, `onSwap` is the
  * opt-in for preserving state across reloads.
  *
  * called from `applyRegistryChanges*` per-room. removed defs are disposed
@@ -1137,14 +1137,14 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * `dirtyScriptIds` narrows the swap to a known-affected subset (DepGraph
  * propagation from a producer change reaching `scripts:<id>` consumers via
  * the per-script `setDeps` wiring). pass `null` for the trait-body-edit
- * path that needs every instance re-run — even unchanged scripts can become
+ * path that needs every instance re-run, even unchanged scripts can become
  * structurally invalid if a trait field they depend on moved indices.
  */
 /**
  * Mirror a `registry.scripts` removal into the owning trait def. `script()`
  * only ever upserts into a trait's `scripts[]`/`scriptsById`, so a `script()`
  * call deleted from source has no effect on a trait def that outlives the
- * edit — a built-in trait (def in an engine module) or any trait defined in a
+ * edit, a built-in trait (def in an engine module) or any trait defined in a
  * *different* file than the removed `script()`. The registry detects the
  * deletion (drops the key on the owning module's reload) and emits a
  * `{ kind: 'removed' }` change; dispatch drains that change and calls this so

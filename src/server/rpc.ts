@@ -5,7 +5,7 @@ import * as Rooms from './rooms';
 
 /**
  * construct the server-side RpcDriver. only job is the side-specific send
- * impls (sendTo / broadcast — server doesn't send to itself); listener
+ * impls (sendTo / broadcast, server doesn't send to itself); listener
  * bookkeeping + dispatch lives in `core/rpc`. wrap with `Rpc.init(driver)`
  * to get an `Rpc` instance.
  *

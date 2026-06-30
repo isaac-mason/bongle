@@ -76,16 +76,16 @@ const _voxelBoxScale = vec3.fromValues(1, 1, 1);
 // look up the correct voxel data for any hit, even when Jolt holds the
 // subShapeId across multi-frame contact persistence.
 //
-// for cube voxel hits we only need (vx, vy, vz, stateId) — geometry is
+// for cube voxel hits we only need (vx, vy, vz, stateId), geometry is
 // recomputed on demand. for custom-collider hits we additionally capture
 // the contact's surface normal and supporting face at emission time
-// (via a wrapper collector — see below) so we don't need a stale
+// (via a wrapper collector, see below) so we don't need a stale
 // "last-hit" global.
 //
 // lifecycle:
 //   per-voxel-query: push entry → encode index in subShapeId
 //   contact listeners / getSurfaceNormal / getSupportingFace decode the
-//     subShapeId and index into the pool — entries stay valid for the
+//     subShapeId and index into the pool, entries stay valid for the
 //     entire frame.
 //   frame end: flushHitBuffer() resets the high-water mark to 0, freeing
 //     all entries back to the pool. MUST be the absolute last call of
@@ -93,7 +93,7 @@ const _voxelBoxScale = vec3.fromValues(1, 1, 1);
 
 // supporting faces from typical block colliders (boxes, hulls, compound
 // children) have ≤ 16 vertices. realistic block colliders won't exceed
-// this — captured faces are truncated if they do.
+// this, captured faces are truncated if they do.
 const FACE_MAX_VERTS = 16;
 const FACE_VERT_FLOATS = FACE_MAX_VERTS * 3;
 
@@ -104,7 +104,7 @@ export type VoxelHitInfo = {
     stateId: number;
     cid: number; // 0 = cube, >0 = custom collider
     subAabbIndex: number; // -1 for cube; reserved for sub-aabb tagging on custom colliders
-    // captured for custom-collider hits at emission time. world space —
+    // captured for custom-collider hits at emission time. world space,
     // assumes the voxel shape's body is at identity transform (terrain).
     nx: number;
     ny: number;
@@ -191,7 +191,7 @@ const _unpack_popResult = subShape.popResult();
  * call of each frame on both server and client (after render and any
  * post-render hooks), so contact-listener consumers can resolve
  * subShapeIds for the entire frame. Misplacement is the main correctness
- * risk — call it AFTER everything else.
+ * risk, call it AFTER everything else.
  */
 export function flushHitBuffer(): void {
     _hitCount = 0;
@@ -202,7 +202,7 @@ export function flushHitBuffer(): void {
  * `VoxelHitInfo`. Single source of truth for subShapeId → block lookup
  * used by rigid-body and vcc contact listeners.
  *
- * The returned object is owned by the pool — copy fields you need
+ * The returned object is owned by the pool, copy fields you need
  * before another physics query runs.
  */
 export function unpackVoxelHitInfo(subShapeId: number): VoxelHitInfo {
@@ -218,7 +218,7 @@ export function unpackVoxelHitInfo(subShapeId: number): VoxelHitInfo {
 // first). we wrap the outer collector, capture each emission's normal
 // and supporting face into the hit buffer, then OVERWRITE subShapeIdA
 // with `outerSubShapeIdA :: hitIdx` before forwarding. inner shape's
-// internal sub-id is discarded — we don't need it because everything we
+// internal sub-id is discarded, we don't need it because everything we
 // need at flush time is already in the buffer entry.
 //
 // the wrapper assumes the voxel shape body is at identity transform
@@ -267,7 +267,7 @@ const _wrapCollideCollector: CollideShapeCollector = {
     earlyOutFraction: 0,
     addHit(h: CollideShapeHit) {
         // penetrationAxis points from A's surface outward (direction to
-        // push B out of A). normalize to get A's surface normal — same
+        // push B out of A). normalize to get A's surface normal, same
         // direction whether voxel shape is A or B (faceA is on A).
         const voxelSide = _wrap.voxelSide;
         const face = voxelSide === 'A' ? h.faceA : h.faceB;
@@ -580,7 +580,7 @@ function castRayVsVoxels(
     if (cid === 0) {
         hitIdx = pushCubeHit(_castRay_result.voxelX, _castRay_result.voxelY, _castRay_result.voxelZ, stateId);
     } else {
-        // custom collider — raycast gives us a single normal + hit point.
+        // custom collider, raycast gives us a single normal + hit point.
         // store the normal directly; face is a degenerate triangle around
         // the hit point (raycasts don't carry a supporting face).
         _castRay_degenerateFace.numVertices = 3;
@@ -673,7 +673,7 @@ function collidePointVsVoxels(
     if (mt === MODEL_NONE && shapeB.registry.colliderId[stateId] === 0) return;
 
     // for custom shapes, approximate with unit cube containment check.
-    // collidePoint is a rough test — exact shape containment would require
+    // collidePoint is a rough test, exact shape containment would require
     // crashcat's collidePointVsShape but the approximation is sufficient here.
 
     _collidePoint_subShapeIdBuilder.value = subShapeIdB;
@@ -974,7 +974,7 @@ function castConvexVsVoxels(
     // A-to-world
     const transformA = mat4.fromRotationTranslationScale(_castVox_AtoWorld, _castVox_quatA, _castVox_posA, _castVox_scaleA);
 
-    // B-to-world (rotation + translation only — voxel shape)
+    // B-to-world (rotation + translation only, voxel shape)
     const targetTransform = mat4.fromRotationTranslation(_castVox_BtoWorld, _castVox_quatB, _castVox_posB);
 
     // castTransform = B^-1 * A (A's transform in B's local space)
@@ -1151,7 +1151,7 @@ function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsSha
     const info = _hitPool[_getSurfaceNormal_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube block — compute closest face geometrically using exact voxel coords from buffer
+        // cube block, compute closest face geometrically using exact voxel coords from buffer
         const px = ioResult.position[0];
         const py = ioResult.position[1];
         const pz = ioResult.position[2];
@@ -1207,7 +1207,7 @@ function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsSha
 
         vec3.set(ioResult.normal, nx, ny, nz);
     } else {
-        // custom collider — read the per-hit normal captured at the time
+        // custom collider, read the per-hit normal captured at the time
         // the inner shape's collide/cast emitted this contact.
         vec3.set(ioResult.normal, info.nx, info.ny, info.nz);
     }
@@ -1236,12 +1236,12 @@ function getSupportingFace(
     const info = _hitPool[_getSupportingFace_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube block — pick face most aligned with direction, build quad
+        // cube block, pick face most aligned with direction, build quad
         // direction is in shape-local space (voxel coords), pointing INTO the surface
         const faceIdx = getFaceFromNormal(-direction[0], -direction[1], -direction[2]);
         buildCubeQuad(face, faceIdx, info.vx, info.vy, info.vz);
     } else {
-        // custom collider — copy the per-hit face captured at emission time.
+        // custom collider, copy the per-hit face captured at emission time.
         const n = info.faceNumVerts;
         face.numVertices = n;
         for (let i = 0; i < n * 3; i++) {
@@ -1274,13 +1274,13 @@ export const voxelPhysicsShapeDef = defineShape<VoxelPhysicsShape>({
     register() {
         for (const def of Object.values(shapeDefs)) {
             if (def.category === ShapeCategory.CONVEX) {
-                // voxels (A) vs convex (B) — our primary direction
+                // voxels (A) vs convex (B), our primary direction
                 setCollideShapeFn(ShapeType.USER_1, def.type, collideVoxelsVsConvex);
-                // convex (A) vs voxels (B) — reversed
+                // convex (A) vs voxels (B), reversed
                 setCollideShapeFn(def.type, ShapeType.USER_1, reversedCollideShapeVsShape(collideVoxelsVsConvex));
                 // cast: convex (A) vs voxels (B)
                 setCastShapeFn(def.type, ShapeType.USER_1, castConvexVsVoxels);
-                // cast: voxels (A) vs convex (B) — reversed
+                // cast: voxels (A) vs convex (B), reversed
                 setCastShapeFn(ShapeType.USER_1, def.type, reversedCastShapeVsShape(castConvexVsVoxels));
             }
         }

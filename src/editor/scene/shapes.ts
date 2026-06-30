@@ -1,5 +1,5 @@
 /**
- * brush shape rasterisers — fill a `Selection` with the voxels covered by
+ * brush shape rasterisers, fill a `Selection` with the voxels covered by
  * a centered primitive (sphere / cube / cylinder / disc). callers use the
  * resulting selection as input to resolveFill / overlay / replace, so
  * brush click application reuses the same pattern + mask machinery as the
@@ -11,7 +11,7 @@
  * cylinder, centred on the click; cylinder with height=1 is a single-
  * layer disc and is equivalent to `disc`. heights are clamped to ≥1.
  *
- * sphere test is `dx²+dy²+dz² ≤ r²+r` — a well-known voxel-sphere formula
+ * sphere test is `dx²+dy²+dz² ≤ r²+r`, a well-known voxel-sphere formula
  * that produces a rounder shape than the naive `≤ r²` (which makes radius
  * 1 a 6-voxel plus-sign rather than a small ball).
  */

@@ -4,10 +4,10 @@
 // each texture name becomes one layer in the array texture.
 //
 // two-phase approach:
-//   1. createVoxelTextureArray(layerCount) — sync, immediate. creates an
+//   1. createVoxelTextureArray(layerCount), sync, immediate. creates an
 //      array texture with magenta placeholder layers. the world renders
 //      instantly (with magenta blocks) while real textures load.
-//   2. loadBlockTextureAtlasIntoTextureArray(atlas, textureNames) — async. fetches
+//   2. loadBlockTextureAtlasIntoTextureArray(atlas, textureNames), async. fetches
 //      the server-built atlas PNG, extracts each tile, and writes it
 //      into the corresponding layer. progressive enhancement.
 //
@@ -43,7 +43,7 @@ export type BlockTextureAtlasMetadata = {
 };
 
 /** Fetch + parse voxels-atlas.json. Returns null on any failure (404,
- *  parse error, or content-type mismatch — Vite's SPA fallback returns
+ *  parse error, or content-type mismatch, Vite's SPA fallback returns
  *  index.html for missing files, so we explicitly check the type). */
 export async function fetchBlockTextureAtlasMetadata(): Promise<BlockTextureAtlasMetadata | null> {
     try {
@@ -82,7 +82,7 @@ export function createVoxelTextureArray(layerCount: number): ArrayTexture {
         // generateMipmaps reserves the full mip chain on the placeholder so the
         // GPU texture is allocated with every level. The real chain is built on
         // the CPU and uploaded as explicit `atlas.mipmaps` once the atlas loads
-        // (see writeBlockTextureAtlasIntoTextureArray) — premultiplied RGB plus
+        // (see writeBlockTextureAtlasIntoTextureArray), premultiplied RGB plus
         // coverage-preserving alpha for cutout layers, which the naive GPU
         // box filter can't do. Each tile is its own layer, so no cross-tile bleed.
         generateMipmaps: true,
@@ -97,7 +97,7 @@ export function createVoxelTextureArray(layerCount: number): ArrayTexture {
  * the hash can be reused for cache decisions upstream.
  *
  * layers that fail to load keep their magenta placeholder. progressive
- * enhancement — the world renders immediately with placeholders, then
+ * enhancement, the world renders immediately with placeholders, then
  * upgrades to real textures when the PNG arrives.
  *
  * @param atlas - the existing ArrayTexture (created by createVoxelTextureArray)
@@ -137,7 +137,7 @@ export async function loadBlockTextureAtlasIntoTextureArray(
 
 /**
  * Pure (no DOM) variant of `loadBlockTextureAtlasIntoTextureArray` for offline / Node
- * callers — atlas pixels are passed in as a tightly-packed RGBA8
+ * callers, atlas pixels are passed in as a tightly-packed RGBA8
  * buffer of size `meta.atlasWidth * meta.atlasHeight * 4`. Same tile
  * extraction + layer-write logic, just sourced from the supplied buffer
  * instead of a canvas readback.
@@ -171,7 +171,7 @@ export function writeBlockTextureAtlasIntoTextureArray(
 
         const layerOffset = layerIdx * TILE_BYTES;
         if (meta.tileSize === TILE_SIZE) {
-            // fast path — row-by-row copy out of the atlas buffer
+            // fast path, row-by-row copy out of the atlas buffer
             for (let y = 0; y < TILE_SIZE; y++) {
                 const srcRow = (v + y) * atlasStride + u * BPP;
                 const dstRow = layerOffset + y * TILE_SIZE * BPP;
@@ -180,7 +180,7 @@ export function writeBlockTextureAtlasIntoTextureArray(
                 }
             }
         } else {
-            // slow path — nearest-neighbor resample
+            // slow path, nearest-neighbor resample
             for (let y = 0; y < TILE_SIZE; y++) {
                 for (let x = 0; x < TILE_SIZE; x++) {
                     const srcX = Math.floor((x / TILE_SIZE) * meta.tileSize);

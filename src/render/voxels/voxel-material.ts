@@ -3,9 +3,9 @@
 // unified quad-pull material for the chunk renderer. one factory with
 // three pass variants:
 //
-//   opaque       — backface culled, depth write, no discard
-//   transparent  — backface culled, depth write, alpha-cutout discard
-//   translucent  — no cull, no depth write, alpha blending, draws via
+//   opaque, backface culled, depth write, no discard
+//   transparent, backface culled, depth write, alpha-cutout discard
+//   translucent, no cull, no depth write, alpha blending, draws via
 //                  quadOrder permutation
 //
 // all three share the same VS that pulls per-quad headers from the
@@ -26,7 +26,7 @@
 //   u32[6]   uvPacked for corner 2
 //   u32[7]   uvPacked for corner 3
 //   u32[8]   flags: texIndex(16) | animType(4) | facing(3) | reserved(9)
-//            (bit 23 was diagFlip; now lives in light[0] bit 29 — per-relight
+//            (bit 23 was diagFlip; now lives in light[0] bit 29, per-relight
 //            Sodium hierarchical compare, see chunk-mesher.applyDiagFlipBit)
 //   u32[9]   meta:  aoPacked(16) | reserved(16)
 //            aoPacked = ao0Bits | (ao1Bits<<4) | (ao2Bits<<8) | (ao3Bits<<12),
@@ -36,7 +36,7 @@
 // per-corner positions are u8 at 1/16-voxel precision in chunk-local
 // space; the section's `origin` (world-space) adds the chunk offset.
 //
-// lighting model — per-corner packed u32 encodes 4 channels:
+// lighting model, per-corner packed u32 encodes 4 channels:
 //   R | (G<<8) | (B<<16) | (sky<<24). each channel is a raw 4-bit value
 //   (0..15) in the low nibble of its byte; the shader divides by 15 and
 //   applies the brightness curve `(-0.5*x + 1.5)*x*x` (minetest-style,
@@ -165,7 +165,7 @@ export function unpackVoxelLight(lightNode: Node<d.u32>, skyBrightness: Node<d.f
     // Sodium parity: combine sky and block additively (clamped), matching
     // MC's lightmap behavior. `max(block, sky)` lets a dark sky-shadow corner
     // (from smooth-light averaging across cells where one neighbour is
-    // sky-occluded) override a bright block-light corner — manifests as a
+    // sky-occluded) override a bright block-light corner, manifests as a
     // dark halo extending from opaque blocks even when a torch is adjacent.
     // Additive lets both channels contribute, so block light fills sky shadow.
     const skyContrib = vec3f(mul(lightSky, skyBrightness), mul(lightSky, skyBrightness), mul(lightSky, skyBrightness)).toVar(
@@ -236,7 +236,7 @@ export const readByte = Fn(
 // is the source block's world-space center (sectionOrigin + blockLocal +
 // 0.5), shared across every corner of every quad in that block. Phasing
 // off blockCenter (not per-corner worldPos) keeps animated geometry
-// cohesive within a block — crossed-quad plants sway as one piece,
+// cohesive within a block, crossed-quad plants sway as one piece,
 // liquid ripples don't tear at quad seams.
 
 export const computeVertexAnimation = Fn(
@@ -244,7 +244,7 @@ export const computeVertexAnimation = Fn(
         const xDisp = Var('xDisp', f32(0.0));
         const zDisp = Var('zDisp', f32(0.0));
         const depthBias = Var('depthBias', f32(0.0));
-        // per-vertex phase — water and leaves want per-corner shimmer.
+        // per-vertex phase, water and leaves want per-corner shimmer.
         const vertexPhase = add(worldPos.x, worldPos.z).toVar('vertexPhase');
 
         If(equal(animType, u32(1)), () => {
@@ -263,7 +263,7 @@ export const computeVertexAnimation = Fn(
             .ElseIf(equal(animType, u32(3)), () => {
                 // crossed-plant case: phase the whole block coherently so both
                 // diagonals agree at their shared corners. tip-weight is 0 at
-                // the block's base, 1 at its top — clamps tolerate sub-block
+                // the block's base, 1 at its top, clamps tolerate sub-block
                 // geometry that pokes outside [base, base+1].
                 const blockPhase = add(blockCenter.x, blockCenter.z).toVar('blockPhase');
                 const blockBaseY = sub(blockCenter.y, f32(0.5)).toVar('blockBaseY');
@@ -287,7 +287,7 @@ export const computeVertexAnimation = Fn(
 
 // ── shared quad-pull decoders ───────────────────────────────────────
 //
-// extracted from the chunk and baked-mesh vertex graphs — both pull from
+// extracted from the chunk and baked-mesh vertex graphs, both pull from
 // a `quads` storage buffer of 9 u32/quad with identical header layout,
 // so the per-corner position/uv/normal decode and the flags decode are
 // byte-for-byte the same. each returns a record of TSL `Node`s; the
@@ -296,7 +296,7 @@ export const computeVertexAnimation = Fn(
 
 /** vertInQuad (0..5) → corner index (0..3) via 2-bit LUT, picked by diagFlip.
  *  Caller pulls `diagFlip` from `light[realQuadId * 4 + 0]` bit 29 (set by
- *  meshChunk's emitQuadLight* helpers — Sodium hierarchical compare). */
+ *  meshChunk's emitQuadLight* helpers, Sodium hierarchical compare). */
 export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
     const decode = select(u32(TRI_DECODE_FLIPPED), u32(TRI_DECODE_DEFAULT), diagFlip.equal(u32(0))).toVar('triDecode');
     return decode
@@ -308,7 +308,7 @@ export function pickCornerIdx(diagFlip: Node<d.u32>, vertInQuad: Node<d.u32>) {
 /** flags word (u32[8]) → { texIndex, animType, emissive }. layout:
  *  texIndex(16) | animType(4) | facing(3) | emissive(1) | reserved(8).
  *  bit 23 (formerly the diagFlip, now in `light[0]` bit 29) is the
- *  emissive flag — self-lit quads skip directional face-shade + AO so
+ *  emissive flag, self-lit quads skip directional face-shade + AO so
  *  they glow uniformly. */
 export function decodeQuadFlags(flags: Node<d.u32>) {
     const texIndex = flags.bitwiseAnd(u32(0xffff)).toF32().toVar('texIndex');
@@ -319,7 +319,7 @@ export function decodeQuadFlags(flags: Node<d.u32>) {
 
 /** read u0..u3, uv0..uv3 for `realQuadId`, decode the per-corner position
  *  bytes, uv, and oct16 normal. caller applies the 16/255 voxel-space
- *  scale (inverse of mesher pos16's 255/16 — byte 0 → 0, byte 255 → 16).
+ *  scale (inverse of mesher pos16's 255/16, byte 0 → 0, byte 255 → 16).
  *  `u3` is returned so callers can read source-block bits 16..27 without
  *  re-fetching. */
 export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>, cornerIdx: Node<d.u32>) {
@@ -392,7 +392,7 @@ export function buildVoxelFragment(
     const mixFactor = mul(doInterpolate, interpFrac).toVar('mixFactor');
     const texColor = (mix(colorA, colorB, mixFactor) as Node<d.vec4f>).toVar('texColor');
 
-    // lighting — per-face directional shade is folded into vLight
+    // lighting, per-face directional shade is folded into vLight
     // vertex-side (see vertex shader's aoMul). sunShade and ambient
     // floor stay per-fragment because they depend on vNormal vs sun.
     const ndotl = max(dot(vNormal, sunDirection), f32(0.0)).toVar('ndotl');
@@ -416,7 +416,7 @@ export function makePassMaterial(opts: {
     clipPos: Node<d.vec4f>;
     fragColor: Node<d.vec4f>;
     texColor: Node<d.vec4f>;
-    // per-instance screen-door fade for the cutout pass — default is a pure
+    // per-instance screen-door fade for the cutout pass, default is a pure
     // cutout (the chunk path); voxel meshes pass their dither knob.
     dither?: Node<d.f32>;
 }): Material {
@@ -457,7 +457,7 @@ export function makePassMaterial(opts: {
     });
 }
 
-// ── createQuadMaterial — unified VS for all 3 passes ────────────────
+// ── createQuadMaterial, unified VS for all 3 passes ────────────────
 //
 // VS reads `visibleQuads[instanceIndex]` → (slot, localIdx), looks up
 // `chunkInfo[slot]` → (origin, arenaBase), computes the absolute
@@ -468,10 +468,10 @@ export function makePassMaterial(opts: {
 // each instance is exactly one quad (6 verts, 2 tris).
 //
 // per-name storage bindings (must be set on the chunk geometry):
-//   'quads'         — shared quadArena.quads (interleaved header+light, stride=14 u32)
-//   'visibleQuads'  — this pass's GPU-built per-quad table
-//   'chunkInfo'     — per-room ChunkInfo side-table (slot → {origin, arenaBase})
-//   'env'           — per-room EnvConfig
+//   'quads', shared quadArena.quads (interleaved header+light, stride=14 u32)
+//   'visibleQuads', this pass's GPU-built per-quad table
+//   'chunkInfo', per-room ChunkInfo side-table (slot → {origin, arenaBase})
+//   'env', per-room EnvConfig
 
 export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: GpuBuffer; pass: VoxelPass }): Material {
     const { atlas, texAnimBuffer, pass } = opts;
@@ -565,7 +565,7 @@ export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: G
     const { sunDirection, sunIntensity, skyBrightness, ambientMinimum } = buildEnvSky();
 
     // Sodium-parity AO: apply aoFactor uniformly regardless of corner
-    // brightness. Vanilla MC behavior — AO darkens corners by the same
+    // brightness. Vanilla MC behavior, AO darkens corners by the same
     // proportion in lit and unlit scenes. Emissive quads (torch, glowstone)
     // opt out of both AO and directional face-shade so a self-lit block
     // glows uniformly instead of dimming its E/W/N/S faces to 0.6/0.8.

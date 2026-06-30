@@ -1,4 +1,4 @@
-// selector.ts — scene raycast for the inspect tool.
+// selector.ts, scene raycast for the inspect tool.
 //
 // casts a ray against all raycaster-able things in a scene and returns
 // all hits sorted by distance. consumers filter by type.

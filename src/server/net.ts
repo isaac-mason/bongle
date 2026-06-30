@@ -7,7 +7,7 @@ import { getClientsInRoom } from './rooms';
 
 /** outbox entry: a pre-packed ServerMessage paired with its `type` for accounting. */
 type OutboxEntry = {
-    /** bytes for this message — exactly what'll be emitted on the wire (modulo the per-msg varuint length prefix added by ServerPacket). */
+    /** bytes for this message, exactly what'll be emitted on the wire (modulo the per-msg varuint length prefix added by ServerPacket). */
     bytes: Uint8Array;
     type: string;
 };

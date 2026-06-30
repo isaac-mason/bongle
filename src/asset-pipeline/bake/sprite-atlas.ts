@@ -2,8 +2,8 @@
 //
 // reads source PNGs from each sprite's `src` (one entry per flipbook
 // frame), skyline-packs them into a single texture, and writes:
-//   resources/client/sprites-atlas.png    — the atlas image
-//   resources/client/sprites-atlas.json   — per-sprite uvRects + sizePx
+//   resources/client/sprites-atlas.png, the atlas image
+//   resources/client/sprites-atlas.json, per-sprite uvRects + sizePx
 //
 // shape mirrors `atlas.ts` (block textures): hash sidecar gates rebuild,
 // missing source files get a magenta placeholder, atlas size starts
@@ -69,7 +69,7 @@ export type SpriteAtlasEntry = {
 export type SpriteAtlasMetadata = {
     atlasSize: number;
     sprites: Record<string, SpriteAtlasEntry>;
-    /** content hash — sources + sprite knobs. acts as the rebuild gate
+    /** content hash, sources + sprite knobs. acts as the rebuild gate
      *  (read back next run via readArtifactHashSync). */
     hash: string;
 };
@@ -92,7 +92,7 @@ export async function buildSpriteAtlas(
     const handles = [...spritesRegistry.byId.values()].map((h) => h.payload);
 
     if (handles.length === 0) {
-        // empty registry — drop any leftover artifacts so the cache marker
+        // empty registry, drop any leftover artifacts so the cache marker
         // resets cleanly. parallels buildBlockTextureAtlas's empty path.
         try {
             fs.unlinkSync(atlasPng);
@@ -257,7 +257,7 @@ function placeholder(item: FrameItem, size: number): LoadedFrame {
 /**
  * Skyline-pack at `atlasSize`. Returns null on overflow so the caller
  * can retry at a larger size. Padding is honoured by reserving `padding`
- * pixels on each side — the frame pixels are written at the inset
+ * pixels on each side, the frame pixels are written at the inset
  * position, and the recorded uv rect points at the frame interior.
  */
 function tryPack(frames: LoadedFrame[], atlasSize: number): PackedFrame[] | null {

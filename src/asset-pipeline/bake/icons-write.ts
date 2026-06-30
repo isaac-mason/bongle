@@ -67,7 +67,7 @@ export async function writeIconArtifact(
 // per-subject PNGs at resources/client/<dir>/<id>.icon.png. scenes and
 // prefabs are the same shape, different dir. No hash sidecar: render gating
 // is in-memory in the orchestrator (it computes + compares hashes itself and
-// only dispatches renders that changed), so there's nothing to persist here —
+// only dispatches renders that changed), so there's nothing to persist here,
 // the worker only ever POSTs a render that needs writing.
 
 export type PerIdIconGroup = { dir: string };
@@ -77,7 +77,7 @@ export const PREFAB_ICONS: PerIdIconGroup = { dir: 'prefabs' };
 
 /** the per-id icon dirs under resources/client. these hold editor-only
  *  library/inspector thumbnails that grow unbounded with content and are never
- *  fetched in a play-mode bundle — so they're excluded from build output. (the
+ *  fetched in a play-mode bundle, so they're excluded from build output. (the
  *  bounded block-icon atlas, `voxels-icons.*`, is kept.) */
 export const PER_ID_ICON_DIRS: readonly string[] = [SCENE_ICONS.dir, PREFAB_ICONS.dir];
 

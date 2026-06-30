@@ -144,7 +144,7 @@ function cornerVoxels(): Voxels {
     return voxels;
 }
 
-/** ceiling + floor + walls — the "stuck on a wall with low ceiling" scenario. */
+/** ceiling + floor + walls, the "stuck on a wall with low ceiling" scenario. */
 function tunnelVoxels(): Voxels {
     const voxels = flatFloorVoxels();
     const chunk = createChunk(0, 0, 0);
@@ -164,7 +164,7 @@ function tunnelVoxels(): Voxels {
     return voxels;
 }
 
-/** dense — every cell within a chunk filled (only AABB faces visible). */
+/** dense, every cell within a chunk filled (only AABB faces visible). */
 function denseVoxels(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, -1, 0);
@@ -226,7 +226,7 @@ function makeScenario(opts: {
     });
 
     if (opts.bodyCount && opts.bodyCount > 0) {
-        // ring of static box bodies around the character — stresses body
+        // ring of static box bodies around the character, stresses body
         // overlap-gather + body-cast inside the sweep.
         const r = opts.bodyRadius ?? 1.5;
         for (let i = 0; i < opts.bodyCount; i++) {
@@ -393,7 +393,7 @@ describe('vcc.move — single character', () => {
 
 // ── multi-character (mob crowd) benchmarks ──────────────────────────
 //
-// the headline number for "can we use VCC for mobs?" — N controllers in the
+// the headline number for "can we use VCC for mobs?", N controllers in the
 // same world calling move() each tick. all share one voxel floor so chunk
 // caches stay warm. characters are spaced apart so they don't collide with
 // each other (would skew toward worst-case body overlap).
@@ -442,7 +442,7 @@ describe('vcc.move — mob crowd (one tick)', () => {
     bench('250 mobs', () => tickCrowd(c250));
 });
 
-// ── tickLike — full controller path (move + walkStairs + stickToFloor) ────
+// ── tickLike, full controller path (move + walkStairs + stickToFloor) ────
 //
 // mirrors what `tickCharacterController` does per tick:
 //   1. resolve wishDir from camera + move axes
@@ -453,7 +453,7 @@ describe('vcc.move — mob crowd (one tick)', () => {
 //   6. vcc.stickToFloor() if was-grounded but became airborne (no jump)
 //
 // this is what the real game pays per character; the plain `vcc.move` numbers
-// above understate the per-tick cost by ~2–4× depending on world geometry
+// above understate the per-tick cost by ~2-4× depending on world geometry
 // because they skip the post-passes and the listener.
 
 const _tl_forward = vec3.create();
@@ -503,7 +503,7 @@ function _tl_applyAirWishAccel(vel: Vec3, dir: Vec3, airAccel: number, wishSpeed
     vel[2] += dir[2] * a;
 }
 
-/** controller-like config — defaults match CharacterControllerTrait. */
+/** controller-like config, defaults match CharacterControllerTrait. */
 type CcConfig = {
     walkSpeed: number;
     sprintSpeed: number;
@@ -602,7 +602,7 @@ function tickLike(
         _tl_applyHorizontalDrag(_tl_horizVel, cfg.airDragRate, dt);
         _tl_applyAirWishAccel(_tl_horizVel, _tl_movementDir, cfg.airAccel, wishSpeed, dt);
     } else {
-        // add ground velocity (we don't model moving platforms here — zero).
+        // add ground velocity (we don't model moving platforms here, zero).
         const gv = v.groundVelocity;
         _tl_horizVel[0] += gv[0];
         _tl_horizVel[2] += gv[2];
@@ -667,7 +667,7 @@ function tickLike(
 
 function steppedTerrainVoxels(): Voxels {
     const voxels = createVoxels(registry);
-    // chunk at (0, -1, 0) — y=-16..-1, top face of full chunk at y=0
+    // chunk at (0, -1, 0), y=-16..-1, top face of full chunk at y=0
     const c = createChunk(0, -1, 0);
     voxels.chunks.set('0,-1,0', c);
     for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -765,7 +765,7 @@ describe('vcc.tickLike — full controller path', () => {
     const walk16 = makeRealisticScenario({ propCount: 16, cameraTheta: 0 });
     const walk64 = makeRealisticScenario({ propCount: 64, cameraTheta: 0 });
 
-    // walking +X into the staircase — exercises walkStairs each tick.
+    // walking +X into the staircase, exercises walkStairs each tick.
     const stairs = makeRealisticScenario({ propCount: 0, cameraTheta: -Math.PI / 2 });
 
     // jump (wantsJump branch + air accel) on first tick.
@@ -806,7 +806,7 @@ describe('vcc.tickLike — full controller path', () => {
 // ── phase isolation ──────────────────────────────────────────────────
 //
 // per-tick budget breakdown. each bench targets ONE primitive that
-// vcc.move calls (often multiple times per tick — voxel sweep up to
+// vcc.move calls (often multiple times per tick, voxel sweep up to
 // `maxCollisionIterations` = 5, body overlap once per outer iter, body
 // cast once per outer iter). multiplying these by the iter count gives
 // the per-tick contribution.
@@ -931,7 +931,7 @@ describe('vcc phase — body cast (called once per outer iter)', () => {
 // ── solver isolation ─────────────────────────────────────────────────
 //
 // build a vcc + synthetic constraint set, call solveConstraints. tells
-// us pure JS math cost — no broadphase, no voxel iteration.
+// us pure JS math cost, no broadphase, no voxel iteration.
 
 describe('vcc phase — solver only (synthetic constraints)', () => {
     const world = createWorld(physicsSettings);

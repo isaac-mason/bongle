@@ -8,7 +8,7 @@
 // on release the stroke is mask-filtered and merged into `selection` per
 // `selectionBehavior` (replace / add, shift = force add, mirroring
 // box-select). like brush (build), the optional mask is applied at commit
-// only — the preview always shows the full shape so the user sees the brush
+// only, the preview always shows the full shape so the user sees the brush
 // footprint, and the mask just narrows which cells actually get selected.
 
 import type { Input } from '../../client/input';
@@ -56,7 +56,7 @@ export function updateBrushSelect(
             selectedAny = true;
         });
         // only clobber the existing selection when the stroke actually selected
-        // something — a stroke fully masked out (e.g. dragged over air with a
+        // something, a stroke fully masked out (e.g. dragged over air with a
         // `#existing` mask) leaves the selection intact rather than wiping it.
         if (selectedAny || behavior === 'add') {
             store.setState({ selection: next });

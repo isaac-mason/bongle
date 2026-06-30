@@ -2,7 +2,7 @@
  * per-room server chat. composes core/chat-commands. data-driven: inbound
  * `chat_input` protocol messages are pushed onto `inbox`; system or
  * pass-through broadcasts are pushed onto `outbox`. both are drained by
- * `tick` each frame — inbox entries are parsed (consumed by local handlers
+ * `tick` each frame, inbox entries are parsed (consumed by local handlers
  * or promoted into the outbox as plain messages), outbox entries are
  * fanned to every client in the room via `Net.broadcastToRoom`.
  *

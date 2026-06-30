@@ -1,7 +1,7 @@
 // pure swept-AABB primitives. no engine deps.
 //
 // shared by the voxel pass, the body-AABB pass, and stair-step retry.
-// the analytical TOI mirrors Minetest's `axisAlignedCollision` — Minkowski
+// the analytical TOI mirrors Minetest's `axisAlignedCollision`, Minkowski
 // difference, per-axis closed-form, return the *colliding axis* so the
 // caller can zero that velocity component and slide.
 
@@ -30,7 +30,7 @@ export type SweepResult = {
      * physical penetration depth along the contact normal, in world units.
      * non-zero only for already-overlapping hits (toi < 0). callers use
      * this for depenetration: displacement[axis] = normal[axis] * overlapDepth.
-     * required when motion on the hit axis is zero — scale-by-toi alone can't
+     * required when motion on the hit axis is zero, scale-by-toi alone can't
      * eject the box in that case.
      */
     overlapDepth: number;
@@ -116,9 +116,9 @@ export function sweepAabbVsAabb(
     // per-axis slab test. tEnter < 0 ⇒ that axis was entered in the past
     // (currently overlapping on this axis with motion still pushing in).
     // tEnter === -Infinity ⇒ axis has no motion AND char is currently inside
-    // the slab — axis contributes no constraint (analogue of Minetest's
+    // the slab, axis contributes no constraint (analogue of Minetest's
     // `if (speed.X) { ... }` skip). axes with no motion AND char outside
-    // their slab cause an early no-hit return — char never enters that
+    // their slab cause an early no-hit return, char never enters that
     // slab so the box is unreachable.
     let tEnterX: number;
     let tExitX: number;
@@ -180,7 +180,7 @@ export function sweepAabbVsAabb(
         signZ = 0;
     }
 
-    // pick the axis with the latest tEnter — that's the limiting axis. only
+    // pick the axis with the latest tEnter, that's the limiting axis. only
     // consider axes with motion (sign !== 0); zero-motion axes contribute no
     // constraint and skipping them is the analogue of Minetest's per-axis
     // `if (speed.X) { ... }` guard. without this skip, a char flush against
@@ -236,7 +236,7 @@ export function sweepAabbVsAabb(
     }
 
     if (axis === AXIS_NONE) {
-        // no axis with motion qualifies — char either fully separated on a
+        // no axis with motion qualifies, char either fully separated on a
         // motion-free axis (caught above) or has no motion at all.
         return _miss(r);
     }
@@ -248,7 +248,7 @@ export function sweepAabbVsAabb(
 
     // separation: tEnter > tExit ⇒ slabs never overlap simultaneously.
     // tEnter > 1 ⇒ won't reach within this displacement.
-    // tExit <= 0 ⇒ already exited (tunneled past) — don't pull char back in.
+    // tExit <= 0 ⇒ already exited (tunneled past), don't pull char back in.
     if (tEnter > tExit || tEnter > 1 || tExit <= 0) {
         return _miss(r);
     }
@@ -256,7 +256,7 @@ export function sweepAabbVsAabb(
     // already-overlapping (tEnter < 0): inner-margin direction gate (mirrors
     // Minetest's `inner_margin = max(-0.5 * static_size, -2)` cutoff).
     // penetration past the static's mid-line on the chosen axis means we
-    // can't tell which side we entered from — depenetrating along this axis
+    // can't tell which side we entered from, depenetrating along this axis
     // would push us through to the wrong side. drop the contact instead;
     // some other axis (or some other box) will handle it.
     //
@@ -288,7 +288,7 @@ export function sweepAabbVsAabb(
     // inside `axisAlignedCollision`). a legitimate face contact requires the
     // moving box, at time tEnter, to STRICTLY overlap the static on the two
     // non-hit axes. when overlap on a non-hit axis is exactly zero, we're
-    // grazing an edge or corner of the static box, not its face — and the
+    // grazing an edge or corner of the static box, not its face, and the
     // chosen axis would incorrectly block tangential motion (the classic
     // "char walking along a floor seam catches on the next cell's vertical
     // edge" snag).
@@ -313,7 +313,7 @@ export function sweepAabbVsAabb(
     }
 
     // emit. tEnter ∈ (-innerMarginSize/speedAbs, 1] now: negative means
-    // depenetration (caller moves char by `disp * tEnter` — backward); 0+
+    // depenetration (caller moves char by `disp * tEnter`, backward); 0+
     // means forward TOI as usual.
     //
     // for overlap hits (tEnter < 0), derive the normal sign from relative

@@ -7,7 +7,7 @@ import path from 'node:path';
  *
  * Used by `kit/src/build.ts` to pass an absolute path to the in-process asset
  * pipeline so the physics module's side-effect import resolves regardless of
- * cwd. The dev orchestrator does not need this — Vite resolves engine sources
+ * cwd. The dev orchestrator does not need this, Vite resolves engine sources
  * through the server env's runner, and the asset-pipeline flush handler
  * (mounted in `kit/src/vite/plugin.ts`) reads everything from registries.
  */

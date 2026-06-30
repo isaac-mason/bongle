@@ -1,12 +1,12 @@
 /**
- * DepsGraph — neighborhood view of the engine's content DepGraph.
+ * DepsGraph, neighborhood view of the engine's content DepGraph.
  *
  * Shows the selected node centered between its producers (left) and
  * consumers (right), with SVG arcs between them. Clicking an item
  * navigates the selection. With nothing selected, prompts the user to
  * pick a node from the adjacent list.
  *
- * The full topology view was dropped — once the graph is non-trivial
+ * The full topology view was dropped, once the graph is non-trivial
  * a laid-out DAG turns into spaghetti you read by clicking anyway,
  * which is exactly what the list does.
  */

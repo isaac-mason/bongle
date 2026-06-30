@@ -3,7 +3,7 @@
 // Convention: each generated artifact has a sidecar JSON (e.g.
 // resources/client/voxels-atlas.json) that carries a `hash` field over
 // its inputs. A rebuild is gated by `readArtifactHashSync(sidecar) ===
-// computedHash`. The artifact JSON IS the cache marker — no separate
+// computedHash`. The artifact JSON IS the cache marker, no separate
 // cache file. Cold-start wipes simply delete the artifact files.
 //
 // Browser-side tasks use the matching `fetchManifestHash` helper in

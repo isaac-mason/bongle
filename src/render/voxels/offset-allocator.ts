@@ -11,7 +11,7 @@
 // `clz32`s. `free()` coalesces with address-order neighbours.
 //
 // Storage is struct-of-arrays in Uint32Array/Uint8Array to avoid per-node JS
-// object overhead. The allocator owns no GPU memory — it just hands out
+// object overhead. The allocator owns no GPU memory, it just hands out
 // offsets. Use it under a `SegmentArena`-style wrapper that owns the actual
 // buffers and writes by offset.
 
@@ -89,7 +89,7 @@ function findLowestSetBitAfter(bitMask: number, startBitIndex: number): number {
 export type OAHandle = {
     /** Byte/slot offset into the managed space. */
     readonly offset: number;
-    /** Internal node index — required by `oaFree`. */
+    /** Internal node index, required by `oaFree`. */
     readonly node: number;
 };
 
@@ -97,14 +97,14 @@ export type OffsetAllocator = {
     readonly capacity: number;
     readonly maxAllocs: number;
 
-    // bin tier — usedBinsTop is a single u32 stored as a JS number (bits, not
+    // bin tier, usedBinsTop is a single u32 stored as a JS number (bits, not
     // value-comparable when bit 31 is set; only used with bitwise ops).
     usedBinsTop: number;
     usedBins: Uint8Array; // length NUM_TOP_BINS
-    binIndices: Uint32Array; // length NUM_LEAF_BINS — head node per bin
+    binIndices: Uint32Array; // length NUM_LEAF_BINS, head node per bin
 
     // node pool (SoA). `nodeUsed` is a flag, not packed into the index space
-    // (kept simple — the C++ has the same TODO comment).
+    // (kept simple, the C++ has the same TODO comment).
     nodeOffset: Uint32Array;
     nodeSize: Uint32Array;
     binPrev: Uint32Array;
@@ -330,7 +330,7 @@ function removeNodeFromBin(a: OffsetAllocator, nodeIndex: number): void {
         a.binNext[prev] = next;
         if (next !== OA_UNUSED) a.binPrev[next] = prev;
     } else {
-        // Head of its bin. Recompute bin index from size (round down — matches insert).
+        // Head of its bin. Recompute bin index from size (round down, matches insert).
         const binIndex = uintToFloatRoundDown(a.nodeSize[nodeIndex]!);
         const topBinIndex = binIndex >>> TOP_BINS_INDEX_SHIFT;
         const leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;

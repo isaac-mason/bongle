@@ -6,7 +6,7 @@
 //
 // It sequences the two layers below it rather than owning them: content-manager
 // (disk I/O + self-write dedup) and voxel-savefile (incremental serialization).
-// Per-room save state lives on `room.edit` (Rooms.RoomEditState) — null on play
+// Per-room save state lives on `room.edit` (Rooms.RoomEditState), null on play
 // rooms, so they can never be persisted.
 
 import * as Content from '../core/content';
@@ -19,12 +19,12 @@ import type { EngineServer } from './engine-server';
 import * as Rooms from './rooms';
 
 /** how often dirty edit rooms auto-flush to disk. dirty-gated + incremental, so
- *  a clean editor (and all of play mode) never flushes — this only bounds the
+ *  a clean editor (and all of play mode) never flushes, this only bounds the
  *  unsaved-edit loss window. */
 const AUTOSAVE_INTERVAL_S = 3;
 
 /** serialize + persist one edit room to disk; returns whether the file changed.
- *  voxels serialize incrementally — only chunks whose data version moved since
+ *  voxels serialize incrementally, only chunks whose data version moved since
  *  the last flush are re-gzipped. no-op (false) on play rooms. */
 export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
     if (!room.edit) return false; // edit === null ⇔ play room (never persists)
@@ -36,7 +36,7 @@ export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
     const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);
 
     // bump the scene handle version so in-process consumers (cross-room prefab
-    // readers in the same tick) see the new state immediately — the file-watcher
+    // readers in the same tick) see the new state immediately, the file-watcher
     // → HMR fan-out reaches the client out-of-band.
     if (sceneChanged) {
         Content.populateScene(state.content, registry.blockRegistry, room.sceneId, payload, 'server');
@@ -60,7 +60,7 @@ export function flushDirty(state: EngineServer): void {
 }
 
 /** interval auto-flush, driven from the server tick. accumulates `delta` and
- *  flushes dirty edit rooms every AUTOSAVE_INTERVAL_S — clean and play rooms are
+ *  flushes dirty edit rooms every AUTOSAVE_INTERVAL_S, clean and play rooms are
  *  skipped, so an idle or playing server never touches disk. */
 export function tick(state: EngineServer, delta: number): void {
     state.flushSince += delta;

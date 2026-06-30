@@ -3,7 +3,7 @@
  * line buffer + UI subscribers + message-listener set. data-driven
  * transport: inbound `chat_broadcast` payloads land in `inbox`, outbound
  * user-typed lines land in `outbox`. `tick(net, room)` drains both each
- * frame — inbox entries become lines + fan out to listeners, outbox lines
+ * frame, inbox entries become lines + fan out to listeners, outbox lines
  * are enqueued as `chat_input` protocol messages.
  *
  * scripts and the UI panel call `submit(chat, line)` for input and
@@ -87,13 +87,13 @@ function notify(chat: ChatClient): void {
         try {
             fn();
         } catch {
-            // swallow — subscriber errors shouldn't break dispatch
+            // swallow, subscriber errors shouldn't break dispatch
         }
     }
 }
 
 export function appendLine(chat: ChatClient, line: Omit<ChatLine, 'ts'>): void {
-    // new array reference each append — useSyncExternalStore compares
+    // new array reference each append, useSyncExternalStore compares
     // snapshots by Object.is, so an in-place push would silently skip
     // re-renders (visible as "new messages don't appear" while closed).
     const next = chat.lines.concat({ ...line, ts: Date.now() });
@@ -186,7 +186,7 @@ export function tick(chat: ChatClient, net: ClientNet, roomId: string): void {
             try {
                 fn(msg);
             } catch {
-                // swallow — listener errors shouldn't break dispatch
+                // swallow, listener errors shouldn't break dispatch
             }
         }
     }

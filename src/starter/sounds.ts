@@ -263,23 +263,23 @@ export const playerDamage = sound('starter:player_damage', {
 });
 
 /* combat */
-// a bow loosing an arrow — the string's twang + release.
+// a bow loosing an arrow, the string's twang + release.
 export const bowShoot = sound('starter:bow_shoot', {
     src: new URL('./assets/sounds/bow_shoot.ogg', import.meta.url),
 });
-// a whooshing fireball launch — spell/projectile cast.
+// a whooshing fireball launch, spell/projectile cast.
 export const cast = sound('starter:cast', {
     src: new URL('./assets/sounds/fireball_whoosh.ogg', import.meta.url),
 });
-// a solid hard impact — projectile/spell hit.
+// a solid hard impact, projectile/spell hit.
 export const impact = sound('starter:impact', {
     src: new URL('./assets/sounds/snowball_hard_impact.ogg', import.meta.url),
 });
-// a sharper, punchier hit — a critical / killing blow on a fighter.
+// a sharper, punchier hit, a critical / killing blow on a fighter.
 export const impactCrit = sound('starter:impact_crit', {
     src: new URL('./assets/sounds/impact_crit.ogg', import.meta.url),
 });
-// a rising chime — player level-up / progression.
+// a rising chime, player level-up / progression.
 export const levelUp = sound('starter:level_up', {
     src: new URL('./assets/sounds/levelup.ogg', import.meta.url),
 });

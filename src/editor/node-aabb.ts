@@ -1,4 +1,4 @@
-// node-aabb.ts — shared helpers for computing a node's world-space AABB
+// node-aabb.ts, shared helpers for computing a node's world-space AABB
 // from its (and its subtree's) MeshTrait / VoxelMeshTrait geometry.
 //
 // used by node-bodies (broadphase shape sizing) and the grab tool (transient

@@ -29,14 +29,14 @@ const TOOL_LABELS: Record<EditorTool, string> = {
     elevation: 'elevation',
 };
 
-/** returns the collapsible pane title for the tool section, e.g. "tool — build" */
+/** returns the collapsible pane title for the tool section, e.g. "tool, build" */
 export function useToolPaneTitle(): string {
     const activeTool = useEditRoom((s) => s.activeTool);
     return `tool — ${TOOL_LABELS[activeTool]}`;
 }
 
 /**
- * content slot for the "tool space" pane — renders the active tool's options/inspector.
+ * content slot for the "tool space" pane, renders the active tool's options/inspector.
  * inspect → inspector panel (select node, edit traits/scripts)
  * voxel tools → their respective option panels
  *

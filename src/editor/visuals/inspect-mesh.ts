@@ -1,4 +1,4 @@
-// inspect-mesh.ts — bounding box outline for the selected node.
+// inspect-mesh.ts, bounding box outline for the selected node.
 //
 // computes the world-space AABB by walking the selected node's subtree
 // directly (via unionSubtreeWorldAabb). falls back to a sphere around
@@ -59,7 +59,7 @@ const _scratchSphere: Box3 = box3.create();
 function getNodeAABB(node: Node, resources: Resources, out: Box3): boolean {
     if (unionSubtreeWorldAabb(node, resources, out)) return true;
 
-    // fallback: no mesh/voxel geometry anywhere in the subtree — sphere at this node's position
+    // fallback: no mesh/voxel geometry anywhere in the subtree, sphere at this node's position
     const transform = getTrait(node, TransformTrait);
     if (transform) {
         const p = getVisualWorldPosition(transform);
@@ -182,7 +182,7 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
         return;
     }
 
-    // one box per selected node — a single merged box loses per-node detail
+    // one box per selected node, a single merged box loses per-node detail
     // for multi-selection. skip the scene root since its box would enclose
     // everything else in the scene.
     const pts: number[] = [];
@@ -193,7 +193,7 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
     }
 
     if (pts.length === 0) {
-        // no drawable nodes — hide
+        // no drawable nodes, hide
         if (state.mesh) state.mesh.visible = false;
         return;
     }

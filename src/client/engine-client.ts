@@ -57,7 +57,7 @@ export type InitOptions = {
     mode: 'edit' | 'play';
     /**
      * Transport for actions a script triggers on the client that need to
-     * exit the engine — currently just `client.matchmake` (re-enter matchmaking
+     * exit the engine, currently just `client.matchmake` (re-enter matchmaking
      * with new gameOptions/joinData). Kit dev wraps a `play` message send;
      * deployed (game-client/poki) wraps the iframe-parent bridge so the
      * parent disposes + re-enqueues. Always
@@ -65,7 +65,7 @@ export type InitOptions = {
      */
     driver: ClientDriver;
     /**
-     * The environment's resource-loading bag — byte loading (model bins, atlas
+     * The environment's resource-loading bag, byte loading (model bins, atlas
      * PNGs, …) plus the optional image decoder. Browser boot templates pass
      * `browserResourceLoader`; the asset pipeline passes a disk + sharp loader.
      * Required so engine-client owns no environment-specific I/O.
@@ -78,7 +78,7 @@ export type InitOptions = {
 export { applyRegistryChanges, refreshAudioResources, refreshBlockResources, refreshSpriteResources } from './registry-dispatch';
 
 // Re-export the play-mode UI mount so the play-mode boot template can mount
-// the play shell directly — keeps `engine-client` free of `env.editor` UI
+// the play shell directly, keeps `engine-client` free of `env.editor` UI
 // branches; the editor counterpart lives at `bongle/engine-editor`.
 export { mountPlayUI } from './ui/play-ui';
 
@@ -99,7 +99,7 @@ export function init(opts: InitOptions) {
 
     const content = Content.init();
 
-    // The caller supplies the asset loader for its environment — browser boot
+    // The caller supplies the asset loader for its environment, browser boot
     // templates pass `fetchResourceLoader`, the Node pipeline worker reads off
     // disk. engine-client stays agnostic about where the bytes come from.
     const resources = Resources.init(opts.resourceLoader, 'client');
@@ -121,7 +121,7 @@ export function init(opts: InitOptions) {
         /** per-player buffer of chunk coords decoded + applied since the last
          *  flush, drained into one voxel_ack per player at the end of
          *  processInbox. frees the server's in-flight slots (voxel
-         *  backpressure). keyed by playerId — one client may hold several. */
+         *  backpressure). keyed by playerId, one client may hold several. */
         voxelAckBuffer: new Map<number, Array<{ cx: number; cy: number; cz: number }>>(),
         content,
         resources,
@@ -158,20 +158,20 @@ export function init(opts: InitOptions) {
         /** engine-global particle material + cull compute. binds the sprite
          *  atlas Texture via a TextureNode; atlas swaps rebind it in place. */
         particleResources: null! as ParticleResources.ParticleResources,
-        /** engine-global cloud system — material, geometry, static
+        /** engine-global cloud system, material, geometry, static
          *  storage buffers, and the shared compacted+indirect buffers the
          *  active room's CloudVisuals.update writes to each frame. */
         cloudResources: null! as CloudResources.CloudResources,
         /** engine-global shadow material. per-room ShadowVisuals routes
          *  its `instance` buffer by name. */
         shadowResources: null! as ShadowResources.ShadowResources,
-        /** engine-global audio resources — manifest + decoded atlas +
+        /** engine-global audio resources, manifest + decoded atlas +
          *  AudioContext. populated in `load()` (async fetch + decode).
          *  the clips map is empty when no manifest was emitted, but the
          *  AudioContext is always live. */
         audioResources: null! as Audio.AudioResources,
         /**
-         * INBOUND wire-index tables for messages received from the server —
+         * INBOUND wire-index tables for messages received from the server,
          * the server's outbound tables, mirrored on this side. seeded from
          * the client's local module at `load()` time (both peers built from
          * the same source, so they agree at connect) and refreshed by
@@ -180,21 +180,21 @@ export function init(opts: InitOptions) {
         inboundTraitWireIndex: null! as WireIndex,
         inboundCommandWireIndex: null! as WireIndex,
         accumulator: 0,
-        /** global metrics (tick timing). starts disabled — flipped on by the
+        /** global metrics (tick timing). starts disabled, flipped on by the
          *  debugOpen subscription in `load()` so per-frame begin/end work is
          *  skipped while the debug panel is closed. */
         metrics: Debug.createMetrics(useClient.getState().debugOpen),
         /** engine-wide quality tier + GPU limits + adapter info. populated in
-         *  `load()` after the renderer's device handshake — subsystems derive
+         *  `load()` after the renderer's device handshake, subsystems derive
          *  their own budgets from `profile.active` (see `voxelArenaBudgetForTier`
          *  in voxel-visuals.ts). */
         performance: null! as Performance.Profile,
-        /** per-room voxel arena/section sizing — derived from `performance`
+        /** per-room voxel arena/section sizing, derived from `performance`
          *  once at boot. threaded into every `VoxelVisuals.init` call so
          *  rooms allocate identical-sized arenas regardless of who creates
          *  them (server-joined, local, asset-pipeline). */
         voxelBudget: null! as VoxelArenaBudget,
-        /** last value sent in `debug_subscribe` — re-sent only on edge
+        /** last value sent in `debug_subscribe`, re-sent only on edge
          *  transitions, not every frame. */
         debugLogsSubscribed: false,
         /** true while a portal ad (commercial/rewarded break) is showing. Set
@@ -208,7 +208,7 @@ export function init(opts: InitOptions) {
 export type EngineClient = ReturnType<typeof init>;
 
 /**
- * Boot a self-contained room — no server, no matchmaking, one local player.
+ * Boot a self-contained room, no server, no matchmaking, one local player.
  * Used by the kit `standalone` build (and the asset pipeline worker conceptually):
  * `init()` → `load()` → `startStandaloneRoom()` → frame loop. The returned
  * room is already the active player; the caller just has to drive `update()`.
@@ -227,7 +227,7 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
 
 /**
  * Send a `play` message to the server. Kit-dev wraps this in its
- * ClientDriver.matchmake impl — the local game server then find-or-creates a
+ * ClientDriver.matchmake impl, the local game server then find-or-creates a
  * namespaced room and re-joins this client. Deployed shells (game-client/poki)
  * bypass the engine entirely and signal the parent host instead.
  */
@@ -269,7 +269,7 @@ export async function load(state: EngineClient) {
     // before the server's first `wire_table` lands has a table to use.
     // server emits `wire_table` immediately on connect (before any
     // packed payload), and again on HMR drift, so this seed is just a
-    // safe default — it's overwritten before `join_room` decodes.
+    // safe default, it's overwritten before `join_room` decodes.
     state.inboundTraitWireIndex = registry.traitWireIndex;
     state.inboundCommandWireIndex = registry.commandWireIndex;
 
@@ -279,7 +279,7 @@ export async function load(state: EngineClient) {
 
     // scene handles live on `registry.scenes` (declared via `scene()`). their
     // authored `_payload` was stamped at module-eval by the codegen barrel's
-    // `_registerScenePayload` calls — walk the store and populate any handle
+    // `_registerScenePayload` calls, walk the store and populate any handle
     // whose payload is set. live updates (dev) flow through
     // `applyScenePayload`/`clearScene` from the boot template's HMR listeners.
     for (const [sceneId, h] of registry.scenes.byId) {
@@ -318,7 +318,7 @@ export async function load(state: EngineClient) {
         );
     }
 
-    // catch the specific buffer that fails — chromebook prints the
+    // catch the specific buffer that fails, chromebook prints the
     // validation message before APICreateErrorBuffer but doesn't tag the
     // buffer; this scope-pushes around every WebGPU command and surfaces
     // the offender. cheap to leave on; one log per uncaptured error.
@@ -329,7 +329,7 @@ export async function load(state: EngineClient) {
         });
     }
 
-    // sync init pass — every *Resources.init() is pure construction (no
+    // sync init pass, every *Resources.init() is pure construction (no
     // side effects, no awaits). Builds materials + cull computes against
     // the magenta placeholder atlas so the downstream extruded/particle
     // inits can name-bind it immediately.
@@ -343,7 +343,7 @@ export async function load(state: EngineClient) {
     state.voxelResources = VoxelResources.init(registry.blockRegistry, state.renderer.environmentResources, voxelBudget);
     state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
 
-    // async load pass — pre-warms compile pipelines, fetches atlases. All
+    // async load pass, pre-warms compile pipelines, fetches atlases. All
     // resources race in parallel; the placeholder atlas keeps materials
     // valid until SpriteResources.load() swaps the real atlas in.
     const audioPromise = Audio.loadResources();
@@ -362,7 +362,7 @@ export async function load(state: EngineClient) {
     state.audioResources = audioResources!;
 
     // Both extruded-sprite and particle materials captured a TextureNode
-    // against `state.spriteResources.atlas` *as it was during init()* —
+    // against `state.spriteResources.atlas` *as it was during init()*,
     // i.e. the magenta placeholder. `SpriteResources.load()` then ran
     // concurrently and swapAtlas'd the placeholder out (disposing it), but
     // `rebindAtlas` only fires from `refreshSpriteResources` on registry
@@ -372,7 +372,7 @@ export async function load(state: EngineClient) {
     ParticleResources.rebindAtlas(state.particleResources, state.spriteResources.atlas);
 
     // resize the renderer + cameras when the viewport div changes size.
-    // useClient is the source of truth — Viewport writes dims into the store
+    // useClient is the source of truth, Viewport writes dims into the store
     // on mount + ResizeObserver, the engine reads current values here and
     // subscribes for future changes. No callback-registration race: if the
     // Viewport mounted before this point (mountPlayUI runs before load), the
@@ -384,7 +384,7 @@ export async function load(state: EngineClient) {
         state.viewport.height = h;
 
         // resize all room canvas targets so they're ready when switched to.
-        // camera aspect/projection is no longer event-driven — the renderer
+        // camera aspect/projection is no longer event-driven, the renderer
         // pulls viewport size from canvasTarget each frame in `bindRenderCamera`
         // and writes aspect into the active control camera.
         for (const room of state.rooms.rooms.values()) {
@@ -408,7 +408,7 @@ export async function load(state: EngineClient) {
     // expose global client metrics to the debug panel.
     useClient.getState().setClientGlobalMetrics(state.metrics);
 
-    // gate per-frame Debug.begin/end work on `debugOpen` — those samples are
+    // gate per-frame Debug.begin/end work on `debugOpen`, those samples are
     // only consumed by the panel, and the timer calls add up on profile traces.
     // server metrics stay always-on (they ship to clients regardless).
     let prevDebugOpen = useClient.getState().debugOpen;
@@ -427,7 +427,7 @@ export async function load(state: EngineClient) {
     // play mode calls `EngineClient.mountPlayUI(state.domElement)`. Keeping
     // it out here means `engine-client` has zero `env.editor` UI branches.
 
-    // initial registry population is consumed via the singleton above —
+    // initial registry population is consumed via the singleton above,
     // drop the `added` events accumulated on each store's `pendingChanges`
     // so the first HMR-driven flush only logs real deltas instead of
     // replaying every declaration as freshly added.
@@ -468,7 +468,7 @@ function processInbox(state: EngineClient): void {
                     break;
 
                 case 'server_clock': {
-                    // a server-clock push — fold it into the room's estimate. recvTime is
+                    // a server-clock push, fold it into the room's estimate. recvTime is
                     // the room's render clock (`wall`, advanced up front this frame): the
                     // same base syncServer reads, so the offset is coherent and render-behind.
                     for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
@@ -537,7 +537,7 @@ function processInbox(state: EngineClient): void {
                 case 'register_model':
                     // Server-authoritative runtime model registration. The
                     // server is the canonical source of truth for which
-                    // runtime models the client should know — refcount
+                    // runtime models the client should know, refcount
                     // lives over there. Client gets exactly one register
                     // per id, paired with one unregister on release.
                     //
@@ -574,7 +574,7 @@ function processInbox(state: EngineClient): void {
 
     state.net.inbox.length = 0;
 
-    // flush voxel acks — one message per player that applied chunks this drain.
+    // flush voxel acks, one message per player that applied chunks this drain.
     for (const [playerId, full] of state.voxelAckBuffer) {
         if (full.length === 0) continue;
         Net.send(state.net, { type: 'voxel_ack', playerId, full });
@@ -592,7 +592,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
 
     // resync path: same player + room shell already exists (e.g. when the
     // server re-sends join_room for an already-joined player). repopulate
-    // scene graph in place and re-fire onInit — keeps activePlayerId,
+    // scene graph in place and re-fire onInit, keeps activePlayerId,
     // viewport mount, camera state, and voxel chunk meshes intact.
     const existing = state.rooms.rooms.get(message.playerId);
     if (existing && existing.roomId === message.roomId) {
@@ -623,7 +623,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     Rooms.mountRoomViewport(room);
 
     // populate ctx.client.state and ctx.client.room now that both exist,
-    // then fire onInit hooks — order matters: hooks may access client.room
+    // then fire onInit hooks, order matters: hooks may access client.room
     if (room.scriptRuntime.client) {
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
@@ -639,7 +639,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         Rooms.disposeRoom(state, existing);
     }
 
-    // add to rooms map (additive — replaces if already present). does NOT
+    // add to rooms map (additive, replaces if already present). does NOT
     // auto-activate; the server emits a follow-up activate_room message
     // when this view should become the focused tab.
     state.rooms.rooms.set(message.playerId, room);
@@ -710,8 +710,8 @@ function processRoomList(state: EngineClient, message: Protocol.RoomList): void 
 
 // all 26 neighbours (6 faces + 12 edges + 8 corners). the mesher's slab
 // reads a 1-voxel apron from every diagonal neighbour for AO + smooth
-// light, so a whole-chunk data/light replacement must remesh all 26 — not
-// just the 6 faces — or stale light lingers at chunk edges and corners
+// light, so a whole-chunk data/light replacement must remesh all 26, not
+// just the 6 faces, or stale light lingers at chunk edges and corners
 // until a full /relight. (the per-cell light_delta path already dirties the
 // correct 3×3×3 subset; this is the full-chunk analog.)
 const NEIGHBOR_OFFSETS: readonly (readonly [number, number, number])[] = /* @__PURE__ */ (() => {
@@ -731,7 +731,7 @@ function dirtyAllNeighborChunks(voxels: Voxels.Voxels, cx: number, cy: number, c
 
 function processVoxelChunkFull(state: EngineClient, message: Protocol.VoxelChunkFull): void {
     const room = state.rooms.rooms.get(message.playerId);
-    // no room for this player (desync) — drop without acking. the server's
+    // no room for this player (desync), drop without acking. the server's
     // in-flight slot stays held until eviction/disconnect (or a future backstop
     // sweep); acking a chunk we didn't apply would be wrong.
     if (!room) return;
@@ -807,7 +807,7 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
         }
 
         // update palette (may have grown). resolve only newly-appended
-        // runtime ids — existing entries stay valid by the append-only
+        // runtime ids, existing entries stay valid by the append-only
         // invariant asserted above.
         const oldPaletteLen = chunk.paletteKeys.length;
         chunk.paletteKeys = entry.paletteKeys;
@@ -819,7 +819,7 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
             chunk.palette[i] = resolveKey(room.voxels.registry, entry.paletteKeys[i]!);
         }
 
-        // COW out of the shared empty-stub data array before mutating —
+        // COW out of the shared empty-stub data array before mutating,
         // chunks promoted from voxel_chunk_empty alias Voxels.EMPTY_DATA.
         if (chunk.data === Voxels.EMPTY_DATA) chunk.data = new Uint16Array(Voxels.EMPTY_DATA);
 
@@ -967,7 +967,7 @@ function processVoxelChunkEmpty(state: EngineClient, message: Protocol.VoxelChun
     if (!room) return;
     for (const c of message.chunks) {
         const key = Voxels.chunkKey(c.cx, c.cy, c.cz);
-        // a real chunk already present (full upgrade arrived first) — leave it.
+        // a real chunk already present (full upgrade arrived first), leave it.
         if (room.voxels.chunks.has(key)) continue;
         const chunk = Voxels.createEmptyChunk(c.cx, c.cy, c.cz);
         room.voxels.chunks.set(key, chunk);
@@ -990,12 +990,12 @@ function processRoomMetrics(state: EngineClient, message: Protocol.RoomMetrics):
 /**
  * record per-message-type net metrics + aggregate game/total rates.
  *
- * `net/in/<type>` / `net/out/<type>` — per-type kb/s (lets the breakdown
+ * `net/in/<type>` / `net/out/<type>`, per-type kb/s (lets the breakdown
  *      widget enumerate by id prefix).
- * `net/ingress` / `net/egress` — "game" headline (every type EXCEPT those
+ * `net/ingress` / `net/egress`, "game" headline (every type EXCEPT those
  *      in DEBUG_MESSAGE_TYPES). this is what the summary widget reads, so
  *      opening the debug panel doesn't pollute its own metric.
- * `net/in/total` / `net/out/total` — true totals (includes debug bytes).
+ * `net/in/total` / `net/out/total`, true totals (includes debug bytes).
  */
 function recordNetStats(metrics: Debug.Metrics, stats: Net.NetStats, delta: number): void {
     let inGame = 0;
@@ -1036,7 +1036,7 @@ function processDebugLogs(state: EngineClient, message: Protocol.DebugLogs): voi
  * apply an authored scene payload to its handle and re-populate scene state.
  * called from `load()` (cold-load drain of `module.scenes`) and from the dev
  * boot template's `bongle:scene-update` HMR listener. mirror of the server
- * function in `server/engine-server.ts` — the client variant has no
+ * function in `server/engine-server.ts`, the client variant has no
  * ContentManager / disk seed (server-only concern).
  */
 export function applyScenePayload(state: EngineClient, id: string, payload: Content.ScenePayload): void {
@@ -1058,7 +1058,7 @@ export function clearScene(state: EngineClient, id: string): void {
     Registry.touch(registry.scenes, id);
 }
 
-/** clamp on inbound dt — guards against huge spikes after tab refocus,
+/** clamp on inbound dt, guards against huge spikes after tab refocus,
  *  long GC pauses, or debugger breaks. 0.2s ≈ 5fps floor: anything slower
  *  ticks as if the simulation ran at 5fps for that frame, instead of
  *  letting physics/animation integrators see a runaway delta. */
@@ -1079,27 +1079,27 @@ export function update(state: EngineClient, delta: number) {
     /* process inbox */
     processInbox(state);
 
-    // reconcile audio output mute with ad state — the game is silenced while a
+    // reconcile audio output mute with ad state, the game is silenced while a
     // portal ad shows (flag set by api/platform). cheap: setOutputMuted no-ops
     // unless the value changed.
     if (state.audioResources) Audio.setOutputMuted(state.audioResources, state.adActive);
 
     const activeRoom = Rooms.getActiveRoom(state.rooms);
 
-    // per-frame input pre-processing — runs before runOnUpdate so consumers
+    // per-frame input pre-processing, runs before runOnUpdate so consumers
     // (e.g. editor grab-rotate) can zero mk._dx/_dy before player
     // controllers read input for camera/look. only the active room receives
-    // input — its canvas is the only one mounted as `display: block`.
+    // input, its canvas is the only one mounted as `display: block`.
     if (activeRoom) {
         Debug.begin(activeRoom.clientMetrics, 'on-input');
         Nodes.runOnInput(activeRoom.nodes, { delta }, activeRoom.clientMetrics);
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
-    // per-frame update — input polling, camera binding, etc. every room gets
+    // per-frame update, input polling, camera binding, etc. every room gets
     // a per-frame pass; inactive rooms continue advancing scripts/animations.
     for (const room of state.rooms.rooms.values()) {
-        // slew `server` toward the latest server-clock push — before onFrame reads
+        // slew `server` toward the latest server-clock push, before onFrame reads
         // it. no-op until the first push lands (and on local rooms, which get none),
         // where `server` rides the join seed via the fixed tick (see core/clock).
         // `wall` (advanced up front this frame) is the local base: real elapsed,
@@ -1109,7 +1109,7 @@ export function update(state: EngineClient, delta: number) {
         Debug.begin(room.clientMetrics, 'on-update');
         Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');
-        // particles are visual fx — framerate-dependent motion is fine, and
+        // particles are visual fx, framerate-dependent motion is fine, and
         // running per-frame (not per fixed-step) avoids the spawn→render
         // delay you'd get from waiting for the next tick before integrating.
         Debug.begin(room.clientMetrics, 'particles-tick');
@@ -1117,7 +1117,7 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'particles-tick');
     }
 
-    // fixed update — single global accumulator drives lockstep across rooms
+    // fixed update, single global accumulator drives lockstep across rooms
     state.accumulator += delta;
     const timestep = 1 / 60;
 
@@ -1131,7 +1131,7 @@ export function update(state: EngineClient, delta: number) {
 
             Nodes.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
 
-            // tick prefab system — discovers and re-instantiates stale prefab nodes
+            // tick prefab system, discovers and re-instantiates stale prefab nodes
             Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
 
             Debug.begin(room.clientMetrics, 'physics');
@@ -1157,12 +1157,12 @@ export function update(state: EngineClient, delta: number) {
     // sync client-global model GPU pools with newly-ready / vanished payloads
     ModelResources.update(state.modelResources, state.resources);
 
-    // tier settings — fetch once per tick, threaded to every subsystem
+    // tier settings, fetch once per tick, threaded to every subsystem
     // that takes a tier-driven cap (cull radius, mesher caps, ...). reads
     // through profile.active so a runtime tier flip applies next tick.
     const perfSettings = Performance.settingsForTier(state.performance);
 
-    // per-room interpolate, frame hooks, visual update — every room
+    // per-room interpolate, frame hooks, visual update, every room
     // advances even when not active; inactive viewports are display:none
     // but their scenes stay live for fast tab swaps. only the active
     // room runs the voxel mesher (engine-global arenas hold one room's
@@ -1171,7 +1171,7 @@ export function update(state: EngineClient, delta: number) {
     for (const room of state.rooms.rooms.values()) {
         // interpolate replicated transforms first so rig roots are at their
         // visual position for the frame (animator writes to child bones, not
-        // rig roots, so visibility only needs roots — not bones — settled).
+        // rig roots, so visibility only needs roots, not bones, settled).
         Debug.begin(room.clientMetrics, 'interpolate');
         Interpolation.interpolate(room.interpolation, alpha, delta);
         Debug.end(room.clientMetrics, 'interpolate');
@@ -1205,7 +1205,7 @@ export function update(state: EngineClient, delta: number) {
         // Animation.tick: the meshes' transforms reflect last frame's pose,
         // which the fat-AABB margin absorbs.
         // shared view radius across the chunk mesher (cullCPU) and frustum
-        // cull — same Euclidean sphere so a sprite/rig fades at the same
+        // cull, same Euclidean sphere so a sprite/rig fades at the same
         // boundary the chunks it sits on do.
         Debug.begin(room.clientMetrics, 'visibility');
         Visibility.update(room.visibility, controlCamera, perfSettings.voxelViewChunkRadius * Voxels.CHUNK_SIZE);
@@ -1214,13 +1214,13 @@ export function update(state: EngineClient, delta: number) {
         // sample voxel light at each visible model's world-space AABB
         // centroid into `ModelTrait.light`. one sample per rig (not per
         // mesh) so limbs that clip into solid voxels mid-animation don't
-        // pop dark — the centroid is inside the model's body by
+        // pop dark, the centroid is inside the model's body by
         // construction.
         Debug.begin(room.clientMetrics, 'modelLighting');
         ModelLighting.update(room.modelLighting, room.voxels);
         Debug.end(room.clientMetrics, 'modelLighting');
 
-        // sample animations at render rate with the real frame delta — bones
+        // sample animations at render rate with the real frame delta, bones
         // step smoothly at any fps. animation writes to bone locals via
         // setPosition/setQuaternion, marking them dirty. gated per-rig on
         // the fresh `aabb.visible` from Visibility above.
@@ -1301,7 +1301,7 @@ export function update(state: EngineClient, delta: number) {
         ShadowVisuals.update(room.shadowVisuals, room.voxels, controlCamera);
         Debug.end(room.clientMetrics, 'shadow');
 
-        // particle visuals reads pool[0..count) directly — no scene-graph
+        // particle visuals reads pool[0..count) directly, no scene-graph
         // traits. runs after `Particles.update` (per-frame loop above) so
         // freshly-stepped positions feed this frame's pose buffer.
         Debug.begin(room.clientMetrics, 'particle');
@@ -1315,7 +1315,7 @@ export function update(state: EngineClient, delta: number) {
         Debug.end(room.clientMetrics, 'audio');
     }
 
-    /* render — only the active room renders to the GPU each frame */
+    /* render, only the active room renders to the GPU each frame */
     if (activeRoom) {
         // TODO: be smarter :)
         activeRoom.scene.updateWorldMatrix();
@@ -1326,16 +1326,16 @@ export function update(state: EngineClient, delta: number) {
         Renderer.render(state.renderer, activeRoom, activeCamera, state.voxelResources, perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
-        /* metrics — request server-side stats for every room the client
+        /* metrics, request server-side stats for every room the client
          * holds, not just the active one. each room maintains its own
          * server-side metrics history; the response is dispatched into
          * each ClientRoom.serverMetrics by roomId. de-dup roomIds since
          * a single client may hold multiple Players in the same room. */
-        // debug network traffic is editor-only — player builds never request
+        // debug network traffic is editor-only, player builds never request
         // server metrics or subscribe to server logs.
         const { debugOpen, debugTab } = useClient.getState();
 
-        // gpucat Inspector overlay — visible only on the 'renderer' tab while
+        // gpucat Inspector overlay, visible only on the 'renderer' tab while
         // the panel is open. available in non-editor builds too (debug perf
         // for shipped games).
         Renderer.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
@@ -1353,7 +1353,7 @@ export function update(state: EngineClient, delta: number) {
 
             /* log subscription: flat per-client bit. server pushes
              * `debug_logs` for every room we hold a Player in while enabled.
-             * only active in the logs view — perf view doesn't render logs. */
+             * only active in the logs view, perf view doesn't render logs. */
             const subscribeLogs = debugOpen && debugTab === 'logs';
             if (subscribeLogs !== state.debugLogsSubscribed) {
                 Net.send(state.net, { type: 'debug_subscribe', enabled: subscribeLogs });
@@ -1368,7 +1368,7 @@ export function update(state: EngineClient, delta: number) {
         }
     }
 
-    /* reset per-room input — snapshots prev and clears per-frame deltas.
+    /* reset per-room input, snapshots prev and clears per-frame deltas.
        inactive rooms received no events, so their reset is a no-op (zero
        state stays zero). */
     for (const room of state.rooms.rooms.values()) {

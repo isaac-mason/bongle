@@ -73,7 +73,7 @@ describe('SmallFloat', () => {
 
     it('round-up = round-down for exact bin sizes (representable range)', () => {
         // Bins 240..255 (exp 30, 31) encode sizes ≥ 2^32, which don't fit in
-        // a u32 — the C++ has the same limitation. Real allocations stay well
+        // a u32, the C++ has the same limitation. Real allocations stay well
         // below this; we test the practical range.
         const MAX_REPRESENTABLE_BIN = 240; // exclusive
         for (let bin = 1; bin < MAX_REPRESENTABLE_BIN; bin++) {
@@ -172,7 +172,7 @@ describe('OffsetAllocator basics', () => {
 // ── OOM ─────────────────────────────────────────────────────────────
 
 describe('OOM behaviour', () => {
-    // NOTE on sizes: TLSF-style bin classification is conservative — a free
+    // NOTE on sizes: TLSF-style bin classification is conservative, a free
     // region of size N lives in `roundDown(N)` but an alloc-of-N needs
     // `roundUp(N)`. Sizes that aren't exact bin sizes (e.g. 100) will fail to
     // alloc from a same-size region. Use powers of 2 (which are exact bin

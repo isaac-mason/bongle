@@ -1,5 +1,5 @@
 /**
- * core transform system — world transform computation for the scene
+ * core transform system, world transform computation for the scene
  * graph's TransformTrait. pure math, no rendering dependencies. callable
  * from both client and server.
  *
@@ -10,7 +10,7 @@
  * getWorldPosition/getWorldMatrix/etc triggers recompute on demand.
  *
  * the per-frame snapshot+interpolate pipeline lives in
- * `render/interpolation.ts` — interpolation is a rendering concern and
+ * `render/interpolation.ts`, interpolation is a rendering concern and
  * only meaningful client-side.
  */
 
@@ -32,13 +32,13 @@ import { traverse } from '../core/scene/traverse';
 // without growing the trait shape with extra bool fields.
 //
 // bits live on TransformTrait._dirty (typed `number` in the trait body).
-//   TRANSFORM_DIRTY_WORLD_MATRIX  — t.worldMatrix stale vs local TRS / ancestors
-//   TRANSFORM_DIRTY_WORLD_TRS     — t.worldPosition/Quaternion/Scale stale vs worldMatrix
-//   TRANSFORM_DIRTY_INTERPOLATED_MATRIX — t.interpolatedWorldMatrix stale vs local TRS / ancestor visual
-//   TRANSFORM_DIRTY_INTERPOLATED_TRS    — t.interpolatedWorldPosition/Quaternion/Scale stale vs
+//   TRANSFORM_DIRTY_WORLD_MATRIX, t.worldMatrix stale vs local TRS / ancestors
+//   TRANSFORM_DIRTY_WORLD_TRS, t.worldPosition/Quaternion/Scale stale vs worldMatrix
+//   TRANSFORM_DIRTY_INTERPOLATED_MATRIX, t.interpolatedWorldMatrix stale vs local TRS / ancestor visual
+//   TRANSFORM_DIRTY_INTERPOLATED_TRS, t.interpolatedWorldPosition/Quaternion/Scale stale vs
 //                                   t.interpolatedWorldMatrix (set by paths that
 //                                   write interpolatedWorldMatrix without mirroring
-//                                   the decomposed TRS — e.g. publishToTraits
+//                                   the decomposed TRS, e.g. publishToTraits
 //                                   or `interpolate()`'s nested-Interp branch).
 
 export const TRANSFORM_DIRTY_WORLD_MATRIX = 1;
@@ -63,12 +63,12 @@ export const TRANSFORM_DIRTY_ALL =
  * setQuaternion/setScale to trigger dirty-flag propagation.
  *
  * external writes (net sync, scene unpack, editor inspector) bypass the
- * setters and instead route through control.set / sync.unpack callbacks
- * — copy in-place, then markDirty. keeps the Vec3/Quat reference stable
+ * setters and instead route through control.set / sync.unpack callbacks,
+ * copy in-place, then markDirty. keeps the Vec3/Quat reference stable
  * for code that caches it.
  *
  * world-space values (worldPosition, worldQuaternion, worldScale,
- * worldMatrix) are computed lazily — read via getWorldPosition/
+ * worldMatrix) are computed lazily, read via getWorldPosition/
  * getWorldMatrix/etc which recompute on demand if dirty.
  *
  * visual values (interpolatedWorldPosition, interpolatedWorldQuaternion,
@@ -76,7 +76,7 @@ export const TRANSFORM_DIRTY_ALL =
  * lazily for rendering. they parallel the world chain but compose
  * from `parent.interpolatedWorldMatrix` instead of `parent.worldMatrix`,
  * so interpolation writes upstream automatically flow down through
- * descendants. renderers read via getVisualWorld* — see below.
+ * descendants. renderers read via getVisualWorld*, see below.
  */
 export const TransformTrait = trait('transform', {
     // ── local-space (persisted + synced) ─────────────────────────────
@@ -128,7 +128,7 @@ export const TransformTrait = trait('transform', {
     // ── interpolation participation (set via setInterpolation API) ────
     /** sticky flag: does this node currently want interpolation? toggled
      *  by `setInterpolation(node, on)`. enrolls this transform in the
-     *  `_interpolating` set on Nodes — per-frame iterate target. */
+     *  `_interpolating` set on Nodes, per-frame iterate target. */
     interpolate: 0 as 0 | 1,
     /** local pose at the start of the current fixed tick. seeded by
      *  `setInterpolation(true)` / `resetInterpolation` and refreshed by
@@ -196,13 +196,13 @@ sync(TransformTrait, 'teleport', {
 /**
  * position + quaternion as two independent owner-authority slices, both
  * threshold-gated (emit only once the value moves ≥ threshold by its metric since
- * the last emit — sub-threshold drift accumulates, a resting body goes silent).
+ * the last emit, sub-threshold drift accumulates, a resting body goes silent).
  * kept separate (not a combined pose tuple) so a node whose position changes every
- * tick but whose rotation is static — or vice versa — only re-emits the slice that
+ * tick but whose rotation is static, or vice versa, only re-emits the slice that
  * actually changed. `setPosition` / `setQuaternion` dirty just their own slice;
  * `markTransformDirty` (physics, animator, compound/world writes) dirties both.
  *
- * receiving side copies the value and invalidates world caches — the per-frame
+ * receiving side copies the value and invalidates world caches, the per-frame
  * `interpolate()` chase-lerps `interpolatedWorld*` toward the freshly-landed
  * pose, with a teleport edge handled via the `teleport` counter. no snapshot
  * buffer, no prev seeding.
@@ -252,7 +252,7 @@ const transformScaleSync = sync(TransformTrait, 'scale', {
 // descendant invalidation, WITHOUT flagging any replication sync. callers pair
 // this with the specific `transform*Sync.dirty(t)` for the slice they wrote.
 function markTransformChanged(t: TransformTrait): void {
-    // always enqueue for snapshot — even when _dirty is already maxed,
+    // always enqueue for snapshot, even when _dirty is already maxed,
     // the node may have moved again this tick and prev snapshot needs to
     // catch the new pose.
     const node = t._node;
@@ -267,7 +267,7 @@ export function markTransformDirty(t: TransformTrait): void {
     markTransformChanged(t);
     // fire replication dirty bits unconditionally (cheap single bits, and
     // freshly-created traits start at _dirty=ALL so markTransformChanged's
-    // early-out would otherwise swallow the first local write's emission —
+    // early-out would otherwise swallow the first local write's emission,
     // mountRig hit this with bone TRS on first set). full write: every slice.
     transformPositionSync.dirty(t);
     transformQuaternionSync.dirty(t);
@@ -279,7 +279,7 @@ export function markTransformDirty(t: TransformTrait): void {
  * enqueue or replication-dirty flags. used by the buffered (remote-
  * driven) pose unpack: `position`/`quaternion` changed so any consumer
  * of world values (physics queries, audio, GPU upload, descendant
- * compose) needs the same invalidation `markTransformDirty` does — but
+ * compose) needs the same invalidation `markTransformDirty` does, but
  * NOT the `_transformDirty` enqueue (which would copy position→prev on
  * the next snapshot and stomp the buffered path's irrelevant prev) and
  * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
@@ -298,7 +298,7 @@ function markDescendants(node: Node): void {
             if (ct._dirty !== TRANSFORM_DIRTY_ALL) {
                 ct._dirty = TRANSFORM_DIRTY_ALL;
                 ct._version++;
-                // no pose/scaleSync.dirty here — descendants' local TRS is
+                // no pose/scaleSync.dirty here, descendants' local TRS is
                 // unchanged, only their world. replication is local-only.
                 markDescendants(child);
             }
@@ -310,15 +310,15 @@ function markDescendants(node: Node): void {
 
 /**
  * mark a subtree dirty because its *ancestry* changed (reparent, or an
- * ancestor's TransformTrait was added/removed) — `parent transform`
+ * ancestor's TransformTrait was added/removed), `parent transform`
  * pointers shifted but local TRS values didn't.
  *
  * unlike `markDirty`, this:
- *   - has no "already maximally dirty" early-out — `_version` must bump
+ *   - has no "already maximally dirty" early-out, `_version` must bump
  *     unconditionally so consumers gated on `_version` (e.g. editor
  *     body-sync) catch the world-matrix change even when the node was
  *     already dirty from a prior local write this frame.
- *   - does NOT flag pose/scaleSync dirty — local TRS is unchanged, so
+ *   - does NOT flag pose/scaleSync dirty, local TRS is unchanged, so
  *     replication doesn't need to retransmit. structural reparenting is
  *     replicated separately by the scene-graph layer.
  */
@@ -338,7 +338,7 @@ export function markAncestryChanged(node: Node): void {
 const _invParent: Mat4 = mat4.create();
 
 // reusable walk stack for updateWorldTransform's iterative ancestor walk.
-// non-reentrant — safe because updateWorldTransform never calls anything
+// non-reentrant, safe because updateWorldTransform never calls anything
 // that re-enters it before returning.
 const _walkStack: TransformTrait[] = [];
 
@@ -446,7 +446,7 @@ export function composeWorldMatrix(n: TransformTrait): void {
     } else {
         // affine multiply: world = parent.world * local. caller guarantees
         // parent.worldMatrix is fresh. both matrices are affine (bottom row
-        // [0 0 0 1]) — exploit to skip the bottom-row computations and the
+        // [0 0 0 1]), exploit to skip the bottom-row computations and the
         // L[3]/L[7]/L[11]/L[15] cancellations.
         const pm = parent.worldMatrix;
         const p00 = pm[0];
@@ -600,8 +600,8 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
     } else {
         // source from parent's visual chain if parent participates in
         // interpolation; otherwise the visual chain is not maintained
-        // above this point, so use parent.worldMatrix (which the caller
-        // — `updateInterpolatedWorldTransform` — has refreshed at the boundary).
+        // above this point, so use parent.worldMatrix (which the caller,
+        // `updateInterpolatedWorldTransform`, has refreshed at the boundary).
         const pm = parent._interpolated ? parent.interpolatedWorldMatrix : parent.worldMatrix;
         const p00 = pm[0];
         const p01 = pm[1];
@@ -639,7 +639,7 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
 }
 
 /**
- * ensure interpolatedWorld values are up to date — mirror of
+ * ensure interpolatedWorld values are up to date, mirror of
  * `updateWorldTransform`, using the visual dirty bit and visual chain.
  *
  * walks up only through interpolated ancestors; stops at the first clean
@@ -664,7 +664,7 @@ export function updateInterpolatedWorldTransform(t: TransformTrait): void {
     // boundary parent (cursor) is null, a clean interp ancestor, or a
     // non-interp ancestor. only the non-interp case needs setup: ensure
     // its worldMatrix is fresh so the nested-compose branch can read it.
-    // updateWorldTransform uses the separate _walkStack — safe to call.
+    // updateWorldTransform uses the separate _walkStack, safe to call.
     if (cursor !== null && !cursor._interpolated && cursor._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
         updateWorldTransform(cursor);
     }
@@ -682,14 +682,14 @@ export function updateInterpolatedWorldTransform(t: TransformTrait): void {
  * visually on next read AND need their `_interpolated` bit set so reader
  * short-circuits flip to the visual chain.
  *
- * does NOT touch the world dirty bits — sim-side worldMatrix chain is
+ * does NOT touch the world dirty bits, sim-side worldMatrix chain is
  * independent and stays valid.
  *
  * unlike `markDescendants`, this walk has no "already dirty" early-out:
  * newly-attached subtrees may already be dirty (from creation) but their
  * `_interpolated` bit hasn't been set yet, so we must keep recursing.
  * descendant counts under Interp roots are small (player rigs, attached
- * props) — the unconditional walk is fine.
+ * props), the unconditional walk is fine.
  */
 export function markInterpolatedDescendantsDirty(node: Node): void {
     for (const child of node.children) {
@@ -710,15 +710,15 @@ export function markInterpolatedDescendantsDirty(node: Node): void {
 // which seeds prev = current immediately so the first render frame blends
 // from the actual pose, not from (0,0,0). without this, snapshot() doesn't
 // run until the next fixed tick, and any render in between would lerp from
-// the default vec3.create() — visually a teleport-from-origin.
+// the default vec3.create(), visually a teleport-from-origin.
 
 /**
  * enroll/unenroll a node in the per-frame interpolation pass. mirrors
  * godot's `set_physics_interpolated`.
  *
  * on enable: flips `interpolate` flag, seeds prev pose from the current
- * local pose, and adds the transform to the per-room `_interpolating` set
- * — which the per-frame `interpolate()` loop in `render/interpolation.ts`
+ * local pose, and adds the transform to the per-room `_interpolating` set,
+ * which the per-frame `interpolate()` loop in `render/interpolation.ts`
  * iterates.
  *
  * on disable: flips the flag off, clears `_interpolated` (so visual getters
@@ -756,7 +756,7 @@ export function setInterpolation(node: Node, on: boolean): void {
 
 /**
  * re-seed prev pose from the node's current local TRS. mirrors godot's
- * `reset_physics_interpolation` — call after a hard snap / teleport /
+ * `reset_physics_interpolation`, call after a hard snap / teleport /
  * authoritative state load where the prev pose would otherwise cause a
  * visual rubber-band on the next interpolate frame.
  *
@@ -870,7 +870,7 @@ export function getWorldMatrix(t: TransformTrait): Mat4 {
 // through the lazy visual chain (`updateInterpolatedWorldTransform`) which composes
 // from `parent.interpolatedWorldMatrix * local`.
 
-/** get the world matrix to render with — visual chain if interpolated, world otherwise. */
+/** get the world matrix to render with, visual chain if interpolated, world otherwise. */
 export function getVisualWorldMatrix(t: TransformTrait): Mat4 {
     if (!t._interpolated) return getWorldMatrix(t);
     if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
@@ -948,7 +948,7 @@ export function computeWorldTransforms(nodes: Nodes): void {
 
 /**
  * convert a world-space position to local-space for a node.
- * fast path: if no transformed parent, world === local — just copies.
+ * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalPosition(t: TransformTrait, worldPos: Vec3, out: Vec3): Vec3 {
     const parent = t._parent as TransformTrait | null;
@@ -973,7 +973,7 @@ const _worldToLocalQuaternion_invParentQuat: Quat = quat.create();
 
 /**
  * convert a world-space quaternion to local-space for a node.
- * fast path: if no transformed parent, world === local — just copies.
+ * fast path: if no transformed parent, world === local, just copies.
  */
 export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: Quat): Quat {
     const parent = t._parent as TransformTrait | null;
@@ -991,7 +991,7 @@ export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: 
 
 /**
  * set a node's local position such that its world position matches worldPos.
- * fast path when no transformed parent — just copies into t.position.
+ * fast path when no transformed parent, just copies into t.position.
  * marks dirty after writing.
  */
 export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void {
@@ -1001,7 +1001,7 @@ export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void {
 
 /**
  * set a node's local quaternion such that its world rotation matches worldQuat.
- * fast path when no transformed parent — just copies into t.quaternion.
+ * fast path when no transformed parent, just copies into t.quaternion.
  * marks dirty after writing.
  */
 export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void {
@@ -1011,7 +1011,7 @@ export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void {
 
 /**
  * returns true if this node has a transformed parent (parent transform pointer is set).
- * used as a fast path check — if false, local === world and no conversion is needed.
+ * used as a fast path check, if false, local === world and no conversion is needed.
  */
 export function hasTransformedParent(t: TransformTrait): boolean {
     return t._parent !== null;
@@ -1032,7 +1032,7 @@ const _collapseQuat: Quat = quat.create();
  * and compose:
  *   newLocal = anchor.local ∘ childLocal
  *
- * subtrees with no TransformTrait are left untouched — they inherit the
+ * subtrees with no TransformTrait are left untouched, they inherit the
  * anchor's parent transform once the anchor's transform is removed.
  *
  * callers are responsible for `removeTrait(anchor, TransformTrait)` and

@@ -32,7 +32,7 @@ function isInputFocused(): boolean {
 // renders the in-progress lasso stroke as an SVG polyline over the canvas.
 // the stroke is captured in NDC (x,y ∈ [-1, 1], y up). we use a
 // non-uniformly-scaled SVG viewbox (0..100 in both axes) so the polyline
-// stretches with the viewport — pixel-perfect alignment with the drawn
+// stretches with the viewport, pixel-perfect alignment with the drawn
 // path because the lasso tool's hit-test is done in NDC too.
 function LassoOverlay() {
     const points = useEditRoom((s) => s.lasso?.points ?? null);
@@ -74,7 +74,7 @@ function Crosshair() {
     );
 }
 
-// fly / orbit / character control mode toggle — floats top-right inside canvas
+// fly / orbit / character control mode toggle, floats top-right inside canvas
 function ControlModeWidget() {
     const controlMode = useEditRoom((s) => s.controlMode);
     const setControlMode = useEditRoom((s) => s.setControlMode);
@@ -123,7 +123,7 @@ function ControlModeWidget() {
  *   │    │   (ControlMode overlay)    │       │
  *   └────┴────────────────────────────┴───────┘
  *
- * left toolbar and right panel are normal flex siblings — they shrink the
+ * left toolbar and right panel are normal flex siblings, they shrink the
  * actual 3d viewport. overlays (ToolActions, ControlModeWidget, DebugPanel,
  * Crosshair) are absolute-positioned inside the canvas container.
  */
@@ -153,7 +153,7 @@ function EditUI() {
     const debugOpen = useClient((s) => s.debugOpen);
     const debugTab = useClient((s) => s.debugTab);
 
-    // global editor hotkeys — must work at the DOM layer because the editor
+    // global editor hotkeys, must work at the DOM layer because the editor
     // script's per-frame onInput hook only fires when the editor module is
     // active for the room. shift+` toggles the editor UI; TAB toggles
     // play/stop on the active room.
@@ -161,7 +161,7 @@ function EditUI() {
         function onKeyDown(e: KeyboardEvent) {
             // undo/redo routes to the active edit-room history here, at the DOM
             // layer, so cmd/ctrl+z works even while a tool-option input (brush
-            // size, pattern, …) holds focus — preventDefault stops the field's
+            // size, pattern, …) holds focus, preventDefault stops the field's
             // native text-undo. handled before the isInputFocused bail for that
             // reason; the game-loop input path leaves mod combos to us.
             if (e.metaKey || e.ctrlKey) {
@@ -217,7 +217,7 @@ function EditUI() {
             }
 
             // in edit mode, Enter is reserved for inline editing affordances
-            // (rename, accept) — only `/` opens chat. in play mode either key
+            // (rename, accept), only `/` opens chat. in play mode either key
             // works.
             const { roomMode } = useEditor.getState();
             const opensChat = e.key === '/' || (e.key === 'Enter' && roomMode !== 'edit');
@@ -234,30 +234,30 @@ function EditUI() {
         <div className="fixed inset-0 flex flex-col">
             <TopToolbar />
 
-            {/* content area — fills remaining height */}
+            {/* content area, fills remaining height */}
             <div className="flex-1 flex flex-row overflow-hidden">
                 {/* left tool strip */}
                 {editorEnabled && <LeftToolbar />}
 
-                {/* canvas viewport — flex-1 so it fills whatever space is left */}
+                {/* canvas viewport, flex-1 so it fills whatever space is left */}
                 <div className="flex-1 relative overflow-hidden flex flex-col">
                     <Viewport />
 
-                    {/* debug panel — ` toggles open; top tab strip switches
+                    {/* debug panel, ` toggles open; top tab strip switches
                         view. 'renderer' tab surfaces the gpucat Inspector
                         overlay (toggled in engine-client.ts) so the panel
                         body is empty in that mode. Whole panel rides a lazy
-                        chunk — Suspense renders nothing while it loads. */}
+                        chunk, Suspense renders nothing while it loads. */}
                     {debugOpen && (
                         <Suspense fallback={null}>
                             <DebugPanel tab={debugTab} />
                         </Suspense>
                     )}
 
-                    {/* crosshair — character (fp) mode only */}
+                    {/* crosshair, character (fp) mode only */}
                     {controlMode === 'character' && <Crosshair />}
 
-                    {/* in-canvas overlays — editor-enabled rooms only */}
+                    {/* in-canvas overlays, editor-enabled rooms only */}
                     {editorEnabled && (
                         <>
                             {/* in-progress lasso stroke */}
@@ -266,30 +266,30 @@ function EditUI() {
                             {/* right-click context menu over the viewport (opened from inspect tool) */}
                             <ViewportContextMenu />
 
-                            {/* HMR / status toasts — top-left, above ToolActions */}
+                            {/* HMR / status toasts, top-left, above ToolActions */}
                             <ToastStack />
 
-                            {/* tool-aware action buttons — top-left, below toasts */}
+                            {/* tool-aware action buttons, top-left, below toasts */}
                             <ToolActions />
 
-                            {/* control mode widget — top-right */}
+                            {/* control mode widget, top-right */}
                             <ControlModeWidget />
 
-                            {/* fly-speed indicator — fades in/out on scroll change */}
+                            {/* fly-speed indicator, fades in/out on scroll change */}
                             <FlySpeedIndicator />
 
-                            {/* orientation cube — bottom-left, gated by debug pane checkbox */}
+                            {/* orientation cube, bottom-left, gated by debug pane checkbox */}
                             {showOrientationCube && <OrientationCube />}
 
-                            {/* hotbar — bottom-center */}
+                            {/* hotbar, bottom-center */}
                             <Hotbar />
 
-                            {/* library overlay — floating panel, conditional (E toggles) */}
+                            {/* library overlay, floating panel, conditional (E toggles) */}
                             <LibraryOverlay />
                         </>
                     )}
 
-                    {/* chat / slash commands — bottom-left, opens on '/' or 't'.
+                    {/* chat / slash commands, bottom-left, opens on '/' or 't'.
                         rendered outside the editorEnabled gate so it works in
                         play mode too. */}
                     <ChatPanel />
@@ -299,7 +299,7 @@ function EditUI() {
                 {editorEnabled && <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />}
             </div>
 
-            {/* carried-item cursor preview — follows mouse while picking up an inventory item */}
+            {/* carried-item cursor preview, follows mouse while picking up an inventory item */}
             {editorEnabled && <CarriedItemCursor />}
         </div>
     );
@@ -342,7 +342,7 @@ function CarriedItemCursor() {
 /**
  * Mount the editor UI shell into `container`. Called from
  * `bongle/engine-editor`'s `setup(state)`, which only the edit-mode boot
- * template imports — so this chunk only ships in editor builds.
+ * template imports, so this chunk only ships in editor builds.
  */
 export function mountEditUI(container: HTMLElement): Root {
     const root = createRoot(container);
@@ -352,7 +352,7 @@ export function mountEditUI(container: HTMLElement): Root {
 
 export { useClient } from '../../client/ui/client-store';
 export { useEditRoom } from '../edit-room-store';
-// keep these re-exports — script consumers and pane components import the
+// keep these re-exports, script consumers and pane components import the
 // stores from here for convenience (matches the prior `client/ui/ui.tsx`
 // surface).
 export { useEditor } from '../editor-store';

@@ -51,7 +51,7 @@ export function updateBuild(
 ): void {
     const s = store.getState();
     // auto-enter prefab placement when the active slot is a prefab. mirrors
-    // ctrl+v→g — ghost follows the cursor and right-click commits, then the
+    // ctrl+v→g, ghost follows the cursor and right-click commits, then the
     // continuous-placement loop re-arms the next instance. mismatch detection
     // (user switched slot mid-placement) lives in inspect.ts since activeTool
     // flips to 'transform' as soon as placement starts and we stop firing.
@@ -68,7 +68,7 @@ export function updateBuild(
         enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.nodes, ctx);
         return;
     }
-    // same auto-enter flow for saved blueprints — the placement preview is
+    // same auto-enter flow for saved blueprints, the placement preview is
     // the saved scene's voxels + nodes, committed via the standard path.
     if (slot && slot.kind === 'blueprint' && !isInPlacement(transformToolState) && s.hoverVoxel && s.hoverNormal) {
         const anchor: Vec3 = [
@@ -104,7 +104,7 @@ export function updateBuild(
     }
 
     // right click: place the active block on the adjacent face.
-    // prefab slots never reach here — auto-enter above intercepts them and
+    // prefab slots never reach here, auto-enter above intercepts them and
     // commit/re-arm is driven by the transform-tool place-mode handler.
     const locked = !!document.pointerLockElement;
     const rmb = locked ? isMouseJustDown(input.mouseKeyboard, 'right') : isMouseTap(input.mouseKeyboard, 'right');
@@ -152,7 +152,7 @@ export function updateBuild(
 // that cell's original key as the reverse op for undo; io.get reads the
 // world, reflecting this place-action's own pending writes. a block with no
 // `place` hook just writes its selected key at the target cell. returns null
-// if `place` wrote nothing (aborted) — e.g. a door with no headroom.
+// if `place` wrote nothing (aborted), e.g. a door with no headroom.
 
 function resolvePlacement(
     activeBlockKey: string,
@@ -207,7 +207,7 @@ function resolvePlacement(
             io,
         );
     } else {
-        // no place hook — write the selected key as-is at the target cell.
+        // no place hook, write the selected key as-is at the target cell.
         io.set(targetX, targetY, targetZ, activeBlockKey);
     }
 

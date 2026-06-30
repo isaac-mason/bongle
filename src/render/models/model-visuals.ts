@@ -1,11 +1,11 @@
-// model visuals — per-room HW-instanced rendering for MeshTrait instances.
+// model visuals, per-room HW-instanced rendering for MeshTrait instances.
 //
 // architecture:
 //   - shared geometry / atlas / meshInfo / material owned by client-global
 //     ModelResources. The pool's interleaved vertex buffer binds as a real
 //     vertex buffer named `vertex`; the index pool binds as the geometry
 //     index. HW vertex fetch + HW indexing.
-//   - per-room: stable per-slot `instanceData` ({worldMatrix, params} —
+//   - per-room: stable per-slot `instanceData` ({worldMatrix, params},
 //     each sub-range written gated by its own trait version; params now
 //     also carries `uvOffset`/`uvScale` re-uploaded on entry-ref change),
 //     plus per-frame `slotMap` (u32[]) + `drawIndirectArray`
@@ -48,7 +48,7 @@ import {
 type MeshQuery = ReturnType<typeof query<[typeof MeshTrait, typeof TransformTrait]>>;
 
 // InstanceParams f32 layout (20 f32 / 80B, mirrors `InstanceParams` in
-// model-resources.ts — must stay in sync, no compiler will catch drift):
+// model-resources.ts, must stay in sync, no compiler will catch drift):
 //   [ 0..3 ]  tint     vec4f  (rgb = target, a = intensity)
 //   [ 4..7 ]  flash    vec4f  (rgb = colour, a = strength)
 //   [ 8..11]  light    vec4f
@@ -95,11 +95,11 @@ function freeOne(a: Allocator, slot: number): void {
 /**
  * renderer-owned per-instance state stored on `MeshTrait._state`. created
  * on first alloc, cleared (back to null on the trait) on destroy. the
- * per-frame loop reads `meshTrait._state` directly — no Map lookup, no
+ * per-frame loop reads `meshTrait._state` directly, no Map lookup, no
  * sparse array.
  */
 export type MeshVisualState = {
-    /** stable GPU instance slot — indexes into instanceData. */
+    /** stable GPU instance slot, indexes into instanceData. */
     slot: number;
     /** back-ref so cleanup can clear `trait._state` on destroy. */
     trait: MeshTrait;
@@ -117,11 +117,11 @@ export type MeshVisualState = {
      *  -1 forces the initial upload (trait._version starts at 0). */
     paramsVersionAtUpload: number;
     /** TransformTrait._version observed at the most recent transform
-     *  upload. NOT advanced while the instance is hidden — so the moment
+     *  upload. NOT advanced while the instance is hidden, so the moment
      *  it becomes visible the version mismatch forces a fresh write. */
     transformVersionAtUpload: number;
     /** MeshInfoEntry reference observed at the most recent params upload.
-     *  Image-decode patches replace the entry object — mismatch retriggers
+     *  Image-decode patches replace the entry object, mismatch retriggers
      *  the params upload so the new uvOffset/uvScale reach the slot. */
     entryRefAtUpload: MeshInfoEntry | null;
     /** this mesh's own frustum-cull entry. `cull.aabb` is the mesh handle's
@@ -131,11 +131,11 @@ export type MeshVisualState = {
      *  alloc, unregistered on destroy. */
     cull: Visibility.CullState;
     /** nearest `ModelTrait` ancestor (shared light slot for the rig).
-     *  Required at alloc time — without it there's no light source for
+     *  Required at alloc time, without it there's no light source for
      *  the params upload (the engine no longer falls back to per-mesh
      *  voxel sampling). Rejected + warned at alloc, same as bounds. */
     model: ModelTrait;
-    /** sibling `TransformTrait` on this mesh's node — resolved at alloc and
+    /** sibling `TransformTrait` on this mesh's node, resolved at alloc and
      *  cached so the per-frame loop skips the `_traits.get` Map hit. The
      *  ECS query gates on `[MeshTrait, TransformTrait]` already, so this
      *  is always present at alloc time; if a script removes the transform
@@ -211,7 +211,7 @@ export function init(
 
     const geometry = new Geometry();
 
-    // pool buffers — engine-global, interleaved {posU, normalV} (uv in
+    // pool buffers, engine-global, interleaved {posU, normalV} (uv in
     // the .w lanes) + index buffer. HW vertex fetch + HW indexing.
     geometry.setBuffer('vertex', modelResources.geometry.vertices);
     geometry.setIndex(modelResources.geometry.indices);
@@ -222,13 +222,13 @@ export function init(
         usage: 'storage',
     });
 
-    // per-frame slotMap — CPU writes a contiguous run per bucket.
+    // per-frame slotMap, CPU writes a contiguous run per bucket.
     const slotMapBuf = new GpuBuffer(d.array(d.u32), {
         data: new Uint32Array(instanceCapacity),
         usage: 'storage',
     });
 
-    // per-frame DrawIndexedIndirect array — CPU writes uniqueMeshCount
+    // per-frame DrawIndexedIndirect array, CPU writes uniqueMeshCount
     // entries; geometry.indirectDrawCount caps the renderer loop.
     const drawIndirectArrayData = new Uint32Array(maxUniqueMeshes * DRAW_INDEXED_INDIRECT_STRIDE_U32);
     const drawIndirectArrayBuf = createIndirectBuffer(d.array(DrawIndexedIndirect), drawIndirectArrayData);
@@ -323,7 +323,7 @@ export function update(
             continue;
         }
 
-        // existing state with a different MeshId — destroy + recreate so
+        // existing state with a different MeshId, destroy + recreate so
         // the new meshSlot resolves fresh.
         if (state !== null) destroyInstance(visuals, meshTrait, visibility);
 
@@ -338,7 +338,7 @@ export function update(
             // Engine policy: meshes render only under a ModelTrait ancestor
             // (the shared light slot, installed by cloneModel). Frustum
             // culling is per-mesh and needs no ancestor. Roll back the slot
-            // we just took. Warn only in editor mode — at runtime, silent
+            // we just took. Warn only in editor mode, at runtime, silent
             // drop. env.editor is build-time-replaced so the warn branch
             // DCEs out of prod bundles.
             freeOne(visuals.instanceAllocator, slot);
@@ -348,8 +348,8 @@ export function update(
         const transform = getTrait(meshTrait._node, TransformTrait)!;
 
         // register this mesh with the shared culler, seeded from the handle's
-        // bind-pose AABB. world AABB = that box × the mesh node's world matrix
-        // — exact even mid-animation (TRS only, no skinning), so per-mesh
+        // bind-pose AABB. world AABB = that box × the mesh node's world matrix,
+        // exact even mid-animation (TRS only, no skinning), so per-mesh
         // culling is correct.
         const handle = resources.models.get(meshId.modelId)?.handle;
         const meshEntry = handle?.meshes[meshId.meshName];
@@ -386,7 +386,7 @@ export function update(
     // ── phase 3: per-instance writes + per-mesh bucket sort ─────────
     const meshInfoEntries = modelResources.meshInfo.entries;
 
-    // reset buckets — empty arrays in-place and pool any orphaned ones.
+    // reset buckets, empty arrays in-place and pool any orphaned ones.
     const buckets = visuals._bucketScratch;
     const freeBuckets = visuals._freeBuckets;
     for (const arr of buckets.values()) arr.length = 0;
@@ -416,7 +416,7 @@ export function update(
         // ModelTrait into `meshTrait.light` (script-visible), then compares
         // against the state's last-uploaded light. A pure copy of
         // unchanged values doesn't flip `lightDirty`, so the params upload
-        // is skipped — without this gate every visible mesh would re-upload
+        // is skipped, without this gate every visible mesh would re-upload
         // every frame.
         const visualWorldMatrix = getVisualWorldMatrix(transformTrait);
         let lightDirty = false;
@@ -445,7 +445,7 @@ export function update(
         // own version compare so we still skip whichever didn't change.
         const slotBase = slot * MODEL_INSTANCE_STRIDE_F32;
 
-        // ── transform upload — gated on TransformTrait._version ──
+        // ── transform upload, gated on TransformTrait._version ──
         const transformVersion = transformTrait._version;
         if (transformVersion !== state.transformVersionAtUpload) {
             instArr[slotBase + 0] = visualWorldMatrix[0]!;
@@ -468,7 +468,7 @@ export function update(
             instanceDataDirty = true;
         }
 
-        // ── params (tint/light/glow + uv) — re-uploads on trait._version
+        // ── params (tint/light/glow + uv), re-uploads on trait._version
         //    bump (script-visible field changed), MeshInfo entry swap
         //    (image-decode patch landed → new uvOffset/uvScale), OR a
         //    light delta detected above. ──
@@ -515,7 +515,7 @@ export function update(
     }
 
     // ── phase 4: pack slotMap + DrawIndexedIndirect array ───────────
-    // a small unique-bucket count cap may have been blown — grow first.
+    // a small unique-bucket count cap may have been blown, grow first.
     // walk buckets; for each non-empty, write slots contiguously and emit
     // one indirect entry. orphan buckets (no slots this frame) get popped
     // into the free list to keep the working set tight.
@@ -543,7 +543,7 @@ export function update(
             continue;
         }
         const entry = meshInfoEntries[meshSlot];
-        if (!entry) continue; // released mid-frame — skip.
+        if (!entry) continue; // released mid-frame, skip.
 
         // write slots into slotMap at [firstInstance .. +len).
         for (let i = 0; i < len; i++) slotMapArr[firstInstance + i] = slots[i]!;
@@ -551,7 +551,7 @@ export function update(
         // DrawIndexedIndirect layout (5 u32):
         //   [0] indexCount, [1] instanceCount, [2] firstIndex,
         //   [3] baseVertex,  [4] firstInstance.
-        // baseVertex stays 0 — indices in the pool are pre-rebased to
+        // baseVertex stays 0, indices in the pool are pre-rebased to
         // absolute vertex positions at upload time.
         const off = writtenDraws * DRAW_INDEXED_INDIRECT_STRIDE_U32;
         indirectArr[off + 0] = entry.indexCount;
@@ -597,7 +597,7 @@ function warnMissingModelTrait(node: Node): void {
 // ── dispose ─────────────────────────────────────────────────────────
 
 export function dispose(visuals: ModelVisuals, visibility: Visibility.Visibility): void {
-    // walk backward — destroyInstance does swap-pop from aliveStates.
+    // walk backward, destroyInstance does swap-pop from aliveStates.
     const arr = visuals.aliveStates;
     for (let i = arr.length - 1; i >= 0; i--) destroyInstance(visuals, arr[i]!.trait, visibility);
     visuals.scene.remove(visuals.mesh);
@@ -622,7 +622,7 @@ function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Vi
 
     // zero per-slot params so a reused slot doesn't briefly inherit
     // stale tint/light/uv before the first write lands. transforms aren't
-    // zeroed — the next allocation's version mismatch forces a full
+    // zeroed, the next allocation's version mismatch forces a full
     // re-upload before the slot is referenced again. 20 f32 = 80B params
     // block (mirrors `InstanceParams` layout above).
     const instArr = visuals.instanceDataBuf.array as Float32Array;
@@ -668,13 +668,13 @@ function destroyInstance(visuals: ModelVisuals, trait: MeshTrait, visibility: Vi
 
 // growth strategy: webgpu buffers are immutable in size, so growing means
 // allocating a fresh GPUBuffer, copying, and destroying the old one. we
-// recreate the GpuBuffer wrapper too — gpucat tracks buffer swaps by
+// recreate the GpuBuffer wrapper too, gpucat tracks buffer swaps by
 // GpuBuffer identity. `geometry.setBuffer(name, newBuf)` re-binds the
 // material to the new buffer and bumps geometry.version automatically.
 function growInstanceBuffers(visuals: ModelVisuals, newCapacity: number): void {
     const geometry = visuals.geometry;
 
-    // instance data — preserve per-slot bytes (transforms + params are
+    // instance data, preserve per-slot bytes (transforms + params are
     // both versioned and won't re-upload until their trait changes).
     {
         const oldArr = visuals.instanceDataBuf.array as Float32Array;
@@ -686,7 +686,7 @@ function growInstanceBuffers(visuals: ModelVisuals, newCapacity: number): void {
         visuals.instanceDataBuf = newBuf;
     }
 
-    // slotMap — rebuilt every frame, no need to preserve.
+    // slotMap, rebuilt every frame, no need to preserve.
     {
         const newArr = new Uint32Array(newCapacity);
         const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage' });

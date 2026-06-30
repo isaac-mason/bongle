@@ -1,4 +1,4 @@
-// Profile harness — runs meshChunk repeatedly on bench scenes.
+// Profile harness, runs meshChunk repeatedly on bench scenes.
 // Intended to be run under node --cpu-prof (via vitest --inspect-brk or
 // the convenience wrapper at lib/scripts/run-profile.sh):
 //   PROFILE_MESH=1 pnpm vitest run src/core/voxels/profile-mesh.test.ts
@@ -239,7 +239,7 @@ test.skipIf(!SHOULD_RUN)(
             }
         }
 
-        // start CPU profiler — captures only the hot region (skips vitest boot,
+        // start CPU profiler, captures only the hot region (skips vitest boot,
         // pnpm wrapper, etc. that --cpu-prof would otherwise dominate)
         const session = new Session();
         session.connect();

@@ -1,9 +1,9 @@
-// camera-fit — derive an OrthographicCamera that frames an AABB from a
+// camera-fit, derive an OrthographicCamera that frames an AABB from a
 // fixed isometric angle. shared by all preview tasks (block-icons,
 // prefab-icons, ...) so generated thumbnails compose visually.
 //
-// the angle (30° elevation, 45° azimuth) and CAM_DIST match block-icons.ts
-// — keep them in sync if either is tuned.
+// the angle (30° elevation, 45° azimuth) and CAM_DIST match block-icons.ts,
+// keep them in sync if either is tuned.
 
 import { OrthographicCamera } from 'gpucat';
 import type { Vec3 } from 'mathcat';

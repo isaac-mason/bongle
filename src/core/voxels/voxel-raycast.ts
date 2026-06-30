@@ -157,7 +157,7 @@ export function raycastVoxels(
         const cz = z >> CHUNK_BITS;
         const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
 
-        // skip empty/missing chunks — advance to chunk exit boundary
+        // skip empty/missing chunks, advance to chunk exit boundary
         if (!chunk || chunk.aggregate === 0) {
             const chunkMinX = cx << CHUNK_BITS;
             const chunkMinY = cy << CHUNK_BITS;
@@ -251,7 +251,7 @@ export function raycastVoxels(
             const cid = colliderIdTable[stateId]!;
 
             if (cid === 0) {
-                // cube fast path — DDA already gives us the hit
+                // cube fast path, DDA already gives us the hit
                 const faceIdx = distance === 0 ? faceFromRayDirection(dx, dy, dz) : faceIndexFromStep(lastStepAxis, lastStepDir);
 
                 out.hit = true;
@@ -269,11 +269,11 @@ export function raycastVoxels(
                 out.hitIndex = faceIdx;
                 return out;
             } else {
-                // custom collider shape — use crashcat castRayVsShape
+                // custom collider shape, use crashcat castRayVsShape
                 const shape = colliderShapes[cid];
 
-                // a stale state id — e.g. a chunk briefly resolved against a different
-                // registry mid-HMR (block add) — can index past the rebuilt shape table.
+                // a stale state id, e.g. a chunk briefly resolved against a different
+                // registry mid-HMR (block add), can index past the rebuilt shape table.
                 // skip the cell rather than hand crashcat an undefined shape (it would
                 // deref `.type` on undefined and crash the caller, e.g. the editor cursor).
                 if (!shape) continue;

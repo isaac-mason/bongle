@@ -1,5 +1,5 @@
 /**
- * client input — split into:
+ * client input, split into:
  *   - `Input` (per-room data; held keys/buttons, mouse deltas, prev maps)
  *   - `InputManager` (client-level; owns DOM listeners and routes events
  *     into whichever Input is currently the active target)
@@ -93,7 +93,7 @@ export type MouseKeyboardInput = {
     _prevButtons: { left: boolean; right: boolean; middle: boolean };
     /** accumulated scroll wheel delta since last reset() */
     _wheelDeltaY: number;
-    /** per-button drag-vs-tap discrimination — see MouseButtonGesture */
+    /** per-button drag-vs-tap discrimination, see MouseButtonGesture */
     _gestures: { left: MouseButtonGesture; middle: MouseButtonGesture; right: MouseButtonGesture };
 };
 
@@ -207,7 +207,7 @@ export function isMouseTap(mk: MouseKeyboardInput, button: MouseButton): boolean
  * Single canvas touch (one finger). Mirrors Unity's EnhancedTouch.Touch
  * for raw position/start/delta state, and adds latched gesture edge
  * flags (`tapped`/`longPressed`/`swiped`) so scripts can read intent
- * with a single per-touch iteration — same model as the mouse gestures
+ * with a single per-touch iteration, same model as the mouse gestures
  * above.
  */
 export type CanvasTouch = {
@@ -259,7 +259,7 @@ export type TouchButtonState = {
     _prevDown: boolean;
     /** `look:true` buttons also drive the camera while held (a fire button you
      *  can aim with). their drag is forwarded into the same look pipeline as a
-     *  right-half canvas drag — see `consumeTouchButtonLookDrag`. */
+     *  right-half canvas drag, see `consumeTouchButtonLookDrag`. */
     look: boolean;
     /** CSS-px drag accumulated since the last consume; meaningful only when `look`. */
     _dragX: number;
@@ -419,7 +419,7 @@ export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: num
  * Installs `pointerdown/move/up/cancel` on the canvas, filtered to
  * `pointerType === 'touch'`. Touches on virtual joystick/button DOM
  * (sibling-of-canvas under viewport) never bubble here because canvas
- * isn't their ancestor — automatic separation between canvas-touch
+ * isn't their ancestor, automatic separation between canvas-touch
  * gestures and HUD touches. Returns a disposer.
  */
 export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: Input): () => void {
@@ -577,7 +577,7 @@ export function createInputManager(): InputManager {
             // typing in inspector fields, chat, etc. doesn't trigger
             // shortcuts or character movement. Check both `e.target` (stable
             // even if a portal/dismissable layer moves focus before this
-            // bubble-phase listener fires — e.g. Radix Popover on Escape) and
+            // bubble-phase listener fires, e.g. Radix Popover on Escape) and
             // current focus, to cover the case where the keypress originates
             // outside the input.
             if (isTextInputElement(e.target) || isTextInputFocused()) return;
@@ -606,7 +606,7 @@ export function createInputManager(): InputManager {
             mk._mods.mod = e.metaKey || e.ctrlKey;
             mk._mods.shift = e.shiftKey;
             mk._mods.alt = e.altKey;
-            // macOS swallows letter keyups while Cmd is held — when Cmd
+            // macOS swallows letter keyups while Cmd is held, when Cmd
             // itself releases, flush any non-modifier held keys so the
             // next press registers as a fresh just-down.
             if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
@@ -666,7 +666,7 @@ export function createInputManager(): InputManager {
             const g = mk._gestures[name];
             // a release that never crossed the drag threshold is a tap.
             // a drag-look release isn't mis-fired here because the drag
-            // promotion that triggered pointer-lock already set g.drag —
+            // promotion that triggered pointer-lock already set g.drag,
             // the lock state doesn't need to be re-checked. taps issued
             // while pointer-locked (e.g. RMB-place from inside the
             // player-controller's locked view) are intentional.

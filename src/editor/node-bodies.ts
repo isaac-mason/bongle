@@ -1,4 +1,4 @@
-// node-bodies.ts — maintains crashcat sensor rigid bodies for scene nodes
+// node-bodies.ts, maintains crashcat sensor rigid bodies for scene nodes
 // so broadphase queries (castRay, intersectAABB) can find them efficiently.
 //
 // Only nodes in the *targetable frontier* hold bodies. The frontier is a
@@ -18,7 +18,7 @@
 // body owns a stable `BoxShape` whose `halfExtents` is mutated in place each
 // frame to avoid per-frame allocations.
 //
-// the module does NOT use userData on the rigid body — instead it maintains
+// the module does NOT use userData on the rigid body, instead it maintains
 // a bidirectional map: bodyId ↔ nodeId.
 
 import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
@@ -44,7 +44,7 @@ type BodyEntry = {
     /** subtree mesh-AABB union expressed in this node's local frame.
      * snapshotted at first sync (using the current pose) and re-derived
      * only when the frontier rebuilds. animation moving bones inside the
-     * rig does NOT re-tighten this — same trade Godot makes. */
+     * rig does NOT re-tighten this, same trade Godot makes. */
     localAabb: Box3 | null;
     /** transform._version at last body sync. an int-compare against the
      * current frame's _version short-circuits the per-frame update when
@@ -58,7 +58,7 @@ export type NodeBodies = {
     bodyToNode: Map<BodyId, number>;
     // pre-built filter that only hits the editor nodes layer
     queryFilter: Filter;
-    // cached player node id — refreshed when the frontier rebuilds
+    // cached player node id, refreshed when the frontier rebuilds
     playerNodeId: number;
     // current targetable frontier (node ids eligible for a body)
     targetable: Set<number>;
@@ -181,7 +181,7 @@ const _scratchPos: Vec3 = [0, 0, 0];
 
 // half-size of the fallback pick box dropped on transform-only nodes (no
 // mesh/voxel geometry in their subtree). a 0.5-unit cube centered on the
-// node's world origin — big enough to click, small enough not to swallow
+// node's world origin, big enough to click, small enough not to swallow
 // nearby geometry picks.
 const FALLBACK_PICK_HALF_EXTENT = 0.25;
 
@@ -225,7 +225,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
             nodeToBody.delete(nodeId);
         }
 
-        // structure may have changed (children added/removed, mesh swapped, etc.) —
+        // structure may have changed (children added/removed, mesh swapped, etc.),
         // force surviving entries to re-derive their cached local AABB next sync.
         for (const entry of nodeToBody.values()) entry.localAabb = null;
     }
@@ -241,7 +241,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
         // ── steady state: cached local AABB + version short-circuit ──
         if (existing?.localAabb) {
             if (existing.lastVersion === transform._version) {
-                // rig root hasn't moved since last sync — body already in place.
+                // rig root hasn't moved since last sync, body already in place.
                 continue;
             }
             const iwm = getVisualWorldMatrix(transform);
@@ -254,7 +254,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
         // ── first sync (or post-dirty rebuild): walk subtree once ──
         box3.set(_worldAabb, Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
         if (!unionSubtreeWorldAabb(node, resources, _worldAabb)) {
-            // no mesh/voxel geometry in the subtree — fall back to a small fixed
+            // no mesh/voxel geometry in the subtree, fall back to a small fixed
             // box centered on the node's world origin so it stays clickable.
             const wm = getVisualWorldMatrix(transform);
             const wx = wm[12];
@@ -274,7 +274,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
         // derive node-local AABB once: localAabb = inverse(rootWorld) * worldAabb
         const rootIwm = getVisualWorldMatrix(transform);
         if (!mat4.invert(_invMat, rootIwm)) {
-            // singular matrix (zero scale, etc.) — skip; will retry next frame.
+            // singular matrix (zero scale, etc.), skip; will retry next frame.
             continue;
         }
         const localAabb = box3.create();

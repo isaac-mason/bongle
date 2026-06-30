@@ -6,8 +6,8 @@
 // active edge contacts; the kcc would otherwise see phantom snags as
 // it walks across flat ground.
 //
-// scope: cube voxels only (collider id 0). non-cube solids — slopes,
-// custom hulls — count as empty for this classifier. only cube-vs-cube
+// scope: cube voxels only (collider id 0). non-cube solids, slopes,
+// custom hulls, count as empty for this classifier. only cube-vs-cube
 // continuity smooths an edge; any cube-vs-custom seam is a real
 // geometric transition and stays active by construction.
 //

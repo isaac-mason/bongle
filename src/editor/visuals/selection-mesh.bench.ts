@@ -5,12 +5,12 @@
 // the editor pipeline rebuilds three CPU-side artifacts every time the
 // committed selection (or the brush) changes:
 //
-//   1. buildSelectionGeometry  — greedy-mesh quads for the translucent fill
-//   2. buildMeshEdgeSegments   — per-voxel crease + boundary edges (heavy)
-//   3. buildOutlineSegments    — 12-edge AABB outline (trivial)
+//   1. buildSelectionGeometry, greedy-mesh quads for the translucent fill
+//   2. buildMeshEdgeSegments, per-voxel crease + boundary edges (heavy)
+//   3. buildOutlineSegments, 12-edge AABB outline (trivial)
 //
 // then `setOutlineMesh` wraps the segments into a fresh LineSegmentsGeometry
-// (which writes 4 instance buffers + an index buffer — also non-trivial for
+// (which writes 4 instance buffers + an index buffer, also non-trivial for
 // dense edge sets).
 //
 // these benches isolate each stage so we can see which one dominates per
@@ -36,7 +36,7 @@ function single(): Selection.Selection {
     return sel;
 }
 
-/** hollow box shell — only the surface voxels of an N^3 cube */
+/** hollow box shell, only the surface voxels of an N^3 cube */
 function shell(n: number): Selection.Selection {
     const sel = Selection.create();
     for (let z = 0; z < n; z++) {
@@ -50,7 +50,7 @@ function shell(n: number): Selection.Selection {
     return sel;
 }
 
-/** sparse scatter — `count` voxels in a region of side `range` (deterministic). */
+/** sparse scatter, `count` voxels in a region of side `range` (deterministic). */
 function sparse(count: number, range: number): Selection.Selection {
     const sel = Selection.create();
     let seed = 0xdeadbeef;
@@ -66,7 +66,7 @@ function sparse(count: number, range: number): Selection.Selection {
     return sel;
 }
 
-/** worst-case crease pattern — every other voxel set in an n^3 cube */
+/** worst-case crease pattern, every other voxel set in an n^3 cube */
 function checkerboard(n: number): Selection.Selection {
     const sel = Selection.create();
     for (let z = 0; z < n; z++)
@@ -74,7 +74,7 @@ function checkerboard(n: number): Selection.Selection {
     return sel;
 }
 
-/** thin slab — 1 voxel tall, n×n footprint. very common box-select pattern. */
+/** thin slab, 1 voxel tall, n×n footprint. very common box-select pattern. */
 function slab(n: number): Selection.Selection {
     const sel = Selection.create();
     Selection.setAABB(sel, 0, 0, 0, n - 1, 0, n - 1);

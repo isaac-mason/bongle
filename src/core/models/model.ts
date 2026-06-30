@@ -1,6 +1,6 @@
-// model.ts — runtime in-memory model shape, the idiomatic form that
+// model.ts, runtime in-memory model shape, the idiomatic form that
 // consumers (renderer, animator, physics, the runtime handle hydrator)
-// read from. Distinct from `ModelBin` (the wire format — flat,
+// read from. Distinct from `ModelBin` (the wire format, flat,
 // index-keyed, packcat-friendly) by design:
 //
 //   - serialization shape is constrained by packcat (no cycles, no refs,
@@ -14,8 +14,8 @@
 //   .bin bytes  → packcat unpack → ModelBin  → toModel(bin) → Model
 //   .glb bytes  → gltfUnpack ─────────────────────────────→ Model
 //
-// `gltfUnpack` builds a `Model` directly (skips the ModelBin intermediate)
-// — it's a runtime parser, not a wire codec, so there's no reason to
+// `gltfUnpack` builds a `Model` directly (skips the ModelBin intermediate),
+// it's a runtime parser, not a wire codec, so there's no reason to
 // shape its output for serialization. The .bin path goes through
 // `toModel` because the bytes-on-disk shape *is* ModelBin.
 
@@ -75,19 +75,19 @@ export type ModelImage = {
 };
 
 /**
- * The parsed in-memory model. Lives only at runtime — never serialized.
+ * The parsed in-memory model. Lives only at runtime, never serialized.
  * Produced by `gltfUnpack` (runtime .glb) and `toModel` (declared .bin).
  */
 export type Model = {
     /** scene root. when the source has multiple top-level nodes, this is
      *  a synthetic wrapper named after the modelId. */
     root: ModelNode;
-    /** flat by-name index — same node refs as the tree under `root`. */
+    /** flat by-name index, same node refs as the tree under `root`. */
     nodesByName: Map<string, ModelNode>;
     meshesByName: Map<string, ModelMesh>;
     clipsByName: Map<string, ModelClip>;
     images: ModelImage[];
-    /** bind-pose AABB in root-local space — union of mesh AABBs
+    /** bind-pose AABB in root-local space, union of mesh AABBs
      *  transformed by each owning node's accumulated TRS chain. */
     aabb: Box3;
 };
@@ -155,7 +155,7 @@ export function toModel(modelId: string, bin: ModelBin): Model {
         const channels: ModelChannel[] = [];
         for (const ch of c.channels) {
             const target = nodesByName.get(ch.nodeName);
-            // a channel without a resolvable target is dead data —
+            // a channel without a resolvable target is dead data,
             // either the wire bytes are stale (node removed but channel
             // not) or the source gltf was malformed. drop quietly.
             if (!target) continue;

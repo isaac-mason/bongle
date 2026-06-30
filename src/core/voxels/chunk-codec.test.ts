@@ -218,7 +218,7 @@ describe('encodeLight / decodeLight', () => {
         // sky=0 everywhere, rgb falls off from a single emitter
         const light = new Uint16Array(CHUNK_VOLUME);
         for (let i = 0; i < CHUNK_VOLUME; i++) {
-            // arbitrary rgb pattern — gradient that creates a few distinct runs
+            // arbitrary rgb pattern, gradient that creates a few distinct runs
             const r = i & 0xf;
             const g = (i >> 4) & 0xf;
             const b = (i >> 8) & 0xf;

@@ -3,7 +3,7 @@ import type { TraitSyncState } from '../traits';
 import { captureValue, diffSync } from './sync-diff';
 import { syncMetric } from './sync-rate';
 
-// minimal stubs — diffSync only touches codec.{pack,packInto} + syncDef.{rate,pack}
+// minimal stubs, diffSync only touches codec.{pack,packInto} + syncDef.{rate,pack}
 // + the per-instance sync state, so we avoid pulling real packcat codecs (and their
 // runtime env needs) into the test. packInto mirrors pack: write the slice's bytes into
 // the scratch, return the length.

@@ -1,17 +1,17 @@
-// contact bookkeeping — types, pools, and the per-step global stream.
+// contact bookkeeping, types, pools, and the per-step global stream.
 //
 // two layers:
-//   1. `ContactPair` — un-normalized record of a touching pair (A→B). lives
+//   1. `ContactPair`, un-normalized record of a touching pair (A→B). lives
 //      in `physics.contacts`, populated during the physics listener step
 //      (rigid bodies, voxels) and the AABB physics step (aabb bodies, voxels).
 //      one entry per canonical pair regardless of perspective.
-//   2. `RigidBodyContact` / `AabbBodyContact` / `VoxelContact` — observer-
+//   2. `RigidBodyContact` / `AabbBodyContact` / `VoxelContact`, observer-
 //      normalized contact (normal points away from self). lives in per-node
 //      `ContactsTrait` lists, populated by the post-step fan-out from
 //      `physics.contacts`.
 //
 // the diff lifecycle (added/persisted/removed, one-step grace for removed)
-// is owned at the pair level. per-trait lists are throwaway each step —
+// is owned at the pair level. per-trait lists are throwaway each step,
 // fan-out clears and refills.
 //
 // pools: separate per concrete type. `RigidBodyContactPool`, `AabbBodyContactPool`
@@ -42,7 +42,7 @@ export type RigidBodyContact = ContactBase & {
     bodyId: BodyId;
     /** sub-shape within the other body's compound, 0 for non-compound. */
     subShapeId: number;
-    /** the other body is a sensor — this contact is informational. */
+    /** the other body is a sensor, this contact is informational. */
     isSensor: boolean;
     /** other body's linear velocity at contact, in observer frame: bLin - selfLin. */
     relativeVelocity: Vec3;
@@ -55,7 +55,7 @@ export type AabbBodyContact = ContactBase & {
     aabbBodyId: number;
     /** the trait-bound node owning the other AabbBody, or null when the other side is an imperative body. */
     nodeId: number | null;
-    /** the other body is a sensor — this contact is informational. */
+    /** the other body is a sensor, this contact is informational. */
     isSensor: boolean;
     /** other body's linear velocity at contact, in observer frame: bLin - selfLin. */
     relativeVelocity: Vec3;
@@ -263,7 +263,7 @@ export function releaseContactPair(pool: ContactPairPool, p: ContactPair): void 
 
 // ── keying ───────────────────────────────────────────────────────────
 //
-// strings — simplest correct option. voxel coords can be arbitrarily large
+// strings, simplest correct option. voxel coords can be arbitrarily large
 // (any reasonable world overflows 53-bit packing once you factor in
 // sub-shape + sub-aabb dimensions), so don't pretend a numeric scheme works.
 // Map<string, ContactPair> is well-optimized in modern engines; revisit
@@ -308,7 +308,7 @@ export function pairKey(sideA: string, sideB: string): string {
  *                  last-known fields.
  */
 export type PhysicsContacts = {
-    /** all contacts active this step — `added` ++ `persisted`. */
+    /** all contacts active this step, `added` ++ `persisted`. */
     active: ContactPair[];
     /** first seen this step. */
     added: ContactPair[];
@@ -368,7 +368,7 @@ export function beginPhysicsContactsFrame(pc: PhysicsContacts, pairPool: Contact
  * called twice with the same key in one frame: returns the same instance
  * (the second caller can short-circuit if it doesn't need to overwrite).
  * caller can detect duplicates via the boolean `wasNew` channel if it
- * cares — we don't expose one for now, since the common case is "fill
+ * cares, we don't expose one for now, since the common case is "fill
  * unconditionally, it's cheap."
  */
 export function recordContactPair(pc: PhysicsContacts, pairPool: ContactPairPool, key: string): ContactPair {

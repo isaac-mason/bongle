@@ -1,4 +1,4 @@
-// `bongle/starter` — a free baseline of blocks, textures, models and
+// `bongle/starter`, a free baseline of blocks, textures, models and
 // sounds. Each subsystem is re-exported as its own namespace so usage
 // is uniform across kinds:
 //

@@ -1,4 +1,4 @@
-// per-room visibility — the frustum culler. A thin policy layer over the
+// per-room visibility, the frustum culler. A thin policy layer over the
 // generic `dbvt` broadphase tree: it owns the per-renderable `CullState`s,
 // refits their world AABBs from their transforms each frame, frustum +
 // distance culls, and writes the result back into each `CullState`.
@@ -7,11 +7,11 @@
 // + transform, gets the handle back, keeps it on its own render-state
 // (`MeshVisualState.cull`, `SpriteVisualState.cull`, …), reads `visible` /
 // `distSq` / `extentSq`, and `remove`s it on destroy. Everything else on the
-// struct is the culler's. No traits, no model-level state — a model isn't a
+// struct is the culler's. No traits, no model-level state, a model isn't a
 // cullable, its meshes are.
 //
 // The culler holds the `TransformTrait` ref (on the `CullState`), so it
-// recomputes the world AABB itself at cull time — fresh, no frame lag. It
+// recomputes the world AABB itself at cull time, fresh, no frame lag. It
 // keeps registered entries in one dense `CullState[]`; the tree leaf's `data`
 // payload is the entry's index into that array (fixed up on swap-pop), so the
 // frustum callback maps straight back with no sparse leaf-indexed arrays.
@@ -51,7 +51,7 @@ export type CullState = {
     transform: TransformTrait | null;
     /** `transform._version` last folded into the leaf's world AABB. */
     transformVersion: number;
-    /** prev-frame `visible` — feeds distance-cull hysteresis so a leaf near
+    /** prev-frame `visible`, feeds distance-cull hysteresis so a leaf near
      *  the radius boundary doesn't flicker. */
     wasVisible: boolean;
 };
@@ -87,7 +87,7 @@ export function init(): Visibility {
 }
 
 /** how far past `viewRadius` a leaf that was visible last frame stays visible
- *  (block units). Mirrors the server's `VIEW_RADIUS_MARGIN` — small enough to
+ *  (block units). Mirrors the server's `VIEW_RADIUS_MARGIN`, small enough to
  *  be invisible to the player, big enough to absorb per-frame motion across
  *  the radius boundary. */
 const VIEW_RADIUS_MARGIN = 16;
@@ -101,7 +101,7 @@ function isEmptyAabb(b: Box3): boolean {
 /**
  * Add a renderable's local `aabb` + `transform` and return its cull handle.
  * The leaf is seeded from `aabb × transform.world`. An empty box (the renderer
- * has no geometry yet) returns an unregistered, visible-by-default handle —
+ * has no geometry yet) returns an unregistered, visible-by-default handle,
  * nothing to cull. Pair with `remove` when the render-state is freed.
  */
 export function add(v: Visibility, aabb: Box3, transform: TransformTrait): CullState {
@@ -205,7 +205,7 @@ function _onVisibleLeaf(slot: number, aabb: Box3): void {
     cull.visible = true;
     // coverage inputs for animation LOD (and any future projected-size
     // ranking). world-space extent² ÷ distSq is monotonic with projected
-    // pixel size for a given fov — no sqrt, no projection.
+    // pixel size for a given fov, no sqrt, no projection.
     cull.distSq = distSq;
     const ex = aabb[3] - aabb[0];
     const ey = aabb[4] - aabb[1];

@@ -11,7 +11,7 @@ import type { ScriptContext } from '../core/scene/scripts';
 import { env } from './env';
 
 /** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. true on
- *  touchscreen laptops too — use `isTouchPrimary` to gate touch controls. */
+ *  touchscreen laptops too, use `isTouchPrimary` to gate touch controls. */
 export function isTouchDevice(ctx: ScriptContext): boolean {
     if (!env.client) return false;
     return ctx.client?.state?.device.touch ?? false;
@@ -38,7 +38,7 @@ export function isMobileViewport(): boolean {
     return window.innerWidth < MOBILE_VIEWPORT_BREAKPOINT_PX;
 }
 
-/** isTouchDevice() && isMobileViewport(). A small touch SCREEN — use this to
+/** isTouchDevice() && isMobileViewport(). A small touch SCREEN, use this to
  *  pick a compact/phone HUD LAYOUT. For gating touch CONTROLS (joystick, action
  *  buttons) use `isTouchPrimary` instead: this is false on a tablet or a phone
  *  in landscape (viewport ≥ breakpoint), where you still want the controls. */

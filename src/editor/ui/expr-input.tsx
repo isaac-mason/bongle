@@ -1,5 +1,5 @@
 /**
- * <ExprInput> — small text input with grammar-aware autocomplete.
+ * <ExprInput>, small text input with grammar-aware autocomplete.
  *
  * shape mirrors the chat panel's completion UX: dropdown below the input,
  * arrow keys cycle, Tab/Enter accepts, Esc dismisses. used by the tool
@@ -8,7 +8,7 @@
  *
  * grammar-specific knowledge lives in the suggest fn (see
  * `pattern.ts:suggestPattern` / `mask.ts:suggestMask`); this component is
- * pure UX — it doesn't know about block ids, weights, or operators. that
+ * pure UX, it doesn't know about block ids, weights, or operators. that
  * keeps it reusable for any future grammar-typed field (e.g. selectors).
  */
 
@@ -37,7 +37,7 @@ type Props = {
     placeholder?: string;
     suggest: ExprSuggestFn;
     onChange: (next: string) => void;
-    /** parse error from the consumer's commit fn — rendered below the input. */
+    /** parse error from the consumer's commit fn, rendered below the input. */
     error?: string | null;
 };
 
@@ -167,7 +167,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                         sideOffset={2}
                     >
                         <Popover.Popup
-                            // keep focus in the input — the popup otherwise grabs
+                            // keep focus in the input, the popup otherwise grabs
                             // focus on open and steals the caret.
                             initialFocus={false}
                             finalFocus={false}

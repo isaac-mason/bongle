@@ -858,7 +858,7 @@ function PivotRow() {
 
     if (!placementActive) return null;
 
-    // derive active preset from current offset (best-effort — custom won't match)
+    // derive active preset from current offset (best-effort, custom won't match)
     const [px, py, pz] = pivotOffset;
     const isMin = px === 0 && py === 0 && pz === 0;
 

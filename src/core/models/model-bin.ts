@@ -1,16 +1,16 @@
-// Model .bin format — packcat schema shared by CLI emit and engine unpack.
+// Model .bin format, packcat schema shared by CLI emit and engine unpack.
 //
 // Two artifacts per model, same schema:
-//   <basename>.<hash8>.server.bin — meshes + clips + scene (`images: undefined`)
-//   <basename>.<hash8>.client.bin — meshes + clips + scene + images
+//   <basename>.<hash8>.server.bin, meshes + clips + scene (`images: undefined`)
+//   <basename>.<hash8>.client.bin, meshes + clips + scene + images
 //
 // Same `unpack(bytes)` runs on both sides; client reads `result.images ?? []`.
 //
 // Scene tree (`nodes` + `rootIndices` + `aabb`) lives here so runtime-only
 // `.glb` uploads (avatars) can hydrate the same `ModelHandle` shape that
 // codegen produces for declared models. Declared models still have the
-// codegen sidecar — that's the static-at-module-eval source of truth for
-// `wizard.scene` / `.nodes.Body` etc. — but the .bin now carries the same
+// codegen sidecar, that's the static-at-module-eval source of truth for
+// `wizard.scene` / `.nodes.Body` etc., but the .bin now carries the same
 // data structurally so the runtime hydrator path doesn't need a separate
 // format-specific construction routine.
 
@@ -25,9 +25,9 @@ const meshSchema = packcat.object({
     normals: packcat.float32Array(),
     /** vertex uvs, 2 floats per vertex. */
     uvs: packcat.float32Array(),
-    /** triangle indices (uint32 always — keeps slot math uniform pool-side). */
+    /** triangle indices (uint32 always, keeps slot math uniform pool-side). */
     indices: packcat.uint32Array(),
-    /** local-space AABB — mathcat `Box3` (`[minX, minY, minZ, maxX, maxY, maxZ]`). */
+    /** local-space AABB, mathcat `Box3` (`[minX, minY, minZ, maxX, maxY, maxZ]`). */
     aabb: packcat.list(packcat.float32(), 6),
     /**
      * index into `images` for this mesh's base-color texture; absent for
@@ -63,7 +63,7 @@ const clipSchema = packcat.object({
 });
 
 const imageSchema = packcat.object({
-    /** mime type — 'image/png' or 'image/jpeg' typically. */
+    /** mime type, 'image/png' or 'image/jpeg' typically. */
     mimeType: packcat.string(),
     /** raw image bytes; client decodes via createImageBitmap. */
     bytes: packcat.uint8Array(),
@@ -97,7 +97,7 @@ export const modelBinSchema = packcat.object({
     clips: packcat.list(clipSchema),
     images: packcat.optional(packcat.list(imageSchema)),
     /**
-     * DFS-flattened scene tree. Empty list is legal — a meshes-only model
+     * DFS-flattened scene tree. Empty list is legal, a meshes-only model
      * (one root with one mesh) needs no hierarchy; the hydrator wraps it
      * in a synthetic root.
      */
@@ -108,7 +108,7 @@ export const modelBinSchema = packcat.object({
      *  hydrator skip `TransformTrait` on identity non-mesh non-animated
      *  nodes (matches the codegen barrel's same optimization). */
     animatedNodeNames: packcat.list(packcat.string()),
-    /** bind-pose AABB in root-local space — union of mesh AABBs
+    /** bind-pose AABB in root-local space, union of mesh AABBs
      *  transformed by each owning node's accumulated TRS chain. */
     aabb: packcat.list(packcat.float32(), 6),
 });

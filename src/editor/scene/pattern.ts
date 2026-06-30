@@ -1,13 +1,13 @@
 /**
  * WorldEdit-style block patterns. A Pattern is a plain-object AST that
- * answers "what block should I place here?" — it is sampled per voxel by
+ * answers "what block should I place here?", it is sampled per voxel by
  * bulk ops like fill / replace.
  *
  * The grammar is a subset of WorldEdit's (see worldedit-docs patterns.rst):
- *   - `stone`                 — single block (with optional `[k=v,...]` state)
- *   - `stone,dirt`            — equal-weight random list
- *   - `10%stone,90%dirt`      — weighted random (weights are relative, not %)
- *   - `$active`               — resolves at sample-time to whatever block is
+ *   - `stone`, single block (with optional `[k=v,...]` state)
+ *   - `stone,dirt`, equal-weight random list
+ *   - `10%stone,90%dirt`, weighted random (weights are relative, not %)
+ *   - `$active`, resolves at sample-time to whatever block is
  *                               in the active hotbar slot. callers pass it via
  *                               `samplePattern(..., active)`; brushes default
  *                               their pattern to this token.
@@ -15,7 +15,7 @@
  * Decimals on weights are allowed. Brackets are protected when splitting on
  * `,` so `stone_stairs[half=top],dirt` parses correctly.
  *
- * The union is intentionally open — add new kinds (randomState, category,
+ * The union is intentionally open, add new kinds (randomState, category,
  * clipboard, typeApply, stateApply) by extending the type and matching them
  * in `parsePattern` / `samplePattern`.
  */
@@ -117,7 +117,7 @@ function parseSingle(token: string): Pattern {
 // thin completion helper used by the editor's <ExprInput> wrapper. given
 // the input text + caret position, returns the substring range to replace
 // and a ranked candidate list. kept inside this module so the grammar and
-// its suggestions stay in lockstep — if a new pattern kind is added above,
+// its suggestions stay in lockstep, if a new pattern kind is added above,
 // add a token here too.
 
 export type PatternSuggestion = { text: string; label?: string; detail?: string };
@@ -134,7 +134,7 @@ export function suggestPattern(
     cursor: number,
     blockIds: ReadonlyArray<{ id: string; name?: string }>,
 ): PatternSuggestResult {
-    // walk back from cursor over non-comma at depth 0 — that's the token
+    // walk back from cursor over non-comma at depth 0, that's the token
     // currently being edited.
     let depth = 0;
     let tokenStart = 0;

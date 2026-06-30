@@ -1,4 +1,4 @@
-// smooth tool — worldedit-style heightmap gaussian.
+// smooth tool, worldedit-style heightmap gaussian.
 //
 // per (x,z) column inside the footprint we sample the topmost block that
 // satisfies `heightmapMask` (any non-air when null), then run `iterations`
@@ -44,7 +44,7 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
 // ── 5×5 gaussian kernel ────────────────────────────────────────────
 // matches worldedit's default GaussianKernel(2, 1.0). columns without a
 // surface drop out of the convolution (their weight is skipped and the
-// remaining weights are re-normalised) — same as worldedit treating
+// remaining weights are re-normalised), same as worldedit treating
 // unsampled cells as edges.
 
 const KERNEL_RADIUS = 2;
@@ -150,7 +150,7 @@ export function runSmooth(
 
     // (3) iterate the 5×5 gaussian. unsampled cells outside the footprint
     // and empty columns inside drop out; the kernel re-normalises by the
-    // accumulated weight. worldedit uses 1 iteration by default — higher
+    // accumulated weight. worldedit uses 1 iteration by default, higher
     // ≈ a larger σ via repeated convolution.
     const passes = Math.max(1, Math.floor(iterations));
     for (let pass = 0; pass < passes; pass++) {

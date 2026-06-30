@@ -43,7 +43,7 @@ const LAYER_STRIDE = 13;
 
 // ── fixtures ────────────────────────────────────────────────────────
 
-/** parent-first DFS rig: humanoid-ish — spine + 4 limbs branching off. */
+/** parent-first DFS rig: humanoid-ish, spine + 4 limbs branching off. */
 function buildRig(boneCount: number): {
     traits: TransformTrait[];
     subtreeEnd: Int32Array;
@@ -464,7 +464,7 @@ describe('H2 — per-bone normalize loop (60-bone rig, all 3 channels active)', 
         }
     });
 
-    // assumes "all three active" — measures the floor if branches all hit
+    // assumes "all three active", measures the floor if branches all hit
     bench('normalize_loop_unconditional (drops the 3 branches)', () => {
         seedAccum();
         for (let iter = 0; iter < NORMALIZE_ITERS; iter++) {
@@ -521,7 +521,7 @@ describe('H3 — compose forward sweep', () => {
 
 // ── H4: subtreeDirty.fill range scaling ─────────────────────────────
 //
-// Mirrors animation.ts:506,781,829,843 — subtreeDirty.fill(1, lo, hi) for
+// Mirrors animation.ts:506,781,829,843, subtreeDirty.fill(1, lo, hi) for
 // the bone-and-descendants cascade. Question: is .fill() cheap for the
 // small ranges typical of leaf bones, or does the function-call overhead
 // dominate?

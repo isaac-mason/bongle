@@ -1,16 +1,16 @@
 /**
- * voxel pathfinding — standalone, functional A* over the voxel grid.
+ * voxel pathfinding, standalone, functional A* over the voxel grid.
  *
  * adapted from the sketch at sketches/voxels/graph-search-pathfinding
  * (A* + swept-box shortcut smoothing), bound to the engine's `Voxels` and
- * block-flag system. pure functions + types — no traits, no systems.
+ * block-flag system. pure functions + types, no traits, no systems.
  *
  * everything operates in INTEGER VOXEL SPACE. callers convert world↔voxel at
  * the boundary (floor a world position to its cell; a cell's feet-centre is
  * `[x + 0.5, y, z + 0.5]`). pathfinding produces a list of cells; following
  * those waypoints (steering a character) is a separate concern.
  *
- * the movement model is pluggable via `actions` — a successor function that
+ * the movement model is pluggable via `actions`, a successor function that
  * expands a cell into its reachable neighbours. it owns both the candidate move
  * set and the walkability test, so the same A* drives land / fly / swim (and
  * context-dependent movement like ladders) by swapping the model. `gridActions`
@@ -68,7 +68,7 @@ function isWalkable(voxels: Voxels, x: number, y: number, z: number, size: Vec3)
  *  loop allocates nothing. slot a different impl in for fly / swim / wall. */
 export type Walkable = (voxels: Voxels, x: number, y: number, z: number) => boolean;
 
-/** ground agent — needs solid support below. default body is 1×2×1 (2 blocks high).
+/** ground agent, needs solid support below. default body is 1×2×1 (2 blocks high).
  *  feed it to `gridActions`/`groundShortcut`, or wrap it, for "only walk on X" rules. */
 export function groundWalkable(size: Vec3 = [1, 2, 1]): Walkable {
     return (voxels, x, y, z) => isWalkable(voxels, x, y, z, size);
@@ -76,10 +76,10 @@ export function groundWalkable(size: Vec3 = [1, 2, 1]): Walkable {
 
 // ── movement model (the slot-in "actions") ─────────────────────────
 
-/** one candidate offset for the fixed-move case — input to `gridActions`. */
+/** one candidate offset for the fixed-move case, input to `gridActions`. */
 export type Move = { offset: Vec3; cost: number };
 
-/** the sink a successor calls once per reachable neighbour cell — its coords plus
+/** the sink a successor calls once per reachable neighbour cell, its coords plus
  *  the move cost. the search supplies it, so a successor never builds a list. */
 export type StepFn = (x: number, y: number, z: number, cost: number) => void;
 
@@ -97,7 +97,7 @@ export type Heuristic = (fromX: number, fromY: number, fromZ: number, toX: numbe
  *  directly (skipping intermediate waypoints)? */
 export type Shortcut = (voxels: Voxels, from: Vec3, to: Vec3) => boolean;
 
-/** build an `Actions` from a fixed candidate offset set + a walkability test — the
+/** build an `Actions` from a fixed candidate offset set + a walkability test, the
  *  composer for the common (fixed-offset) case. each offset landing on a walkable
  *  cell becomes a reachable step. compose `groundMoves`/`groundWalkable` here, or
  *  swap in your own moves/walkability, for custom movement. */
@@ -112,7 +112,7 @@ export function gridActions(moves: readonly Move[], walkable: Walkable): Actions
     };
 }
 
-/** euclidean distance — fast, slightly non-admissible with unit-cost diagonals
+/** euclidean distance, fast, slightly non-admissible with unit-cost diagonals
  *  (favours speed over strict optimality, matching the source sketch). */
 const euclidean: Heuristic = (fromX, fromY, fromZ, toX, toY, toZ) => Math.hypot(fromX - toX, fromY - toY, fromZ - toZ);
 
@@ -132,7 +132,7 @@ const GROUND_OFFSETS: Vec3[] = [
     [0, -1, 1],
 ];
 
-/** the default ground move set — spread + extend it (e.g. add gap-jumps) and feed
+/** the default ground move set, spread + extend it (e.g. add gap-jumps) and feed
  *  `gridActions` for a custom successor. */
 export const groundMoves: readonly Move[] = GROUND_OFFSETS.map((offset) => ({ offset, cost: 1 }));
 
@@ -151,12 +151,12 @@ const CARDINAL_OFFSETS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 /** ground successor that ALSO lets the agent walk off a ledge and drop straight down to
- *  the first landing below — to any depth up to `maxDrop`. the fixed ground moves (flat,
+ *  the first landing below, to any depth up to `maxDrop`. the fixed ground moves (flat,
  *  ±1 step) come from the standard ground actions; this adds, per cardinal, the one cell
  *  the agent falls to after stepping off the edge. the fall column must stay clear the
  *  whole way (no overhang clips the 2-high body) and the landing needs solid support
  *  below. `maxDrop` MUST be finite: out-of-world reads are air, so a void column has no
- *  floor and the scan would never terminate — the cap doubles as the "don't path off into
+ *  floor and the scan would never terminate, the cap doubles as the "don't path off into
  *  the abyss" guard. `dropCost` is the extra cost per block fallen on top of the unit move
  *  (keep it small so drops are taken when they shortcut, but stairs win when costs tie). */
 export function groundDropActions(opts?: { size?: Vec3; maxDrop?: number; dropCost?: number }): Actions {
@@ -196,14 +196,14 @@ type Node = {
     f: number;
 };
 
-// node pool — search() would otherwise allocate one Node per heap push (up to
+// node pool, search() would otherwise allocate one Node per heap push (up to
 // ~maxIterations expansions plus their neighbours), the dominant per-search garbage.
 // a bump allocator: requestNode hands out the next pool slot (reused in place, grown on
-// demand) and releaseSearchNodes returns the whole batch with a single index reset — no
+// demand) and releaseSearchNodes returns the whole batch with a single index reset, no
 // per-node bookkeeping or array churn. none can be released mid-search, since any may
 // still sit on the final parent chain reconstruct() walks, so release is batch-only at
 // the next search start. steady-state searches allocate zero Node objects. NOT
-// re-entrancy safe — search() never calls search().
+// re-entrancy safe, search() never calls search().
 const nodePool: Node[] = [];
 let nodePoolIndex = 0; // count of slots handed out to the current search
 function requestNode(x: number, y: number, z: number, parent: Node | null, g: number, f: number): Node {
@@ -222,14 +222,14 @@ function requestNode(x: number, y: number, z: number, parent: Node | null, g: nu
     nodePoolIndex++;
     return node;
 }
-// release the whole batch the just-finished search requested — an O(1) reset; slots stay
+// release the whole batch the just-finished search requested, an O(1) reset; slots stay
 // in nodePool and are reused in place by the next search's requestNode calls.
 function releaseSearchNodes(): void {
     nodePoolIndex = 0;
 }
 
 // min-heap of nodes keyed by f, as a plain array mutated only through `heapPush` /
-// `heapPop` — so the heap invariant always holds. read `.length` for the size.
+// `heapPop`, so the heap invariant always holds. read `.length` for the size.
 type NodeHeap = Node[];
 
 function heapPush(heap: NodeHeap, node: Node): void {
@@ -269,7 +269,7 @@ function heapPop(heap: NodeHeap): Node {
 // flag. replaces the string-keyed Map/Set: no per-cell string, and a generation
 // stamp resets it in O(1) between searches (no array clearing). it grows +
 // rehashes when one search's live set passes the load factor, so there's NO
-// world-size, search-extent, or cell-count cap — only available memory bounds it.
+// world-size, search-extent, or cell-count cap, only available memory bounds it.
 // NOT re-entrancy safe; like the node pool, search()/floodFill() never nest.
 let htCap = 1 << 12;
 let htMask = htCap - 1;
@@ -296,7 +296,7 @@ function htReset(): void {
     }
 }
 
-// Teschner et al. spatial hash. `^`/`*` coerce through int32 — fine for a hash
+// Teschner et al. spatial hash. `^`/`*` coerce through int32, fine for a hash
 // (we only need spread + determinism) and it handles negative coords.
 function hashCoord(x: number, y: number, z: number): number {
     const h = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
@@ -362,7 +362,7 @@ function htGrow(): void {
 }
 
 // ── A* search state (module scratch; search() is non-re-entrant) ────
-// hoisting these lets `relax` be one shared StepFn — zero closure/array
+// hoisting these lets `relax` be one shared StepFn, zero closure/array
 // allocation per expansion. all set fresh at the top of each search().
 const sOpen: NodeHeap = [];
 let sGoalX = 0;
@@ -385,7 +385,7 @@ const relax: StepFn = (nx, ny, nz, cost) => {
 };
 
 /** how the frontier is scored. 'shortest' = classic A* (g + h); 'greedy' =
- *  best-first (h only) — faster, not optimal. */
+ *  best-first (h only), faster, not optimal. */
 export type SearchType = 'shortest' | 'greedy';
 
 export type FindPathOptions = {
@@ -400,13 +400,13 @@ export type FindPathOptions = {
 
 /**
  * find a path of cells from `start` to `goal` under the successor function
- * `actions`, or null. returns every cell — never smoothed (smooth explicitly with
+ * `actions`, or null. returns every cell, never smoothed (smooth explicitly with
  * `smoothPath` if you want steering waypoints). pass `actions` directly (e.g.
  * `groundActions`), wrap one, or build via `gridActions`. heuristic defaults to
  * euclidean (override via `options.heuristic`).
  *
  * uses lazy deletion: a cheaper route to an open cell pushes a fresh node and
- * stale duplicates are skipped on pop (closed check) — correct without
+ * stale duplicates are skipped on pop (closed check), correct without
  * decrease-key bookkeeping.
  */
 export function findPath(voxels: Voxels, start: Vec3, goal: Vec3, actions: Actions, options?: FindPathOptions): Vec3[] | null {
@@ -466,7 +466,7 @@ function reconstruct(node: Node): Vec3[] {
 
 /** drop redundant waypoints: keep a cell only when the agent can't travel
  *  directly (per `shortcut`) from the last kept cell to the one after it.
- *  never shortcuts across an upward hop — a waypoint whose predecessor is
+ *  never shortcuts across an upward hop, a waypoint whose predecessor is
  *  lower (a +Y step) is preserved so the agent still jumps it. */
 export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Vec3[] {
     if (path.length < 3) return path;
@@ -485,7 +485,7 @@ export function smoothPath(voxels: Voxels, path: Vec3[], shortcut: Shortcut): Ve
     return out;
 }
 
-/** swept-box line-of-sight with gravity descent over a precomputed diagonal trace —
+/** swept-box line-of-sight with gravity descent over a precomputed diagonal trace,
  *  the standard ground smoother for `smoothPath`. won't shortcut uphill. defaults to
  *  the standard ground agent; pass the same `walkable` the path was found with if you
  *  customized it. */
@@ -521,7 +521,7 @@ export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut 
 // ── reachability (flood-fill) ───────────────────────────────────────
 // the dual of pathfinding: instead of "is there a path A→B", "which cells can I
 // reach from A". shares the movement models, so every returned cell is genuinely
-// path-reachable — handy for picking a provably-reachable target (e.g. NPC wander)
+// path-reachable, handy for picking a provably-reachable target (e.g. NPC wander)
 // without a path query that can fail.
 
 /** breadth-first expansion of every cell reachable from `start` under the successor

@@ -17,7 +17,7 @@ const CHUNK_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // 4096
 const vi = (x: number, y: number, z: number) => x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE;
 const packLight = (sky: number, r: number, g: number, b: number) => (sky << 12) | (r << 8) | (g << 4) | b;
 
-// ── RLE (uint16 value/count pairs) — copied from chunk-codec.ts ──────
+// ── RLE (uint16 value/count pairs), copied from chunk-codec.ts ──────
 function rleEncode(input: Uint16Array): Uint16Array {
     if (input.length === 0) return new Uint16Array(0);
     const pairs = new Uint16Array(input.length * 2);
@@ -77,7 +77,7 @@ type Codec = {
     };
 };
 
-// A. baseline — current production: interleave → RLE u16 → deflate
+// A. baseline, current production: interleave → RLE u16 → deflate
 const A_baseline: Codec = {
     name: 'A baseline (interleave+RLE+deflate)',
     run(data, light) {
@@ -106,7 +106,7 @@ const A_baseline: Codec = {
     },
 };
 
-// B. split, NO deflate — RLE(data) + RLE(sky) + RLE(rgb), three fast expands
+// B. split, NO deflate, RLE(data) + RLE(sky) + RLE(rgb), three fast expands
 const B_splitNoDeflate: Codec = {
     name: 'B split, no deflate (RLE data/sky/rgb)',
     run(data, light) {
@@ -328,7 +328,7 @@ function sceneSurface(): Scene {
     return { name: 'surface (terrain+sky band)', data, light };
 }
 function sceneLayered(): Scene {
-    // stone/dirt/grass/air bands + sky gradient near top — palette of 4
+    // stone/dirt/grass/air bands + sky gradient near top, palette of 4
     const data = new Uint16Array(CHUNK_VOLUME);
     const light = new Uint16Array(CHUNK_VOLUME);
     for (let y = 0; y < CHUNK_SIZE; y++) {

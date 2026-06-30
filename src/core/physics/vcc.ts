@@ -1,4 +1,4 @@
-// voxel character controller (VCC) — the engine-side equivalent of crashcat's
+// voxel character controller (VCC), the engine-side equivalent of crashcat's
 // KCC, but built around an analytical AABB pipeline against voxels + bodies.
 //
 // shape: matches `crashcat/src/character/kcc.ts`. one move(...) per tick that
@@ -93,7 +93,7 @@ export type VccContact = {
     positionY: number;
     positionZ: number;
 
-    /** contact normal — surface → character. used by the solver as the constraint plane. */
+    /** contact normal, surface → character. used by the solver as the constraint plane. */
     contactNormalX: number;
     contactNormalY: number;
     contactNormalZ: number;
@@ -538,7 +538,7 @@ export type VCC = {
     groundVoxelY: number;
     groundVoxelZ: number;
     /** block state id at the supporting voxel (0 when not voxel-grounded). the
-     *  authoritative "standing block" — read this instead of re-deriving from
+     *  authoritative "standing block", read this instead of re-deriving from
      *  contacts + column probes, which mis-sample at cell boundaries. */
     groundVoxelStateId: number;
 
@@ -680,7 +680,7 @@ export function destroy(world: World, vcc: VCC): void {
  *  `transformed`-wrapped box (the wrapper lifts by halfExtents[1] so
  *  the body's reference point stays at the feet). `bodyOverlapShape`
  *  picks up the change automatically in `getContactsAtPosition`. no
- *  penetration test — callers gate the swap themselves (e.g. only on
+ *  penetration test, callers gate the swap themselves (e.g. only on
  *  fully-eased crouch). */
 export function resize(world: World, vcc: VCC, halfExtents: Vec3): void {
     if (vcc.halfExtents[0] === halfExtents[0] && vcc.halfExtents[1] === halfExtents[1] && vcc.halfExtents[2] === halfExtents[2])
@@ -715,7 +715,7 @@ const UP_Z = 0;
 /**
  * compute TOI for a single constraint against a moving character.
  *
- * the velocity gate at the bottom is the "slope freeze" fix — a contact whose
+ * the velocity gate at the bottom is the "slope freeze" fix, a contact whose
  * relative-velocity projection onto its normal is below the threshold isn't
  * pushing into the character (it's tangent or moving away), so it shouldn't
  * generate a constraint hit. otherwise iterative slide spins on flush slopes.
@@ -729,7 +729,7 @@ export function calculateConstraintTOI(
     // signed distance: how far the character has already advanced toward the plane.
     const distToPlane = vec3.dot(constraint.planeNormal, displacement) + constraint.planeDistance;
 
-    // (constraintLinearVel - characterVel) · planeNormal — positive ⇒ pushing in.
+    // (constraintLinearVel - characterVel) · planeNormal, positive ⇒ pushing in.
     const projectedVelocity =
         vec3.dot(constraint.linearVelocity, constraint.planeNormal) - vec3.dot(velocity, constraint.planeNormal);
 
@@ -785,7 +785,7 @@ export function slideAlongEdge(outVelocity: Vec3, velocity: Vec3, c1: VccConstra
     vec3.cross(_slideAlongEdge_dir, c1.planeNormal, c2.planeNormal);
     const edgeLenSq = vec3.squaredLength(_slideAlongEdge_dir);
     if (edgeLenSq < 1e-12) {
-        // planes parallel (shouldn't happen — caller filters by dot < 0.984) — fall back.
+        // planes parallel (shouldn't happen, caller filters by dot < 0.984), fall back.
         slideVelocityAlongPlane(outVelocity, velocity, c1);
         return;
     }
@@ -857,7 +857,7 @@ function determineConstraints(vcc: VCC, contacts: VccContact[], deltaTime: numbe
 
         main.isSteepSlope = true;
 
-        // horizontal projection of the contact normal — that's the wall plane we want
+        // horizontal projection of the contact normal, that's the wall plane we want
         // to add as a second constraint so the character can't ride the slope upward.
         _determineContact_horiz[0] = contact.contactNormalX;
         _determineContact_horiz[1] = contact.contactNormalY - contactDotUp; // - up * dotUp
@@ -1027,7 +1027,7 @@ export function solveConstraints(
         if (reachedGoal) break;
 
         if (!active) {
-            // all constraints discarded or non-pushing — free move for the rest of the step.
+            // all constraints discarded or non-pushing, free move for the rest of the step.
             vec3.scaleAndAdd(outDisplacement, outDisplacement, velocity, timeRemaining);
             timeSimulated += timeRemaining;
             break;
@@ -1149,7 +1149,7 @@ export function solveConstraints(
 
 // ── gather: contacts at position (mirrors kcc.ts:1267 getContactsAtPosition) ──
 //
-// gathers body contacts only — voxels feed the solver via the sweep-and-slide
+// gathers body contacts only, voxels feed the solver via the sweep-and-slide
 // loop, not via the constraint gather. minetest's collisionMoveSimple proves
 // this works for blocky worlds: pure sweep, no pre-pass depenetration, the
 // inner-margin filter in sweepAabbVsAabb handles concurrent-axis overlaps.
@@ -1190,7 +1190,7 @@ function emitBodyContact(
 
     // surface normal: ask the body for the true geometric face normal at the
     // contact point. mirrors kcc.ts:983. the penetrationAxis from GJK/EPA is
-    // the minimal-separation axis — for an AABB character vs a sloped box it
+    // the minimal-separation axis, for an AABB character vs a sloped box it
     // comes out axis-aligned, not slope-aligned, so using it as the surface
     // normal would wrongly classify a walkable slope as a wall.
     const body: RigidBody | undefined = rigidBody.get(world, hit.bodyIdB);
@@ -1205,7 +1205,7 @@ function emitBodyContact(
             _surfaceNormal[1] = -_surfaceNormal[1];
             _surfaceNormal[2] = -_surfaceNormal[2];
         }
-        // prefer whichever normal points more upward — handles edges/corners
+        // prefer whichever normal points more upward, handles edges/corners
         // (mirrors kcc.ts:993-996).
         if (c.contactNormalY > _surfaceNormal[1]) {
             c.surfaceNormalX = c.contactNormalX;
@@ -1314,7 +1314,7 @@ function emitBodyContact(
 /**
  * gather contacts at the current position via overlap (no sweep).
  *
- * body side only — voxels feed the solver via the sweep-and-slide loop
+ * body side only, voxels feed the solver via the sweep-and-slide loop
  * (see header comment). crashcat collideShape against non-voxel bodies.
  *
  * `vcc.contacts` is reset and refilled. distances follow the KCC convention:
@@ -1327,7 +1327,7 @@ function getContactsAtPosition(world: World, vcc: VCC, listener: VccListener | u
 
     const padding = vcc.predictiveContactDistance + vcc.characterPadding;
 
-    // body pass — crashcat collideShape against non-voxel bodies.
+    // body pass, crashcat collideShape against non-voxel bodies.
     // `maxSeparationDistance = padding` makes the query report predictive
     // contacts: solver needs flush-against-wall constraints in
     // `previousConstraints` for slideAlongEdge to fire.
@@ -1424,7 +1424,7 @@ function getFirstContactForSweep(
     let bestFraction = voxelHit ? _sweepHit.toi : Infinity;
     let voxelWon = voxelHit;
 
-    // body sweep — castShape against non-voxel layers, excluding self.
+    // body sweep, castShape against non-voxel layers, excluding self.
     _bodyCastCollector.reset();
     _bodyCastSettings.activeEdgeMovementDirection[0] = dispX;
     _bodyCastSettings.activeEdgeMovementDirection[1] = dispY;
@@ -1452,10 +1452,10 @@ function getFirstContactForSweep(
         voxelWon = false;
     }
 
-    // aabb body sweep — analytical, broadphase-backed. character is matched
+    // aabb body sweep, analytical, broadphase-backed. character is matched
     // against every body whose envelope overlaps the swept aabb. uses the
-    // character's default groups/mask (all/all) since vcc doesn't expose them
-    // — VCC contacts are filtered through the bodyFilter for crashcat bodies,
+    // character's default groups/mask (all/all) since vcc doesn't expose them,
+    // VCC contacts are filtered through the bodyFilter for crashcat bodies,
     // and AabbBodies don't have a "self" entry to filter against.
     const aabbHit = AabbPhysics.sweepBodies(
         aabbWorld,
@@ -1493,7 +1493,7 @@ function getFirstContactForSweep(
     // the representative point is `center - normal * halfExtents` componentwise.
     // for axis-aligned hits this lands on the face center (good for ground
     // state's "is positionY ≤ feet" gate). for diagonal body-contact normals
-    // it lands on the AABB surface in the normal direction — close enough.
+    // it lands on the AABB surface in the normal direction, close enough.
     const hX = vcc.halfExtents[0];
     const hY = vcc.halfExtents[1];
     const hZ = vcc.halfExtents[2];
@@ -1567,7 +1567,7 @@ function getFirstContactForSweep(
 
     // surface normal: ask the body for the true geometric face normal.
     // mirrors kcc.ts:1133. cast hit.normal is the contact normal (A→B at
-    // fraction > 0) — still GJK/EPA-derived and potentially axis-aligned for
+    // fraction > 0), still GJK/EPA-derived and potentially axis-aligned for
     // box vs box. getSurfaceNormal gives the real slope face normal.
     const body = rigidBody.get(world, hit.bodyIdB);
     if (body) {
@@ -1665,7 +1665,7 @@ function moveShape(
     // downward component so the first sweep-verify always finds the floor.
     // mirrors KCC's predictiveContactDistance which keeps the overlap query
     // finding the floor even at rest. the floor constraint will fire at
-    // toi≈0 and block it immediately — no visible movement.
+    // toi≈0 and block it immediately, no visible movement.
     if (vcc.groundState === GROUND_STATE_ON_GROUND && Math.abs(_moveShape_velocity[1]) < 1e-4) {
         _moveShape_velocity[1] = -(vcc.characterPadding + vcc.predictiveContactDistance);
     }
@@ -1679,7 +1679,7 @@ function moveShape(
         reduceNearDuplicateContacts(vcc.contacts);
 
         // 2. discard penetration-conflicting contacts (e.g., a corner where two
-        //    surfaces' normals oppose — keep the deeper one).
+        //    surfaces' normals oppose, keep the deeper one).
         removeConflictingContacts(vcc.contacts, vcc.characterPadding);
 
         // 3. derive constraints.
@@ -1748,7 +1748,7 @@ function moveShape(
                 // a wall would freeze the char at the cell boundary).
                 //
                 // zero the other axes so this iteration consumes no time AND
-                // makes no tangential progress — otherwise tangential disp
+                // makes no tangential progress, otherwise tangential disp
                 // compounds across iterations (timeSimulated stays 0 below),
                 // multiplying motion by maxCollisionIterations.
                 const depth = _moveShape_sweepContact.overlapDepth;
@@ -1777,7 +1777,7 @@ function moveShape(
                     applyNormalSlide = false;
                 }
 
-                // consume no time — we made no forward progress.
+                // consume no time, we made no forward progress.
                 timeSimulated = 0;
             } else {
                 _moveShape_displacement[0] *= fraction;
@@ -1801,7 +1801,7 @@ function moveShape(
 
             // pushable aabb body: apply a mass-aware impulse so it accelerates
             // away on the next AABB world tick. character is treated as infinite
-            // mass — `body.mass` is the per-body push-strength knob (heavier ⇒
+            // mass, `body.mass` is the per-body push-strength knob (heavier ⇒
             // less velocity for the same approach). character resolves the
             // contact as a wall this frame.
             if (_moveShape_sweepContact.aabbBodyId !== -1) {
@@ -1843,7 +1843,7 @@ function moveShape(
         // do NOT break on tiny displacement: a sweep-clamp at toi=0 (flush
         // floor when V has gravity, flush wall when standing against it)
         // produces zero displacement, but the slide above just zeroed the
-        // into-surface velocity component — the next iteration is exactly
+        // into-surface velocity component, the next iteration is exactly
         // where the character moves along the surface. bailing here glued
         // grounded characters in place and prevented walking off ledges.
         // bound by maxCollisionIterations + minTimeRemaining instead.
@@ -1855,7 +1855,7 @@ function moveShape(
 
     // emit the best up-pointing sweep hit into vcc.contacts so updateGroundState
     // sees it (the gather pass clears vcc.contacts each iter; we have to add
-    // post-loop). distance=0 — sweep contacts are already touching.
+    // post-loop). distance=0, sweep contacts are already touching.
     if (vcc.hasBestSweepHit) {
         const out = acquireVccContact(vcc.contacts, vcc.contactsPool);
         copyVccContact(out, vcc.bestSweepHit);
@@ -2013,7 +2013,7 @@ function updateGroundState(world: World, vcc: VCC): void {
                 (vcc.linearVelocity[2] - deepest.linearVelocityZ) * UP_Z;
 
             if (relVelDotUp > 1e-4) {
-                // moving upward relative to ground — definitely not supported.
+                // moving upward relative to ground, definitely not supported.
                 vcc.groundState = GROUND_STATE_ON_STEEP_GROUND;
             } else {
                 // sliding down: may be wedged in a concave corner of two slopes.
@@ -2041,7 +2041,7 @@ function updateGroundState(world: World, vcc: VCC): void {
                     _ground_cornerDisp[2] * _ground_cornerDisp[2];
 
                 if (timeSimulated < 0.001 || dispLenSq < minRequiredDisplacementSq) {
-                    // blocked by corner constraints — treated as supported.
+                    // blocked by corner constraints, treated as supported.
                     vcc.groundState = GROUND_STATE_ON_GROUND;
                 } else {
                     vcc.groundState = GROUND_STATE_ON_STEEP_GROUND;
@@ -2158,7 +2158,7 @@ export function stickToFloor(world: World, voxels: Voxels, aabbWorld: AabbPhysic
 
     syncInnerBody(world, vcc);
 
-    // override ground state — caller relies on this.
+    // override ground state, caller relies on this.
     vcc.groundState = GROUND_STATE_ON_GROUND;
     vcc.groundNormal[0] = _stick_contact.surfaceNormalX;
     vcc.groundNormal[1] = _stick_contact.surfaceNormalY;
@@ -2194,7 +2194,7 @@ const _walk_steepNormals: Array<{ x: number; y: number; z: number }> = [];
  * 3. sweep horizontally `stepForward` at the lifted height.
  * 4. require ≥ 2% horizontal progress along requested direction (steep contacts).
  * 5. sweep down `stepUpY + stepDownExtraY` to land on the stair top.
- * 6. reject if the landing surface is steep — fall back to forward-test sweep.
+ * 6. reject if the landing surface is steep, fall back to forward-test sweep.
  * 7. commit to final position; force ground state to ON_GROUND.
  *
  * returns true on commit, false if any test failed (caller keeps prior state).
@@ -2236,7 +2236,7 @@ export function walkStairs(
             _walk_upContact,
         )
     ) {
-        // hit a ceiling — only as much room as the fraction allows, with a small float buffer.
+        // hit a ceiling, only as much room as the fraction allows, with a small float buffer.
         upY = Math.max(0, stepUpY * _walk_upContact.fraction - 1e-3);
         if (upY <= 0) return false;
     }
@@ -2323,7 +2323,7 @@ export function walkStairs(
             _walk_downContact,
         )
     ) {
-        // nothing to land on — abort.
+        // nothing to land on, abort.
         vcc.position[0] = _walk_savedPosition[0];
         vcc.position[1] = _walk_savedPosition[1];
         vcc.position[2] = _walk_savedPosition[2];
@@ -2336,7 +2336,7 @@ export function walkStairs(
         _walk_downContact.surfaceNormalZ * UP_Z;
 
     if (landingCosAngle < vcc.cosMaxSlopeAngle) {
-        // landing is steep — try a forward-test sweep at lower height to validate
+        // landing is steep, try a forward-test sweep at lower height to validate
         // we still cleared the obstacle. otherwise abort.
         if (stepForwardTestX === 0 && stepForwardTestZ === 0) {
             vcc.position[0] = _walk_savedPosition[0];
@@ -2361,7 +2361,7 @@ export function walkStairs(
                 _walk_downContact,
             )
         ) {
-            // forward-test still blocked — abort.
+            // forward-test still blocked, abort.
             vcc.position[0] = _walk_savedPosition[0];
             vcc.position[1] = _walk_savedPosition[1];
             vcc.position[2] = _walk_savedPosition[2];

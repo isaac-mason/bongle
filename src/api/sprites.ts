@@ -3,14 +3,14 @@
  *
  * Module-scope `sprite()` declaration primitive + source-type re-exports
  * + a small set of ctx-taking free fns for advanced consumers (custom
- * materials, body-size-from-sprite). Mirrors `api/audio.ts`'s shape —
+ * materials, body-size-from-sprite). Mirrors `api/audio.ts`'s shape,
  * server-safe shims that gate on `ctx.client?.state?.spriteResources`
  * and return `null` when the resource isn't up (server side, or before
  * the client has finished `load()`).
  *
  * Per `feedback_no_speculative_precompute`: `sampleSprite()` +
  * `spriteWhiteUv()` are the shader-node fragment surface and depend on
- * the GPU frame-LUT buffer + reserved white-pixel UV — neither has a
+ * the GPU frame-LUT buffer + reserved white-pixel UV, neither has a
  * concrete consumer until step 7's `ExtrudedSpriteTrait` material wants
  * to read pixels through the LUT. Those land in step 7 alongside their
  * first caller.
@@ -42,11 +42,11 @@ export { draw, sprite } from '../core/sprites/sprites';
 export const DEFAULT_PIXELS_PER_UNIT = 16;
 
 /**
- * Resolve the engine-global sprite atlas `Texture` — escape hatch for
+ * Resolve the engine-global sprite atlas `Texture`, escape hatch for
  * advanced scripts that want to write a custom material sampling the
  * atlas directly. Returns `null` server-side or before the client has
  * finished `load()`. Prefer `sampleSprite()` (step 7) over raw atlas
- * access where possible — atlas-layout shifts on every registry change,
+ * access where possible, atlas-layout shifts on every registry change,
  * but `sampleSprite()`'s LUT indirection absorbs them.
  */
 export function spriteAtlasTexture(ctx: ScriptContext): Texture | null {
@@ -62,8 +62,8 @@ export function spriteAtlasTexture(ctx: ScriptContext): Texture | null {
  * `null` server-side, before the client has booted, or before the
  * asset pipeline has emitted this sprite into the atlas.
  *
- * Convenience for keeping an `AabbBody` size in sync with the visual
- * — body owns its own size concern per "own table for sub-concepts",
+ * Convenience for keeping an `AabbBody` size in sync with the visual,
+ * body owns its own size concern per "own table for sub-concepts",
  * this helper just removes the manual arithmetic at the call site.
  */
 export function spriteWorldSize(

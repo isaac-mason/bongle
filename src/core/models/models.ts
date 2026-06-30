@@ -1,9 +1,9 @@
-// model registration — module-scope api for declaring gltf models.
+// model registration, module-scope api for declaring gltf models.
 //
 // follows the same pattern as block() / blockTexture(): called at module
 // scope, returns a typed ModelHandle. parallels how blockTextures → atlas
 // works (the atlas is downstream-derived state, not its own registry).
-// `modelsRegistry` is the single source of truth — the user module that
+// `modelsRegistry` is the single source of truth, the user module that
 // called `model('id', ...)` owns the entry, and the codegen barrel
 // (`src/generated/models.ts`) mutates the payload in place via
 // `_registerModelHandle` to populate the runtime fields (bin urls,
@@ -53,7 +53,7 @@ export type ModelOptions = {
      * resolves the `file://` URL via fileURLToPath to a disk path the
      * gltf loader can read.
      *
-     * stored as a string at registration — URLs are normalized to
+     * stored as a string at registration, URLs are normalized to
      * `.href` so downstream consumers (registry hashes, codegen, the
      * pipeline) only deal with one shape.
      */
@@ -61,7 +61,7 @@ export type ModelOptions = {
 };
 
 /**
- * Empty base interface — augmented by the codegen'd registry barrel
+ * Empty base interface, augmented by the codegen'd registry barrel
  * (`src/generated/models.ts`) via declaration merging to map model ids
  * to their precise handle types.
  *
@@ -85,7 +85,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 /**
  * Called by the per-project barrel `src/generated/models.ts` at module-
  * eval to populate each handle's runtime fields. Barrel does not own
- * registry entries — see file header. Mutates the existing payload in
+ * registry entries, see file header. Mutates the existing payload in
  * place so user code refs stay valid, then `touch()`es so consumers
  * (renderer, animator, prefab deps) react via the dispatch path.
  *
@@ -117,7 +117,7 @@ export function _registerModelHandle(id: string, handle: ModelHandle): void {
 
 /**
  * Build a per-id placeholder handle. Used by `model()` when the user
- * declares a model before codegen has run for it — the placeholder sits
+ * declares a model before codegen has run for it, the placeholder sits
  * in the registry so the cli can discover the declaration (`.src` is
  * the cli's codegen input). `_registerModelHandle` mutates this payload
  * in place once codegen catches up, preserving the user-held reference.
@@ -160,7 +160,7 @@ export function model<const Id extends string>(
     const name = options.name ?? id;
     const existing = get(registry.models, id);
     if (existing) {
-        // claim ownership — promotes from PLACEHOLDER_OWNER (barrel-first
+        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
         // boot) to this user module, adds id to module's pending set so
         // endModuleRun doesn't fire removed on this run, throws on
         // duplicate declaration from another file.
@@ -182,7 +182,7 @@ export function model<const Id extends string>(
         return existing as never;
     }
 
-    // no warning here — placeholder is the normal cold-start state. the
+    // no warning here, placeholder is the normal cold-start state. the
     // user-entry shim wipes `src/generated/models.ts` on every dev start
     // (schema-drift protection in `resetGeneratedBarrels`), so EVERY
     // declared model hits this path before the pipeline's first flush

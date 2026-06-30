@@ -1,5 +1,5 @@
 /**
- * Client-side editor orchestration — the page-level glue between UI
+ * Client-side editor orchestration, the page-level glue between UI
  * toggles (Eye icon, mode pill, Shift+`) and the trait-driven editor
  * lifecycle.
  *
@@ -81,14 +81,14 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
  * mode on its next tick. No-op when a lens is already up.
  *
  * The lens camera is separate from `room.cameraNode` so the lens's pose
- * survives play↔edit tab toggles — the player controller keeps driving
+ * survives play↔edit tab toggles, the player controller keeps driving
  * the shared default camera while the lens's own camera holds wherever
  * the editor was last flown to.
  */
 export function enterLocalEditorView(room: ClientRoom): void {
     if (room.editor) return;
 
-    // snapshot src pose BEFORE creating any nodes — getControlCamera returns
+    // snapshot src pose BEFORE creating any nodes, getControlCamera returns
     // the play room's player camera while room.control.node is still the body.
     const src = getControlCamera(room);
     const srcPos = src ? ([src.position[0], src.position[1], src.position[2]] as [number, number, number]) : null;
@@ -98,7 +98,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
 
     // lens-private camera node. realm: 'client' so it doesn't replicate; lives
     // for the lifetime of the lens. its TransformTrait pose is what survives
-    // play↔edit toggles — the player controller never writes here.
+    // play↔edit toggles, the player controller never writes here.
     const cameraNode = Nodes.createNode({ name: `editor:${room.playerId}:camera`, persist: false, realm: 'client' });
     Nodes.addTrait(cameraNode, TransformTrait);
     Nodes.addTrait(cameraNode, CameraTrait);
@@ -119,7 +119,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
     // Reconcile may swap this on next tick.
     Nodes.addTrait(editorNode, FlyControllerTrait);
 
-    // publish the lens pointer *before* attaching EditorTrait — addTrait fires
+    // publish the lens pointer *before* attaching EditorTrait, addTrait fires
     // the editor script synchronously, and its ownership gate checks
     // `room.editor.editorNode === ctx.node` to recognise the client-local lens
     // (lens nodes have no owner, so isOwner() always fails for them).
@@ -129,12 +129,12 @@ export function enterLocalEditorView(room: ClientRoom): void {
     setControlNode(room, editorNode);
     const store = useEditor.getState();
     store.setRoomView(room.playerId, 'edit');
-    // editor POV now exists — refresh the RoomView snapshot so consumers
+    // editor POV now exists, refresh the RoomView snapshot so consumers
     // (toolbar tabs) see the new addressable view.
     store.setRoomViews(buildRoomViews(store.allRooms));
 }
 
-/** Tear down the local editor lens — restore player POV, destroy lens nodes, clear room.editor. */
+/** Tear down the local editor lens, restore player POV, destroy lens nodes, clear room.editor. */
 export function exitLocalEditorView(room: ClientRoom): void {
     const lens = room.editor;
     if (!lens) return;
@@ -144,7 +144,7 @@ export function exitLocalEditorView(room: ClientRoom): void {
     room.editor = null;
     const store = useEditor.getState();
     store.clearRoomView(room.playerId);
-    // editor POV gone — refresh the RoomView snapshot.
+    // editor POV gone, refresh the RoomView snapshot.
     store.setRoomViews(buildRoomViews(store.allRooms));
 }
 
@@ -152,7 +152,7 @@ export function exitLocalEditorView(room: ClientRoom): void {
  * Switch which perspective `room` is viewed through. Drives the imperative
  * POV swap (`setControlNode`) and writes the resulting view into the editor
  * store so tab UIs can render active state. No-op on edit rooms (lens
- * doesn't apply — player node already is the editor camera).
+ * doesn't apply, player node already is the editor camera).
  */
 export function setRoomView(room: ClientRoom, view: 'edit' | 'play'): void {
     const lens = room.editor;

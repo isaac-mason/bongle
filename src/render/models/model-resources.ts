@@ -1,4 +1,4 @@
-// ModelResources — client-global GPU pools backing all model rendering.
+// ModelResources, client-global GPU pools backing all model rendering.
 //
 // Owns the texture atlas, the CPU-side mesh-info catalog (firstIndex,
 // indexCount, uv, AABB per mesh), pooled vertex/index buffers, and the
@@ -72,7 +72,7 @@ import * as ModelAtlas from './model-atlas';
 export const InstanceParams = struct('ModelInstanceParams', {
     // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
-    // flash: transient overlay — rgb is the colour, a the strength (lerp).
+    // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
     light: d.vec4f,
     glow: d.f32,
@@ -82,18 +82,18 @@ export const InstanceParams = struct('ModelInstanceParams', {
     // litMin: floor on voxel light (0..1) for readability in dim areas.
     litMin: d.f32,
     // dither: screen-door fade 0..1. 0 = solid, 1 = invisible. fragment
-    // discards against an interleaved-gradient threshold — opaque pipeline,
+    // discards against an interleaved-gradient threshold, opaque pipeline,
     // no sort or blend.
     dither: d.f32,
     // atlas uv rect for this instance's mesh. lives per-slot rather than
     // per-frame because it only changes when the source image lands in
-    // the atlas — re-uploaded on entry-ref mismatch in model-visuals.
+    // the atlas, re-uploaded on entry-ref mismatch in model-visuals.
     uvOffset: d.vec2f,
     uvScale: d.vec2f,
 });
 
 // Per-slot stable instance record. Merges what were two separate
-// storage buffers (transforms + params) into one binding — same
+// storage buffers (transforms + params) into one binding, same
 // cardinality, same writer, same grow lifecycle.
 //
 // Layout: mat4x4f (64B, align 16) then InstanceParams (80B, align 16)
@@ -109,7 +109,7 @@ export const ModelInstance = struct('ModelInstance', {
 // normalV.xyz = normal, normalV.w = v
 // vec4f+vec4f = 32 bytes per vertex, aligned 16. Same memory cost as
 // three separate pools (vec4 + vec4 + vec2 with std430 padding) but
-// only one binding — folding pos/normal/uv into one struct buffer
+// only one binding, folding pos/normal/uv into one struct buffer
 // drops two bindings without changing memory footprint, which the VS
 // needs to stay under WebGPU's 8 storage-buffer-per-stage cap.
 export const ModelVertex = struct('ModelVertex', {
@@ -122,7 +122,7 @@ export const MODEL_INSTANCE_STRIDE = layoutStrideOf(ModelInstance);
 /** byte offset of the `params` member inside `ModelInstance` (after the mat4x4f). */
 export const MODEL_INSTANCE_PARAMS_OFFSET = 64;
 /** f32-index offset of the `params` member inside `ModelInstance`. Used by
- *  the inlined params writer in model-visuals — keep in sync with
+ *  the inlined params writer in model-visuals, keep in sync with
  *  `MODEL_INSTANCE_PARAMS_OFFSET` (64 bytes = 16 f32). */
 export const MODEL_INSTANCE_PARAMS_OFFSET_F32 = 16;
 export const MODEL_VERTEX_STRIDE = layoutStrideOf(ModelVertex);
@@ -225,7 +225,7 @@ function createGeometryPool(
     initialVertexCapacity = INITIAL_VERTEX_CAPACITY,
     initialIndexCapacity = INITIAL_INDEX_CAPACITY,
 ): ModelGeometryPool {
-    // MANUAL lifecycle: this pool owns the buffers across script-reload — many
+    // MANUAL lifecycle: this pool owns the buffers across script-reload, many
     // ModelVisuals geometries bind to and dispose them per reload, but the pool
     // itself outlives them. REF_COUNTED would let the last `geometry.dispose()`
     // destroy the GPU buffer while the pool still hands the JS object out.
@@ -255,7 +255,7 @@ function createGeometryPool(
  * mesh-info writes. Indices are rebased by `vertexOffset` so the VS
  * reads pool indices directly.
  *
- * Idempotent — re-uploading the same `meshKey` returns the existing slot
+ * Idempotent, re-uploading the same `meshKey` returns the existing slot
  * without copying. Caller releases-then-uploads to replace.
  */
 function uploadGeometry(pool: ModelGeometryPool, meshKey: string, geom: ModelGeometryUpload): GeometrySlot {
@@ -316,7 +316,7 @@ function uploadGeometry(pool: ModelGeometryPool, meshKey: string, geom: ModelGeo
 
 /**
  * Free the ranges for `meshKey`. Pushed to free-lists; pool stays the
- * same size. The GPU bytes are NOT cleared — they're overwritten on the
+ * same size. The GPU bytes are NOT cleared, they're overwritten on the
  * next upload that lands in the same range.
  */
 function releaseGeometry(pool: ModelGeometryPool, meshKey: string): void {
@@ -411,9 +411,9 @@ function releaseMeshInfo(cat: MeshInfoCatalog, meshKey: string): void {
 // ── module surface ──────────────────────────────────────────────────
 
 type UploadRecord = {
-    /** mesh names uploaded for this model — used to release pool slots. */
+    /** mesh names uploaded for this model, used to release pool slots. */
     meshNames: string[];
-    /** image count from the model — used to release atlas regions. */
+    /** image count from the model, used to release atlas regions. */
     imageCount: number;
 };
 
@@ -423,9 +423,9 @@ export type ModelResources = {
     geometry: ModelGeometryPool;
     /** modelId → upload record. presence = "uploaded"; drives release-on-removal. */
     uploaded: Map<string, UploadRecord>;
-    /** UV of the reserved white pixel — fallback for untextured meshes. */
+    /** UV of the reserved white pixel, fallback for untextured meshes. */
     whiteUv: [number, number];
-    /** engine-global model material — HW instanced. Per-room buffers
+    /** engine-global model material, HW instanced. Per-room buffers
      *  (slotMap, instanceData, env) bind by name through each room's
      *  geometry; the interleaved vertex pool binds as a vertex buffer
      *  named `vertex`, the index pool as the geometry index. */
@@ -616,7 +616,7 @@ function release(resources: ModelResources, modelId: string): void {
 
 /**
  * Blit a decoded ImageBitmap into the atlas's CPU pixel buffer at `region`.
- * Uses an offscreen canvas to extract rgba8 — there's no direct bitmap →
+ * Uses an offscreen canvas to extract rgba8, there's no direct bitmap →
  * Uint8Array path in the web platform.
  */
 function blitBitmapToAtlas(
@@ -639,7 +639,7 @@ function blitBitmapToAtlas(
 
 /**
  * Blit tightly-packed RGBA8 pixels (region.w × region.h) into the atlas's CPU
- * pixel buffer at `region`. The headless counterpart of `blitBitmapToAtlas` —
+ * pixel buffer at `region`. The headless counterpart of `blitBitmapToAtlas`,
  * the injected decoder already returns raw bytes, so no canvas readback.
  */
 function blitRgbaToAtlas(
@@ -664,7 +664,7 @@ function blitRgbaToAtlas(
 // Atlas texture is engine-global, so it's bound by value here.
 
 function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
-    // HW vertex fetch from the interleaved pool — posU.xyz = pos,
+    // HW vertex fetch from the interleaved pool, posU.xyz = pos,
     // posU.w = u; normalV.xyz = normal, normalV.w = v. Stride 32B.
     // Both attributes share the same vertex buffer; gpucat groups
     // same-named attribute() calls into one VertexBufferLayout.
@@ -691,7 +691,7 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     const worldPos = mul(worldMatrix, vec4f(aPosition, f32(1.0))).toVar('mvWorldPos');
     const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, worldPos)).toVar('mvClipPos');
 
-    // transform normal (no non-uniform scale support — using mat3 of world)
+    // transform normal (no non-uniform scale support, using mat3 of world)
     const col0 = worldMatrix.element(u32(0)).xyz.toVar('mvCol0');
     const col1 = worldMatrix.element(u32(1)).xyz.toVar('mvCol1');
     const col2 = worldMatrix.element(u32(2)).xyz.toVar('mvCol2');
@@ -727,7 +727,7 @@ function createModelMaterial(atlas: ModelAtlas.ModelAtlas): Material {
     const sunIntensity = cfg.sunIntensity.toVar('mvSunIntensity');
     const ambientMinimum = vec3f(f32(0.04), f32(0.04), f32(0.06)).toVar('mvAmbientMin');
 
-    // sky-brightness curve — matches voxel-material so a model and the
+    // sky-brightness curve, matches voxel-material so a model and the
     // voxels around it shade identically under the same sky.
     const sunY = sunDirection.y.toVar('mvSunY');
     const dayCurve = smoothstep(f32(-0.1), f32(0.15), sunY).toVar('mvDayCurve');

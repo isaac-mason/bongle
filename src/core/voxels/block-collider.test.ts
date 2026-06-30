@@ -58,7 +58,7 @@ describe('rotateY', () => {
         it('rotates back-half slab to swap z extents', () => {
             // back step: [0, 0.5, 0.5, 1, 1, 1]. 1 step CW: (x,y,z)→(z,y,1-x).
             // (0, 0.5, 0.5)→(0.5, 0.5, 1); (1, 1, 1)→(1, 1, 0).
-            // renormalised: [0.5, 0.5, 0, 1, 1, 1] — back step becomes the +x-half step.
+            // renormalised: [0.5, 0.5, 0, 1, 1, 1], back step becomes the +x-half step.
             const back = aabbs([[0, 0.5, 0.5, 1, 1, 1]]);
             const r = rotateY(back, 1) as BlockShapeAabbs;
             expect(r.boxes[0]).toEqual([0.5, 0.5, 0, 1, 1, 1]);
@@ -129,7 +129,7 @@ describe('block-registry per-shape data', () => {
         const reg = buildTestRegistry([{ id: 'stone', texId: 'stone', shape: cube() }]);
         const sid = reg.keyToState.get('stone')!;
         expect(reg.colliderId[sid]).toBe(0);
-        // index 0 is the cube sentinel — shapeKind[0] holds SHAPE_CUBE.
+        // index 0 is the cube sentinel, shapeKind[0] holds SHAPE_CUBE.
         expect(reg.shapeKind[0]).toBe(SHAPE_CUBE);
     });
 

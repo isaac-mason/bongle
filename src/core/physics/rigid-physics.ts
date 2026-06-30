@@ -9,7 +9,7 @@
 // shape mirrors `aabb-physics`: `World` + factories + `preStep` (trait→world
 // sync) + `tick` (step + record contacts) + `postStep` (writeback). the
 // top-level `Physics` holds a single `rigid` handle and orchestrates by
-// calling these — it does not own crashcat state, listener building, or
+// calling these, it does not own crashcat state, listener building, or
 // shape construction directly.
 
 import {
@@ -89,22 +89,22 @@ const INFINITE_AABB: [number, number, number, number, number, number] = [-INF, -
 
 export type PropertySnapshot = {
     motionType: MotionType;
-    /** snapshot of rb.prediction — changing this requires body recreation. */
+    /** snapshot of rb.prediction, changing this requires body recreation. */
     prediction: boolean;
     /**
-     * snapshot of node.owner — server demotes owned non-prediction dynamic
+     * snapshot of node.owner, server demotes owned non-prediction dynamic
      * bodies to kinematic so the owner client is the sim authority, so an
      * ownership change must trigger a motion-type update.
      */
     owner: PlayerId | null;
     /**
-     * the `rb.def` reference at last install. ref-compared each preStep —
+     * the `rb.def` reference at last install. ref-compared each preStep,
      * mismatch means the user (editor / sync / script) replaced the def, so
      * the installer-owned body is destroyed and a new one is built.
      */
     lastDef: RigidBodyDef | null;
     /**
-     * the `rb.body` reference at last install. ref-compared each preStep —
+     * the `rb.body` reference at last install. ref-compared each preStep,
      * mismatch means a script reassigned the body, so we adopt the new one
      * (and destroy the previous one if we owned it).
      */
@@ -129,7 +129,7 @@ export type World = {
     /** scene graph back-ref. needed for trait sync, getNodeById, and script-hook fan-out. */
     nodes: Nodes;
 
-    /** crashcat world — full broadphase + manifold pipeline. */
+    /** crashcat world, full broadphase + manifold pipeline. */
     world: CrashcatWorld;
     /** static body holding the voxel terrain shape. */
     terrainBody: RigidBody;
@@ -145,13 +145,13 @@ export type World = {
     /** last physics-written transform per node for teleport detection */
     lastPhysicsTransform: Map<number, TransformSnapshot>;
 
-    /** cached query for trait sync — built once at create. */
+    /** cached query for trait sync, built once at create. */
     _bodyQuery: ReturnType<typeof query<[typeof RigidBodyTrait, typeof TransformTrait]>>;
 
     /** body contacts gathered by character VCCs during `runOnTick` (which runs
      *  before the rigid solver). a VCC depenetrates its character off the bodies
      *  it touches and teleport-follows its kinematic inner body, so by the time
-     *  the solver steps there's no overlap and no manifold — a fast projectile
+     *  the solver steps there's no overlap and no manifold, a fast projectile
      *  would pass straight through with no contact event. these are replayed into
      *  the contact stream each tick (see {@link ingestVccContacts}) so they reach
      *  both bodies' `ContactsTrait` like any solver contact. `vccContactCount` is
@@ -233,7 +233,7 @@ export function pushVccContact(
  *  buffer. MUST run inside the contacts frame (after the solver tick, before the
  *  frame ends) so the pairs diff and fan out like solver contacts. a pair the
  *  solver also recorded (a slow body the VCC didn't depenetrate clear of) shares
- *  the same key, so this just refreshes it — no double contact. */
+ *  the same key, so this just refreshes it, no double contact. */
 export function ingestVccContacts(world: World, contacts: PhysicsContacts, pool: ContactPairPool): void {
     for (let i = 0; i < world.vccContactCount; i++) {
         const rec = world.vccContacts[i]!;
@@ -272,7 +272,7 @@ export function takeTransformSnapshot(pos: Vec3, rot: Quat): TransformSnapshot {
 
 // ── effective motion type ─────────────────────────────────────────────
 //
-// simulate=false (edit mode): everything clamped to static — bodies exist
+// simulate=false (edit mode): everything clamped to static, bodies exist
 //   for queries + debug viz only, no simulation.
 // otherwise: the sim *authority* for a body uses its declared motionType.
 // authority is the server when the node is ownerless, the owning client
@@ -317,7 +317,7 @@ function resolveLiteralShape(shapeDef: ShapeDef): Shape | null {
             return children.length > 0 ? compound.create({ children }) : null;
         }
         case 'auto':
-            // dispatched in buildShape — never reached here
+            // dispatched in buildShape, never reached here
             return null;
         default:
             console.warn('[physics] unknown shape type');
@@ -413,7 +413,7 @@ function buildAutoBoundsShape(
 
 // ── auto-shape: geometry modes (hull/mesh) ─────────────────────────────
 //
-// these are expensive — cache built shapes keyed by the contributions that
+// these are expensive, cache built shapes keyed by the contributions that
 // produced them. cache hit means same set of (mesh ids, local matrices,
 // mode), common when many bodies share an auto-shape recipe.
 //
@@ -479,7 +479,7 @@ function buildAutoGeometryShape(
 
 /**
  * Build a crashcat Shape for the given `ShapeDef`. Returns null when the
- * shape can't be built yet — e.g. an `'auto'` hull/mesh whose model payload
+ * shape can't be built yet, e.g. an `'auto'` hull/mesh whose model payload
  * is still loading, or no MeshTrait descendants exist. The caller retries
  * on the next preStep.
  */
@@ -506,7 +506,7 @@ function buildShape(shapeDef: ShapeDef, rbNode: Node, transform: TransformTrait,
 
 /**
  * synthesize box-equivalent mass properties from a shape's local AABB.
- * triangle-mesh shapes have no natural mass — dynamic bodies that wrap one
+ * triangle-mesh shapes have no natural mass, dynamic bodies that wrap one
  * need synthetic mass props or they fall through the world. mirrors what
  * jolt does for mesh-on-dynamic.
  */
@@ -524,7 +524,7 @@ function synthesizeBoxMassProps(shape: Shape, density = 1000): MassProperties {
 // ── body installation (declarative `def` path) ────────────────────────
 //
 // builds a fresh body from `rb.def` and assigns `rb.body`. seeded with the
-// node's world transform plus every optional field the def carries —
+// node's world transform plus every optional field the def carries,
 // crashcat fills missing fields from DEFAULT_RIGID_BODY_SETTINGS. seeds
 // motionType / prediction on the trait too so subsequent edits start from
 // the def's intent rather than the trait's default.
@@ -591,7 +591,7 @@ function buildBodyFromDef(
 //
 // `destroyBody` is the unconditional path used when a node loses its
 // RigidBodyTrait (or the trait is told to dispose). it removes whichever
-// body is currently mapped — installer-built or script-adopted alike.
+// body is currently mapped, installer-built or script-adopted alike.
 // callers wanting the "shared body" escape hatch null `rb.body` first so
 // the body isn't mapped when this fires.
 
@@ -636,7 +636,7 @@ function syncRigidBodyToWorld(
 
     // 1. def ref-change → tear down our installer-built body so the new
     //    def can produce a fresh one. adopt-mode bodies (installerOwned=false)
-    //    are left alone — the script owns them and def changes are advisory.
+    //    are left alone, the script owns them and def changes are advisory.
     if (snap && rb.def !== snap.lastDef && snap.installerOwned && rb.body !== null) {
         rigidBody.remove(world.world, rb.body);
         world.nodeToBody.delete(node.id);
@@ -700,7 +700,7 @@ function syncRigidBodyToWorld(
         }
     } else if (snap && rb.def !== snap.lastDef) {
         // def ref-change while in adopt mode (or while a new build hasn't
-        // produced a body yet) — sync lastDef so we don't keep retrying.
+        // produced a body yet), sync lastDef so we don't keep retrying.
         snap.lastDef = rb.def;
     }
 
@@ -734,7 +734,7 @@ function syncRigidBodyToWorld(
     // client-side replication smoothing: a KINEMATIC body we don't own would
     // otherwise sit still between sparse poseSync teleports. push synced
     // rb.linearVelocity / angularVelocity into it so we integrate motion
-    // continuously — the next poseSync corrects drift via the teleport branch
+    // continuously, the next poseSync corrects drift via the teleport branch
     // above. covers both demoted-DYNAMIC (prediction off) and server-declared
     // KINEMATIC (moving platforms). gated on non-owner so we don't clobber
     // locally-simulated bodies or the server's own state.
@@ -747,7 +747,7 @@ function syncRigidBodyToWorld(
 // ── listener (built fresh each tick, closes over current contacts stream) ─
 //
 // phase 1 (listener): translate each manifold into a `ContactPair` in
-// `contacts`. one canonical entry per (A, B) pair regardless of perspective —
+// `contacts`. one canonical entry per (A, B) pair regardless of perspective,
 // fan-out (in the coordinator) splits that into per-observer Contacts later.
 //
 // classification:
@@ -759,7 +759,7 @@ function syncRigidBodyToWorld(
 /**
  * When one side of a rigid-body contact is the terrain, swap in the
  * per-block friction/restitution looked up from the registry and run the
- * standard crashcat combine — `combineMaterial(value, mode)` priority-
+ * standard crashcat combine, `combineMaterial(value, mode)` priority-
  * resolves the two sides' combine modes (MAX > MIN > GEOMETRIC_MEAN >
  * MULTIPLY > AVERAGE). The terrain body uses crashcat defaults
  * (frictionCombineMode=GEOMETRIC_MEAN, restitutionCombineMode=MAX) so a
@@ -924,7 +924,7 @@ function recordContactFromManifold(
     pair.relativeVelocity[2] = (bLin?.[2] ?? 0) - (aLin?.[2] ?? 0);
 }
 
-/** record a body↔body contact from an explicit point/normal (no manifold) —
+/** record a body↔body contact from an explicit point/normal (no manifold),
  *  used to replay VCC contacts. side A is the character's inner body, side B the
  *  body it touched; the pair fans out to both nodes' `ContactsTrait`. */
 function recordBodyContact(
@@ -1074,7 +1074,7 @@ export function postStep(world: World, identity: PlayerId | null): void {
         // transform and the outgoing TransformTrait sync would echo the
         // owner's own pose back at them. genuine server-initiated pose
         // changes still go through (they mutate transform directly, not via
-        // the body). same reasoning for velocity write-back — we don't want
+        // the body). same reasoning for velocity write-back, we don't want
         // to clobber the replicated rb.linearVelocity with body's zero.
         if (identity === null && node.owner !== null && body.motionType === MotionType.KINEMATIC) {
             continue;

@@ -1,9 +1,9 @@
-// ExtrudedSpriteTrait — pixel-extruded 3D mesh sampled from the sprite
+// ExtrudedSpriteTrait, pixel-extruded 3D mesh sampled from the sprite
 // atlas. The "MC item/generated" look: each opaque pixel in the union
 // silhouette across the sprite's frames becomes a unit-pixel cube,
 // sampled per-pixel from the current frame's atlas region.
 //
-// Sibling of `SpriteTrait` rather than a `mode` on it — extrusion is a
+// Sibling of `SpriteTrait` rather than a `mode` on it, extrusion is a
 // genuinely different rendering primitive (mesh, not quad), not just a
 // different quad orientation.
 //
@@ -14,7 +14,7 @@
 // never invalidates the bake.
 //
 // Code-only: no `control()`, no `sync()`. Same reasoning as
-// `SpriteTrait` — sprite handle is module-eval state, persist + sync
+// `SpriteTrait`, sprite handle is module-eval state, persist + sync
 // are out-of-scope for v1.
 //
 // Render path: `render/sprites/extruded-sprite-visuals.ts`. Flipbook
@@ -41,7 +41,7 @@ export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
     worldScale: 1 / 16,
 
     /** flipbook playback rate. ignored when the sprite has a single
-     *  frame. loops forever — no playback enum (same shape as
+     *  frame. loops forever, no playback enum (same shape as
      *  `SpriteTrait`). */
     fps: 8,
 
@@ -82,7 +82,7 @@ export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
     /**
      * screen-door fade 0-1. 0 = solid (default), 1 = fully invisible.
      * Fragments drop via `discard` against an interleaved-gradient
-     * threshold — stays in the opaque pipeline, no sort/blend. client-only.
+     * threshold, stays in the opaque pipeline, no sort/blend. client-only.
      */
     dither: 0,
 
@@ -93,12 +93,12 @@ export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
     visible: true,
 
     /**
-     * version counter — bumped by setters when tint/light/glow change so
+     * version counter, bumped by setters when tint/light/glow change so
      * the renderer can re-upload only on mismatch.
      */
     _version: 0,
 
-    /** renderer-owned per-instance state. fast-path lookup — the
+    /** renderer-owned per-instance state. fast-path lookup, the
      *  ExtrudedSpriteVisuals per-frame loop reads this directly instead
      *  of a Map probe. mirrors `SpriteTrait._state` + `MeshTrait._state`.
      *  includes the frustum-cull entry (see `ExtrudedSpriteVisualState.cull`). */

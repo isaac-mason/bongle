@@ -1,8 +1,8 @@
-// scene handle — runtime representation of a scene resource.
+// scene handle, runtime representation of a scene resource.
 //
 // `scene('penguin')` declares a scene as authored content and returns
 // a stable handle. the handle's `node`, `voxels`, and `version` fields are
-// mutated in place by the engine when the authored payload arrives — at
+// mutated in place by the engine when the authored payload arrives, at
 // boot via the codegen `src/generated/scenes.ts` barrel, and live via the
 // kit `bongle:scenes` vite plugin's HMR events (dev only). user code holds
 // the handle reference permanently and reads through it; reference identity
@@ -23,12 +23,12 @@ export const DEFAULT_SCENE_ID = 'main';
 /**
  * On-demand: the DepKeys of every prefab a scene payload embeds (a node
  * carrying `prefab: { prefabId }`). This is deliberately NOT wired into the
- * scenes registry store's `extractDeps` — scenes need no dep edges at runtime
+ * scenes registry store's `extractDeps`, scenes need no dep edges at runtime
  * (embedded prefab anchors re-tick at the instance level via
  * `markPrefabAnchorsDirty`), and an always-on extractor would fire redundant
  * `scene changed` dispatch on every embedded-prefab edit. Callers that DO want
- * a scene's prefab dependencies — the offline icon pipeline deciding which
- * icons a prefab edit invalidates — call this explicitly, so unused paths pay
+ * a scene's prefab dependencies, the offline icon pipeline deciding which
+ * icons a prefab edit invalidates, call this explicitly, so unused paths pay
  * nothing.
  *
  * Prefab nodes own no serialized children (serializeNode drops them), so the
@@ -51,7 +51,7 @@ export function extractScenePrefabDeps(payload: ScenePayload): DepKey[] {
 
 export type SceneOptions = {
     /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic — IDs remain the lookup
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
      *  key everywhere else. */
     name?: string;
     /** push to clients. default: true. set false for server-only scenes (navmeshes, AI lookups). */
@@ -62,11 +62,11 @@ export type SceneOptions = {
 
 export type SceneHandle = {
     readonly id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
     /**
-     * DepGraph dependency — `{ registry: 'scenes', id }`. Consumed by
+     * DepGraph dependency, `{ registry: 'scenes', id }`. Consumed by
      * the unified `deps:` API on `prefab()` / `script()`: any handle in
      * that array contributes a DepGraph edge keyed off `dependency`. Stamped
      * by `createSceneHandle`; never mutated.
@@ -94,7 +94,7 @@ export type SceneHandle = {
      */
     version: number;
     /**
-     * authored payload (parsed `.scene.json` — nodes + optional chunks).
+     * authored payload (parsed `.scene.json`, nodes + optional chunks).
      * stamped by `scene()` from the codegen barrel's `_registerScenePayload`
      * write. engine `load()` reads this to seed `node`/`voxels` via
      * `populateScene` on both sides. live HMR updates and registry-dispatch
@@ -108,7 +108,7 @@ export type SceneHandle = {
  * create a fresh empty handle. the engine populates `node`/`voxels` and
  * bumps `version` once the scene is loaded (or arrives from the server).
  *
- * caller owns capture/registration — this just shapes the object.
+ * caller owns capture/registration, this just shapes the object.
  */
 export function createSceneHandle(id: string, options?: SceneOptions): SceneHandle {
     return {

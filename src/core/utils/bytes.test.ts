@@ -11,7 +11,7 @@ describe('bytesEqual', () => {
 
 describe('bytesEqualPrefix', () => {
     it('compares the first n bytes of a against all of b (no subarray view)', () => {
-        // scratch is oversized; only [0:n) is meaningful — trailing bytes ignored.
+        // scratch is oversized; only [0:n) is meaningful, trailing bytes ignored.
         const scratch = new Uint8Array([1, 2, 3, 99, 99, 99]);
         expect(bytesEqualPrefix(scratch, 3, new Uint8Array([1, 2, 3]))).toBe(true);
     });

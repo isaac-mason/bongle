@@ -1,11 +1,11 @@
-// viewport-context-menu.tsx — right-click menu over the 3D viewport.
+// viewport-context-menu.tsx, right-click menu over the 3D viewport.
 //
 // the inspect tool tick decides when to open the menu (raycast + select on
 // empty space, gate out drags/place/grab) and writes screen-pixel coords into
 // store.viewportContextMenu. this component renders a 1×1 anchor at those
 // coords inside the viewport container; a controlled DropdownMenu anchors its
 // content to that point. (radix ContextMenu positions from native contextmenu
-// events, so it can't be opened programmatically with a known coordinate —
+// events, so it can't be opened programmatically with a known coordinate,
 // hence DropdownMenu, which anchors to its trigger's bounding box.)
 
 import * as Icons from 'lucide-react';

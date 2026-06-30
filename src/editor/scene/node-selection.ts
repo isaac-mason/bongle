@@ -8,7 +8,7 @@
  *
  * Approach: broadphase-narrow against the selection's AABB, then per-candidate
  * point-in-selection check on the floor of the world-space origin. Exact
- * shape-vs-AABB intersection is intentionally skipped — origin-point-in-set
+ * shape-vs-AABB intersection is intentionally skipped, origin-point-in-set
  * is the contract; it tracks voxel selection exactly across all shape kinds.
  */
 import { type BodyVisitor, broadphase, type RigidBody } from 'crashcat';

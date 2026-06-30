@@ -1,6 +1,6 @@
 // per-room SoA pool + tick stepper for the particle system.
 //
-// Lives in client/ because the pool is a client-only runtime concern —
+// Lives in client/ because the pool is a client-only runtime concern,
 // it never ticks on the server and never enters replication. The
 // declaration primitive (`particle()`) and the pure-data type surface
 // (`ParticleHandle`, `ParticlePool`, `UpdateFn`, etc.) live in
@@ -16,7 +16,7 @@
 // in the postlude.
 //
 // no per-particle JS allocations during tick (UpdateFn args are direct
-// pool + index + dt + voxels — no per-call object construction).
+// pool + index + dt + voxels, no per-call object construction).
 // renderer reads `subarray(0, count)` for GPU writeback (see
 // `particle-visuals.ts`).
 //
@@ -27,7 +27,7 @@
 // cost is the compaction scan (one read + at-most-one swap per slot) and
 // GPU writeback.
 //
-// slot defaults match the plan §"Pool design" table — unset slots aren't
+// slot defaults match the plan §"Pool design" table, unset slots aren't
 // traps:
 //   pos*       = spawn pos
 //   prev*      = pos at spawn (writes-through for render interpolation)
@@ -38,10 +38,10 @@
 //   seed       = random u32
 //
 // per-particle dispatch (one indirect call per alive slot per tick) is
-// the v1 choice — closest to MC's model and trivially within budget at
+// the v1 choice, closest to MC's model and trivially within budget at
 // 8k particles × 60Hz (≈ 0.1ms/frame indirect-call overhead). swappable
 // to sort-by-fn or per-bucket sub-pools later without touching update
-// fns (signature is `(pool, i, dt, voxels)` — pool identity is invariant).
+// fns (signature is `(pool, i, dt, voxels)`, pool identity is invariant).
 //
 // `voxels` is threaded into the per-particle update fn (rather than
 // stamped on the pool) so collision primitives can query the world
@@ -93,7 +93,7 @@ export type SpawnOpts = {
     velX?: number;
     velY?: number;
     velZ?: number;
-    /** duration in seconds — engine writes `expiresAt[i] = now + lifetime`. */
+    /** duration in seconds, engine writes `expiresAt[i] = now + lifetime`. */
     lifetime?: number;
     size?: number;
     /** start mid-animation by passing `now - offset`. default = now. */
@@ -162,7 +162,7 @@ export function allocateSlot(
  * dispatch & compact are two separate scans:
  *   1. dispatch in forward order so motion fns see a stable snapshot.
  *      a slot killed by its own update fn (writes `expiresAt = 0`)
- *      doesn't re-process — its `expiresAt <= now` check at compact time
+ *      doesn't re-process, its `expiresAt <= now` check at compact time
  *      reaps it.
  *   2. compact scans backwards so swap-with-last from `count-1` into the
  *      hole doesn't re-test the swapped-in slot's old position. the
@@ -176,7 +176,7 @@ export function update(pool: ParticlePool, dt: number, now: number, voxels: Voxe
         pool.updateFn[i]!(pool, i, dt, voxels);
     }
 
-    // compact — backward scan, swap-with-last on death.
+    // compact, backward scan, swap-with-last on death.
     for (let i = pool.count - 1; i >= 0; i--) {
         if (pool.expiresAt[i]! > now) continue;
         const last = pool.count - 1;

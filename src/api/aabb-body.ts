@@ -1,5 +1,5 @@
 /**
- * Script-facing imperative ops on an AABB body — a small namespace over an
+ * Script-facing imperative ops on an AABB body, a small namespace over an
  * `AabbBodyTrait`'s live `.body`, mirroring crashcat's `rigidBody.*` shape so
  * physics verbs don't pollute the top-level `bongle` namespace.
  *

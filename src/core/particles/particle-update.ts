@@ -3,14 +3,14 @@
 // Two layers, all sharing the `(pool, i, dt, voxels)` per-particle
 // signature so they compose freely:
 //
-//   primitives  — gravity / drag / integrate / collideSlide / collideLand
+//   primitives, gravity / drag / integrate / collideSlide / collideLand
 //                 / collideBounce / collideDestroy. building blocks.
-//   complete    — dust / smoke / spark / snow / rain. drop straight into
+//   complete, dust / smoke / spark / snow / rain. drop straight into
 //                 `update:`, but also serve as readable examples for
 //                 hand-rolling custom motion.
 //
 // engine handles natural death (`expiresAt <= now`) at compact time, so
-// there's no `expireOnAge` primitive — motion fns just do motion and
+// there's no `expireOnAge` primitive, motion fns just do motion and
 // collision response. to kill from inside a fn (any non-age reason),
 // write `pool.expiresAt[i] = 0`.
 //
@@ -42,7 +42,7 @@ function gravity(pool: ParticlePool, i: number, dt: number, g: number): void {
 /** velocity damping. `k` in `[0, 1]`. `k=1` → no drag, `k=0` → instant
  *  stop. applied per-axis to mimic air resistance. note: this is a
  *  per-frame multiplier (not a per-second coefficient), so framerate-
- *  dependent — fine for visual fx where exact decay rate is unimportant. */
+ *  dependent, fine for visual fx where exact decay rate is unimportant. */
 function drag(pool: ParticlePool, i: number, dt: number, k: number): void {
     void dt;
     pool.velX[i]! *= k;
@@ -62,7 +62,7 @@ function integrate(pool: ParticlePool, i: number, dt: number): void {
     pool.posZ[i]! += pool.velZ[i]! * dt;
 }
 
-/** result of a voxel sweep — populated in-place to avoid per-call
+/** result of a voxel sweep, populated in-place to avoid per-call
  *  allocations in the tick loop. `axis` identifies which face the
  *  particle crossed (0=X, 1=Y, 2=Z); `t` is the segment parameter in
  *  `[0, 1]` of the contact. */
@@ -74,7 +74,7 @@ const HIT: Hit = { t: 0, axis: 0 };
  * offset by the cell origin). writes the earliest in-range hit into
  * `HIT` and returns it, or `null` if every box misses.
  *
- * `tMin` is the inclusive lower bound on hit-t — for the start cell it's
+ * `tMin` is the inclusive lower bound on hit-t, for the start cell it's
  * `0` with the strict-`>` rule so a particle already overlapping an AABB
  * "escapes" rather than re-snapping at t=0 (mirrors the cube start-cell
  * skip). for DDA-stepped cells it's the cell-entry t with the inclusive
@@ -193,7 +193,7 @@ function sweepAabbs(
  * returns `HIT` (mutated) when the segment first enters a solid surface,
  * or `null` if it stays clear all the way to the end.
  *
- * cube blocks (colliderId === 0) take the fast path — hit at the DDA
+ * cube blocks (colliderId === 0) take the fast path, hit at the DDA
  * face crossing. non-cube blocks (slabs/stairs/fences/etc.) read the
  * per-shape AABB list from `voxels.registry.shapeAabbs[colliderId]` and
  * delegate to `sweepAabbs` for a real slab-method intersection inside
@@ -205,7 +205,7 @@ function sweepAabbs(
  * particles spawned inside terrain) but still tested for sub-AABBs with
  * `t > 0` so a particle in an air pocket of a stair cell still sees the
  * stair's vertical face. inside-an-AABB at t=0 returns tNear ≤ 0 and is
- * excluded by the same rule — escape behavior preserved.
+ * excluded by the same rule, escape behavior preserved.
  *
  * single shared `HIT` is fine here: collide* primitives consume the
  * result before yielding control, no caller holds a ref across calls.
@@ -221,7 +221,7 @@ function sweepSolid(voxels: Voxels, sx: number, sy: number, sz: number, ex: numb
     let vy = Math.floor(sy);
     let vz = Math.floor(sz);
 
-    // start cell: sub-AABB-only (cube start cells are skipped — escape rule).
+    // start cell: sub-AABB-only (cube start cells are skipped, escape rule).
     {
         const stateId = getBlockState(voxels, vx, vy, vz);
         if ((registry.flags[stateId]! & BLOCK_FLAG_COLLISION) !== 0) {
@@ -279,12 +279,12 @@ function sweepSolid(voxels: Voxels, sx: number, sy: number, sz: number, ex: numb
         if ((registry.flags[stateId]! & BLOCK_FLAG_COLLISION) === 0) continue;
         const cid = registry.colliderId[stateId]!;
         if (cid === 0) {
-            // cube fast path — snap at the DDA face crossing.
+            // cube fast path, snap at the DDA face crossing.
             HIT.t = t;
             HIT.axis = axis;
             return HIT;
         }
-        // sub-AABB cell — segment-vs-AABB inside this cell. miss → keep stepping.
+        // sub-AABB cell, segment-vs-AABB inside this cell. miss → keep stepping.
         const hit = sweepAabbs(sx, sy, sz, dx, dy, dz, vx, vy, vz, registry.shapeAabbs[cid]!, t, false);
         if (hit) return hit;
     }
@@ -304,7 +304,7 @@ function snapToHit(pool: ParticlePool, i: number, t: number): void {
 
 /** sweep prev→pos; on hit, snap to contact and zero the hit-axis
  *  velocity (other axes keep moving). good for "particles that slide
- *  along walls" — smoke, dust drifting against geometry. */
+ *  along walls", smoke, dust drifting against geometry. */
 function collideSlide(pool: ParticlePool, i: number, _dt: number, voxels: Voxels): void {
     const hit = sweepSolid(voxels, pool.prevX[i]!, pool.prevY[i]!, pool.prevZ[i]!, pool.posX[i]!, pool.posY[i]!, pool.posZ[i]!);
     if (!hit) return;
@@ -315,7 +315,7 @@ function collideSlide(pool: ParticlePool, i: number, _dt: number, voxels: Voxels
 }
 
 /** sweep prev→pos; on hit, snap to contact and zero all velocity.
- *  good for "particles that settle in place" — snow landing, dust
+ *  good for "particles that settle in place", snow landing, dust
  *  pooling on the ground. */
 function collideLand(pool: ParticlePool, i: number, _dt: number, voxels: Voxels): void {
     const hit = sweepSolid(voxels, pool.prevX[i]!, pool.prevY[i]!, pool.prevZ[i]!, pool.posX[i]!, pool.posY[i]!, pool.posZ[i]!);
@@ -328,7 +328,7 @@ function collideLand(pool: ParticlePool, i: number, _dt: number, voxels: Voxels)
 
 /** sweep prev→pos; on hit, snap to contact and reflect hit-axis velocity
  *  with damping `b` in `[0, 1]` (1 = perfectly elastic, 0 = stop on
- *  hit-axis). good for "particles that bounce" — sparks, debris. */
+ *  hit-axis). good for "particles that bounce", sparks, debris. */
 function collideBounce(pool: ParticlePool, i: number, _dt: number, voxels: Voxels, b: number): void {
     const hit = sweepSolid(voxels, pool.prevX[i]!, pool.prevY[i]!, pool.prevZ[i]!, pool.posX[i]!, pool.posY[i]!, pool.posZ[i]!);
     if (!hit) return;
@@ -339,7 +339,7 @@ function collideBounce(pool: ParticlePool, i: number, _dt: number, voxels: Voxel
 }
 
 /** sweep prev→pos; on hit, kill the particle (`expiresAt[i] = 0`).
- *  good for "particles that die on contact" — rain splashing, projectile
+ *  good for "particles that die on contact", rain splashing, projectile
  *  hit fx. */
 function collideDestroy(pool: ParticlePool, i: number, _dt: number, voxels: Voxels): void {
     const hit = sweepSolid(voxels, pool.prevX[i]!, pool.prevY[i]!, pool.prevZ[i]!, pool.posX[i]!, pool.posY[i]!, pool.posZ[i]!);

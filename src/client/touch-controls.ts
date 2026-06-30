@@ -1,5 +1,5 @@
 /**
- * On-screen joystick + button — DOM helpers mounted under the per-room
+ * On-screen joystick + button, DOM helpers mounted under the per-room
  * `touchOverlay`. They own pointer-event listeners on their own root
  * `<div>` (siblings of the canvas, not children) and write directly
  * into the room's `TouchInput` state by id. Scripts read state via the
@@ -168,7 +168,7 @@ export type CreateTouchButtonOpts = {
     width: number;
     height: number;
     label?: string;
-    /** also rotate the camera while held — slide the finger to aim. the button
+    /** also rotate the camera while held, slide the finger to aim. the button
      *  captures its pointer, so the drag is forwarded into the look pipeline via
      *  `consumeTouchButtonLookDrag` (PlayerController reads it). default false. */
     look?: boolean;
@@ -202,7 +202,7 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     applyEdges(root, opts);
 
     let activePointerId: number | null = null;
-    // last pointer position while held — `look` buttons accumulate the per-move
+    // last pointer position while held, `look` buttons accumulate the per-move
     // delta into state so PlayerController can aim from it (drag-to-look).
     let lastX = 0;
     let lastY = 0;

@@ -1,5 +1,5 @@
 /**
- * On-screen mobile controls — joystick + button helpers that mount a
+ * On-screen mobile controls, joystick + button helpers that mount a
  * DOM widget on the room's `touchOverlay` and write into the room's
  * `TouchInput` state. Pair with `getJoystick(t, id)` /
  * `isTouchButtonDown(t, id)` for read-side polling.

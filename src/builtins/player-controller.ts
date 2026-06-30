@@ -1,5 +1,5 @@
 /**
- * player controller — mouse/keyboard input + camera + per-player UX.
+ * player controller, mouse/keyboard input + camera + per-player UX.
  *
  * pairs with `CharacterControllerTrait` (the sim). this trait *writes* the
  * CC's input fields (facing/move/jump/sprint/crouch/noclip) from real input
@@ -7,9 +7,9 @@
  * debug viz. an NPC system would use CC directly without this trait.
  *
  * camera supports three perspectives, cycled with 'C':
- *   - first        — at the head, looking forward
- *   - third-back   — behind the head, looking forward
- *   - third-front  — in front of the head, looking back at the face
+ *   - first, at the head, looking forward
+ *   - third-back, behind the head, looking forward
+ *   - third-front, in front of the head, looking back at the face
  *
  * third-person collision is a raycast from the head along the offset
  * direction; the camera distance is clamped to the nearest hit (against
@@ -65,7 +65,7 @@ const PERSPECTIVE_ORDER: Perspective[] = ['first', 'third-back', 'third-front'];
 /**
  * Input + HUD wiring for the player controller. One master switch plus
  * grouped sub-knobs for desktop and touch behaviours. Fields are mutated
- * live — flip `enabled` for pause menus, dialog modals, cutscenes; flip
+ * live, flip `enabled` for pause menus, dialog modals, cutscenes; flip
  * individual sub-flags for settings UIs.
  */
 export type ControlsConfig = {
@@ -85,13 +85,13 @@ export type ControlsConfig = {
 
     touch: {
         /** auto-mount the default 'move' joystick on mobile. the joystick
-         *  id is read into cc.move regardless — set false to suppress only
+         *  id is read into cc.move regardless, set false to suppress only
          *  the default mount (e.g. you're mounting your own at a custom
          *  position). */
         joystick: boolean;
         /** auto-mount default 'jump' button on mobile. */
         jumpButton: boolean;
-        /** auto-mount 'sprint' button on mobile (off by default — joystick
+        /** auto-mount 'sprint' button on mobile (off by default, joystick
          *  magnitude drives sprint instead). always-read regardless. */
         sprintButton: boolean;
         /** auto-mount 'crouch' button on mobile (off by default). */
@@ -135,7 +135,7 @@ export type CrosshairConfig = {
 // look direction lives on CharacterControllerTrait (`cc.input.look`) so it
 // can be synced + driven by NPCs too. PC just integrates mouse delta into
 // cc.input.look and reads it for camera composition. PC therefore has no
-// `input` bucket of its own — only `config` (tuning + editor toggles) and
+// `input` bucket of its own, only `config` (tuning + editor toggles) and
 // `state` (per-frame runtime). The two well-named bundles (`crosshair`,
 // `controls`) stay top-level for discoverability.
 
@@ -144,8 +144,8 @@ type PlayerControllerConfig = {
     thirdPersonDistance: number;
     cameraCollisionMargin: number;
     /** ease rate (1/s) for the sprint FOV transition. (eye height now lives on
-     *  CharacterControllerTrait — `config.eyeHeight`/`crouchEyeHeight`, eased into
-     *  `state.eyeHeight` — so the camera reads it from there.) */
+     *  CharacterControllerTrait, `config.eyeHeight`/`crouchEyeHeight`, eased into
+     *  `state.eyeHeight`, so the camera reads it from there.) */
     fovLerpSpeed: number;
     fov: number;
     fovSprint: number;
@@ -156,7 +156,7 @@ type PlayerControllerConfig = {
 
 type PlayerControllerState = {
     currentFov: number;
-    /** game-set multiplier on the target FOV (folded in before the ease) —
+    /** game-set multiplier on the target FOV (folded in before the ease),
      *  < 1 zooms in, > 1 widens. lets game code drive transient FOV effects
      *  (aim-down-sights, a bow-draw zoom, a speed-line widen) without fighting
      *  the controller's own sprint-FOV easing. reset to 1 to clear. */
@@ -305,14 +305,14 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
         }
     }
     // `look:true` touch buttons (e.g. a fire button you aim with) feed the same
-    // look channel — position-independent, so unlike canvasLook there's no
+    // look channel, position-independent, so unlike canvasLook there's no
     // half-screen gate. additive with the above, clamped together below.
     const buttonLook = consumeTouchButtonLookDrag(t);
     cc.input.look[1] -= buttonLook.dx * TOUCH_LOOK_SENSITIVITY;
     cc.input.look[2] -= buttonLook.dy * TOUCH_LOOK_SENSITIVITY;
     cc.input.look[2] = Math.max(CHARACTER_PHI_MIN, Math.min(CHARACTER_PHI_MAX, cc.input.look[2]));
 
-    // move — keyboard + joystick additive, clamp to [-1, 1].
+    // move, keyboard + joystick additive, clamp to [-1, 1].
     const stick = getJoystick(t, PlayerControllerTouchIds.moveJoystick);
     const mx =
         (isKeyDown(mk, 'KeyA') || isKeyDown(mk, 'ArrowLeft') ? -1 : 0) +
@@ -431,7 +431,7 @@ function castCameraRay(
     );
     let hitDist = _voxelResult.hit ? _voxelResult.distance : maxDist;
 
-    // body raycast — reuse vcc bodyFilter (excludes voxels + inner body)
+    // body raycast, reuse vcc bodyFilter (excludes voxels + inner body)
     if (cc.state.vcc) {
         _rayOrigin[0] = headX;
         _rayOrigin[1] = headY;
@@ -468,7 +468,7 @@ function updateCamera(
     cameraTrait: CameraTrait,
     dt: number,
 ): void {
-    // decay step-smooth offset toward zero — camera rises smoothly to match
+    // decay step-smooth offset toward zero, camera rises smoothly to match
     // physics position after a stair step-up. exp(-23*dt) mirrors Minetest.
     if (transform.teleport !== playerController.state.lastTeleportId) {
         playerController.state.lastTeleportId = transform.teleport;
@@ -505,7 +505,7 @@ function updateCamera(
     // Pick eye + target by perspective. mat4.targetTo(eye, target, up)
     // produces a transform whose local -Z points from eye toward target,
     // matching the renderer's camera convention. Set both, then derive
-    // the camera quaternion from the resulting matrix — same math the
+    // the camera quaternion from the resulting matrix, same math the
     // orbit-controller uses and a clean replacement for manual yaw*pitch
     // composition.
     let eyeX = headX;
@@ -552,7 +552,7 @@ function updateCamera(
         eyeX = headX + fwdX * clamped;
         eyeY = headY + fwdY * clamped;
         eyeZ = headZ + fwdZ * clamped;
-        // Target the head — view direction = -fwd (camera faces player).
+        // Target the head, view direction = -fwd (camera faces player).
         targetX = headX;
         targetY = headY;
         targetZ = headZ;
@@ -561,7 +561,7 @@ function updateCamera(
 
         // First-person camera bob: shift eye and target by the same
         // offset so the look direction is preserved. Third-person skips
-        // this — bobbing an orbit anchor produces visible jitter.
+        // this, bobbing an orbit anchor produces visible jitter.
         if (characterController.state.bobOffsetX !== 0 || characterController.state.bobOffsetY !== 0) {
             const rightX = cosTheta;
             const rightZ = -sinTheta;
@@ -747,7 +747,7 @@ script(
         // through CameraRefTrait on ctx.node (with fallback to `ctx.client.camera`),
         // so bespoke setups that re-point CameraRefTrait still work. null for
         // non-owner instances (onInit bails early on isOwner). nothing to tear
-        // down on dispose — camera-node lifecycle is owned by whoever installed
+        // down on dispose, camera-node lifecycle is owned by whoever installed
         // CameraRefTrait (room init or editor lens).
         let cameraTransform: TransformTrait | null = null;
         let cameraTrait: CameraTrait | null = null;
@@ -787,7 +787,7 @@ script(
         // four ticks. each tick has a target rect (x,y,w,h) derived from the
         // trait's `crosshair` params, and a current rect that lerps toward it.
         // we redraw the canvas only when any current rect drifts past `REDRAW_EPS`
-        // since the last paint — cheap idle (no draw when stable) but smooth
+        // since the last paint, cheap idle (no draw when stable) but smooth
         // animation when params change.
         let crosshairCanvas: HTMLCanvasElement | null = null;
         let crosshairCtx2d: CanvasRenderingContext2D | null = null;
@@ -830,10 +830,10 @@ script(
         const onCanvasClick = (): void => {
             if (!ctx.trait.controls.enabled) return;
             // pointer lock is the desktop mouse-look affordance; touch devices look via
-            // canvasLook (drag), and locking the pointer on a tap breaks that — plus
+            // canvasLook (drag), and locking the pointer on a tap breaks that, plus
             // pointer-lock + touch is undefined in browsers. so never lock on a touch
             // device. (the `click` event is a plain MouseEvent in Chromium, so we can't
-            // tell touch from mouse per-event — gate on the device instead.)
+            // tell touch from mouse per-event, gate on the device instead.)
             if (isTouchDevice(ctx)) return;
             if (!document.pointerLockElement) {
                 ctx.client?.domElement.requestPointerLock();
@@ -872,14 +872,14 @@ script(
 
         const syncHud = (pc: PlayerControllerTrait): void => {
             const on = pc.controls.enabled;
-            // edge: falling enabled — release pointer lock so whatever UI is
+            // edge: falling enabled, release pointer lock so whatever UI is
             // taking over (pause menu, dialog) gets a normal cursor back.
             if (prevControlsEnabled && !on && document.pointerLockElement) {
                 document.exitPointerLock();
             }
             prevControlsEnabled = on;
 
-            // touch controls show whenever touch is the primary input — viewport size
+            // touch controls show whenever touch is the primary input, viewport size
             // independent, so tablets and landscape phones get them too (a width gate
             // would wrongly drop them).
             const wantHud = on && isTouchPrimary(ctx);
@@ -986,7 +986,7 @@ script(
                 crosshairLastViewportH = h;
                 // force redraw by zeroing last-drawn rects.
                 crosshairLastDrawn.fill(0);
-                // and snap current rects to the new targets — without this
+                // and snap current rects to the new targets, without this
                 // the lerp would crawl from the old-viewport geometry to
                 // the new one (most visible on edit→play, where the HUD
                 // chrome resizes the viewport on the first play frame).
@@ -1060,7 +1060,7 @@ script(
             // input + camera writes gate on control: when the POV has been
             // swapped to a different node (e.g. editor freecam), this player
             // stops reading mouse/keyboard and its CameraTrait stops being
-            // touched. owner-only state (perspective, fov lerp) is implied —
+            // touched. owner-only state (perspective, fov lerp) is implied,
             // control => owner, since only owners can hold control of their
             // own player node.
             if (getControlNode(ctx) !== ctx.node) return;
@@ -1076,7 +1076,7 @@ script(
                 pollInput(pc, cc, input, viewportWidth);
 
                 // double-tap Space toggles noclip when enabled (editor character
-                // mode; opt-in fly cheat in games). pure gesture — the noclip
+                // mode; opt-in fly cheat in games). pure gesture, the noclip
                 // movement itself lives on the CC.
                 if (pc.controls.desktop.doubleTapNoclip && isKeyJustDown(input.mouseKeyboard, 'Space')) {
                     if (pc.state.lastJumpDownTime >= 0 && pc.state.elapsed - pc.state.lastJumpDownTime < DOUBLE_TAP_WINDOW) {
@@ -1089,7 +1089,7 @@ script(
                     }
                 }
 
-                // 'C' cycles perspective (play mode only — keep the edit-mode
+                // 'C' cycles perspective (play mode only, keep the edit-mode
                 // camera predictable while building).
                 if (ctx.mode !== 'edit' && isKeyJustDown(input.mouseKeyboard, 'KeyC')) {
                     const idx = PERSPECTIVE_ORDER.indexOf(pc.config.perspective);
@@ -1098,7 +1098,7 @@ script(
             }
 
             // eye-height (incl. the crouch drop) is eased on CharacterControllerTrait
-            // now — `state.eyeHeight`, which the camera reads above.
+            // now, `state.eyeHeight`, which the camera reads above.
             const targetFov = (cc.input.sprint ? pc.config.fovSprint : pc.config.fov) * pc.state.fovScale;
             pc.state.currentFov += (targetFov - pc.state.currentFov) * (1 - Math.exp(-pc.config.fovLerpSpeed * delta));
         });

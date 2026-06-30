@@ -1,4 +1,4 @@
-// elevation tool — axiom-style heightmap sculpt.
+// elevation tool, axiom-style heightmap sculpt.
 //
 // modes:
 //   raise   extend the top block upward inside the y-limit band.
@@ -10,15 +10,15 @@
 //   continuous  per-column fractional accumulator integrated over time.
 //               each frame:  accum += rate · amount · falloff · image · dt.
 //               whenever floor(accum) advances, one block flips. center cells
-//               fill first, edges trail — natural smooth dome / valley shape.
+//               fill first, edges trail, natural smooth dome / valley shape.
 //
 // the disc footprint preview follows the cursor (idle) and tracks (x,z)
-// only during a stroke (y stays at click level — the y-limit pivot).
+// only during a stroke (y stays at click level, the y-limit pivot).
 //
 // crucial: the live voxel grid is NEVER mutated mid-stroke. ops accumulate
 // into state.forward/reverse and are committed atomically on release via
 // the action.do callback. mid-stroke, the projected delta cells are drawn
-// as cyan highlights via the brush selection — same render path as the
+// as cyan highlights via the brush selection, same render path as the
 // disc footprint. this keeps the raycast surface frozen for the whole
 // stroke so the cursor never climbs the hill it's building.
 
@@ -89,13 +89,13 @@ function findTopH(voxels: Voxels, wx: number, wz: number, yLo: number, yHi: numb
 
 // ── stroke state (continuous mode) ────────────────────────────────
 // per-column accumulator. captured on first contact during the stroke
-// (a column may enter the disc later via cursor drag — it starts then,
+// (a column may enter the disc later via cursor drag, it starts then,
 // not at stroke-start).
 
 type ColumnAccum = {
     /** topmost surface y in [yMin, yMax] when this column was first touched. */
     baselineH: number;
-    /** block key at baselineH — extended upward on raise / flatten-up. */
+    /** block key at baselineH, extended upward on raise / flatten-up. */
     baselineKey: string;
     /** fractional blocks-of-change since first contact (always ≥ 0). */
     accum: number;
@@ -103,19 +103,19 @@ type ColumnAccum = {
     applied: number;
     /** +1 = raise/flatten-up, -1 = lower/flatten-down. fixed once on creation. */
     sign: 1 | -1;
-    /** true once `applied` has hit the cap — no further accumulation. */
+    /** true once `applied` has hit the cap, no further accumulation. */
     done: boolean;
 };
 
 /** per-room elevation stroke state. created once per edit room in
- *  EditorScript onInit and threaded into `updateElevation` — never
+ *  EditorScript onInit and threaded into `updateElevation`, never
  *  module-scoped, so two joined rooms can't share one stroke. */
 export type ElevationState = {
     active: boolean;
     mode: 'single' | 'continuous';
     startY: number;
     yLimit: number;
-    /** options snapshotted at stroke-start — the stroke is mode-locked to
+    /** options snapshotted at stroke-start, the stroke is mode-locked to
      *  whatever was active on click. null when no stroke is in progress. */
     opts: ElevationOptions | null;
     flattenTargetY: number;
@@ -125,7 +125,7 @@ export type ElevationState = {
     accum: Map<string, ColumnAccum>;
     lastFrameMs: number;
     previewKey: string;
-    /** bumps whenever new ops are projected into `forward` — folded into the
+    /** bumps whenever new ops are projected into `forward`, folded into the
      *  preview key so the brush mesh rebuilds as the delta grows. */
     version: number;
 };
@@ -196,7 +196,7 @@ export function updateElevation(
         state.version++;
 
         if (state.mode === 'single') {
-            // project the stamp into state.forward/reverse only — nothing
+            // project the stamp into state.forward/reverse only, nothing
             // hits the voxel grid until release. the cyan preview shows the
             // affected cells via the brush selection below.
             const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
@@ -216,7 +216,7 @@ export function updateElevation(
                 if (added > 0) state.version++;
             }
         } else {
-            // off-surface — don't accumulate, but advance the clock so re-entry
+            // off-surface, don't accumulate, but advance the clock so re-entry
             // doesn't dump a giant delta.
             state.lastFrameMs = now;
         }
@@ -246,7 +246,7 @@ export function updateElevation(
 
     // ── preview ──
     //
-    // idle:   disc footprint at the hover y, follows the cursor — tells the
+    // idle:   disc footprint at the hover y, follows the cursor, tells the
     //         user where the next click will land.
     // stroke: drop the disc entirely; only the projected delta cells (the
     //         "ghost terrain" the stroke will materialise on release) are
@@ -294,7 +294,7 @@ export function updateElevation(
                     Selection.set(sel, op.wx, op.wy, op.wz);
                 }
             } else {
-                // additive — buildShape clears, so we'd lose all but the last
+                // additive, buildShape clears, so we'd lose all but the last
                 // disc if we called it 2-3 times. inline the disc footprint.
                 const cy = hv![1];
                 const rsq = size * size + size;
@@ -313,7 +313,7 @@ export function updateElevation(
             }
             store.setState({ brush: sel, brushFill: tint.fill, brushEdges: tint.edges });
         } else if (store.getState().brushFill !== tint.fill || store.getState().brushEdges !== tint.edges) {
-            // mode changed without the preview geometry changing — push the new
+            // mode changed without the preview geometry changing, push the new
             // tint refs anyway so the materials update.
             store.setState({ brushFill: tint.fill, brushEdges: tint.edges });
         }
@@ -324,7 +324,7 @@ export function updateElevation(
 }
 
 // ── single-shot stamp ─────────────────────────────────────────────
-// also reused by the /elevation region command — `flattenTargetY` is
+// also reused by the /elevation region command, `flattenTargetY` is
 // the y for flatten mode (ignored for raise/lower).
 
 function applyElevationStamp(
@@ -347,7 +347,7 @@ function applyElevationStamp(
 
     // pickFill: source the fill block for raise / flatten-up. null pattern
     // falls back to the column's existing top block (the natural terrain
-    // default — extend the surface up); otherwise sample the configured
+    // default, extend the surface up); otherwise sample the configured
     // pattern at the cell being placed.
     function pickFill(wx: number, wy: number, wz: number, surfaceKey: string): string {
         if (!opts.pattern) return surfaceKey;
@@ -446,14 +446,14 @@ function integrateContinuous(
             const k = `${wx},${wz}`;
             let col = state.accum.get(k);
             if (!col) {
-                // baseline reads always hit the *original* grid — we never
+                // baseline reads always hit the *original* grid, we never
                 // mutate during the stroke. that's the whole point: the
                 // raycast surface stays frozen and the cursor doesn't climb
                 // its own hill.
                 const top = findTopH(voxels, wx, wz, yMin, yMax);
                 if (!top) continue;
                 // mask filters per-column at first contact (sampled on the
-                // surface cell). columns that fail are dropped entirely —
+                // surface cell). columns that fail are dropped entirely,
                 // they never get an accumulator entry.
                 if (opts.mask && !testMask(opts.mask, voxels, wx, top.h, wz, rng)) continue;
                 let sign: 1 | -1;

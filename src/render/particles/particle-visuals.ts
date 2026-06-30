@@ -1,16 +1,16 @@
-// ParticleVisuals — billboard-only instanced renderer for the particle pool.
+// ParticleVisuals, billboard-only instanced renderer for the particle pool.
 //
 // Material lives engine-global on `ParticleResources`. This per-room
 // struct owns the geometry and per-instance buffers; they route to the
 // engine-global material by name via `geometry.setBuffer(name, buf)`.
 //
 // The pool keeps a dense alive prefix `[0, count)`, so the draw is a
-// single instanced `drawIndexed(6, pool.count, 0)` — no per-slot cull
+// single instanced `drawIndexed(6, pool.count, 0)`, no per-slot cull
 // compute needed. `update()` sets `mesh.count = pool.count` each frame.
 // Instance data lives in two storage buffers indexed by `instanceIndex`
 // in the shader. Reads instance data from the per-room SoA ParticlePool
 // rather than scene-graph traits. Sits next to particles.ts as a sibling
-// subsystem so the pool owner stays a pure data module — no scene/Renderer
+// subsystem so the pool owner stays a pure data module, no scene/Renderer
 // imports leak in.
 
 import { createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, packTo, type Scene } from 'gpucat';
@@ -49,10 +49,10 @@ export type ParticleVisuals = {
 
 // ── init ────────────────────────────────────────────────────────────
 
-/** instance capacity — must match `POOL_CAPACITY` in particles.ts. kept
+/** instance capacity, must match `POOL_CAPACITY` in particles.ts. kept
  *  local rather than imported so the pool module stays free of any GPU
  *  ref; if these drift, instance buffers run short of the pool, leaving
- *  the tail invisible — caught by a single render check rather than a
+ *  the tail invisible, caught by a single render check rather than a
  *  runtime assert. */
 const INSTANCE_CAPACITY = 8192;
 
@@ -84,7 +84,7 @@ export function init(
     const mesh = new Mesh(geometry, particleResources.material);
     mesh.name = 'particle-visuals';
     mesh.frustumCulled = false;
-    // Mesh.count defaults to 1 — override so the first frame before
+    // Mesh.count defaults to 1, override so the first frame before
     // update() runs draws nothing instead of one garbage instance.
     mesh.count = 0;
     scene.add(mesh);
@@ -106,7 +106,7 @@ export function init(
  * Per-frame update. Walks `pool[0..count)`, resolves the sprite frame
  * index per slot from the handle's playback mode, packs pose + material.
  *
- * No camera arg — the billboard basis is reconstructed in-shader from
+ * No camera arg, the billboard basis is reconstructed in-shader from
  * cameraViewMatrix.
  */
 const _light: Vec4 = [0, 0, 0, 0];
@@ -160,7 +160,7 @@ export function update(visuals: ParticleVisuals, pool: ParticlePool, voxels: Vox
 
         const glowValue = glow[i]!;
         // glow raises the light floor to `glowValue` (see shader). at >=1
-        // the floor saturates, so the sampled voxel light is irrelevant —
+        // the floor saturates, so the sampled voxel light is irrelevant,
         // skip the sample.
         if (glowValue >= 1) {
             _light[0] = 0;

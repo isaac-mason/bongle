@@ -1,9 +1,9 @@
-// blueprints — client-only sync of `useEditor.sceneList` + `useEditor.blueprints`
+// blueprints, client-only sync of `useEditor.sceneList` + `useEditor.blueprints`
 // off the kit's scene HMR channels. `initBlueprints()` is called from the
 // editor's client activation path; never imported on the server.
 //
 // Two channels in one module because blueprint sync is driven by the scene
-// list — every `blueprints/...` id in the list needs its payload pulled.
+// list, every `blueprints/...` id in the list needs its payload pulled.
 //
 //   • `bongle:scene-list` carries the current scene id set; cold-cache
 //     boot via `GET /__bongle/scenes` covers initial fetch (HMR doesn't
@@ -14,7 +14,7 @@
 //     the editor's own subscriber.
 //
 // Initial blueprint payloads go through the plugin's `/__bongle/scene/:id`
-// cold-cache endpoint, since the file watcher only fires for live edits —
+// cold-cache endpoint, since the file watcher only fires for live edits,
 // files that existed before the dev server booted never produce an HMR
 // event, so we fetch them off the cold-fetched scene list.
 
@@ -72,7 +72,7 @@ async function fetchSceneList(): Promise<void> {
 
 let initialized = false;
 
-/** wires up scene-list cold-fetch + HMR subscriptions. client-only — called
+/** wires up scene-list cold-fetch + HMR subscriptions. client-only, called
  *  from the editor's client activation path in editor/index.ts. idempotent
  *  across HMR reloads of the editor module. */
 export function initBlueprints(): void {

@@ -7,7 +7,7 @@
 // whether the bundle was deployed to localhost, play.bongle.io, or a
 // CDN with an arbitrary prefix.
 //
-// Dev: Vite serves each engine module at its own dev URL — so
+// Dev: Vite serves each engine module at its own dev URL, so
 // `import.meta.url` is module-specific and useless as a base. Instead,
 // the kit's dev middleware (kit/src/dev.ts → bongle-serve-resources)
 // streams everything in `resources/client/` from the document origin's
@@ -41,7 +41,7 @@ export const fetchResourceLoader = async (url: string): Promise<Uint8Array> => {
 
 /**
  * The browser's `ResourceLoader` bag passed to `EngineClient.init`. Byte loading
- * only — no `decodeImage`, so the texture loaders take their DOM image path. The
+ * only, no `decodeImage`, so the texture loaders take their DOM image path. The
  * asset pipeline (`src/asset-pipeline`) supplies a different loader (disk +
  * sharp `decodeImage`).
  */

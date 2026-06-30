@@ -1,13 +1,13 @@
 /**
  * Server-side avatar wiring. The avatar a player renders with is
- * resolved upstream — the matchmaker resolves it at allocation time and
+ * resolved upstream, the matchmaker resolves it at allocation time and
  * stamps it into the join reservation, so it arrives synchronously at
  * `onClientJoin` (the dev/edit path has no matchmaker → builtin). This
  * module records that identity on the ClientState and writes it onto
  * each of the client's Players' `CharacterTrait`.
  *
  * Because identity (`modelId` + `rigType`) is known at join, the trait
- * is stamped before `onJoin` fires — game scripts see the right avatar
+ * is stamped before `onJoin` fires, game scripts see the right avatar
  * immediately, and `JoinArgs` carries it. The model *payload* still
  * loads asynchronously: for runtime avatars we acquire + ensure the
  * bytes into Resources here, and the `WorldTrait` reconciler in
@@ -31,15 +31,15 @@ import type { Player, Room } from './rooms';
  * load. Called from `onClientJoin` BEFORE the client's player nodes are
  * created, so `enqueuePlayer` stamps the trait synchronously and
  * `onJoin` observes the right `modelId` / `rigType`. `resolved` is
- * absent on the dev/edit path (no matchmaker) — default to the engine
+ * absent on the dev/edit path (no matchmaker), default to the engine
  * builtin.
  */
 export function setClientAvatar(state: EngineServer, cs: ClientState, resolved: ResolvedAvatar | undefined): void {
-    // Idempotent — the avatar is fixed for the connection (resolved once
+    // Idempotent, the avatar is fixed for the connection (resolved once
     // by the matchmaker). Guards against a re-entered onClientJoin
     // double-acquiring the runtime model and leaking a refcount.
     if (cs.avatar) return;
-    // Absent (dev/edit — no matchmaker) ⇒ the builtin. `acquireAvatarModel`
+    // Absent (dev/edit, no matchmaker) ⇒ the builtin. `acquireAvatarModel`
     // handles both arms: +1 refcount + ensure for runtime, ensure-only for
     // bundled/builtin. The payload streams in behind the now-known identity.
     const avatar: ResolvedAvatar = resolved ?? { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID };
@@ -61,7 +61,7 @@ function stampPlayerCharacter(state: EngineServer, cs: ClientState, playerId: Pl
 /**
  * Stamp the client's resolved avatar onto a newly-created Player's
  * `CharacterTrait`. The identity is set on the ClientState at join, so
- * this is always synchronous — no waiting on a load.
+ * this is always synchronous, no waiting on a load.
  */
 export function enqueuePlayer(state: EngineServer, _room: Room, player: Player): void {
     const cs = state.clients.connected.get(player.client);
@@ -71,7 +71,7 @@ export function enqueuePlayer(state: EngineServer, _room: Room, player: Player):
 
 /**
  * The client's resolved avatar identity, or the builtin if (defensively)
- * unset — `setClientAvatar` always sets it before any player node is
+ * unset, `setClientAvatar` always sets it before any player node is
  * created, so the fallback only guards a missing ClientState. Used to
  * populate `JoinArgs` for onJoin.
  */
@@ -81,7 +81,7 @@ export function clientAvatarIdentity(cs: ClientState | undefined): Avatar {
 
 /**
  * Release the client's runtime model refcount on disconnect. No-op for
- * bundled / unresolved clients — `releaseRuntimeModel` filters bundled
+ * bundled / unresolved clients, `releaseRuntimeModel` filters bundled
  * entries internally.
  */
 export function releaseClientAvatar(state: EngineServer, cs: ClientState): void {

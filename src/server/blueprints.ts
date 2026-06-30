@@ -1,8 +1,8 @@
-// server/blueprints.ts — server-side helpers for the blueprint inventory.
+// server/blueprints.ts, server-side helpers for the blueprint inventory.
 //
 // blueprints are scenes under the reserved `blueprints/` folder
 // (`content/scenes/blueprints/<name>.scene.json`). they're authored
-// content like any other scene — the only special thing is the folder
+// content like any other scene, the only special thing is the folder
 // convention + the editor flow that writes them from a live selection.
 //
 // this module owns: name allocation (so right-click "create blueprint"
@@ -44,7 +44,7 @@ export type SaveBlueprintResult = { ok: true; sceneId: string; overwritten: bool
 /**
  * save a ScenePayload as a blueprint under `blueprints/<name>.scene.json`.
  * overwrites any existing entry with the same name. `name` must match
- * `^[a-z0-9][a-z0-9\-_]*$` — no slashes (single-level under blueprints/).
+ * `^[a-z0-9][a-z0-9\-_]*$`, no slashes (single-level under blueprints/).
  */
 export function saveBlueprint(state: ContentManager.ContentManager, name: string, payload: ScenePayload): SaveBlueprintResult {
     if (!NAME_RE.test(name)) {
@@ -57,7 +57,7 @@ export function saveBlueprint(state: ContentManager.ContentManager, name: string
     const overwritten = existingBlueprintIds(state).has(name);
     ContentManager.saveScene(state, sceneId, payload);
     if (!overwritten) {
-        // saveScene doesn't update the in-memory entries list — push the new
+        // saveScene doesn't update the in-memory entries list, push the new
         // id so a follow-up allocateBlueprintName sees it without rescanning.
         state.entries.push({ sceneId });
     }

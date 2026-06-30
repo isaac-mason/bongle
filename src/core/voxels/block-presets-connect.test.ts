@@ -229,7 +229,7 @@ describe('pane neighbour update', () => {
     });
 
     it('placing 5 panes one per tick — collects the ops the server would send each tick', () => {
-        // same as above, but inspects the ops emitted each "tick" — those
+        // same as above, but inspects the ops emitted each "tick", those
         // are exactly what coalesceBlockOps would feed to the client. if
         // the corrected state for an earlier pane is missing from a tick's
         // ops trail, the client renders stale state until something else
@@ -274,7 +274,7 @@ describe('pane neighbour update', () => {
         }
 
         // tick 4 (placing pane #5 at x=4): server must emit a corrected op
-        // for pane #4 at x=3 — it transitioned from end-of-row (west-only)
+        // for pane #4 at x=3, it transitioned from end-of-row (west-only)
         // to middle-of-row (east+west).
         const tick4Positions = new Set(tickOps[4]!.map((o) => `${o.wx},${o.wy},${o.wz}`));
         expect(tick4Positions).toContain('3,0,0');

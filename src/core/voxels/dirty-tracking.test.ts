@@ -273,7 +273,7 @@ describe('light epoch', () => {
 
         propagateAllLight(voxels);
 
-        // should have zero ops — epoch bump handles full recompute
+        // should have zero ops, epoch bump handles full recompute
         expect(voxels.authority!.changes.ops).toHaveLength(0);
         expect(voxels.authority!.changes.lightEpoch).toBe(1);
     });
@@ -434,7 +434,7 @@ describe('flushPendingLight (batched)', () => {
         // ── setup: identical world state for both approaches ────────
         const baseBlocks: { x: number; y: number; z: number; key: string }[] = [];
 
-        // stone floor at y=0, box walls, etc. — same as ceiling toggle test
+        // stone floor at y=0, box walls, etc., same as ceiling toggle test
         const boxX = 16,
             boxZ = 1,
             boxY = 10,
@@ -565,7 +565,7 @@ describe('flushPendingLight (batched)', () => {
         for (const chunk of voxelsB.chunks.values()) if (chunk.lightDirty) batchedDirty++;
 
         // both approaches should dirty some chunks. with chunk-level lightDirty,
-        // the count may differ between batched and incremental — the real advantage
+        // the count may differ between batched and incremental, the real advantage
         // of batching is network efficiency (full arrays vs per-voxel deltas), not
         // necessarily fewer dirty chunks.
         expect(batchedDirty).toBeGreaterThan(0);

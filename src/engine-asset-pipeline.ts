@@ -1,4 +1,4 @@
-// The one asset pipeline — init(ctx) / run(state) / dispose / assetSources.
+// The one asset pipeline, init(ctx) / run(state) / dispose / assetSources.
 // This is the API the kit programs against: the dev plugin runs it on each
 // settled flush (forwarding the RunResult to the browser), and the build runs
 // it once. It lives in the engine because it uses the engine; reachable only

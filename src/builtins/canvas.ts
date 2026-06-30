@@ -1,11 +1,11 @@
-// CanvasTrait — bring-your-own-pixels: an OffscreenCanvas painted into a
+// CanvasTrait, bring-your-own-pixels: an OffscreenCanvas painted into a
 // textured 3D quad. No DOM, no `drawElement`. User scripts grab a 2D
 // context off `trait.canvas` and paint whatever they want.
 //
-// Persist-only — no replication. Client-only `canvas`. Picking is a
+// Persist-only, no replication. Client-only `canvas`. Picking is a
 // userland concern (raycast the quad, translate hit to UV).
 //
-// No `control()` — code-only trait.
+// No `control()`, code-only trait.
 //
 // See `client/dom-ui.ts` for the visuals layer.
 

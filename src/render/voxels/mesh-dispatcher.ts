@@ -42,7 +42,7 @@ import { chunkKey } from '../../core/voxels/voxels';
 
 /** minimal Worker surface the dispatcher needs. Both real `Worker` and
  *  `MessagePort` (used by the in-process test) satisfy this shape.
- *  `onerror` / `onmessageerror` are optional — only real `Worker`s emit
+ *  `onerror` / `onmessageerror` are optional, only real `Worker`s emit
  *  them; the in-process test stubs them out. */
 export interface WorkerLike {
     postMessage(msg: MeshWorkerInMsg, transfer?: Transferable[]): void;
@@ -53,7 +53,7 @@ export interface WorkerLike {
 }
 
 /** spawnMeshWorker lives in `mesh-worker-spawn.ts` so the `?worker&inline`
- *  query stays out of mesh-dispatcher's static import graph — Bun's TS
+ *  query stays out of mesh-dispatcher's static import graph, Bun's TS
  *  loader doesn't strip Vite query suffixes, and the kit asset pipeline
  *  imports this file via the `bongle` graph. voxel-resources reaches the
  *  spawn helper through a dynamic import that only resolves under Vite. */
@@ -62,8 +62,8 @@ export interface WorkerLike {
  *  `ChunkMeshResult` carries the three PassMesh payloads + AABB (same
  *  shape the sync `meshChunk` path returns); `chunkKey` + `gen` let the
  *  caller match it back to the right chunk and discard stale results.
- *  Buffer views (`PassMesh.quads`) are backed by transferred ArrayBuffers
- *  — see mesh-worker.ts protocol notes. */
+ *  Buffer views (`PassMesh.quads`) are backed by transferred ArrayBuffers,
+ * see mesh-worker.ts protocol notes. */
 export type MeshDispatcherResult = ChunkMeshResult & {
     chunkKey: string;
     gen: number;
@@ -86,7 +86,7 @@ const PASS_BUF_BYTES = MAX_QUADS_PER_PASS * QUAD_STRIDE_U32S * 4;
 
 type WorkerSlot = {
     worker: WorkerLike;
-    /** FIFO of in-flight job keys at this slot — entries are spliced
+    /** FIFO of in-flight job keys at this slot, entries are spliced
      *  out by chunkKey when the matching result lands. Length bounded
      *  by `queueDepth`. */
     inFlight: Array<{ chunkKey: string; gen: number }>;
@@ -107,16 +107,16 @@ export type MeshDispatcher = {
     /** free per-job buffer sets. Borrowed on enqueue, recycled on result. */
     jobBufferPool: MeshJobBuffers[];
     registryVersion: number;
-    /** canonical serialized registry — kept so newly spawned workers
+    /** canonical serialized registry, kept so newly spawned workers
      *  (post-crash respawn) can be re-inited without re-encoding. */
     registryBuf: ArrayBuffer | null;
     onResult: (result: MeshDispatcherResult) => void;
-    /** called once per in-flight chunk lost when a worker crashes —
+    /** called once per in-flight chunk lost when a worker crashes,
      *  caller is expected to re-mark the chunk dirty so it gets
      *  re-dispatched on a subsequent frame. null if the caller doesn't
      *  care (offline paths). */
     onLost: ((chunkKey: string) => void) | null;
-    /** kept for crash recovery — respawn calls this to get a fresh
+    /** kept for crash recovery, respawn calls this to get a fresh
      *  worker for the same slot index. */
     workerFactory: () => WorkerLike;
 };
@@ -126,10 +126,10 @@ export type MeshDispatcherOpts = {
     workerFactory: () => WorkerLike;
     workerCount: number;
     queueDepth: number;
-    /** called when a result lands (fresh or stale — caller's gen guard
+    /** called when a result lands (fresh or stale, caller's gen guard
      *  decides what to do with it). */
     onResult: (result: MeshDispatcherResult) => void;
-    /** optional — called once per in-flight chunk lost to a worker crash
+    /** optional, called once per in-flight chunk lost to a worker crash
      *  (worker `error` / `messageerror` event). The dispatcher respawns
      *  the worker and replenishes the buffer pool; the caller is
      *  responsible for putting the chunk back on the dirty list. */
@@ -151,7 +151,7 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
     };
 
     // Pre-allocate the job buffer pool. Sized to cover every slot at
-    // full queue depth — every job borrows one set and transfers it; the
+    // full queue depth, every job borrows one set and transfers it; the
     // result echoes it back to the pool.
     const poolSize = opts.workerCount * opts.queueDepth;
     for (let i = 0; i < poolSize; i++) {
@@ -186,7 +186,7 @@ function allocateJobBuffers(): MeshJobBuffers {
 /** Wire onmessage + crash handlers for a (possibly newly respawned)
  *  worker. Both `error` (worker-script exception) and `messageerror`
  *  (postMessage failed to deserialise) terminate the slot's worker and
- *  respawn — see `handleWorkerCrash`. */
+ *  respawn, see `handleWorkerCrash`. */
 function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): void {
     worker.onmessage = (e) => handleWorkerMessage(d, slotIndex, e.data);
     worker.onerror = (ev) => handleWorkerCrash(d, slotIndex, 'error', ev);
@@ -194,7 +194,7 @@ function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): v
 }
 
 /** Respawn a crashed worker slot. The crash detaches every buffer
- *  currently in flight at the slot — they're gone, can't be returned
+ *  currently in flight at the slot, they're gone, can't be returned
  *  to the pool. We replenish with freshly-allocated sets to keep the
  *  pool at its original capacity. In-flight chunks are surfaced
  *  through `onLost` so the caller can re-mark them dirty. */
@@ -212,7 +212,7 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
         d.onLost?.(entry.chunkKey);
     }
 
-    // Replenish pool — the in-flight buffer sets are gone with the crash.
+    // Replenish pool, the in-flight buffer sets are gone with the crash.
     for (let i = 0; i < slot.inFlight.length; i++) {
         d.jobBufferPool.push(allocateJobBuffers());
     }
@@ -241,7 +241,7 @@ export function setMeshRegistry(d: MeshDispatcher, reg: BlockRegistry): void {
     const version = d.registryVersion;
     d.registryBuf = serializeBlockRegistryForWorker(reg, version);
 
-    // Per-slot copy — postMessage transfer detaches the buffer, can't
+    // Per-slot copy, postMessage transfer detaches the buffer, can't
     // ship one buffer to N workers. `.slice()` is a flat memcpy of
     // ~MB-scale buffers, ~ms one-shot; fine for boot/rebuild.
     for (let i = 0; i < d.slots.length; i++) {
@@ -317,14 +317,14 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
     if (msg.cmd === 'result') {
         // Find and remove the matching in-flight entry. Workers process
         // FIFO so usually it's at index 0, but a stale-result scenario
-        // could surface it elsewhere — splice by chunkKey, not by
+        // could surface it elsewhere, splice by chunkKey, not by
         // position.
         const idx = slot.inFlight.findIndex((e) => e.chunkKey === msg.chunkKey && e.gen === msg.gen);
         if (idx >= 0) slot.inFlight.splice(idx, 1);
 
         // Clear the global dedup entry only if it matches the gen we
         // just got. (In practice nothing else writes to this map
-        // concurrently — we're single-threaded on main — so this is
+        // concurrently, we're single-threaded on main, so this is
         // belt-and-braces.)
         const tracked = d.inFlightByChunk.get(msg.chunkKey);
         if (tracked && tracked.gen === msg.gen) d.inFlightByChunk.delete(msg.chunkKey);
@@ -357,7 +357,7 @@ export function disposeMeshDispatcher(d: MeshDispatcher): void {
     d.registryBuf = null;
 }
 
-/** test-only inspection helpers — kept on the public surface because
+/** test-only inspection helpers, kept on the public surface because
  *  they're how the dispatcher test verifies invariants (slot queue
  *  depth, pool size). Cheap O(slots) reads, no internal state changes. */
 export function dispatcherStats(d: MeshDispatcher): {

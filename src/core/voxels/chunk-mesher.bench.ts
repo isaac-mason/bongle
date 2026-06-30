@@ -65,7 +65,7 @@ function buildBenchRegistry() {
         { id: 'leaves', cull: CullType.SELF, texId: 'leaves' },
         { id: 'water', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, texId: 'water' },
         { id: 'glass', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, texId: 'glass' },
-        // village-scenario filler — varied cull/material to exercise diverse-state cache behavior.
+        // village-scenario filler, varied cull/material to exercise diverse-state cache behavior.
         { id: 'sand', texId: 'sand' },
         { id: 'gravel', texId: 'gravel' },
         { id: 'cobblestone', texId: 'cobblestone' },
@@ -80,7 +80,7 @@ function buildBenchRegistry() {
         { id: 'ice', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, texId: 'ice' },
         { id: 'snow', texId: 'snow' },
         { id: 'torch', cull: CullType.NONE, texId: 'torch' },
-        // model-shape benchers — drive MODEL_MESH dispatch in chunk-mesher.
+        // model-shape benchers, drive MODEL_MESH dispatch in chunk-mesher.
         { id: 'slab_b', cull: CullType.PARTIAL, texId: 'oak_planks', model: (t) => ({ type: 'custom', quads: slabModel(t) }) },
         { id: 'stair_b', cull: CullType.PARTIAL, texId: 'oak_stairs', model: (t) => ({ type: 'custom', quads: stairModel(t) }) },
         { id: 'fence_b', cull: CullType.PARTIAL, texId: 'oak_log', model: (t) => ({ type: 'custom', quads: fenceModel(t) }) },
@@ -119,7 +119,7 @@ const registry = buildBenchRegistry();
 
 // ── chunk generators ────────────────────────────────────────────────
 
-/** fully solid chunk — worst case for vertex count (only surface faces visible) */
+/** fully solid chunk, worst case for vertex count (only surface faces visible) */
 function makeDenseChunk(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, 0, 0);
@@ -131,7 +131,7 @@ function makeDenseChunk(): Voxels {
     return voxels;
 }
 
-/** dense chunk with 6 solid neighbors — most faces culled */
+/** dense chunk with 6 solid neighbors, most faces culled */
 function makeDenseWithNeighbors(): Voxels {
     const voxels = createVoxels(registry);
     // center chunk
@@ -162,7 +162,7 @@ function makeDenseWithNeighbors(): Voxels {
     return voxels;
 }
 
-/** terrain-like: stone below y=8, air above — typical real-world pattern */
+/** terrain-like: stone below y=8, air above, typical real-world pattern */
 function makeTerrainChunk(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, 0, 0);
@@ -177,7 +177,7 @@ function makeTerrainChunk(): Voxels {
     return voxels;
 }
 
-/** checkerboard — maximum exposed faces, worst case for face count */
+/** checkerboard, maximum exposed faces, worst case for face count */
 function makeCheckerboard(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, 0, 0);
@@ -189,7 +189,7 @@ function makeCheckerboard(): Voxels {
     return voxels;
 }
 
-/** sparse — 64 randomly placed blocks */
+/** sparse, 64 randomly placed blocks */
 function makeSparse(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, 0, 0);
@@ -210,7 +210,7 @@ function makeSparse(): Voxels {
     return voxels;
 }
 
-/** mixed cull classes — solid terrain + water pool + leaves canopy */
+/** mixed cull classes, solid terrain + water pool + leaves canopy */
 function makeMixed(): Voxels {
     const voxels = createVoxels(registry);
     const chunk = createChunk(0, 0, 0);
@@ -233,7 +233,7 @@ function makeMixed(): Voxels {
     return voxels;
 }
 
-/** village — diverse real-world chunk with ~18 distinct stateIds, clustered
+/** village, diverse real-world chunk with ~18 distinct stateIds, clustered
  *  spatially (not random noise). meant to expose cache-pressure regressions
  *  that single/few-state benches miss: per-state tables get accessed across
  *  a wider footprint, and chunks like this are typical, not pathological. */
@@ -329,7 +329,7 @@ function makeVillage(): Voxels {
     return voxels;
 }
 
-/** model dispatch — stairs/slabs/fences carpet over a stone base.
+/** model dispatch, stairs/slabs/fences carpet over a stone base.
  *  exercises the MODEL_MESH bake/relight path that single-shape benches miss
  *  (AoFaceData blend + 5-shape dispatch + per-quad inset face cache). */
 function makeModelDispatch(): Voxels {
@@ -337,11 +337,11 @@ function makeModelDispatch(): Voxels {
     const chunk = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', chunk);
 
-    // stone base y=0..3 (background, mostly culled — keeps light/AO realistic)
+    // stone base y=0..3 (background, mostly culled, keeps light/AO realistic)
     for (let z = 0; z < CHUNK_SIZE; z++)
         for (let x = 0; x < CHUNK_SIZE; x++) for (let y = 0; y < 4; y++) setChunkBlock(chunk, x, y, z, 'stone', registry);
 
-    // model carpet at y=4..6 — 3 model variants tiled across the chunk
+    // model carpet at y=4..6, 3 model variants tiled across the chunk
     for (let z = 0; z < CHUNK_SIZE; z++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             const k = (x + z * 3) % 5;

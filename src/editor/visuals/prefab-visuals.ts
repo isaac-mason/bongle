@@ -1,4 +1,4 @@
-// editor/prefab-visuals.ts — ghost voxel rendering for prefab nodes.
+// editor/prefab-visuals.ts, ghost voxel rendering for prefab nodes.
 //
 // in edit mode, prefab nodes whose def produces voxels get a transient
 // child node that shows a tinted ghost of the prefab's voxel data.
@@ -27,7 +27,7 @@ const GHOST_NAME = '\0prefab-voxels';
 
 export type PrefabVisuals = {
     // maps each prefab node → cache key of the last bake.
-    // key = `${generation}|${qx},${qy},${qz},${qw}` — the prefab's
+    // key = `${generation}|${qx},${qy},${qz},${qw}`, the prefab's
     // generation counter is the source of truth for "content changed" (any
     // dep version bump rebuilds), and rotation invalidates the ghost since
     // voxels are pre-rotated into world axes.

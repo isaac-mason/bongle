@@ -49,7 +49,7 @@ function ackFulls(discovery: Discovery.Discovery, playerId: number, out: Array<[
     Discovery.handleVoxelAck(discovery, FAKE_CLIENT, { type: 'voxel_ack', playerId, full });
 }
 
-/** ack every full chunk in a flush, grouped by (client, playerId) — for the
+/** ack every full chunk in a flush, grouped by (client, playerId), for the
  *  multi-client case where one flush carries messages for several clients. */
 function ackAllFulls(discovery: Discovery.Discovery, out: Array<[Client, { type: string }]>): void {
     const groups = new Map<string, { client: Client; playerId: number; full: Array<{ cx: number; cy: number; cz: number }> }>();
@@ -99,10 +99,10 @@ describe('discovery — realm filtering', () => {
     it('play mode: join_room packed scene excludes non-shared subtree', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
 
-        // shared node — should appear
+        // shared node, should appear
         const sharedA = createNode({ name: 'shared-A' });
         addChild(server.nodes.root, sharedA);
-        // server-only node with a shared descendant — entire subtree pruned
+        // server-only node with a shared descendant, entire subtree pruned
         const serverOnly = createNode({ name: 'server-B', realm: 'server' });
         addChild(server.nodes.root, serverOnly);
         const sharedC = createNode({ name: 'shared-C', realm: 'shared' });
@@ -174,7 +174,7 @@ describe('discovery — realm filtering', () => {
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources);
 
-        // add mixed-realm nodes after join — incremental sync path
+        // add mixed-realm nodes after join, incremental sync path
         const sharedX = createNode({ name: 'shared-X' });
         addChild(server.nodes.root, sharedX);
         const svr = createNode({ name: 'server-Y', realm: 'server' });
@@ -202,7 +202,7 @@ describe('discovery — realm filtering', () => {
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources);
 
-        // create c under root, create p under root, then reparent c under p — all
+        // create c under root, create p under root, then reparent c under p, all
         // one tick. c was dirtied before p, but p is now c's parent, so the
         // fan-out must emit p's node_created before c's (depth order).
         const c = createNode({ name: 'child' });
@@ -280,7 +280,7 @@ describe('discovery — realm filtering', () => {
         const node = createNode({ name: 'flicker' });
         addChild(server.nodes.root, node);
         destroyNode(server.nodes, node);
-        // re-add the same node object — it becomes live again this tick.
+        // re-add the same node object, it becomes live again this tick.
         addChild(server.nodes.root, node);
 
         const messages = flushUntilQuiet(discovery, server.rooms, resources);
@@ -310,7 +310,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         const k = voxelKnowledge(discovery, FAKE_CLIENT, player.id);
         const [ax, ay, az] = k.lastAnchor as [number, number, number];
 
-        // 3x3x3 = 27 occupied chunks hugging the anchor — all well within the
+        // 3x3x3 = 27 occupied chunks hugging the anchor, all well within the
         // play-mode view radius (8), and > FULL_CAP so delivery spans ticks.
         const expected = new Set<string>();
         for (let i = 0; i < 3; i++)
@@ -352,7 +352,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         const k = voxelKnowledge(discovery, FAKE_CLIENT, player.id);
         const [ax, ay, az] = k.lastAnchor as [number, number, number];
 
-        // 48 occupied chunks (4x4x3) hugging the anchor — more than the 24-slot
+        // 48 occupied chunks (4x4x3) hugging the anchor, more than the 24-slot
         // in-flight window, all within the edit view radius.
         for (let i = 0; i < 4; i++)
             for (let j = 0; j < 4; j++)
@@ -360,7 +360,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
                     setBlock(server.room.voxels, (ax + i) * 16, (ay + j) * 16, (az + l) * 16, FAIRNESS_BLOCK);
                 }
 
-        // flush repeatedly WITHOUT acking — delivery must stall at the window.
+        // flush repeatedly WITHOUT acking, delivery must stall at the window.
         const shipped: Array<{ cx: number; cy: number; cz: number }> = [];
         for (let tick = 0; tick < 20; tick++) {
             shipped.push(...fullCoords(flushUntilQuiet(discovery, server.rooms, resources)));
@@ -419,7 +419,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         const { server, discovery, net, player, resources } = setupRoom('edit');
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
-        // 75 occupied chunks in a 5x5x3 block near the anchor — well inside the
+        // 75 occupied chunks in a 5x5x3 block near the anchor, well inside the
         // edit view radius, and more than BACKLOG_CAP (64).
         let placed = 0;
         for (let cx = 0; cx < 5; cx++)
@@ -446,7 +446,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
 
         // add two more clients + players in the same room (harness is
         // single-client by default). all three share the [0,0,0] anchor since
-        // the test never builds player scene nodes — maximal contention.
+        // the test never builds player scene nodes, maximal contention.
         const CLIENT_2: Client = 2;
         const CLIENT_3: Client = 3;
         Discovery.addClient(discovery, CLIENT_2);
@@ -481,7 +481,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
             const out = flushUntilQuiet(discovery, server.rooms, resources);
 
             const perClient = new Map<Client, number>();
-            // (client, chunk) shipped as full vs light this tick — must be
+            // (client, chunk) shipped as full vs light this tick, must be
             // disjoint per client (a full carries light in-payload).
             const fullPerClient = new Map<Client, Set<string>>();
             const lightPerClient = new Map<Client, Set<string>>();

@@ -59,7 +59,7 @@ export const CreateNodeCommand = command(
         // optional JSON of PrefabConfig. inlined here (rather than sent as a
         // separate SetPrefabCommand) so the originating client's discovery
         // knowledge isn't stamped before discovery has emitted node_created
-        // for this node — that stamping path silently swallows the create.
+        // for this node, that stamping path silently swallows the create.
         prefab: pack.optional(pack.string()),
     }),
 );

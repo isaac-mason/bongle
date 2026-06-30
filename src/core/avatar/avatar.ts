@@ -1,4 +1,4 @@
-// Engine-facing avatar identity — the resolved avatar recorded on a
+// Engine-facing avatar identity, the resolved avatar recorded on a
 // client at join time.
 //
 // Distinct from the driver-layer `ResolvedAvatar` (lib/interface/server.ts),
@@ -9,7 +9,7 @@
 // remains here is the model id and its rig contract.
 
 export type Avatar = {
-    /** Resolved model id — registered with `Resources`, written onto the
+    /** Resolved model id, registered with `Resources`, written onto the
      *  player's `CharacterTrait.modelId`. */
     modelId: string;
 

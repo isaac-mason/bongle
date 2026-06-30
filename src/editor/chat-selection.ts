@@ -86,14 +86,14 @@ const DirectionArg: ArgType<readonly DirectionVec[]> = {
 
 type Vec3 = readonly [number, number, number];
 
-// absolute integer voxel coordinate written `x,y,z` with no spaces — the
+// absolute integer voxel coordinate written `x,y,z` with no spaces, the
 // tokenizer splits on spaces, so a corner is a single token. relative `~`
 // forms are a later addition.
 const Vec3Arg: ArgType<Vec3> = {
     name: 'coord',
     parse: (s) => {
         // tolerate a trailing comma (`5,0,5,`) and surrounding whitespace; an
-        // empty component (`5,,5`) is an error — Number('') is 0, not NaN.
+        // empty component (`5,,5`) is an error, Number('') is 0, not NaN.
         const parts = s
             .replace(/,+$/, '')
             .split(',')
@@ -124,7 +124,7 @@ function resolveTarget(flags: Record<string, boolean>, sticky: SelectTarget): Ta
     return { voxels, nodes };
 }
 
-// flag specs shared by every selection command — keeps suggestions uniform.
+// flag specs shared by every selection command, keeps suggestions uniform.
 const TARGET_FLAGS = [
     { name: 'voxels', description: 'include voxels in this op' },
     { name: 'no-voxels', description: 'exclude voxels from this op' },
@@ -171,7 +171,7 @@ function compose(
 }
 
 // ── mask arg (local) ───────────────────────────────────────────────
-// thin variant of chat-commands.ts's MaskArg — no in-selection ranking
+// thin variant of chat-commands.ts's MaskArg, no in-selection ranking
 // because /count's mask is about classifying voxels, not contextual.
 // keep it simple; if we need cross-feature consistency later, lift the
 // shared closure-built version out of chat-commands.ts.
@@ -386,7 +386,7 @@ export function installSelectionChatCommands(
     /**
      * Expand the voxel selection by `n` voxels along each direction in `dirs`.
      * Each axis is swept independently against the accumulated result, so
-     * `dirs=all` produces a `(2n+1)³` cuboid envelope (WE semantics) — not the
+     * `dirs=all` produces a `(2n+1)³` cuboid envelope (WE semantics), not the
      * octahedron you'd get from iterating a 6-neighbour Minkowski dilation.
      */
     function grow(sel: Selection.Selection, n: number, dirs: readonly DirectionVec[]): Selection.Selection {
@@ -429,7 +429,7 @@ export function installSelectionChatCommands(
 
     function commitTransformed(next: Selection.Selection, target: Target): void {
         // node rebuild uses the *transformed* voxel set even when voxels are
-        // about to be reverted — that lets `--nodes --no-voxels` track what
+        // about to be reverted, that lets `--nodes --no-voxels` track what
         // the transform would have selected without disturbing voxels.
         if (target.nodes) {
             rebuildNodeSelection(next, ctx, physics, nodeBodies);
@@ -553,7 +553,7 @@ export function installSelectionChatCommands(
         ({ args, flags }) => {
             const n = Math.floor((args.n as number | undefined) ?? 0);
             // shift uses a single direction; collapse multi-axis dirs (all/vert)
-            // by summing their first component — practically callers will use a
+            // by summing their first component, practically callers will use a
             // single-axis token. error if user passed a multi-axis one.
             const dirs = (args.direction as readonly DirectionVec[] | undefined) ?? DIR_TOKENS.up!;
             if (dirs.length !== 1) {

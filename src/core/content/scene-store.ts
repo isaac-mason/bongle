@@ -1,4 +1,4 @@
-// core/content/scene-store.ts — runtime mutation of declared scene handles.
+// core/content/scene-store.ts, runtime mutation of declared scene handles.
 //
 // scenes are authored content. authored payloads ride on each
 // `SceneHandle._payload` field, stamped at `scene()` declaration by the
@@ -10,7 +10,7 @@
 // kit boot entries, which both update `_payload` and re-`populateScene`.
 //
 // scene declarations live on `module.scenes` (captured by `scene()` in user
-// code). this module does not keep a parallel registry — the project module
+// code). this module does not keep a parallel registry, the project module
 // is the source of truth.
 
 import { registry } from '../registry';
@@ -23,7 +23,7 @@ import { createVoxels } from '../voxels/voxels';
 import type { Content } from './index';
 
 /**
- * raw, on-the-wire scene data — what the codegen barrel imports at module
+ * raw, on-the-wire scene data, what the codegen barrel imports at module
  * eval and what the plugin's HMR events carry (already parsed). fed into
  * `populateScene`, which both caches it on `content.payloads`
  * (authored-form-of-record) and deserializes it into the registered
@@ -40,8 +40,8 @@ export type ScenePayload = {
  * declared the scene as relevant, mutate the declared `SceneHandle` so
  * prefabs depending on it rebuild.
  *
- * the cache always records the payload — even when the handle isn't
- * relevant on this side — so the server can push `server: false` scenes
+ * the cache always records the payload, even when the handle isn't
+ * relevant on this side, so the server can push `server: false` scenes
  * to clients without keeping a populated handle for them server-side.
  *
  * `side` selects which handle flag gates handle mutation:
@@ -65,7 +65,7 @@ export function populateScene(
     if (side === 'server' && !handle.server) return;
     if (side === 'client' && !handle.client) return;
 
-    // detach current children — the handle's node is free-floating (no
+    // detach current children, the handle's node is free-floating (no
     // Nodes runtime), so no unregister is needed; just clear the list and
     // null parent pointers.
     for (const child of handle.node.children) {
@@ -80,7 +80,7 @@ export function populateScene(
     handle.node._traitIssues.clear();
 
     // apply root-level traits. handle.node is free-floating (no sg, no
-    // runtime), so no reindex / script instantiation — closures over
+    // runtime), so no reindex / script instantiation, closures over
     // `handle.node` see the full authored shape including root traits.
     if (raw.nodes.root.traits) {
         for (const st of raw.nodes.root.traits) {
@@ -101,7 +101,7 @@ export function populateScene(
         }
     }
 
-    // populate fresh children. persist:true is preserved from the source —
+    // populate fresh children. persist:true is preserved from the source,
     // these aren't prefab outputs, they're authored scene content.
     for (const childData of raw.nodes.root.children) {
         addChild(handle.node, deserializeNode(childData));
@@ -124,7 +124,7 @@ export function populateScene(
  * scene declaration is removed, or a `bongle:scene-clear` HMR event fires
  * after an authored file is deleted on disk). gates handle mutation on the
  * side flag, mirroring `populateScene`.
- * the handle reference itself stays valid — module-scope closures still
+ * the handle reference itself stays valid, module-scope closures still
  * resolve.
  */
 export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
@@ -146,7 +146,7 @@ export function clearScene(content: Content, id: string, side: 'server' | 'clien
 /**
  * detach a free-floating subtree's root from its parent. the handle's
  * children are not registered in any Nodes runtime, so we just clear
- * the parent pointer — descendants are unreachable and get GC'd.
+ * the parent pointer, descendants are unreachable and get GC'd.
  */
 function detachOrphan(child: Node): void {
     child.parent = null;

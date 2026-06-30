@@ -1,4 +1,4 @@
-// ModelAtlas — single 2D RGBA8 texture with skyline-packed regions.
+// ModelAtlas, single 2D RGBA8 texture with skyline-packed regions.
 //
 // One client-global atlas (owned by `ModelResources`). Skyline allocator caches
 // free-edges; `allocate(w, h, ownerKey)` returns a region or null on
@@ -29,7 +29,7 @@ export type ModelAtlas = {
     /** GPU texture; format rgba8unorm-srgb (PNG/JPG bytes are sRGB-encoded
      *  per glTF spec, so the GPU decodes to linear at sample time), no mipmaps. */
     texture: Texture;
-    /** CPU-side rgba8 backing — `size * size * 4` bytes. Skyline writes
+    /** CPU-side rgba8 backing, `size * size * 4` bytes. Skyline writes
      *  go through this; texture re-uploads on `needsUpdate`. */
     pixels: Uint8Array;
     /** sorted-by-x skyline edges. invariant: nodes cover [0, size]
@@ -66,11 +66,11 @@ export function create(initialSize = 1024): ModelAtlas {
  * Reserve a `w × h` region tagged with `ownerKey`. Caller writes pixels
  * into `atlas.pixels` at the returned offset, then calls `markDirty`.
  *
- * Idempotent — re-allocating the same `ownerKey` returns the existing
+ * Idempotent, re-allocating the same `ownerKey` returns the existing
  * region. Caller is responsible for `release` then `allocate` if it
  * wants to resize.
  *
- * Returns `null` on overflow — caller decides whether to defrag, grow,
+ * Returns `null` on overflow, caller decides whether to defrag, grow,
  * or evict.
  */
 export function allocate(atlas: ModelAtlas, w: number, h: number, ownerKey: string): Region | null {

@@ -104,7 +104,7 @@ export function sweepAabbVsVoxels(
     const minZ = dz >= 0 ? mcZ - mhZ : mcZ - mhZ + dz;
     const maxZ = dz >= 0 ? mcZ + mhZ + dz : mcZ + mhZ;
 
-    // expand by one cell — catches blocks whose face is exactly at the
+    // expand by one cell, catches blocks whose face is exactly at the
     // envelope boundary (grazing) without false negatives from float error.
     const ix0 = Math.floor(minX) - 1;
     const iy0 = Math.floor(minY) - 1;
@@ -166,7 +166,7 @@ export function sweepAabbVsVoxels(
                         out.vy = cwy;
                         out.vz = cwz;
                         // AIR sentinel ⇒ neutral material defaults
-                        // (friction=1, restitution=0) — same convention used
+                        // (friction=1, restitution=0), same convention used
                         // for AABB-vs-AABB hits where no source block exists.
                         out.stateId = AIR;
                         out.subAabbIndex = -1;

@@ -1,22 +1,22 @@
 /**
  * WorldEdit-style block masks. A Mask is a plain-object AST that answers
- * "does this voxel match?" — used to filter which positions a bulk op
+ * "does this voxel match?", used to filter which positions a bulk op
  * affects.
  *
  * Subset of WorldEdit's mask grammar (see worldedit-docs masks.rst):
- *   - `stone`                 — block mask (states unspecified → fuzzy match)
- *   - `stone[axis=y]`         — block mask with required state
- *   - `stone,dirt`            — block OR list (one BlockMask matching any)
- *   - `stone dirt`            — intersection (space-separated)
- *   - `!stone`                — negation
- *   - `#existing`             — non-air
- *   - `%50`                   — random 50% of voxels
+ *   - `stone`, block mask (states unspecified → fuzzy match)
+ *   - `stone[axis=y]`, block mask with required state
+ *   - `stone,dirt`, block OR list (one BlockMask matching any)
+ *   - `stone dirt`, intersection (space-separated)
+ *   - `!stone`, negation
+ *   - `#existing`, non-air
+ *   - `%50`, random 50% of voxels
  *
  * Unlike patterns, unspecified states in a block mask fuzzy-match any value
  * (matching WE's BlockMask semantics). Unlike pattern weights, mask `%N` is
  * literally N% (not relative).
  *
- * Open union — add `solid`, `fullCube`, `surface`, `category`, `offset`,
+ * Open union, add `solid`, `fullCube`, `surface`, `category`, `offset`,
  * `adjacent`, `state`, `expression`, `biome`, `clipboard`, `region` as
  * needed by extending the type + matching in `parseMask` / `testMask`.
  */
@@ -100,7 +100,7 @@ function parseComponent(token: string): Mask {
         }
         return { kind: 'noise', percent };
     }
-    // block OR list — at this point any leftover `,` is between block keys
+    // block OR list, at this point any leftover `,` is between block keys
     const blocks = splitTopLevel(token, ',').map((part) => {
         const parsed = parseKey(part.trim());
         if (!parsed) throw new Error(`mask: bad block: ${part}`);
@@ -112,7 +112,7 @@ function parseComponent(token: string): Mask {
 }
 
 // ── autocomplete ───────────────────────────────────────────────────
-// see pattern.ts:suggestPattern — same shape, different token rules.
+// see pattern.ts:suggestPattern, same shape, different token rules.
 // mask boundaries are space (AND) and comma (OR-list within a component);
 // the active token is the OR-list item under the caret. unary `!` is part
 // of the OR-list item; `#existing` is a single keyword. when the item is
@@ -130,7 +130,7 @@ export function suggestMask(
     cursor: number,
     blockIds: ReadonlyArray<{ id: string; name?: string }>,
 ): MaskSuggestResult {
-    // walk back over chars that aren't a space or `,` at depth 0 — that
+    // walk back over chars that aren't a space or `,` at depth 0, that
     // identifies the innermost OR-list item being edited.
     let depth = 0;
     let tokenStart = 0;
@@ -141,7 +141,7 @@ export function suggestMask(
         else if (depth === 0 && (ch === ' ' || ch === ',')) tokenStart = i + 1;
     }
     // is this token the start of a component (preceded by space or BOL)?
-    // OR-list items (preceded by `,`) only accept block ids — no `!`/`#`/`%`.
+    // OR-list items (preceded by `,`) only accept block ids, no `!`/`#`/`%`.
     const prevCh = tokenStart > 0 ? text[tokenStart - 1] : '';
     const isComponentStart = tokenStart === 0 || prevCh === ' ';
 
@@ -152,7 +152,7 @@ export function suggestMask(
     const body = text.slice(bodyStart, cursor).toLowerCase();
 
     const out: MaskSuggestion[] = [];
-    // structural keywords — only at component start (not inside an OR list).
+    // structural keywords, only at component start (not inside an OR list).
     if (isComponentStart) {
         if ('#existing'.startsWith(body)) out.push({ text: '#existing', detail: 'non-air blocks' });
         // `%` noise prefix has no real completion (just a number), but show

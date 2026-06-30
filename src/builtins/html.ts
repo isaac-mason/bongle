@@ -1,12 +1,12 @@
-// HtmlTrait — DOM overlay anchored to a 3D node.
+// HtmlTrait, DOM overlay anchored to a 3D node.
 //
 // The engine creates one <div> per trait instance and positions it each
 // frame from the node's world transform. User scripts mutate `element`
-// imperatively (innerHTML, appendChild, listeners). Persist-only — no
+// imperatively (innerHTML, appendChild, listeners). Persist-only, no
 // replication. Server-side `element` stays null; user scripts must gate
 // on `ctx.env.client`.
 //
-// No `control()` — code-only trait, no editor inspector surface. Set
+// No `control()`, code-only trait, no editor inspector surface. Set
 // fields directly from scripts and bump `_version` if the visuals layer
 // needs to re-apply config.
 //
@@ -20,14 +20,14 @@ export type HtmlMode = 'screen' | 'world' | 'billboard' | 'y-billboard';
 export const HtmlTrait = trait('html', {
     /**
      * Layout mode.
-     * - `screen`   — project node world position to screen-space; div sits
+     * - `screen`, project node world position to screen-space; div sits
      *                at its natural CSS size, optionally scaled by
      *                `distanceFactor`. No 3D rotation, no perspective.
-     * - `world`    — full 3D `matrix3d`. Follows node rotation and
+     * - `world`, full 3D `matrix3d`. Follows node rotation and
      *                perspective-foreshortens.
-     * - `billboard` — 3D `matrix3d` with rotation cancelled; always faces
+     * - `billboard`, 3D `matrix3d` with rotation cancelled; always faces
      *                the camera.
-     * - `y-billboard` — yaws around world-Y to face the camera; pitch level.
+     * - `y-billboard`, yaws around world-Y to face the camera; pitch level.
      */
     mode: 'screen' as HtmlMode,
 

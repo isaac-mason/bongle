@@ -1,4 +1,4 @@
-// ExtrudedSpriteVisuals — per-room HW-instanced renderer for
+// ExtrudedSpriteVisuals, per-room HW-instanced renderer for
 // ExtrudedSpriteTrait instances.
 //
 // Material + silhouette mesh pool live engine-global on
@@ -14,7 +14,7 @@
 //     ExtrudedVertex (vertex usage) + u32 index (index usage). Lazily
 //     baked, refcounted, shared across rooms.
 //   - stable per-slot `instanceData` (mat4x4f worldMatrix +
-//     InstanceMaterial — uvRect / tint / flash / light / glow / unlit / litMin / dither).
+//     InstanceMaterial, uvRect / tint / flash / light / glow / unlit / litMin / dither).
 //     Written every frame for visible slots; never zeroed on destroy
 //     because the next allocation overwrites before use.
 //   - per-frame `slotMap` (u32[]) + `drawIndirectArray`
@@ -29,13 +29,13 @@
 //     from the bake's pixel dims × worldScale + depth*worldScale on Z),
 //     registered with the room culler at alloc. Visibility frustum-culls it
 //     once per frame; the per-frame loop reads `cull.visible && trait.visible`
-//     and skips invisible instances — no per-slot visible flag, visibility =
+//     and skips invisible instances, no per-slot visible flag, visibility =
 //     "got included in some bucket this frame".
 //
 // Atlas swap invalidates every cached silhouette in the engine-global
 // pool. `registry-dispatch.ts:refreshSpriteResources` calls
 // `clearGeometryPool` on the pool and disposes + re-inits each room's
-// ExtrudedSpriteVisuals — re-init's first frame re-acquires lazily.
+// ExtrudedSpriteVisuals, re-init's first frame re-acquires lazily.
 
 import {
     createIndirectBuffer,
@@ -108,17 +108,17 @@ function freeOne(a: SlotAllocator, slot: number): void {
 export type ExtrudedSpriteVisualState = {
     slot: number;
     trait: ExtrudedSpriteMeshTrait;
-    /** this instance's own frustum-cull entry — registered with the shared
+    /** this instance's own frustum-cull entry, registered with the shared
      *  Visibility culler at install, which writes `cull.visible` each frame. */
     cull: Visibility.CullState;
-    /** sprite id observed at install — re-install on swap. */
+    /** sprite id observed at install, re-install on swap. */
     spriteIdAtInstall: string;
     /** entry from `SpriteResources.frames` captured at install. */
     entry: SpriteEntry;
-    /** direct ref to the engine-global pool slot — feeds firstIndex /
+    /** direct ref to the engine-global pool slot, feeds firstIndex /
      *  indexCount / bucketKey per frame without a map lookup. */
     geomSlot: GeometrySlot;
-    /** performance.now() at install — drives flipbook frame selection. */
+    /** performance.now() at install, drives flipbook frame selection. */
     installedAtMs: number;
     /** frame counter of the most recent update pass that touched this
      *  state. cleanup at end of update destroys stale entries. */
@@ -148,7 +148,7 @@ export type ExtrudedSpriteVisuals = {
     /** stack of empty arrays freed by stale-bucket sweeps, reused on next
      *  insert to keep allocation pressure low. */
     _freeBuckets: number[][];
-    /** parallel to `_bucketScratch` — the GeometrySlot for each bucketKey
+    /** parallel to `_bucketScratch`, the GeometrySlot for each bucketKey
      *  this frame. Reused across frames; entries overwritten on insert. */
     _bucketSlotRef: Map<number, GeometrySlot>;
 
@@ -183,7 +183,7 @@ export function init(
 
     const geometry = new Geometry();
 
-    // engine-global pool buffers — HW vertex fetch + HW indexing.
+    // engine-global pool buffers, HW vertex fetch + HW indexing.
     geometry.setBuffer('vertex', extrudedSpriteResources.geometryPool.vertices);
     geometry.setIndex(extrudedSpriteResources.geometryPool.indices);
 
@@ -193,13 +193,13 @@ export function init(
         usage: 'storage',
     });
 
-    // per-frame slotMap — CPU writes a contiguous run per bucket.
+    // per-frame slotMap, CPU writes a contiguous run per bucket.
     const slotMapBuf = new GpuBuffer(d.array(d.u32), {
         data: new Uint32Array(instanceCapacity),
         usage: 'storage',
     });
 
-    // per-frame DrawIndexedIndirect array — CPU writes uniqueSpriteCount
+    // per-frame DrawIndexedIndirect array, CPU writes uniqueSpriteCount
     // entries; geometry.indirectDrawCount caps the renderer loop.
     const drawIndirectArrayData = new Uint32Array(maxUniqueSprites * DRAW_INDEXED_INDIRECT_STRIDE_U32);
     const drawIndirectArrayBuf = createIndirectBuffer(d.array(DrawIndexedIndirect), drawIndirectArrayData);
@@ -344,7 +344,7 @@ export function update(
         const slot = state.slot;
         const slotBase = slot * EXTRUDED_INSTANCE_STRIDE_F32;
 
-        // worldMatrix — scaled per-trait. written every frame (no
+        // worldMatrix, scaled per-trait. written every frame (no
         // versioning); sprites are typically attached to moving
         // entities so the version check would rarely skip work.
         const worldMat = getVisualWorldMatrix(transformTrait);
@@ -359,7 +359,7 @@ export function update(
             sampleVoxelLight(voxels, worldMat[12]!, worldMat[13]!, worldMat[14]!, trait.light);
         }
 
-        // material — flipbook frame selection + per-instance tint/light.
+        // material, flipbook frame selection + per-instance tint/light.
         const frameCount = state.entry.frames.length;
         const frameIdx = frameCount > 1 ? Math.floor(((nowMs - state.installedAtMs) / 1000) * trait.fps) % frameCount : 0;
         const frame = state.entry.frames[frameIdx]!;
@@ -420,7 +420,7 @@ export function update(
         // DrawIndexedIndirect layout (5 u32):
         //   [0] indexCount, [1] instanceCount, [2] firstIndex,
         //   [3] baseVertex,  [4] firstInstance.
-        // baseVertex stays 0 — pool indices are pre-rebased to absolute
+        // baseVertex stays 0, pool indices are pre-rebased to absolute
         // vertex positions at upload time.
         const off = writtenDraws * DRAW_INDEXED_INDIRECT_STRIDE_U32;
         indirectArr[off + 0] = geomSlot.indexCount;
@@ -517,7 +517,7 @@ function writeScaledMatrix(out: Float32Array, base: number, m: Mat4, sx: number,
 function growInstanceBuffers(visuals: ExtrudedSpriteVisuals, newCapacity: number): void {
     const geometry = visuals.geometry;
 
-    // instance data — preserve per-slot bytes (every visible slot is
+    // instance data, preserve per-slot bytes (every visible slot is
     // re-written each frame anyway, but preserving keeps invisible
     // slots intact across resizes).
     {
@@ -530,7 +530,7 @@ function growInstanceBuffers(visuals: ExtrudedSpriteVisuals, newCapacity: number
         visuals.instanceDataBuf = newBuf;
     }
 
-    // slotMap — rebuilt every frame, no need to preserve.
+    // slotMap, rebuilt every frame, no need to preserve.
     {
         const newArr = new Uint32Array(newCapacity);
         const newBuf = new GpuBuffer(d.array(d.u32), { data: newArr, usage: 'storage' });

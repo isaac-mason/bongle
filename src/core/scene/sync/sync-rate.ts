@@ -1,7 +1,7 @@
 // ── adaptive sync rate ───────────────────────────────────────────────
 //
 // all server→client send rate logic lives here. discovery.ts calls in
-// to gate which syncs get sent each tick. no abstractions — just the
+// to gate which syncs get sent each tick. no abstractions, just the
 // logic needed.
 //
 // diff detection still runs every tick for all nodes (cheap byte compare).
@@ -37,7 +37,7 @@ export const syncMetric = {
 };
 
 /**
- * `ThresholdRate` constructors for the common shapes — bake the metric so it can't
+ * `ThresholdRate` constructors for the common shapes, bake the metric so it can't
  * be mismatched with the value, and read as English at the call site:
  * `rate: syncRate.distance(0.05)`. for an exotic metric, write the raw
  * `{ threshold, metric }` form instead.

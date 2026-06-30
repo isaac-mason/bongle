@@ -1,4 +1,4 @@
-// api/scenes.ts — user-facing scene resource api.
+// api/scenes.ts, user-facing scene resource api.
 //
 // `scene('penguin')` declares a scene resource at module scope. returns a
 // stable `SceneHandle` whose `node`/`voxels`/`version` fields are mutated
@@ -28,10 +28,10 @@ export type { SceneHandle, SceneOptions };
  * declare a scene resource at module scope. returns a stable handle whose
  * fields the engine populates once the scene is loaded (or arrives from the
  * server). reference identity is permanent for the lifetime of this module
- * load — closures over `handle.node` survive any number of hot reloads.
+ * load, closures over `handle.node` survive any number of hot reloads.
  *
  * idempotent within a single module load: a second `scene('id', ...)` call
- * returns the same handle (options on later calls are ignored — declare the
+ * returns the same handle (options on later calls are ignored, declare the
  * options on the first call).
  *
  * @example
@@ -56,14 +56,14 @@ export function scene(id: string, options?: SceneOptions): SceneHandle {
     // identity-stable: the handle is referenced by user code across hot
     // reloads, so we keep the same object and let the engine mutate its
     // fields in place. only first call decides `options` for client/server
-    // (those affect transport routing — flipping them mid-session would
+    // (those affect transport routing, flipping them mid-session would
     // require a reload anyway). `name` is patched in place so authors
     // can rename without restarting.
     const existing = get(registry.scenes, id);
     if (existing) {
         const nextName = options?.name ?? id;
         if (existing.name !== nextName) existing.name = nextName;
-        // claim ownership — promotes from PLACEHOLDER_OWNER (barrel-first
+        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
         // boot, where `_registerScenePayload` pre-populated the entry) to
         // this user module, stamps the id into the registry's per-module
         // pending set (so `endModuleRun` doesn't fire a spurious 'removed'
@@ -93,7 +93,7 @@ export function scene(id: string, options?: SceneOptions): SceneHandle {
  *     If the user later declares the id via `scene()`, `claimOwnership`
  *     promotes the placeholder to the user module. Edit mode's filesystem
  *     walk surfaces every `.scene.json` (including blueprints), so many
- *     ids never get a user-side `scene()` and stay as placeholders — fine.
+ *     ids never get a user-side `scene()` and stay as placeholders, fine.
  *
  * Exposed via `bongle/internal`.
  */

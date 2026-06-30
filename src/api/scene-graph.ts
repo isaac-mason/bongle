@@ -18,7 +18,7 @@ export {
 export { traverse } from '../core/scene/traverse';
 
 /**
- * clone a node and all its descendants. the returned subtree is **detached** —
+ * clone a node and all its descendants. the returned subtree is **detached**,
  * attach with `addChild(parent, clone)` to wake it up.
  */
 export function cloneNode(node: Node): Node {
@@ -26,7 +26,7 @@ export function cloneNode(node: Node): Node {
 }
 
 /**
- * Clone a node intended for the **visual scene** — same as `cloneNode`, plus
+ * Clone a node intended for the **visual scene**, same as `cloneNode`, plus
  * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
  * installed on the clone root. Use this for every cloneNode site that goes
  * into the visible scene; reserve `cloneNode` for non-visual subtree
@@ -53,7 +53,7 @@ export function cloneModel(node: Node): Node {
 }
 
 /**
- * create a new **detached** node — no parent, no scripts fired, not in queries.
+ * create a new **detached** node, no parent, no scripts fired, not in queries.
  * attach with `addChild(parent, node)` to make it live; an id is allocated at
  * attach time (negative on the client, positive on the server).
  *

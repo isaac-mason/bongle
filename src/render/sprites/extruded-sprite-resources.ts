@@ -1,8 +1,8 @@
-// ExtrudedSpriteResources — engine-global extruded-sprite material +
+// ExtrudedSpriteResources, engine-global extruded-sprite material +
 // shared geometry pool.
 //
 // One instance per `EngineClient`, shared across rooms. The atlas Texture
-// is owned by `SpriteResources` — this struct holds a TextureNode bound at
+// is owned by `SpriteResources`, this struct holds a TextureNode bound at
 // build time and exposes `rebindAtlas()` so the registry-dispatch atlas
 // swap can retarget it without rebuilding the compiled pipeline.
 //
@@ -77,7 +77,7 @@ export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
     uvRect: d.vec4f,
     // tint: rgb is the recolour target, a the intensity (lightness-preserving).
     tint: d.vec4f,
-    // flash: transient overlay — rgb is the colour, a the strength (lerp).
+    // flash: transient overlay, rgb is the colour, a the strength (lerp).
     flash: d.vec4f,
     light: d.vec4f,
     glow: d.f32,
@@ -88,7 +88,7 @@ export const InstanceMaterial = struct('ExtrudedSpriteInstanceMaterial', {
 });
 
 // Per-slot stable instance record. Merges transform + material into one
-// binding — mirrors ModelInstance so downstream visuals shares its update
+// binding, mirrors ModelInstance so downstream visuals shares its update
 // shape.
 //
 // Layout: mat4x4f (64B, align 16) then InstanceMaterial (64B, align 16)
@@ -104,7 +104,7 @@ export const ExtrudedInstance = struct('ExtrudedInstance', {
 // v = v
 //
 // Std430 stride rounds the struct to 32B (struct align 16). The trailing
-// 12B are padding — sprites have no per-vertex normals to fill them with;
+// 12B are padding, sprites have no per-vertex normals to fill them with;
 // reserved for future use (e.g. face normals for ndotl shading).
 export const ExtrudedVertex = struct('ExtrudedVertex', {
     posU: d.vec4f,
@@ -261,8 +261,8 @@ export function acquireGeometry(res: ExtrudedSpriteResources, spriteId: string):
     const iRange = allocRange(pool.indexAllocator, indexCount);
     if (iRange.offset + iRange.count > getIndexCapacity(pool)) growIndex(pool, pool.indexAllocator.capacity);
 
-    // interleave into the single vertex pool: ExtrudedVertex {posU, v}
-    // — posU.xyz = position, posU.w = u, then v + 12B padding.
+    // interleave into the single vertex pool: ExtrudedVertex {posU, v},
+    // posU.xyz = position, posU.w = u, then v + 12B padding.
     const vertArr = pool.vertices.array as Float32Array;
     const idxArr = pool.indices.array as Uint32Array;
 
@@ -278,10 +278,10 @@ export function acquireGeometry(res: ExtrudedSpriteResources, spriteId: string):
         vertArr[vDstBase + d8 + 2] = posSrc[s3 + 2]!;
         vertArr[vDstBase + d8 + 3] = uvSrc[s2 + 0]!;
         vertArr[vDstBase + d8 + 4] = uvSrc[s2 + 1]!;
-        // [d8+5..d8+7] are the trailing 12B padding — left zero.
+        // [d8+5..d8+7] are the trailing 12B padding, left zero.
     }
 
-    // rebase indices to absolute vertex positions in the pool — VS
+    // rebase indices to absolute vertex positions in the pool, VS
     // consumes the index buffer via HW indexing with no baseVertex offset.
     const base = vRange.offset;
     for (let i = 0; i < indexCount; i++) {
@@ -323,7 +323,7 @@ export function releaseGeometry(res: ExtrudedSpriteResources, spriteId: string):
  *  preserved (rooms hold setBuffer/setIndex bindings against these), so
  *  the next acquire writes fresh data into the same buffers.
  *
- *  Called from registry-dispatch on atlas swap — every cached silhouette
+ *  Called from registry-dispatch on atlas swap, every cached silhouette
  *  is stale (bakes read live atlas pixels). Per-room visuals must drop
  *  their alive states (which hold stale GeometrySlot refs) for re-acquire
  *  to land in this freshly-cleared pool. */
@@ -361,7 +361,7 @@ function growIndex(pool: GeometryPool, newCapacity: number): void {
 // ── public type ─────────────────────────────────────────────────────
 
 export type ExtrudedSpriteResources = {
-    /** engine-global extruded-sprite material — HW instanced. Per-room
+    /** engine-global extruded-sprite material, HW instanced. Per-room
      *  buffers (slotMap, instanceData, env) bind by name through each
      *  room's geometry; the pool's vertex buffer binds as `vertex`, the
      *  index pool as the geometry index. */
@@ -369,10 +369,10 @@ export type ExtrudedSpriteResources = {
     /** atlas TextureNode owned by `material`. Retargeted by
      *  `rebindAtlas()` when SpriteResources swaps its atlas. */
     atlasTexNode: TextureNode;
-    /** engine-global silhouette mesh pool — one bake per unique spriteId
+    /** engine-global silhouette mesh pool, one bake per unique spriteId
      *  shared across rooms. */
     geometryPool: GeometryPool;
-    /** ref to the engine-global SpriteResources — bakes read its atlas
+    /** ref to the engine-global SpriteResources, bakes read its atlas
      *  pixels + frame UV LUT. */
     spriteResources: SpriteResources;
 };
@@ -400,7 +400,7 @@ export function dispose(res: ExtrudedSpriteResources): void {
 // ── internals ───────────────────────────────────────────────────────
 
 function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atlasTexNode: TextureNode } {
-    // HW vertex fetch from the interleaved pool — posU.xyz = pos,
+    // HW vertex fetch from the interleaved pool, posU.xyz = pos,
     // posU.w = u; v = v. Stride 32B (struct rounds up; trailing 12B padding).
     const posU = attribute('vertex', d.vec4f, { stride: 32, offset: 0 });
     const vAttr = attribute('vertex', d.f32, { stride: 32, offset: 16 });
@@ -448,7 +448,7 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
     const atlasTexNode = texture(atlas);
     const sampled = atlasTexNode.sample(vUv).toVar('esSampled');
 
-    // lighting — no ndotl (bake doesn't emit per-vertex normals).
+    // lighting, no ndotl (bake doesn't emit per-vertex normals).
     const cfg = storage('env', EnvConfig, 'read').fields();
     const TAU = f32(Math.PI * 2);
     const sunAngle = mul(sub(cfg.time, f32(0.25)), TAU).toVar('esSunAngle');
@@ -478,9 +478,9 @@ function createExtrudedSpriteMaterial(atlas: Texture): { material: Material; atl
         name: 'extruded-sprite-batched',
         vertex: clipPos,
         fragment,
-        // extruded meshes are 3D — back-face cull is correct, the bake
+        // extruded meshes are 3D, back-face cull is correct, the bake
         // skips internal seams, and alpha cutout (discard < 0.5) keeps
-        // the mesh in the opaque pass — no sorting, correct depth writes.
+        // the mesh in the opaque pass, no sorting, correct depth writes.
         cullMode: 'back',
         depthTest: true,
         depthWrite: true,

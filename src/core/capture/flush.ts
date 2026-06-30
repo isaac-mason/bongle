@@ -1,5 +1,5 @@
 /**
- * core/capture/flush.ts — debounced cross-module flush request.
+ * core/capture/flush.ts, debounced cross-module flush request.
  *
  * The bongle() plugin's transform injects `requestFlush()` into every
  * user module's `hot.accept` callback. A single HMR cascade can fire dozens
@@ -7,13 +7,13 @@
  * them onto one microtask, so every registered handler runs at most once
  * per cycle.
  *
- * Multiple handlers can coexist — every registration site adds its own
+ * Multiple handlers can coexist, every registration site adds its own
  * handler, and a single `requestFlush()` fans out to all of them. In the
  * server env that means BOTH the engine's `applyRegistryChanges`
  * (registered by the boot template) AND the asset pipeline pass
  * (registered by the bongle:pipeline plugin) fire on each cascade. On the
  * client env only the engine handler is registered. The pipeline env has
- * no separate boot — it piggybacks on server.
+ * no separate boot, it piggybacks on server.
  *
  * `registerFlushHandler` returns an unregister fn. Boot entries that
  * might re-evaluate under HMR should use `import.meta.hot.dispose(unregister)`

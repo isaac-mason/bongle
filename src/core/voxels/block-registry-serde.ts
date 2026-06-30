@@ -3,7 +3,7 @@
 // Encode the subset of `BlockRegistry` the mesher reads into one
 // `ArrayBuffer` for transferable `postMessage`. Decode constructs
 // typed-array views over the same buffer (no copies) and returns a
-// partial `BlockRegistry` — only mesher-read fields are populated;
+// partial `BlockRegistry`, only mesher-read fields are populated;
 // physics/handle/Map fields stay undefined and the worker never
 // touches them.
 //
@@ -24,7 +24,7 @@ const H_VERSION = 1;
 const H_TOTAL_STATES = 2;
 const H_MESH_COUNT = 3;
 const H_TOTAL_QUADS = 4;
-const H_MESH_QUAD_COUNT = 5; // Uint16Array[meshCount + 1] — quads per mesh slot
+const H_MESH_QUAD_COUNT = 5; // Uint16Array[meshCount + 1], quads per mesh slot
 // per-state byte offsets
 const H_CULL = 6;
 const H_BLOCK_TYPE_ID = 7;

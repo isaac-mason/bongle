@@ -79,7 +79,7 @@ export function LeftToolbar() {
     return (
         <div className="w-12 flex-shrink-0 flex flex-col items-center pt-2 pb-2 bg-neutral-100 border-r border-neutral-200">
             {/* tools, grouped by category. each group has a small header like
-                "scene v" — the category name plus its hotkey. per-tool slot
+                "scene v", the category name plus its hotkey. per-tool slot
                 digits appear in the bottom-right corner of each icon. */}
             <div className="flex flex-col items-stretch gap-1">
                 {TOOL_CATEGORIES.map((category: ToolCategory, ci) => {

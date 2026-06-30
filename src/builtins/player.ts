@@ -2,8 +2,8 @@ import { pack } from '../core/scene/pack';
 import { sync, type TraitType, trait } from '../core/scene/traits';
 
 /**
- * player trait. marks a node as the in-scene body of a specific Player —
- * one (client, room, mode) view. persist: false — player nodes are
+ * player trait. marks a node as the in-scene body of a specific Player,
+ * one (client, room, mode) view. persist: false, player nodes are
  * ephemeral, created at Player join time.
  *
  * playerId/client/userId/username are server-set runtime state. they're

@@ -1,11 +1,11 @@
 /**
- * global editor store — fields that are NOT tied to a specific edit room.
+ * global editor store, fields that are NOT tied to a specific edit room.
  * per-player-session state (active tool, selection, transform options,
  * inventory session state, undo mirror, etc.) lives on per-player stores in
  * `edit-room-store.ts`, registered here under `playerEditStores`.
  *
  * Maps that vary across joined players (edit state, lens view, edit store)
- * are keyed by `PlayerId`, not `roomId` — a single roomId can have both a
+ * are keyed by `PlayerId`, not `roomId`, a single roomId can have both a
  * play-mode and an edit-mode ClientRoom joined simultaneously, each with
  * its own independent editor state.
  *
@@ -55,7 +55,7 @@ export type EditorStore = {
     /* ── room registries ── */
     roomList: RoomInfo[];
     joinedPlayers: JoinedPlayer[];
-    /** every ClientRoom the client holds — kept in sync with engine state.
+    /** every ClientRoom the client holds, kept in sync with engine state.
      *  used by the debug panel to show per-room metrics. */
     allRooms: ClientRoom[];
     /** addressable RoomViews keyed by RoomViewId. one entry per ClientRoom's
@@ -98,11 +98,11 @@ export type EditorStore = {
     blockIconPx: number;
     blockIconCols: number;
     blockIconRows: number;
-    // (prefab + scene icons are per-file PNGs loaded by direct URL — no atlas)
+    // (prefab + scene icons are per-file PNGs loaded by direct URL, no atlas)
 
     /* ── per-player scene-view (tabs) ── */
     // which perspective the user is viewing the scene through. only present
-    // while a play-mode player has a lens — entries are seeded by
+    // while a play-mode player has a lens, entries are seeded by
     // enterLocalEditorView (writes 'edit') and cleared by exitLocalEditorView.
     // Tabs in the toolbar subscribe here; click handlers in client/editor.ts
     // call `setRoomView` after running the imperative POV swap.
@@ -220,7 +220,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
         });
     },
 
-    /* ── room-management actions — bound by registerClient (engine-client.ts). ── */
+    /* ── room-management actions, bound by registerClient (engine-client.ts). ── */
     switchRoom: () => {},
     joinRoom: () => {},
     leaveRoom: () => {},

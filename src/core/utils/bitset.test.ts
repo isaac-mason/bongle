@@ -15,7 +15,7 @@ describe('bitset', () => {
 
     // regression: words are stored unsigned (`>>> 0`) but JS `&` yields a signed
     // Int32, so a mask with bit 31 set came back negative and never equalled the
-    // unsigned stored mask — any query requiring a trait at slot 31/63/… silently
+    // unsigned stored mask, any query requiring a trait at slot 31/63/… silently
     // never matched.
     it('containsAll matches a mask whose high bit (31) is set', () => {
         const node = bitset.init();

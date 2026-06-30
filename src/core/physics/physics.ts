@@ -63,10 +63,10 @@ export {
 // ── physics struct ───────────────────────────────────────────────────
 //
 // `Physics` is a thin coordinator over self-contained sub-worlds:
-//   - `rigid` — crashcat-backed rigid bodies + voxel terrain body. trait
+//   - `rigid`, crashcat-backed rigid bodies + voxel terrain body. trait
 //     sync (RigidBodyTrait → World), listener, shape building, script hooks
 //     all live in `rigid-physics.ts`.
-//   - `aabb` — analytical aabb sweep + items / particles. trait sync
+//   - `aabb`, analytical aabb sweep + items / particles. trait sync
 //     (AabbBodyTrait → World) lives in `aabb-physics.ts` behind
 //     `bindNodeSync` (kept off the cycle path: trait passed in by the
 //     coordinator rather than imported as a value by the subsystem).
@@ -77,14 +77,14 @@ export {
 // (Interpolate, Contacts) that unifies across subsystems.
 
 export type Physics = {
-    /** crashcat rigid body sub-world — full broadphase + manifolds + sleep. */
+    /** crashcat rigid body sub-world, full broadphase + manifolds + sleep. */
     rigid: RigidPhysics.World;
-    /** AABB physics sub-world — items / particles / throwables. analytical sweep. */
+    /** AABB physics sub-world, items / particles / throwables. analytical sweep. */
     aabb: AabbPhysics.World;
 
     // ── contact output ───────────────────────────────────────────────
 
-    /** global contact stream — pairs un-normalized (A→B), with added/persisted/removed lifecycle. */
+    /** global contact stream, pairs un-normalized (A→B), with added/persisted/removed lifecycle. */
     contacts: PhysicsContacts;
     /** pool of rigid-body-side observer Contact instances, drawn by fan-out into ContactsTrait. */
     rigidBodyContactPool: RigidBodyContactPool;
@@ -94,7 +94,7 @@ export type Physics = {
     voxelContactPool: VoxelContactPool;
     /** pool of ContactPair instances backing `contacts.*` lists. */
     contactPairPool: ContactPairPool;
-    /** cached query for fan-out — built once at init so we don't pay hash+lookup each tick. */
+    /** cached query for fan-out, built once at init so we don't pay hash+lookup each tick. */
     contactsQuery: ReturnType<typeof query<[typeof ContactsTrait]>>;
 
     /** sink passed into `AabbPhysics.tick`. drains pairs into `contacts`. */
@@ -182,7 +182,7 @@ export function postStep(physics: Physics, _nodes: Nodes, identity: PlayerId | n
 }
 
 /**
- * Release per-frame physics scratch state — currently the voxel hit-info
+ * Release per-frame physics scratch state, currently the voxel hit-info
  * pool. MUST be called after all subShapeId consumers for the frame have
  * run (contact listeners, getSurfaceNormal, getSupportingFace). Today
  * that means at the end of the engine tick on the server, and at the end
@@ -197,7 +197,7 @@ export function flush(_physics: Physics): void {
 // any node that holds a body in *either* subsystem gets enrolled in
 // interpolation (via setInterpolation, which lives on TransformTrait) and
 // gets a ContactsTrait. unified here (not per-subsystem) so the policy and
-// the diff live in one place — subsystems stay independent of these
+// the diff live in one place, subsystems stay independent of these
 // import paths.
 
 function syncCompanionTraits(physics: Physics, nodes: Nodes): void {

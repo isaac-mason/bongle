@@ -1,4 +1,4 @@
-// node-menu.ts — shared menu entry config for node operations.
+// node-menu.ts, shared menu entry config for node operations.
 //
 // rendered in two places: the hierarchy panel's Radix ContextMenu and the
 // viewport's controlled DropdownMenu (the viewport can't use ContextMenu
@@ -7,7 +7,7 @@
 // primitive, so the visible items + ordering stay in lockstep.
 //
 // surface-specific items (rename, create-child in hierarchy; voxel ops in the
-// viewport) are not represented here — surfaces compose them around the
+// viewport) are not represented here, surfaces compose them around the
 // shared entries inline.
 
 import * as Icons from 'lucide-react';
@@ -37,7 +37,7 @@ export type NodeMenuActions = {
 export type NodeMenuOptions = {
     /** the right-clicked node when the menu targets one specific node. null for multi-select. */
     node: Node | null;
-    /** number of nodes the menu acts on — drives label pluralization. */
+    /** number of nodes the menu acts on, drives label pluralization. */
     multiCount: number;
     actions: NodeMenuActions;
 };

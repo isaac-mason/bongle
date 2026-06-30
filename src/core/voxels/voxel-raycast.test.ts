@@ -98,7 +98,7 @@ describe('raycastVoxels', () => {
             setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
 
             const out = createVoxelRaycastResult();
-            // ray going +x but block is at (5,5,5) and ray is at y=0 — misses
+            // ray going +x but block is at (5,5,5) and ray is at y=0, misses
             raycastVoxels(out, voxels, registry, 0, 0.5, 0.5, 1, 0, 0, 20, 0);
 
             expect(out.hit).toBe(false);
@@ -140,7 +140,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
 
             // chunk at (0,0,0) is empty, chunk at (1,0,0) has a block
-            createChunk(0, 0, 0); // empty chunk (not even added — tests missing chunk skip)
+            createChunk(0, 0, 0); // empty chunk (not even added, tests missing chunk skip)
             const chunk1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', chunk1);
             setChunkBlock(chunk1, 2, 5, 5, 'stone', registry); // world x=18
@@ -185,7 +185,7 @@ describe('raycastVoxels', () => {
             setChunkBlock(chunk0, 15, 5, 5, 'stone', registry);
 
             const out = createVoxelRaycastResult();
-            // ray from (20, 5.5, 5.5) going -x — passes through empty chunk
+            // ray from (20, 5.5, 5.5) going -x, passes through empty chunk
             // (1,0,0), then hits the +x face of voxel (15,5,5)
             raycastVoxels(out, voxels, registry, 20, 5.5, 5.5, -1, 0, 0, 30, 0);
 

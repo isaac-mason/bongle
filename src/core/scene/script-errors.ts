@@ -7,7 +7,7 @@
  *     `trait '${id}'.onChange[${field}] @${nodeId}`
  *
  * scope: runtime callbacks only. module-load throws and top-level async
- * errors (timers/microtasks scheduled at module scope) are out of reach —
+ * errors (timers/microtasks scheduled at module scope) are out of reach,
  * the host app owns import().
  */
 export function logScriptError(where: string, err: unknown): void {

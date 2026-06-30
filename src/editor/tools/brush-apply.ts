@@ -3,8 +3,8 @@
 // both tools rasterise the configured shape with `buildShape`, then walk
 // the resulting Selection cell-by-cell: mask-filter, pattern-sample, diff
 // against the current voxel, and push forward/reverse ops. the only
-// divergence between the tools is *when* those ops fly — brush batches
-// on release, paint streams live during the drag — so the per-cell logic
+// divergence between the tools is *when* those ops fly, brush batches
+// on release, paint streams live during the drag, so the per-cell logic
 // lives here as one function.
 
 import * as Selection from '../../core/scene/selection';

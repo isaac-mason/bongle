@@ -20,7 +20,7 @@ import { send } from './net';
  *  snapshot itself lives on each trait instance's `_sync.bytes/values`; this set
  *  exists only so we can reset a node's snapshot when ownership is lost, so a
  *  future re-own re-uploads from scratch (first-seen) rather than diffing against
- *  stale bytes. (name kept for caller stability — it tracks nodes, not state.) */
+ *  stale bytes. (name kept for caller stability, it tracks nodes, not state.) */
 export function createSyncSnapshots(): Set<Node> {
     return new Set();
 }
@@ -28,7 +28,7 @@ export function createSyncSnapshots(): Set<Node> {
 /**
  * send sync updates for owner-authority slices that changed since last tick.
  * call once per tick (not per frame) to match the server's tick rate. the
- * per-slice byte snapshot lives on `instance._sync` — same store the server
+ * per-slice byte snapshot lives on `instance._sync`, same store the server
  * diff uses.
  */
 export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, playerId: PlayerId, tracked: Set<Node>): void {

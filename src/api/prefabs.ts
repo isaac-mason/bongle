@@ -1,5 +1,5 @@
 /**
- * api/prefabs.ts — user-facing prefab API.
+ * api/prefabs.ts, user-facing prefab API.
  *
  * usage:
  *   const PenguinScene = scene('penguin');
@@ -13,7 +13,7 @@
  *       },
  *   });
  *
- *   // args is { schema, default } — default is required when args is set.
+ *   // args is { schema, default }, default is required when args is set.
  *   // it's used: (1) when callers omit args, (2) for inspector pre-fill,
  *   // (3) for the asset-pipeline prefab preview tiles.
  *   const Mage = prefab('mage', {
@@ -50,21 +50,21 @@ export type { PrefabApplyContext };
 
 /**
  * what a prefab produces when instantiated.
- *   - 'voxels'   — voxel content only (`fn` populates the empty `ctx.voxels` canvas)
- *   - 'nodes'    — node children only (`fn` attaches children under `ctx.root`)
- *   - 'composite'— both voxels and nodes
+ *   - 'voxels', voxel content only (`fn` populates the empty `ctx.voxels` canvas)
+ *   - 'nodes', node children only (`fn` attaches children under `ctx.root`)
+ *   - 'composite', both voxels and nodes
  */
 export type PrefabType = 'voxels' | 'nodes' | 'composite';
 
 export type PrefabDef<Args = unknown> = {
     id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     name: string;
     type: PrefabType;
     deps: ReadonlyArray<DepHandle>;
     argsSchema: Schema;
-    /** default args value — used when callers omit args. `{}` when args isn't set. */
+    /** default args value, used when callers omit args. `{}` when args isn't set. */
     defaultArgs: Args;
     node?: { realm?: Realm };
     apply: (ctx: PrefabApplyContext, args: Args) => void;
@@ -72,14 +72,14 @@ export type PrefabDef<Args = unknown> = {
 
 export type PrefabHandle<Args = unknown> = {
     readonly id: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     readonly name: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'prefabs'; id: string };
     readonly type: PrefabType;
     readonly argsSchema: Schema;
-    /** default args value — read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
+    /** default args value, read by the editor for pre-fill, by the asset-pipeline for preview, and by `createPrefab` when caller omits args. */
     readonly defaultArgs: Args;
     readonly node: { realm?: Realm } | undefined;
     readonly __args: Args;
@@ -89,23 +89,23 @@ export type PrefabOptions<T extends PrefabType, S extends Schema> = {
     /** human-readable display name for editor UIs (prefab picker,
      *  inventory). falls back to the string id when omitted. */
     name?: string;
-    /** what this prefab produces — voxels, nodes, or both. required. */
+    /** what this prefab produces, voxels, nodes, or both. required. */
     type: T;
     /**
      * producer handles whose changes trigger re-instantiation in edit mode.
-     * accepts anything with a DepGraph `dependency` stamp — scene, model,
+     * accepts anything with a DepGraph `dependency` stamp, scene, model,
      * block, trait, command, prefab handles, etc. usually injected by the
      * AST rewriter from identifiers the body closes over; list manually
      * for procedural cases the rewriter can't see.
      */
     deps?: ReadonlyArray<DepHandle>;
     /**
-     * args schema + default value. `default` is required when present —
+     * args schema + default value. `default` is required when present,
      * it's used for caller-omitted args, inspector pre-fill, and preview rendering.
      */
     args?: { schema: S; default: SchemaType<S> };
     fn?: (ctx: PrefabApplyContext<T>, args: SchemaType<S>) => void;
-    /** authored anchor defaults — applied to the node createPrefab returns when the caller doesn't override. */
+    /** authored anchor defaults, applied to the node createPrefab returns when the caller doesn't override. */
     node?: { realm?: Realm };
 };
 
@@ -174,7 +174,7 @@ export function prefab<T extends PrefabType, S extends Schema>(
 /* ── createPrefab ── */
 
 /**
- * create a **detached** prefab node — sets `node.prefab` with the given config
+ * create a **detached** prefab node, sets `node.prefab` with the given config
  * but does NOT attach it to the scene graph. attach explicitly with
  * `addChild(parent, node)`; instantiation happens on the next prefab tick.
  *

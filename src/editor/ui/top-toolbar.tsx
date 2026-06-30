@@ -144,7 +144,7 @@ type TabId = string;
 /**
  * One renderable tab. `view` is null for ghost (server room known, no
  * ClientRoom joined yet); otherwise it's the addressable RoomView for
- * either the player POV or — when `view.room.editor?.id === view.id` —
+ * either the player POV or, when `view.room.editor?.id === view.id`,
  * the editor POV layered on a play room.
  *
  * `info` is always populated. For ghosts it's the only source of metadata;
@@ -155,7 +155,7 @@ type Tab = {
     view: RoomView | null;
     info: RoomInfo;
     /** true when another tab in the same group is bound to the same underlying
-     *  ClientRoom — e.g. play POV + editor lens, or sibling edit ClientRoom on
+     *  ClientRoom, e.g. play POV + editor lens, or sibling edit ClientRoom on
      *  a play session. drives the pill collapse; shared namespace alone (all
      *  solo edit rooms share 'editor') does not count. */
     hasRoomSibling: boolean;
@@ -232,7 +232,7 @@ function RoomTab({
                 switchRoom?.(view.room.roomId, 'play');
             }
             // if lens was up, swap POV back to player and hide editor (but
-            // keep the lens alive — full teardown lives on the lens pill's X).
+            // keep the lens alive, full teardown lives on the lens pill's X).
             if (playerToView.get(view.room.playerId) === 'edit') {
                 setRoomView(view.room, 'play');
             }
@@ -247,7 +247,7 @@ function RoomTab({
     const onClose = (e: React.MouseEvent): void => {
         e.stopPropagation();
         if (!view) {
-            // ghost — only server-side stop applies.
+            // ghost, only server-side stop applies.
             stopRoom?.(info.id);
             return;
         }
@@ -490,7 +490,7 @@ export function TopToolbar() {
             </div>
 
             {/* mode + play/stop. editor UI visibility lives on the inspect-client
-                sub-tab now — no global toggle here. */}
+                sub-tab now, no global toggle here. */}
             <div className="flex items-center gap-2">
                 <ModePill />
                 <PlaySection />

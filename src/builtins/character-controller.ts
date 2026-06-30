@@ -1,10 +1,10 @@
 /**
- * character controller — trait, simulation, and script.
+ * character controller, trait, simulation, and script.
  *
  * the simulation is a custom swept-AABB slide:
  *   - voxels: analytical sweep against the chunk grid (no GJK).
  *   - bodies: crashcat `castShape` against any non-voxel body shape
- *     (sphere, capsule, hull, mesh, rotated box — all flow through it).
+ *     (sphere, capsule, hull, mesh, rotated box, all flow through it).
  *
  * the controller still owns a kinematic inner body in the world so other
  * bodies + queries can collide with the character; we exclude that body
@@ -15,9 +15,9 @@
  * NPC system would write them from AI. either way the sim is identical.
  *
  * trait fields are grouped into three buckets:
- *   - `input`  — owner-authoritative knobs scripts write (look, move, jump…)
- *   - `config` — static tunables scripts read+write (walkSpeed, gravity…)
- *   - `state`  — per-tick runtime scripts read (velocity, grounded, bobPhase,
+ *   - `input`, owner-authoritative knobs scripts write (look, move, jump…)
+ *   - `config`, static tunables scripts read+write (walkSpeed, gravity…)
+ *   - `state`, per-tick runtime scripts read (velocity, grounded, bobPhase,
  *                isClimbing, …) for animations, sfx, vfx, debug, etc.
  */
 
@@ -48,12 +48,12 @@ import { TransformTrait } from './transform';
 
 // ── character shape ──────────────────────────────────────────────────
 //
-// box character — defaults match Minecraft (standing 0.6 x 1.8 x 0.6,
+// box character, defaults match Minecraft (standing 0.6 x 1.8 x 0.6,
 // crouching 0.6 x 1.3 x 0.6). feet at y=0. vcc.create owns the inner
 // kinematic body + foot-pivot transform internally, so the trait just
 // hands it `position` (= feet) and `linearVelocity`. crouch swaps the
-// inner shape via `vcc.resize` — binary, the instant the input flips (and,
-// on release, once there's headroom to stand) — so the collider is a pure
+// inner shape via `vcc.resize`, binary, the instant the input flips (and,
+// on release, once there's headroom to stand), so the collider is a pure
 // sim decision off the synced input, never gated on the visual ease. the
 // visual `crouchAmount` (presentation only) eases to catch up.
 
@@ -66,7 +66,7 @@ const _identityQuat: Quat = [0, 0, 0, 1];
 const _bodyYawAxis: Vec3 = [0, 1, 0];
 const _bodyYawQuat = quat.create();
 
-// reusable listener — closure vars below are set from the trait before
+// reusable listener, closure vars below are set from the trait before
 // vcc.move() runs each tick so the listener sees the right values.
 let _vccListenerIsIntentional = false;
 let _vccListenerTerrainBodyId = -1;
@@ -80,7 +80,7 @@ let _vccListenerRigid: RigidWorld | null = null;
 // reflecting near-zero velocities (settled rest contacts).
 const BOUNCE_MIN_DOWN_SPEED = 0.5;
 
-// max body-vs-head yaw difference (rad). voxelibre uses 40°; same here —
+// max body-vs-head yaw difference (rad). voxelibre uses 40°; same here,
 // past this the body snaps to keep the neck within a plausible twist.
 const BODY_YAW_LIMIT_RAD = degreesToRadians(40);
 
@@ -91,7 +91,7 @@ const BODY_VEL_YAW_MIN_SPEED = 0.5;
 
 // exponential-approach rate (1/s) for body yaw chasing its target.
 // each frame, body yaw moves a fraction `1 - exp(-rate · dt)` of the
-// remaining gap — critically-damped feel with no velocity state.
+// remaining gap, critically-damped feel with no velocity state.
 // half-life ≈ ln(2) / rate, so 12/s ≈ 58 ms half-life: turn starts fast
 // and eases as it closes, with no constant-rate kink at start/finish.
 const BODY_YAW_RESPONSE_RATE = 12;
@@ -106,7 +106,7 @@ const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 
 // surface every body the VCC touches into the contact stream. the VCC slides
 // the character off these bodies and teleport-follows its kinematic inner body,
-// so the solver never forms the manifold — replaying the contact is the only way
+// so the solver never forms the manifold, replaying the contact is the only way
 // a fast body (an arrow) that passed "through" the character produces a contact
 // event on both bodies' ContactsTrait. added + persisted both report (a body can
 // linger a frame before the reactor that consumes the hit removes it).
@@ -190,7 +190,7 @@ const _vccListener: vcc.VccListener = {
 type CharacterControllerInput = {
     /** look direction as [r, theta, phi] spherical. theta = yaw around +Y
      *  (drives wish direction); phi = polar from +Y, π/2 = horizon (drives
-     *  camera pitch + head/neck visuals). r is unused — Spherical is reused
+     *  camera pitch + head/neck visuals). r is unused, Spherical is reused
      *  so this can pass through mathcat's spherical helpers unchanged. */
     look: Spherical;
     /** [strafe, forward] in [-1, 1]. */
@@ -203,7 +203,7 @@ type CharacterControllerInput = {
     crouch: boolean;
     /** when true, sim is bypassed and the writer must move the transform. */
     noclip: boolean;
-    /** userland override — when true, the sim treats the character as
+    /** userland override, when true, the sim treats the character as
      *  climbing regardless of voxel sampling. lets scripts force climb
      *  mode on contact with custom geometry (e.g. rope meshes). */
     climbOverride: boolean;
@@ -237,7 +237,7 @@ type CharacterControllerConfig = {
      *  drag. derived from MC's per-tick inertia `friction · 0.91`
      *  (≈ 0.546 at 20Hz on default blocks ⇒ -ln(0.546)/0.05 ≈ 12.1). */
     groundDragRate: number;
-    /** drag rate in air (1/s). softer than MC's 1.9/s — sprint-jumpers
+    /** drag rate in air (1/s). softer than MC's 1.9/s, sprint-jumpers
      *  keep more of their liftoff momentum, so a chain of sprint-jumps
      *  carries well ahead of plain running. */
     airDragRate: number;
@@ -247,7 +247,7 @@ type CharacterControllerConfig = {
      *  MC's `0.02/tick` air control coefficient. */
     airAccel: number;
     /** horizontal kick (m/s) added along the wish direction at jump
-     *  takeoff when sprinting — MC's +4 m/s, so sprint-jumping carries
+     *  takeoff when sprinting, MC's +4 m/s, so sprint-jumping carries
      *  noticeably faster than running. */
     sprintJumpImpulse: number;
     /** vertical climb speed when in a climbable block / climbOverride. */
@@ -259,7 +259,7 @@ type CharacterControllerConfig = {
     swimSpeed: number;
     /** horizontal accel cap while swimming. */
     swimAccel: number;
-    /** downward "gravity" in a liquid — much smaller than `gravity`. */
+    /** downward "gravity" in a liquid, much smaller than `gravity`. */
     liquidSink: number;
     /** drag coefficient applied per tick as v *= exp(-liquidDrag * viscosity * dt). */
     liquidDrag: number;
@@ -274,7 +274,7 @@ type CharacterControllerConfig = {
      *  camera eye-height drop (PlayerController), so they stay locked in
      *  step regardless of who reads it. */
     crouchLerpRate: number;
-    /** standing eye height (m above feet) — the look-ray origin used by the
+    /** standing eye height (m above feet), the look-ray origin used by the
      *  camera and `view.origin`. */
     eyeHeight: number;
     /** crouched eye height (m); the eased `state.eyeHeight` (and the camera +
@@ -287,13 +287,13 @@ type CharacterControllerState = {
     velocity: Vec3;
     /** whether the character is grounded. */
     grounded: boolean;
-    /** state id of the voxel "at the character's foot sample" —
+    /** state id of the voxel "at the character's foot sample",
      *  the standing block when grounded, the liquid voxel when
      *  feet-deep in a liquid, 0 otherwise. owner writes after the
      *  per-tick environment sample; remote clients read it for
      *  footstep / splash SFX and footstep particle resolution (since
-     *  they have no `vcc`). minimal — uint16, syncs only on change.
-     *  the swim case follows luanti's `getFootstepNodePos` — when
+     *  they have no `vcc`). minimal, uint16, syncs only on change.
+     *  the swim case follows luanti's `getFootstepNodePos`, when
      *  `inLiquidStable` is true, this points at the liquid so the
      *  same SFX lookup picks up the liquid's `footstep` / `splash`
      *  clips for free. */
@@ -310,9 +310,9 @@ type CharacterControllerState = {
     bobSineValue: number;
     bobSineValuePrevious: number;
     /** eased peak amplitudes (units). ramp toward per-state targets
-     *  while bobbing, snap to 0 on stop. three independent axes —
+     *  while bobbing, snap to 0 on stop. three independent axes,
      *  lateral (`sin(phase/2)`), vertical (`sin(phase)`), and item
-     *  sway — so consumers can scale each without round-tripping
+     *  sway, so consumers can scale each without round-tripping
      *  through a unified 0..1. */
     bobLateralAmplitude: number;
     bobVerticalAmplitude: number;
@@ -329,7 +329,7 @@ type CharacterControllerState = {
      *  every frame (both into and out of motion) so weapon overlays
      *  glide smoothly. consumers add `bobItemSwayOffsetX` along the
      *  weapon's local right and `bobItemSwayOffsetY` along its local
-     *  up. no weapon system here yet — exposed for later. */
+     *  up. no weapon system here yet, exposed for later. */
     bobItemSwayOffsetX: number;
     bobItemSwayOffsetY: number;
 
@@ -348,8 +348,8 @@ type CharacterControllerState = {
     isClimbing: boolean;
     /** sampled per-tick with hysteresis (enter low, exit high). */
     inLiquid: boolean;
-    /** feet-deep liquid sample — true the moment the foot voxel is a
-     *  liquid, no hysteresis. owner-only — not synced. presentation
+    /** feet-deep liquid sample, true the moment the foot voxel is a
+     *  liquid, no hysteresis. owner-only, not synced. presentation
      *  traits derive this remotely from `groundBlockState + BlockRegistry
      *  flags` (when the foot is in a liquid, `groundBlockState` is the
      *  liquid voxel state and its `BLOCK_FLAG_LIQUID` flag is set), so
@@ -360,7 +360,7 @@ type CharacterControllerState = {
     /** state id of the voxel sampled at body-mid each `sampleEnvironment`
      *  call. carried over into `groundBlockState` post-move when the
      *  feet are in a liquid, so the SFX path picks up the liquid's
-     *  `footstep` / `splash` clips. owner-only scratch — never synced. */
+     *  `footstep` / `splash` clips. owner-only scratch, never synced. */
     feetStateId: number;
     /** crouch-guard anchor voxel coords (x, y, z). undefined when not
      *  engaged. matches luanti's `m_sneak_node`. */
@@ -382,7 +382,7 @@ type CharacterControllerState = {
      *  `bobPhase` on landing, and exposed for downstream consumers
      *  (CharacterTrait footsteps, etc.) so they detect the landing edge
      *  against a snapshot taken from the same controller tick that wrote
-     *  the current value — robust to multiple ticks per frame. */
+     *  the current value, robust to multiple ticks per frame. */
     previousGrounded: boolean;
     /** previous tick's `bobPhase`. snapshotted at the start of
      *  `updateCharacterBob`, before any mutation, so consumers (footstep
@@ -392,7 +392,7 @@ type CharacterControllerState = {
     /** previous bob-tick's `groundBlockState`. snapshotted at the end of
      *  `updateCharacterBob` (mirrors `previousGrounded`). presentation
      *  traits diff this against the current id to spot foot-sample
-     *  transitions — entry splash fires when the new id is a liquid and
+     *  transitions, entry splash fires when the new id is a liquid and
      *  the old one wasn't. */
     previousGroundBlockState: number;
     /** persistent body yaw (radians around +Y). while moving, tracks
@@ -402,20 +402,20 @@ type CharacterControllerState = {
      *  tick into `transform.quaternion`; remote sides re-derive it
      *  from the synced quaternion when rotating the head bone. */
     bodyYaw: number;
-    /** lazy init flag — first owner tick snaps `bodyYaw` to `look[1]`
+    /** lazy init flag, first owner tick snaps `bodyYaw` to `look[1]`
      *  so spawning characters don't start with the body twisted 40°
      *  off their look direction. */
     bodyYawInit: boolean;
     /** which posture is currently active on `state.vcc.innerBody`. binary
      *  sim state: flips to true the instant `input.crouch` is held, and back
-     *  to false on release *once there's headroom to stand* — owner-only
+     *  to false on release *once there's headroom to stand*, owner-only
      *  (vcc is owner-only). the trait re-reads this each tick to detect the
      *  edge that drives `vcc.resize`; not synced because remote sides
      *  reconstruct posture from `input.crouch` for visuals. */
     isCrouchShape: boolean;
     /** VISUAL-ONLY 0..1 crouch, eased per-frame toward `input.crouch ? 1 : 0`
      *  at `config.crouchLerpRate` (in `updateCharacterBob`). the collider is
-     *  binary (`isCrouchShape`) and never reads this — so the ease is pure
+     *  binary (`isCrouchShape`) and never reads this, so the ease is pure
      *  presentation catch-up and render cadence can't drive a sim decision.
      *  shared signal: CharacterTrait drives the body lean off it and
      *  PlayerController the eye-height drop, so pose + camera stay locked in
@@ -428,8 +428,8 @@ type CharacterControllerState = {
 };
 
 /** the character's look ray this frame: eye `origin` (world space) + unit
- *  `direction` from `input.look`. populated every frame for every character —
- *  players AND npcs — so scripts can fire / raycast / aim from the eyes without
+ *  `direction` from `input.look`. populated every frame for every character,
+ *  players AND npcs, so scripts can fire / raycast / aim from the eyes without
  *  reaching for the camera (which doesn't exist server-side or for npcs). */
 export type CharacterView = {
     origin: Vec3;
@@ -626,7 +626,7 @@ sync(CharacterControllerTrait, 'ground-block-state', {
 // each frame we apply an exponential drag (`v *= exp(-rate · dt)`) and
 // then add `wishDir · accel · dt` along the input direction. no dot
 // product against current velocity, so wishdir is the actual target
-// direction — there is no quake-style air strafe or bunny-hop speed
+// direction, there is no quake-style air strafe or bunny-hop speed
 // stacking. on ground, the accel coefficient is sized to make steady
 // state exactly equal to wish speed; in air it's a small fixed value so
 // jumps feel committed.
@@ -634,7 +634,7 @@ sync(CharacterControllerTrait, 'ground-block-state', {
 // continuous-time analogue of MC's per-tick model. MC at 20Hz does
 // `v = v · friction · 0.91 + wishVel`; with default block friction 0.6
 // that's a per-tick inertia of 0.546, i.e. drag rate -ln(0.546)/0.05 ≈
-// 12.1/s — matching the `groundDragRate` default.
+// 12.1/s, matching the `groundDragRate` default.
 
 function applyHorizontalDrag(vel: Vec3, dragRate: number, dt: number): void {
     const k = Math.exp(-dragRate * dt);
@@ -687,7 +687,7 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     //
     // earlier port used a head sample (feet+1.5) as the exit probe, which
     // flickered in any pool shallower than head-height because feet-voxel
-    // was wet but head-voxel was air — that flicker bounced the character
+    // was wet but head-voxel was air, that flicker bounced the character
     // between gravity and swim physics and retriggered landing footsteps
     // as `grounded` toggled.
     const liquidProbeY = Math.floor(feet[1] + (state.inLiquid ? 0.1 : 0.5));
@@ -712,10 +712,10 @@ function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
     // robust to overhangs (the column probe at center XZ reads air when
     // the body straddles a block's edge). fall back to the column probe
     // when no voxel contact qualifies. note: sampleEnvironment runs
-    // pre-move, so this scans LAST tick's contacts — fine for steady
+    // pre-move, so this scans LAST tick's contacts, fine for steady
     // walking; on the landing tick it falls back to the column probe (a
     // one-tick friction approximation). footstep sfx/particles don't use
-    // this — they read the solver's authoritative `groundVoxelStateId`.
+    // this, they read the solver's authoritative `groundVoxelStateId`.
     const standingFromContacts = deriveStandingStateFromContacts(state.vcc!);
     state.standingStateId = standingFromContacts !== 0 ? standingFromContacts : getBlockState(voxels, fx, belowY, fz);
 }
@@ -743,7 +743,7 @@ function deriveStandingStateFromContacts(v: vcc.VCC): number {
 // ── crouch edge guard ────────────────────────────────────────────────
 //
 // Faithful port of luanti's sneak-anchor (see llm/luanti/src/client/
-// localplayer.cpp, lines 89–208 `updateSneakNode` and 393–444 `move`):
+// localplayer.cpp, lines 89-208 `updateSneakNode` and 393-444 `move`):
 //
 //   1. After the solver runs, if a previous anchor exists, clamp the
 //      player's position to that anchor's union AABB (gated on
@@ -752,9 +752,9 @@ function deriveStandingStateFromContacts(v: vcc.VCC): number {
 //   2. Then re-pick the anchor at the NEW (post-clamp) position via a
 //      3×3 search using luanti's `position_y_mod` trick.
 //
-// No pre-move work — the solver runs unrestricted, then we clamp
+// No pre-move work, the solver runs unrestricted, then we clamp
 // after. Matches luanti's order exactly. The anchor's bounds come from
-// the voxel's *union* of collision boxes (`getNodeBoundingBox`) — for
+// the voxel's *union* of collision boxes (`getNodeBoundingBox`), for
 // stairs that's the full cube, but luanti's smoothened Y pull avoids
 // the TP-up bug an instant snap would cause.
 
@@ -762,13 +762,13 @@ function deriveStandingStateFromContacts(v: vcc.VCC): number {
 // player's center can extend ~98% of the body's half-extents past the
 // anchor's AABB edge before the clamp kicks in. without this the clamp triggers
 // the moment the center reaches the block edge, locking traversal to
-// integer columns — the player can never reach a block boundary to
+// integer columns, the player can never reach a block boundary to
 // re-anchor. luanti's loose value also matches MC's visible "dangle".
 const SNEAK_HALF_EXTENT_FACTOR = 0.98;
 
 // max XZ distance from player center to candidate anchor's AABB center
 // during the 3×3 search. luanti's value (`0.5 + 0.05` in block-size
-// units) — the 0.05 prevents sideways teleporting through thin walls.
+// units), the 0.05 prevents sideways teleporting through thin walls.
 const SNEAK_ALLOWED_RANGE = 0.55;
 
 // cells above the candidate anchor voxel that must be non-collidable
@@ -791,7 +791,7 @@ const SNEAK_Y_PULL_RATE = 22;
 const SNEAK_Y_PULL_BIAS = 0.01;
 
 /** Union AABB of a block's collision shape in voxel-local [0,1]³
- *  coords. Matches luanti's `getNodeBoundingBox` (lines 73–86).
+ *  coords. Matches luanti's `getNodeBoundingBox` (lines 73-86).
  *  Cube fast path (cid===0) returns the unit box without touching
  *  `shapeAabbs`. Non-AABB-shape blocks fall back to the unit box. */
 function blockUnionAabbLocal(registry: BlockRegistry, stateId: number): [number, number, number, number, number, number] {
@@ -820,7 +820,7 @@ function blockUnionAabbLocal(registry: BlockRegistry, stateId: number): [number,
 }
 
 /** `SNEAK_HEADROOM_CELLS` cells above `(x, fy, z)` must be non-collidable.
- *  Mirrors luanti's `updateSneakNode` headroom check (lines 162–171). */
+ *  Mirrors luanti's `updateSneakNode` headroom check (lines 162-171). */
 function hasSneakHeadroom(voxels: Voxels, x: number, fy: number, z: number): boolean {
     const flags = voxels.registry.flags;
     for (let y = 1; y <= SNEAK_HEADROOM_CELLS; y++) {
@@ -859,7 +859,7 @@ function canStandUp(cc: CharacterControllerTrait, voxels: Voxels): boolean {
     return true;
 }
 
-// 3×3 neighbor offsets used by the sneak anchor search — center voxel
+// 3×3 neighbor offsets used by the sneak anchor search, center voxel
 // first, then 4 cardinals, then 4 diagonals. matches luanti's
 // `dir9_center` order in localplayer.cpp (line 96).
 const SNEAK_SEARCH_OFFSETS: readonly [number, number][] = [
@@ -874,7 +874,7 @@ const SNEAK_SEARCH_OFFSETS: readonly [number, number][] = [
     [-1, -1],
 ];
 
-/** Faithful port of luanti's `updateSneakNode` (lines 89–208). Runs on
+/** Faithful port of luanti's `updateSneakNode` (lines 89-208). Runs on
  *  the post-solver position, finds a sneak-guardable voxel within the
  *  3×3 around the foot voxel (using `position_y_mod` so the foot voxel
  *  is computed relative to the previous anchor top, not raw position),
@@ -960,7 +960,7 @@ function updateSneakNode(cc: CharacterControllerTrait, voxels: Voxels): boolean 
 
 /** Apply luanti's post-collision sneak clamp + smoothened Y pull,
  *  using the *previous* anchor (i.e. the anchor at the start of this
- *  tick, before `updateSneakNode` re-picks). Mirrors lines 395–444 of
+ *  tick, before `updateSneakNode` re-picks). Mirrors lines 395-444 of
  *  luanti's `move()`. Returns true if a previous anchor existed (used
  *  to force grounded for the rest of the tick). */
 function applySneakClamp(cc: CharacterControllerTrait, dt: number): boolean {
@@ -990,7 +990,7 @@ function applySneakClamp(cc: CharacterControllerTrait, dt: number): boolean {
         return true;
     }
 
-    // floor sneak — luanti's bmin/bmax in world space:
+    // floor sneak, luanti's bmin/bmax in world space:
     //   bmin = node + box.MinEdge, bmax = node + box.MaxEdge.
     const bminX = node[0] + box[0];
     const bmaxX = node[0] + box[3];
@@ -1017,7 +1017,7 @@ function applySneakClamp(cc: CharacterControllerTrait, dt: number): boolean {
         if (v.position[2] !== oldZ) v.linearVelocity[2] = 0;
     }
 
-    // smoothened Y pull (lines 417–428): gated on yDiff > 0 (player
+    // smoothened Y pull (lines 417-428): gated on yDiff > 0 (player
     // below anchor top) AND vy <= 0 (not jumping up). also gated by
     // yDiff < sneak_stepheight, so stair-step from y=0.5 to bmax=1.0
     // (yDiff=0.5) pulls up gradually instead of instant snap.
@@ -1069,13 +1069,13 @@ function processCrouchGuard(cc: CharacterControllerTrait, voxels: Voxels, dt: nu
         }
         state.sneakNodeBbTop = [0, 0, 0, 1, 1, 1];
         state.sneakOnLadder = true;
-        // ladder mode never claims grounded — climb branch keeps us in climb mode.
+        // ladder mode never claims grounded, climb branch keeps us in climb mode.
         return false;
     }
 
     state.sneakOnLadder = false;
     updateSneakNode(cc, voxels);
-    // force grounded only if we actually clamped this tick — matches
+    // force grounded only if we actually clamped this tick, matches
     // luanti's `m_standing_node = m_sneak_node` (line 402), which sits
     // inside the clamp block and so only fires when an anchor existed.
     return hadAnchor;
@@ -1096,7 +1096,7 @@ function ensureVCC(cc: CharacterControllerTrait, transform: TransformTrait, phys
     cc.state.isCrouchShape = false;
     // attribute crashcat contact events on the VCC inner body back to this
     // node so the listener's resolveSide can fan them out into the node's
-    // ContactsTrait. registered only in bodyToNode (not nodeToBody) — the
+    // ContactsTrait. registered only in bodyToNode (not nodeToBody), the
     // VCC owns the body's lifecycle, not the rigid-body trait installer.
     physics.rigid.bodyToNode.set(cc.state.vcc.innerBodyId, cc._node.id);
 }
@@ -1111,12 +1111,12 @@ function disposeVCC(cc: CharacterControllerTrait, physics: Physics): void {
 // ── crouch shape (runs on every side) ────────────────────────────────
 //
 // binary, driven by the already-synced `input.crouch`: the hull swaps the
-// instant the input flips (on release, only once there's headroom to stand
-// — else you stay crouched under a low ceiling). running off synced input
+// instant the input flips (on release, only once there's headroom to stand,
+// else you stay crouched under a low ceiling). running off synced input
 // keeps the inner body coherent on the owner, server, and peer clients, so
 // sensor triggers and raycasts hit the right hull on every side. the visual
 // `crouchAmount` (presentation only) eases to catch up in `updateCharacterBob`.
-// note: replicated input arrives ~50–150ms after the owner, so the shape
+// note: replicated input arrives ~50-150ms after the owner, so the shape
 // flips later on non-owner sides; during that window shapes briefly disagree.
 function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics): void {
     const v = cc.state.vcc;
@@ -1171,16 +1171,16 @@ function tickCharacterController(
     if (state.isIntentionalMovement) vec3.scale(_movementDir, _movementDir, 1 / movLen);
 
     // clamp input magnitude to 1 so keyboard diagonals (movLen = √2) don't
-    // exceed cardinal wishSpeed — analog sticks already report |stick| ≤ 1
+    // exceed cardinal wishSpeed, analog sticks already report |stick| ≤ 1
     // so this only kicks in for digital input.
     const inputMag = movLen > 1 ? 1 : movLen;
     const wishSpeed = inputMag * (input.sprint ? config.sprintSpeed : input.crouch ? config.crouchSpeed : config.walkSpeed);
     const wasGrounded = state.grounded;
-    // normal-mode jump only — climb/liquid consume the jump key for their
+    // normal-mode jump only, climb/liquid consume the jump key for their
     // own up-ascend.
     const wantsJump = input.jump && wasGrounded && !isClimbing && !inLiquid;
 
-    // velocity update — MC-style drag + accel, with climb/liquid branches.
+    // velocity update, MC-style drag + accel, with climb/liquid branches.
     vec3.copy(_newVel, state.velocity);
     const vertVel = _newVel[1];
     vec3.copy(_horizVel, _newVel);
@@ -1209,13 +1209,13 @@ function tickCharacterController(
         // horizontal: air-style additive accel. velocity is naturally capped
         // by the viscosity drag applied below.
         applyAirWishAccel(_horizVel, _movementDir, config.swimAccel, wishSpeed, dt);
-        // viscosity drag on the full velocity — luanti's resistance term.
+        // viscosity drag on the full velocity, luanti's resistance term.
         const drag = Math.exp(-config.liquidDrag * state.liquidViscosity * dt);
         _horizVel[0] *= drag;
         _horizVel[2] *= drag;
         newVert *= drag;
     } else {
-        // normal mode — integrate gravity / jump.
+        // normal mode, integrate gravity / jump.
         if (wantsJump) {
             newVert = config.jumpSpeed - config.gravity * dt;
             // MC sprint-jump kick: +4 m/s along wishDir at takeoff. paired
@@ -1279,7 +1279,7 @@ function tickCharacterController(
     // conflict-resolution (which can drop a wall contact in favor of the
     // floor when the player is grounded at the corner). when unobstructed,
     // gotInDir ≈ wishSpeed * dt; when blocked, ~0. read by the climb branch
-    // next tick — one-tick lag matches MC's horizontalCollision.
+    // next tick, one-tick lag matches MC's horizontalCollision.
     const wishMag = wishSpeed * dt;
     if (state.isIntentionalMovement && wishMag > 1e-4) {
         const gotInDir = (v.position[0] - startX) * _movementDir[0] + (v.position[2] - startZ) * _movementDir[2];
@@ -1325,7 +1325,7 @@ function tickCharacterController(
     // post-move sneak guard: clamp position + smoothened Y pull using
     // the previous anchor, then re-pick the anchor for next tick.
     // Faithful port of luanti's `move()` clamp + `updateSneakNode` (see
-    // llm/luanti/src/client/localplayer.cpp:393–444 and :89–208).
+    // llm/luanti/src/client/localplayer.cpp:393-444 and :89-208).
     if (processCrouchGuard(cc, voxels, dt)) grounded = true;
 
     // climbing always reports grounded (so jump-as-ascend reaches the climb
@@ -1336,9 +1336,9 @@ function tickCharacterController(
 
     state.grounded = grounded;
     // foot-sample resolution for SFX + particles (luanti's
-    // `getFootstepNodePos` model — one field carries whichever block
+    // `getFootstepNodePos` model, one field carries whichever block
     // the foot is interacting with this tick). priority:
-    //   1. real ground contact wins — slabs, stairs, sand under shallow
+    //   1. real ground contact wins, slabs, stairs, sand under shallow
     //      water all play their own sounds even if the body-mid probe
     //      happens to land in an adjacent liquid cell.
     //   2. otherwise feet-in-liquid → liquid voxel (drives swim cadence +
@@ -1348,14 +1348,14 @@ function tickCharacterController(
     // authoritative standing block: the solver already pinned the exact ground
     // voxel (updateGroundState / stick / walk-down) and stamped its state, so
     // read it directly instead of re-deriving from contacts + a floor-of-center
-    // column probe — that mis-sampled the block at cell boundaries (wrong-block
+    // column probe, that mis-sampled the block at cell boundaries (wrong-block
     // footstep sfx + particles).
     let footState = 0;
     if (grounded && v.groundVoxelStateId !== 0) footState = v.groundVoxelStateId;
     else if (state.inLiquidStable) footState = state.feetStateId;
     state.groundBlockState = footState;
     // horizontal velocity reflects the *effective* post-solve motion (from
-    // the actual position delta) rather than the pre-solve wishvel — the
+    // the actual position delta) rather than the pre-solve wishvel, the
     // vcc solver only mutates a working-copy velocity during slide, so
     // v.linearVelocity still carries our pre-collision request. without
     // this fix, walking into a wall keeps state.velocity at full forward
@@ -1372,7 +1372,7 @@ function tickCharacterController(
     feet[2] = v.position[2];
     setWorldPosition(transform, feet);
 
-    // body yaw — voxelibre-style decoupled head/body. body tracks the
+    // body yaw, voxelibre-style decoupled head/body. body tracks the
     // velocity-direction yaw while moving, lingers while stationary, and
     // is always clamped to within ±BODY_YAW_LIMIT_RAD of look[1] so the
     // head can't twist past a plausible neck range. on each side, the
@@ -1380,7 +1380,7 @@ function tickCharacterController(
     // `look[1] - bodyYaw` for the matching counter-rotation.
     //
     // sign: avatars are authored facing -Z, so setAxisAngle(UP, +θ) applied
-    // to (0,0,-1) yields (-sinθ, 0, -cosθ) — matches engine forward in the
+    // to (0,0,-1) yields (-sinθ, 0, -cosθ), matches engine forward in the
     // input section above. atan2(-vx, -vz) inverts to the same convention.
     if (!state.bodyYawInit) {
         state.bodyYaw = input.look[1];
@@ -1389,11 +1389,11 @@ function tickCharacterController(
     const bvx = state.velocity[0];
     const bvz = state.velocity[2];
     const bodyHorizSpeed = Math.sqrt(bvx * bvx + bvz * bvz);
-    // target body yaw — three cases:
+    // target body yaw, three cases:
     //   1. stopped or inside back-cone → look-yaw (no twist). without
     //      the back-cone, pure-backward velocity (≈180° from look) drags
     //      target to the opposite side and the ±BODY_YAW_LIMIT_RAD clamp
-    //      visibly twists the avatar — reads as a torso tilt.
+    //      visibly twists the avatar, reads as a torso tilt.
     //   2. forward-half motion → velocity-direction yaw (`atan2(-bvx,
     //      -bvz)`). body leans into the strafe direction.
     //   3. backward-half (outside cone) → mirror of velocity yaw through
@@ -1426,7 +1426,7 @@ function tickCharacterController(
     const k = 1 - Math.exp(-BODY_YAW_RESPONSE_RATE * dt);
     state.bodyYaw = wrapPi(state.bodyYaw + slewDelta * k);
     // safety net: even mid-slew, never let the body stray more than
-    // BODY_YAW_LIMIT_RAD from look — a fast head whip should drag the
+    // BODY_YAW_LIMIT_RAD from look, a fast head whip should drag the
     // body along rather than overshoot the neck twist.
     let bodyYawDelta = wrapPi(state.bodyYaw - input.look[1]);
     if (bodyYawDelta > BODY_YAW_LIMIT_RAD) bodyYawDelta = BODY_YAW_LIMIT_RAD;
@@ -1507,18 +1507,18 @@ const CHARACTER_BOB_STATE_VALUES: Record<
 // phase velocity is pure-linear in actual horizontal speed, capped to
 // BOB_PHASE_VEL_MAX so a fall/dash can't spin legs unbounded. one bob
 // cycle (2π) advances at this rate, driving the walk clip's phase-driven
-// playback and the footstep crossing detector together. no floor — a
+// playback and the footstep crossing detector together. no floor, a
 // slow wall-slide at 0.5 m/s genuinely animates as slow leg swing
 // instead of snapping to a "walking" cadence. camera bob and footstep
 // SFX still gate on `grounded` separately (via 'fall'/'idle' amplitude
 // targets and the explicit grounded check in the crossing detector).
 const BOB_PHASE_VEL_PER_M_S = 2.5;
 const BOB_PHASE_VEL_MAX = 22;
-// extra phase-rate multiplier while sprinting — sprint speed alone only
+// extra phase-rate multiplier while sprinting, sprint speed alone only
 // nudges the phase ~30% above walk, which doesn't land as visibly different
 // for the camera/leg cycle. boosting it makes sprint feel epic.
 const BOB_PHASE_VEL_SPRINT_FACTOR = 1.1;
-// swim stroke is slower than walking gait — halves the bob/footstep cadence
+// swim stroke is slower than walking gait, halves the bob/footstep cadence
 // so the swim SFX doesn't fire at a frantic walking pace and the camera bob
 // reads as a longer, lazier breath cycle.
 const BOB_PHASE_VEL_LIQUID_FACTOR = 0.5;
@@ -1539,7 +1539,7 @@ function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistr
     const config = cc.config;
     const input = cc.input;
 
-    // visual crouch catch-up (presentation only — the collider is binary,
+    // visual crouch catch-up (presentation only, the collider is binary,
     // `isCrouchShape`). eased per-frame here so the head/waist drop reads
     // smooth instead of stepping at the tick rate.
     state.crouchAmount += ((input.crouch ? 1 : 0) - state.crouchAmount) * (1 - Math.exp(-config.crouchLerpRate * dt));
@@ -1551,13 +1551,13 @@ function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistr
     // crossing would never fire.
     state.previousBobPhase = state.bobPhase;
 
-    // re-anchor edges — jam phase to the bottom of the cycle (sin = −1)
+    // re-anchor edges, jam phase to the bottom of the cycle (sin = −1)
     // so downstream crossing detectors fire on the transition and continue
     // evenly spaced. checked here (and not on the footstep side) because
     // the re-anchor mutates bobPhase + bobSineValue together. fires on:
-    //   - landing (grounded ↑) — first ground footstep is on-cadence.
+    //   - landing (grounded ↑), first ground footstep is on-cadence.
     //   - feet-enter liquid (groundBlockState transitions into a liquid
-    //     voxel) — first swim stroke fires on-cadence right after splash.
+    //     voxel), first swim stroke fires on-cadence right after splash.
     // liquid status is derived from `groundBlockState` + the block
     // registry flags rather than the controller's `inLiquidStable` field,
     // so remote characters (who don't run `sampleEnvironment`) re-anchor
@@ -1615,14 +1615,14 @@ function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistr
             state.bobItemSwayOffsetY += (-dipValue * state.bobItemSwayAmplitude - state.bobItemSwayOffsetY) * offK;
         }
 
-        // camera lateral: sin(phase/2) — written directly so it tracks
+        // camera lateral: sin(phase/2), written directly so it tracks
         // the sinusoid exactly. amplitude itself lerps to the target.
         state.bobLateralAmplitude += (targets.horizontalAmplitude - state.bobLateralAmplitude) * ampK;
         if (state.bobLateralAmplitude > 0) {
             state.bobOffsetX = bobSineValueHalf * state.bobLateralAmplitude;
         }
 
-        // camera vertical: sin(phase) — full sine, dips and rises.
+        // camera vertical: sin(phase), full sine, dips and rises.
         state.bobVerticalAmplitude += (targets.verticalAmplitude - state.bobVerticalAmplitude) * ampK;
         if (state.bobVerticalAmplitude > 0) {
             state.bobOffsetY = bobSineValue * state.bobVerticalAmplitude;
@@ -1647,7 +1647,7 @@ function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistr
 
 // ── look helpers ──────────────────────────────────────────────────────
 //
-// pitch is the spherical phi (π/2 = horizon, 0 = look down, π = look up —
+// pitch is the spherical phi (π/2 = horizon, 0 = look down, π = look up,
 // matching the camera convention in player-controller).
 
 function writeLook(cc: CharacterControllerTrait, theta: number, phi: number | undefined): void {
@@ -1690,7 +1690,7 @@ function lookForward(look: Vec3, out: Vec3): Vec3 {
 /** refresh `cc.view` (eye origin + look direction) and the eased `state.eyeHeight`,
  *  so any script can read the character's look ray from its eyes. eye height eases
  *  `eyeHeight`↔`crouchEyeHeight` by `crouchAmount` (climbing keeps full height).
- *  run per-frame for every character — players and npcs alike. */
+ *  run per-frame for every character, players and npcs alike. */
 function updateCharacterView(cc: CharacterControllerTrait, transform: TransformTrait): void {
     const config = cc.config;
     const state = cc.state;
@@ -1707,7 +1707,7 @@ script(
     CharacterControllerTrait,
     'controller',
     (ctx) => {
-        // play playerNode transform — used as the server-side discovery anchor.
+        // play playerNode transform, used as the server-side discovery anchor.
         // when ctx.node is the editorNode (client-realm, server has no copy),
         // physics-driven body motion never reaches the server's view of the
         // player, so voxel chunk streaming stays anchored at spawn. mirror
@@ -1761,7 +1761,7 @@ script(
         onFrame(ctx, ({ delta }) => {
             updateCharacterBob(ctx.trait, ctx.blocks, delta);
             // refresh the look ray (eye origin + direction) after the bob/crouch ease, so
-            // every character — players and npcs — exposes `cc.view` for aiming/firing.
+            // every character, players and npcs, exposes `cc.view` for aiming/firing.
             const transform = getTrait(ctx.node, TransformTrait);
             if (transform) updateCharacterView(ctx.trait, transform);
         });

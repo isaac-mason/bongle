@@ -30,7 +30,7 @@ import {
 
 /**
  * Common preset options. `name` is the human-readable display label
- * shown in editor UIs (inventory, hotbar, inspector) — falls back to
+ * shown in editor UIs (inventory, hotbar, inspector), falls back to
  * the string id when omitted. `sounds` lets games wire a
  * `blockSoundPresets.*` bundle on derived blocks the same way raw
  * `block(...)` calls do.
@@ -62,7 +62,7 @@ import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
 //
 // the most basic block: a full opaque cube with the given textures. drop
 // down to block() directly if you need to override cull, friction, or any
-// other field — this preset deliberately keeps the surface small.
+// other field, this preset deliberately keeps the surface small.
 
 export function cube(id: string, textures: CubeTextures, options?: PresetOptions) {
     return block(id, {
@@ -75,7 +75,7 @@ export function cube(id: string, textures: CubeTextures, options?: PresetOptions
 
 // ── column ──────────────────────────────────────────────────────────
 //
-// axis-oriented full cube — end-cap texture on faces perpendicular to
+// axis-oriented full cube, end-cap texture on faces perpendicular to
 // the axis, wrap texture on the other four (logs, basalt pillars, hay
 // bales, ...). placement axis is set by the build tool via the
 // build-direction convention (axis = dominant hit-normal axis).
@@ -103,7 +103,7 @@ export function column(id: string, textures: { end: TextureRef; side: TextureRef
         material: options?.material ?? MaterialType.OPAQUE,
         states: ColumnState,
         defaultState: { axis: 'y' },
-        // axis-aligned cube — geometry never changes. grain follows axis via
+        // axis-aligned cube, geometry never changes. grain follows axis via
         // per-face UV rotation baked into the registry's cubeFaceUVs. AO and
         // smooth lighting stay on the cube fast-path. mirrors Luanti's
         // facedir / MC's blockstate-rotation approach (see plan notes).
@@ -150,7 +150,7 @@ export function column(id: string, textures: { end: TextureRef; side: TextureRef
             const p = handle.states.decode(local);
             return handle.stateId({ axis: AXIS_REMAP[axis][p.axis as 'x' | 'y' | 'z'] });
         },
-        // axis is directionless — flips are identity.
+        // axis is directionless, flips are identity.
     });
     return handle;
 }
@@ -165,8 +165,8 @@ export function column(id: string, textures: { end: TextureRef; side: TextureRef
 //     placer. for a stair the "front" face is the low/climbable side
 //     (the side you step onto from ground level). base orientation has
 //     the high back step at +Z (south); rotateY is CCW compass, so we
-//     rotate by `(4 - FACING4_STEPS[facing]) % 4` — same inversion the
-//     ladder uses — so that `facing=name` lands the low step on the
+//     rotate by `(4 - FACING4_STEPS[facing]) % 4`, same inversion the
+//     ladder uses, so that `facing=name` lands the low step on the
 //     named side for all four cardinals.
 //   half: 'bottom' = staircase rests on the floor, 'top' = upside-down
 //     (ceiling-mounted; player climbs along the bottom).
@@ -192,7 +192,7 @@ type StairShape = 'straight' | 'inner_left' | 'inner_right' | 'outer_left' | 'ou
 type StairHalf = 'bottom' | 'top';
 
 // chirality swap for any horizontal mirror: left ↔ right, straight unchanged.
-// applied under flip-x and flip-z regardless of facing — see plan notes.
+// applied under flip-x and flip-z regardless of facing, see plan notes.
 const STAIR_SHAPE_FLIP: Record<StairShape, StairShape> = {
     straight: 'straight',
     inner_left: 'inner_right',
@@ -282,7 +282,7 @@ function stairQuads(textures: CubeTextures, topTex: TextureRef, p: { half: Stair
         ...blockModel.box([0, 0, 0], [1, 0.5, 1], textures, { exclude: ['up'] }),
     ];
     for (const b of stairUpperBoxes(p.shape)) {
-        // upper step boxes rest on the slab top — exclude their down face.
+        // upper step boxes rest on the slab top, exclude their down face.
         quads.push(...blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], textures, { exclude: ['down'] }));
     }
     for (const r of stairExposedTopRects(p.shape)) {
@@ -337,7 +337,7 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
         }),
         cull: CullType.PARTIAL,
         place: (ctx, io) => {
-            // shape stays 'straight' — onNeighbourUpdate re-derives corners post-placement.
+            // shape stays 'straight', onNeighbourUpdate re-derives corners post-placement.
             io.set(
                 ctx.worldX,
                 ctx.worldY,
@@ -358,7 +358,7 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
             const cw = FACING4_ORDER[(FACING4_STEPS[f] + 1) % 4]!;
             const ccw = FACING4_ORDER[(FACING4_STEPS[f] + 3) % 4]!;
 
-            // world-direction the stair faces — same direction the low/front
+            // world-direction the stair faces, same direction the low/front
             // step points (= where the placer was standing).
             const dir = (
                 {
@@ -385,7 +385,7 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
             return handle.stateId({ facing: f, half: h, shape: 'straight' });
         },
         rotate: (stateId, axis, cw) => {
-            // sideways stair has no valid state — only Y rotation maps cleanly.
+            // sideways stair has no valid state, only Y rotation maps cleanly.
             if (axis !== 'y') return stateId;
             const p = handle.states.decode(stateId - handle._baseStateId);
             return handle.stateId({
@@ -414,7 +414,7 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
 // ── slab ────────────────────────────────────────────────────────────
 //
 // `half` picks the slab's vertical placement: 'bottom' (y=0..0.5),
-// 'top' (y=0.5..1), or 'double' (full cube — two slabs merged).
+// 'top' (y=0.5..1), or 'double' (full cube, two slabs merged).
 // double-slab is SOLID so adjacent doubles cull each other; the half
 // slabs are PARTIAL.
 
@@ -463,7 +463,7 @@ export function plant(id: string, texture: TextureRef, options?: PresetOptions) 
         model: () => ({ type: 'custom' as const, quads: blockModel.cross(texture) }),
         cull: CullType.SELF,
         collision: false,
-        // sparse cross-quads — don't filter light. without this, CullType.SELF
+        // sparse cross-quads, don't filter light. without this, CullType.SELF
         // would default to opacity 1 (like leaves/glass) and dim what's behind.
         lightOpacity: 0,
         material: options?.material ?? MaterialType.TRANSPARENT,
@@ -513,7 +513,7 @@ export function ladder(id: string, texture: TextureRef, options?: PresetOptions)
         states: LadderFacingState,
         // base panel sits at +Z facing -Z (texture normal points north). the
         // rotation goes CCW per step around Y, so to make the texture face
-        // the named direction we rotate by (4 - FACING4_STEPS[facing]) — the
+        // the named direction we rotate by (4 - FACING4_STEPS[facing]), the
         // CW-sense complement. without this inversion N/S would look right
         // (180° is self-inverse) but E/W would be swapped.
         defaultState: { facing: 'south' },
@@ -568,7 +568,7 @@ export const WATER_DEFAULT_TINT: ScreenTintSpec = { color: [0.04, 0.1, 0.2], opa
 export const LAVA_DEFAULT_TINT: ScreenTintSpec = { color: [1.0, 0.35, 0.05], opacity: 0.75 };
 
 //
-// MODEL_LIQUID block — the character swims in it instead of colliding,
+// MODEL_LIQUID block, the character swims in it instead of colliding,
 // and the mesher emits a cube whose top quad and side quads are clipped
 // to `surfaceHeight`.
 //
@@ -576,9 +576,9 @@ export const LAVA_DEFAULT_TINT: ScreenTintSpec = { color: [1.0, 0.35, 0.05], opa
 // same-fluid face culling); omitting it gives an opaque liquid like lava.
 //
 // `levels` (default 1) controls how many discrete surface heights this
-// block exposes. levels=1 stays stateless — a full-height cube, same as
+// block exposes. levels=1 stays stateless, a full-height cube, same as
 // the old preset. levels>1 introduces a `level` int prop (1..levels) and
-// a `level(n)` helper on the handle for picking a specific height —
+// a `level(n)` helper on the handle for picking a specific height,
 // e.g. `Water.level(4)` for half-height on an 8-level liquid. the
 // `defaultState` is the highest level, so `defaultKey()` returns the full-
 // height surface (handy for icons and bare `setBlock(..., Water.defaultKey())`).
@@ -607,7 +607,7 @@ export function liquid(
         /** scales the surface for every level. 1 = full cube at max level; lower
          * (e.g. 15/16) gives a visible meniscus from above. defaults to 1. */
         maxHeight?: number;
-        /** per-channel light output (0..15) — set for lava-style glow. */
+        /** per-channel light output (0..15), set for lava-style glow. */
         lightEmission?: [number, number, number];
         /** mark the texture as self-lit so it stays bright in shadow. */
         emissive?: boolean;
@@ -838,7 +838,7 @@ export function pane(id: string, textures: CubeTextures, options?: PresetOptions
             const south = hasGroupConnection(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ + 1, BLOCK_FLAG_PANE);
             const east = hasGroupConnection(ctx.voxels, ctx.worldX + 1, ctx.worldY, ctx.worldZ, BLOCK_FLAG_PANE);
             const west = hasGroupConnection(ctx.voxels, ctx.worldX - 1, ctx.worldY, ctx.worldZ, BLOCK_FLAG_PANE);
-            // PaneState aliases FenceState — same strides apply.
+            // PaneState aliases FenceState, same strides apply.
             return handle.stateIdLocal(
                 (north ? FENCE_STRIDE_NORTH : 0) +
                     (east ? FENCE_STRIDE_EAST : 0) +
@@ -1140,7 +1140,7 @@ export function wall(id: string, textures: CubeTextures, options?: PresetOptions
 // onNeighbourUpdate prefers floor-mount when the block below is solid;
 // otherwise picks the first solid horizontal neighbour. with no
 // support at all the torch stays in its current orientation rather
-// than dropping — floating torches are allowed.
+// than dropping, floating torches are allowed.
 
 const TorchState = blockState.create({
     mount: blockState.enumeration(['floor', 'north', 'east', 'south', 'west'] as const),
@@ -1174,7 +1174,7 @@ function torchShape(mount: 'floor' | 'north' | 'east' | 'south' | 'west') {
 // quantizes positions to. an off-grid rotateAxis lean (sin/cos 22.5°) would
 // round each corner unevenly and give the post a visibly non-uniform
 // thickness; instead the post's top is sheared TORCH_WALL_LEAN outward over
-// its 10/16 height — a grid-aligned ~21.8° lean, close to Minecraft's 22.5°.
+// its 10/16 height, a grid-aligned ~21.8° lean, close to Minecraft's 22.5°.
 // TORCH_WALL_LIFT is how far up the wall the base sits (~3px, MC-like).
 const TORCH_WALL_LIFT = 3 / 16;
 const TORCH_WALL_LEAN = 4 / 16;
@@ -1187,13 +1187,13 @@ const TORCH_WALL_STEPS = { north: 0, west: 1, south: 2, east: 3 } as const;
 // the upright 2×10×2 stick, centred in the cell (x,z ∈ [7/16,9/16] so its
 // local UVs bake from the centred stick column). the four sides sample the
 // stick column via local UVs; the up/down caps get explicit UVs (matching
-// MC's torch model) so the bottom shows the dim stick base (rows 13–15) and
-// the top the lit neck under the flame (rows 6–8). a local-UV cap keys off
+// MC's torch model) so the bottom shows the dim stick base (rows 13-15) and
+// the top the lit neck under the flame (rows 6-8). a local-UV cap keys off
 // x/z, not height, so both caps would sample the bright texture-centre rows
 // and read as "fire on the bottom of the torch".
 function torchPostQuads(texture: TextureRef): BlockQuad[] {
     const tex: CubeTextures = { all: { texture } };
-    // cull:false — the post is free-standing, no face sits on a boundary.
+    // cull:false, the post is free-standing, no face sits on a boundary.
     const sides = blockModel.box([7 / 16, 0, 7 / 16], [9 / 16, 10 / 16, 9 / 16], tex, {
         uvs: 'local',
         cull: false,
@@ -1310,7 +1310,7 @@ export function torch(id: string, texture: TextureRef, options?: PresetOptions &
 //
 // two-cell (lower + upper) door. state is (facing, half, hinge, open):
 //   facing : direction the door's front faces = toward the placer.
-//   half   : lower / upper — both cells carry identical facing/hinge/open,
+//   half   : lower / upper, both cells carry identical facing/hinge/open,
 //            differing only in `half` (and which texture they render).
 //   hinge  : which vertical edge the door pivots on (sets double-door pairing).
 //   open   : closed flush across the doorway, or swung 90° to the hinge side.
@@ -1318,7 +1318,7 @@ export function torch(id: string, texture: TextureRef, options?: PresetOptions &
 // placement writes BOTH cells (validate both air first → never a half-door)
 // and picks the hinge from a same-facing door immediately to the right, so two
 // adjacent doors form a double door. removal cohesion (break one half → remove
-// the other) is deferred to a future onBlockBreak gameplay hook — v1 leaves an
+// the other) is deferred to a future onBlockBreak gameplay hook, v1 leaves an
 // orphaned half. open/close is driven by setDoorOpen, not by any block hook.
 
 const DoorState = blockState.create({
@@ -1361,7 +1361,7 @@ export function door(id: string, textures: { top: TextureRef; bottom: TextureRef
         shape: (p) => blockShape.rotateY(blockShape.aabbs([doorBox(p.hinge, p.open)]), (4 - FACING4_STEPS[p.facing]) % 4),
         model: (p) => {
             // model the left door always; mirror across X for the right hinge so
-            // the handle/panel — and the open swing — land on the correct side.
+            // the handle/panel, and the open swing, land on the correct side.
             const b = doorBox('left', p.open);
             const texture = p.half === 'lower' ? textures.bottom : textures.top;
             let quads = blockModel.box(
@@ -1424,7 +1424,7 @@ export function getDoorOpen(voxels: Voxels, x: number, y: number, z: number): bo
     return doorAt(voxels, x, y, z)?.p.open ?? false;
 }
 
-/** set the open state of the door at (x,y,z) — writes both halves (partner
+/** set the open state of the door at (x,y,z), writes both halves (partner
  *  re-derived from `half`). no-op if the cell isn't a door or already matches.
  *  toggle = `setDoorOpen(v, x, y, z, !getDoorOpen(v, x, y, z))`. */
 export function setDoorOpen(voxels: Voxels, x: number, y: number, z: number, open: boolean): void {

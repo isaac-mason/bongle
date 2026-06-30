@@ -346,7 +346,7 @@ function UnionEditor({
                     if (!variant) return;
                     const next: Record<string, unknown> = {};
                     for (const [k, s] of Object.entries(variant.fields)) {
-                        // skip the discriminator — we set it explicitly below
+                        // skip the discriminator, we set it explicitly below
                         if (k === schema.key) continue;
                         if (s.type === 'number') next[k] = 0;
                         else if (s.type === 'string') next[k] = '';
@@ -355,7 +355,7 @@ function UnionEditor({
                         else if (s.type === 'vector3') next[k] = [0, 0, 0];
                         else if (s.type === 'vector4' || s.type === 'quaternion') next[k] = [0, 0, 0, 0];
                         else if (s.type === 'literal') next[k] = s.value;
-                        // other complex types (object, list, union…) left undefined —
+                        // other complex types (object, list, union…) left undefined,
                         // the editor will render them with their own fallback defaults
                     }
                     next[schema.key] = newDiscriminator;
@@ -1184,7 +1184,7 @@ export function InspectorPanel() {
 
                     <NameEditor node={node} />
 
-                    {/* realm — root is always 'shared', no editor */}
+                    {/* realm, root is always 'shared', no editor */}
                     {node.parent && (
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] font-mono text-neutral-400 shrink-0 w-12">realm</span>

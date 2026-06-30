@@ -1,5 +1,5 @@
 /**
- * public animation api — single namespace fronting the animator runtime.
+ * public animation api, single namespace fronting the animator runtime.
  *
  *   import { Animation, AnimationAction, AnimatorTrait } from 'bongle';
  *   const a = Animation.clip(animator, wizard.animations.idle);

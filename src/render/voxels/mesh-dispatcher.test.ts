@@ -1,6 +1,6 @@
 // ── mesh-dispatcher tests ───────────────────────────────────────────
 //
-// Drives the worker protocol via in-process stub workers — no real
+// Drives the worker protocol via in-process stub workers, no real
 // Worker spawned. Each stub holds two queues: dispatcher → worker
 // inbox and worker → dispatcher outbox. Tests step the protocol
 // explicitly (processWorker → deliverToMain) so invariants like
@@ -112,7 +112,7 @@ describe('mesh-dispatcher', () => {
             });
             setMeshRegistry(d, reg);
 
-            // Before ack, enqueue must fail — slot pendingVersion !== registryVersion via ack
+            // Before ack, enqueue must fail, slot pendingVersion !== registryVersion via ack
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
             expect(enqueueMesh(d, voxels, chunk, 1)).toBe(false);
 
@@ -161,7 +161,7 @@ describe('mesh-dispatcher', () => {
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
 
             expect(enqueueMesh(d, voxels, chunk, 1)).toBe(true);
-            // Same key, even at a higher gen, must skip — caller is
+            // Same key, even at a higher gen, must skip, caller is
             // expected to wait for the in-flight result to land first.
             expect(enqueueMesh(d, voxels, chunk, 2)).toBe(false);
 
@@ -269,7 +269,7 @@ describe('mesh-dispatcher', () => {
             const initialPool = dispatcherStats(d).poolSize;
             expect(initialPool).toBe(2 * 3); // workerCount * queueDepth
 
-            // Enqueue 4 jobs — pool drops by 4.
+            // Enqueue 4 jobs, pool drops by 4.
             for (let i = 0; i < 4; i++) {
                 const voxels = createVoxels(reg);
                 const chunk = createChunk(i, 0, 0);
@@ -279,7 +279,7 @@ describe('mesh-dispatcher', () => {
             }
             expect(dispatcherStats(d).poolSize).toBe(initialPool - 4);
 
-            // Process + deliver every result — pool restored.
+            // Process + deliver every result, pool restored.
             step(tws);
             expect(dispatcherStats(d).poolSize).toBe(initialPool);
             disposeMeshDispatcher(d);
@@ -309,7 +309,7 @@ describe('mesh-dispatcher', () => {
             expect(initialPool).toBe(3);
             expect(tws.length).toBe(1);
 
-            // Queue 2 jobs at the live worker — both are in flight at slot 0.
+            // Queue 2 jobs at the live worker, both are in flight at slot 0.
             const c0 = (() => {
                 const voxels = createVoxels(reg);
                 const chunk = createChunk(0, 0, 0);

@@ -1,10 +1,10 @@
-// per-room model lighting — samples voxel light once per model at its
+// per-room model lighting, samples voxel light once per model at its
 // world-space origin and writes it into `ModelTrait.light`. Every mesh under
 // the model shares this one value, so a rig's limbs stay consistently lit and
 // a bone whose own world position clips into a solid voxel mid-animation
 // doesn't pop dark.
 //
-// Sampling is unconditional (every model, every frame) — `sampleVoxelLight`
+// Sampling is unconditional (every model, every frame), `sampleVoxelLight`
 // is a handful of voxel-grid lookups, far cheaper than walking each model's
 // mesh subtree to decide visibility + a centroid. Off-screen models pay the
 // sample; the meshes themselves are still frustum-culled downstream.

@@ -4,9 +4,9 @@
 // mip generator does a naive, non-premultiplied box filter, which wrecks
 // alpha-cutout block textures two ways:
 //
-//   1. fringe   — transparent texels carry arbitrary RGB (often black);
+//   1. fringe, transparent texels carry arbitrary RGB (often black);
 //                 averaging it in bleeds dark halos around cutout edges.
-//   2. erosion  — averaging alpha then hard-discarding at 0.5 shrinks
+//   2. erosion, averaging alpha then hard-discarding at 0.5 shrinks
 //                 coverage every level, so foliage/glass thins and holes
 //                 grow with distance.
 //
@@ -28,7 +28,7 @@ const ALPHA_REF = 0.5;
 
 // ── sRGB transfer (block textures are rgba8unorm-srgb) ──────────────
 //
-// downsampling must average in linear light, not gamma-encoded bytes —
+// downsampling must average in linear light, not gamma-encoded bytes,
 // matching what the GPU path does implicitly via its sRGB texture views.
 
 const SRGB_TO_LINEAR = new Float32Array(256);
@@ -57,7 +57,7 @@ export function buildVoxelMipPyramid(
     tileSize: number,
     isCutout: (layer: number) => boolean,
 ): Source[] {
-    // Pass 1 — build the raw box-filtered chain (premultiplied RGB + averaged
+    // Pass 1, build the raw box-filtered chain (premultiplied RGB + averaged
     // alpha), each level downsampled from the previous one. Coverage rescale is
     // deliberately NOT applied here so it never feeds back into deeper levels.
     const rawLevels: { data: Uint8Array; size: number }[] = [];
@@ -74,7 +74,7 @@ export function buildVoxelMipPyramid(
         srcSize = dstSize;
     }
 
-    // Pass 2 — rescale each cutout layer's alpha per level against the *base*
+    // Pass 2, rescale each cutout layer's alpha per level against the *base*
     // coverage (Castano), independent of the chain, then wrap as a Source.
     const levels: Source[] = [];
     for (const { data, size } of rawLevels) {
@@ -130,7 +130,7 @@ function downsampleLayerPremultiplied(
                     dstData[dst + ch] = linearToSrgbByte(lin / sumA);
                 }
             } else {
-                // fully transparent footprint — no coverage to weight by; keep a
+                // fully transparent footprint, no coverage to weight by; keep a
                 // plain linear average so the (invisible) RGB stays well-defined.
                 for (let ch = 0; ch < 3; ch++) {
                     const lin =

@@ -1,15 +1,15 @@
-// ShadowCasterTrait — flat dithered circular ground shadow under the node.
+// ShadowCasterTrait, flat dithered circular ground shadow under the node.
 //
 // Code-only: no control()/sync(). Pure client visual. Each frame the
 // renderer raycasts straight down from the node's world position to the
 // nearest top-facing voxel surface, then draws a dithered disc at the
-// hit point. No transparency — dither density falls off with vertical
+// hit point. No transparency, dither density falls off with vertical
 // distance so the shadow softens as the caster lifts off the ground.
 //
 // Quad orientation is hardcoded to world-XZ in shader; no per-instance
 // basis needed (axis-aligned voxel tops are the only surfaces the
 // raycast cares about). Multi-block clipping (ledges, stairs) is the
-// lazy single-ray version — same fidelity as Minecraft's entity shadow.
+// lazy single-ray version, same fidelity as Minecraft's entity shadow.
 //
 // Render path lives in `render/shadows/shadow-visuals.ts`.
 

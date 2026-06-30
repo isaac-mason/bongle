@@ -1,4 +1,4 @@
-// snapshot — render-target + readback primitive shared by every
+// snapshot, render-target + readback primitive shared by every
 // asset-pipeline icon task. owns the per-tile gpucat RenderTarget and the
 // readback into a tightly-packed RGBA8 buffer. the caller drives the actual
 // render call between begin and captureTile, so this module stays agnostic
@@ -8,7 +8,7 @@
 // the block-icons atlas task blits each tile into its own packed buffer.
 //
 // Headless / DOM-free. The renderer is left configured to render into the
-// session's RenderTarget — the caller restores pre-session state via
+// session's RenderTarget, the caller restores pre-session state via
 // `endSnapshotSession`.
 
 import { RenderTarget, readPixels, type WebGPURenderer } from 'gpucat';
@@ -37,7 +37,7 @@ export function beginSnapshotSession(renderer: WebGPURenderer, pxSize: number): 
     });
     const originalTarget = renderer.renderTarget;
     // Renderer.clearColor defaults to [0,0,0,1] opaque black. Force
-    // transparent for icon tiles (restore on end) as a defensive default —
+    // transparent for icon tiles (restore on end) as a defensive default,
     // current callers render through `createOfflinePipeline`, whose pass sets
     // its own [0,0,0,0] clear, but this keeps any bare-render caller honest.
     const originalClearColor: [number, number, number, number] = [

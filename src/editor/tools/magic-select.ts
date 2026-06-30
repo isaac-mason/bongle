@@ -101,7 +101,7 @@ function runBFS(
     const offsets = buildNeighbourOffsets(opts);
     const { limit, range } = opts;
 
-    // visited set — keyed as "wx,wy,wz" strings. bounded by limit so acceptable cost.
+    // visited set, keyed as "wx,wy,wz" strings. bounded by limit so acceptable cost.
     const visited = new Set<string>();
     const queue: Array<[number, number, number]> = [[sx, sy, sz]];
     visited.add(`${sx},${sy},${sz}`);
@@ -127,7 +127,7 @@ function runBFS(
                 if (!visited.has(key)) {
                     visited.add(key);
                     // for gap > 1 we still need to enqueue intermediate empty cells
-                    // so the BFS can "see through" them — only add if potentially reachable.
+                    // so the BFS can "see through" them, only add if potentially reachable.
                     // we skip if a previous step was non-matching (gap too wide).
                     // note: the matches check at the top of the loop handles the filtering.
                     if (
@@ -178,7 +178,7 @@ export function updateMagicSelect(
     const justDown = pointerJustDown(pointer, input);
     if (!justDown) return;
 
-    // magic-select is voxel-only — skip when target restricts to nodes
+    // magic-select is voxel-only, skip when target restricts to nodes
     const s = store.getState();
     const { selectionBehavior, magicSelectOptions, selectTarget } = s;
     if (selectTarget === 'nodes') return;

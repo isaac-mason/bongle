@@ -1,20 +1,20 @@
-// block hook dispatch — see plan-block-hooks.md for the design.
+// block hook dispatch, see plan-block-hooks.md for the design.
 //
 // one combined driver, parameterised by a SetBlockFlags mask:
 //   runBlockHooks(voxels, NOTIFY_NEIGHBOURS)               // editor + recompute only
-//   runBlockHooks(voxels, NOTIFY_NEIGHBOURS | FIRE_EVENTS) // server tick — recompute + observers + onNeighbourChanged
+//   runBlockHooks(voxels, NOTIFY_NEIGHBOURS | FIRE_EVENTS) // server tick, recompute + observers + onNeighbourChanged
 //
 // runBlockHooks may be invoked inline from setBlock (per-op gameplay default)
 // or in bulk from runNeighbourRecompute / runBlockEventHooks (editor command
 // drain, server end-of-tick drain). per-pass cursors make every pass
-// idempotent — re-running picks up only ops past the last drain cursor.
+// idempotent, re-running picks up only ops past the last drain cursor.
 // `voxels.authority.changes._draining` short-circuits re-entrant calls
 // (e.g. a hook issues setBlock with DEFAULT flags) so the outer while-loop
 // picks up the appended op naturally.
 //
 // the driver is depth-bounded so handler-issued setBlock chains can't
 // run away. observer-issued setBlocks produce ops that the next outer
-// iteration will pick up — so onBlockBuild fires for blocks placed by
+// iteration will pick up, so onBlockBuild fires for blocks placed by
 // other handlers, not just by user code.
 //
 // the bitmask on BlockHandle._hooks tracks intrinsic hooks only.
@@ -39,7 +39,7 @@ export type BlockObserverEntry = {
 };
 
 /** lazy-init observer map on first registration. caller must hold an
- *  authoritative Voxels — observers don't fire on read-only mirrors. */
+ *  authoritative Voxels, observers don't fire on read-only mirrors. */
 export function ensureBlockObservers(voxels: Voxels): Map<number, BlockObserverEntry> {
     const auth = voxels.authority;
     if (!auth) throw new Error('[bongle] ensureBlockObservers: voxels has no authority bundle');
@@ -65,7 +65,7 @@ const MAX_HOOK_DEPTH = 512;
 /**
  * editor / pure-recompute path. fires onNeighbourUpdate on the changed
  * cell and each of its 6 neighbours, depth-bounded. safe to call from
- * the editor edit-action path — no observers, no side-effect hooks.
+ * the editor edit-action path, no observers, no side-effect hooks.
  */
 export function runNeighbourRecompute(voxels: Voxels): void {
     runBlockHooks(voxels, SetBlockFlags.NOTIFY_NEIGHBOURS);
@@ -89,7 +89,7 @@ export function runBlockEventHooks(voxels: Voxels): void {
  * starting from per-pass cursors that track which ops the previous call
  * already handled. inline drains from setBlock advance the cursors;
  * end-of-tick drain picks up only the tail. keeps total work O(n) across
- * n setBlock calls — never re-scans a fully-drained prefix.
+ * n setBlock calls, never re-scans a fully-drained prefix.
  *
  * passes interleave per window so observer reactions see fully-recomputed
  * neighbour state for ops in the same batch. ops appended by hook
@@ -104,7 +104,7 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
     const changes = auth.changes;
     // re-entrant call (a hook handler issued setBlock with default flags
     // and that setBlock tried to drain inline). the outer call's
-    // while-loop will pick up the appended op — just return.
+    // while-loop will pick up the appended op, just return.
     if (changes._draining) return;
     changes._draining = true;
     try {
@@ -115,7 +115,7 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
         let depth = 0;
         while (true) {
             const end = ops.length;
-            // start each pass from its own cursor — they advance
+            // start each pass from its own cursor, they advance
             // independently (editor pre-drains neighbours but leaves
             // events for end-of-tick).
             const nStart = wantNeighbours ? changes.notifyNeighboursCursor : end;
@@ -170,7 +170,7 @@ function recomputeAt(voxels: Voxels, wx: number, wy: number, wz: number): void {
     if (newId === stateId) return;
     const newKey = registry.stateToKey[newId];
     if (!newKey) return;
-    // BULK — outer runBlockHooks while-loop picks up the appended op; no
+    // BULK, outer runBlockHooks while-loop picks up the appended op; no
     // point paying the inline-drain re-entry-guard round-trip.
     setBlock(voxels, wx, wy, wz, newKey, SetBlockFlags.BULK);
 }

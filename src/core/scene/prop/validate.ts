@@ -13,11 +13,11 @@ export type ValidationIssue = {
 };
 
 /**
- * walk `value` against `schema` and return every divergence. pure — no
+ * walk `value` against `schema` and return every divergence. pure, no
  * mutation, no side effects. an empty array means the value conforms.
  *
  * use at boundaries where untrusted data enters the engine (scene file load,
- * trait register-time defaults, inspector commits) — values are *preserved*
+ * trait register-time defaults, inspector commits), values are *preserved*
  * regardless of issues so the user can see and fix them rather than silently
  * losing the original bytes.
  */
@@ -127,7 +127,7 @@ function walk(schema: Schema, value: unknown, path: (string | number)[], issues:
             walk(schema.of, value, path, issues);
             return;
         case 'mesh':
-            // mesh is implicitly nullable — packcat-bridge wraps it as
+            // mesh is implicitly nullable, packcat-bridge wraps it as
             // p.nullable(...) and MeshTrait.meshId defaults to null.
             if (value === null) return;
             if (!isPlainObject(value)) {

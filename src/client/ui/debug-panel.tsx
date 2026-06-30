@@ -21,7 +21,7 @@ const widgetStyle = (extra: React.CSSProperties): React.CSSProperties => ({
     ...extra,
 });
 
-// ─── PerfCanvas — entire perf tab body rendered in one canvas ───────────────
+// ─── PerfCanvas, entire perf tab body rendered in one canvas ───────────────
 //
 // Previously every metric had its own <canvas> + rAF loop, and the scroll
 // effect used drawImage(canvas, canvas, …) per row per frame. With dozens
@@ -270,13 +270,13 @@ function drawPerf(
     state.scrollRegions.length = 0;
 
     if (view === 'summary') {
-        // 'summary' tab — widgets along the top: the frame-time square + strip.
+        // 'summary' tab, widgets along the top: the frame-time square + strip.
         drawFrameSquare(ctx, 0, 0, TOP_H, TOP_H, data.clientGlobal);
         drawSummaryStrip(ctx, TOP_H + GAP, 0, cssW - (TOP_H + GAP), TOP_H, data);
         return;
     }
 
-    // 'perf' = cpu breakdown, 'net' = net breakdown — one full-width column.
+    // 'perf' = cpu breakdown, 'net' = net breakdown, one full-width column.
     const scopes = buildScopes(data);
     if (view === 'net') drawColumn(ctx, 0, 0, cssW, cssH, 'net breakdown', isNetMetric, scopes, state, 'net');
     else drawColumn(ctx, 0, 0, cssW, cssH, 'cpu breakdown', isCpuMetric, scopes, state, 'cpu');
@@ -507,7 +507,7 @@ function drawMetricRow(
     ctx.fillText(id, x + 8, y + 8);
 
     // header, right-aligned: current value (bright) at the far right, with labeled
-    // min/avg/max (dim, smaller) to its left — both up here so the graph stays clean.
+    // min/avg/max (dim, smaller) to its left, both up here so the graph stays clean.
     const valText = cfg.format(last);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#eee';
@@ -526,7 +526,7 @@ function drawMetricRow(
     if (values.length === 0) return;
 
     // draw the FULL retained window (~10s), bucketed to the graph width so a
-    // longer history fits — one bar per ~pixel, each the MAX of its bucket so
+    // longer history fits, one bar per ~pixel, each the MAX of its bucket so
     // spikes stay visible even when many samples collapse into one bar.
     const peak = max || 1;
     const barCount = Math.max(1, Math.min(values.length, Math.floor(gw)));
@@ -550,7 +550,7 @@ const LOG_ROW_H = 14;
 const LOG_OVERSCAN = 6;
 
 /** subscribe to a Logs buffer at rAF cadence. returns a version int that
- *  bumps whenever new entries arrive — components read `logs.entries`
+ *  bumps whenever new entries arrive, components read `logs.entries`
  *  directly in render to avoid copying the buffer each tick. */
 function useLogsVersion(logs: Debug.Logs | null | undefined): number {
     const [version, setVersion] = useState(0);
@@ -685,7 +685,7 @@ function LogColumn({ label, logs }: { label: string; logs: Debug.Logs | null }) 
     );
 }
 
-// ─── LogsRow — middle row: client + server log columns ──────────────────────
+// ─── LogsRow, middle row: client + server log columns ──────────────────────
 
 function LogsRow({ activeRoom }: { activeRoom: ClientRoom | null }) {
     const clientLogs = activeRoom?.clientLogs ?? null;
@@ -816,11 +816,11 @@ function DepsTab() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0', minHeight: 0, gap: 8 }}>
-            {/* top — registry columns, click to select */}
+            {/* top, registry columns, click to select */}
             <div style={widgetStyle({ flex: '1 1 0', minHeight: 0, flexDirection: 'column' })}>
                 <DepsList snapshot={snapshot} selected={selected} onSelect={setSelected} />
             </div>
-            {/* bottom — selected node's neighborhood (producers ← selected → consumers) */}
+            {/* bottom, selected node's neighborhood (producers ← selected → consumers) */}
             <div style={widgetStyle({ flex: '1 1 0', minHeight: 0, padding: 0 })}>
                 <DepsGraph snapshot={snapshot} selected={selected} onSelect={setSelected} />
             </div>
@@ -872,9 +872,9 @@ function TabStrip({ tab, onSelect }: { tab: DebugTab; onSelect: (t: DebugTab) =>
     );
 }
 
-// ─── DebugPanel — fullscreen dashboard ───────────────────────────────────────
+// ─── DebugPanel, fullscreen dashboard ───────────────────────────────────────
 //
-// Default export so ui.tsx can `lazy(() => import('./debug-panel'))` — the
+// Default export so ui.tsx can `lazy(() => import('./debug-panel'))`, the
 // whole panel (all tabs, xyflow, dagre, log virtualization, metrics
 // widgets) lives in one chunk that only loads after the user opens it.
 
@@ -909,7 +909,7 @@ export default function DebugPanel({ tab }: { tab: DebugTab }) {
             {tab === 'net' && <PerfCanvas view="net" />}
             {tab === 'logs' && <LogsRow activeRoom={activeRoom} />}
             {tab === 'deps' && <DepsTab />}
-            {/* renderer tab: panel body is empty — gpucat Inspector overlay
+            {/* renderer tab: panel body is empty, gpucat Inspector overlay
                 is the actual surface, mounted directly on the canvas. */}
         </div>
     );

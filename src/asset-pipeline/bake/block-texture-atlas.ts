@@ -2,14 +2,14 @@
 //
 // reads source PNGs from the project's textures/ directory, composites
 // them into a grid atlas, and writes:
-//   resources/client/voxels-atlas.png   — the atlas image
-//   resources/client/voxels-atlas.json  — metadata (tile positions, sizes, hash)
+//   resources/client/voxels-atlas.png, the atlas image
+//   resources/client/voxels-atlas.json, metadata (tile positions, sizes, hash)
 //
 // the atlas grid order matches BlockRegistryData.textures[], so the
 // client can use textureIndex values directly as grid indices to
 // extract pixel data for each layer of its ArrayTexture.
 //
-// rebuild is gated by the `hash` field in voxels-atlas.json — the
+// rebuild is gated by the `hash` field in voxels-atlas.json, the
 // artifact IS the cache marker, no separate cache file. Same convention
 // the asset-pipeline icon tasks use; cold-start wipe just deletes the
 // artifact files. Missing source textures get a magenta placeholder tile.
@@ -36,7 +36,7 @@ const TILE_SIZE = 16;
 
 export type BuildBlockTextureAtlasOptions = {
     /** absolute path to the project root. All input + output paths resolve
-     *  against this — no reliance on process.cwd(). */
+     *  against this, no reliance on process.cwd(). */
     projectDir: string;
     /** in-memory canvases for any DrawSource frames in this module,
      *  keyed by descriptor identity. produced by the upstream
@@ -60,7 +60,7 @@ export type BlockTextureAtlasMetadata = {
     atlasHeight: number;
     /** texture names in order (same as BlockRegistryData.textures) */
     textures: string[];
-    /** content hash — sources hash + ICON_PX. Acts as the rebuild cache
+    /** content hash, sources hash + ICON_PX. Acts as the rebuild cache
      *  marker (read back on next run via readArtifactHashSync) and is
      *  folded into downstream icon tasks' input hashes so texture pixel
      *  changes invalidate the icon caches transitively. */
@@ -90,7 +90,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
     const textures = registry.textures;
 
     if (textures.length === 0) {
-        // no textures — drop any leftover artifacts so downstream icon tasks
+        // no textures, drop any leftover artifacts so downstream icon tasks
         // hash a clean slate. Deleting the JSON also clears the cache marker,
         // so the next non-empty build rebuilds unconditionally.
         try {
@@ -140,7 +140,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
         let tileBuffer: Buffer;
 
         if (typeof src !== 'string') {
-            // DrawSource — look up the in-memory bake produced upstream.
+            // DrawSource, look up the in-memory bake produced upstream.
             // Missing entry means bake didn't run / errored out: fall
             // back to magenta + warn rather than failing the whole atlas.
             const canvas = bakedDraws.get(src);

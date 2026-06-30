@@ -8,7 +8,7 @@
 // flood-fill vs inline-light seed.
 //
 // each iteration performs a bulk operation (typically CHUNK_VOLUME
-// writes) so the per-iteration teardown — re-creating the Voxels —
+// writes) so the per-iteration teardown, re-creating the Voxels,
 // is amortized across thousands of calls. divide reported time by
 // the op count to get a per-call estimate.
 
@@ -220,8 +220,8 @@ describe('setBlock — server mode (change tracking on)', () => {
 
 // ── fence onNeighbourUpdate (state recompute on placement) ──────────
 //
-// declares a stone + 4-bool fence (16 states) via the public block() API
-// — same module-scope path user code takes. onNeighbourUpdate sets
+// declares a stone + 4-bool fence (16 states) via the public block() API,
+// same module-scope path user code takes. onNeighbourUpdate sets
 // {north,east,south,west} based on solid/fence neighbours. measures the
 // full place-and-recompute flow: setBlock writes the op,
 // runNeighbourRecompute drains ops and fires onNeighbourUpdate on the
@@ -273,7 +273,7 @@ const STONE_KEY = StoneBlock.defaultKey();
 // each bench is explicit about flags so the comparison is real. BULK +
 // trailing drain mirrors the editor command path (the fast one). DEFAULT
 // (inline drain per setBlock) mirrors gameplay code that just calls
-// setBlock and expects the new fence to be connected on the next line —
+// setBlock and expects the new fence to be connected on the next line,
 // this is the slow path the bench guards against accidentally entering
 // from a bulk loop.
 
@@ -329,7 +329,7 @@ describe('setBlock + onNeighbourUpdate (fence state recompute)', () => {
         runNeighbourRecompute(voxels);
         voxels.authority!.changes.ops.length = 0;
 
-        // remove the centre fence — DEFAULT drains inline so the 4
+        // remove the centre fence, DEFAULT drains inline so the 4
         // neighbouring fences see settled state by the time setBlock returns
         setBlock(voxels, 8, 8, 8, 'air');
     });

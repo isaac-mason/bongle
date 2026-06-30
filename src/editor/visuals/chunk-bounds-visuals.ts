@@ -1,4 +1,4 @@
-// chunk-bounds-visuals.ts — wireframe boxes around every loaded voxel chunk.
+// chunk-bounds-visuals.ts, wireframe boxes around every loaded voxel chunk.
 //
 // debug overlay toggled by the editor's "show chunk boundaries" checkbox.
 // rebuilds the segment list only when the chunk set changes (size delta) or
@@ -77,7 +77,7 @@ export function update(state: ChunkBoundsVisualsState, voxels: Voxels, enabled: 
     }
 
     if (count === 0) {
-        // hide entirely — LineSegmentsGeometry requires ≥1 segment to update.
+        // hide entirely, LineSegmentsGeometry requires ≥1 segment to update.
         state.lines.visible = false;
         state.lastChunkCount = 0;
         state.lastEnabled = true;

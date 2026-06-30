@@ -1,10 +1,10 @@
-// ShadowVisuals — instanced renderer for ShadowCasterTrait.
+// ShadowVisuals, instanced renderer for ShadowCasterTrait.
 // Material lives engine-global on `ShadowResources`. This per-room
 // struct owns the geometry, per-instance storage buffer, and a
 // swap-and-pop slot allocator that keeps the buffer's [0, head) prefix
 // dense and visible.
 //
-// Architecture mirrors SpriteVisuals — shared 1×1 PlaneGeometry, one
+// Architecture mirrors SpriteVisuals, shared 1×1 PlaneGeometry, one
 // per-room storage buffer carrying pose, one Mesh in the scene drawn
 // with `mesh.count = head` instances.
 //
@@ -14,7 +14,7 @@
 // flat).
 //
 // Visibility flow per frame, per ShadowCasterTrait (casters are few, so the
-// down-ray is the only gate — no frustum check):
+// down-ray is the only gate, no frustum check):
 //   1. fetch the node's world-space position from TransformTrait
 //   2. raycastVoxels straight down to trait.maxDistance; visible iff
 //      top-face hit (ny > 0.5)
@@ -80,7 +80,7 @@ export type ShadowVisuals = {
 export function init(scene: Scene, nodes: Nodes, resources: ShadowResources): ShadowVisuals {
     const capacity = INITIAL_INSTANCE_CAPACITY;
 
-    // Shared 1×1 plane geometry — positions in [-0.5..0.5] × [-0.5..0.5].
+    // Shared 1×1 plane geometry, positions in [-0.5..0.5] × [-0.5..0.5].
     // The vertex shader interprets aPosition.xy as offsets in the world
     // XZ plane (Y comes straight from groundPos).
     const geometry = createPlaneGeometry(1, 1);
@@ -96,7 +96,7 @@ export function init(scene: Scene, nodes: Nodes, resources: ShadowResources): Sh
     const mesh = new Mesh(geometry, resources.material);
     mesh.name = 'shadow-visuals';
     mesh.frustumCulled = false;
-    // Mesh.count defaults to 1 — override so the first frame before
+    // Mesh.count defaults to 1, override so the first frame before
     // update() runs draws nothing instead of one garbage instance.
     mesh.count = 0;
     scene.add(mesh);
@@ -128,7 +128,7 @@ export function update(visuals: ShadowVisuals, voxels: Voxels, _camera: Camera):
     const stride4 = SHADOW_INSTANCE_STRIDE / 4;
 
     for (const [trait, transform] of visuals._query) {
-        // State is created on first sight regardless of visibility — it
+        // State is created on first sight regardless of visibility, it
         // tracks bounds + lastSeenFrame across frames. Slot is allocated
         // lazily when the caster becomes visible.
         let state = trait._state;
@@ -147,7 +147,7 @@ export function update(visuals: ShadowVisuals, voxels: Voxels, _camera: Camera):
         const maxDist = trait.maxDistance;
         raycastVoxels(_ray, voxels, voxels.registry, ox, oy, oz, 0, -1, 0, maxDist, 0);
 
-        // top-face hits only — sides/bottoms aren't shadow surfaces.
+        // top-face hits only, sides/bottoms aren't shadow surfaces.
         const isTopHit = _ray.hit && _ray.ny > 0.5;
 
         if (!isTopHit) {

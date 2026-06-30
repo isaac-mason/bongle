@@ -8,7 +8,7 @@ import { runDiffDetection } from './discovery';
 // ── runDiffDetection bench ───────────────────────────────────────────
 //
 // the REAL per-tick diff: a real scene graph, real trait sync codecs, real packcat
-// serialization. measures what shows up as `discovery/diff` in the perf digest —
+// serialization. measures what shows up as `discovery/diff` in the perf digest,
 // packInto, bytesEqual, storeSnapshot, the threshold compares, version bumps.
 //
 // run: `pnpm bench discovery`. capture a baseline, change the diff path, re-run,
@@ -40,7 +40,7 @@ sync(Mover, 'rot', {
 const N = 1000;
 
 // build a fresh scene of N Mover nodes and seed the diff snapshots with one pass,
-// so the benched passes measure steady state — not first-seen or construction.
+// so the benched passes measure steady state, not first-seen or construction.
 // each instance gets its own pos/rot arrays so per-node mutation is independent.
 function scene() {
     const sg = createSceneGraph();
@@ -60,7 +60,7 @@ function scene() {
 describe('runDiffDetection', () => {
     {
         // static: nothing moves. every slice is re-checked (threshold compare) and
-        // emits nothing — the steady "wasted work over unchanged" cost.
+        // emits nothing, the steady "wasted work over unchanged" cost.
         const { sg } = scene();
         bench(`${N} static nodes (no change)`, () => {
             runDiffDetection(sg);
@@ -79,7 +79,7 @@ describe('runDiffDetection', () => {
         });
     }
     {
-        // ~20% moving, rest static — a more typical frame.
+        // ~20% moving, rest static, a more typical frame.
         const { sg, movers } = scene();
         let tick = 0;
         bench(`${N} nodes, 20% moving`, () => {

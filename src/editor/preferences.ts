@@ -1,9 +1,9 @@
 /**
- * editor preferences — anything we want to persist across editor sessions
+ * editor preferences, anything we want to persist across editor sessions
  * (hotbar slots, inspector rotation mode, etc.).
  *
  * each project's editor runs on its own dev-server origin, so per-origin
- * localStorage already isolates per-project preferences — no extra
+ * localStorage already isolates per-project preferences, no extra
  * namespacing needed here.
  *
  * add a new pref by putting its key + load/save pair in this file.
@@ -15,7 +15,7 @@ import { emptyHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
 // ── low-level helpers ────────────────────────────────────────────────
 
 // Sandboxed iframes (the deployed game-client) expose `localStorage`
-// as a property but throw SecurityError on actual access — so a
+// as a property but throw SecurityError on actual access, so a
 // `typeof` guard alone isn't enough; the read/write itself has to be
 // wrapped. Same envelope handles disabled-storage / quota-exceeded.
 function readString(key: string): string | null {
@@ -32,7 +32,7 @@ function writeString(key: string, value: string): void {
         if (typeof localStorage === 'undefined') return;
         localStorage.setItem(key, value);
     } catch {
-        // sandboxed iframe / quota exceeded / storage disabled — drop
+        // sandboxed iframe / quota exceeded / storage disabled, drop
     }
 }
 
@@ -50,7 +50,7 @@ function writeJson(key: string, value: unknown): void {
     try {
         writeString(key, JSON.stringify(value));
     } catch {
-        // can't even serialize — silently drop
+        // can't even serialize, silently drop
     }
 }
 

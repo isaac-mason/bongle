@@ -1,4 +1,4 @@
-// commitVoxelOps — ship voxel edit ops to the server AND apply them eagerly
+// commitVoxelOps, ship voxel edit ops to the server AND apply them eagerly
 // to the local client voxels, so the change is visible this frame instead of
 // one server round-trip later.
 //

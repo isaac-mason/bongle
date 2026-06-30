@@ -8,18 +8,18 @@ import { clearSyncDirty, type SyncDef, type TraitBase, type TraitDef } from './t
 /* ── per-sync codecs (replication) ── */
 
 /**
- * pack/apply closures for a single SyncDef on a trait. positional —
+ * pack/apply closures for a single SyncDef on a trait. positional,
  * the array index matches the SyncDef's index in `def.syncDefs`, which
  * is also its wire key in the BinaryField envelope.
  */
 export type SyncCodec = {
     /** pack the sync slice from a trait instance to bytes. `node` is the
-     *  owning node — only read (id/name) on error to enrich the log. */
+     *  owning node, only read (id/name) on error to enrich the log. */
     pack(instance: TraitBase, node: Node): Uint8Array;
-    /** pack into a caller-provided buffer — the zero-alloc path for per-tick
+    /** pack into a caller-provided buffer, the zero-alloc path for per-tick
      *  diffing. returns the byte length written (>0), `0` when there's nothing
      *  to pack (no serdes / pack error → caller skips the slice), or the negated
-     *  required size (<0) when `u8` was too small — the caller grows to exactly
+     *  required size (<0) when `u8` was too small, the caller grows to exactly
      *  `-n` and retries once. */
     packInto(instance: TraitBase, node: Node, u8: Uint8Array, offset: number): number;
     /** unpack bytes and apply to an existing instance via syncDef.unpack */
@@ -117,12 +117,12 @@ function buildOneSyncCodec(idx: number, syncDef: SyncDef): SyncCodec {
 
 /**
  * pack/unpack/apply closures for a single ControlDef on a trait.
- * positional — the array index matches the control's index in
+ * positional, the array index matches the control's index in
  * `def.controls`, which is also its wire key in the persisted format.
  */
 export type ControlCodec = {
     /** pack the control's current value from an instance to bytes. `node`
-     *  is the owning node — only read (id/name) on error to enrich the log. */
+     *  is the owning node, only read (id/name) on error to enrich the log. */
     pack(instance: TraitBase, node: Node): Uint8Array;
     /** unpack bytes to a value (used when constructing a fresh instance via props) */
     unpack(data: Uint8Array): unknown;

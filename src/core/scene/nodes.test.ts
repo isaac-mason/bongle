@@ -105,14 +105,14 @@ control(EphemeralTrait, 'value', {
 
 /* ── traits with scripts (must be declared before getProjectModule()) ── */
 
-// trait whose script registers a live query — used by the query-lifecycle tests
+// trait whose script registers a live query, used by the query-lifecycle tests
 // to verify that script-acquired queries get evicted when the instance disposes.
 const Tracked = trait('test/tracked', {}, { persist: false });
 script(Tracked, 'track', (ctx) => {
     scriptQuery(ctx, [RigidBody]);
 });
 
-// trait whose script acquires the same query twice — exercises per-instance dedup
+// trait whose script acquires the same query twice, exercises per-instance dedup
 // (one acquire, one release on dispose, refcount stays correct).
 const TrackedTwice = trait('test/tracked-twice', {}, { persist: false });
 script(TrackedTwice, 'track', (ctx) => {
@@ -364,7 +364,7 @@ describe('findAncestor', () => {
         const phys = getTrait(parent, Physics)!;
         phys.gravity = -20;
 
-        // same object reference — mutation is visible
+        // same object reference, mutation is visible
         expect(physics.gravity).toBe(-20);
     });
 
@@ -383,7 +383,7 @@ describe('findAncestor', () => {
         const child = createNode({ name: 'C' });
         addChild(parent, child);
 
-        // both Physics and Renderer required — GP doesn't qualify, parent does
+        // both Physics and Renderer required, GP doesn't qualify, parent does
         const result = findAncestor(child, [Physics, Renderer]);
         expect(result).not.toBeNull();
         const [physics, renderer] = result!;
@@ -405,7 +405,7 @@ describe('findAncestor', () => {
         const child = createNode({ name: 'C' });
         addChild(parent, child);
 
-        // Physics is on GP, Renderer is on parent — no single ancestor has both
+        // Physics is on GP, Renderer is on parent, no single ancestor has both
         const result = findAncestor(child, [Physics, Renderer]);
         expect(result).toBeNull();
     });
@@ -476,7 +476,7 @@ describe('reorderChild', () => {
         addChild(sg.root, b);
         addChild(sg.root, c);
 
-        // order: A, B, C — move C to index 0
+        // order: A, B, C, move C to index 0
         reorderChild(sg.root, c, 0);
         expect(sg.root.children.map((n) => n.name)).toEqual(['C', 'A', 'B']);
     });
@@ -489,7 +489,7 @@ describe('reorderChild', () => {
         addChild(sg.root, a);
         addChild(sg.root, b);
 
-        // move A to index 999 — should end up at end
+        // move A to index 999, should end up at end
         reorderChild(sg.root, a, 999);
         expect(sg.root.children.map((n) => n.name)).toEqual(['B', 'A']);
     });
@@ -741,7 +741,7 @@ describe('query — acquireQuery / releaseQuery', () => {
         const before = sg.queries.size;
         query(sg, [RigidBody]);
         expect(sg.queries.size).toBe(before + 1);
-        // a second engine-only get of the same query just dedups — no acquire.
+        // a second engine-only get of the same query just dedups, no acquire.
         query(sg, [RigidBody]);
         expect(sg.queries.size).toBe(before + 1);
     });
@@ -779,7 +779,7 @@ describe('script removal on reload', () => {
         let initCount = 0;
         let disposeCount = 0;
 
-        // trait def created independent of the script's module — the built-in /
+        // trait def created independent of the script's module, the built-in /
         // cross-file case where the def outlives the edited file.
         const HmrTrait = trait('test/hmr-removal');
 
@@ -914,7 +914,7 @@ describe('query — script-instance lifecycle', () => {
         const sg = server.nodes;
         const before = sg.queries.size;
 
-        // engine-side caller — no acquire, persistent.
+        // engine-side caller, no acquire, persistent.
         const engineQ = query(sg, [Transform]);
         expect(sg.queries.size).toBe(before + 1);
 
@@ -922,7 +922,7 @@ describe('query — script-instance lifecycle', () => {
         const node = createNode({ name: 'A' });
         addChild(sg.root, node);
         addTrait(node, Tracked);
-        // Tracked queries [RigidBody], not [Transform] — so engine query is independent.
+        // Tracked queries [RigidBody], not [Transform], so engine query is independent.
         // sanity: engineQ entry still present.
         expect(sg.queries.has(engineQ.hash)).toBe(true);
 

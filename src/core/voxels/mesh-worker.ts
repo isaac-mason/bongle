@@ -4,7 +4,7 @@
 //   - one decoded BlockRegistry (re-installed on registry rebuild)
 //   - module-scope slab scratch via chunk-mesher.ts's _slab/_blockLightSlab
 //     (each worker is a separate module instance, so each gets its own
-//      private scratch — no contention with main or other workers)
+//      private scratch, no contention with main or other workers)
 //
 // Per job: main transfers two ArrayBuffers (blocks + light slab bytes)
 // plus chunk coords. Worker copies the bytes into module scratch via
@@ -28,13 +28,13 @@
 //       aabb: { min, max } | null,
 //       recycle: { blocksBuf, lightBuf,
 //                  opaqueBuf, transparentBuf, translucentBuf } }
-//         [transfer: all 5 recycle buffers — the PassMesh.quads views
+//         [transfer: all 5 recycle buffers, the PassMesh.quads views
 //          point into recycle.{opaque,transparent,translucent}Buf, so
 //          transferring the underlying ArrayBuffers carries them too]
 //
 // The worker never references DOM, Voxels, or any main-thread-only
 // resource. It can be unit-tested by importing this module's `handleMessage`
-// directly with a stub `post` function — see mesh-dispatcher.test.ts.
+// directly with a stub `post` function, see mesh-dispatcher.test.ts.
 
 import type { BlockRegistry } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
@@ -92,7 +92,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         const decoded = deserializeBlockRegistryForWorker(msg.buf);
         // Cast: decoded is a Partial<BlockRegistry> populated with every
         // table meshChunk reads. The mesher's destructure-then-read
-        // pattern at chunk-mesher.ts:1484 is the contract — unset fields
+        // pattern at chunk-mesher.ts:1484 is the contract, unset fields
         // (physics, handles) are never accessed.
         state.registry = decoded as unknown as BlockRegistry;
         state.registryVersion = msg.version;

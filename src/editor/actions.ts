@@ -1,5 +1,5 @@
 /**
- * editor action functions — unified voxel and scene mutations.
+ * editor action functions, unified voxel and scene mutations.
  *
  * each function takes the per-room store api as its first arg and a
  * ScriptContext as the second (both are available inside the editor script
@@ -8,7 +8,7 @@
  * command to the server.
  *
  * call-sites are the store closures set up in EditorScript client onInit.
- * components call e.g. useEditRoom((s) => s.createNode)(...) — they never
+ * components call e.g. useEditRoom((s) => s.createNode)(...), they never
  * import this file directly.
  */
 
@@ -73,7 +73,7 @@ function sendVoxelOps(ctx: ScriptContext, ops: VoxelOp[]): void {
 }
 
 /** resolve the active hotbar slot's block key for `$active` pattern tokens.
- *  empty string when the slot is empty or holds a non-block — the sampler
+ *  empty string when the slot is empty or holds a non-block, the sampler
  *  will fall back to air for that case, which mirrors how `build` behaves
  *  with an empty hand. */
 function activeBlockKey(state: EditRoomState): string {
@@ -249,7 +249,7 @@ export function pickBlock(state: EditRoomState, ctx: ScriptContext): void {
 }
 
 /** for each non-air voxel in the selection, set the cell directly above to
- *  `pattern` — but only when that cell is currently air. mirrors WorldEdit's
+ *  `pattern`, but only when that cell is currently air. mirrors WorldEdit's
  *  //overlay. the overlay row may sit one block outside the selection AABB. */
 export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
@@ -290,7 +290,7 @@ export function overlay(state: EditRoomState, ctx: ScriptContext, pattern: Patte
 /** worldedit-style `//walls`: paint the pattern onto every voxel in the
  *  selection whose ±x or ±z neighbour falls outside the selection. vertical
  *  neighbours don't count, so the top and bottom of the selection are left
- *  untouched — you get the 4 vertical sides only. */
+ *  untouched, you get the 4 vertical sides only. */
 export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern): number {
     const sel = state.selection;
     if (Selection.isEmpty(sel)) return 0;
@@ -330,7 +330,7 @@ export function walls(state: EditRoomState, ctx: ScriptContext, pattern: Pattern
  *  column inside the selection, finds the topmost non-air block within
  *  the column's selection-y band, then raises/lowers/flattens by
  *  `amount` blocks (clamped to the column's band). flatten target
- *  defaults to the average of column tops. no falloff or image — those
+ *  defaults to the average of column tops. no falloff or image, those
  *  are brush-only. leaves the selection intact. */
 export function elevateSelection(
     state: EditRoomState,
@@ -837,7 +837,7 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
     }
     const instance = node._traits.get(def.slot);
     if (!instance) return null;
-    // clone — captured props are retained on the action's closure for undo;
+    // clone, captured props are retained on the action's closure for undo;
     // sharing references with the live trait would let runtime mutations
     // (or a subsequent re-add) corrupt the snapshot.
     const props: Record<string, unknown> = {};
@@ -974,7 +974,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
         do() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            // capture child ids lazily — after undo + redo the reconciler will
+            // capture child ids lazily, after undo + redo the reconciler will
             // have recreated children with fresh ids.
             const childIds = n.children.map((c) => c.id);
 
@@ -988,7 +988,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
         undo() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            // children survive prefab clear as persist:true — flip them back
+            // children survive prefab clear as persist:true, flip them back
             // to persist:false before restoring the prefab so the next
             // reconcile tick destroys them and re-expands the def fresh.
             const childIds = n.children.map((c) => c.id);

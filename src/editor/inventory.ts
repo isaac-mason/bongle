@@ -2,8 +2,8 @@
  * inventory + hotbar data shapes.
  *
  * an InventoryItem is a stable, identifier-only reference to either a block
- * (by state-key) or a prefab (by id). slots store these — never object refs,
- * never registry indices — so they survive project reload and registry churn.
+ * (by state-key) or a prefab (by id). slots store these, never object refs,
+ * never registry indices, so they survive project reload and registry churn.
  *
  * the catalog is computed on demand from runtime registries (blocks + prefabs),
  * not stored. it's just a flattened list for the inventory UI to render.
@@ -28,7 +28,7 @@ export function emptyHotbar(): HotbarSlot[] {
     return Array.from({ length: HOTBAR_SIZE }, () => null);
 }
 
-/** stable string key for an item — usable as a react key or DnD id. */
+/** stable string key for an item, usable as a react key or DnD id. */
 export function inventoryItemKey(item: InventoryItem): string {
     switch (item.kind) {
         case 'block':
@@ -62,7 +62,7 @@ export function inventoryItemsEqual(a: InventoryItem | null, b: InventoryItem | 
 }
 
 /**
- * resolve display strings for an inventory item — looks up the block/prefab
+ * resolve display strings for an inventory item, looks up the block/prefab
  * def by id and returns:
  *   - `name`: human-readable name from the def (falls back to id when none)
  *   - `id`:   the stable id string (blockKey for blocks, prefabId for prefabs)
@@ -89,7 +89,7 @@ export function inventoryItemDisplay(item: InventoryItem, room: ClientRoom | nul
         }
         case 'blueprint': {
             const id = item.sceneId;
-            // strip the `blueprints/` prefix for display — the folder is
+            // strip the `blueprints/` prefix for display, the folder is
             // implied by the inventory tab.
             const short = id.startsWith(BLUEPRINT_PREFIX) ? id.slice(BLUEPRINT_PREFIX.length) : id;
             return { name: short, id: short, title: short };

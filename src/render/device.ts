@@ -1,6 +1,6 @@
 /**
- * One-shot device capability probe. Touch capability is hardware — it does
- * not change for the session — so we resolve it once at client boot and
+ * One-shot device capability probe. Touch capability is hardware, it does
+ * not change for the session, so we resolve it once at client boot and
  * stash the result on engine-client state. Per-frame predicates
  * (`isTouchDevice`) read `state.device.touch` instead of calling `matchMedia`
  * every tick.
@@ -13,7 +13,7 @@ export type Device = {
     /** touch is the PRIMARY pointer (matchMedia('(pointer: coarse)') alone, no
      *  maxTouchPoints). true on phones + tablets regardless of viewport size,
      *  false on a touchscreen laptop driven by its trackpad/mouse. this is the
-     *  "should I show touch controls" signal — see `isTouchPrimary`. */
+     *  "should I show touch controls" signal, see `isTouchPrimary`. */
     touchPrimary: boolean;
 };
 

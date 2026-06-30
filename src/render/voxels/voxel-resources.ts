@@ -1,4 +1,4 @@
-// VoxelResources — engine-global GPU resources backing all voxel rendering.
+// VoxelResources, engine-global GPU resources backing all voxel rendering.
 //
 // Owns the texture array atlas, the per-layer texture-animation buffer,
 // the unified chunk-renderer quad materials (one per pass), the GPU
@@ -91,7 +91,7 @@ export const ChunkInfo = /* @__PURE__ */ struct('VoxelChunkInfo', {
 // the expansion compute reads this and writes `quadCount` entries into
 // visibleQuads[] starting at `instanceStart`.
 //
-// localBase is section-relative — it indexes into the section's slice
+// localBase is section-relative, it indexes into the section's slice
 // of quadArena, not the arena globally:
 //   opaque / transparent → faceOffsets[face]
 //   translucent          → 0 (assumes quadOrder is identity; sort later)
@@ -121,7 +121,7 @@ export const VisibleQuad = /* @__PURE__ */ struct('VoxelVisibleQuad', {
 // per-frame CPU-built dispatch map: one entry per launched workgroup.
 // a slice with N quads emits ceil(N/EXPAND_WG_SIZE) consecutive entries,
 // each pointing at the same slice with a successive quadBase
-// (0, 64, 128, …). dispatch shape becomes [wgCount, 1, 1] — eliminates
+// (0, 64, 128, …). dispatch shape becomes [wgCount, 1, 1], eliminates
 // the dispatch.y rounding waste from sizing to maxSliceQuads.
 
 export const WgInfo = /* @__PURE__ */ struct('VoxelExpandWgInfo', {
@@ -197,7 +197,7 @@ export type PassRender = {
     visibleQuadsBuffer: GpuBuffer;
     /** CPU-built per-WG dispatch map. one entry per launched workgroup
      *  ({sliceIdx, quadBase}); a slice with N quads emits ceil(N/64)
-     *  entries. drives `dispatch=[wgCount,1,1]` — tail-only waste. */
+     *  entries. drives `dispatch=[wgCount,1,1]`, tail-only waste. */
     wgInfoBuffer: GpuBuffer;
     wgInfoData: Uint32Array;
     /** single-entry indirect: vertexCount=6, instanceCount=visibleQuadCount. */
@@ -205,7 +205,7 @@ export type PassRender = {
     indirectData: Uint32Array;
     /** number of valid entries in visibleSlicesBuffer this frame. */
     visibleSliceCount: number;
-    /** number of valid entries in wgInfoBuffer this frame — also the
+    /** number of valid entries in wgInfoBuffer this frame, also the
      *  expansion compute's dispatch.x. */
     wgCount: number;
     /** sum of quadCount across all visible slices this frame. */
@@ -216,7 +216,7 @@ export type PassRender = {
 //
 // fixed-count, slot-indexed allocator over N lock-stepped GpuBuffer
 // streams. each stream has its own `perSlot` element count but slot
-// indices are shared — allocating slot range [s, s+k) gives you the
+// indices are shared, allocating slot range [s, s+k) gives you the
 // same range in every stream.
 //
 // suballocator is OffsetAllocator (TLSF-style, 256 bins, 3-bit
@@ -282,7 +282,7 @@ export function arenaAlloc<S extends Record<string, StreamSpec>>(a: SegmentArena
     const prev = a.slotToNode.get(h.offset);
     if (prev !== undefined) {
         // OA handed back an offset whose slotToNode entry was never cleared
-        // by a matching arenaFree — bookkeeping drift. (See [voxel-drift].)
+        // by a matching arenaFree, bookkeeping drift. (See [voxel-drift].)
         throw new Error(
             `[voxel-drift][alloc-collision] arenaAlloc returned offset=${h.offset} but slotToNode still holds node=${prev}; new node=${h.node}, slots=${slots}`,
         );
@@ -355,7 +355,7 @@ export function arenaDispose<S extends Record<string, StreamSpec>>(a: SegmentAre
 
 export const QUAD_ORDER_U32S_PER_SLOT = 1;
 
-const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4; // 56 — interleaved header (40 B) + light (16 B)
+const BYTES_PER_QUAD = QUAD_STRIDE_U32S * 4; // 56, interleaved header (40 B) + light (16 B)
 const BYTES_PER_ORDER = QUAD_ORDER_U32S_PER_SLOT * 4; // 4
 
 export type QuadArenaStreams = {
@@ -411,7 +411,7 @@ export type SectionTable = {
     readonly entryU32s: number;
     /** CPU mirrors of the per-slot fields cullCPU needs to size + emit
      *  slices. AABB + iteration order live on the per-chunk `ChunkAlloc`
-     *  (shared across passes) — frustum cull runs once per chunk now. */
+     *  (shared across passes), frustum cull runs once per chunk now. */
     readonly cpuDataCount: Uint32Array; // 1 per slot (translucent slice quadCount)
     readonly cpuFaceOffsets: Uint32Array; // 7 per slot (opaque/transparent localBase per facing)
     readonly cpuFaceCounts: Uint32Array; // 7 per slot
@@ -471,7 +471,7 @@ export function createSectionTable(opts: { name: string; slotCount: number }): S
         const base = slot * entryU32s;
         // GPU side-table only carries origin + arenaBase. cull mirrors
         // below hold faceOffsets / faceCounts / dataCount /
-        // quadOrderStart — none of which the VS needs at draw time.
+        // quadOrderStart, none of which the VS needs at draw time.
         packTo(ChunkInfo, dataU32, base * 4, {
             origin: [entry.originX, entry.originY, entry.originZ],
             arenaBase: entry.dataStart,
@@ -520,7 +520,7 @@ export type ChunkAlloc = {
     transparent: PassAlloc | null;
     translucent: PassAlloc | null;
     /** chunk-level AABB, shared across all 3 passes. cullCPU iterates
-     *  ChunkAllocs and frustum-tests this once — emit slices into each
+     *  ChunkAllocs and frustum-tests this once, emit slices into each
      *  pass that has a non-null PassAlloc. */
     aabb: Box3;
 };
@@ -718,7 +718,7 @@ export function packerSetCameraPos(packer: ArenaPacker, pos: Vec3 | null): void 
 // when one of the underlying arenas / section tables runs out of room,
 // evict the chunk farthest from the current camera (excluding the one
 // being upserted) and retry. without a camera reference, evict an
-// arbitrary chunk (offline path — should never OOM in practice).
+// arbitrary chunk (offline path, should never OOM in practice).
 
 function farthestChunkKey(packer: ArenaPacker, excludeKey: string): string | null {
     let bestKey: string | null = null;
@@ -902,7 +902,7 @@ function createGeometries(
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
-        // shared quadArena bound by name — same buffers across all 3 passes.
+        // shared quadArena bound by name, same buffers across all 3 passes.
         g.setBuffer('quads', arenas.quadArena.buffers.quads);
         // engine-global GPU-built visible-quad table; VS reads
         // visibleQuads[instanceIndex] → (slot, localIdx).
@@ -942,11 +942,11 @@ export type VoxelResources = {
      *  populated by the active room's `cullCPU`. */
     passRender: Record<VoxelPass, PassRender>;
     /** engine-global per-pass Geometry. all bindings are engine-global
-     *  buffers — bound once at construction, never rebound on room swap. */
+     *  buffers, bound once at construction, never rebound on room swap. */
     geometries: Record<VoxelPass, Geometry>;
     /** resolves when the texture atlas has been fully loaded into the array texture */
     atlasReady: Promise<void>;
-    /** @internal — settled by VoxelResources.load() once atlas pixels finish uploading. */
+    /** @internal, settled by VoxelResources.load() once atlas pixels finish uploading. */
     _resolveAtlasReady: () => void;
     /** atlas manifest hash this struct was built against (null if the
      *  manifest fetch failed). */
@@ -960,7 +960,7 @@ export type VoxelResources = {
      *  `voxel-visuals.update()`. Populated by `meshDispatcher`'s onResult. */
     pendingMeshResults: MeshDispatcherResult[];
     /** chunk keys whose in-flight worker jobs were lost to a worker
-     *  crash. Drained at the top of `voxel-visuals.update()` — each is
+     *  crash. Drained at the top of `voxel-visuals.update()`, each is
      *  put back on `voxels.dirty.blocks` so the chunk gets re-dispatched
      *  next frame. */
     pendingLostChunkKeys: string[];
@@ -1065,7 +1065,7 @@ export async function load(
     // never binds a still-null cached pipeline). Timing relative to the atlas
     // load differs by environment:
     //  - client (no `decodeImage`): kick it up front and let the atlas
-    //    fetch+canvas run fire-and-forget alongside it — non-blocking, unchanged.
+    //    fetch+canvas run fire-and-forget alongside it, non-blocking, unchanged.
     //  - asset pipeline (`decodeImage` present): the atlas decode is sharp
     //    (libvips) native work that segfaults if it overlaps a Dawn pipeline
     //    compile, so await the atlas FIRST, then compile. The pipeline isn't
@@ -1100,7 +1100,7 @@ export async function load(
         }
     }
 
-    // pipeline: now safe to compile — the atlas sharp decode has finished.
+    // pipeline: now safe to compile, the atlas sharp decode has finished.
     if (serializeAtlasBeforeCompute && renderer) {
         computeReady = renderer.compileCompute(res.expandSlices);
     }
@@ -1110,7 +1110,7 @@ export async function load(
         // don't reach the `?worker&inline` query suffix that lives inside
         // mesh-worker-spawn.ts. Vite resolves it at bundle time.
         // The Worker guard lets node/happy-dom test harnesses run without
-        // a worker shim — they fall through to inline meshing.
+        // a worker shim, they fall through to inline meshing.
         const { spawnMeshWorker } = await import('./mesh-worker-spawn');
         const meshDispatcher = createMeshDispatcher({
             workerFactory: spawnMeshWorker,

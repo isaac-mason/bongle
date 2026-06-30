@@ -12,14 +12,14 @@
 // data and light are kept as separate streams rather than interleaved:
 // interleaving alternates two unrelated value distributions, which
 // shortens every RLE run and gives deflate a noisier window. encoding
-// each channel's runs contiguously is both smaller (measured 1.4–6× on
+// each channel's runs contiguously is both smaller (measured 1.4-6× on
 // structured chunks) and faster to decode (one smaller inflate, no
-// de-interleave pass). RLE before deflate still earns its keep — it
+// de-interleave pass). RLE before deflate still earns its keep, it
 // pre-collapses the long air/sky runs so deflate's window isn't spent on
 // them. see chunk-codec-bench.ts for the variant comparison.
 //
 // the light-only codec (encodeLight/decodeLight, used by chunk_light)
-// skips the deflate step — inflateSync was the dominant decode cost on
+// skips the deflate step, inflateSync was the dominant decode cost on
 // the client, and RLE alone captures most of the win for low-entropy
 // light data. see notes above encodeLight for the wire format.
 
@@ -132,7 +132,7 @@ export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light:
 // ── light codec ─────────────────────────────────────────────────────
 //
 // chunk_light payloads split the packed (sky << 12) | rgb light value into
-// two streams before RLE. sky and rgb run under very different distributions —
+// two streams before RLE. sky and rgb run under very different distributions,
 // sky correlates with the heightmap (long horizontal runs of 15 above terrain,
 // 0 below), rgb is mostly zero except near emitters. a combined-uint16 RLE
 // breaks runs whenever either channel changes; the split keeps each channel's
@@ -142,7 +142,7 @@ export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light:
 // the compression win, and inflateSync is the dominant cost on the decode
 // side. wire format is rleEncode'd Uint16Array reinterpreted as bytes.
 
-/** view a Uint16Array's underlying bytes — typically the result of rleEncode
+/** view a Uint16Array's underlying bytes, typically the result of rleEncode
  *  ready to send on the wire as a uint8Array pack field. */
 function uint16AsBytes(arr: Uint16Array): Uint8Array {
     return new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);

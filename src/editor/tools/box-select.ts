@@ -127,7 +127,7 @@ export function updateBoxSelect(
             boxSelect: { cornerA: [hv[0], hv[1], hv[2]], previewB: [hv[0], hv[1], hv[2]], locked: false },
         });
     } else {
-        // second click — commit selection.
+        // second click, commit selection.
         // when locked (keyboard-driven), use the nudged previewB; otherwise use hover voxel.
         const cornerB = after.boxSelect.locked && after.boxSelect.previewB ? after.boxSelect.previewB : hv;
         if (!cornerB) return;
@@ -171,7 +171,7 @@ export function commitBoxSelect(
         Selection.setAABB(next, minX, minY, minZ, maxX, maxY, maxZ);
     }
 
-    // nodes — origin-in-box: rasterise the box into a scratch region and
+    // nodes, origin-in-box: rasterise the box into a scratch region and
     // let the helper pick nodes whose origins fall inside.
     if (selectTarget !== 'voxels') {
         _queryRegion.chunks.clear();

@@ -21,7 +21,7 @@ export function chunkKey(cx: number, cy: number, cz: number): string {
     return `${cx},${cy},${cz}`;
 }
 
-/** chunk xz-column key — used by voxels.columns to group chunks that share an
+/** chunk xz-column key, used by voxels.columns to group chunks that share an
  *  (cx, cz) so callers (sky-light, heightmaps, surface queries) can walk a
  *  column top-down without scanning the world bbox. */
 export function chunkColumnKey(cx: number, cz: number): string {
@@ -44,7 +44,7 @@ export function worldToBlockCoord(worldCoord: number): number {
     return Math.floor(worldCoord);
 }
 
-/** world-space point at the center of a block's top face — i.e. where
+/** world-space point at the center of a block's top face, i.e. where
  *  feet land if standing on top of block `(x, y, z)`. block N occupies
  *  `[N, N+1)`, so the top-center is `(x + 0.5, y + 1, z + 0.5)`. */
 export function blockTopCenter(out: Vec3, x: number, y: number, z: number): Vec3 {
@@ -61,7 +61,7 @@ export type Chunk = {
     cy: number;
     cz: number;
 
-    /* world coordinates of chunk corner (cx*16, cy*16, cz*16) — cached for meshing. */
+    /* world coordinates of chunk corner (cx*16, cy*16, cz*16), cached for meshing. */
     wx: number;
     wy: number;
     wz: number;
@@ -125,7 +125,7 @@ export type Chunk = {
      */
     light: Uint16Array;
 
-    /** dirty flag — set when data changes, cleared by mesher. */
+    /** dirty flag, set when data changes, cleared by mesher. */
     dirty: boolean;
 
     /** monotonically increasing version of this chunk's mesh-relevant
@@ -142,7 +142,7 @@ export type Chunk = {
      *  first observation. */
     meshGen: number;
 
-    /** monotonically increasing version of this chunk's PERSISTED data —
+    /** monotonically increasing version of this chunk's PERSISTED data,
      *  blocks, light, and palette. bumped by every mutation that changes the
      *  bytes `saveVoxels` would write (setChunkBlock, setLight, resolveChunk,
      *  propagateAllLight) but NOT by mesh-only changes (boundary-neighbour
@@ -151,7 +151,7 @@ export type Chunk = {
      *  starts at 1; cloneChunk carries `src.version` (clone has identical data). */
     version: number;
 
-    /** light dirty flag — set when light[] changes, cleared after network flush. */
+    /** light dirty flag, set when light[] changes, cleared after network flush. */
     lightDirty: boolean;
 
     /**
@@ -159,13 +159,13 @@ export type Chunk = {
      * length = CHUNK_VOLUME. set to 1 by setLight when light[i] is written;
      * cleared (released back to EMPTY_LIGHT_MASK) at end-of-tick after
      * dispatch. only meaningful on the server (the client never calls
-     * setLight). idle chunks alias the shared EMPTY_LIGHT_MASK singleton —
+     * setLight). idle chunks alias the shared EMPTY_LIGHT_MASK singleton,
      * setLight COWs on first write and end-of-tick releases when count
      * drops to zero so memory stays proportional to dirty-chunk count.
      */
     lightDirtyMask: Uint8Array;
 
-    /** number of set bytes in lightDirtyMask — cheap threshold check for
+    /** number of set bytes in lightDirtyMask, cheap threshold check for
      *  the dispatchLight delta-vs-whole-chunk branch without scanning the mask. */
     lightDirtyCount: number;
 
@@ -220,7 +220,7 @@ export function createChunk(cx: number, cy: number, cz: number): Chunk {
 /**
  * shared all-AIR data + light arrays used by empty-chunk stubs on the client.
  * any writer that touches `chunk.data` or `chunk.light` MUST first compare
- * identity against these and clone (copy-on-write) before mutating — these
+ * identity against these and clone (copy-on-write) before mutating, these
  * arrays are aliased by every empty stub in the world.
  *
  * EMPTY_LIGHT is pre-filled with sky=15 (packed = 0xF000): an empty chunk
@@ -312,7 +312,7 @@ export function unlinkChunkNeighbors(chunk: Chunk): void {
 
 /**
  * get the global state id at a local position within a chunk.
- * no bounds checking — caller must ensure 0 <= x,y,z < CHUNK_SIZE.
+ * no bounds checking, caller must ensure 0 <= x,y,z < CHUNK_SIZE.
  *
  * this is the fast path for the mesher. returns numeric runtime ids.
  */
@@ -331,7 +331,7 @@ export function getChunkBlockKey(chunk: Chunk, x: number, y: number, z: number):
 /**
  * set a block at a local position within a chunk using a string key.
  * the registry is used to resolve the key to a runtime numeric id.
- * no bounds checking — caller must ensure 0 <= x,y,z < CHUNK_SIZE.
+ * no bounds checking, caller must ensure 0 <= x,y,z < CHUNK_SIZE.
  */
 export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key: string, registry: BlockRegistry): void {
     let paletteIdx = chunk.paletteMap.get(key);
@@ -366,7 +366,7 @@ export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key
  * per-block deltas. COWs the mask out of the shared EMPTY_LIGHT_MASK
  * singleton on first write. callers must still flag the chunk via
  * markChunkLightDirty (or the light.ts writeChunkLight helper that
- * folds both) to wire the chunk into the per-tick dispatch queue —
+ * folds both) to wire the chunk into the per-tick dispatch queue,
  * setLight only owns the data + mask, not the dirty-set membership.
  */
 export function setLight(chunk: Chunk, index: number, value: number): void {
@@ -386,7 +386,7 @@ export function setLight(chunk: Chunk, index: number, value: number): void {
  * re-resolve all palette keys against a new registry.
  * call this on hot reload when the registry rebuilds.
  *
- * O(palette size) — typically < 50 entries per chunk.
+ * O(palette size), typically < 50 entries per chunk.
  * unresolved keys → MISSING. newly resolved keys → live again.
  */
 export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
@@ -414,7 +414,7 @@ export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
  *
  * INVARIANT: chunk.paletteKeys is append-only across a session. compaction
  * happens only when materialising save bytes via `saveVoxels`. mutating
- * the live palette mid-session is a protocol violation — discovery's
+ * the live palette mid-session is a protocol violation, discovery's
  * voxel_chunk_ops ships the live paletteKeys to clients by reference and
  * relies on indices staying stable.
  *
@@ -423,7 +423,7 @@ export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
 export function repackChunkSnapshot(chunk: Chunk): { paletteKeys: string[]; data: Uint16Array } {
     const oldLen = chunk.paletteKeys.length;
     if (oldLen <= 1) {
-        // only air — nothing to compact. still copy data so callers may
+        // only air, nothing to compact. still copy data so callers may
         // own/serialize it without aliasing the live chunk.
         return { paletteKeys: chunk.paletteKeys.slice(), data: new Uint16Array(chunk.data) };
     }
@@ -435,7 +435,7 @@ export function repackChunkSnapshot(chunk: Chunk): { paletteKeys: string[]; data
     let usedCount = 0;
     for (let i = 0; i < oldLen; i++) if (used[i]) usedCount++;
 
-    // nothing to drop — return copies so caller owns the buffers.
+    // nothing to drop, return copies so caller owns the buffers.
     if (usedCount === oldLen) {
         return { paletteKeys: chunk.paletteKeys.slice(), data: new Uint16Array(chunk.data) };
     }
@@ -461,9 +461,9 @@ export type VoxelBlockOp = {
     cy: number;
     cz: number;
     index: number;
-    /** chunk-local palette index — what the network sends to clients. */
+    /** chunk-local palette index, what the network sends to clients. */
     data: number;
-    /** world coords — saves recomputing per delta for hook dispatch. */
+    /** world coords, saves recomputing per delta for hook dispatch. */
     wx: number;
     wy: number;
     wz: number;
@@ -483,14 +483,14 @@ export type VoxelChanges = {
     pendingLight: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
     /** chunks created this tick that need sky light seeded. drained by flushPendingLight. */
     pendingNewChunks: Chunk[];
-    /** chunks created this tick. drained by discovery — lets each player's
+    /** chunks created this tick. drained by discovery, lets each player's
      *  cursor rewind so newly-existing chunks get streamed without
      *  re-walking the whole view sphere each tick. holds the Chunk ref so
      *  consumers don't have to re-lookup. */
     addedChunks: Set<Chunk>;
     /** index of the next op the NOTIFY_NEIGHBOURS pass should consider.
      *  runBlockHooks() advances this past every op it processes, so subsequent
-     *  drains skip the already-fired prefix — keeps the inline-drain path
+     *  drains skip the already-fired prefix, keeps the inline-drain path
      *  O(n) total across n setBlock calls instead of O(n²). */
     notifyNeighboursCursor: number;
     /** same as above, for the FIRE_EVENTS pass. tracked separately because
@@ -516,7 +516,7 @@ export function createVoxelChanges(): VoxelChanges {
     };
 }
 
-/** clear ops after flush. lightEpoch is NOT cleared — it's monotonic. */
+/** clear ops after flush. lightEpoch is NOT cleared, it's monotonic. */
 export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.ops.length = 0;
     changes.addedChunks.clear();
@@ -536,10 +536,10 @@ export function _registerBlockHooksDriver(fn: (voxels: Voxels, mask: number) => 
  * flood-fill light-propagation config. when `enabled` is false,
  * `flushPendingLight` is short-circuited and `setBlock` / `ensureChunk`
  * write a flat seed value instead of queueing for BFS. `minLevel` is the
- * sky-channel seed for inline writes — `15` keeps the world fully lit,
+ * sky-channel seed for inline writes, `15` keeps the world fully lit,
  * `0` is pitch black except where blocks emit their own light.
  *
- * lives inside `VoxelsAuthority` — only meaningful when this Voxels owns
+ * lives inside `VoxelsAuthority`, only meaningful when this Voxels owns
  * the truth and drives light propagation.
  */
 export type FloodFillLightingState = {
@@ -552,7 +552,7 @@ export type FloodFillLightingState = {
  * truth: writes record ops, fire block-hook observers, and drive
  * flood-fill light propagation. null on a read-only mirror (today's
  * clients). a future client-side authoritative room allocates one of
- * these just like the server does — no type split, no env probe.
+ * these just like the server does, no type split, no env probe.
  */
 export type VoxelsAuthority = {
     /** per-tick change log for block ops, light updates, and new chunks. */
@@ -577,31 +577,31 @@ export function createVoxelsAuthority(): VoxelsAuthority {
 }
 
 /** clear per-tick state inside the authority bundle. observer registry
- *  and lighting config are NOT cleared — they outlive a tick. */
+ *  and lighting config are NOT cleared, they outlive a tick. */
 export function clearVoxelsAuthority(authority: VoxelsAuthority): void {
     clearVoxelChanges(authority.changes);
 }
 
 export type Voxels = {
     chunks: Map<string, Chunk>;
-    /** dirty index — sidecar to chunk.dirty / chunk.lightDirty flags.
+    /** dirty index, sidecar to chunk.dirty / chunk.lightDirty flags.
      *
-     *  `blocks` is the renderer tier — populated by `markChunkDirty` and
+     *  `blocks` is the renderer tier, populated by `markChunkDirty` and
      *  (post Stage 2b) also by `markChunkLightDirty` since meshChunk emits
      *  geometry+light in one pass. consumed by voxel-visuals.update().
      *
-     *  `light` is the server network tier — populated by
+     *  `light` is the server network tier, populated by
      *  `markChunkLightDirty` only. consumed by discovery's per-client
      *  chunk_light streaming. kept separate from `blocks` so the server
      *  doesn't have to filter a growing `blocks` set every tick to find
      *  light-only changes. */
     dirty: { blocks: Set<Chunk>; light: Set<Chunk> };
-    /** xz-column index — chunks at the same (cx, cz) sorted by cy descending.
+    /** xz-column index, chunks at the same (cx, cz) sorted by cy descending.
      *  maintained by `ensureChunk` and rebuilt by `loadVoxels`. lets
      *  sky-light / heightmap / surface code walk only chunks that actually
      *  exist, instead of scanning a world bbox. */
     columns: Map<string, Chunk[]>;
-    /** block registry — flat lookup tables for block type/state info.
+    /** block registry, flat lookup tables for block type/state info.
      *  stored here so setBlock/resolveAllChunks don't need a trailing registry arg.
      *  on hot reload, registry-dispatch reassigns this field directly and
      *  calls resolveAllChunks() per room. */
@@ -630,7 +630,7 @@ export function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
 }
 
 /** mark `chunk` as needing a relight. adds to BOTH `dirty.blocks` (so the
- *  client renderer remeshes — meshChunk emits geometry+light in one pass)
+ *  client renderer remeshes, meshChunk emits geometry+light in one pass)
  *  AND `dirty.light` (so the server's chunk_light streaming path can find
  *  light-only changes without filtering a growing blocks set). */
 export function markChunkLightDirty(voxels: Voxels, chunk: Chunk): void {
@@ -694,7 +694,7 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
             } else {
                 const sky = authority.floodFillLighting.minLevel & 0xf;
                 chunk.light.fill(sky << 12);
-                // no markChunkLightDirty here — initial light ships with
+                // no markChunkLightDirty here, initial light ships with
                 // voxel_chunk_full via addedChunks, and the bulk fill bypasses
                 // setLight (mask stays empty). entering the dirty queue with
                 // dirtyCount=0 would only create a ghost the dispatch fallback
@@ -796,13 +796,13 @@ function markBoundaryNeighborsDirty(
 /**
  * set a block at a world position. creates the chunk if it doesn't exist.
  *
- * `flags` controls which hook passes fire inline before this call returns —
+ * `flags` controls which hook passes fire inline before this call returns,
  * default is gameplay-coherent (`SetBlockFlags.DEFAULT` = NOTIFY_NEIGHBOURS
  * + FIRE_EVENTS), so a place-then-read sees settled state. bulk paths
  * (editor command drain, worldgen, prefab paste) should pass
  * `SetBlockFlags.BULK` and drain explicitly via runNeighbourRecompute or
  * runBlockEventHooks once at the end. inline drains from inside a hook
- * handler are guarded against re-entry — see block-hooks.runBlockHooks.
+ * handler are guarded against re-entry, see block-hooks.runBlockHooks.
  */
 export function setBlock(
     voxels: Voxels,
@@ -884,7 +884,7 @@ export function resolveAllChunks(voxels: Voxels): void {
     }
 }
 
-/** deep-copy a single chunk. neighbors are NOT copied — caller wires those. */
+/** deep-copy a single chunk. neighbors are NOT copied, caller wires those. */
 function cloneChunk(src: Chunk): Chunk {
     return {
         cx: src.cx,
@@ -914,7 +914,7 @@ function cloneChunk(src: Chunk): Chunk {
 
 /**
  * deep-copy a Voxels instance into a fresh one. the new instance owns its
- * chunk data — mutations don't affect the source. registry is shared by
+ * chunk data, mutations don't affect the source. registry is shared by
  * reference; if you need a different registry, reassign `.registry` and
  * call resolveAllChunks() on the result.
  */
@@ -934,7 +934,7 @@ export function cloneVoxels(src: Voxels): Voxels {
 }
 
 /**
- * copy all non-air blocks from `src` into `out`. preserves source coords —
+ * copy all non-air blocks from `src` into `out`. preserves source coords,
  * blocks land at the same world positions in `out`. existing blocks in
  * `out` at those positions are overwritten; blocks at positions not
  * present in the source are left alone.
@@ -948,7 +948,7 @@ export function copyVoxels(out: Voxels, src: Voxels): void {
                     const paletteIdx = chunk.data[voxelIndex(lx, ly, lz)]!;
                     const key = chunk.paletteKeys[paletteIdx];
                     if (!key || key === BLOCK_AIR) continue;
-                    // BULK — bulk copy is a transport primitive, not a place-action.
+                    // BULK, bulk copy is a transport primitive, not a place-action.
                     // caller drains if the destination has change tracking enabled.
                     setBlock(out, chunk.wx + lx, chunk.wy + ly, chunk.wz + lz, key, SetBlockFlags.BULK);
                 }

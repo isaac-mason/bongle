@@ -43,22 +43,22 @@ export const BLOCK_FLAG_LIQUID = 1 << 3;
 /** crouched character can edge-guard (anchor + clamp) on this block. */
 export const BLOCK_FLAG_SNEAK_GUARD = 1 << 4;
 
-/** block is a fence — fences connect to other fence-flagged blocks. */
+/** block is a fence, fences connect to other fence-flagged blocks. */
 export const BLOCK_FLAG_FENCE = 1 << 5;
 
-/** block is a wall — walls connect to other wall-flagged blocks. */
+/** block is a wall, walls connect to other wall-flagged blocks. */
 export const BLOCK_FLAG_WALL = 1 << 6;
 
-/** block is a glass pane / bars — panes connect to other pane-flagged blocks. */
+/** block is a glass pane / bars, panes connect to other pane-flagged blocks. */
 export const BLOCK_FLAG_PANE = 1 << 7;
 
-/** block is a door half — identifies the two cells of a door for the
+/** block is a door half, identifies the two cells of a door for the
  *  get/setDoorOpen utils (all door presets share one DoorState schema). */
 export const BLOCK_FLAG_DOOR = 1 << 8;
 
 /** a navigating agent may occupy/pass through this cell. defaults to the
  *  inverse of `collision` at registration, overridable via
- *  `block({ pathfindable })` — e.g. open doors pathable, hazards not. read by
+ *  `block({ pathfindable })`, e.g. open doors pathable, hazards not. read by
  *  the voxel pathfinding utils (core/nav). mirrors Minecraft `isPathfindable`. */
 export const BLOCK_FLAG_PATHFINDABLE = 1 << 9;
 
@@ -118,14 +118,14 @@ export function encodeVertexAnimation(va: VertexAnimation | undefined): number {
 /** no geometry (air, missing, invisible blocks). */
 export const MODEL_NONE = 0;
 
-/** standard cube — all data in stateTexCube, no mesh arrays needed. */
+/** standard cube, all data in stateTexCube, no mesh arrays needed. */
 export const MODEL_CUBE = 1;
 
-/** custom triangle mesh — data in meshXYZ dense arrays. */
+/** custom triangle mesh, data in meshXYZ dense arrays. */
 export const MODEL_MESH = 2;
 
 /**
- * liquid — cube-like geometry with a fractional top surface height.
+ * liquid, cube-like geometry with a fractional top surface height.
  * uses cubeTexIndices for textures. the mesher emits a cube whose top
  * quad is lowered to surfaceHeight[stateId] and whose side quads are
  * height-clipped (positions and UVs).
@@ -157,7 +157,7 @@ export const SHAPE_NON_PARALLEL = 4;
 /** quad with non-axis-aligned normal (vegetation cross-quads, etc.). squared-normal blend. */
 export const SHAPE_IRREGULAR = 5;
 
-/** face direction sentinel — quad has no single owning face (IRREGULAR). */
+/** face direction sentinel, quad has no single owning face (IRREGULAR). */
 export const FACE_DIR_NONE = 0xff;
 
 /** epsilon for snapping vert components to axis planes / corner positions. */
@@ -190,7 +190,7 @@ const FACE_AXIS_UW = /* @__PURE__ */ new Uint8Array([
  * mesher needs (face direction, uniform depth, per-vertex depths/normals).
  *
  * `outDepthsScratch` and `outNormalsScratch` are write-only buffers sized
- * for 4 verts (length 4 / length 12) — populated only when the resolved
+ * for 4 verts (length 4 / length 12), populated only when the resolved
  * shape needs them (NON_PARALLEL / IRREGULAR). callers copy out as needed.
  *
  * mirrors Sodium's SmoothLightPipeline shape branching at
@@ -275,7 +275,7 @@ function classifyMeshQuadShape(
     }
 
     // non-axis-aligned normal → IRREGULAR. fall back to face normal for all 4
-    // verts (BlockQuad has no per-vertex normals yet — Sodium reads
+    // verts (BlockQuad has no per-vertex normals yet, Sodium reads
     // `getAccurateNormal(i)` per vert; if/when we add per-vert normals we'd
     // copy them here instead).
     for (let i = 0; i < 4; i++) {
@@ -330,7 +330,7 @@ export type BlockRegistry = {
      * nothing in the hot loop. values are 0 or 1.
      *
      * face-order indexing matches the mesher's emit order (east, west, up,
-     * down, south, north — driven by FACE_TEX_OFFSET).
+     * down, south, north, driven by FACE_TEX_OFFSET).
      */
     cubeFaceUVs: Uint8Array;
 
@@ -347,7 +347,7 @@ export type BlockRegistry = {
     meshTexIndices: Uint16Array[];
     /**
      * dense per-quad material (MaterialType enum). parallel to meshQuads.
-     * always allocated — quads without explicit material get the block's default.
+     * always allocated, quads without explicit material get the block's default.
      */
     meshQuadMaterials: Uint8Array[];
 
@@ -465,7 +465,7 @@ export type BlockRegistry = {
 
     /**
      * dense per-shape kind, indexed by colliderId. index 0 holds SHAPE_CUBE
-     * as a sentinel — collider-id 0 is the cube fast path and never reads
+     * as a sentinel, collider-id 0 is the cube fast path and never reads
      * shapeAabbs. consumers (e.g. VCC's analytical sweep) read this to
      * dispatch.
      */
@@ -538,7 +538,7 @@ export type BlockRegistry = {
     /**
      * global state id → restitution (bounciness) coefficient. multiplied
      * with per-body restitution to produce contact restitution. defaults
-     * to 0 (no bounce — multiplies any per-body restitution down to zero,
+     * to 0 (no bounce, multiplies any per-body restitution down to zero,
      * matching today's behaviour for non-restitutive blocks).
      */
     restitution: Float32Array;
@@ -567,7 +567,7 @@ export type BlockRegistry = {
 
     /**
      * global state id → screen tint (r,g,b,a) packed as 4 floats per state.
-     * indexed as stateId * 4. a (opacity) === 0 means "no tint" — the
+     * indexed as stateId * 4. a (opacity) === 0 means "no tint", the
      * fast path on the per-frame lookup. read by the client renderer when
      * the camera sits inside a block; never touched server-side.
      */
@@ -587,7 +587,7 @@ export type BlockRegistry = {
      * `undefined` for `particles: false`, air, missing, and blocks
      * without a cube model + no author-supplied slots. default dust is
      * derived once per block (from default state's model) and shared
-     * across every state — see `deriveBlockDust` in blocks.ts.
+     * across every state, see `deriveBlockDust` in blocks.ts.
      */
     particles: (BlockParticleConfig | undefined)[];
 
@@ -665,7 +665,7 @@ export function buildBlockRegistry(
 
         handle._index = index;
         handle._baseStateId = baseStateId;
-        // intrinsic hook bitmask — observer hooks (onBuild/onBreak/onStateChange)
+        // intrinsic hook bitmask, observer hooks (onBuild/onBreak/onStateChange)
         // are tracked per-room and not reflected here.
         let hooks = 0;
         if (def.onNeighbourUpdate) hooks |= 1 << 0; // HOOK_ON_NEIGHBOUR_UPDATE
@@ -702,7 +702,7 @@ export function buildBlockRegistry(
     // air → 0
     stateToKey[AIR] = 'air';
     keyToState.set('air', AIR);
-    // missing (1) has no string key — stateToKey[1] stays ""
+    // missing (1) has no string key, stateToKey[1] stays ""
 
     for (let bi = 0; bi < orderedDefs.length; bi++) {
         const def = orderedDefs[bi]!;
@@ -724,7 +724,7 @@ export function buildBlockRegistry(
     //
     // modelTypeTable[stateId] = MODEL_NONE/MODEL_CUBE/MODEL_MESH
     // meshIdTable[stateId]    = dense mesh index (1-based, 0 = not a mesh)
-    // cube models are "dissolved" — their texture indices go into cubeTexIndices
+    // cube models are "dissolved", their texture indices go into cubeTexIndices
     // at pass 2 and no BlockModel object is stored in the registry.
 
     const _tempModels: (BlockModel | undefined)[] = new Array(totalStates);
@@ -772,8 +772,8 @@ export function buildBlockRegistry(
     let meshCount = 0; // number of custom mesh models (for dense mesh arrays)
     let colliderCount = 0; // number of custom collider shapes (for dense collider array)
 
-    // air (0) and missing (1) get CullType.NONE (0) — already zero-initialized
-    // air/missing light opacity = 0 (transparent) — already zero-initialized
+    // air (0) and missing (1) get CullType.NONE (0), already zero-initialized
+    // air/missing light opacity = 0 (transparent), already zero-initialized
     // air (0) is navigable: set PATHFINDABLE explicitly. the reserved air state
     // usually isn't a registered block, so it bypasses the per-block flag loop
     // below (where it would derive from !collision) and its flags stay 0. a
@@ -787,7 +787,7 @@ export function buildBlockRegistry(
 
         // default dust handles, derived once per block from the default
         // state's model (state 0). shared across every state of the
-        // block as the fallback for missing particle slots — keeps the
+        // block as the fallback for missing particle slots, keeps the
         // sprite + particle registry from multiplying by state count.
         // null when `particles: false`, no model, or the model isn't a cube.
         const defaultDust = resolveDefaultDust(def);
@@ -857,7 +857,7 @@ export function buildBlockRegistry(
             const collides = hasGeometry && collisionVal;
             const climbableVal = typeof def.climbable === 'function' ? def.climbable(props) : (def.climbable ?? false);
             const liquidVal = typeof def.liquid === 'function' ? def.liquid(props) : (def.liquid ?? null);
-            // pathfindable defaults to the inverse of collision — passable cells
+            // pathfindable defaults to the inverse of collision, passable cells
             // (air, plants) are navigable, solid cells are not. authors override
             // to mark colliding-but-passable (open doors) or passable-but-blocked
             // (hazards) for the nav utils.
@@ -924,7 +924,7 @@ export function buildBlockRegistry(
             particlesTable[globalId] = resolveBlockParticles(def, props, defaultDust);
 
             // resolve collider shape. explicit cube collapses to the
-            // colliderId=0 fast path — same as no shape. a non-cube shape with no
+            // colliderId=0 fast path, same as no shape. a non-cube shape with no
             // boxes has no collision geometry: assigning it a custom collider would
             // build a zero-child crashcat compound, and castRayVsShape dereferences
             // an undefined child on the next raycast (e.g. the editor cursor). leave
@@ -938,7 +938,7 @@ export function buildBlockRegistry(
                     _tempColliderShapes[globalId] = blockShapeToShape(blockShape);
                 }
             }
-            // else: 0 (cube fast path) — already zero-initialized
+            // else: 0 (cube fast path), already zero-initialized
         }
     }
 
@@ -979,7 +979,7 @@ export function buildBlockRegistry(
         }
     }
 
-    // pad to at least one entry — WebGPU rejects zero-sized storage buffers,
+    // pad to at least one entry, WebGPU rejects zero-sized storage buffers,
     // and a game with no blocks defined would otherwise produce an empty array.
     if (animEntries.length === 0) animEntries.push(1, 0, 0, 0);
     const texAnimData = new Float32Array(animEntries);
@@ -996,7 +996,7 @@ export function buildBlockRegistry(
     // ── pass 2: bake flat texture index tables + dense mesh arrays ─────
     //
     // cube models are "dissolved" into cubeTexIndices (stateId × 6 stride).
-    // no BlockModel object is stored for cubes — the mesher reads directly
+    // no BlockModel object is stored for cubes, the mesher reads directly
     // from the flat typed array.
     //
     // custom (mesh) models are compacted into dense arrays indexed by
@@ -1005,17 +1005,17 @@ export function buildBlockRegistry(
     const cubeTexIndices = new Uint16Array(totalStates * 6);
     const cubeFaceUVs = new Uint8Array(totalStates * 48);
 
-    // canonical face UVs — must mirror chunk-mesher's FACE_UVS order.
+    // canonical face UVs, must mirror chunk-mesher's FACE_UVS order.
     // mesher face index: 0=east, 1=west, 2=up, 3=down, 4=south, 5=north.
     // 8 entries per face: (u,v) × 4 corners.
     const CANONICAL_FACE_UVS = [
-        // east — v0(bottom) v1(bottom) v2(top) v3(top)
+        // east, v0(bottom) v1(bottom) v2(top) v3(top)
         0, 1, 1, 1, 1, 0, 0, 0,
         // west
         0, 1, 1, 1, 1, 0, 0, 0,
-        // up — top-down, no flip
+        // up, top-down, no flip
         0, 0, 0, 1, 1, 1, 1, 0,
-        // down — bottom-up, no flip
+        // down, bottom-up, no flip
         0, 0, 0, 1, 1, 1, 1, 0,
         // south
         0, 1, 1, 1, 1, 0, 0, 0,
@@ -1043,7 +1043,7 @@ export function buildBlockRegistry(
         }
     }
 
-    // dense mesh arrays — index 0 is unused sentinel
+    // dense mesh arrays, index 0 is unused sentinel
     const meshQuads: BlockQuad[][] = new Array(meshCount + 1);
     const meshTexIndices: Uint16Array[] = new Array(meshCount + 1);
     const meshQuadMaterials: Uint8Array[] = new Array(meshCount + 1);
@@ -1150,7 +1150,7 @@ export function buildBlockRegistry(
             const mid = meshIdTable[sid]!;
             const quads = model.quads;
 
-            // quad-only authoring — validated implicitly by the type
+            // quad-only authoring, validated implicitly by the type
             // (BlockQuad.verts is a 4-tuple). reject empty quad lists.
             if (quads.length === 0) {
                 throw new Error(`block ${sid}: custom model has zero quads`);
@@ -1165,7 +1165,7 @@ export function buildBlockRegistry(
             }
             meshTexIndices[mid] = indices;
 
-            // per-quad material — always allocate for mesh models.
+            // per-quad material, always allocate for mesh models.
             // quads without an explicit material get the block's default.
             const defaultMat = materialTable[sid]!;
             const quadMats = new Uint8Array(quads.length);
@@ -1303,7 +1303,7 @@ export function buildBlockRegistry(
     // ── compact collider shapes + per-shape data into dense arrays ──
     //
     // colliderShapes[] is the crashcat shape consumed by KCC and rigid
-    // bodies. shapeKind / shapeAabbs are the source of truth — VCC's
+    // bodies. shapeKind / shapeAabbs are the source of truth, VCC's
     // analytical sweep reads them directly without touching the crashcat
     // shape.
 
@@ -1311,7 +1311,7 @@ export function buildBlockRegistry(
     const shapeKind = new Uint8Array(colliderCount + 1); // index 0 = SHAPE_CUBE sentinel
     const shapeAabbs: AABB[][] = new Array(colliderCount + 1);
 
-    // index 0: cube sentinel — empty per-shape data, never read.
+    // index 0: cube sentinel, empty per-shape data, never read.
     const _emptyAabbs: AABB[] = [];
     shapeAabbs[0] = _emptyAabbs;
 
@@ -1417,7 +1417,7 @@ export function resolveKey(registry: BlockRegistry, key: string): number {
     let localIndex = def.defaultLocalIdx ?? 0;
     for (const [name, rawVal] of Object.entries(parsed.props)) {
         const propDef = def.states.props[name];
-        if (!propDef) continue; // unknown prop — ignore
+        if (!propDef) continue; // unknown prop, ignore
 
         let typedVal: boolean | string | number;
         if (propDef.type === 'bool') {
@@ -1460,7 +1460,7 @@ function resolveDefaultDust<P extends PropsDef>(def: BlockDef<P>): readonly Part
 }
 
 /** evaluate the sounds option for a single state. static config passes
- *  through (shared ref across all states — common case); function form
+ *  through (shared ref across all states, common case); function form
  *  is called with decoded props. `undefined` for blocks without any
  *  sounds option. */
 function resolveBlockSounds<P extends PropsDef>(def: BlockDef<P>, props: PropsValues<P>): BlockSoundConfig | undefined {

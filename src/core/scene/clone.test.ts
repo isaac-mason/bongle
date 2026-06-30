@@ -118,7 +118,7 @@ describe('cloneNode', () => {
         const source = build3LevelTree('Source');
         const sizeBefore = TEST_NODES.nodes.size;
         cloneNode(source);
-        // detached — no new nodes registered
+        // detached, no new nodes registered
         expect(TEST_NODES.nodes.size).toBe(sizeBefore);
     });
 
@@ -151,7 +151,7 @@ describe('cloneNode', () => {
         expect(cloneVec.position[1]).toBe(2);
         expect(cloneVec.position[2]).toBe(3);
 
-        // distinct refs — mutating the clone must not bleed into source
+        // distinct refs, mutating the clone must not bleed into source
         expect(cloneVec.position).not.toBe(sourceVec.position);
         vec3.set(cloneVec.position, 9, 9, 9);
         expect(sourceVec.position[0]).toBe(1);
@@ -206,7 +206,7 @@ describe('findChildByName', () => {
 
     it('excludes the input node itself', () => {
         const root = build3LevelTree('Root');
-        // root has name 'Root' — looking for 'Root' should NOT find itself
+        // root has name 'Root', looking for 'Root' should NOT find itself
         expect(findChildByName(root, 'Root')).toBeNull();
     });
 

@@ -64,7 +64,7 @@ function setup() {
 
 describe('Discovery.flush fan-out', () => {
     {
-        // nothing changes — the dirty set is empty, so per-client cost should not
+        // nothing changes, the dirty set is empty, so per-client cost should not
         // scale with N (this is the case the old whole-tree walk paid in full).
         const { server, discovery, resources, metrics } = setup();
         bench(`${N} nodes × ${M} clients — idle (no changes)`, () => {

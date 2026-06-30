@@ -3,17 +3,17 @@
 // run with: pnpm vitest bench src/core/voxels/light.bench.ts
 //
 // two suites:
-//   1. propagateAllLight — full recompute. characterizes the cost of
+//   1. propagateAllLight, full recompute. characterizes the cost of
 //      the editor "rebake light" command (and the now-removed startup
 //      pass that initializeRoom used to run). measures sky-only,
 //      emitter-only, and mixed scenarios across chunk counts.
 //
-//   2. flushPendingLight — incremental updates triggered by setBlock.
+//   2. flushPendingLight, incremental updates triggered by setBlock.
 //      models the gameplay path: place a block, drain pendingLight at
 //      end of tick. covers single-block / batch / per-tick scenarios.
 //
 // setup work is performed inside each iteration (same as setblock.bench);
-// for the incremental suite we keep the pre-lit world small (1–2 chunks)
+// for the incremental suite we keep the pre-lit world small (1-2 chunks)
 // so the propagateAllLight setup doesn't dominate the measurement of the
 // actual flush.
 
@@ -136,7 +136,7 @@ describe('propagateAllLight — full recompute', () => {
         const v = blankServerVoxels();
         // wrap a single emitter in a 1-chunk ceiling so sky never reaches it
         // (isolates block-light cost). instead: just place emitter in an
-        // otherwise sky-open world — sky still propagates normally, but the
+        // otherwise sky-open world, sky still propagates normally, but the
         // emitter adds independent block-light work.
         seedChunkCube(v, 0, 3);
         setBlock(v, 32, 32, 32, 'glowstone', SetBlockFlags.BULK);
@@ -181,7 +181,7 @@ describe('propagateAllLight — full recompute', () => {
     });
 
     bench('SPARSITY — 32 chunks, tall bbox (8x4x1 plane + 1 high, bbox=128)', () => {
-        // 8×4 plane at cy=0 plus a single chunk at cy=3 — same 32 chunks
+        // 8×4 plane at cy=0 plus a single chunk at cy=3, same 32 chunks
         // (31 floor + 1 high) but bbox now 8×4×4 = 128 (4× sparser).
         const v = blankServerVoxels();
         for (let cx = 0; cx < 8; cx++) for (let cz = 0; cz < 4; cz++) ensureChunk(v, cx, 0, cz);
@@ -215,7 +215,7 @@ describe('propagateAllLight — full recompute', () => {
 // world: 2x2x2 chunks (32x32x32), pre-lit with sky. small enough that
 // the setup propagateAllLight stays under ~10ms, so the measurement
 // reflects the flush cost rather than setup. each bench builds the
-// world fresh, runs the edit + flush, and reports the combined time —
+// world fresh, runs the edit + flush, and reports the combined time,
 // since setup is identical across iterations of one bench, the
 // *relative* cost between benches in this suite is meaningful even
 // though absolute numbers include setup.
@@ -291,7 +291,7 @@ describe('flushPendingLight — incremental updates', () => {
 
     bench('sky-pierce: drop a 1x16 air column through a ceiling', () => {
         // build a ceiling at y=15, then break a 16-tall column through it.
-        // worst case for sky cascade — every voxel below the breach relights.
+        // worst case for sky cascade, every voxel below the breach relights.
         const v = blankServerVoxels();
         seedChunkCube(v, 0, 1);
         for (let x = 0; x < 32; x++) for (let z = 0; z < 32; z++) setBlock(v, x, 15, z, 'stone', SetBlockFlags.BULK);

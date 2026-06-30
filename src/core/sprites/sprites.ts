@@ -1,9 +1,9 @@
-// sprite() declaration primitive — pure-data handle, module-scope api.
+// sprite() declaration primitive, pure-data handle, module-scope api.
 //
 // shape mirrors `blockTexture()` (`core/voxels/blocks.ts`), not `model()`:
 //   - no `_registerSpriteHandle` mutation path
 //   - no codegen barrel (`lib/kit/src/user-entry.ts` `GENERATED_BARRELS`
-//     stays `['models', 'scenes', 'sounds']` — sprites are not added)
+//     stays `['models', 'scenes', 'sounds']`, sprites are not added)
 //   - declarations are pure source data; runtime wiring is a JSON
 //     sidecar (`sprites-atlas.json`) emitted by the asset-pipeline pass
 //     and fetched by `render/sprites/sprite-resources.ts` at room init
@@ -12,7 +12,7 @@
 // fn descriptor) or an array of them (flipbook frames). URLs are
 // normalized to `.href` strings at registration so downstream consumers
 // (atlas hash, pipeline) only see one shape; nested `DrawSource`s pass
-// through untouched. No per-frame `fps` or `interpolate` here — playback
+// through untouched. No per-frame `fps` or `interpolate` here, playback
 // rate is the consumer's decision (`SpriteTrait`, `particle()` etc.).
 //
 // `DrawSource` / `ImageSource` / the `draw()` constructor live in
@@ -33,7 +33,7 @@ export { draw, normalizeImageSource } from './draw';
 
 export type SpriteOptions = {
     /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic — IDs remain the lookup
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
      *  key everywhere else. */
     name?: string;
 
@@ -42,7 +42,7 @@ export type SpriteOptions = {
      * flipbooks (one entry per frame, frames mixed freely between
      * paths/URLs and draw descriptors).
      *
-     * URLs are normalized to `.href` at registration — same convention
+     * URLs are normalized to `.href` at registration, same convention
      * as `blockTexture()`. The URL form lets 3rd-party packs ship sprite
      * pixels bundled alongside their modules (vite rewrites
      * `new URL(...)` in the client bundle; the asset pipeline resolves
@@ -60,7 +60,7 @@ export type SpriteOptions = {
 export type SpriteHandle = {
     /** sprite string id (e.g. 'sword'). */
     spriteId: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `spriteId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     name: string;

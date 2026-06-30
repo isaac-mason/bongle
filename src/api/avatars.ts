@@ -1,9 +1,9 @@
-// api/avatars.ts — script-facing avatar API: source, load, assign, release.
+// api/avatars.ts, script-facing avatar API: source, load, assign, release.
 //
-//   - sampleAvatars — pull an opaque batch from the `ServerDriver.avatars` host capability
-//   - loadAvatar    — acquire + ensure a resolved avatar's model; +1 refcount (runtime; bundled = ensure-only)
-//   - assignAvatar  — point a node's CharacterTrait at an already-loaded model (no refcount)
-//   - releaseAvatar — drop the refcount; bytes freed only when the last holder releases
+//   - sampleAvatars, pull an opaque batch from the `ServerDriver.avatars` host capability
+//   - loadAvatar, acquire + ensure a resolved avatar's model; +1 refcount (runtime; bundled = ensure-only)
+//   - assignAvatar, point a node's CharacterTrait at an already-loaded model (no refcount)
+//   - releaseAvatar, drop the refcount; bytes freed only when the last holder releases
 //
 // `loadAvatar` MUST precede `assignAvatar` for runtime avatars: acquire registers
 // the resource entry that ensure + the rig reconciler need (bundled entries are
@@ -25,7 +25,7 @@ import type { ScriptContext } from '../core/scene/scripts';
 export { assignAvatar } from '../core/avatar/model';
 
 /**
- * Pull a batch of avatars for populating NPCs. Opaque + unordered + non-stable —
+ * Pull a batch of avatars for populating NPCs. Opaque + unordered + non-stable,
  * the host owns what's in it and may return fewer than you'd like (or none).
  * Resolves to an empty array off-server (or when the host's pool is empty), so
  * callers just fall back to their default avatar. Bulk: call once and round-robin
@@ -44,7 +44,7 @@ export function sampleAvatars(ctx: ScriptContext): Promise<ResolvedAvatar[]> {
 export function loadAvatar(ctx: ScriptContext, avatar: ResolvedAvatar): { modelId: string; rigType: string } {
     const resources = ctx._runtime?.resources;
     if (!resources) {
-        // No runtime resources (degenerate context) — return identity so a bundled
+        // No runtime resources (degenerate context), return identity so a bundled
         // assign still works; runtime payloads simply won't load here.
         const rigType = avatar.source === 'runtime' ? (avatar.rigType ?? RIG_TYPE_6BONE) : RIG_TYPE_6BONE;
         return { modelId: avatar.modelId, rigType };
@@ -53,7 +53,7 @@ export function loadAvatar(ctx: ScriptContext, avatar: ResolvedAvatar): { modelI
 }
 
 /**
- * Drop the runtime refcount for an avatar model — call on NPC despawn / round
+ * Drop the runtime refcount for an avatar model, call on NPC despawn / round
  * reset so the pool doesn't accrete. No-op for bundled models or unknown ids.
  */
 export function releaseAvatar(ctx: ScriptContext, modelId: string): void {
@@ -62,7 +62,7 @@ export function releaseAvatar(ctx: ScriptContext, modelId: string): void {
 }
 
 // A small bundled name pool so ambient NPCs read as people, not "Dummy 3".
-// Wholly separate from avatar sourcing — games may use it, ignore it, or bring
+// Wholly separate from avatar sourcing, games may use it, ignore it, or bring
 // their own list.
 const DISPLAY_NAMES = [
     'Ash',

@@ -149,7 +149,7 @@ sync(AabbBodyTrait, 'linearVelocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    rate: syncRate.distance(0.1), // 0.1 m/s — resting bodies go silent
+    rate: syncRate.distance(0.1), // 0.1 m/s, resting bodies go silent
 });
 
 sync(AabbBodyTrait, 'gravityFactor', {

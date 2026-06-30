@@ -1,8 +1,8 @@
-// voxel-model-collider — convert a VoxelModel into a crashcat shape.
+// voxel-model-collider, convert a VoxelModel into a crashcat shape.
 //
 // produces a static compound shape of axis-aligned boxes covering the
 // non-air voxels. a greedy 3D merge (extend along x, then z, then y)
-// collapses dense regions into one box instead of one-per-voxel — for
+// collapses dense regions into one box instead of one-per-voxel, for
 // a solid 16³ block that's 1 box instead of 4096.
 //
 // box positions are in the same model-local space as VoxelMeshTrait
@@ -17,7 +17,7 @@ import type { VoxelModel } from './voxel-model';
 import { CHUNK_SIZE, type Voxels, voxelIndex } from './voxels';
 
 /**
- * build a static compound shape for `model` — one axis-aligned box per
+ * build a static compound shape for `model`, one axis-aligned box per
  * greedy-merged run of non-air voxels. positions are offset by -model.origin
  * so the resulting shape pivots around the model's origin.
  *
@@ -55,7 +55,7 @@ export function createVoxelModelShape(model: VoxelModel): crashcat.Shape | null 
                 let extX = 1;
                 while (x + extX < dx && grid[localIndex(x + extX, y, z, dx, dz)] === 1) extX++;
 
-                // extend along z — entire x-row at z+extZ must match
+                // extend along z, entire x-row at z+extZ must match
                 let extZ = 1;
                 zLoop: while (z + extZ < dz) {
                     for (let xx = 0; xx < extX; xx++) {
@@ -64,7 +64,7 @@ export function createVoxelModelShape(model: VoxelModel): crashcat.Shape | null 
                     extZ++;
                 }
 
-                // extend along y — entire xz-slab at y+extY must match
+                // extend along y, entire xz-slab at y+extY must match
                 let extY = 1;
                 yLoop: while (y + extY < dy) {
                     for (let zz = 0; zz < extZ; zz++) {

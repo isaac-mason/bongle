@@ -1,14 +1,14 @@
 // Rig contract for player avatars. Shared between the engine runtime
 // and the platform's upload worker.
 //
-// v1 supports a single rig type — `6bone` — sized for Minecraft-style
+// v1 supports a single rig type, `6bone`, sized for Minecraft-style
 // humanoids: a waist hub with body/head/arm_left/arm_right/leg_left/
 // leg_right siblings. Future rig types (`12bone`, creature-rigs, …) get
 // sibling exports and a new tag value; the `rig_type` column on the
-// avatar row is free text — no enum migration required.
+// avatar row is free text, no enum migration required.
 //
 // Avatars are origined so the feet sit at world y=0; no `avatar_root`
-// wrapper is required — bones may sit at scene root or under whatever
+// wrapper is required, bones may sit at scene root or under whatever
 // parent the authoring tool produces. The validator only enforces that
 // the required bones are present somewhere reachable in the scene.
 //
@@ -16,7 +16,7 @@
 // authoring guidance documented in plan-avatars.md but not enforced
 // at upload yet. The 5MB total-bytes cap is the real abuse ceiling.
 //
-// Intentionally no `@gltf-transform/core` dep here — keeps this module
+// Intentionally no `@gltf-transform/core` dep here, keeps this module
 // trivially testable + reusable. Worker adapts its parsed gltf
 // `Document` into the `RigSceneView` shape below.
 
@@ -58,11 +58,11 @@ export const RIG_6BONE_REQUIRED_NODES = [
 
 /** Attach-point sockets for gear (held items, back-mounted). The engine
  *  builds these as persistent rig nodes and derives their rest position from
- *  the parent bone's geometry when a model doesn't author one — so creators
+ *  the parent bone's geometry when a model doesn't author one, so creators
  *  get usable mount points for free; an authored node's TRS wins. */
 export const RIG_6BONE_ATTACH_NODES = [RIG_6BONE_BACK, RIG_6BONE_HAND_LEFT, RIG_6BONE_HAND_RIGHT] as const;
 
-/** Height bounds (metres) — referenced by the post-v1 validator,
+/** Height bounds (metres), referenced by the post-v1 validator,
  *  not enforced in v1. Listed here so the eventual extension has a
  *  single source of truth. */
 export const RIG_6BONE_MAX_HEIGHT_M = 3.0;
@@ -71,7 +71,7 @@ export const RIG_6BONE_MIN_HEIGHT_M = 0.5;
 /** Reserved clip names. An avatar that ships a clip at any of these
  *  names registers a per-state locomotion override; whatever it
  *  doesn't ship falls back to `builtin:avatar`. Names map 1:1 to
- *  `CharacterTrait` locomotion state fields — no state→clip
+ *  `CharacterTrait` locomotion state fields, no state→clip
  *  indirection. Additive: appending here doesn't break existing
  *  avatars (their bytes + DB rows are immutable; new uploads pick
  *  up the expanded list). */
@@ -101,7 +101,7 @@ export function validateRig6Bone(scene: RigSceneView): ValidationResult {
     const errors: string[] = [];
 
     // Walk every scene root so required bones may sit anywhere in the
-    // scene — Blockbench-style exports stash the legs as their own scene
+    // scene, Blockbench-style exports stash the legs as their own scene
     // roots, hierarchical rigs nest everything under one root.
     const present = new Set<string>();
     const walk = (n: RigNodeView): void => {

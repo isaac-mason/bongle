@@ -83,10 +83,10 @@ describe('Visibility', () => {
         const camera = makeCamera();
         camera.position = [0, 0, 30];
         mat4.lookAt(camera.matrixWorldInverse, [0, 0, 30], [0, 0, 0], [0, 1, 0]);
-        // leaf at origin — distance 30 from camera.
+        // leaf at origin, distance 30 from camera.
         const a = spawn(sg.root, visibility, [0, 0, 0]);
 
-        // generous radius — well inside inner sphere.
+        // generous radius, well inside inner sphere.
         Visibility.update(visibility, camera, 50);
         expect(a.cull.visible).toBe(true);
 

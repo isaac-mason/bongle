@@ -1,4 +1,4 @@
-// painter tool — live-application sibling of the brush tool.
+// painter tool, live-application sibling of the brush tool.
 //
 // shares the brush's options shape (shape/size/height/pattern/mask) and
 // its cell-application step (`applyStamp`). the *only* difference is
@@ -7,7 +7,7 @@
 // the paint stream during the drag. one undo action per drag, same as
 // brush.
 //
-// size 0 collapses the stamp to a single voxel — that's the classic
+// size 0 collapses the stamp to a single voxel, that's the classic
 // 1-voxel paint behaviour, no separate mode needed.
 
 import type { Input } from '../../client/input';
@@ -37,15 +37,15 @@ function sendOps(ctx: ScriptContext, ops: VoxelOp[]): void {
 // ── stroke state ───────────────────────────────────────────────────
 
 /** per-room painter stroke state. created once per edit room in EditorScript
- *  onInit and threaded into `updatePainter` — never module-scoped, so two
+ *  onInit and threaded into `updatePainter`, never module-scoped, so two
  *  joined rooms can't share one stroke. */
 export type PainterState = {
     active: boolean;
     forward: VoxelOp[];
     reverse: VoxelOp[];
-    /** cells already touched this stroke — prevents re-painting on re-crossing. */
+    /** cells already touched this stroke, prevents re-painting on re-crossing. */
     visited: Set<string>;
-    /** last cursor centre — skip the stamp rebuild when the cursor sits still. */
+    /** last cursor centre, skip the stamp rebuild when the cursor sits still. */
     lastCenter: [number, number, number] | null;
     /** idle-preview cache key (content-eq dirty check, matches brush.ts). */
     previewKey: string;
@@ -115,7 +115,7 @@ export function updatePainter(
             state.lastCenter = [hv[0], hv[1], hv[2]];
             const active = activeBlockKeyOf(useEditor.getState().hotbar, store.getState().activeSlotIndex);
             // rasterise the stamp into the scratch Selection, but only feed
-            // applyStamp the cells we haven't already painted this stroke —
+            // applyStamp the cells we haven't already painted this stroke,
             // this is what makes re-crossing painted cells a no-op.
             STAMP_SCRATCH.chunks.clear();
             STAMP_SCRATCH.nodes.clear();
@@ -125,7 +125,7 @@ export function updatePainter(
                 const k = `${wx},${wy},${wz}`;
                 if (state.visited.has(k)) return;
                 state.visited.add(k);
-                // paint is "recolour existing blocks" — air is not a block.
+                // paint is "recolour existing blocks", air is not a block.
                 // skipping air here (rather than via a default mask) keeps the
                 // rule built-in: the user's mask field is purely additive
                 // filtering on top of "only existing voxels".

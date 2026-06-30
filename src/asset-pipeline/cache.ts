@@ -16,7 +16,7 @@
  *
  * Plain Arrays and Objects fall through to the default serializer,
  * which preserves their ordering (Arrays are explicit, Objects use
- * insertion order — keep that in mind when building hash inputs).
+ * insertion order, keep that in mind when building hash inputs).
  */
 function stableReplacer(_key: string, value: unknown): unknown {
     if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {

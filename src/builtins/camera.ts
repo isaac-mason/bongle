@@ -6,15 +6,15 @@ import type { ScriptContext } from '../core/scene/scripts';
 import { type TraitType, trait } from '../core/scene/traits';
 
 /**
- * camera trait — plain projection data (fov/near/far) for a scene-tree node.
+ * camera trait, plain projection data (fov/near/far) for a scene-tree node.
  * world pose lives on the sibling TransformTrait; a controller (player /
  * orbit / fly) creates the camera node, owns this trait, and writes pose
  * through TransformTrait each frame.
  *
  * the renderer composes a per-room PerspectiveCamera each frame from
- * (camera node Transform + this trait) — see `Renderer.syncRenderCamera`.
+ * (camera node Transform + this trait), see `Renderer.syncRenderCamera`.
  *
- * persist: false — runtime-only; the camera node is recreated on every
+ * persist: false, runtime-only; the camera node is recreated on every
  * controller spin-up and never survives a scene round-trip.
  */
 export const CameraTrait = trait(
@@ -34,7 +34,7 @@ export const CameraTrait = trait(
 export type CameraTrait = TraitType<typeof CameraTrait>;
 
 /**
- * pointer attached to the control node — references the CameraTrait the
+ * pointer attached to the control node, references the CameraTrait the
  * renderer should compose the active render camera from. Controllers
  * (builtin or DIY) add this on init and set `camera` to the trait on
  * whichever node they want the renderer to see; clear / detach on dispose.
@@ -43,7 +43,7 @@ export type CameraTrait = TraitType<typeof CameraTrait>;
  * back-ref, so the renderer also gets to the sibling TransformTrait through
  * the same handle.
  *
- * persist: false — runtime-only wiring.
+ * persist: false, runtime-only wiring.
  */
 export const CameraRefTrait = trait(
     'camera-ref',
@@ -71,7 +71,7 @@ export function getControlCamera(ctx: ScriptContext): PerspectiveCamera | null {
 }
 
 /**
- * resolve the camera this script's node drives — CameraRefTrait on `ctx.node`
+ * resolve the camera this script's node drives, CameraRefTrait on `ctx.node`
  * if present (the standard wiring; POV-eligible nodes get it pre-installed
  * at room init and the editor lens points its own at a private camera),
  * falling back to the room's default camera. returns both the CameraTrait

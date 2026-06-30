@@ -4,9 +4,9 @@
 // all three drive the store's `brush` field identically: an idle shape-at-
 // hover preview, then while LMB is held a Selection accumulating every
 // centre the cursor crosses, with nothing committed until release. the
-// tools differ ONLY in what `release` does with the accumulated footprint —
+// tools differ ONLY in what `release` does with the accumulated footprint,
 // brush rasterises voxel ops, brush-select folds it into `selection`, smooth
-// runs the gaussian — so that step is a callback the tool supplies. the
+// runs the gaussian, so that step is a callback the tool supplies. the
 // cancel / start / drag / idle machinery lives here once.
 //
 // shape rasterisation is `scene/shapes.buildShape`; the preview/accumulator
@@ -21,17 +21,17 @@ import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '.
 import { type BrushShape, buildShape } from '../../scene/shapes';
 
 /** per-room brush-stroke state. created once per edit room in EditorScript
- *  onInit and threaded into the tool's update fn — never module-scoped, so
+ *  onInit and threaded into the tool's update fn, never module-scoped, so
  *  two joined rooms can't share one stroke flag. */
 export type BrushStrokeState = {
     active: boolean;
-    /** centre voxel of the last stamp merged into the stroke / preview —
+    /** centre voxel of the last stamp merged into the stroke / preview,
      *  avoids re-rasterising on every frame when the cursor sits still. */
     lastCenter: [number, number, number] | null;
     /** content-key for the idle preview ("x,y,z|shape|size|height"). a fresh
      *  Selection ref is pushed to the store only when this changes, so the
      *  selection-mesh rebuilder (reference-eq dirty check) only repaints on
-     *  real changes — not every frame. */
+     *  real changes, not every frame. */
     previewKey: string;
 };
 
@@ -44,14 +44,14 @@ export function createBrushStrokeState(): BrushStrokeState {
 export type BrushShapeOpts = { shape: BrushShape; size: number; height: number };
 
 /** module-level scratch used to rasterise one stamp's shape before merging
- *  it into the stroke accumulator. carries no state between calls — only ever
+ *  it into the stroke accumulator. carries no state between calls, only ever
  *  written then immediately read within a single synchronous update. */
 const STAMP_SCRATCH: Selection.Selection = Selection.create();
 
 /**
  * advance one frame of an accumulate-then-commit brush stroke. handles the
- * shared lifecycle — right-click cancel, stroke start, drag accumulation into
- * `store.brush`, and the idle shape-at-hover preview — and on release hands
+ * shared lifecycle, right-click cancel, stroke start, drag accumulation into
+ * `store.brush`, and the idle shape-at-hover preview, and on release hands
  * the accumulated (non-empty) Selection to `onCommit`. the caller's only job
  * is `onCommit`: it reads whatever else it needs (active block, mask,
  * selection behavior, …) off the store and turns the footprint into voxel

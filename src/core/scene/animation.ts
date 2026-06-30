@@ -42,12 +42,12 @@ export type AnimationAction = {
      *  - 'replace' (default): contributes to the layer's weighted sum
      *  - 'additive': delta from clip's first frame, added on top */
     blendMode: BlendMode;
-    /** scratch — channels resolved at top of tick. preserved across ticks
+    /** scratch, channels resolved at top of tick. preserved across ticks
      *  so the boneIndices cache below can detect a payload swap by ref
      *  identity. cleared by `Resources.modelClipChannels` returning a
      *  fresh ref on resource reload, which forces a rebuild. */
     _channels: ClipChannels | null;
-    /** parallel to `_channels.channels` — boneIndices[c] = the channel's
+    /** parallel to `_channels.channels`, boneIndices[c] = the channel's
      *  target bone index in `state.boneOrder`, or -1 if the rig doesn't
      *  contain that bone, or if `mask` filters it out. lets the inner
      *  sample loops index directly instead of doing string-keyed
@@ -59,10 +59,10 @@ export type AnimationAction = {
     _boneIndicesChannelsRef: ClipChannels | null;
     /** ref of the mask `_boneIndices` was built against. */
     _boneIndicesMaskRef: ReadonlySet<string> | null;
-    /** parallel to `_channels.channels` — last-found keyframe `lo` index per
+    /** parallel to `_channels.channels`, last-found keyframe `lo` index per
      *  channel. seeded to 0; sample functions read this as their search start
      *  and write back the new lo. for steady-time playback the typical case
-     *  is 0–1 forward steps before hitting the right interval; only sudden
+     *  is 0-1 forward steps before hitting the right interval; only sudden
      *  rewinds / loop wraps fall through to binary search. (three.js-style
      *  cached-index hybrid in `findKeyLow`.) */
     _lastKeyIdx: Int32Array | null;
@@ -90,13 +90,13 @@ export type AnimatorState = {
     /** keyed by ClipDef ref identity (sidecar singleton). lookup-only. */
     actions: Map<ClipDef, AnimationAction>;
     /** parallel flat list of every action in `actions`, in insertion order.
-     *  the tick body iterates this — `Map.values()` was ~1.8× slower per
+     *  the tick body iterates this, `Map.values()` was ~1.8× slower per
      *  pass in animation.bench.ts and the tick walks it three times. kept
      *  in sync with `actions` at `Animation.clip()` time. */
     actionsList: AnimationAction[];
 
     /**
-     * cached parent-first DFS of the rig's TransformTraits — built once on
+     * cached parent-first DFS of the rig's TransformTraits, built once on
      * first tick (when `boneOrder.length === 0`) and reused. scripts that
      * restructure the rig (e.g. attach a sword to a hand bone and want it
      * eagerly tracked) call `Animation.invalidateRig(animator)` to force a
@@ -104,10 +104,10 @@ export type AnimatorState = {
      * reconciliation pass walks bones in a single forward sweep.
      */
     boneOrder: TransformTrait[];
-    /** parallel to `boneOrder` — direct refs to `t.position` / `t.quaternion`
+    /** parallel to `boneOrder`, direct refs to `t.position` / `t.quaternion`
      *  / `t.scale` for each bone, captured during `walkBones`. saves a
      *  hidden-class property lookup per bone per tick in the layer passes.
-     *  these arrays ARE the canonical store — replace + additive write
+     *  these arrays ARE the canonical store, replace + additive write
      *  directly into them; world matrices are recomputed lazily via
      *  `getWorldMatrix` on read (Unity/three.js shape). */
     bonePos: Vec3[];
@@ -124,7 +124,7 @@ export type AnimatorState = {
     /** for each bone, exclusive end index of its DFS subtree in `boneOrder`
      *  (descendants of `bi` are the contiguous range `[bi+1, subtreeEnd[bi])`).
      *  built once during `walkBones`. lets writes mark a bone-and-descendants
-     *  range dirty in one `Uint8Array.fill` call — godot Skeleton3D's
+     *  range dirty in one `Uint8Array.fill` call, godot Skeleton3D's
      *  `nested_set_offset + nested_set_span` trick. */
     subtreeEnd: Int32Array;
     /** subtree dirty bitmap: 1 = this tick's sampling wrote to bone `bi`'s
@@ -142,7 +142,7 @@ export type AnimatorState = {
      *  (on `MeshVisualState.cull`, written by the Visibility culler): the
      *  rig is visible iff any mesh is, and coverage comes from the
      *  closest/largest one. "Is the model visible" = "is any child mesh
-     *  visible" — there's no rig-level cullable. */
+     *  visible", there's no rig-level cullable. */
     _cullMeshes: MeshTrait[];
 
     /** current LOD stride: 1 (sample every frame) / 2 / 4 / 8. Defaults 1
@@ -186,7 +186,7 @@ function createAnimatorState(): AnimatorState {
 
 /**
 /**
- * Ensure the animator node carries a ModelTrait — the shared voxel-light
+ * Ensure the animator node carries a ModelTrait, the shared voxel-light
  * slot every mesh under the rig reads. Frustum culling is per-mesh now and
  * needs no rig-level trait, so this is the only colocated trait the animator
  * installs.
@@ -198,8 +198,8 @@ function ensureModelTrait(animatorNode: Node): void {
 }
 
 /** Fold the rig's meshes' own cull entries into a rig-level answer. The rig
- *  is visible iff any mesh is (a mesh with no render-state yet — not drawn
- *  this frame, e.g. server tick or pre-first-render — counts as visible so
+ *  is visible iff any mesh is (a mesh with no render-state yet, not drawn
+ *  this frame, e.g. server tick or pre-first-render, counts as visible so
  *  animation runs at full fidelity until the renderer catches up). Coverage
  *  comes from the largest-projected visible mesh, for LOD. */
 type RigVisibility = { visible: boolean; distSq: number; extentSq: number };
@@ -213,7 +213,7 @@ function rigVisibility(state: AnimatorState): RigVisibility {
     for (let i = 0; i < meshes.length; i++) {
         const s = meshes[i]!._state;
         if (s === null) {
-            // mesh not realized by the renderer yet — treat as visible.
+            // mesh not realized by the renderer yet, treat as visible.
             visible = true;
             continue;
         }
@@ -231,7 +231,7 @@ function rigVisibility(state: AnimatorState): RigVisibility {
 
 /**
  * Reclassify the rig's sampling stride from its current projected coverage
- * (`extentSq / distSq` — monotonic with projected pixel size for a given
+ * (`extentSq / distSq`, monotonic with projected pixel size for a given
  * fov, no sqrt or projection math needed). `distSq === 0` means "no coverage
  * data yet" → treat as closest (Infinity) so the rig samples at full
  * fidelity until the culler has measured it.
@@ -240,7 +240,7 @@ function rigVisibility(state: AnimatorState): RigVisibility {
  * boundaries); holds tier choice stable between reclassifications so the
  * stride gate is a single integer compare in the steady-state hot path.
  *
- * Hysteresis: bands have asymmetric thresholds — upgrading to a smaller
+ * Hysteresis: bands have asymmetric thresholds, upgrading to a smaller
  * stride (more sampling) requires clearing the boundary by 20%, mirroring
  * the visibility distance-cull pattern. Prevents oscillation for rigs
  * drifting across a boundary.
@@ -254,13 +254,13 @@ function classifyLod(state: AnimatorState, distSq: number, extentSq: number, fra
     const current = state._lodStride;
     let stride = current;
 
-    // upgrade (smaller stride, higher fidelity) — require clearing the
+    // upgrade (smaller stride, higher fidelity), require clearing the
     // boundary by +20% so a drifting rig doesn't oscillate.
     if (stride > 4 && coverage >= 0.0012) stride = 4;
     if (stride > 2 && coverage >= 0.012) stride = 2;
     if (stride > 1 && coverage >= 0.06) stride = 1;
 
-    // downgrade (larger stride, lower fidelity) — require dropping below the
+    // downgrade (larger stride, lower fidelity), require dropping below the
     // boundary by -20%.
     if (stride < 2 && coverage < 0.04) stride = 2;
     if (stride < 4 && coverage < 0.008) stride = 4;
@@ -309,7 +309,7 @@ export function stop(action: AnimationAction): void {
 /**
  * blend `from` out and `to` in over `duration` seconds. both actions become
  * enabled; per-tick animator advances each weight toward its target. safe to
- * re-call mid-fade — sets fresh targets and the next tick continues smoothly.
+ * re-call mid-fade, sets fresh targets and the next tick continues smoothly.
  */
 export function crossFadeTo(from: AnimationAction, to: AnimationAction, duration: number): void {
     const rate = duration > 0 ? 1 / duration : Infinity;
@@ -384,7 +384,7 @@ export function clip(animator: AnimatorTrait, clipDef: ClipDef): AnimationAction
  * to a bone that should be eagerly transformed each tick alongside the
  * skeleton). a no-op if no state exists yet.
  *
- * does not invalidate `mask` sets returned by `Animation.descendants` —
+ * does not invalidate `mask` sets returned by `Animation.descendants`,
  * call that again separately if needed.
  */
 export function invalidateRig(animator: AnimatorTrait): void {
@@ -424,7 +424,7 @@ function collectDescendantNames(node: Node, out: Set<string>): void {
  * write blended TRS values back into the rig's TransformTraits via
  * setPosition/setQuaternion/setScale.
  *
- * **client**: called per render frame with the real frame delta — bones
+ * **client**: called per render frame with the real frame delta, bones
  * step smoothly at any fps. bones aren't enrolled in interpolation, so
  * `Interpolation.interpolate` doesn't touch them; `composeAndPublish` writes
  * local TRS via setPosition/etc, which marks the visual chain dirty.
@@ -443,7 +443,7 @@ function collectDescendantNames(node: Node, out: Set<string>): void {
  */
 export type Animations = {
     _query: ReturnType<typeof query<[typeof AnimatorTrait]>>;
-    /** monotonic per-room frame counter — drives LOD stride/phase gating in
+    /** monotonic per-room frame counter, drives LOD stride/phase gating in
      *  the per-animator tick. Wraps would only matter past ~10⁹ frames. */
     _frameCount: number;
     /** room-scoped counter handed out as `_lodPhase` to each animator on its
@@ -490,8 +490,8 @@ function tickAnimator(
     // ── visibility gate ─────────────────────────────────────────────────
     // Skip sample/compose/publish for off-screen rigs. `action.time` still
     // advances so resumption is seamless. "Is the rig visible" folds its
-    // meshes' own per-mesh cull results — written earlier this frame by the
-    // Visibility culler — so the rig is visible iff any of its meshes is.
+    // meshes' own per-mesh cull results, written earlier this frame by the
+    // Visibility culler, so the rig is visible iff any of its meshes is.
     const rig = rigVisibility(state);
     if (!rig.visible) {
         state._lastVisible = 0;
@@ -598,7 +598,7 @@ function tickAnimator(
 
     // clear the subtree-dirty bitmap. set per-bone by replace-normalize and
     // additive when an active action contributes to that bone's local TRS this
-    // tick — each contribution does `subtreeDirty.fill(1, bi, subtreeEnd[bi])`,
+    // tick, each contribution does `subtreeDirty.fill(1, bi, subtreeEnd[bi])`,
     // pre-baking the bone-and-descendants cascade so composeAndPublish can gate
     // on a single bool read per bone.
     subtreeDirty.fill(0, 0, boneCount);
@@ -608,7 +608,7 @@ function tickAnimator(
 
         // Fast path: single replace action, no additive on this layer. The
         // weighted-blend math degenerates (`sample × w / w = sample` for one
-        // contributor), so layerAccum + normalize is dead weight — sample
+        // contributor), so layerAccum + normalize is dead weight, sample
         // straight into bone TRS. This is the steady state for any rig
         // running `Animation.play(action)` with no crossfade or overlay.
         let replaceCount = 0;
@@ -659,7 +659,7 @@ function tickAnimator(
             continue;
         }
 
-        // Phase 1 — replace pass for this layer (weighted sum, then override).
+        // Phase 1, replace pass for this layer (weighted sum, then override).
         layerAccum.fill(0, 0, boneCount * LAYER_STRIDE);
         for (let ai = 0; ai < actionsList.length; ai++) {
             const action = actionsList[ai]!;
@@ -731,7 +731,7 @@ function tickAnimator(
 
         // override directly into trait local TRS arrays (per-bone normalize
         // from weighted sum). bones with no contribution this layer keep
-        // their prior trait value — the subtreeDirty bitmap + composeAndPublish
+        // their prior trait value, the subtreeDirty bitmap + composeAndPublish
         // gate ensures unanimated bones avoid the world-matrix recompute.
         for (let bi = 0; bi < boneCount; bi++) {
             const lo = bi * LAYER_STRIDE;
@@ -741,7 +741,7 @@ function tickAnimator(
             if (posW === 0 && quatTotal === 0 && scaleW === 0) continue;
 
             // godot Skeleton3D's nested-set trick: a write at bi forces every
-            // descendant to recompose too. scalar loop — per animation.bench.ts
+            // descendant to recompose too. scalar loop, per animation.bench.ts
             // (H4), Uint8Array.fill carries ~17ns of per-call overhead, while
             // a scalar write is ~0.5ns/byte; for typical leaf-bone ranges
             // (<30 bones) scalar wins ~7×. The rare root-bone full-rig case
@@ -780,7 +780,7 @@ function tickAnimator(
             }
         }
 
-        // Phase 2 — additive pass for this layer (delta on top of current trait local).
+        // Phase 2, additive pass for this layer (delta on top of current trait local).
         for (let ai = 0; ai < actionsList.length; ai++) {
             const action = actionsList[ai]!;
             if (!action.enabled || action.weight <= 0) continue;
@@ -889,7 +889,7 @@ function tickAnimator(
     // boneOrder (composed by this very loop before bi runs) or outside the
     // rig (refreshed via getWorldMatrix below on first dirty hit). After
     // this loop, every animated bone's worldMatrix is fresh and
-    // TRANSFORM_DIRTY_WORLD_MATRIX is clear. visual chain stays dirty —
+    // TRANSFORM_DIRTY_WORLD_MATRIX is clear. visual chain stays dirty,
     // it lazily recomposes on first renderer read against the (possibly
     // interpolated) parent.interpolatedWorldMatrix.
     //
@@ -904,7 +904,7 @@ function tickAnimator(
         // ensure parent.worldMatrix is fresh. usually a no-op: parent is
         // earlier in boneOrder and was composed by this loop's prior
         // iteration. exception: rig-root bones whose `parent transform`
-        // lives outside the rig — refresh it via the lazy walk-up.
+        // lives outside the rig, refresh it via the lazy walk-up.
         const parent = t._parent as TransformTrait | null;
         if (parent !== null && parent._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
             getWorldMatrix(parent);
@@ -925,7 +925,7 @@ function tickAnimator(
  * (TransformTrait per named node) and `boneIndex` (name → index). called
  * lazily on first tick or after `invalidateRig`.
  *
- * the animator node itself is included — gltf rigs often have the root
+ * the animator node itself is included, gltf rigs often have the root
  * node as an animation target (e.g. the 'penguin' root waddling its body).
  */
 /** collect every `MeshTrait` in the subtree (inclusive) into `out`. The
@@ -938,7 +938,7 @@ function collectMeshes(node: Node, out: MeshTrait[]): void {
 
 function rebuildBoneOrder(state: AnimatorState, animatorNode: Node): void {
     // the rig's mesh subtree just changed (initial mount or post-mount
-    // swap) — recache the meshes the visibility gate/LOD folds, and ensure
+    // swap), recache the meshes the visibility gate/LOD folds, and ensure
     // the shared-light ModelTrait now that the meshes are attached.
     state._cullMeshes.length = 0;
     collectMeshes(animatorNode, state._cullMeshes);
@@ -969,7 +969,7 @@ function rebuildBoneOrder(state: AnimatorState, animatorNode: Node): void {
  * resolve every channel's target bone once and stash the result on the
  * action, so the per-tick sample loops can skip string-keyed Map +
  * mask lookups. `-1` means "this rig has no such bone" or "the mask
- * filters it out" — both are skipped identically by the caller.
+ * filters it out", both are skipped identically by the caller.
  *
  * called only when the rig was rebuilt, the channels payload swapped
  * (resource reload), or the action's mask ref changed.
@@ -1020,7 +1020,7 @@ function rebuildActionBoneIndices(action: AnimationAction, channels: ClipChannel
     action._idxScale = idxS;
     action._boneIndices = out;
     action._boneIndicesEpoch = state.boneOrderEpoch;
-    // _lastKeyIdx is keyed to the channels payload — its slot count must
+    // _lastKeyIdx is keyed to the channels payload, its slot count must
     // match `arr.length`. cache contents are only valid against this exact
     // payload too (reload swaps `times` arrays, so cached lo positions are
     // garbage). resetting on every rebuild also covers epoch + mask
@@ -1042,8 +1042,8 @@ function walkBones(state: AnimatorState, node: Node, subtreeEndList: number[]): 
         state.boneIndex.set(node.name, myIdx);
         state.boneOrder.push(t);
         // capture trait TRS array refs once. these are stable for the
-        // lifetime of the trait — the trait creates them once in its
-        // initializer and never reassigns the field — so caching here is sound
+        // lifetime of the trait, the trait creates them once in its
+        // initializer and never reassigns the field, so caching here is sound
         // until rebuild. layer passes write into bonePos/Quat/Scale directly;
         // world matrices are computed lazily on first read via
         // `getWorldMatrix` (Unity/three.js shape).
@@ -1100,7 +1100,7 @@ function findKeyLow(times: ArrayLike<number>, kc: number, time: number, last: nu
     // same interval as last tick? overwhelmingly common at steady playback.
     if (times[lo]! <= time && time < times[lo + 1]!) return lo;
 
-    // forward 1–2 steps (time advanced into next interval).
+    // forward 1-2 steps (time advanced into next interval).
     if (lo + 2 < kc) {
         if (time < times[lo + 2]! && times[lo + 1]! <= time) return lo + 1;
     }
@@ -1108,7 +1108,7 @@ function findKeyLow(times: ArrayLike<number>, kc: number, time: number, last: nu
         if (time < times[lo + 3]! && times[lo + 2]! <= time) return lo + 2;
     }
 
-    // backward 1 step (rewind by a sliver — rare but cheap to check).
+    // backward 1 step (rewind by a sliver, rare but cheap to check).
     if (lo > 0 && times[lo - 1]! <= time && time < times[lo]!) return lo - 1;
 
     // fall back to binary search (loop wrap, scrub, first tick).

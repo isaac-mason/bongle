@@ -1,6 +1,6 @@
 // reusable number input matching the tool-panel style. clamps on commit
-// (`min` / `max`) and falls back to `min` (or 0) when the field is empty
-// — that matches the existing parseInt(...)||1 pattern in magic-select.
+// (`min` / `max`) and falls back to `min` (or 0) when the field is empty,
+// that matches the existing parseInt(...)||1 pattern in magic-select.
 //
 // pair with <Range> for slider+input rows. omitting `max` lets the user
 // type values beyond the paired slider's range, which is the intended

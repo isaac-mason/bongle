@@ -1,9 +1,9 @@
 /**
- * src/core/resource-loader.ts — the engine's environment resource-I/O capability.
+ * src/core/resource-loader.ts, the engine's environment resource-I/O capability.
  *
  * Injected into the engine and carried on `Resources` (passed to the texture
  * loaders). Each environment supplies its own:
- *   - client: `loadBytes` = fetch(assetUrl); NO `decodeImage` — the client uses
+ *   - client: `loadBytes` = fetch(assetUrl); NO `decodeImage`, the client uses
  *     its DOM image path (createImageBitmap / canvas) inline, unchanged.
  *   - asset pipeline (src/asset-pipeline): `loadBytes` = disk read; `decodeImage`
  *     = sharp.
@@ -19,7 +19,7 @@ export type ResourceLoader = {
     loadBytes(url: string): Promise<Uint8Array>;
     /**
      * Decode encoded image bytes → RGBA + dimensions. Present ONLY where the
-     * environment has no DOM image APIs — i.e. the asset pipeline. When present,
+     * environment has no DOM image APIs, i.e. the asset pipeline. When present,
      * the texture loaders take their pipeline branch (loadBytes + decodeImage);
      * when absent (the client), they use the browser DOM path unchanged.
      */

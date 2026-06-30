@@ -1,4 +1,4 @@
-// canonical directional placement resolvers — pure functions of the
+// canonical directional placement resolvers, pure functions of the
 // placement ctx (hit normal, hit point, camera yaw). single source of truth
 // for "which way does a block face when placed", shared by every directional
 // block preset and available to user-defined blocks. replaces the old
@@ -29,7 +29,7 @@ export function axisFromPlaceCtx(ctx: BlockPlaceCtx): Axis {
     return 'z';
 }
 
-/** 6-dir facing from the hit normal — block points away from the clicked
+/** 6-dir facing from the hit normal, block points away from the clicked
  *  surface (pistons, observers). */
 export function facing6FromPlaceCtx(ctx: BlockPlaceCtx): Facing6 {
     const ax = Math.abs(ctx.normalX);
@@ -40,7 +40,7 @@ export function facing6FromPlaceCtx(ctx: BlockPlaceCtx): Facing6 {
     return ctx.normalZ >= 0 ? 'south' : 'north';
 }
 
-/** 4-dir facing toward the placer — wall click → opposite of the clicked face
+/** 4-dir facing toward the placer, wall click → opposite of the clicked face
  *  (hit-normal direction); floor/ceiling click → camera yaw. ladders, stairs,
  *  doors, signs. */
 export function facing4FromPlaceCtx(ctx: BlockPlaceCtx): Facing4 {
@@ -57,7 +57,7 @@ export function facing4FromPlaceCtx(ctx: BlockPlaceCtx): Facing4 {
     return fz >= 0 ? 'south' : 'north';
 }
 
-/** top/bottom half for slab/stair/trapdoor/door — top face click → bottom of
+/** top/bottom half for slab/stair/trapdoor/door, top face click → bottom of
  *  the cell above; bottom face → top; wall click → by where on the wall. */
 export function halfFromPlaceCtx(ctx: BlockPlaceCtx): 'bottom' | 'top' {
     if (ctx.normalY > 0.5) return 'bottom';

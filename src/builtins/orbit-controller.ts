@@ -1,5 +1,5 @@
 /**
- * orbit controller script — orbit camera controller.
+ * orbit controller script, orbit camera controller.
  *
  * polls blocks' Input each frame instead of attaching DOM listeners (only
  * exception: contextmenu suppression so right-drag pan doesn't pop the menu).
@@ -33,7 +33,7 @@ const INITIAL_TARGET_DISTANCE = 5;
  * (left-drag rotate, right-drag pan, wheel dolly).
  *
  * `target` is the world-space focal point the camera orbits / pans around.
- * mutable — pan writes back into it and the editor reconcile loop seeds it
+ * mutable, pan writes back into it and the editor reconcile loop seeds it
  * on takeover.
  *
  * `eye` is the initial world-space camera position. consumed once on
@@ -84,7 +84,7 @@ script(
         const viewport = client.state!.viewport;
         const mk = input.mouseKeyboard;
 
-        // ── camera — resolved through CameraRefTrait on ctx.node (with fallback
+        // ── camera, resolved through CameraRefTrait on ctx.node (with fallback
         // to the room's default at client.camera), so editor lenses that point
         // editorNode's CameraRefTrait at a lens-private camera drive their own
         // camera. camera-node lifecycle is owned by whoever installed the ref
@@ -96,7 +96,7 @@ script(
         // mirror targets for the orbit eye position. orbit only writes to
         // cameraTransform (a separate scene-root camera node), so ctx.node's
         // TransformTrait never moves. see fly-controller for the full
-        // rationale — same two cases (real edit room: ctx.node ===
+        // rationale, same two cases (real edit room: ctx.node ===
         // room.playerNode is the server-authoritative anchor; local lens:
         // ctx.node is client-only and we additionally mirror into
         // room.playerNode so owner-sync carries the anchor to the server).
@@ -158,7 +158,7 @@ script(
 
         onFrame(ctx, (_args) => {
             if (getControlNode(ctx) !== ctx.node) return;
-            // Skip until the viewport has a real size — the ResizeObserver
+            // Skip until the viewport has a real size, the ResizeObserver
             // hasn't fired yet on the first frame(s) after attach. Without
             // this, the `viewport.height || 1` fallback below divides mouse
             // deltas by 1 instead of ~the canvas height, amplifying any

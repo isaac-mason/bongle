@@ -31,7 +31,7 @@ import type { BrushShape } from './scene/shapes';
 // chat tokenize splits on spaces, so a /set arg is a single space-free
 // token. that's fine for patterns (`,` and `N%` are space-free) and for
 // most masks (`,`, `!`, `#`, `%`). top-level space intersection like
-// `!air stone` is unreachable until the tokenizer learns quoting — at
+// `!air stone` is unreachable until the tokenizer learns quoting, at
 // which point this arg type still works on the un-quoted contents.
 
 // strip a `N%` weight prefix from a pattern segment, returning the rest.
@@ -79,7 +79,7 @@ function maskToString(m: Mask): string {
 }
 
 // candidate block id + the hint shown next to it. registry defs become
-// candidates, plus `air` — a valid clear/erase token for `/set` + `/replace`
+// candidates, plus `air`, a valid clear/erase token for `/set` + `/replace`
 // that isn't a placeable block, so it carries its own hint instead of a name.
 type BlockCandidate = { id: string; detail?: string };
 
@@ -128,7 +128,7 @@ export function installEditorChatCommands(
 
     // pattern token: comma-split (bracket-aware) random list; each segment
     // may have a leading `N%`. suggestion targets the trailing segment.
-    // for patterns, in-selection block ids surface first too — handy for
+    // for patterns, in-selection block ids surface first too, handy for
     // /set when you want to refill using what's already there.
     const PatternArg: ArgType<Pattern> = {
         name: 'pattern',
@@ -162,7 +162,7 @@ export function installEditorChatCommands(
             }
         },
         suggest: (partial) => {
-            // `#existing` / `%N` are not block suggestions — nothing useful to
+            // `#existing` / `%N` are not block suggestions, nothing useful to
             // complete inside them.
             if (partial.startsWith('#') || partial.startsWith('%')) return [];
             // unwrap leading `!` (possibly stacked) and remember it for re-prefix
@@ -181,7 +181,7 @@ export function installEditorChatCommands(
     };
 
     // prepend in-selection blocks (fuzzy-ranked) as `(in selection)`
-    // suggestions, then fall back to the registry — deduped so a block
+    // suggestions, then fall back to the registry, deduped so a block
     // doesn't appear twice.
     function withSelectionFirst(prefix: string, partial: string): Suggestion[] {
         const inSel = fuzzyRank(partial, selectionBlockIds(), (id) => id).map((r) => r.item);

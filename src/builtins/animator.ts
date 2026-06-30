@@ -1,4 +1,4 @@
-// AnimatorTrait — name-keyed animation playback for a rig of TransformTraits.
+// AnimatorTrait, name-keyed animation playback for a rig of TransformTraits.
 //
 // the runtime (sampling, blending, action lifecycle) lives in
 // core/scene/animator.ts; this file is just the trait def. user-facing
@@ -22,7 +22,7 @@ export const AnimatorTrait = trait('animator', {
      *
      * Set false for rigs whose bone positions drive gameplay (hit
      * detection on a weapon bone, attached colliders, raycasts against
-     * skeleton). Defaults true — most rigs are visuals-only.
+     * skeleton). Defaults true, most rigs are visuals-only.
      */
     lod: true,
 });

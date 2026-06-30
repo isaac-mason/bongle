@@ -1,7 +1,7 @@
 // Starter pack block handles.
 //
 // Textures come from `./block-textures`, sound presets from
-// `./block-sound-presets` — pure composition here. Each block is its
+// `./block-sound-presets`, pure composition here. Each block is its
 // own `export const` so the package index can re-export them as
 // `export * as blocks` and bundlers can drop unused declarations.
 
@@ -31,7 +31,7 @@ export const grass = block('starter:grass', {
 });
 
 // farmland (tilled dirt) and dirt path (flattened dirt). both sit 1px below a
-// full cube via surfaceHeight — the mesher lowers the top quad and clips the
+// full cube via surfaceHeight, the mesher lowers the top quad and clips the
 // side quads to match. CullType.NONE so adjacent full blocks still draw their
 // faces flush down past the lowered lip (a SOLID cull would over-cull and leave
 // a see-through gap); lightOpacity 15 keeps them light-blocking like dirt.
@@ -129,7 +129,7 @@ export const cobblestoneWall = blockPreset.wall(
 );
 // full glass cube. transparent (alpha-cutout) like the glass pane, with
 // CullType.SELF so a wall of glass culls its internal shared faces and only
-// the outer shell draws — adjacent glass reads as one clear pane.
+// the outer shell draws, adjacent glass reads as one clear pane.
 export const glass = block('starter:glass', {
     name: 'Glass',
     model: () => ({ type: 'cube', textures: { all: { texture: tex.glass } } }),
@@ -222,7 +222,7 @@ export const oakFence = blockPreset.fence(
 );
 export const torch = blockPreset.torch('starter:torch', tex.torch, { name: 'Torch', sounds: soundPreset.wood });
 
-// rgb variants — same preset, colored-flame texture + custom lightEmission per channel.
+// rgb variants, same preset, colored-flame texture + custom lightEmission per channel.
 export const redTorch = blockPreset.torch('starter:red_torch', tex.redTorch, {
     name: 'Red Torch',
     lightEmission: [15, 0, 0],
@@ -239,7 +239,7 @@ export const blueTorch = blockPreset.torch('starter:blue_torch', tex.blueTorch, 
     sounds: soundPreset.wood,
 });
 
-// wool — 15 dye colors mirroring Minecraft's palette (light_blue omitted;
+// wool, 15 dye colors mirroring Minecraft's palette (light_blue omitted;
 // no source texture). soft cloth: leaves sounds (snappy dig).
 export const woolWhite = block('starter:wool_white', {
     name: 'White Wool',

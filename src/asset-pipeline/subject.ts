@@ -1,8 +1,8 @@
 // shared asset-pipeline machinery for rendering a populated room into a
 // single 256² icon tile. scene-icon and prefab-icon differ only in how they
 // SEED the room (deserialize a scene's voxels + nodes vs. tick a prefab
-// anchor); everything after — preload models, wait for referenced models +
-// GPU upload, light, frame, render, read back — is identical and lives here.
+// anchor); everything after, preload models, wait for referenced models +
+// GPU upload, light, frame, render, read back, is identical and lives here.
 
 import type { ComputeDispatch } from 'gpucat';
 import { type Box3, box3, type Mat4 } from 'mathcat';
@@ -33,7 +33,7 @@ export const SUBJECT_ICON_PX = 256;
 /** poll budget for async loads (atlas + models + cull-compute compile). */
 const WAIT_TIMEOUT_MS = 5000;
 const WAIT_STEP_MS = 16;
-/** post-upload settle for image decode + atlas patch — generous so textures land. */
+/** post-upload settle for image decode + atlas patch, generous so textures land. */
 const TEXTURE_SETTLE_MS = 300;
 
 /* ── async helpers ────────────────────────────────────────────────── */
@@ -53,7 +53,7 @@ export async function waitFor(predicate: () => boolean, label: string, timeoutMs
  *
  * Both subjects need this BEFORE seeding: prefab `apply` bodies (and any
  * embedded-prefab `apply` inside a scene) dereference ModelHandle.scene /
- * .meshes during `Prefab.tick` — without a loaded payload, `cloneModel(
+ * .meshes during `Prefab.tick`, without a loaded payload, `cloneModel(
  * undefined)` throws and the render is lost. The per-render wait in
  * `renderPopulatedRoom` only covers MeshTraits that already exist in the
  * room, which isn't true until tick has instantiated them.
@@ -76,12 +76,12 @@ export async function preloadAllModels(state: State): Promise<void> {
 
 /* ── prefab instantiation ─────────────────────────────────────────── */
 
-/** safety cap on the prefab-drain loop — far above any real nesting depth. */
+/** safety cap on the prefab-drain loop, far above any real nesting depth. */
 const MAX_PREFAB_TICKS = 16;
 
 /**
  * Run `Prefab.tick` to a fixpoint. Each tick resolves only one level of
- * nesting — it snapshots the dirty set up front, so a prefab whose output
+ * nesting, it snapshots the dirty set up front, so a prefab whose output
  * embeds another prefab just marks the inner one dirty for the NEXT pass. The
  * live render ticks every frame, so nesting resolves over frames; offline we
  * drain in a bounded loop. Without this, a scene/prefab that embeds a prefab
@@ -163,7 +163,7 @@ export async function renderPopulatedRoom(
 
     // force fully-lit voxels: no light propagation runs in the asset-pipeline,
     // so without this every stamped voxel renders pitch-black. 0xFFFF =
-    // packLight(15, 15, 15, 15) — max sky + max RGB across every voxel.
+    // packLight(15, 15, 15, 15), max sky + max RGB across every voxel.
     for (const chunk of room.voxels.chunks.values()) {
         chunk.light.fill(0xffff);
         markChunkDirty(room.voxels, chunk);
@@ -177,11 +177,11 @@ export async function renderPopulatedRoom(
     const aabb = computeSceneAabb(room, state);
     if (!aabb) return null; // nothing renderable
 
-    // small margin — AABB is tight (per-voxel + per-mesh) and the square frustum
+    // small margin, AABB is tight (per-voxel + per-mesh) and the square frustum
     // already centers non-square content.
     const camera = fitOrthoIsometric([aabb[0], aabb[1], aabb[2]], [aabb[3], aabb[4], aabb[5]], { margin: 1.02 });
 
-    // render previews unlit — icon thumbnails should read flat and consistent
+    // render previews unlit, icon thumbnails should read flat and consistent
     // regardless of where the subject would have stood under a real sky.
     // (chunk voxels are still affected by the 0xFFFF light fill above; this
     // covers MeshTrait + VoxelMeshTrait instances which have their own paths.)
@@ -195,7 +195,7 @@ export async function renderPopulatedRoom(
 
     // now run model + voxel-mesh visuals updates. these register cull
     // entries with the room culler, but the offline pass never runs a cull,
-    // so every entry stays visible — exactly what an icon render wants.
+    // so every entry stays visible, exactly what an icon render wants.
     VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels, room.visibility);
     ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
 
@@ -204,7 +204,7 @@ export async function renderPopulatedRoom(
 
     // build a per-pass pipeline tied to the framing camera. offline icons
     // don't go through the engine-global pipeline (custom camera/framing +
-    // transparent clear + no fog/tint) — drive cull + render directly.
+    // transparent clear + no fog/tint), drive cull + render directly.
     const pipeline = Renderer.createOfflinePipeline(state.renderer, room.scene, camera);
     try {
         const gpuRenderer = state.renderer.renderer;
@@ -225,7 +225,7 @@ const _worldAabb: Box3 = box3.create();
 
 /**
  * Compute the union AABB of the room's renderable content:
- *   - voxels (tight per-voxel scan, skipping AIR/MISSING — single 1-voxel
+ *   - voxels (tight per-voxel scan, skipping AIR/MISSING, single 1-voxel
  *     subjects get a 1-unit AABB, not a 16-unit chunk-aligned one)
  *   - MeshTrait+TransformTrait nodes (per-mesh local AABB transformed by world matrix)
  *
@@ -240,7 +240,7 @@ function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, numbe
         maxZ = -Infinity;
     let any = false;
 
-    // voxels — tight per-voxel scan.
+    // voxels, tight per-voxel scan.
     for (const chunk of room.voxels.chunks.values()) {
         if (chunk.aggregate === 0) continue;
         const { wx, wy, wz, data, palette } = chunk;
@@ -264,7 +264,7 @@ function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, numbe
         }
     }
 
-    // MeshTrait nodes — look up local AABB in modelResources.meshInfo,
+    // MeshTrait nodes, look up local AABB in modelResources.meshInfo,
     // transform by interpolatedWorldMatrix.
     for (const [meshTrait, transformTrait] of query(room.nodes, [MeshTrait, TransformTrait])) {
         const id = meshTrait.meshId;
@@ -292,7 +292,7 @@ function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, numbe
         if (_worldAabb[5] > maxZ) maxZ = _worldAabb[5];
     }
 
-    // VoxelMeshTrait nodes are also rendered via voxelMeshVisuals — their bounds
+    // VoxelMeshTrait nodes are also rendered via voxelMeshVisuals, their bounds
     // are recorded on each VoxelModel's own bounds. for now they are likely
     // covered by their stamped voxels (if any). future: add VoxelMeshTrait
     // bounds collection here.

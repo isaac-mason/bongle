@@ -4,7 +4,7 @@
  * orchestrator can re-render only the icons a given edit actually invalidates
  * instead of all of them.
  *
- * Two dep sources are interleaved — neither always-on, both read here only
+ * Two dep sources are interleaved, neither always-on, both read here only
  * when gating runs:
  *   - prefabs → the runtime DepGraph's reverse edges (`directProducersOf`),
  *     which carry a prefab's declared `deps:` + AST-detected refs.
@@ -27,7 +27,7 @@ const encode = (k: DepKey): string => `${k.registry}:${k.id}`;
 /** One hop of producers for a node in the closure walk. */
 function directDeps(internal: PipelineInternal, node: DepKey): DepKey[] {
     if (node.registry === 'scenes') {
-        // scenes carry no DepGraph edges — derive embedded prefabs from the
+        // scenes carry no DepGraph edges, derive embedded prefabs from the
         // payload. (best-effort: a scene not yet in the registry returns none,
         // and its own bytes-hash still drives its icon.)
         const payload = internal.registry.scenes.byId.get(node.id)?.payload._payload;
@@ -58,7 +58,7 @@ export function iconDepClosure(internal: PipelineInternal, subject: DepKey): Map
 }
 
 /** A producer's current registry `version` (bumps on its content/dep-set
- *  change). -1 when absent — distinct from any real version, so a producer
+ *  change). -1 when absent, distinct from any real version, so a producer
  *  appearing/disappearing moves the digest. */
 function producerVersion(internal: PipelineInternal, key: DepKey): number {
     const store = (internal.registry as unknown as Record<string, { byId: Map<string, { version: number }> }>)[key.registry];
@@ -66,7 +66,7 @@ function producerVersion(internal: PipelineInternal, key: DepKey): number {
 }
 
 /**
- * Stable `[registry:id, version]` digest of a subject's closure — fold into
+ * Stable `[registry:id, version]` digest of a subject's closure, fold into
  * the icon hash so any change to a transitive dependency re-renders the icon.
  */
 export function closureVersionDigest(internal: PipelineInternal, closure: Map<string, DepKey>): Array<[string, number]> {

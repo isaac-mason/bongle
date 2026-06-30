@@ -1,7 +1,7 @@
-// sound registration — module-scope api for declaring audio clips.
+// sound registration, module-scope api for declaring audio clips.
 //
 // follows the same pattern as model(): called at module scope, returns a
-// typed SoundHandle. parallels how models work — `soundsRegistry` is the
+// typed SoundHandle. parallels how models work, `soundsRegistry` is the
 // single source of truth, the user module that called `sound('id', ...)`
 // owns the entry, and the codegen barrel (`src/generated/sounds.ts`)
 // mutates the payload in place via `_registerSoundHandle` to populate
@@ -13,7 +13,7 @@
 // standalone sibling file and the runtime lazy-loads + decodes it on
 // first play. atlas vs standalone routing is owned by the runtime's
 // `audio-manifest.json` map (loaded by client/audio/audio.ts), not by
-// the handle — keeping the handle free of routing data means the runtime
+// the handle, keeping the handle free of routing data means the runtime
 // can change transports without re-codegen.
 //
 // Ownership story (same as model())
@@ -35,7 +35,7 @@ import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from 
 
 export type SoundOptions = {
     /** human-readable display name for editor UIs. falls back to the
-     *  string id when omitted. purely cosmetic — IDs remain the lookup
+     *  string id when omitted. purely cosmetic, IDs remain the lookup
      *  key everywhere else. */
     name?: string;
     /**
@@ -49,13 +49,13 @@ export type SoundOptions = {
      * (running under bun) resolves the `file://` URL via fileURLToPath
      * to a disk path ffmpeg can read.
      *
-     * stored as a string at registration — URLs are normalized to
+     * stored as a string at registration, URLs are normalized to
      * `.href` so downstream consumers (registry hashes, codegen, the
      * pipeline) only deal with one shape.
      */
     src: string | URL;
     /**
-     * opt out of the audio atlas — ship + decode standalone. default false.
+     * opt out of the audio atlas, ship + decode standalone. default false.
      *
      * use for long-form audio (background tracks, voice lines, ambient
      * loops) where adding to the atlas would bloat the eager-at-boot
@@ -66,7 +66,7 @@ export type SoundOptions = {
 };
 
 /**
- * Empty base interface — augmented by the codegen'd registry barrel
+ * Empty base interface, augmented by the codegen'd registry barrel
  * (`src/generated/sounds.ts`) via declaration merging to map sound ids
  * to their precise handle types. Mirrors ModelHandleMap.
  *
@@ -85,16 +85,16 @@ export interface SoundHandleMap {}
 
 export type SoundHandle = {
     readonly soundId: string;
-    /** human-readable display name for editor UIs. always set —
+    /** human-readable display name for editor UIs. always set,
      *  defaults to `soundId` when the author didn't supply one, so
      *  readers can show `handle.name` unconditionally. */
     readonly name: string;
-    /** DepGraph dependency — see SceneHandle.dependency. */
+    /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'sounds'; id: string };
     readonly src: string;
     readonly long: boolean;
     /**
-     * clip duration in seconds — ffprobed at codegen and baked into the
+     * clip duration in seconds, ffprobed at codegen and baked into the
      * sidecar. zero on the placeholder handle that `sound()` returns when
      * codegen hasn't run yet for this id; the barrel mutates it in place
      * on the next pipeline pass.
@@ -111,7 +111,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 /**
  * Called by the per-project barrel `src/generated/sounds.ts` at module-
  * eval to populate each handle's codegen'd fields. Barrel does not own
- * registry entries — see file header. Mutates the existing payload in
+ * registry entries, see file header. Mutates the existing payload in
  * place so user code refs stay valid, then `touch()`es so consumers
  * react via the dispatch path.
  *
@@ -139,12 +139,12 @@ export function _registerSoundHandle(id: string, handle: SoundHandle): void {
 
 /**
  * Build a per-id placeholder handle. Used by `sound()` when the user
- * declares a sound before codegen has run for it — the placeholder sits
+ * declares a sound before codegen has run for it, the placeholder sits
  * in the registry so the cli can discover the declaration (`.src` is the
  * cli's codegen input). `_registerSoundHandle` mutates this payload in
  * place once codegen catches up, preserving the user-held reference.
  *
- * `duration: 0` is the placeholder sentinel — user code that reads
+ * `duration: 0` is the placeholder sentinel, user code that reads
  * `handle.duration` before the first pipeline pass sees zero, which is
  * also the correct value for an empty handle.
  */
@@ -189,7 +189,7 @@ export function sound<const Id extends string>(
     const name = options.name ?? id;
     const existing = get(registry.sounds, id);
     if (existing) {
-        // claim ownership — promotes from PLACEHOLDER_OWNER (barrel-first
+        // claim ownership, promotes from PLACEHOLDER_OWNER (barrel-first
         // boot) to this user module, adds id to module's pending set so
         // endModuleRun doesn't fire removed on this run, throws on
         // duplicate declaration from another file.
@@ -208,7 +208,7 @@ export function sound<const Id extends string>(
         return existing as never;
     }
 
-    // no warning here — placeholder is the normal cold-start state. the
+    // no warning here, placeholder is the normal cold-start state. the
     // user-entry shim wipes `src/generated/sounds.ts` on every dev start
     // (schema-drift protection in `resetGeneratedBarrels`), so EVERY
     // declared sound hits this path before the pipeline's first flush

@@ -1,14 +1,14 @@
 /**
- * src/asset-pipeline/engine.ts — EngineAssetPipeline.
+ * src/asset-pipeline/engine.ts, EngineAssetPipeline.
  *
  * A render-only engine entry, sibling to EngineClient / the server. It builds
- * the GPU render resources an icon render needs and nothing else — no DOM,
+ * the GPU render resources an icon render needs and nothing else, no DOM,
  * input, audio, networking, sprites/particles/clouds-presentation, or driver.
  * Native I/O (disk bytes, sharp image decode) arrives via the injected
  * `ResourceLoader` on `Resources`, so this module imports no Node libs and is
  * never in the client bundle's path.
  *
- * `boot()` builds the FULL state and returns it — no `null!` placeholders.
+ * `boot()` builds the FULL state and returns it, no `null!` placeholders.
  * `env` (client flags) is set by the boot entry BEFORE user code imports, not
  * here.
  */
@@ -55,7 +55,7 @@ export type BootOptions = {
  * Seed the URL registry (`resources.models`) from the model registry.
  *
  * The client/server populate theirs by draining `registry.models.pendingChanges`
- * in their registry-dispatch. The pipeline doesn't drain that queue — it runs in
+ * in their registry-dispatch. The pipeline doesn't drain that queue, it runs in
  * its own worker runner (no EngineServer dispatch there to consume
  * `pendingChanges`), so we re-seed wholesale from `byId` (the same set
  * EngineClient.seedModels uses), every boot + before every render pass.
@@ -69,7 +69,7 @@ function seedModels(resources: Resources.Resources): void {
     for (const [id, h] of registry.models.byId) {
         const handle = h.payload;
         // Skip placeholder/unbaked models: a model declared but not yet (or never)
-        // baked has empty bin urls (createPlaceholderHandle) — e.g. a model from an
+        // baked has empty bin urls (createPlaceholderHandle), e.g. a model from an
         // imported pack whose .gltf isn't present in this project. Registering one
         // would resolve its url to the resources dir itself (EISDIR) when the
         // render path force-loads it. Leaving it out degrades a scene that
@@ -148,7 +148,7 @@ export function clearScene(state: State, id: string): void {
 
 /** Re-fetch the atlas + rebuild voxel resources after a registry/atlas change.
  *  Rooms are ephemeral (built per render), so they pick up the swapped
- *  engine-global resources on the next render — no per-room rebind needed. */
+ *  engine-global resources on the next render, no per-room rebind needed. */
 export async function applyRegistryChanges(state: State): Promise<void> {
     seedModels(state.resources);
     const settings = Performance.settingsForTier(state.performance);

@@ -113,7 +113,7 @@ export function updateLassoSelect(
     }
 
     // ── commit on release ──────────────────────────────────────────
-    // a sub-3-point stroke (i.e. a click) produces a zero-area polygon —
+    // a sub-3-point stroke (i.e. a click) produces a zero-area polygon,
     // both branches naturally find nothing inside it, so under 'replace'
     // it clears the selection and under 'add' it's a no-op.
     if (lasso && justUp) {
@@ -166,7 +166,7 @@ function commitLasso(
         if (maxX > 1) maxX = 1;
         if (maxY > 1) maxY = 1;
 
-        // adaptive grid step — denser for tight strokes, capped at SAMPLE_GRID_RES
+        // adaptive grid step, denser for tight strokes, capped at SAMPLE_GRID_RES
         const spanX = Math.max(maxX - minX, 1e-6);
         const spanY = Math.max(maxY - minY, 1e-6);
         const stepX = spanX / SAMPLE_GRID_RES;

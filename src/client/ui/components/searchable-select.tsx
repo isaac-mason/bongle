@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './popover';
  *
  * `id` is what's passed to onSelect. `label` is what the user types against
  * and what's shown in the row. `sublabel` (optional) renders on a second line
- * underneath the label in a smaller, dimmer mono font — for displaying the
+ * underneath the label in a smaller, dimmer mono font, for displaying the
  * stable id beneath a human-readable name. `leading` is an optional
  * thumbnail/icon shown before the label. `badge` is an optional trailing label
  * (e.g. "(missing)").

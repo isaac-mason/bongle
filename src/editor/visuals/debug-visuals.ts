@@ -1,4 +1,4 @@
-// debug-visuals.ts — physics collider debug rendering.
+// debug-visuals.ts, physics collider debug rendering.
 //
 // iterates the world's body pool and emits wireframes via crashcat's
 // per-body debug.body(), skipping editor-layer bodies (transform gizmos,

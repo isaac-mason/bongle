@@ -16,7 +16,7 @@ type Face = {
     label: string;
     color: string;
     verts: [number, number, number][];
-    // face-local "right" and "up" axes in world space — used as a basis to
+    // face-local "right" and "up" axes in world space, used as a basis to
     // transform the label so it sticks to the face surface.
     rx: number;
     ry: number;
@@ -357,7 +357,7 @@ function drawCube(
         ctx.stroke();
 
         // text transform: project the face's local right/up basis into screen
-        // space and use as the canvas transform basis — the label sits on the
+        // space and use as the canvas transform basis, the label sits on the
         // face surface and foreshortens with the cube rotation. canvas y grows
         // downward, so flip the up basis.
         ctx.save();

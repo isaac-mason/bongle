@@ -1,11 +1,11 @@
-// core/avatar/model.ts — shared avatar→character wiring, used by BOTH the script
+// core/avatar/model.ts, shared avatar→character wiring, used by BOTH the script
 // API (api/avatars) and the engine player-join path (server/avatars). This is the
 // ctx-less core; scripts use loadAvatar/assignAvatar from api/avatars, never these
 // directly.
 //
-//   - acquireAvatarModel — the load half: acquire + ensure the model bytes
+//   - acquireAvatarModel, the load half: acquire + ensure the model bytes
 //     (refcounted for runtime avatars, ensure-only for bundled/builtin).
-//   - assignAvatar       — the stamp half: point a node's CharacterTrait at an
+//   - assignAvatar, the stamp half: point a node's CharacterTrait at an
 //     already-loaded model + mark it for sync. No refcount.
 //
 // `acquireAvatarModel` MUST precede `assignAvatar` for runtime avatars: acquire
@@ -34,7 +34,7 @@ export function acquireAvatarModel(resources: Resources.Resources, avatar: Resol
         Resources.ensureModel(resources, avatar.modelId);
         return { modelId: avatar.modelId, rigType: avatar.rigType ?? RIG_TYPE_6BONE };
     }
-    // bundled — entry exists via codegen; ensure keeps the load path uniform (no-op
+    // bundled, entry exists via codegen; ensure keeps the load path uniform (no-op
     // once ready). no refcount: bundled models live for the engine lifetime.
     Resources.ensureModel(resources, avatar.modelId);
     return { modelId: avatar.modelId, rigType: RIG_TYPE_6BONE };
@@ -43,7 +43,7 @@ export function acquireAvatarModel(resources: Resources.Resources, avatar: Resol
 /**
  * Point a `CharacterTrait` node at an already-loaded avatar (acquire the model
  * first for runtime avatars). Sets the synced `modelId`/`rigType`; the rig
- * reconciler mounts it once the payload lands. No refcount — safe to call
+ * reconciler mounts it once the payload lands. No refcount, safe to call
  * repeatedly / swap freely. No-op if `node` has no `CharacterTrait`.
  */
 export function assignAvatar(node: Node, modelId: string, rigType: string = RIG_TYPE_6BONE): void {

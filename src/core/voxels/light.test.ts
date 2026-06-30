@@ -57,7 +57,7 @@ function readLight(chunk: ReturnType<typeof createChunk>, x: number, y: number, 
 }
 
 /** mesh + light a chunk in one call. post Stage 2b: meshChunk emits
- *  geometry+AO+light in one pass — this wrapper now just delegates. */
+ *  geometry+AO+light in one pass, this wrapper now just delegates. */
 function meshAndLight(voxels: Voxels, chunk: Chunk, reg: BlockRegistry): ChunkMeshResult | null {
     return meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
 }
@@ -447,7 +447,7 @@ describe('propagateAllLight', () => {
 
             propagateAllLight(voxels);
 
-            // glass has opacity=0, so decay=max(1,0)=1 — same as air.
+            // glass has opacity=0, so decay=max(1,0)=1, same as air.
             // light at glass: 14 (1 step from emitter)
             expect(readLight(chunk, 9, 8, 8).r).toBe(14);
             // light beyond glass: 13 (2 steps from emitter)
@@ -469,7 +469,7 @@ describe('propagateAllLight', () => {
 
             propagateAllLight(voxels);
 
-            // leaves opacity=1, decay=max(1,1)=1 — same as air.
+            // leaves opacity=1, decay=max(1,1)=1, same as air.
             // at leaves: 14
             expect(readLight(chunk, 9, 8, 8).r).toBe(14);
             // beyond: 13
@@ -490,7 +490,7 @@ describe('propagateAllLight', () => {
             linkChunkNeighbors(voxels, chunk0);
             linkChunkNeighbors(voxels, chunk1);
 
-            // emitter at local (15,8,8) in chunk0 — right at the boundary
+            // emitter at local (15,8,8) in chunk0, right at the boundary
             setChunkBlock(chunk0, 15, 8, 8, 'redlight', registry);
 
             propagateAllLight(voxels);
@@ -520,7 +520,7 @@ describe('propagateAllLight', () => {
             linkChunkNeighbors(voxels, chunkTop);
             linkChunkNeighbors(voxels, chunkBot);
 
-            // all air — sky should propagate down through both chunks
+            // all air, sky should propagate down through both chunks
             propagateAllLight(voxels);
 
             // top of upper chunk: sky=15
@@ -555,7 +555,7 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            // place a stone block — sky light should illuminate from above
+            // place a stone block, sky light should illuminate from above
             setChunkBlock(chunk, 8, 8, 8, 'stone', registry);
             propagateAllLight(voxels);
 
@@ -583,7 +583,7 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            // stone block with only sky light — no block emitters
+            // stone block with only sky light, no block emitters
             setChunkBlock(chunk, 8, 8, 8, 'stone', registry);
             propagateAllLight(voxels);
 
@@ -639,7 +639,7 @@ describe('propagateAllLight', () => {
 
         it('smooth lighting: top face vertices near emitter are brighter', () => {
             // place stone at (8,4,8) with a red emitter at (10,4,8) (2 away in +X).
-            // the top (+Y) face samples light from (8,5,8) — one step up.
+            // the top (+Y) face samples light from (8,5,8), one step up.
             // smooth lighting averages each vertex with its 2 edge + 1 corner neighbors.
             //
             // top face vertex layout (XZ plane at Y+1):
@@ -706,10 +706,10 @@ describe('propagateAllLight', () => {
             //   v2 at (9,5,9): edge neighbors at +X=(9,5,8) and +Z=(8,5,9)
             //   v0 at (8,5,8): edge neighbors at -X=(7,5,8) and -Z=(8,5,7)
             //
-            // place a red emitter at (9,5,9) — the corner position for v2.
+            // place a red emitter at (9,5,9), the corner position for v2.
             // with both edge positions blocked by stone, the corner (where the
             // emitter sits) is NOT sampled for v2.
-            // place nothing at v0's corner (7,5,7) — all air, gets averaged normally.
+            // place nothing at v0's corner (7,5,7), all air, gets averaged normally.
             //
             // without obstruction, v2 would sample the emitter (r=15) and get a
             // high average. with obstruction, v2 only samples the face center.
@@ -783,7 +783,7 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            // place a partial block — sky light should reach it
+            // place a partial block, sky light should reach it
             setChunkBlock(chunk, 8, 8, 8, 'stairs', registry);
             propagateAllLight(voxels);
 
@@ -841,7 +841,7 @@ describe('propagateAllLight', () => {
             expect(interiorSkys.length).toBeGreaterThan(0);
 
             // all boundary vertices should have the same sky light as interior
-            // (flat open ground, no obstructions — no reason for any difference)
+            // (flat open ground, no obstructions, no reason for any difference)
             const interiorSky = interiorSkys[0]!;
             for (const sky of boundarySkys) {
                 expect(sky).toBe(interiorSky);
@@ -881,7 +881,7 @@ describe('updateLightOnBlockChange', () => {
         setChunkBlock(chunk, 6, 8, 8, 'stone', registry);
         updateLightOnBlockChange(voxels, 6, 8, 8, oldState);
 
-        // light at (7,8,8) should now be much lower — the direct path is blocked.
+        // light at (7,8,8) should now be much lower, the direct path is blocked.
         // light has to go around the stone, so it'll be significantly attenuated.
         const afterPlace = readLight(chunk, 7, 8, 8);
         expect(afterPlace.r).toBeLessThan(12);
@@ -945,7 +945,7 @@ describe('updateLightOnBlockChange', () => {
 
     it('placing an opaque emitter (glowstone-style) spreads light', () => {
         // regression: opaque emitters (lightOpacity=15) were silently skipped in
-        // handleChannelChange — the placement path only handled transparent blocks.
+        // handleChannelChange, the placement path only handled transparent blocks.
         const registry = buildTestRegistry([
             { id: 'glowstone', texId: 'glow', lightEmission: [15, 12, 8] },
             // default cull=SOLID, no explicit lightOpacity → defaults to 15
@@ -1078,7 +1078,7 @@ describe('updateLightOnBlockChange', () => {
 
         propagateAllLight(voxels);
 
-        // place emitter at (15,8,8) in chunk0 — right at the boundary
+        // place emitter at (15,8,8) in chunk0, right at the boundary
         const oldState = stateIdForKey('air', registry);
         setChunkBlock(chunk0, 15, 8, 8, 'redlight', registry);
         updateLightOnBlockChange(voxels, 15, 8, 8, oldState);
@@ -1272,8 +1272,8 @@ describe('updateLightOnBlockChange', () => {
         // an opaque block that emits light (e.g. glowstone) should still
         // contribute its emission as a border seed during unspread.
         // setup: opaque emitter at (6,8,8), transparent emitter at (4,8,8).
-        // remove the transparent emitter. the voxel at (5,8,8) — between
-        // them — should get relit from the opaque emitter's emission.
+        // remove the transparent emitter. the voxel at (5,8,8), between
+        // them, should get relit from the opaque emitter's emission.
         const registry = buildTestRegistry([
             { id: 'redlight', cull: CullType.NONE, texId: 'red', lightEmission: [10, 0, 0], lightOpacity: 0 },
             { id: 'glowstone', cull: CullType.SOLID, texId: 'glow', lightEmission: [12, 0, 0] },
@@ -1292,7 +1292,7 @@ describe('updateLightOnBlockChange', () => {
         // red from opaque emitter at dist 1: but opaque blocks don't propagate INTO
         // their neighbors via spread (their own light stays 0 in the stored array).
         // however, in propagateAllLight, the opaque emitter writes emission=12 to
-        // chunk.light and pushes to spread queue — but spreadChannel skips opaque
+        // chunk.light and pushes to spread queue, but spreadChannel skips opaque
         // neighbors. the emitter itself gets its value written, then spread tries
         // to propagate outward. neighbor (5,8,8) coming from the glowstone:
         // decay = max(1, opacity_of_5,8,8=0) = 1, spreading = 12-1 = 11.
@@ -1304,7 +1304,7 @@ describe('updateLightOnBlockChange', () => {
         setChunkBlock(chunk, 4, 8, 8, 'air', registry);
         updateLightOnBlockChange(voxels, 4, 8, 8, oldState);
 
-        // (5,8,8) should still be lit from the glowstone — the opaque emitter's
+        // (5,8,8) should still be lit from the glowstone, the opaque emitter's
         // emission should serve as a border seed during unspread.
         // the glowstone at (6,8,8) has light=12 stored. during unspread,
         // the opaque neighbor enters the border branch, gets boosted to
@@ -1495,7 +1495,7 @@ describe('perf: 5x5 ceiling removal', () => {
         const voxels = createVoxels(registry);
         voxels.authority = createVoxelsAuthority();
 
-        // larger chunk grid — 6x4x6 = 144 chunks (more realistic loaded world)
+        // larger chunk grid, 6x4x6 = 144 chunks (more realistic loaded world)
         for (let cx = -3; cx <= 3; cx++)
             for (let cy = -1; cy <= 3; cy++) for (let cz = -3; cz <= 3; cz++) ensureChunk(voxels, cx, cy, cz);
 
@@ -1526,7 +1526,7 @@ describe('perf: 5x5 ceiling removal', () => {
         // compute initial light
         propagateAllLight(voxels);
 
-        // now remove the ceiling — this is the operation we're measuring
+        // now remove the ceiling, this is the operation we're measuring
         const changes: { wx: number; wy: number; wz: number; oldStateId: number }[] = [];
         for (let dx = 0; dx < boxW; dx++)
             for (let dz = 0; dz < boxD; dz++) {
@@ -1584,7 +1584,7 @@ describe('perf: 5x5 ceiling removal', () => {
             }
         }
 
-        // NO ceiling — open top
+        // NO ceiling, open top
         propagateAllLight(voxels);
 
         // now PLACE the ceiling
@@ -1816,7 +1816,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             const avgBoundary = boundarySkys.reduce((a, b) => a + b, 0) / boundarySkys.length;
             const avgInterior = interiorSkys.reduce((a, b) => a + b, 0) / interiorSkys.length;
 
-            // they should be similar — both see sky-lit air. allow some
+            // they should be similar, both see sky-lit air. allow some
             // tolerance for smooth lighting averaging differences.
             expect(avgBoundary).toBeGreaterThan(avgInterior * 0.5);
         });
@@ -1898,7 +1898,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // leaves have lightOpacity=1, so sky decays through them. but the
             // topmost leaf's top face samples the air above it (which is void =
             // sky=15). the mesher border fill must not copy the leaf's own
-            // (decayed) light into the slab border above — it should be sky=15.
+            // (decayed) light into the slab border above, it should be sky=15.
             const registry = buildTestRegistry([
                 { id: 'stone', texId: 'stone' },
                 { id: 'leaves', texId: 'leaves', cull: CullType.SELF, lightOpacity: 1 },
@@ -1976,7 +1976,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
         });
 
         it('block light propagates correctly at chunk boundary without neighbor', () => {
-            // red emitter at (0,8,8) — right at the -X boundary with no neighbor.
+            // red emitter at (0,8,8), right at the -X boundary with no neighbor.
             // light should still spread inward within the chunk.
             const registry = buildTestRegistry([
                 { id: 'redlight', cull: CullType.NONE, texId: 'red', lightEmission: [15, 0, 0], lightOpacity: 0 },
@@ -1997,7 +1997,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
     describe('incremental sky light at top of world', () => {
         it('removing opaque block at top of world seeds sky column from void above', () => {
             // single chunk. stone at (8,15,8) blocks sky. remove it.
-            // since there's no chunk above, the void IS sky — sky=15 should
+            // since there's no chunk above, the void IS sky, sky=15 should
             // propagate down from the top of the world.
             const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
             const voxels = createVoxels(registry);
@@ -2007,7 +2007,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             setChunkBlock(chunk, 8, 15, 8, 'stone', registry);
             propagateAllLight(voxels);
 
-            // stone at top blocks sky — air below should not have sky=15 in this column
+            // stone at top blocks sky, air below should not have sky=15 in this column
             expect(readLight(chunk, 8, 14, 8).sky).toBeLessThan(15);
 
             // remove the stone
@@ -2015,7 +2015,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             setChunkBlock(chunk, 8, 15, 8, 'air', registry);
             updateLightOnBlockChange(voxels, 8, 15, 8, oldStateId);
 
-            // now the column is unobstructed — sky=15 should reach all the way down
+            // now the column is unobstructed, sky=15 should reach all the way down
             expect(readLight(chunk, 8, 15, 8).sky).toBe(15);
             expect(readLight(chunk, 8, 14, 8).sky).toBe(15);
             expect(readLight(chunk, 8, 0, 8).sky).toBe(15);
@@ -2043,12 +2043,12 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // verify sky=15 at top of lower chunk (air above floor)
             expect(readLight(chunkBot, 8, 15, 8).sky).toBe(15);
 
-            // place stone at world y=16 (local y=0 in chunk cy=1) — creates new chunk
+            // place stone at world y=16 (local y=0 in chunk cy=1), creates new chunk
             setBlock(voxels, 8, 16, 8, 'stone');
             const chunkTop = voxels.chunks.get(chunkKey(0, 1, 0))!;
             expect(chunkTop).toBeDefined();
 
-            // flush — this seeds sky in the new chunk, then processes the block change
+            // flush, this seeds sky in the new chunk, then processes the block change
             flushPendingLight(voxels);
 
             // air above the new stone (y=17, local y=1 in top chunk) should have sky=15
@@ -2082,7 +2082,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             setChunkBlock(chunk, 8, 15, 8, 'air', registry);
             updateLightOnBlockChange(voxels, 8, 15, 8, oldStone);
 
-            // sky should be restored — the void above acts as sky=15
+            // sky should be restored, the void above acts as sky=15
             expect(readLight(chunk, 8, 15, 8).sky).toBe(15);
             expect(readLight(chunk, 8, 14, 8).sky).toBe(15);
         });
@@ -2233,7 +2233,7 @@ describe('bottom chunk sky light', () => {
         expect(readLight(chunkBot, 8, 15, 8).sky).toBe(15);
 
         // far away from shaft (x=0,z=0) at bottom of bottom chunk:
-        // sky should be low — it can only arrive via horizontal spreading
+        // sky should be low, it can only arrive via horizontal spreading
         // which decays by 1 each step. from shaft at x=8,z=8, the position
         // (0,0,0) is at manhattan distance ~16, so sky would be ~0 or very low.
         const farBottomLight = readLight(chunkBot, 0, 0, 0);
@@ -2366,7 +2366,7 @@ describe('bottom chunk sky light', () => {
         // clear block change ops from setChunkBlock (we just want to test sky seeding)
         voxels.authority!.changes.pendingLight.length = 0;
 
-        // step 3: flush — seeds sky for both new chunks, then processes block changes
+        // step 3: flush, seeds sky for both new chunks, then processes block changes
         flushPendingLight(voxels);
 
         // the bottom chunk is all air under a solid stone ceiling.
@@ -2390,7 +2390,7 @@ describe('bottom chunk sky light', () => {
         const voxels = createVoxels(registry);
         voxels.authority = createVoxelsAuthority();
 
-        // place a block in cy=0 first — this triggers ensureChunk(0,0,0)
+        // place a block in cy=0 first, this triggers ensureChunk(0,0,0)
         // with no upper neighbor. the new chunk gets pushed to pendingNewChunks.
         setBlock(voxels, 8, 8, 8, 'air'); // force chunk creation at cy=0
 
@@ -2420,7 +2420,7 @@ describe('bottom chunk sky light', () => {
 //
 // build a sealed rectangular cave that spans many chunks horizontally
 // (and a vertical extent inside a single cy=0 column). interior must be
-// completely dark — no sky should reach any interior cell.
+// completely dark, no sky should reach any interior cell.
 
 describe('multi-chunk sealed cave', () => {
     it('sky=0 throughout the interior of a 3x1x3 sealed cave', () => {
@@ -2453,14 +2453,14 @@ describe('multi-chunk sealed cave', () => {
 
         const W = GRID * CHUNK_SIZE;
         const H = CHUNK_SIZE;
-        // floor (y=0) + ceiling (y=H-1) — solid stone across the whole grid
+        // floor (y=0) + ceiling (y=H-1), solid stone across the whole grid
         for (let wx = 0; wx < W; wx++) {
             for (let wz = 0; wz < W; wz++) {
                 setAt(wx, 0, wz, 'stone');
                 setAt(wx, H - 1, wz, 'stone');
             }
         }
-        // four side walls — solid stone columns at x=0, x=W-1, z=0, z=W-1
+        // four side walls, solid stone columns at x=0, x=W-1, z=0, z=W-1
         for (let wy = 0; wy < H; wy++) {
             for (let i = 0; i < W; i++) {
                 setAt(0, wy, i, 'stone');
@@ -2526,7 +2526,7 @@ describe('multi-chunk sealed cave', () => {
         }
         for (const c of src.chunks.values()) linkChunkNeighbors(src, c);
 
-        // surface (cy=0): solid stone everywhere — acts as the world's
+        // surface (cy=0): solid stone everywhere, acts as the world's
         // sky-blocking cap above the cave.
         for (const row of surfChunks) {
             for (const c of row) {

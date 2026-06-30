@@ -1,6 +1,6 @@
 // Free helper: resolve a connected Client (per-connection number) to
 // its authenticated User (durable platform identity). Server-only.
-// Throws if the client isn't connected — a stale Client reference is
+// Throws if the client isn't connected, a stale Client reference is
 // a bug, not something scripts should branch on.
 
 import type { Client, User } from 'bongle/interface';

@@ -2,10 +2,10 @@
 //
 // reads source audio files (.wav/.mp3/.ogg/.flac) listed by `sound()`
 // declarations, partitions on `long: true` and emits:
-//   resources/client/audio-atlas.mp3           — concatenated long:false bucket
-//   resources/client/audio/{id}.mp3            — one file per long:true clip
-//   resources/client/audio-manifest.json      — both buckets, with offsets
-//   src/generated/sounds.ts                   — single barrel: all handles inline
+//   resources/client/audio-atlas.mp3, concatenated long:false bucket
+//   resources/client/audio/{id}.mp3, one file per long:true clip
+//   resources/client/audio-manifest.json, both buckets, with offsets
+//   src/generated/sounds.ts, single barrel: all handles inline
 //
 // codegen emits ALL SoundHandles inline in a single barrel file (no per-id
 // sidecars). Each handle is a small object literal so the whole file stays
@@ -17,7 +17,7 @@
 //
 // Single-file rationale: cold start writes 1 file vs N+1, eliminating the
 // HMR wall when many sounds are declared (the engine ships 77 builtins).
-// Re-evaluating all handles on any sound edit is cheap — they're inert
+// Re-evaluating all handles on any sound edit is cheap, they're inert
 // object literals.
 //
 // the artifact manifest is the cache marker for the atlas + standalone
@@ -33,7 +33,7 @@
 // encoding: MP3 (libmp3lame), 48000 Hz, atlas mono. MP3 is the most
 // universally `decodeAudioData`-supported format (every browser incl.
 // Safari), and libmp3lame writes the LAME gapless header (encoder delay +
-// padding) that browsers honor — so a single-pass encode of the
+// padding) that browsers honor, so a single-pass encode of the
 // concatenated PCM round-trips sample-exact and the atlas offsets stay
 // aligned. Opus-in-Ogg was dropped: Safari can't decode it via Web Audio
 // at all, and some Chrome setups (e.g. high output-device sample rates)
@@ -54,7 +54,7 @@ const FFPROBE = ffprobeInstaller.path;
 
 // pnpm sometimes strips the POSIX exec bit when extracting the ffmpeg/
 // ffprobe installer tarballs (the platform sub-packages ship the binary
-// as a regular data file — there's no `bin` field and no postinstall to
+// as a regular data file, there's no `bin` field and no postinstall to
 // chmod it). spawn() then fails with EACCES. force-set 0755 once at
 // module load; cheap, idempotent, no-op on win32.
 if (process.platform !== 'win32') {
@@ -84,7 +84,7 @@ export type BuildAudioOptions = {
 
 export type AudioManifestAtlasEntry = {
     id: string;
-    /** seconds — feeds AudioBufferSourceNode.start(when, offset, duration). */
+    /** seconds, feeds AudioBufferSourceNode.start(when, offset, duration). */
     offset: number;
     duration: number;
 };
@@ -97,18 +97,18 @@ export type AudioManifestStandaloneEntry = {
 };
 
 export type AudioManifest = {
-    /** combined hash over both buckets — drives the artifact cache check. */
+    /** combined hash over both buckets, drives the artifact cache check. */
     hash: string;
-    /** hash over only the atlas bucket sources — for selective rebuild. */
+    /** hash over only the atlas bucket sources, for selective rebuild. */
     atlasHash: string;
-    /** hash over only the standalone bucket sources — for selective rebuild. */
+    /** hash over only the standalone bucket sources, for selective rebuild. */
     standaloneHash: string;
     sampleRate: number;
     atlas: AudioManifestAtlasEntry[];
     standalone: AudioManifestStandaloneEntry[];
 };
 
-/** Per-id codegen entry — input to the sidecar + barrel emitters. */
+/** Per-id codegen entry, input to the sidecar + barrel emitters. */
 type CodegenEntry = {
     id: string;
     src: string;
@@ -161,7 +161,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
         .sort((a, b) => a.id.localeCompare(b.id));
 
     if (all.length === 0) {
-        // no sounds declared — clean up any leftover artifacts + codegen.
+        // no sounds declared, clean up any leftover artifacts + codegen.
         try {
             fs.unlinkSync(paths.atlasFile);
         } catch {
@@ -204,7 +204,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
     let rebuilt = false;
 
     if (existing?.hash === combinedHash && atlasUpToDate && standaloneUpToDate) {
-        // full cache hit — reuse the on-disk manifest for codegen durations.
+        // full cache hit, reuse the on-disk manifest for codegen durations.
         manifest = existing;
     } else {
         console.log(`[bongle] building audio (${atlasResolved.length} atlas, ${standaloneResolved.length} standalone)...`);
@@ -233,7 +233,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
                     }
                 }
             } catch {
-                /* dir may not exist yet — fine */
+                /* dir may not exist yet, fine */
             }
         }
 
@@ -330,8 +330,8 @@ async function buildAtlas(sources: ResolvedSource[], outPath: string): Promise<A
     // build one continuous PCM stream from the sources, then encode it in a
     // single MP3 pass. doing it as ONE encode (rather than per-clip then
     // concat) means there's exactly one block of encoder delay at the file
-    // start and one of padding at the end — both described by the LAME
-    // gapless header that browsers honor — so the decoded buffer is
+    // start and one of padding at the end, both described by the LAME
+    // gapless header that browsers honor, so the decoded buffer is
     // sample-aligned with this concatenated PCM and every clip's offset +
     // duration (computed below from PCM sample counts) lands correctly. A
     // per-clip-then-concat approach would scatter delay/padding mid-stream
@@ -501,12 +501,12 @@ function renderBarrel(entries: CodegenEntry[]): string {
     lines.push(``);
     lines.push(`import type { SoundHandle } from 'bongle';`);
     // `__kit` is provided in module scope by the kit Vite plugin's
-    // prelude (see kit/src/vite/plugin.ts) — re-importing it here would
+    // prelude (see kit/src/vite/plugin.ts), re-importing it here would
     // collide with the prelude's top-level `import { __kit }` and parse
     // as "Identifier '__kit' has already been declared".
     lines.push(``);
 
-    // inline every handle literal — one short block per id. ~7 lines each;
+    // inline every handle literal, one short block per id. ~7 lines each;
     // 77 builtins + N user sounds stays under ~1000 lines total.
     for (const e of entries) {
         const constId = sanitizeIdent(e.id);

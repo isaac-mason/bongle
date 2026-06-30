@@ -1,5 +1,5 @@
 /**
- * client-store — engine-essential UI state. Imported by both play and editor
+ * client-store, engine-essential UI state. Imported by both play and editor
  * builds (the editor reads/writes these alongside its own editor-store).
  * Lives outside `editor/` so engine-client.ts and play-ui can touch it
  * without pulling editor code into play bundles.
@@ -28,14 +28,14 @@ export type ClientStore = {
     viewportElement: HTMLElement | null;
     setViewportElement: (el: HTMLElement | null) => void;
 
-    /** viewport pixel dims — written by the Viewport component (mount + ResizeObserver),
+    /** viewport pixel dims, written by the Viewport component (mount + ResizeObserver),
      *  read by the engine. The store is the source of truth so engine boot ordering
      *  (mountPlayUI then load) can't race the initial size. */
     viewportWidth: number;
     viewportHeight: number;
     setViewportSize: (width: number, height: number) => void;
 
-    // debug panel — backtick toggles `debugOpen`; the panel's top tab strip
+    // debug panel, backtick toggles `debugOpen`; the panel's top tab strip
     // switches `debugTab`. 'renderer' surfaces the gpucat Inspector overlay
     // (driven from engine-client.ts via setInspectorVisible), which is
     // intentionally available in play builds too.
@@ -58,7 +58,7 @@ export type ClientStore = {
     setRoom: (playerId: PlayerId, room: ClientRoom) => void;
     removeRoom: (playerId: PlayerId) => void;
 
-    /** the focused room — mirrors `Rooms.activePlayerId`. */
+    /** the focused room, mirrors `Rooms.activePlayerId`. */
     activePlayerId: PlayerId | null;
     setActivePlayerId: (id: PlayerId | null) => void;
 };

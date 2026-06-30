@@ -2,7 +2,7 @@
 //
 // formats the per-tick timing already collected in `Debug.Metrics` (the begin/end
 // phase spans + the `script/<key>` per-script timings) into a compact line block
-// for the server CLI. pure formatting — `engine-server` owns the cadence and the
+// for the server CLI. pure formatting, `engine-server` owns the cadence and the
 // edit-mode gate, and does the actual `console.log`.
 //
 // the layout is stable + greppable (`[perf …]` prefix, `avg/max` pairs) so an
@@ -10,7 +10,7 @@
 
 import * as Debug from '../core/debug';
 
-/** emit cadence (seconds of sim time) — engine-server accumulates against this. */
+/** emit cadence (seconds of sim time), engine-server accumulates against this. */
 export const PERF_EMIT_INTERVAL_S = 1.0;
 /** a tick over this many ms is counted "over budget" (60Hz frame). */
 export const FRAME_BUDGET_MS = 1000 / 60;
@@ -36,7 +36,7 @@ const STAGES = [
     'discovery',
 ];
 
-// stages whose time is per-script — expanded to their top `script/<hook>/<key>`
+// stages whose time is per-script, expanded to their top `script/<hook>/<key>`
 // contributors. (physics-step hooks aren't timed; input is client-only.)
 const STAGE_HOOKS: Record<string, string> = {
     'nodes/update': 'onUpdate',
@@ -45,7 +45,7 @@ const STAGE_HOOKS: Record<string, string> = {
     'nodes/frame': 'onFrame',
 };
 
-// whole-server (non-room) stages — read from the global tick metrics, merged into
+// whole-server (non-room) stages, read from the global tick metrics, merged into
 // the same breakdown so a spike in save / drain / net-pack / discovery sub-phase
 // is attributable.
 const GLOBAL_STAGES = ['inbox', 'rooms/drain', 'save', 'netflush', 'discovery/diff', 'discovery/scene', 'discovery/voxels'];

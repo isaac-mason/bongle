@@ -31,24 +31,24 @@ import * as VoxelVisuals from './voxels/voxel-visuals';
 
 export type Renderer = {
     renderer: WebGPURenderer;
-    /** engine-global env GPU buffers — one set across the whole engine,
+    /** engine-global env GPU buffers, one set across the whole engine,
      *  flushed each frame from the active room's CPU shadow (see
      *  `Environment.updateForCamera`). every env-aware shader (sky, voxel,
      *  model, sprite, cloud) binds these by name through its per-room
      *  geometry. */
     environmentResources: Environment.EnvironmentResources;
-    /** engine-global render pipeline — one set across all rooms; the active
+    /** engine-global render pipeline, one set across all rooms; the active
      *  room swaps in via `setActiveScene` each frame. */
     pipeline: EngineRenderPipeline;
 };
 
 /**
- * sync construction — WebGPURenderer + env GPU buffers + render pipeline.
+ * sync construction, WebGPURenderer + env GPU buffers + render pipeline.
  * gpucat objects defer their actual GPU work until `renderer.init()` runs,
  * so the pipeline can be wired against the buffers up front; only the
  * device handshake stays async (`load`).
  *
- * No Inspector is constructed at boot — `setInspectorVisible(true)` lazily
+ * No Inspector is constructed at boot, `setInspectorVisible(true)` lazily
  * builds one on first show and disposes it when hidden (full teardown of
  * GPU resources, DOM, and window listeners).
  */
@@ -64,7 +64,7 @@ export function init(): Renderer {
 /**
  * Headless construction for the asset pipeline (`src/asset-pipeline`). Renders
  * into an offscreen RenderTarget against a caller-supplied Dawn device +
- * adapter — no canvas swapchain, no window dimension reads. The env GPU buffers
+ * adapter, no canvas swapchain, no window dimension reads. The env GPU buffers
  * + render pipeline build identically to the browser `init()`; this just swaps
  * the surface. There is no `setSize`: the asset pipeline sizes per-pass
  * RenderTargets itself (see offline snapshot sessions).
@@ -94,7 +94,7 @@ export async function load(state: Renderer): Promise<void> {
  *
  * On show: constructs a fresh Inspector, attaches it via `setInspector`,
  * mounts the panel to document.body (bongle never mounts the WebGPURenderer's
- * implicit canvas — each room renders to its own canvas via canvas targets,
+ * implicit canvas, each room renders to its own canvas via canvas targets,
  * so the inspector's self-attach finds nothing), and docks/opens it.
  *
  * On hide: `setInspector(null)` triggers the Inspector's dispose path which
@@ -122,12 +122,12 @@ export function setInspectorVisible(state: Renderer, visible: boolean): void {
 
 /**
  * the engine's single, persistent render pipeline. one set across the
- * whole engine — built once at boot, then reused for every active room.
+ * whole engine, built once at boot, then reused for every active room.
  * swapping rooms mutates `passNode.scene` (and the matrices on `camera`)
  * instead of building a fresh pipeline, so the compiled post-chain (fxaa
  * + tint) is paid for exactly once.
  *
- * a fullscreen tint applied after fxaa is driven by `screenTint` — when
+ * a fullscreen tint applied after fxaa is driven by `screenTint`, when
  * `w=0` the mix collapses to the input (free fast path). callers update
  * the uniform each frame based on the block at the camera position.
  */
@@ -142,11 +142,11 @@ export type EngineRenderPipeline = {
     /**
      * the camera the pass renders through. composed each frame from the
      * active camera node's TransformTrait + CameraTrait via
-     * `syncRenderCamera`. owned here, not by CameraTrait — CameraTrait is
+     * `syncRenderCamera`. owned here, not by CameraTrait, CameraTrait is
      * plain projection data.
      */
     camera: PerspectiveCamera;
-    /** rgba tint uniform — set w=0 for no tint. */
+    /** rgba tint uniform, set w=0 for no tint. */
     screenTint: Uniform<d.vec4f>;
 };
 
@@ -177,7 +177,7 @@ function createRenderPipeline(webGpuRenderer: WebGPURenderer): EngineRenderPipel
  * compose the pipeline's persistent render camera from the active CameraTrait
  * (and its sibling TransformTrait). pose comes from the camera node's world
  * transform; fov/near/far come from CameraTrait. projection rebuilds only on
- * change. idempotent — safe to call multiple times per frame.
+ * change. idempotent, safe to call multiple times per frame.
  *
  * no-op when cameraTrait is null (no active POV).
  */
@@ -219,7 +219,7 @@ export function syncRenderCamera(pipeline: EngineRenderPipeline, cameraTrait: Ca
 
 /**
  * point the persistent pass at the active room's scene. `PassNode.scene`
- * is `readonly` in TS but read fresh each frame in `updateBefore` — the
+ * is `readonly` in TS but read fresh each frame in `updateBefore`, the
  * runtime resolves the swap on the next render.
  */
 function setActiveScene(pipeline: EngineRenderPipeline, scene: Scene): void {
@@ -244,7 +244,7 @@ export function bindRenderCamera(pipeline: EngineRenderPipeline, canvasTarget: C
 /**
  * transparent-clear pipeline for offline tasks (icon atlases). callers
  * supply a per-pass camera so each subject can be framed independently.
- * skips screen tint — icons composite against a neutral background.
+ * skips screen tint, icons composite against a neutral background.
  */
 export function createOfflinePipeline(state: Renderer, scene: Scene, camera: Camera): RenderPipeline {
     const scenePass = pass(scene, camera, { clearColor: [0, 0, 0, 0] });
@@ -279,7 +279,7 @@ export function resize(state: Renderer, width: number, height: number) {
  * cull computes + pipeline.render.
  *
  * the engine-global render pipeline is built once at boot and reused for
- * every active room — only `passNode.scene` (and the camera + env buffer
+ * every active room, only `passNode.scene` (and the camera + env buffer
  * contents) rotate per frame.
  */
 export function render(
@@ -289,37 +289,37 @@ export function render(
     voxelResources: VoxelResources,
     voxelViewChunkRadius: number,
 ): void {
-    // canvas target — guard avoids redundant reconfigure on the gpu side.
+    // canvas target, guard avoids redundant reconfigure on the gpu side.
     if (state.renderer.getCanvasTarget() !== room.canvasTarget) {
         state.renderer.setCanvasTarget(room.canvasTarget);
     }
 
-    // env flush + screen tint — only the active camera defines what world
+    // env flush + screen tint, only the active camera defines what world
     // context the post-chain should see this frame. when camera is null
     // (e.g. boot before a control is bound) we still render whatever the
-    // pipeline last saw — the room will compose with stale env, which is
+    // pipeline last saw, the room will compose with stale env, which is
     // fine for the rare null window.
     if (camera) {
         updateCameraEnvironment(state.pipeline, room.voxels, camera);
         Environment.updateForCamera(room.environment, camera);
-        // CPU per-(section, facing) cull — builds per-pass visibleSlices
+        // CPU per-(section, facing) cull, builds per-pass visibleSlices
         // + single-entry drawIndirect. expansion compute fans these out
         // into per-quad visibleQuads downstream.
         VoxelVisuals.cullCPU(voxelResources, camera, voxelViewChunkRadius);
     }
 
-    // point the engine-global pass at this room's scene before render —
+    // point the engine-global pass at this room's scene before render,
     // the pipeline graph is shared, only `passNode.scene` rotates.
     setActiveScene(state.pipeline, room.scene);
 
     const dispatches: ComputeDispatch[] = [];
 
-    // voxel expansion (3 dispatches: opaque, transparent, translucent —
+    // voxel expansion (3 dispatches: opaque, transparent, translucent,
     // skipped per-pass when no visible slices). fans per-(section, facing)
     // visible slices into per-quad entries the VS reads.
     for (const disp of VoxelVisuals.expandDispatches(voxelResources)) dispatches.push(disp);
 
-    // drive the voxel animation clock — gpucat no longer ticks time itself.
+    // drive the voxel animation clock, gpucat no longer ticks time itself.
     elapsedTime.value = performance.now() / 1000;
     state.renderer.compute(dispatches);
     state.pipeline.pipeline.render();

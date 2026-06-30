@@ -1,5 +1,5 @@
 /**
- * library overlay — floating panel for browsing and managing project content.
+ * library overlay, floating panel for browsing and managing project content.
  *
  * shown when `libraryOpen` is true (toggled with E). top-level tabs:
  *   - inventory: catalog of blocks, prefabs, blueprints. click an item to
@@ -37,7 +37,7 @@ export function LibraryOverlay() {
     const [tab, setTab] = useState<Tab>('inventory');
 
     // close on Esc (and drop carry implicitly via setLibraryOpen). also
-    // release pointer lock on open — fly/character controllers grab it on
+    // release pointer lock on open, fly/character controllers grab it on
     // canvas click and the user can't interact with the overlay without it
     // being released.
     useEffect(() => {
@@ -56,7 +56,7 @@ export function LibraryOverlay() {
     if (!open) return null;
 
     return (
-        // floating panel — positioned, no full-screen backdrop, doesn't block
+        // floating panel, positioned, no full-screen backdrop, doesn't block
         // clicks on the rest of the editor (canvas + hotbar remain interactive).
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
             <div className="bg-white shadow-xl border border-neutral-200 w-[640px] max-w-[90vw] max-h-[70vh] flex flex-col">
@@ -242,7 +242,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
         } catch {
-            // clipboard blocked — ignore
+            // clipboard blocked, ignore
         }
     };
     return (

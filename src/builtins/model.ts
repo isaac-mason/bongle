@@ -1,10 +1,10 @@
-// ModelTrait — the shared voxel-light home for everything rendered under
+// ModelTrait, the shared voxel-light home for everything rendered under
 // this node. `ModelLighting` samples voxel light once per frame at the
 // centroid of the model's visible meshes and writes it here; every MeshTrait
 // in the subtree reads it via `findModelAncestor`.
 //
 // Sampling per-model (rather than per-mesh) keeps lighting consistent
-// across a rig's limbs — bones whose own world position clips into a
+// across a rig's limbs, bones whose own world position clips into a
 // solid voxel mid-animation don't pop dark, because the centroid is by
 // construction inside the model body.
 //
@@ -29,7 +29,7 @@ export const ModelTrait = trait('model', {
      * Voxel light contribution [sky, r, g, b] sampled by `ModelLighting.update`
      * once per frame at the model's sample point (origin + `lightOffset`).
      * Meshes under this ModelTrait read this directly instead of sampling
-     * at their own world position — keeps lighting consistent across a
+     * at their own world position, keeps lighting consistent across a
      * rig's limbs and stops individual bone meshes from popping dark when
      * their world position clips into a solid voxel. Defaults to full-bright
      * so the first frame before sampling doesn't render the model black.
@@ -39,7 +39,7 @@ export const ModelTrait = trait('model', {
     /**
      * Where to sample voxel light, as a model-local offset from this node's
      * origin (transformed by the node's world matrix before sampling).
-     * Defaults to the origin itself — correct for static meshes whose origin
+     * Defaults to the origin itself, correct for static meshes whose origin
      * sits inside the body. Models whose origin is on the surface rather than
      * the interior set this so the sample lands inside the body: a character's
      * rig root is at its feet, so it sets `[0, ~0.9, 0]` to sample from the

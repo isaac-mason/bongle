@@ -1,4 +1,4 @@
-// selection — sparse chunk bitset for voxels + set of node ids.
+// selection, sparse chunk bitset for voxels + set of node ids.
 //
 // voxel part mirrors the VoxelsState chunk map structure so the representation is
 // familiar and the coordinate maths are identical.
@@ -11,7 +11,7 @@
 //   - O(1) set / get / has via chunk map + bit index
 //   - iteration is tile-by-tile, then bit-scan within each tile
 //   - nudge allocates a new Selection (unavoidable O(filled chunks))
-//   - merge is O(filled chunks of source) — just OR the bit words
+//   - merge is O(filled chunks of source), just OR the bit words
 //   - no per-voxel object allocation anywhere
 //
 // node part is a simple Set<number> of scene graph node ids.
@@ -255,7 +255,7 @@ export function intersect(dst: Selection, src: Selection): void {
 //
 // translate all selected voxels by (dx, dy, dz) into `out` (which is
 // cleared first). for each set bit, decode world coords, re-set with
-// delta applied. O(set voxels) — unavoidable for arbitrary deltas.
+// delta applied. O(set voxels), unavoidable for arbitrary deltas.
 
 export function nudge(out: Selection, src: Selection, dx: number, dy: number, dz: number): void {
     out.chunks.clear();

@@ -1,17 +1,17 @@
 /**
- * tiny fuzzy matcher — subsequence scan with fzf-style bonuses. tuned for
+ * tiny fuzzy matcher, subsequence scan with fzf-style bonuses. tuned for
  * short snake_case identifiers (block ids, command names) where the inputs
  * are O(hundreds) and queries are O(chars). returns the best score for a
  * candidate plus the matched character positions for optional highlight.
  *
- * not a port — just the same idea distilled down. greedy left-to-right
+ * not a port, just the same idea distilled down. greedy left-to-right
  * subsequence match (case-insensitive), scoring per matched char:
  *   +16  match at word boundary (start, or after `_-./ `)
  *   + 8  consecutive with previous match
  *   + 4  exact case match
  *   + 2  base
  *   - 1  per skipped (gap) char
- * empty query returns score 0 with no positions — every candidate trivially
+ * empty query returns score 0 with no positions, every candidate trivially
  * matches; the caller decides whether to keep them.
  */
 

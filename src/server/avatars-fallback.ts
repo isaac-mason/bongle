@@ -1,10 +1,10 @@
-// avatars-fallback.ts — the dev/edit/offline `ServerDriver.avatars` impl.
+// avatars-fallback.ts, the dev/edit/offline `ServerDriver.avatars` impl.
 //
 // `ServerDriver.avatars` is required, like `storage`: a deployed host sources
-// real avatars from its backend (the HTTP driver — published avatars on R2),
+// real avatars from its backend (the HTTP driver, published avatars on R2),
 // and kit dev / editor / offline supply this fallback. It mirrors how the
 // platform sources them: each is a `runtime` avatar served as a plain `.glb`
-// the engine fetches and parses via `gltfUnpack` — NOT a bundled `model()`.
+// the engine fetches and parses via `gltfUnpack`, NOT a bundled `model()`.
 // That keeps dev on the exact same runtime-avatar path as prod and needs no
 // per-game codegen/baking of the engine's example avatars.
 //
@@ -36,12 +36,12 @@ const SAMPLE_AVATARS: SampleAvatar[] = [
 
 // Server-only: resolved at runtime against the module's on-disk location so we
 // can read the engine's example `.glb`s off disk. It's a directory, not a file,
-// so there's no build-time asset for Vite to emit — tell it to leave it as-is.
+// so there's no build-time asset for Vite to emit, tell it to leave it as-is.
 const avatarsDir = fileURLToPath(new URL(/* @vite-ignore */ '../../avatars/', import.meta.url));
 const filePathFor = (a: SampleAvatar): string => path.join(avatarsDir, a.file);
 
 export function createFallbackAvatarsDriver(): ServerDriver['avatars'] {
-    // Only advertise avatars whose bytes are actually on disk — present in the
+    // Only advertise avatars whose bytes are actually on disk, present in the
     // source tree during dev, absent from a prod build (where the platform's own
     // HTTP driver replaces this anyway). So we never hand the engine a URL that
     // resolves to nothing, and the driver degrades to an empty batch cleanly.

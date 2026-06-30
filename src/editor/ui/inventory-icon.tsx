@@ -45,7 +45,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
         case 'prefab': {
             // per-prefab PNG written by the asset-pipeline prefab-icon task.
             // missing-file (cold start, hash gate) renders as a broken img;
-            // ok for now — the placeholder fallback only fires when the
+            // ok for now, the placeholder fallback only fires when the
             // prefabId itself is empty.
             if (!item.prefabId) return <Placeholder size={size} />;
             return (
@@ -64,7 +64,7 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
         case 'blueprint': {
             // per-scene PNG written by the asset-pipeline scene-icon task.
             // missing-file (cold start, hash gate) renders as a broken img;
-            // ok for now — the placeholder fallback only fires when the
+            // ok for now, the placeholder fallback only fires when the
             // sceneId itself is empty.
             if (!item.sceneId) return <Placeholder size={size} />;
             return (
