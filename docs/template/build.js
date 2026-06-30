@@ -134,6 +134,46 @@ function collectModuleExports(file, prefix = '', seen = new Set()) {
     return exports;
 }
 
+// group the public barrel (`src/index.ts`) by the module each export comes
+// from, preserving the barrel's namespacing. `export * from './api/x'` lands
+// flat under key 'api/x'; `export * as ns from './api/y'` lands under key
+// 'api/y' with every export prefixed `ns.` (so it renders as `ns.foo`);
+// `export { a } from './api/z'` lands under 'api/z' with just those names.
+// this map is the source of truth for the auto-generated API reference.
+function buildBarrelGroups(indexFile) {
+    const sf = tsProgram.getSourceFile(indexFile);
+    const groups = new Map();
+    if (!sf) return groups;
+    for (const node of sf.statements) {
+        if (!ts.isExportDeclaration(node) || !node.moduleSpecifier) continue;
+        const spec = node.moduleSpecifier.text;
+        const file = resolveModule(indexFile, spec);
+        if (!file) continue;
+        const key = spec.replace(/^\.\//, '').replace(/\/index$/, '');
+        let exps;
+        if (!node.exportClause) {
+            exps = collectModuleExports(file);
+        } else if (ts.isNamespaceExport(node.exportClause)) {
+            exps = collectModuleExports(file, `${node.exportClause.name.text}.`);
+        } else {
+            exps = node.exportClause.elements.map((el) => ({
+                exportName: el.name.text,
+                localName: el.propertyName?.text ?? el.name.text,
+                originFile: file,
+            }));
+        }
+        const group = groups.get(key) ?? { spec, exports: [] };
+        group.exports.push(...exps);
+        groups.set(key, group);
+    }
+    return groups;
+}
+
+const barrelGroups = buildBarrelGroups(path.join(srcDir, 'index.ts'));
+// module keys rendered by <RenderModule> in the current template, for the
+// completeness check (reset per template).
+const renderedModuleKeys = new Set();
+
 // ── signature / source extraction (declaration-level, no body) ──────
 
 function printSignature(node, sourceFile, fileText, displayName) {
@@ -274,6 +314,36 @@ function renderSymbol(attrs) {
     return `#### \`${display}\`\n\n${block}`;
 }
 
+// render every public export of a barrel module, in source order, each under a
+// `#### \`name\`` heading with its signature. attrs:
+//   select="api/transforms"  required — a barrel module key (path under src)
+// names that can't be resolved to a local declaration (e.g. symbols re-exported
+// from a sibling package like packcat) are listed compactly instead of dropped,
+// so the reference stays complete.
+function renderModule(attrs) {
+    const key = (attrs.select || '').trim();
+    const group = barrelGroups.get(key);
+    if (!group) {
+        console.warn(`RenderModule: '${key}' is not a module in the bongle barrel`);
+        return `<!-- RenderModule: module not found: ${key} -->`;
+    }
+    renderedModuleKeys.add(key);
+    const parts = [];
+    const unresolved = [];
+    const seen = new Set();
+    for (const exp of group.exports) {
+        if (seen.has(exp.exportName)) continue;
+        seen.add(exp.exportName);
+        const scope = tsProgram.getSourceFile(exp.originFile) ?? null;
+        const symbolName = exp.exportName.split('.').pop();
+        const code = getType(exp.localName, scope, symbolName);
+        if (code) parts.push(`#### \`${exp.exportName}\`\n\n\`\`\`ts\n${code.trim()}\n\`\`\``);
+        else unresolved.push(exp.exportName);
+    }
+    if (unresolved.length) parts.push(`Also exported: ${unresolved.map((n) => `\`${n}\``).join(', ')}.`);
+    return parts.join('\n\n');
+}
+
 // ── template tag expansion ──────────────────────────────────────────
 
 // parse tag attributes. supports key="value" and bare boolean flags (e.g.
@@ -287,6 +357,7 @@ function parseAttrs(raw) {
 }
 
 function expandTemplate(text) {
+    text = text.replace(/<RenderModule\s+([^>]*?)\/>/g, (_m, raw) => renderModule(parseAttrs(raw)));
     text = text.replace(/<Render\s+([^>]*?)\/>/g, (_m, raw) => renderSymbol(parseAttrs(raw)));
 
     text = text.replace(/<Snippet\s+([^>]*?)\/>/g, (full, raw) => {
@@ -330,7 +401,19 @@ for (const [tpl, out] of [['guide.template.md', 'guide.md'], ['api.template.md',
         console.warn(`skipping ${tpl}: not found`);
         continue;
     }
+    renderedModuleKeys.clear();
     const result = expandTemplate(fs.readFileSync(tplPath, 'utf-8'));
     fs.writeFileSync(path.join(docsDir, out), result, 'utf-8');
     console.log(`wrote ${out}`);
+
+    // completeness check: every barrel module must be rendered by some
+    // <RenderModule> in the API reference, so a new module can't silently
+    // go undocumented. only meaningful for the api template.
+    if (out === 'api.md') {
+        const missing = [...barrelGroups.keys()].filter((key) => !renderedModuleKeys.has(key));
+        if (missing.length) {
+            console.warn(`\napi.md is missing ${missing.length} barrel module(s) — add a <RenderModule select="..."> for each:`);
+            for (const key of missing) console.warn(`  <RenderModule select="${key}" />`);
+        }
+    }
 }
