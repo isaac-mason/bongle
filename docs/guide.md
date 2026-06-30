@@ -330,6 +330,18 @@ and saves it in scene files. Its `schema`, built with the `prop` helpers such as
 export function control<T extends TraitBase, V>(handle: TraitHandle<T>, controlId: string, body: ControlBody<T, V>): void;
 ```
 
+The `prop` builders cover the field types the inspector can edit:
+
+| Builder | Field |
+| --- | --- |
+| `prop.boolean()`, `prop.string()`, `prop.number({ min, max, step })` | a checkbox, text, or number input |
+| `prop.vec2()`, `prop.vec3()`, `prop.vec4()`, `prop.quaternion()` | vector and rotation inputs |
+| `prop.enumeration([...])` | a dropdown of fixed choices |
+| `prop.list(of)`, `prop.tuple([...])` | a variable-length or fixed array |
+| `prop.object({ ... })`, `prop.record(of)` | a nested struct or keyed map |
+| `prop.optional(of)`, `prop.nullable(of)`, `prop.nullish(of)` | wrap any of the above as maybe-absent |
+| `prop.mesh()`, `prop.prefab()`, `prop.block()` | an asset reference picker |
+
 `sync` replicates a field across the network. Its rate and authority (which side
 may write it) get a fuller treatment under
 [replication and authority](#replication-and-authority).
@@ -502,15 +514,16 @@ with RPC; and managing multiple rooms.
 
 ### Replication and authority
 
-Replication only concerns shared-realm nodes (the [realm](#nodes-and-the-scene-graph)
-section covers the rest). Most multiplayer state on them never needs an explicit
-message: a trait field with a `sync` is serialized on its authoritative side and
-applied everywhere else. The sync's `rate` controls how often it emits: `'realtime'`
-(the default) emits on every change, for positions and health; `'dirty'` emits only
-when you call the returned handle's `dirty()`, for fields you set once; a number caps
-the rate in Hz; and a threshold rate such as `syncRate.distance(0.1)` re-emits only
-once the value has moved that far, which is how a body coming to rest goes quiet on
-the wire.
+Most multiplayer state never needs an explicit message: give a trait field a `sync`
+and it replicates from its authoritative side to every other side automatically, on
+every change. (Replication applies only to shared-realm nodes; the
+[realm](#nodes-and-the-scene-graph) section covers the others.)
+
+When a field gets noisy, tune how often it emits with the sync's `rate`. The default
+is `'realtime'`, every change. The alternatives trade freshness for bandwidth:
+`'dirty'` emits only when you call the handle's `dirty()` (for fields you set once), a
+number caps the rate in Hz, and a threshold like `syncRate.distance(0.1)` re-emits
+only after the value moves that far, so a body coming to rest goes quiet on the wire.
 
 **Authority** decides which side may write a synced field. By default it is the
 server, so writes from clients are ignored. Set `authority: 'owner'` on the sync to
@@ -532,6 +545,43 @@ server-owned. For an entity a player should control, like a vehicle they enter o
 object they carry, keep it server-authoritative and route that player's input to it
 (over RPC, or by reading their owned player node), rather than handing the entity
 itself to the client.
+
+These two axes, per-field authority and per-node ownership, compose, and a player is
+the classic case. The player node is owned by its client so movement stays responsive,
+but the things a player must not forge, health, score, an inventory, stay
+**server-authoritative on the same entity**. Do this per field by leaving those syncs
+at the default `authority: 'server'` (the engine's own player node works this way: its
+character-controller input is owner-authoritative while its identity is server-owned),
+or per node by hanging a server-owned child off the player. Any node you create has no
+owner, so the server drives everything on it, which makes a child node a clean home
+for a server-owned subsystem like an inventory.
+
+```ts
+const InventoryTrait = trait('inventory', { coins: 0 });
+
+// `coins` replicates from the server: authority defaults to 'server', so clients
+// see it but cannot write it, even on a node their own player owns.
+sync(InventoryTrait, 'coins', {
+    schema: pack.uint32(),
+    pack: (t) => t.coins,
+    unpack: (value, t) => {
+        t.coins = value;
+    },
+});
+
+script(WorldTrait, 'inventories', (ctx) => {
+    if (!env.server) return;
+
+    onJoin(ctx, ({ playerNode }) => {
+        // the player node is owned by its client, which drives its movement. attach a
+        // server-owned child for state the server must control: a node you create has
+        // no owner, so the server is authoritative over everything on it.
+        const inventory = createNode({ name: 'inventory' });
+        addTrait(inventory, InventoryTrait);
+        addChild(playerNode, inventory);
+    });
+});
+```
 
 ### Client-only nodes
 
@@ -624,11 +674,24 @@ script(WorldTrait, 'weapon-rpc', (ctx) => {
 
 That schema is a `pack` schema. `pack` is the engine's binary wire-format builder,
 from [packcat](https://github.com/isaac-mason/packcat): you compose a payload shape
-from `pack.object`, `pack.float32`, `pack.string`, `pack.list`, `pack.boolean`, and
-the rest, plus bongle helpers such as `pack.quaternion()`, and the command serializes to
-a compact binary frame rather than JSON. The same `pack` schemas back trait `sync`
-replication under the hood, so it is the one wire format the whole engine speaks.
-Do not confuse it with `prop` (from the [trait `control`](#traits) schema), which
+and the command serializes to a compact binary frame rather than JSON. The same `pack`
+schemas back trait `sync` replication under the hood, so it is the one wire format the
+whole engine speaks. It mirrors `prop`'s shapes but with explicit sizes, since bytes
+matter on the wire:
+
+| Builder | Wire type |
+| --- | --- |
+| `pack.boolean()`, `pack.string()` | a boolean, a length-prefixed string |
+| `pack.uint8()` … `pack.uint32()`, `pack.int8()` … `pack.int32()` | sized integers |
+| `pack.varuint()`, `pack.varint()` | variable-length integers (small values cost fewer bytes) |
+| `pack.float32()`, `pack.float64()`, `pack.quantized(...)` | floats, or a compressed fixed-range float |
+| `pack.enumeration([...])`, `pack.literal(...)` | a fixed choice |
+| `pack.list(of)`, `pack.tuple([...])` | a variable or fixed array |
+| `pack.object({ ... })`, `pack.record(of)`, `pack.union(...)` | a struct, keyed map, or tagged variant |
+| `pack.optional(of)`, `pack.nullable(of)` | maybe-absent / maybe-null |
+| `pack.quat()`, and bongle's `pack.position()` / `pack.quaternion()` / `pack.scale()` | rotation and engine vector helpers |
+
+Do not confuse `pack` with `prop` (from the [trait `control`](#traits) schema), which
 describes editor-inspectable and persisted fields, not what crosses the network.
 
 ### Rooms
