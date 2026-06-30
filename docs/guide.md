@@ -286,6 +286,55 @@ Realm decides where a node exists; [replication and
 authority](#replication-and-authority) decides what crosses the wire and who may
 write it.
 
+### Transforms
+
+Every node with a `TransformTrait` has a position, rotation, and scale. You
+write **local-space** values with setters and read **world-space** values with
+getters. Setters propagate a dirty flag down the subtree; getters lazily
+recompute only when something upstream changed, so reading is cheap when
+nothing moved.
+
+The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
+`setTransform` to write all three at once:
+
+```ts
+/** set local position and mark dirty. only the position slice replicates. */
+export function setPosition(t: TransformTrait, v: Vec3): void;
+```
+
+The world getters read where a node actually ended up after its parents' transforms
+apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
+`getWorldMatrix`.
+
+```ts
+/** get world-space position, decomposing from worldMatrix if needed. */
+export function getWorldPosition(t: TransformTrait): Vec3;
+```
+
+To place a node at an absolute world position or orientation regardless of its
+parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
+the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
+**interpolated** transform rather than the logic one, which is what camera work and
+other `onFrame` code should read (see
+[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
+
+In practice you add a `TransformTrait` to a node, set its local position, then
+read back where it lands in world space:
+
+```ts
+// give a node a transform, then position it in local space
+const crate = createNode({ name: 'crate' });
+const transform = addTrait(crate, TransformTrait);
+setPosition(transform, [4, 1, -2]);
+
+// read where it ended up in world space (after any parent transforms apply)
+const worldPos = getWorldPosition(transform);
+console.log(worldPos);
+```
+
+See the [API reference](./api.md#transforms--scene-graph) for the full set of
+transform setters and getters.
+
 ### Traits
 
 If you have used an entity-component system, a trait is bongle's version of a
@@ -532,71 +581,108 @@ pickup, a projectile.
 Most games mix the two. A root-level system owns the rules that span entities,
 while individual entities keep their own local behaviour.
 
+### Client, server, and editor
+
+The same source runs on both sides; a few flags decide where and when each piece
+runs, and the unused branches are stripped at build time.
+
+**Which side.** `env.server` and `env.client` are build-time booleans, so a guard like
+`if (!env.server) return` compiles its body out of the client bundle entirely. Put
+authoritative simulation behind `env.server`, and visuals, input, and UI behind
+`env.client`. Inside a script, `ctx.server` and `ctx.client` are the matching runtime
+handles, present only on their side.
+
+```ts
+script(WorldTrait, 'sides', (ctx) => {
+    // server-only: authoritative logic, compiled out of the client bundle
+    if (env.server) {
+        onJoin(ctx, ({ playerNode }) => {
+            log(ctx, 'player joined', playerNode.id);
+        });
+    }
+
+    // client-only: visuals, input, and UI, compiled out of the server bundle
+    if (env.client) {
+        onFrame(ctx, () => {
+            // inside `env.client`, ctx.client is guaranteed, so `!` is fine
+            const mouseKeyboard = ctx.client!.input.mouseKeyboard;
+            if (isKeyDown(mouseKeyboard, 'KeyE')) {
+                // ... interact ...
+            }
+        });
+    }
+});
+```
+
+For moving state from the server to clients, a `sync` on a trait is the usual path;
+for discrete events, use RPC ([Multiplayer](#multiplayer) covers both).
+
+**Editor builds.** `env.editor` is true only when the project runs under the editor in
+development, and false in production deploys, so authoring helpers and debug overlays
+live behind it and never ship.
+
+**Edit vs play.** A script's lifecycle hooks do not run while the editor is in edit
+mode by default; pass `{ editor: true }` as the script's options to opt in (the
+starter's lighting script does exactly this, so the world is lit while you build it). A
+script that runs in both then reads `ctx.mode`, which is `'edit'` or `'play'` per room,
+to tell which it is. A classic use is an authoring-only marker, a label over each spawn
+point while editing, gone at play time.
+
+```ts
+// an authoring aid: a label floating over each spawn point while you build the
+// level. `{ editor: true }` lets the script run in edit mode at all; the guard
+// limits it to an editor build (env.editor) in edit mode (ctx.mode), so it never
+// appears in play or in a shipped bundle.
+script(
+    WorldTrait,
+    'spawn-markers',
+    (ctx) => {
+        if (!env.editor || ctx.mode !== 'edit') return;
+
+        const spawns = query(ctx, [SpawnTrait, TransformTrait]);
+        const painted = new Set<Node>();
+
+        onFrame(ctx, () => {
+            for (const [, transform] of spawns) {
+                const point = transform._node;
+
+                let marker = findChildByName(point, 'marker');
+                if (!marker) {
+                    // a client-only canvas billboard. paint it next frame, once the
+                    // visuals layer has installed (and one-time cleared) its canvas.
+                    marker = createNode({ realm: 'client', name: 'marker' });
+                    setPosition(addTrait(marker, TransformTrait), [0, 1.5, 0]);
+                    addTrait(marker, CanvasTrait, { mode: 'y-billboard', worldScale: 1 / 128 });
+                    addChild(point, marker);
+                    continue;
+                }
+                if (painted.has(marker)) continue; // a static label: paint it just once
+
+                const canvas = getTrait(marker, CanvasTrait);
+                const g = canvas?.canvas?.getContext('2d');
+                if (!canvas || !g) continue;
+                g.fillStyle = '#000';
+                g.fillRect(0, 0, canvas.width, canvas.height);
+                g.fillStyle = '#fff';
+                g.font = 'bold 48px sans-serif';
+                g.textAlign = 'center';
+                g.textBaseline = 'middle';
+                g.fillText('SPAWN', canvas.width / 2, canvas.height / 2);
+                canvas.needsUpdate = true;
+                painted.add(marker);
+            }
+        });
+    },
+    { editor: true },
+);
+```
+
 ### Hot reload
 
 In the editor, saving a script re-runs its factory live, so edits take effect
 without a restart. The old instance is disposed first, so its `onDispose` runs,
 then the new factory runs. Factory-scope locals reset by design; to carry state
 across a reload, register `onSwap` with a serialize and deserialize pair.
-
-### Client and server
-
-The same source is bundled for both sides, and `env.server` / `env.client` (plus
-`env.editor`) carve out side-specific logic, with the unused branch stripped at
-build time. Put authoritative simulation on the server and read its results on
-the client through replication: a `sync` on a trait is the usual path, where the
-server writes the field and every client receives it at the configured rate. For
-discrete events rather than continuous state, use RPC, covered in
-[Multiplayer](#multiplayer).
-
-## Transforms
-
-Every node with a `TransformTrait` has a position, rotation, and scale. You
-write **local-space** values with setters and read **world-space** values with
-getters. Setters propagate a dirty flag down the subtree; getters lazily
-recompute only when something upstream changed, so reading is cheap when
-nothing moved.
-
-The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
-`setTransform` to write all three at once:
-
-```ts
-/** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void;
-```
-
-The world getters read where a node actually ended up after its parents' transforms
-apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
-`getWorldMatrix`.
-
-```ts
-/** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3;
-```
-
-To place a node at an absolute world position or orientation regardless of its
-parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
-the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
-**interpolated** transform rather than the logic one, which is what camera work and
-other `onFrame` code should read (see
-[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
-
-In practice you add a `TransformTrait` to a node, set its local position, then
-read back where it lands in world space:
-
-```ts
-// give a node a transform, then position it in local space
-const crate = createNode({ name: 'crate' });
-const transform = addTrait(crate, TransformTrait);
-setPosition(transform, [4, 1, -2]);
-
-// read where it ended up in world space (after any parent transforms apply)
-const worldPos = getWorldPosition(transform);
-console.log(worldPos);
-```
-
-See the [API reference](./api.md#transforms--scene-graph) for the full set of
-transform setters and getters.
 
 ## Math
 
@@ -1306,16 +1392,17 @@ script(
 
 ### Models and meshes
 
-Most visible 3D content is glTF. A plain **model** is any glTF you place in the
-world, such as a prop, a pickup, or a piece of scenery. A **character** is a rigged
-humanoid that animates and that players and NPCs render as. They share the loading
-machinery here but differ in how you drive them.
+You bring 3D art into the world by declaring a model and placing a copy of it. A
+model is loaded from a glTF file (`.gltf` or `.glb`, the format bongle supports) and
+can be anything: a prop, a pickup, a piece of scenery, or a character. A **character**
+is just a model that follows the humanoid rig, so it can be animated and driven like a
+player or an NPC; it gets its own treatment under [Characters](#characters), but
+everything here applies to it too.
 
-In almost every case you bring 3D geometry into the world by declaring a model and
-instancing it, not by building meshes by hand. `model(id, { src })` declares a model
-from a glTF at module scope and returns a handle; `cloneModel(handle.scene)` copies
-its subtree and installs the render slot a visible node needs, and you attach the
-clone to the scene.
+`model(id, { src })` declares a model from a glTF at module scope and returns a handle.
+`cloneModel(handle.scene)` makes a copy of its node subtree, installing the render slot
+a visible node needs, which you attach to the scene. You almost never build geometry
+by hand.
 
 ```ts
 // declare a model from a glTF at module scope
