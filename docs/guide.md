@@ -845,22 +845,29 @@ when the parent goes away. Build it in a client context (guard with `ctx.client`
 frame: check whether the child already exists before adding it.
 
 ```ts
-// give every player a client-only name tag, built and kept entirely on the client
-script(PlayerTrait, 'nametag', (ctx) => {
+// give every player a name tag, built and kept entirely on the client.
+// (minimalized from wizard-game's wizard nameplate.)
+script(PlayerTrait, 'nameplate', (ctx) => {
     if (!ctx.client) return; // a local visual; this never runs on the server
 
     onFrame(ctx, () => {
-        // client scripts run every frame, so create the child once, idempotently
-        if (findChildByName(ctx.node, 'nametag')) return;
+        // create the child once, idempotently, since onFrame runs every frame
+        if (findChildByName(ctx.node, 'nameplate')) return;
 
         // realm 'client': lives on this client alone, never replicated or serialized.
         // as a child of the shared player node it rides the player's transform and is
         // removed automatically when the player leaves.
-        const tag = createNode({ realm: 'client', name: 'nametag' });
-        setPosition(addTrait(tag, TransformTrait), [0, 2.2, 0]);
-        addTrait(tag, CanvasTrait, { mode: 'y-billboard', worldScale: 1 / 64 });
-        addChild(ctx.node, tag);
-        // then paint its canvas to draw the player's name
+        const plate = createNode({ realm: 'client', name: 'nameplate' });
+        setPosition(addTrait(plate, TransformTrait), [0, 3.1, 0]);
+
+        // a screen-space DOM overlay at constant css size (distanceFactor null), so it
+        // stays readable at any distance instead of shrinking like a world quad.
+        const html = addTrait(plate, HtmlTrait, { mode: 'screen', center: true, distanceFactor: null });
+        if (html.element) {
+            html.element.textContent = ctx.trait.username;
+            html.element.style.cssText = 'color:#fff; font:bold 12px ui-monospace, monospace; pointer-events:none;';
+        }
+        addChild(ctx.node, plate);
     });
 });
 ```
