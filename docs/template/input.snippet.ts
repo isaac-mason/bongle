@@ -8,9 +8,9 @@ import { createTouchButton, isKeyDown, isTouchButtonDown, isTouchPrimary, onDisp
 script(WorldTrait, 'read-input', (ctx) => {
     onInput(ctx, () => {
         if (!ctx.client) return;
-        const mk = ctx.client.input.mouseKeyboard;
-        const forward = isKeyDown(mk, 'KeyW');
-        const back = isKeyDown(mk, 'KeyS');
+        const mouseKeyboard = ctx.client.input.mouseKeyboard;
+        const forward = isKeyDown(mouseKeyboard, 'KeyW');
+        const back = isKeyDown(mouseKeyboard, 'KeyS');
         if (forward !== back) {
             // drive movement, aim a weapon, etc.
         }

@@ -103,10 +103,10 @@ This is server logic, so it returns early unless `env.server` is true (the
 client that joins the room and hands you that client's `playerNode`. We read its
 `TransformTrait` with `getTrait` and call `setPosition` to drop the player at
 `[0, 5, 0]`, then face them toward a point of interest. The player node also carries
-a `CharacterControllerTrait`, and `setCharacterLookAt(cc, transform, target)` aims it at
+a `CharacterControllerTrait`, and `setCharacterLookAt(controller, transform, target)` aims it at
 a world position, computing the look yaw and pitch through the character's eyes. The
 player controller reads those angles, so the client's camera starts pointed that way.
-(For a raw yaw and pitch, `setCharacterLook(cc, yaw, pitch?)` writes them directly.)
+(For a raw yaw and pitch, `setCharacterLook(controller, yaw, pitch?)` writes them directly.)
 
 That is the whole starter: register blocks, size the room, light the world,
 spawn players. The rest of this guide unpacks the pieces it leans on, starting
@@ -170,6 +170,15 @@ A bongle game is built from three things: nodes, traits, and scripts. Nodes form
 the scene tree, traits give a node state and capabilities, and scripts attach
 behaviour to a trait. This chapter covers all three, then how code splits across
 the client and server.
+
+Every script runs with a **`ctx`**, its `ScriptContext`: the handle it reaches
+everything through, from its own `ctx.node` and `ctx.trait` to the room's world
+(`ctx.voxels`, `ctx.physics`, `ctx.clock`) and the lifecycle hooks below. `ctx` is
+scoped to one **room**, and that matters from the start: a server runs many rooms at
+once, each its own independent world, and your script runs once per node in each
+room. So per-room state belongs on `ctx`-reachable things, a trait or the world
+itself, never in a module-scope variable, which every room in the process would
+share. Rooms get a fuller treatment in [Multiplayer, in depth](#rooms).
 
 ### Nodes and the scene graph
 
@@ -325,14 +334,23 @@ getters. Setters propagate a dirty flag down the subtree; getters lazily
 recompute only when something upstream changed, so reading is cheap when
 nothing moved.
 
-The most common call is `setPosition`, which writes the node's local position:
+The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
+`setTransform` to write all three at once:
 
 <Render select="api/transforms:setPosition" />
 
-To read where a node actually ended up in the world (after its parents'
-transforms are applied), use `getWorldPosition`:
+The world getters read where a node actually ended up after its parents' transforms
+apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
+`getWorldMatrix`.
 
 <Render select="api/transforms:getWorldPosition" />
+
+To place a node at an absolute world position or orientation regardless of its
+parent, write through `setWorldPosition` and `setWorldQuaternion`. And for rendering,
+the `getVisualWorld*` family (`getVisualWorldPosition` and friends) reads the
+**interpolated** transform rather than the logic one, which is what camera work and
+other `onFrame` code should read (see
+[Ticks, frames, and interpolation](#ticks-frames-and-interpolation)).
 
 In practice you add a `TransformTrait` to a node, set its local position, then
 read back where it lands in world space:
@@ -341,6 +359,27 @@ read back where it lands in world space:
 
 See the [API reference](./api.md#transforms--scene-graph) for the full set of
 transform setters and getters.
+
+## Math
+
+bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
+small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
+tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
+import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
+
+The API is gl-matrix style, so if you know gl-matrix you already know it: an
+operation takes its output target first and writes into it, avoiding allocation, as
+in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
+do vector math yourself, such as steering, aiming, or camera work.
+
+That output-first shape is built for **scratch buffers**: allocate a few reusable
+vectors once and write through them every tick rather than creating a new vector per
+operation, which matters in hot paths like `onTick`. Declare them in the script
+factory so each script instance gets its own, and prefix them with an underscore
+(`_toTarget`) to mark them as throwaway working memory, not state anything reads
+later.
+
+<Snippet source="math.snippet.ts" select="scratch" />
 
 ## Scenes & prefabs
 
@@ -474,15 +513,19 @@ to `setBlock`.
 
 ### Reading and writing the world
 
-Blocks live in the per-room `Voxels`, reachable in any script as `ctx.voxels`.
-`setBlock` writes a block by world coordinate and `getBlock` reads one back. Edits
-made on the server replicate to clients automatically.
+Blocks live in the per-room `Voxels`, reachable in any script as `ctx.voxels`, and
+the block types themselves in the per-room block registry, `ctx.blocks`. `setBlock`
+writes a block by world coordinate and `getBlock` reads its key back; `getBlockState`
+reads the numeric **state id**, the block kind plus its block-state values in one
+integer (the same id a raycast hit reports). The empty cell has state id `AIR`, so
+compare `getBlockState` against it to test for air. `forEachBlock` walks every block
+that has been set. Server edits replicate to clients automatically.
 
 <Snippet source="blocks.snippet.ts" select="edit-world" />
 
 To find which block a ray hits, for a build cursor or a hitscan weapon, use
-`raycastVoxels`. The starter blocks also include presets such as doors; toggle one
-with `getDoorOpen` and `setDoorOpen`.
+`raycastVoxels` (covered under [Scene queries](#scene-queries)). The starter blocks
+also include presets such as doors; toggle one with `getDoorOpen` and `setDoorOpen`.
 
 ### Reacting to changes
 
@@ -495,17 +538,22 @@ are server-only and hand you the world coordinates of the change.
 
 ## Rendering & visuals
 
-Everything the player sees comes from a handful of built-in pieces, each covered
-below:
+Everything the player sees comes from a handful of built-in pieces: the camera and
+lighting, the traits that draw a node, the model and character system that brings in
+glTF art, and particles. This chapter covers them all, then drops to the renderer
+for anything they do not:
 
 - [Camera](#camera): the room's view and projection, and the controllers that move it.
 - [Lighting and sky](#lighting-and-sky): sky presets, time of day, and voxel lighting.
-- [Visual traits](#visual-traits): the traits that draw a node, meshes, sprites, and shadows.
+- [Models and meshes](#models-and-meshes): bringing in glTF geometry (the 99% path) and the low-level mesh trait.
+- [glTF support](#gltf-support): exactly which glTF/GLB features are imported.
+- [Characters](#characters): rigged humanoids that players and NPCs render as.
+- [Animation](#animation): playing a model's glTF clips.
+- [Procedural animation](#procedural-animation): posing bones from code each frame.
+- [Voxel meshes](#voxel-meshes): standalone, movable block meshes.
+- [Sprites](#sprites): 2D billboards and extruded sprite slabs.
+- [Shadows](#shadows): cheap blob shadows under a node.
 - [Particles](#particles): short-lived sprite effects such as smoke, sparks, and dust.
-- [Going lower level](#going-lower-level): drop to the gpucat scene for custom rendering.
-
-Rigged glTF models are their own topic, covered in
-[Models & characters](#models--characters).
 
 ### Camera
 
@@ -525,14 +573,149 @@ server-only `configureFloodFillLighting`.
 
 <Snippet source="visuals.snippet.ts" select="lighting" />
 
-### Visual traits
+Most visible 3D content is glTF. A plain **model** is any glTF you place in the
+world, such as a prop, a pickup, or a piece of scenery. A **character** is a rigged
+humanoid that animates and that players and NPCs render as. They share the loading
+machinery below but differ in how you drive them.
 
-Most visible objects are a node carrying a visual trait:
+### Models and meshes
 
-- `MeshTrait` draws raw geometry, and `VoxelMeshTrait` draws block meshes.
-- `SpriteTrait` draws 2D art as a billboard, and `ExtrudedSpriteMeshTrait` turns
-  that art into a 3D slab. Both suit items, foliage, and effects.
-- `ShadowCasterTrait` makes a node cast a shadow.
+In almost every case you bring 3D geometry into the world by declaring a model and
+instancing it, not by building meshes by hand. `model(id, { src })` declares a model
+from a glTF at module scope and returns a handle; `cloneModel(handle.scene)` copies
+its subtree and installs the render slot a visible node needs, and you attach the
+clone to the scene.
+
+<Snippet source="character.snippet.ts" select="place-model" />
+
+A model is a tree of named nodes, and you often want to drive one part of it from
+code: open a chest lid, mount an item on a hand, attach an effect to a turret. The
+handle indexes everything the glTF contains by name, as `handle.nodes`,
+`handle.meshes`, and `handle.animations`. On a placed clone, reach the live instance
+of a named node with `findByName(clone, name)`, then read or write its traits.
+
+<Snippet source="character.snippet.ts" select="reference-node" />
+
+Underneath, the trait that actually draws geometry is `MeshTrait`: it renders one
+mesh referenced by `meshId`, such as `handle.meshes.<Name>.id`. Reach for it directly
+only when you want a single mesh without the surrounding model subtree. It carries
+the shared render knobs every visual trait has (`tint`, `glow`, `flash`, `unlit`,
+`visible`), set through helpers such as `setMeshTint` and `setMeshGlow`.
+
+Models load at build time from your declarations. For the rare case where a model's
+source is only known at runtime, `loadModel`, `getModel`, `ensureModel`, and
+`releaseModel` fetch and reference-count one on the fly; prefer a declared `model()`
+when you can.
+
+### glTF support
+
+**TLDR: author with [bongle-blockbench](https://blockbench.bongle.io)** and you stay
+inside the supported subset by construction. It is a build of
+[Blockbench](https://www.blockbench.net/) set up for bongle (the same tool the
+[Characters](#characters) section uses) that exports engine-ready glTF, so you rarely
+need the specifics below.
+
+If you bring a model from elsewhere, bongle imports a deliberate subset. Either
+`.gltf` or `.glb` works; the asset pipeline normalizes the source at build time and
+the engine reads the canonical result. Exactly what it uses:
+
+- **Geometry**: triangle meshes with `POSITION`, optional `NORMAL`, and one UV set,
+  `TEXCOORD_0`. Multiple primitives on a mesh are flattened into one. Indices may be
+  unsigned byte, short, or int.
+- **Materials**: the PBR **base-color texture** only, sampled through `TEXCOORD_0`.
+  Metallic-roughness, normal, emissive, and occlusion maps are not used.
+- **Animation**: node **TRS** tracks (`translation`, `rotation`, `scale`) with
+  `LINEAR`, `STEP`, or `CUBICSPLINE` interpolation.
+- **Hierarchy**: the node tree and each node's local transform.
+
+Everything else is ignored: skinning, morph targets, vertex colors, tangents,
+cameras, lights, and glTF extensions. Because there is no skinning, animation moves
+whole nodes rather than deforming a mesh, which is why character rigs are built from
+separate bone nodes (see [Animation](#animation)).
+
+### Characters
+
+A character is a node with a `CharacterTrait`, which carries its model, sounds, and
+effects and pairs with the `CharacterControllerTrait` from [Physics](#physics).
+Player nodes get one automatically from their avatar (see [Avatars](#avatars)); for
+NPCs you assign one yourself.
+
+Character models follow a canonical humanoid rig (the `6bone` rig, whose structure
+is laid out under [Avatars](#avatars)). You author them in
+[bongle-blockbench](https://github.com/isaac-mason/bongle-blockbench), a build of
+[Blockbench](https://www.blockbench.net/) set up for bongle. It starts you from
+that rig, validates it as you work, and exports an engine-ready glTF in one click.
+Run it online at [blockbench.bongle.io](https://blockbench.bongle.io), or install
+it into the Blockbench desktop app.
+
+### Animation
+
+Any model that ships clips can be animated, not just characters. bongle plays the
+glTF's **TRS** animation tracks, keyframed node translation, rotation, and scale, so
+a clip moves whole nodes of the model: a crab's legs, a turning gear, a swinging
+door. There is no skinning, so it does not deform a mesh by bone weights. That makes
+clips ideal for props, machines, creatures, and one-shot character emotes.
+
+Animation is driven by an `AnimatorTrait` on the model node. It samples the model's
+clips each tick and blends between them. The `Animation` namespace is the
+script-facing API: `Animation.clip(animator, clipDef)` resolves one of the model's
+clips to an `AnimationAction`, and `Animation.play`, `Animation.stop`,
+`Animation.crossFadeTo`, and `Animation.setEffectiveWeight` drive playback and
+blending. A model's clips are reachable by name off its handle, as
+`CrabModel.animations.idle`.
+
+<Snippet source="character.snippet.ts" select="animate" />
+
+On a **character**, prefer procedural animation (below) for ongoing motion. Clip
+playback writes the same bone TRS as the built-in procedural locomotion and
+head-look, so the two fight; reserve clips on characters for one-shot emotes layered
+on top, and let procedural code drive the moment-to-moment pose.
+
+### Procedural animation
+
+Some pose work can't come from a baked clip: a head that tracks the camera, a
+spring that reacts to the parent's motion, a constraint that clamps a joint. Use
+`onPostAnimate`, which fires after the animator has sampled this tick's clips but
+before world matrices are recomputed. At that point a bone's local TRS is fresh, so
+writes here layer on top of the sampled pose rather than being overwritten by it.
+Built-in character locomotion (arm and leg swing, head-look) runs in exactly this
+phase.
+
+<Snippet source="character.snippet.ts" select="procedural" />
+
+### Voxel meshes
+
+`VoxelMeshTrait` draws a standalone `VoxelModel`: the same greedy-meshed block look
+as the terrain, but as a movable scene node rather than part of the world grid, for
+vehicles, doors, and detached chunks of structure. It shares the same render knobs
+as `MeshTrait`.
+
+Build one from blocks: make a standalone grid with `createVoxels(ctx.blocks)`, paint
+it with `setBlock`, wrap it in a model with `createVoxelModel`, and point a
+`VoxelMeshTrait` at it.
+
+<Snippet source="voxel-model.snippet.ts" select="voxel-model" />
+
+To make the structure solid and movable, build the same `VoxelModel` on the server,
+turn it into a collider with `createVoxelModelShape(model)`, and adopt that shape
+into a `RigidBodyTrait` (see [Rigid bodies](#rigid-bodies)). The example games float
+platforms and boats exactly this way.
+
+### Sprites
+
+`SpriteTrait` draws 2D art as a billboard that always faces the camera. Point its
+`sprite` at a `sprite()` handle, size it with `width` and `height` (in source
+pixels) and `worldScale`, and set `fps` to play a multi-frame sprite as an
+animation. Billboards suit items, pickups, foliage, and cheap characters.
+`ExtrudedSpriteMeshTrait` takes the same sprite art but extrudes it into a 3D slab
+of `depth`, the chunky paper-craft look (think Crossy Road) that reads from any
+angle rather than only head-on.
+
+### Shadows
+
+`ShadowCasterTrait` drops a soft blob shadow onto the ground beneath a node, a cheap
+way to ground characters and props without full shadow mapping. Tune its `radius`
+and the `maxDistance` it searches downward for a surface.
 
 ### Particles
 
@@ -543,13 +726,6 @@ ones), then emit instances at a position with `spawnParticle`. The starter pack
 bundles ready-made presets under `particlePresets` in `bongle/starter`.
 
 <Snippet source="visuals.snippet.ts" select="particles" />
-
-### Going lower level
-
-bongle renders with [gpucat](https://github.com/isaac-mason/gpucat), a lightweight
-in-house renderer. When the builtin traits do not cover an effect you need,
-advanced games can reach the gpucat scene directly as `ctx.client.scene` to add
-custom meshes or materials.
 
 ## Physics
 
@@ -563,19 +739,32 @@ bodies for projectiles, pickups, and crowds.
 
 ### Rigid bodies
 
-A rigid body is a node with a `RigidBodyTrait`. Assign its `def` to build one: a
-`shape` (`box`, `sphere`, `capsule`, `hull`, or `mesh`) plus optional `friction`,
-`restitution`, and a `motionType` from the `MotionType` enum (`MotionType.STATIC`,
-`KINEMATIC`, or `DYNAMIC`, the default). Set `sensor: true` for a body that reports
-overlaps without blocking, the basis for triggers and pickups.
+Rigid-body physics in bongle is [crashcat](https://github.com/isaac-mason/crashcat),
+the engine's physics library, and these docs lean into it rather than hide it.
+crashcat runs the full solver: bodies with a shape, mass, friction, and restitution
+that collide and respond. Every rigid body in a room is a crashcat body living in the
+world at `ctx.physics.rigid.world`.
+
+`RigidBodyTrait` is a convenience over that. It binds a crashcat body to a scene
+node, replicates it, and tears it down with the node, so you rarely touch crashcat
+for the common cases. It works in two modes.
+
+**def mode** is the declarative path. Assign the trait's `def`, a recipe whose fields
+mirror crashcat's `RigidBodySettings`, and the trait builds and owns the body: a
+`shape` (`box`, `sphere`, `capsule`, `hull`, or `mesh`) plus optional `motionType`
+(`MotionType.STATIC`, `KINEMATIC`, or `DYNAMIC`, the default), `friction`,
+`restitution`, `mass`, `collisionGroups` / `collisionMask`, `sensor`, and the rest of
+the `RigidBodySettings` surface.
 
 <Snippet source="physics.snippet.ts" select="drop-body" />
 
-Rigid-body physics is powered by [crashcat](https://github.com/isaac-mason/crashcat),
-bongle's physics engine. `RigidBodyTrait` covers the common cases declaratively. For
-advanced use the underlying crashcat world is reachable at `ctx.physics.rigid.world`,
-and you can drive it directly with the crashcat API (raw bodies, joints, queries,
-custom shapes) alongside the trait-managed bodies in the same simulation.
+**adopt mode** is the escape hatch. Leave `def` null, build a crashcat body yourself
+against `ctx.physics.rigid.world` with the full crashcat API, and assign it to the
+trait's `body`. The trait adopts it: it replicates the body and removes it on dispose
+just as in def mode (null `body` first if you want to keep it alive). Reach for this
+when you need a shape, joint, or setting the declarative `def` does not expose.
+
+<Snippet source="physics.snippet.ts" select="adopt-body" />
 
 ### AABB bodies
 
@@ -587,16 +776,16 @@ rigid-body solving, so they scale to many simple movers; drive one directly with
 
 `CharacterControllerTrait` is a kinematic mover for players and NPCs: it walks,
 steps, and slides against the world without the wobble of a dynamic body. It pairs
-with `CharacterTrait` for the visible body, covered in
-[Models & characters](#models--characters).
+with `CharacterTrait` for the visible body, covered under
+[Characters](#characters).
 
 You drive it through its `input`: `input.move` is a planar `[strafe, forward]`
 vector, `input.look` is the `[_, yaw, pitch]` look spherical, and `input.jump`,
 `input.sprint`, and `input.crouch` are held flags. The controller turns those into
 motion each tick. For a player, a [`PlayerControllerTrait`](#players--input) fills
 `input` from device input for you. For an NPC you write `input` yourself: set
-`input.move` to steer, and aim with `setCharacterLook(cc, yaw, pitch?)` or
-`setCharacterLookAt(cc, transform, target)` (which points the character at a world
+`input.move` to steer, and aim with `setCharacterLook(controller, yaw, pitch?)` or
+`setCharacterLookAt(controller, transform, target)` (which points the character at a world
 position through its eyes) rather than writing the look angles by hand. The
 [Pathfinding](#pathfinding) snippet drives an NPC exactly this way.
 
@@ -619,6 +808,16 @@ its `added` list.
 For lower-level control, `onPhysicsContact(ctx, 'added' | 'persisted', fn)` fires
 during the step with the raw crashcat bodies and manifold, and lets you tune the
 contact in place, such as zeroing friction for an ice patch or flagging it a sensor.
+
+### Sensors
+
+A **sensor** is a body that detects overlaps without colliding: other bodies pass
+straight through it, but the overlap still registers as a contact. Sensors are how
+you build triggers, pickups, and zones. Set `sensor: true` on a `RigidBodyDef` (or in
+the crashcat body settings in adopt mode), pair the node with a `ContactsTrait`, and
+react to what enters in `onPostPhysicsStep`. The coin pickup above is a worked
+sensor: a static sensor body that awards and despawns the instant a player overlaps
+it.
 
 ### The player controller
 
@@ -727,14 +926,14 @@ These take the `mouseKeyboard` input. `code` is a `KeyboardEvent.code` such as
 
 | Predicate | Reads |
 | --- | --- |
-| `isKeyDown(mk, code)` | key is held this frame |
-| `isKeyJustDown(mk, code)` | key went down this frame (press edge) |
-| `isKeyJustUp(mk, code)` | key went up this frame (release edge) |
-| `isMouseDown(mk, button)` | mouse button is held |
-| `isMouseJustDown(mk, button)` | button went down this frame |
-| `isMouseJustUp(mk, button)` | button went up this frame |
-| `isMouseTap(mk, button)` | a quick press-and-release landed this frame |
-| `isMouseDragStart(mk, button)` | a drag began this frame |
+| `isKeyDown(mouseKeyboard, code)` | key is held this frame |
+| `isKeyJustDown(mouseKeyboard, code)` | key went down this frame (press edge) |
+| `isKeyJustUp(mouseKeyboard, code)` | key went up this frame (release edge) |
+| `isMouseDown(mouseKeyboard, button)` | mouse button is held |
+| `isMouseJustDown(mouseKeyboard, button)` | button went down this frame |
+| `isMouseJustUp(mouseKeyboard, button)` | button went up this frame |
+| `isMouseTap(mouseKeyboard, button)` | a quick press-and-release landed this frame |
+| `isMouseDragStart(mouseKeyboard, button)` | a drag began this frame |
 
 Touch input (joysticks, buttons, pinch) is read with its own predicates, covered
 under [Touch controls](#touch-controls).
@@ -761,89 +960,6 @@ on a small touch screen, for laying out a compact HUD, not for deciding whether 
 show touch controls at all.
 
 <Snippet source="input.snippet.ts" select="touch" />
-
-## Models & characters
-
-bongle has two kinds of model. A plain **model** is any glTF you place in the
-world, such as a prop, a pickup, or a piece of scenery. A **character** is a
-rigged humanoid that animates and that players and NPCs render as. They share the
-loading machinery below but differ in how you drive them.
-
-### Models
-
-`model(id, { src })` declares a model from a glTF at module scope and returns a
-handle. Instance it with `cloneModel(handle.scene)`, which copies the model's
-subtree and installs the render slot a visible node needs, then attach the clone
-to the scene.
-
-<Snippet source="character.snippet.ts" select="place-model" />
-
-A model is a tree of named nodes, and you often want to drive one part of it from
-code: open a chest lid, mount an item on a hand, attach an effect to a turret. The
-handle indexes everything the glTF contains by name, as `handle.nodes`,
-`handle.meshes`, and `handle.animations`. On a placed clone, reach the live instance
-of a named node with `findByName(clone, name)`, then read or write its traits.
-
-<Snippet source="character.snippet.ts" select="reference-node" />
-
-### Character models
-
-A character is a node with a `CharacterTrait`, which carries its model, sounds, and
-effects and pairs with the `CharacterControllerTrait` from [Physics](#physics).
-Player nodes get one automatically from their avatar (see [Avatars](#avatars)); for
-NPCs you assign one yourself.
-
-Character models follow a canonical humanoid rig (the `6bone` rig, whose structure
-is laid out under [Avatars](#avatars)). You author them in
-[bongle-blockbench](https://github.com/isaac-mason/bongle-blockbench), a build of
-[Blockbench](https://www.blockbench.net/) set up for bongle. It starts you from
-that rig, validates it as you work, and exports an engine-ready glTF in one click.
-Run it online at [blockbench.bongle.io](https://blockbench.bongle.io), or install
-it into the Blockbench desktop app.
-
-### Animation
-
-Any model that ships clips can be animated, not just characters. bongle plays the
-glTF's **TRS** animation tracks, keyframed node translation, rotation, and scale, so
-a clip moves whole nodes of the model: a crab's legs, a turning gear, a swinging
-door. There is no skinning, so it does not deform a mesh by bone weights. That makes
-clips ideal for props, machines, creatures, and one-shot character emotes.
-
-Animation is driven by an `AnimatorTrait` on the model node. It samples the model's
-clips each tick and blends between them. The `Animation` namespace is the
-script-facing API: `Animation.clip(animator, clipDef)` resolves one of the model's
-clips to an `AnimationAction`, and `Animation.play`, `Animation.stop`,
-`Animation.crossFadeTo`, and `Animation.setEffectiveWeight` drive playback and
-blending. A model's clips are reachable by name off its handle, as
-`CrabModel.animations.idle`.
-
-<Snippet source="character.snippet.ts" select="animate" />
-
-On a **character**, prefer procedural animation (below) for ongoing motion. Clip
-playback writes the same bone TRS as the built-in procedural locomotion and
-head-look, so the two fight; reserve clips on characters for one-shot emotes layered
-on top, and let procedural code drive the moment-to-moment pose.
-
-### Character procedural animation
-
-Some pose work can't come from a baked clip: a head that tracks the camera, a
-spring that reacts to the parent's motion, a constraint that clamps a joint. Use
-`onPostAnimate`, which fires after the animator has sampled this tick's clips but
-before world matrices are recomputed. At that point a bone's local TRS is fresh, so
-writes here layer on top of the sampled pose rather than being overwritten by it.
-Built-in character locomotion (arm and leg swing, head-look) runs in exactly this
-phase.
-
-<Snippet source="character.snippet.ts" select="procedural" />
-
-### Loading models at runtime (advanced)
-
-Almost always you declare a model with `model()` up front, and that is what you
-should reach for. For the rare case where a model's source is only known at runtime,
-the script context exposes `loadModel`, `getModel`, `ensureModel`, and
-`releaseModel` to fetch and reference-count one on the fly. Prefer a declared model
-when you can: it is typed, processed by the asset pipeline, and simpler to reason
-about.
 
 ## Avatars
 
@@ -914,9 +1030,9 @@ For UI anchored to a scene node rather than the screen, use the `HtmlTrait`, whi
 positions an HTML element at a node's world position, and `UILayer` controls
 stacking order when overlays need to sit above or below one another. For a drawable
 surface inside the world, such as a sign or screen, the `CanvasTrait` renders a 2D
-canvas onto a node. And because the world renders with gpucat, advanced UI that
-needs custom rendering can draw into the gpucat scene directly (see
-[Going lower level](#going-lower-level)).
+canvas onto a node. And because the world renders with
+[gpucat](https://github.com/isaac-mason/gpucat), advanced UI that needs custom
+rendering can draw into the gpucat scene directly via `ctx.client.scene`.
 
 ## Persistence
 

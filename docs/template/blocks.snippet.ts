@@ -1,7 +1,21 @@
 // Typechecked snippets for Voxels & blocks.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { block, blockState, getBlock, onBlockBreak, onBlockBuild, onInit, script, setBlock, WorldTrait } from 'bongle';
+import {
+    AIR,
+    block,
+    blockState,
+    forEachBlock,
+    getBlock,
+    getBlockState,
+    log,
+    onBlockBreak,
+    onBlockBuild,
+    onInit,
+    script,
+    setBlock,
+    WorldTrait,
+} from 'bongle';
 import { blockTextures } from 'bongle/starter';
 
 /* SNIPPET_START: define-block */
@@ -17,12 +31,23 @@ const RubyBlock = block('guide:ruby', {
 // read and write blocks through ctx.voxels, addressed by world x/y/z
 script(WorldTrait, 'place-ruby', (ctx) => {
     onInit(ctx, () => {
-        // place our block at the origin
+        // write a block; server edits replicate to clients automatically
         setBlock(ctx.voxels, 0, 0, 0, RubyBlock.defaultKey());
 
-        // read a block key back (the air key where empty)
+        // read a block's key, and its numeric state id (block kind + block state)
         const key = getBlock(ctx.voxels, 0, 0, 0);
-        console.log(key);
+        const stateId = getBlockState(ctx.voxels, 0, 0, 0);
+        log(ctx, key, stateId);
+
+        // AIR is the empty-cell state id: compare a state against it to test for air
+        if (getBlockState(ctx.voxels, 0, 1, 0) === AIR) {
+            log(ctx, 'nothing above the block');
+        }
+
+        // walk every non-air block that has been set
+        forEachBlock(ctx.voxels, (x, y, z, blockKey) => {
+            log(ctx, 'block at', x, y, z, blockKey);
+        });
     });
 });
 /* SNIPPET_END: edit-world */

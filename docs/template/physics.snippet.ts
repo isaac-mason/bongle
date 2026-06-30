@@ -11,6 +11,7 @@ import {
     env,
     log,
     MotionType,
+    OBJECT_LAYER_NODE_MOVING,
     onInit,
     onPostPhysicsStep,
     PlayerTrait,
@@ -22,6 +23,7 @@ import {
     TransformTrait,
     WorldTrait,
 } from 'bongle';
+import { box, rigidBody } from 'crashcat';
 
 /* SNIPPET_START: drop-body */
 // a dynamic body is a node with a RigidBodyTrait. assign its `def` to build one.
@@ -33,13 +35,40 @@ script(WorldTrait, 'drop-ball', (ctx) => {
         const transform = addTrait(ball, TransformTrait);
         setPosition(transform, [0, 15, 0]);
 
-        const rb = addTrait(ball, RigidBodyTrait);
-        rb.def = { shape: { type: 'sphere', radius: 0.5 }, restitution: 0.4, friction: 0.5 };
+        const bodyTrait = addTrait(ball, RigidBodyTrait);
+        bodyTrait.def = { shape: { type: 'sphere', radius: 0.5 }, restitution: 0.4, friction: 0.5 };
 
         addChild(ctx.node, ball);
     });
 });
 /* SNIPPET_END: drop-body */
+
+/* SNIPPET_START: adopt-body */
+// "adopt mode": leave `def` null and hand the trait a crashcat body you built
+// yourself, for shapes or settings the declarative def does not expose. the trait
+// replicates it and tears it down on dispose, just as if it had built it.
+script(WorldTrait, 'custom-body', (ctx) => {
+    if (!env.server) return;
+
+    onInit(ctx, () => {
+        const crate = createNode({ name: 'crate' });
+        addTrait(crate, TransformTrait); // the body's transform syncs onto this node
+
+        const body = rigidBody.create(ctx.physics.rigid.world, {
+            shape: box.create({ halfExtents: [0.5, 0.5, 0.5] }),
+            objectLayer: OBJECT_LAYER_NODE_MOVING,
+            motionType: MotionType.DYNAMIC,
+            position: [0, 12, 0],
+            restitution: 0.4,
+        });
+
+        const bodyTrait = addTrait(crate, RigidBodyTrait); // def stays null
+        bodyTrait.body = body; // adopt the body; the trait owns and replicates it from here
+
+        addChild(ctx.node, crate);
+    });
+});
+/* SNIPPET_END: adopt-body */
 
 /* SNIPPET_START: coin-pickup */
 // CoinTrait marks a pickup; `value` is how much it is worth.
@@ -60,10 +89,12 @@ function spawnCoin(parent: Node, position: [number, number, number]) {
     addChild(parent, coin);
 }
 
-let coinsCollected = 0;
-
 script(WorldTrait, 'coins', (ctx) => {
     if (!env.server) return; // the server owns pickups
+
+    // per-room running total. factory-scope state lives in this one script
+    // instance (one per world node), never module scope, which every room shares.
+    let coinsCollected = 0;
 
     const coins = query(ctx, [CoinTrait, ContactsTrait]);
     const players = query(ctx, [PlayerTrait]);

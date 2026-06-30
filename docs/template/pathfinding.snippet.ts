@@ -25,7 +25,7 @@ script(CharacterControllerTrait, 'npc-nav', (ctx) => {
     let repathIn = 0;
 
     onTick(ctx, ({ delta }) => {
-        const cc = ctx.trait;
+        const controller = ctx.trait;
         const pos = getWorldPosition(transform);
 
         // repath a couple of times a second rather than every tick
@@ -48,8 +48,8 @@ script(CharacterControllerTrait, 'npc-nav', (ctx) => {
         }
 
         if (!path || waypoint >= path.length) {
-            cc.input.move[0] = 0;
-            cc.input.move[1] = 0; // arrived, or no route: stand still
+            controller.input.move[0] = 0;
+            controller.input.move[1] = 0; // arrived, or no route: stand still
             return;
         }
 
@@ -57,10 +57,10 @@ script(CharacterControllerTrait, 'npc-nav', (ctx) => {
         const cell = path[waypoint]!;
         const dx = cell[0] + 0.5 - pos[0];
         const dz = cell[2] + 0.5 - pos[2];
-        setCharacterLook(cc, Math.atan2(-dx, -dz)); // face the next waypoint
-        cc.input.move[0] = 0; // no strafe
-        cc.input.move[1] = 1; // full forward
-        cc.input.jump = cc.state.horizontalCollision; // hop when a full-block step stalls us
+        setCharacterLook(controller, Math.atan2(-dx, -dz)); // face the next waypoint
+        controller.input.move[0] = 0; // no strafe
+        controller.input.move[1] = 1; // full forward
+        controller.input.jump = controller.state.horizontalCollision; // hop when a full-block step stalls us
     });
 });
 /* SNIPPET_END: path */

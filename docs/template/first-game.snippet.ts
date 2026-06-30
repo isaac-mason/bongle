@@ -59,8 +59,8 @@ script(WorldTrait, 'spawn', (ctx) => {
         // face the new player at a point of interest. setCharacterLookAt aims through
         // the character's eyes, setting its look yaw and pitch; the player controller
         // reads them, so the client's camera starts pointed that way.
-        const cc = getTrait(playerNode, CharacterControllerTrait)!;
-        setCharacterLookAt(cc, transform, [10, 5, 0]);
+        const controller = getTrait(playerNode, CharacterControllerTrait)!;
+        setCharacterLookAt(controller, transform, [10, 5, 0]);
     });
 });
 /* SNIPPET_END: spawn */
