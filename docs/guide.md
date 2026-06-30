@@ -1141,6 +1141,36 @@ build.
 When the content format changes between engine versions, `bongle migrate`
 upgrades your `content/` to the latest schema.
 
+### Patterns and masks
+
+The voxel tools, brushes, fill and replace, the heightmap sculptors, share two
+parameters borrowed from WorldEdit: a **pattern** that decides *what* block to place,
+and a **mask** that decides *which* voxels a stroke is allowed to touch.
+
+A pattern is sampled per voxel to answer "what block goes here":
+
+| Syntax | Description | Example |
+| --- | --- | --- |
+| `block` | a single block | `stone` |
+| `a,b` | an even random mix | `stone,dirt` |
+| `N%a,M%b` | a weighted random mix | `10%stone,90%dirt` |
+| `$active` | the active hotbar slot's block | `$active` |
+
+A mask filters where the op applies, answering "does this voxel match":
+
+| Syntax | Description | Example |
+| --- | --- | --- |
+| `block` | matches that block | `stone` |
+| `#existing` | any non-air voxel | `#existing` |
+| `!mask` | negation | `!stone` |
+| `a,b` | or-list (matches either) | `stone,dirt` |
+| `a b` | intersection (matches all, space-separated) | `#existing !stone` |
+| `%N` | a random N% of voxels | `%50` |
+
+So a brush with pattern `moss` and mask `stone` paints moss onto existing stone only.
+These are a small subset of WorldEdit's grammar, enough to place and constrain blocks
+across the toolset without scripting.
+
 ## Assets
 
 Models, textures, sounds, and sprites come from asset files in your project. You
@@ -2108,11 +2138,23 @@ neighbour the agent can reach from it.
 
 ### Players
 
-Each connected client has a **player node** that the engine creates and tags with
-a `PlayerTrait` (carrying its `playerId`, `username`, and owning `client`). The
-local player is `ctx.client.player`; a joining player arrives as the `playerNode`
-in `onJoin`, as the starter's spawn script uses. You usually drive the player with
-a `PlayerControllerTrait` rather than writing movement from scratch.
+Each connected client has a **player node** that the engine creates on join, already
+carrying a default set of traits:
+
+| Trait | Gives the player |
+| --- | --- |
+| `TransformTrait` | a position, rotation, and scale |
+| `PlayerTrait` | identity: its `playerId`, `username`, and owning `client` |
+| `CharacterTrait` | the humanoid rig and visuals (its [avatar](#avatars)) |
+| `CharacterControllerTrait` | a kinematic controller for movement and collision |
+| `PlayerControllerTrait` | reads input and drives the controller and the camera |
+
+The node is owned by its client, so its movement is
+[owner-authoritative](#replication-and-authority). The local player is
+`ctx.client.player`; a joining player arrives as the `playerNode` in `onJoin`, as the
+starter's spawn script uses. Add your own gameplay traits, health, score, an inventory,
+to it in `onJoin`, and you usually drive movement with the `PlayerControllerTrait`
+rather than writing it from scratch.
 
 ### Reading input
 
