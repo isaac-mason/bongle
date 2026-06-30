@@ -1767,9 +1767,60 @@ script(WorldTrait, 'custom-body', (ctx) => {
 
 ### AABB bodies
 
-The `aabbBody` namespace builds the lighter axis-aligned bodies. They skip full
-rigid-body solving, so they scale to many simple movers; drive one directly with
-`aabbBody.setVelocity`.
+An `AabbBodyTrait` is a lighter physics body: an axis-aligned box that never rotates
+and skips the full rigid-body solver. That makes it cheap enough to run in bulk, for
+projectiles, pickups, particles, or simple movers, where a [rigid body](#rigid-bodies)
+would be overkill. Add one with `addTrait(node, AabbBodyTrait, { ... })` and shape its
+behaviour through the trait's declarative fields: `halfExtents` for the box,
+`linearVelocity` for initial motion, plus `gravityFactor`, `friction`, `restitution`,
+`sensor`, and the `collisionGroups` / `collisionMask` pair that filters what it hits.
+It falls under gravity and collides with voxels and other AABB bodies out of the box.
+
+```ts
+// spawn a light, axis-aligned mover. no rotation and no full rigid-body solve, so you
+// can afford many of them; it still falls under gravity and collides with voxels.
+script(WorldTrait, 'spawn-pellet', (ctx) => {
+    if (!env.server) return; // the server simulates; AABB bodies replicate to clients
+
+    onInit(ctx, () => {
+        const pellet = createNode({ name: 'pellet' });
+        setPosition(addTrait(pellet, TransformTrait), [0, 12, 0]);
+        addTrait(pellet, AabbBodyTrait, {
+            halfExtents: [0.25, 0.25, 0.25],
+            linearVelocity: [6, 0, 0], // initial launch; bounces off voxels on impact
+            restitution: 0.6,
+        });
+        addChild(ctx.node, pellet);
+    });
+});
+```
+
+For motion the declarative `linearVelocity` can't express, reach for the `aabbBody`
+namespace: imperative verbs over a body's live `.body`.
+`aabbBody.setVelocity(ctx.physics.aabb, body, vx, vy, vz)` sets its velocity and wakes
+it, so you can steer a body every tick, reading where it is from `body.position`.
+
+```ts
+// actor-style: one instance per node carrying an AabbBodyTrait. drive it imperatively
+// each tick, where the declarative `linearVelocity` field can't express the logic.
+script(AabbBodyTrait, 'hover', (ctx) => {
+    if (!env.server) return;
+
+    onTick(ctx, () => {
+        const body = ctx.trait.body; // the live AABB body, installed by the first tick
+        if (body.position[1] < 3) {
+            // push up when it dips too low; setVelocity wakes a sleeping body.
+            aabbBody.setVelocity(ctx.physics.aabb, body, 0, 5, 0);
+        }
+    });
+});
+```
+
+AABB bodies and rigid bodies simulate in separate worlds and do not collide with each
+other by default. To let the character controller and the rigid-body solver collide
+with an AABB body, set `rigidBodyImpostor: true`: it presents an impostor box to that
+world while still simulating as a cheap AABB. A `ContactsTrait` reports its touches
+just as it does for a rigid body.
 
 ### Character controller
 

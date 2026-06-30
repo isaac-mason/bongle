@@ -1066,9 +1066,29 @@ when you need a shape, joint, or setting the declarative `def` does not expose.
 
 ### AABB bodies
 
-The `aabbBody` namespace builds the lighter axis-aligned bodies. They skip full
-rigid-body solving, so they scale to many simple movers; drive one directly with
-`aabbBody.setVelocity`.
+An `AabbBodyTrait` is a lighter physics body: an axis-aligned box that never rotates
+and skips the full rigid-body solver. That makes it cheap enough to run in bulk, for
+projectiles, pickups, particles, or simple movers, where a [rigid body](#rigid-bodies)
+would be overkill. Add one with `addTrait(node, AabbBodyTrait, { ... })` and shape its
+behaviour through the trait's declarative fields: `halfExtents` for the box,
+`linearVelocity` for initial motion, plus `gravityFactor`, `friction`, `restitution`,
+`sensor`, and the `collisionGroups` / `collisionMask` pair that filters what it hits.
+It falls under gravity and collides with voxels and other AABB bodies out of the box.
+
+<Snippet source="aabb-body.snippet.ts" select="create" />
+
+For motion the declarative `linearVelocity` can't express, reach for the `aabbBody`
+namespace: imperative verbs over a body's live `.body`.
+`aabbBody.setVelocity(ctx.physics.aabb, body, vx, vy, vz)` sets its velocity and wakes
+it, so you can steer a body every tick, reading where it is from `body.position`.
+
+<Snippet source="aabb-body.snippet.ts" select="drive" />
+
+AABB bodies and rigid bodies simulate in separate worlds and do not collide with each
+other by default. To let the character controller and the rigid-body solver collide
+with an AABB body, set `rigidBodyImpostor: true`: it presents an impostor box to that
+world while still simulating as a cheap AABB. A `ContactsTrait` reports its touches
+just as it does for a rigid body.
 
 ### Character controller
 
