@@ -1754,6 +1754,21 @@ export type Query<Conditions extends Array<Condition>> = {
     [Symbol.iterator](): Iterator<[...traits: ExtractTraitsFromConditions<Conditions>]>;
 };
 
+/**
+ * the full `matches` array of a query, keyed by the same condition args you pass to {@link query}
+ * (e.g. `QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>`). use it to type a function that
+ * receives query matches without hand-respelling the trait tuple:
+ *
+ * ```ts
+ * const fighters = query(ctx, [ScoreTrait, TransformTrait]);
+ * const positions = (matches: QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>) => ...;
+ * positions(fighters.matches);
+ * ```
+ */
+export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToConditions<Args>>['matches'];
+/** one element of {@link QueryMatches} — the trait tuple a single query result yields. */
+export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
+
 function buildConditionBitsets(conditions: ConditionArgs[]): {
     parsedConditions: Condition[];
     withBitset: Bitset;

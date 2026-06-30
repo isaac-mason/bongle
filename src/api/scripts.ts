@@ -12,6 +12,7 @@ export type {
     TickArgs,
     UpdateArgs,
 } from '../core/scene/scripts';
+export type { QueryMatch, QueryMatches } from '../core/scene/nodes';
 export {
     broadcast,
     filter,
