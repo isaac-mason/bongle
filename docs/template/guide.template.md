@@ -1454,6 +1454,26 @@ version, separate from the storage `version` above, which is a concurrency token
 it back as `opts.ifVersion` on a write to reject changes that raced with another
 writer.
 
+## Performance
+
+Before optimizing anything, measure. Press `` ` `` (backtick) while playing to toggle
+the **debug panel**, an on-screen overlay of live performance metrics. Do not guess at
+what is slow: open the panel and find the hot row first.
+
+The panel reports three scopes side by side, the client globally, the current room on
+the client, and that same room on the **server**, so you can tell a client-render cost
+apart from a server-simulation one. It has three views:
+
+- **Summary**: the headline frame time (ms per frame) plus the client and server tick
+  times, the quickest read on whether you are CPU-bound and on which side.
+- **CPU breakdown**: per-subsystem timings, so you can see which system (meshing,
+  physics, lighting, scripts) is eating the frame.
+- **Net breakdown**: inbound and outbound bandwidth in kb/s, broken down by message
+  kind, for spotting a chatty `sync` or RPC.
+
+The panel is the starting point for every performance question: it turns "the game
+feels slow" into a specific row on a specific side.
+
 ## Building & deploying
 
 `bongle build` compiles your project into `dist/bundle.zip`, a self-contained
