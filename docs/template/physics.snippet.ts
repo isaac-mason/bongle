@@ -2,6 +2,7 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import type { Node } from 'bongle';
+import type { Vec3 } from 'mathcat';
 import {
     addChild,
     addTrait,
@@ -76,7 +77,7 @@ const CoinTrait = trait('coin', { value: 1 });
 
 // a coin is a static sensor body carrying a ContactsTrait, so players pass
 // through it but still register a contact.
-function spawnCoin(parent: Node, position: [number, number, number]) {
+function spawnCoin(parent: Node, position: Vec3) {
     const coin = createNode({ name: 'coin' });
     setPosition(addTrait(coin, TransformTrait), position);
     addTrait(coin, CoinTrait);

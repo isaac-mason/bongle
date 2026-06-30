@@ -2,10 +2,11 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import { CharacterControllerTrait, setCharacterLook, env, getTrait, getWorldPosition, nav, onTick, script, TransformTrait } from 'bongle';
+import type { Vec3 } from 'mathcat';
 
 /* SNIPPET_START: path */
 // where the NPC is heading (recompute this toward the nearest player for a chaser)
-const GOAL: [number, number, number] = [12, 1, 8];
+const GOAL: Vec3 = [12, 1, 8];
 
 // the successor the search expands over. groundDropActions also walks off ledges
 // and drops down; for gap-jumps, spread nav.groundMoves with longer offsets and
@@ -32,7 +33,7 @@ script(CharacterControllerTrait, 'npc-nav', (ctx) => {
         repathIn -= delta;
         if (repathIn <= 0) {
             repathIn = 0.5;
-            const start: [number, number, number] = [Math.floor(pos[0]), Math.floor(pos[1]), Math.floor(pos[2])];
+            const start: Vec3 = [Math.floor(pos[0]), Math.floor(pos[1]), Math.floor(pos[2])];
             const raw = nav.findPath(ctx.voxels, start, GOAL, NPC_ACTIONS, { maxIterations: 2000 });
             path = raw ? nav.smoothPath(ctx.voxels, raw, nav.groundShortcut()) : [];
             waypoint = 1; // skip the cell we're standing in
