@@ -694,6 +694,11 @@ prefab's contents on the next tick.
 
 <Snippet source="prefabs.snippet.ts" select="spawn-prefab" />
 
+Prefabs are placeable in the editor too. A declared prefab appears in the editor
+inventory, so you can drop instances into a scene while authoring, the same template
+placed by hand instead of spawned from code, and the saved scene carries those
+instances with it.
+
 Prefabs can take arguments. Pass `args: { schema, default }` in the options and a
 second parameter arrives in `fn`, so one prefab can produce variants such as a
 color, a difficulty, or a team.
