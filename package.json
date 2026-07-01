@@ -97,7 +97,7 @@
         "canvas": "^3.2.3",
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",
-        "gpucat": "github:isaac-mason/gpucat#b97471c191030de2821eb5f87e31ee68a4d1df2d",
+        "gpucat": "github:isaac-mason/gpucat#ac7dda15c1b62fc7e83753298cb7abfdf71a113e",
         "lucide-react": "^1.7.0",
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",

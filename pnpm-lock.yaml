@@ -60,8 +60,8 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: github:isaac-mason/gpucat#b97471c191030de2821eb5f87e31ee68a4d1df2d
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d
+        specifier: github:isaac-mason/gpucat#ac7dda15c1b62fc7e83753298cb7abfdf71a113e
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -70,7 +70,7 @@ importers:
         version: 0.30.21
       mathcat:
         specifier: github:isaac-mason/mathcat#dev
-        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a
+        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f
       meshoptimizer:
         specifier: ^0.25.0
         version: 0.25.0
@@ -2059,8 +2059,8 @@ packages:
     resolution: {integrity: sha512-sSs4inE1FB2YQiymcmTv6NWENryABjUNPeWhOvmn4SjtKybglsyPZxFB3U1/+L1bYi0rNZDqCLlHyLYDl1Pq5A==}
     engines: {node: '>=8'}
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -2327,9 +2327,9 @@ packages:
   mathcat@0.0.12:
     resolution: {integrity: sha512-gUBe1U/sh7JQ+aSMJDiLG++B3t5rSGAYdEIqPBSEEFUHK9mAcC7yE0f7RZ1SjXI57bDLSYJyrA74XQPT1tJxoA==}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a}
-    version: 0.0.12
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f}
+    version: 0.0.13
 
   merge2@1.4.1:
     resolution: {integrity: sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg==}
@@ -4670,7 +4670,7 @@ snapshots:
       merge2: 1.4.1
       slash: 3.0.0
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/b97471c191030de2821eb5f87e31ee68a4d1df2d:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e:
     dependencies:
       mathcat: 0.0.12
 
@@ -4925,7 +4925,7 @@ snapshots:
 
   mathcat@0.0.12: {}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/8e88b094e009061dde48947d1735ee85708d1c2a: {}
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f: {}
 
   merge2@1.4.1: {}
 
