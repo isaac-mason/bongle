@@ -1193,7 +1193,7 @@ export function update(state: EngineClient, delta: number) {
         // then reassigns the scene pass camera so the next render reads it
         // directly. must run AFTER user frame scripts (they write pose/fov
         // on the POV camera) and BEFORE any consumer that reads it.
-        const povCamera = Rooms.getPovCamera(room);
+        const povCamera = Rooms.getRenderCamera(room);
         Renderer.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
         if (!povCamera) continue;
 
@@ -1320,7 +1320,7 @@ export function update(state: EngineClient, delta: number) {
         // TODO: be smarter :)
         activeRoom.scene.updateWorldMatrix();
 
-        const activeCamera = Rooms.getPovCamera(activeRoom);
+        const activeCamera = Rooms.getRenderCamera(activeRoom);
 
         Debug.begin(activeRoom.clientMetrics, 'render');
         Renderer.render(state.renderer, activeRoom, activeCamera, state.voxelResources, perfSettings.voxelViewChunkRadius);

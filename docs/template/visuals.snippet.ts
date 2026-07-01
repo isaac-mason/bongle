@@ -5,18 +5,20 @@ import {
     CameraTrait,
     configureFloodFillLighting,
     ENVIRONMENT_OVERWORLD,
-    getPov,
-    getPovCamera,
+    getCamera,
+    getSubject,
     getTrait,
+    getWorldPosition,
     onFrame,
     onInit,
     particle,
     particleUpdate,
     script,
     setEnvironment,
-    setPov,
+    setSubject,
     spawnParticle,
     sprite,
+    TransformTrait,
     trait,
     WorldTrait,
 } from 'bongle';
@@ -32,30 +34,36 @@ script(WorldTrait, 'camera-setup', (ctx) => {
 });
 /* SNIPPET_END: camera */
 
-/* SNIPPET_START: pov */
-// the POV is the node the engine renders through and routes input to. attach
-// a trait to a node and gate view-only work to whichever node is the POV.
+/* SNIPPET_START: subject */
+// the subject is the node local input drives and the engine treats as this
+// client's point of view. attach a trait to a node and gate view-only work to
+// whichever node is the subject.
 const Viewpoint = trait('viewpoint');
-script(Viewpoint, 'pov', (ctx) => {
+script(Viewpoint, 'subject', (ctx) => {
     onFrame(ctx, () => {
-        // only the active POV node runs this; everything else returns early
-        if (getPov(ctx) !== ctx.node) return;
-        // the live render camera: world pose + projection, synced this frame
-        const camera = getPovCamera(ctx);
-        if (camera) {
-            // read camera.position, aim a crosshair, raycast from the eye, ...
+        // only the active subject runs this; everything else returns early
+        if (getSubject(ctx) !== ctx.node) return;
+        // the active camera node; read its TransformTrait for pose (aiming,
+        // reticles, raycasts from the eye). null when no camera is wired; the
+        // render camera object itself is renderer-private.
+        const cameraNode = getCamera(ctx);
+        const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
+        if (cameraTransform) {
+            const eyePosition = getWorldPosition(cameraTransform);
+            void eyePosition; // ... aim from here
         }
     });
 
     onInit(ctx, () => {
-        // swap the POV to another node for a spectator target, a vehicle a
+        // swap the subject to another node for a spectator target, a vehicle a
         // player enters, or a death cam. client-only and purely local: it
-        // changes what this client sees and controls, not ownership. pass
+        // changes what this client sees and controls, not ownership, and not
+        // the server-side streaming anchor (that stays the player node). pass
         // null to clear it.
-        setPov(ctx, ctx.node);
+        setSubject(ctx, ctx.node);
     });
 });
-/* SNIPPET_END: pov */
+/* SNIPPET_END: subject */
 
 /* SNIPPET_START: lighting */
 // sky preset + voxel flood-fill lighting, set once on the world

@@ -1,5 +1,4 @@
 import {
-    CameraRefTrait,
     CharacterControllerTrait,
     env,
     FlyControllerTrait,
@@ -19,7 +18,7 @@ import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
-import { getPovCamera, setActivePlayer } from '../client/rooms';
+import { getRenderCamera, setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -35,7 +34,6 @@ import {
     getTrait,
     hasTrait,
     isAncestorOf,
-    type Node,
     type Realm,
     removeTrait,
     removeTraitBySlot,
@@ -447,7 +445,7 @@ script(
 // per-player editor activation. EditorTrait attaches to:
 //   - a player's server-owned `room.playerNode` in an edit room (server-
 //     seeded on join, replicated to the owning client)
-//   - the client-local `room.editor.editorNode` lens spawned by Shift+`
+//   - the client-local `room.editor.subject` lens spawned by Shift+`
 //     into a play room (enterLocalEditorView)
 //
 // the trait's *presence* is the on/off switch, no parallel reactive flag,
@@ -468,7 +466,7 @@ script(
         // EditorTrait (Shift+`), the lens node is client-local with no
         // owner, so isOwner returns false; allow that path via the local
         // ClientRoom's lens pointer.
-        const lensActivation = ctx.client?.room?.editor?.editorNode === ctx.node;
+        const lensActivation = ctx.client?.room?.editor?.subject === ctx.node;
         if (!lensActivation && !isOwner(ctx, ctx.node)) return;
 
         // wire up scene-list cold-fetch + HMR. idempotent, first room
@@ -493,7 +491,7 @@ script(
         // holds its own camera ref internally; the per-frame sync below
         // (`transformToolState.gizmo.camera = camera`) keeps it pointing
         // at the active POV so swaps don't strand the gizmo on a stale ref.
-        const initialCamera = getPovCamera(room) as PerspectiveCamera;
+        const initialCamera = getRenderCamera(room) as PerspectiveCamera;
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
             client.domElement,
@@ -554,7 +552,7 @@ script(
         // motion. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getPovCamera(room) as PerspectiveCamera | null;
+            const camera = getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             TransformTool.prePhysicsGrab(transformToolState, room.physics, camera);
         });
@@ -569,7 +567,7 @@ script(
         // fly nor character controller swings the camera.
         onInput(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getPovCamera(room) as PerspectiveCamera | null;
+            const camera = getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             const mk = client.input.mouseKeyboard;
             const grab = transformToolState.grab!;
@@ -708,12 +706,11 @@ script(
         onFrame(ctx, () => {
             // editor visuals + tool dispatch only run when POV is the
             // editor's camera. for play rooms, that means the lens is up
-            // AND the user is on the inspect-client sub-tab (pov.node
+            // AND the user is on the inspect-client sub-tab (client.subject
             // is the lens). for edit rooms, the player node IS the editor
             // camera. when not active, force-hide every editor visual so
             // they don't leak into the player view, and short-circuit.
-            const editorViewActive =
-                room.playerMode === 'edit' || (!!room.editor && room.pov.node === room.editor.editorNode);
+            const editorViewActive = room.playerMode === 'edit' || (!!room.editor && room.client.subject === room.editor.subject);
             if (!editorViewActive) {
                 gridVisualsState.minorLines.visible = false;
                 gridVisualsState.majorLines.visible = false;
@@ -741,7 +738,7 @@ script(
             // is reflected in the gizmo's projection without rebuilding.
             // TransformControls is third-party and holds its own camera
             // ref, there's no way to avoid this sync.
-            const camera = getPovCamera(room) as PerspectiveCamera | null;
+            const camera = getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 
@@ -1135,11 +1132,8 @@ script(
         const _seedBackward: Vec3 = [0, 0, 0];
         const _seedSph: Spherical = [0, 0, 0];
         const ORBIT_TAKEOVER_DISTANCE = 5;
-        const snapshotCameraPose = (n: Node): boolean => {
-            const ref = getTrait(n, CameraRefTrait);
-            const camNode = ref?.camera?._node;
-            if (!camNode) return false;
-            const t = getTrait(camNode, TransformTrait);
+        const snapshotCameraPose = (): boolean => {
+            const t = getTrait(room.client.camera, TransformTrait);
             if (!t) return false;
             const p = getWorldPosition(t);
             const q = getWorldQuaternion(t);
@@ -1152,11 +1146,8 @@ script(
             _snapQuat[3] = q[3];
             return true;
         };
-        const writeCameraPose = (n: Node): void => {
-            const ref = getTrait(n, CameraRefTrait);
-            const camNode = ref?.camera?._node;
-            if (!camNode) return;
-            const t = getTrait(camNode, TransformTrait);
+        const writeCameraPose = (): void => {
+            const t = getTrait(room.client.camera, TransformTrait);
             if (!t) return;
             setWorldPosition(t, _snapPos);
             setWorldQuaternion(t, _snapQuat);
@@ -1172,7 +1163,7 @@ script(
             out[2] = -(1 - 2 * (qx * qx + qy * qy));
         };
         onTick(ctx, () => {
-            const node = room.editor?.editorNode ?? room.playerNode;
+            const node = room.editor?.subject ?? room.playerNode;
             const desiredMode = store.getState().controlMode;
 
             let activeMode: ControlMode | null = null;
@@ -1182,7 +1173,7 @@ script(
 
             if (activeMode === desiredMode) return;
 
-            const hadPose = snapshotCameraPose(node);
+            const hadPose = snapshotCameraPose();
 
             if (desiredMode === 'fly') {
                 if (hasTrait(node, OrbitControllerTrait)) removeTrait(node, OrbitControllerTrait);
@@ -1203,7 +1194,7 @@ script(
             }
 
             if (!hadPose) return;
-            writeCameraPose(node);
+            writeCameraPose();
 
             if (desiredMode === 'orbit') {
                 const orbit = getTrait(node, OrbitControllerTrait);

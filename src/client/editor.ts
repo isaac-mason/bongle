@@ -23,7 +23,7 @@ import { getTrait } from '../core/scene/nodes';
 import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
 import { useEditor } from '../editor/editor-store';
 import { EditorTrait } from '../editor/editor-trait';
-import { buildRoomViews, type ClientRoom, getPovCamera, seedCameraRef } from './rooms';
+import { buildRoomViews, type ClientRoom, getRenderCamera } from './rooms';
 
 /**
  * Toggle the editor for `room`. The mechanism depends on room type:
@@ -73,12 +73,12 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
 
 /**
  * Spawn a local-only editor node on `room` (realm: 'client', persist: false)
- * plus a lens-private camera node, point editorNode's CameraRefTrait at it,
- * seed the lens camera from the outgoing view, attach FlyControllerTrait
- * and EditorTrait (the trait is what activates the editor script), set
- * `room.editor`, and swap the POV to it. The editor's controller-swap
- * reconcile (in editor/index.ts) may swap to the user's chosen control
- * mode on its next tick. No-op when a lens is already up.
+ * plus a lens-private camera node, point the client state's subject + active
+ * camera at them, seed the lens camera from the outgoing view, attach
+ * FlyControllerTrait and EditorTrait (the trait is what activates the editor
+ * script), and set `room.editor`. The editor's controller-swap reconcile (in
+ * editor/index.ts) may swap to the user's chosen control mode on its next
+ * tick. No-op when a lens is already up.
  *
  * The lens camera is separate from `room.cameraNode` so the lens's pose
  * survives play↔edit tab toggles, the player controller keeps driving
@@ -88,9 +88,9 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
 export function enterLocalEditorView(room: ClientRoom): void {
     if (room.editor) return;
 
-    // snapshot src pose BEFORE creating any nodes, getPovCamera returns
-    // the play room's player camera while room.pov.node is still the body.
-    const src = getPovCamera(room);
+    // snapshot the outgoing view pose BEFORE swapping, so the lens starts where
+    // the play camera was and entry is seamless.
+    const src = getRenderCamera(room);
     const srcPos = src ? ([src.position[0], src.position[1], src.position[2]] as [number, number, number]) : null;
     const srcQuat = src
         ? ([src.quaternion[0], src.quaternion[1], src.quaternion[2], src.quaternion[3]] as [number, number, number, number])
@@ -113,21 +113,23 @@ export function enterLocalEditorView(room: ClientRoom): void {
 
     const editorNode = Nodes.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });
     Nodes.addChild(room.nodes.root, editorNode);
-    // point editorNode's CameraRefTrait at the lens camera (not room.cameraNode).
-    seedCameraRef(editorNode, cameraNode);
-
-    // Reconcile may swap this on next tick.
-    Nodes.addTrait(editorNode, FlyControllerTrait);
 
     // publish the lens pointer *before* attaching EditorTrait, addTrait fires
     // the editor script synchronously, and its ownership gate checks
-    // `room.editor.editorNode === ctx.node` to recognise the client-local lens
+    // `room.editor.subject === ctx.node` to recognise the client-local lens
     // (lens nodes have no owner, so isOwner() always fails for them).
-    room.editor = { id: crypto.randomUUID(), editorNode, cameraNode };
+    room.editor = { id: crypto.randomUUID(), subject: editorNode, camera: cameraNode };
+
+    // point the client state at the lens: subject = editorNode, active camera =
+    // the lens camera. do this BEFORE adding the fly controller so it captures
+    // the lens camera (getCamera(ctx)) as the one it drives.
+    room.client.subject = editorNode;
+    room.client.camera = cameraNode;
+
+    // Reconcile may swap this on next tick.
+    Nodes.addTrait(editorNode, FlyControllerTrait);
     Nodes.addTrait(editorNode, EditorTrait);
 
-    // host write to the shared POV box (scripts swap POV via `setPov(ctx)`).
-    room.pov.node = editorNode;
     const store = useEditor.getState();
     store.setRoomView(room.playerId, 'edit');
     // editor POV now exists, refresh the RoomView snapshot so consumers
@@ -135,13 +137,14 @@ export function enterLocalEditorView(room: ClientRoom): void {
     store.setRoomViews(buildRoomViews(store.allRooms));
 }
 
-/** Tear down the local editor lens, restore player POV, destroy lens nodes, clear room.editor. */
+/** Tear down the local editor lens, restore the default subject/camera, destroy lens nodes, clear room.editor. */
 export function exitLocalEditorView(room: ClientRoom): void {
     const lens = room.editor;
     if (!lens) return;
-    room.pov.node = room.playerNode;
-    Nodes.destroyNode(room.nodes, lens.editorNode);
-    Nodes.destroyNode(room.nodes, lens.cameraNode);
+    room.client.subject = room.client.defaultSubject;
+    room.client.camera = room.client.defaultCamera;
+    Nodes.destroyNode(room.nodes, lens.subject);
+    Nodes.destroyNode(room.nodes, lens.camera);
     room.editor = null;
     const store = useEditor.getState();
     store.clearRoomView(room.playerId);
@@ -151,16 +154,22 @@ export function exitLocalEditorView(room: ClientRoom): void {
 
 /**
  * Switch which perspective `room` is viewed through. Drives the imperative
- * POV swap (`room.pov.node`) and writes the resulting view into the editor
- * store so tab UIs can render active state. No-op on edit rooms (lens
- * doesn't apply, player node already is the editor camera).
+ * subject + active-camera swap on the client state and writes the resulting
+ * view into the editor store so tab UIs can render active state. No-op on edit
+ * rooms (lens doesn't apply, player node already is the editor camera).
  */
 export function setRoomView(room: ClientRoom, view: 'edit' | 'play'): void {
     const lens = room.editor;
     if (!lens) return;
-    const target = view === 'edit' ? lens.editorNode : room.playerNode;
-    if (room.pov.node === target) return;
-    room.pov.node = target;
+    if (view === 'edit') {
+        if (room.client.subject === lens.subject) return;
+        room.client.subject = lens.subject;
+        room.client.camera = lens.camera;
+    } else {
+        if (room.client.subject === room.client.defaultSubject) return;
+        room.client.subject = room.client.defaultSubject;
+        room.client.camera = room.client.defaultCamera;
+    }
     useEditor.getState().setRoomView(room.playerId, view);
 }
 

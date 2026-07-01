@@ -120,10 +120,10 @@ import {
     isLocalNode,
     type Node,
 } from '../api/scene-graph';
-import { getPov } from '../api/pov';
 import { isOwner, onFrame, query, script } from '../api/scripts';
+import { getCamera, getSubject } from '../api/subject';
 import { sync, type TraitType, trait } from '../api/traits';
-import { setPosition, setQuaternion, setTransform } from '../api/transforms';
+import { getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
@@ -133,7 +133,6 @@ import type { ScriptContext } from '../core/scene/scripts';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
 import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
 import { AnimatorTrait } from './animator';
-import { getPovCamera } from './camera';
 import { CharacterControllerTrait } from './character-controller';
 import { FlyControllerTrait } from './fly-controller';
 import { MeshTrait, setMeshDither } from './mesh';
@@ -373,8 +372,14 @@ script(
         const qLocomotion = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
 
         onFrame(ctx, ({ delta }) => {
-            const povNode = getPov(ctx);
-            const camera = getPovCamera(ctx);
+            const subjectNode = getSubject(ctx);
+            // active camera pose off its transform, for the proximity fade below.
+            // null when no camera is wired: this reconciler runs unconditionally,
+            // including the offline icon renderer, which has no room camera. the
+            // render camera object itself is renderer-private.
+            const cameraNode = getCamera(ctx);
+            const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
+            const cameraPos = cameraTransform ? getWorldPosition(cameraTransform) : null;
 
             // ── pass 1: every character ─────────────────────────────
             for (const [t, transform] of qChars.matches) {
@@ -436,7 +441,7 @@ script(
                 // Steady-state characters (loaded, out of fade range) write
                 // zero, compare-equals the cache, and skip the walk.
                 let finalDither: number;
-                if (povNode === node) {
+                if (subjectNode === node) {
                     const pc = getTrait(node, PlayerControllerTrait);
                     const hide =
                         (pc && pc.config.perspective === 'first') ||
@@ -452,13 +457,13 @@ script(
                     setCharacterSubtreeVisible(node, true);
                     const range = t.config.proximityFadeRange;
                     let proxDither = 0;
-                    if (range > 0 && camera) {
+                    if (range > 0 && cameraPos) {
                         // measure against character center (~1m above the foot
                         // transform) so a camera at eye-level standing inside
                         // reads as ~0 distance.
-                        const dx = camera.position[0] - transform.position[0];
-                        const dy = camera.position[1] - (transform.position[1] + 1);
-                        const dz = camera.position[2] - transform.position[2];
+                        const dx = cameraPos[0] - transform.position[0];
+                        const dy = cameraPos[1] - (transform.position[1] + 1);
+                        const dz = cameraPos[2] - transform.position[2];
                         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                         proxDither = dist >= range ? 0 : 1 - dist / range;
                     }
@@ -555,7 +560,7 @@ script(
         });
         // editor: true → this presentation runs in edit mode too, so the editor lens
         // gets the real avatar (reconciler), procedural locomotion, and the
-        // first-person POV-hide when viewing through the character (pov.node ===
+        // first-person POV-hide when viewing through the character (subject ===
         // playerNode), not just in play.
     },
     { editor: true },

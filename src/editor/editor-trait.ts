@@ -4,7 +4,7 @@ import { type TraitType, trait } from '../core/scene/traits';
  * per-player editor activation marker. attached to:
  *   - the server-owned `room.playerNode` of a player in an edit room
  *     (replicated to the owning client; the client script runs there)
- *   - the client-local `room.editor.editorNode` lens spawned by
+ *   - the client-local `room.editor.subject` lens spawned by
  *     enterLocalEditorView for Shift+\` peek into play rooms
  *
  * the trait carries no controls, its presence IS the activation. the

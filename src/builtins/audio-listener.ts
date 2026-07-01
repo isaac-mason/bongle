@@ -4,7 +4,7 @@ import { type TraitType, trait } from '../core/scene/traits';
  * Client-only override hook for the room's audio listener pose source.
  *
  * By default the audio runtime (`client/audio/audio.ts`) reads listener
- * position + orientation from `room.pov.node`'s TransformTrait, the
+ * position + orientation from the client's `pov` node's TransformTrait, the
  * same node the renderer derives the active camera from. That's the
  * right pick for first-person and most third-person cameras, where the
  * "ears" and the "eyes" sit at the same node.

@@ -1,6 +1,6 @@
 import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
-import { CameraRefTrait, CameraTrait } from '../builtins/camera';
+import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
 import { TransformTrait } from '../builtins/transform';
 import { attachWorldTrait } from '../builtins/world';
@@ -14,7 +14,7 @@ import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import * as Nodes from '../core/scene/nodes';
 import { unpackSceneGraph } from '../core/scene/scene-pack';
-import type { EditRoomState, NodesContext, PovState } from '../core/scene/scripts';
+import type { ClientContext, EditRoomState, NodesContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
@@ -132,23 +132,21 @@ export type ClientRoom = {
 
     /**
      * default per-room camera node. created at room init with TransformTrait
-     * + CameraTrait, parented at the scene root. controllers (builtin or
-     * DIY) write pose to its TransformTrait and projection to its CameraTrait
-     * by default; bespoke setups can still override by pointing a
-     * CameraRefTrait on the POV node at a different camera trait.
-     *
-     * accessible from scripts as `ctx.client.camera`.
+     * + CameraTrait, parented at the scene root. the initial value of the
+     * active camera pointer (`client.camera`) and the no-controller baseline;
+     * controllers write pose to whichever node `client.camera` points at, and
+     * bespoke setups repoint it via `setCamera(ctx, node)`.
      */
     cameraNode: Nodes.Node;
 
     /**
-     * mutable POV state, same object as `ctx.client.pov` for every
-     * script in this room. `node` defaults to `playerNode` and is swapped
-     * by `setPov`. each frame `bindRenderCamera` reassigns the
-     * scene pass camera to this node's CameraTrait camera; scripts gate
-     * input/camera work via `getPov(ctx) === ctx.node`.
+     * this room's client state, the single mutable ClientContext every script
+     * in the room sees as `ctx.client` (same object as `scriptRuntime.client`).
+     * room-layer code reads the live POV / active camera / defaults off it
+     * (`room.client.subject`, `room.client.camera`); scripts swap them via
+     * `setSubject` / `setCamera`. no boxing, no duplicated pointers, one object.
      */
-    pov: PovState;
+    client: ClientContext;
 
     /**
      * editor lens state, null when no editor lens is up. when present, it's
@@ -279,7 +277,7 @@ export type ClientRoom = {
     /**
      * the engine-global render pipeline this room renders through. all
      * rooms share the same instance, stored here for callers that need
-     * the active render camera (`getPovCamera`, editor tools) without
+     * the active render camera (`getRenderCamera`, editor tools) without
      * threading the engine state through their api.
      */
     _pipeline: Renderer.EngineRenderPipeline;
@@ -612,12 +610,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     viewport.appendChild(canvas);
     const canvasTarget = new CanvasTarget(canvas);
 
-    // shared POV pointer, room.pov and ctx.client.pov are the same
-    // object. swaps mutate `node` in place (host writes here, scripts via
-    // setPov) so existing closures and ctx-builds observe them without
-    // re-seating.
-    const pov: PovState = { node: null };
-
     // touch overlay sits ABOVE the html overlay (UILayer.touch). we create
     // the div here (so we can pass it on the runtime client shape) and
     // append it after DomUi.init; z-index, not DOM order, decides paint order.
@@ -639,25 +631,24 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // unpackSceneGraph wipes root's children.
     const cameraNode = createDefaultCameraNode(nodes, playerNode);
 
-    // every POV-eligible node ships with a CameraRefTrait pre-installed,
-    // pointing at the default camera. that keeps "the active camera is
-    // wired through the POV node" as the visible mental model (inspector
-    // shows the wiring on the player node) without making controllers
-    // responsible for the wiring themselves. swap target by writing
-    // `getTrait(node, CameraRefTrait).camera = otherCameraTrait`.
-    seedCameraRef(playerNode, cameraNode);
-
-    scriptRuntime.client = {
+    // the single client state. scriptRuntime.client and room.client both
+    // reference this one object; subject / camera are plain fields mutated in
+    // place, so scripts (ctx.client) and room-layer code (room.client) observe
+    // swaps without re-seating. subject is seeded to the player node post-populate.
+    const client: ClientContext = {
         clientId,
         scene,
-        pov,
+        subject: null,
         domElement: canvas,
         viewport,
         touchOverlay,
         input,
         player: playerNode,
         camera: cameraNode,
+        defaultSubject: playerNode,
+        defaultCamera: cameraNode,
     };
+    scriptRuntime.client = client;
 
     // Per-room sky + sun/moon/stars/clouds (mesh + per-room CPU
     // shadow). the env GPU buffers in `environmentResources` are engine-
@@ -676,9 +667,9 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const audio = Audio.init(opts.audioResources);
 
     // post-populate wiring. sceneGraph + voxels came in already populated.
-    // seed the pov pointer at the player node, swappable via setPov.
+    // seed the subject at the player node, swappable via setSubject.
     // initSceneGraph fires onInit/onEnter for instances registered during populate.
-    pov.node = playerNode;
+    client.subject = playerNode;
 
     // WorldTrait is attached by callers after they wire `client.room`/`.state`,
     // since its host-script onInit reads them (e.g. setEnvironment).
@@ -750,7 +741,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         audio,
         playerNode,
         cameraNode,
-        pov,
+        client,
         // editor lens is opt-in; populated by enterLocalEditorView (or the
         // edit-room flow). seeding null here keeps fresh rooms inert until
         // the user explicitly enters editor view.
@@ -808,19 +799,16 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
 
     const playerNode = findPlayerNode(room.nodes, message.playerId, message.roomId);
     room.playerNode = playerNode;
-    // re-seed pov to the fresh playerNode. mutate in place so any
-    // ctx.client.pov references held by surviving scripts observe the swap.
-    room.pov.node = playerNode;
     // unpackSceneGraph wiped the default camera node along with the rest of
-    // root's children, re-create it, re-seed CameraRefTrait on the fresh
-    // playerNode, and re-point ctx.client.player / .camera so existing
-    // closures see the new nodes.
+    // root's children, re-create it.
     room.cameraNode = createDefaultCameraNode(room.nodes, playerNode);
-    seedCameraRef(playerNode, room.cameraNode);
-    if (room.scriptRuntime.client) {
-        room.scriptRuntime.client.camera = room.cameraNode;
-        room.scriptRuntime.client.player = playerNode;
-    }
+    // re-seat the client state to the fresh nodes. plain writes to the one
+    // client object, observed everywhere.
+    room.client.subject = playerNode;
+    room.client.player = playerNode;
+    room.client.camera = room.cameraNode;
+    room.client.defaultSubject = playerNode;
+    room.client.defaultCamera = room.cameraNode;
     // any local editor lens is invalidated by the scene graph rebuild,
     // editorNode was a `realm: 'client'` node, gone with the wind. caller
     // re-enters via enterLocalEditorView if they want it back.
@@ -840,43 +828,20 @@ function createDefaultCameraNode(nodes: Nodes.Nodes, playerNode: Nodes.Node): No
 }
 
 /**
- * install a CameraRefTrait on `povNode` pointing at the default camera.
- * call once per POV-eligible node (player node at room init, editor node
- * when an editor lens spins up).
- */
-export function seedCameraRef(povNode: Nodes.Node, cameraNode: Nodes.Node): void {
-    const cameraTrait = Nodes.getTrait(cameraNode, CameraTrait);
-    const ref = Nodes.addTrait(povNode, CameraRefTrait);
-    ref.camera = cameraTrait;
-}
-
-/**
- * resolve the room's active render camera. reads `CameraRefTrait.camera`
- * on the POV node (set by whichever controller, builtin or DIY, is
- * driving the view) and composes the engine-global renderer-owned
- * PerspectiveCamera from (camera node Transform + CameraTrait). returns
- * null when no POV node is set, the node has no CameraRefTrait, or
- * the ref has not been pointed at a camera yet.
+ * resolve the room's active render camera and compose the engine-global
+ * renderer-owned PerspectiveCamera from it (camera node Transform +
+ * CameraTrait). the active camera node is `client.camera` on the single
+ * client state, repointed by whichever controller / lens is driving the view.
  *
- * scripts and editor tools call this for pose, fov, and projection
- * (post-`bindRenderCamera` it has the viewport's aspect). the renderer reads
- * the same camera via `passNode.camera`, no separate mirror; what scripts
- * read is what the pass renders. the engine-global pipeline (one shared
- * camera across rooms; pose is rewritten each frame from the active POV)
- * is reached via `room._pipeline`.
+ * the renderer reads the same camera via `passNode.camera`, no separate
+ * mirror; post-`bindRenderCamera` it also carries the viewport aspect. the
+ * engine-global pipeline (one shared camera across rooms; pose rewritten each
+ * frame from the active camera) is reached via `room._pipeline`. editor tools
+ * call this to read the live render camera; scripts read camera pose off the
+ * camera node's TransformTrait instead.
  */
-export function getPovCamera(room: ClientRoom): PerspectiveCamera | null {
-    // controllers may override the active camera by adding a CameraRefTrait
-    // on the POV node; the default (and most common) path uses the
-    // room's default camera node. fall back to it whenever no override is
-    // in play so the renderer always has a camera to compose.
-    let cameraTrait: CameraTrait | null = null;
-    const povNode = room.pov.node;
-    if (povNode) {
-        const ref = Nodes.getTrait(povNode, CameraRefTrait);
-        cameraTrait = ref?.camera ?? null;
-    }
-    if (!cameraTrait) cameraTrait = Nodes.getTrait(room.cameraNode, CameraTrait) ?? null;
+export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
+    const cameraTrait = Nodes.getTrait(room.client.camera, CameraTrait) ?? null;
     Renderer.syncRenderCamera(room._pipeline, cameraTrait);
     return room._pipeline.camera;
 }

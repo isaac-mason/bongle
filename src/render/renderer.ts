@@ -183,8 +183,8 @@ function createRenderPipeline(webGpuRenderer: WebGPURenderer): EngineRenderPipel
  */
 export function syncRenderCamera(pipeline: EngineRenderPipeline, cameraTrait: CameraTrait | null): void {
     if (!cameraTrait) return;
-    const camNode = cameraTrait._node;
-    const transform = getTrait(camNode, TransformTrait);
+    const cameraNode = cameraTrait._node;
+    const transform = getTrait(cameraNode, TransformTrait);
     const out = pipeline.camera;
     if (transform) {
         const wp = getWorldPosition(transform);

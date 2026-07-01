@@ -26,7 +26,7 @@
  * this is the natural place to satisfy the autoplay policy.
  *
  * Listener pose: read from the room's `AudioListenerTrait` node if one
- * is present and active, else from `room.pov.node`. Pose source is
+ * is present and active, else from the client's `pov` node. Pose source is
  * the TransformTrait via `getVisualWorldPosition` /
  * `getVisualWorldMatrix` so interpolation is folded in for free. We
  * write to the listener's modern AudioParam interface where available
@@ -46,9 +46,10 @@
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
 import { getVisualWorldMatrix, getVisualWorldPosition, TransformTrait } from '../../builtins/transform';
-import type { Node, Nodes as NodesType } from '../../core/scene/nodes';
+import type { Node } from '../../core/scene/nodes';
 import * as Nodes from '../../core/scene/nodes';
 import { assetUrl } from '../../render/asset-url';
+import type { ClientRoom } from '../rooms';
 
 /* ── manifest types (mirror of asset-pipeline/audio.ts) ────────────── */
 
@@ -542,7 +543,7 @@ function startStandaloneSource(
 /** advance listener pose, refresh node-bound panner positions, reap
  *  finished playbacks. called once per active room per frame from
  *  engine-client's update loop (after DomUi.update, before render). */
-export function updateForFrame(audio: Audio, room: AudioRoomLike): void {
+export function updateForFrame(audio: Audio, room: ClientRoom): void {
     updateListener(audio, room);
 
     for (const p of audio.active) {
@@ -569,14 +570,6 @@ export function updateForFrame(audio: Audio, room: AudioRoomLike): void {
     }
 }
 
-/** subset of ClientRoom that updateForFrame actually reads. typed
- *  structurally so this file doesn't need to import the full ClientRoom
- *  type (which would pull in the entire client module graph). */
-export type AudioRoomLike = {
-    nodes: NodesType;
-    pov: { node: Node | null };
-};
-
 function cleanup(audio: Audio, p: ActivePlayback): void {
     try {
         p.gain.disconnect();
@@ -595,7 +588,7 @@ function cleanup(audio: Audio, p: ActivePlayback): void {
 
 /* ── listener pose ─────────────────────────────────────────────────── */
 
-function updateListener(audio: Audio, room: AudioRoomLike): void {
+function updateListener(audio: Audio, room: ClientRoom): void {
     const listenerNode = resolveListenerNode(room);
     if (!listenerNode) return;
     const transform = Nodes.getTrait(listenerNode, TransformTrait);
@@ -676,11 +669,11 @@ function updateListener(audio: Audio, room: AudioRoomLike): void {
     }
 }
 
-function resolveListenerNode(room: AudioRoomLike): Node | null {
+function resolveListenerNode(room: ClientRoom): Node | null {
     for (const [trait] of Nodes.query(room.nodes, [AudioListenerTrait])) {
         if (trait.active) return trait._node!;
     }
-    return room.pov.node;
+    return room.client.subject;
 }
 
 /* ── node position helper ──────────────────────────────────────────── */

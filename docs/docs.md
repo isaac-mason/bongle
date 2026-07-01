@@ -1389,10 +1389,13 @@ for anything they do not:
 
 ### Camera
 
-Every room has a camera node, reachable in a client script as `ctx.client.camera`.
-Its `CameraTrait` holds the projection (`fov`, `near`, `far`). The builtin
-controllers (orbit, fly, player) write its pose each frame, but you can read the
-trait to adjust field of view or seed a pose before adding a controller.
+Every room has a default camera node, reachable in a client script as
+`ctx.client.camera`. Its `CameraTrait` holds the projection (`fov`, `near`,
+`far`). `ctx.client.camera` is the *active* camera node: what the renderer
+composes the render camera from each frame. The builtin controllers (orbit, fly,
+player) write its pose each frame; you can read the trait to adjust field of view
+or seed a pose before adding a controller, and `setCamera(ctx, node)` repoints it
+at a different camera node.
 
 ```ts
 // the room already has a camera node; read its CameraTrait to set field of view
@@ -1405,38 +1408,47 @@ script(WorldTrait, 'camera-setup', (ctx) => {
 });
 ```
 
-Each room renders through one point of view (POV): the node whose `CameraTrait`
-the renderer composes into the scene each frame. On the client, `getPov(ctx)`
-returns that node. Builtin controllers and view-only scripts gate their per-frame
-work on it with `getPov(ctx) === ctx.node`, so only the active POV writes the
-camera or consumes input. `getPovCamera(ctx)` returns the live render camera
-(world pose plus projection, already synced for this frame) for aiming, reticles,
-or raycasts from the eye. To move the POV elsewhere, such as a spectator target, a
-vehicle a player enters, or a death cam, call `setPov(ctx, node)`. It is
-client-only and purely local: it changes what that client sees and controls
-without affecting ownership. Pass `null` to clear it.
+Each client has a **subject**: the node local input drives and the engine treats
+as this client's point of view (renderer + audio). `getSubject(ctx)` returns it.
+Builtin controllers and view-only scripts gate their per-frame work on it with
+`getSubject(ctx) === ctx.node`, so only the active subject writes the camera or
+consumes input. Read the active camera pose off `getCamera(ctx)`'s
+`TransformTrait` for aiming, reticles, or raycasts from the eye (the render camera
+object itself is renderer-private). To move the subject elsewhere, such as a
+spectator target, a vehicle a player enters, or a death cam, call
+`setSubject(ctx, node)`. It is client-only and purely local: it changes what that
+client sees and controls, never ownership, and never the server-side streaming
+anchor (that stays the player node). Pass `null` to clear it. The client also
+holds `defaultSubject` / `defaultCamera` (seeded to the player node and the room
+camera) as the values to restore when a temporary override ends.
 
 ```ts
-// the POV is the node the engine renders through and routes input to. attach
-// a trait to a node and gate view-only work to whichever node is the POV.
+// the subject is the node local input drives and the engine treats as this
+// client's point of view. attach a trait to a node and gate view-only work to
+// whichever node is the subject.
 const Viewpoint = trait('viewpoint');
-script(Viewpoint, 'pov', (ctx) => {
+script(Viewpoint, 'subject', (ctx) => {
     onFrame(ctx, () => {
-        // only the active POV node runs this; everything else returns early
-        if (getPov(ctx) !== ctx.node) return;
-        // the live render camera: world pose + projection, synced this frame
-        const camera = getPovCamera(ctx);
-        if (camera) {
-            // read camera.position, aim a crosshair, raycast from the eye, ...
+        // only the active subject runs this; everything else returns early
+        if (getSubject(ctx) !== ctx.node) return;
+        // the active camera node; read its TransformTrait for pose (aiming,
+        // reticles, raycasts from the eye). null when no camera is wired; the
+        // render camera object itself is renderer-private.
+        const cameraNode = getCamera(ctx);
+        const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
+        if (cameraTransform) {
+            const eyePosition = getWorldPosition(cameraTransform);
+            void eyePosition; // ... aim from here
         }
     });
 
     onInit(ctx, () => {
-        // swap the POV to another node for a spectator target, a vehicle a
+        // swap the subject to another node for a spectator target, a vehicle a
         // player enters, or a death cam. client-only and purely local: it
-        // changes what this client sees and controls, not ownership. pass
+        // changes what this client sees and controls, not ownership, and not
+        // the server-side streaming anchor (that stays the player node). pass
         // null to clear it.
-        setPov(ctx, ctx.node);
+        setSubject(ctx, ctx.node);
     });
 });
 ```

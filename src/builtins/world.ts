@@ -10,7 +10,7 @@
 // `onFrame` closure churn outweighs the locality of per-trait scripts.
 //
 // Caveat: `ctx.node` is the scene root. POV / ownership checks
-// (`getPov(ctx) === ctx.node`, `isOwner(ctx, ctx.node)`) are
+// (`getSubject(ctx) === ctx.node`, `isOwner(ctx, ctx.node)`) are
 // meaningless here, they always evaluate against root. Use the entity
 // node from the query tuple (`trait._node`) instead.
 //

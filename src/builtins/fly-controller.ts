@@ -2,12 +2,11 @@
  * fly controller, trait + script.
  *
  * the trait holds tunables (speed, look sensitivity, scroll-adjust bounds)
- * so they can be edited in the inspector. on init the script resolves the
- * camera node via CameraRefTrait on ctx.node (falling back to the room's
- * default at `ctx.client.camera`) and writes pose to its TransformTrait
- * each frame; the renderer reads pose + projection from there. editor
- * lenses point CameraRefTrait at a lens-private camera so their pose
- * survives play↔edit toggles.
+ * so they can be edited in the inspector. on init the script grabs the active
+ * camera node (`getCamera(ctx)`) and writes pose to its TransformTrait each
+ * frame while it's the subject; the renderer reads pose + projection from
+ * there. the editor lens points `client.camera` at a lens-private camera so
+ * its pose survives play↔edit toggles.
  *
  * polls blocks' Input each frame instead of attaching DOM listeners (only
  * exception: contextmenu suppression so right-drag works, and pointer-lock
@@ -19,11 +18,10 @@ import { env } from '../api/env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
-import { getPov } from '../api/pov';
 import { onDispose, onFrame, script } from '../api/scripts';
+import { getCamera, getSubject } from '../api/subject';
 import { control, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
-import { resolveCamera } from './camera';
 import { TransformTrait } from './transform';
 
 const _EPS = 0.000001;
@@ -131,15 +129,15 @@ script(
         const room = client.room!;
         const { domElement, input } = client;
 
-        // ── camera, resolved through CameraRefTrait on ctx.node (with fallback
-        // to the room's default at client.camera), so editor lenses that point
-        // editorNode's CameraRefTrait at a lens-private camera drive their own
-        // camera and survive play↔edit toggles. the camera node lives at the
-        // scene root (NOT parented under ctx.node) which dodges parent-frame
+        // ── camera: the active camera node on the client state
+        // (`getCamera(ctx)`, the room default in play, a lens-private camera
+        // under the editor). the camera node lives at the scene root (NOT
+        // parented under ctx.node) which dodges parent-frame
         // inheritance from controllers like CharacterController whose body yaw
         // would otherwise drag the camera with the head.
-        const { node: cameraNode } = resolveCamera(ctx);
-        const cameraTransform = getTrait(cameraNode, TransformTrait)!;
+        // re-resolved each active frame in onFrame; the init value seeds baseQuat.
+        let cameraNode = getCamera(ctx)!;
+        let cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
         // mirror targets for the camera pose. fly only writes to cameraTransform
         // (a separate scene-root camera node), so ctx.node's TransformTrait never
@@ -203,7 +201,11 @@ script(
         });
 
         onFrame(ctx, ({ delta }) => {
-            if (getPov(ctx) !== ctx.node) return;
+            if (getSubject(ctx) !== ctx.node) return;
+            // re-resolve the active camera (subject ⟹ client.camera is ours),
+            // so an editor lens swap never strands us on a stale camera node.
+            cameraNode = getCamera(ctx)!;
+            cameraTransform = getTrait(cameraNode, TransformTrait)!;
             const fly = ctx.trait;
 
             // rebase if the camera quaternion was changed externally

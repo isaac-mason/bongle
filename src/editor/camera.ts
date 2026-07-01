@@ -2,7 +2,6 @@
 
 import { box3, mat4, type Quat, quat, type Vec3 } from 'mathcat';
 import { getVisualWorldMatrix, getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
-import { CameraRefTrait } from '../builtins/camera';
 import { MeshTrait } from '../builtins/mesh';
 import { TransformTrait } from '../builtins/transform';
 import type { Input } from '../client/input';
@@ -92,9 +91,9 @@ const _focusQuat: Quat = [0, 0, 0, 1];
  * bind-pose AABB (transformed by the node's world matrix). otherwise, target
  * the node's interpolated position.
  *
- * resolves the active camera-node TransformTrait via the POV node's
- * CameraRefTrait and writes pose directly there (renderer composes the
- * render camera from this transform each frame).
+ * writes pose directly to the active camera node's TransformTrait
+ * (`client.camera`); the renderer composes the render camera from this
+ * transform each frame.
  *
  * TODO(W3.x): walk descendant MeshTraits and union their AABBs for a tight
  * focus on multi-mesh model trees (matches the old ModelTrait behaviour).
@@ -106,11 +105,7 @@ export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Re
     const transform = getTrait(node, TransformTrait);
     if (!transform) return;
 
-    const povNode = room.pov.node;
-    if (!povNode) return;
-    const cameraTrait = getTrait(povNode, CameraRefTrait)?.camera;
-    const cameraNode = cameraTrait?._node;
-    const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
+    const cameraTransform = getTrait(room.client.camera, TransformTrait);
     if (!cameraTransform) return;
 
     let tx: number;

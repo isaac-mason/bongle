@@ -1,4 +1,5 @@
 export type { ClientId } from '../core/client';
+export type { QueryMatch, QueryMatches } from '../core/scene/nodes';
 export type {
     ClientContext,
     EditRoomState,
@@ -11,7 +12,6 @@ export type {
     TickArgs,
     UpdateArgs,
 } from '../core/scene/scripts';
-export type { QueryMatch, QueryMatches } from '../core/scene/nodes';
 export {
     broadcast,
     filter,

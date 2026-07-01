@@ -8,10 +8,10 @@
  *   right drag  → pan (screen-space)
  *   wheel       → dolly in/out
  *
- * resolves the camera node via CameraRefTrait on ctx.node (falling back to
- * `ctx.client.camera`) and writes pose to its TransformTrait each frame.
- * the renderer composes its per-room PerspectiveCamera from that node's
- * TransformTrait + CameraTrait via `Renderer.syncRenderCamera`. callers
+ * grabs the active camera node (`getCamera(ctx)`) and writes pose to its
+ * TransformTrait each frame while it's the subject. the renderer composes
+ * its per-room PerspectiveCamera from that node's TransformTrait +
+ * CameraTrait via `Renderer.syncRenderCamera`. callers
  * can pre-seed the camera transform (or `target` on this trait) before
  * attach to open with a specific view.
  */
@@ -20,11 +20,11 @@ import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat'
 import { env } from '../api/env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { getTrait } from '../api/scene-graph';
-import { getPov } from '../api/pov';
 import { onDispose, onFrame, script } from '../api/scripts';
+import { getCamera, getSubject } from '../api/subject';
 import { type TraitType, trait } from '../api/traits';
 import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuaternion } from '../api/transforms';
-import { resolveCamera } from './camera';
+import { CameraTrait } from './camera';
 import { TransformTrait } from './transform';
 
 const INITIAL_TARGET_DISTANCE = 5;
@@ -85,14 +85,16 @@ script(
         const viewport = client.state!.viewport;
         const mk = input.mouseKeyboard;
 
-        // ── camera, resolved through CameraRefTrait on ctx.node (with fallback
-        // to the room's default at client.camera), so editor lenses that point
-        // editorNode's CameraRefTrait at a lens-private camera drive their own
-        // camera. camera-node lifecycle is owned by whoever installed the ref
-        // (room init or editor lens); onDispose only clears the contextmenu
+        // ── camera: the active camera node on the client state
+        // (`getCamera(ctx)`, the room default in play, a lens-private camera
+        // under the editor). camera-node lifecycle is owned by the room / the
+        // editor lens; onDispose only clears the contextmenu
         // listener.
-        const { camera: cameraTrait, node: cameraNode } = resolveCamera(ctx);
-        const cameraTransform = getTrait(cameraNode, TransformTrait)!;
+        // cameraTrait + cameraTransform are re-resolved each active frame in
+        // onFrame; these init values drive the initial eye/look seeding below.
+        let cameraNode = getCamera(ctx)!;
+        let cameraTrait = getTrait(cameraNode, CameraTrait)!;
+        let cameraTransform = getTrait(cameraNode, TransformTrait)!;
 
         // mirror targets for the orbit eye position. orbit only writes to
         // cameraTransform (a separate scene-root camera node), so ctx.node's
@@ -158,7 +160,12 @@ script(
         const zoomScale = (delta: number): number => 0.95 ** (ZOOM_SPEED * Math.abs(delta * 0.01));
 
         onFrame(ctx, (_args) => {
-            if (getPov(ctx) !== ctx.node) return;
+            if (getSubject(ctx) !== ctx.node) return;
+            // re-resolve the active camera (subject ⟹ client.camera is ours),
+            // so an editor lens swap never strands us on a stale camera node.
+            cameraNode = getCamera(ctx)!;
+            cameraTransform = getTrait(cameraNode, TransformTrait)!;
+            cameraTrait = getTrait(cameraNode, CameraTrait)!;
             // Skip until the viewport has a real size, the ResizeObserver
             // hasn't fired yet on the first frame(s) after attach. Without
             // this, the `viewport.height || 1` fallback below divides mouse

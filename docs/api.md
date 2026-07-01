@@ -1122,14 +1122,40 @@ Attach behaviour and register lifecycle hooks.
 export type ClientId = number;
 ```
 
+#### `QueryMatch`
+
+```ts
+/** one element of {@link QueryMatches}, the trait tuple a single query result yields. */
+export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
+```
+
+#### `QueryMatches`
+
+```ts
+/**
+ * the full `matches` array of a query, keyed by the same condition args you pass to {@link query}
+ * (e.g. `QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>`). use it to type a function that
+ * receives query matches without hand-respelling the trait tuple:
+ *
+ * ```ts
+ * const fighters = query(ctx, [ScoreTrait, TransformTrait]);
+ * const positions = (matches: QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>) => ...;
+ * positions(fighters.matches);
+ * ```
+ */
+export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToConditions<Args>>['matches'];
+```
+
 #### `ClientContext`
 
 ```ts
 export type ClientContext = {
     scene: Scene;
-    pov: PovState;
+    subject: nodes.Node | null;
     player: nodes.Node;
     camera: nodes.Node;
+    defaultSubject: nodes.Node | null;
+    defaultCamera: nodes.Node;
     domElement: HTMLCanvasElement;
     viewport: HTMLDivElement;
     touchOverlay: HTMLDivElement;
@@ -1145,21 +1171,22 @@ export type ClientContext = {
 ```ts
 /**
  * client-side editor lens. when present, this client is in some flavor of
- * edit mode, either a real edit room (server-authoritative, editorNode ===
- * playerNode) or a local-only peek into a play room (editorNode is a
+ * edit mode, either a real edit room (server-authoritative, `subject` ===
+ * playerNode) or a local-only peek into a play room (`subject` is a
  * `realm: 'client'` node carrying EditorTrait + CameraTrait).
  *
  * the existence of `room.editor` is the on/off switch for the editor lens.
  * scripts declared with `{ editor: true }` also run in edit mode and read
  * the lens via `ctx.client.room?.editor`.
  *
- * grows over time with selection / hover / gizmo state. today: just the
- * editor node pointer.
+ * grows over time with selection / hover / gizmo state. today: the lens's
+ * subject + camera nodes. while the lens is active `client.subject` /
+ * `client.camera` point at these.
  */
 export type EditRoomState = {
     id: string;
-    editorNode: nodes.Node;
-    cameraNode: nodes.Node;
+    subject: nodes.Node;
+    camera: nodes.Node;
 };
 ```
 
@@ -1259,30 +1286,6 @@ export type TickArgs = {
 export type UpdateArgs = {
     delta: number;
 };
-```
-
-#### `QueryMatch`
-
-```ts
-/** one element of {@link QueryMatches}, the trait tuple a single query result yields. */
-export type QueryMatch<Args extends ConditionArgs[]> = QueryMatches<Args>[number];
-```
-
-#### `QueryMatches`
-
-```ts
-/**
- * the full `matches` array of a query, keyed by the same condition args you pass to {@link query}
- * (e.g. `QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>`). use it to type a function that
- * receives query matches without hand-respelling the trait tuple:
- *
- * ```ts
- * const fighters = query(ctx, [ScoreTrait, TransformTrait]);
- * const positions = (matches: QueryMatches<[typeof ScoreTrait, typeof TransformTrait]>) => ...;
- * positions(fighters.matches);
- * ```
- */
-export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToConditions<Args>>['matches'];
 ```
 
 #### `broadcast`
@@ -3869,100 +3872,70 @@ The camera, lighting and sky, and the traits that draw a node.
 /**
  * camera trait, plain projection data (fov/near/far) for a scene-tree node.
  * world pose lives on the sibling TransformTrait; a controller (player /
- * orbit / fly) creates the camera node, owns this trait, and writes pose
- * through TransformTrait each frame.
+ * orbit / fly) or the editor lens owns the camera node and writes its pose
+ * through TransformTrait each frame. the active camera node is `client.camera`
+ * on the client state, which the renderer composes the render camera from.
  *
  * the renderer composes a per-room PerspectiveCamera each frame from
  * (camera node Transform + this trait), see `Renderer.syncRenderCamera`.
  *
- * persist: false, runtime-only; the camera node is recreated on every
- * controller spin-up and never survives a scene round-trip.
+ * persist: false, runtime-only; camera nodes are recreated on room spin-up and
+ * never survive a scene round-trip.
  */
 export const CameraTrait;
 ```
-
-#### `CameraRefTrait`
+#### `getCamera`
 
 ```ts
 /**
- * pointer attached to the POV node, references the CameraTrait the
- * renderer should compose the active render camera from. Controllers
- * (builtin or DIY) add this on init and set `camera` to the trait on
- * whichever node they want the renderer to see; clear / detach on dispose.
+ * the active render camera node, what the renderer composes the render camera
+ * from each frame (its TransformTrait pose + CameraTrait projection). defaults
+ * to the room's camera node; the editor lens and DIY setups repoint it.
  *
- * the CameraTrait reference reaches the camera node via the standard `_node`
- * back-ref, so the renderer also gets to the sibling TransformTrait through
- * the same handle.
+ * server-side, ctx.client is undefined and this returns null.
+ */
+export function getCamera(ctx: ScriptContext): nodes.Node | null;
+```
+
+#### `getSubject`
+
+```ts
+/**
+ * the client's current subject: the node local input drives and the engine
+ * treats as this client's point of view (renderer + audio). scripts compare
+ * their own ctx.node to it to gate per-frame work that should only run on the
+ * active subject (camera writes, input-driven movement, etc.); other nodes
+ * still run their remaining hooks unconditionally.
  *
- * persist: false, runtime-only wiring.
+ * a plain field on the single client state (`ctx.client.subject`), so a write
+ * is observed everywhere without re-seating. server-side, ctx.client is
+ * undefined and this returns null (server scripts shouldn't gate on POV).
  */
-export const CameraRefTrait;
+export function getSubject(ctx: ScriptContext): nodes.Node | null;
 ```
 
-#### `getPovCamera`
+#### `setCamera`
 
 ```ts
 /**
- * resolve the active POV node's render camera from a script ctx. on the
- * client this returns the per-room renderer-owned PerspectiveCamera, freshly
- * synced from the active CameraTrait + camera-node Transform. returns null
- * on the server, when no room is wired, or when no controller has spun up
- * its camera node yet.
+ * point the active render camera at `node`. plain in-place write to the single
+ * client state (`ctx.client.camera`), observed by the renderer and every
+ * script without re-seating. client-only: a no-op on the server.
  */
-export function getPovCamera(ctx: ScriptContext): PerspectiveCamera | null;
+export function setCamera(ctx: ScriptContext, node: nodes.Node): void;
 ```
 
-#### `resolveCamera`
+#### `setSubject`
 
 ```ts
 /**
- * resolve the camera this script's node drives, CameraRefTrait on `ctx.node`
- * if present (the standard wiring; POV-eligible nodes get it pre-installed
- * at room init and the editor lens points its own at a private camera),
- * falling back to the room's default camera. returns both the CameraTrait
- * (projection) and its node (sibling TransformTrait lives there). only
- * valid in client scripts (relies on `ctx.client`).
+ * swap the client's subject. plain in-place write to `ctx.client.subject`.
+ * pass `null` to clear. client-only: a no-op on the server. purely local, it
+ * changes what this client controls/sees, never ownership or the server-side
+ * streaming anchor (that stays the player node).
  */
-export function resolveCamera(ctx: ScriptContext): {
-    camera: CameraTrait;
-    node: Node;
-};
+export function setSubject(ctx: ScriptContext, node: nodes.Node | null): void;
 ```
-#### `getPov`
-
-```ts
-/**
- * resolve the room's current POV node, the node the engine renders
- * through and routes input through. scripts compare to their own ctx.node
- * to gate per-frame work that should only run on the active POV (camera
- * writes, input-driven movement, etc.); non-POV nodes still run other
- * hooks (animation, state ticks) unconditionally.
- *
- * server-side, ctx.client is undefined and this returns null. that's
- * intentional: server scripts shouldn't conditionalize on POV.
- */
-export function getPov(ctx: ScriptContext): nodes.Node | null;
-```
-
-#### `setPov`
-
-```ts
-/**
- * swap the room's POV pointer. writes `ctx.client.pov.node` in place, the
- * same box `room.pov` and every script's `ctx.client.pov` reference, so the
- * swap is observed everywhere without re-seating. pass `null` to clear (no
- * POV node, input still routes via room.input, but `getPov(ctx)` returns
- * null everywhere and rendering bails for this room until a POV node is set
- * again).
- *
- * client-only: a no-op on the server (ctx.client is undefined), like getPov.
- * the renderer reads the active POV camera each frame via `getPovCamera`, so
- * POV swaps need no pipeline rebuild.
- */
-export function setPov(ctx: ScriptContext, node: nodes.Node | null): void;
-```
-
-Also exported: `PovState`.
 #### `configureFloodFillLighting`
 
 ```ts
@@ -5635,7 +5608,7 @@ export function playOnNode(ctx: ScriptContext, sound: SoundHandle, node: Node, o
  * Client-only override hook for the room's audio listener pose source.
  *
  * By default the audio runtime (`client/audio/audio.ts`) reads listener
- * position + orientation from `room.pov.node`'s TransformTrait, the
+ * position + orientation from the client's `pov` node's TransformTrait, the
  * same node the renderer derives the active camera from. That's the
  * right pick for first-person and most third-person cameras, where the
  * "ears" and the "eyes" sit at the same node.

@@ -864,25 +864,31 @@ for anything they do not:
 
 ### Camera
 
-Every room has a camera node, reachable in a client script as `ctx.client.camera`.
-Its `CameraTrait` holds the projection (`fov`, `near`, `far`). The builtin
-controllers (orbit, fly, player) write its pose each frame, but you can read the
-trait to adjust field of view or seed a pose before adding a controller.
+Every room has a default camera node, reachable in a client script as
+`ctx.client.camera`. Its `CameraTrait` holds the projection (`fov`, `near`,
+`far`). `ctx.client.camera` is the *active* camera node: what the renderer
+composes the render camera from each frame. The builtin controllers (orbit, fly,
+player) write its pose each frame; you can read the trait to adjust field of view
+or seed a pose before adding a controller, and `setCamera(ctx, node)` repoints it
+at a different camera node.
 
 <Snippet source="visuals.snippet.ts" select="camera" />
 
-Each room renders through one point of view (POV): the node whose `CameraTrait`
-the renderer composes into the scene each frame. On the client, `getPov(ctx)`
-returns that node. Builtin controllers and view-only scripts gate their per-frame
-work on it with `getPov(ctx) === ctx.node`, so only the active POV writes the
-camera or consumes input. `getPovCamera(ctx)` returns the live render camera
-(world pose plus projection, already synced for this frame) for aiming, reticles,
-or raycasts from the eye. To move the POV elsewhere, such as a spectator target, a
-vehicle a player enters, or a death cam, call `setPov(ctx, node)`. It is
-client-only and purely local: it changes what that client sees and controls
-without affecting ownership. Pass `null` to clear it.
+Each client has a **subject**: the node local input drives and the engine treats
+as this client's point of view (renderer + audio). `getSubject(ctx)` returns it.
+Builtin controllers and view-only scripts gate their per-frame work on it with
+`getSubject(ctx) === ctx.node`, so only the active subject writes the camera or
+consumes input. Read the active camera pose off `getCamera(ctx)`'s
+`TransformTrait` for aiming, reticles, or raycasts from the eye (the render camera
+object itself is renderer-private). To move the subject elsewhere, such as a
+spectator target, a vehicle a player enters, or a death cam, call
+`setSubject(ctx, node)`. It is client-only and purely local: it changes what that
+client sees and controls, never ownership, and never the server-side streaming
+anchor (that stays the player node). Pass `null` to clear it. The client also
+holds `defaultSubject` / `defaultCamera` (seeded to the player node and the room
+camera) as the values to restore when a temporary override ends.
 
-<Snippet source="visuals.snippet.ts" select="pov" />
+<Snippet source="visuals.snippet.ts" select="subject" />
 
 ### Lighting and sky
 

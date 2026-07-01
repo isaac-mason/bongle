@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getPovCamera } from '../../client/rooms';
+import { getRenderCamera } from '../../client/rooms';
 import { useEditor } from '../editor-store';
 
 const CUBE_PX = 165;
@@ -172,7 +172,7 @@ export function OrientationCube() {
 
         const tick = () => {
             const r = roomRef.current;
-            const camera = r ? getPovCamera(r) : null;
+            const camera = r ? getRenderCamera(r) : null;
             if (camera) {
                 const m = camera.matrixWorldInverse;
                 const a0 = m[0],

@@ -102,7 +102,7 @@ export function openViewportContextMenu(
     );
 
     const playerNode = room.playerNode;
-    const editorNode = room.editor?.editorNode;
+    const editorNode = room.editor?.subject;
     const nodeHit = hits.find(
         (h): h is Selector.NodeHit =>
             h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
@@ -281,7 +281,7 @@ export function updateInspect(
                 MAX_RAY_DIST,
             );
             const playerNode = room.playerNode;
-            const editorNode = room.editor?.editorNode;
+            const editorNode = room.editor?.subject;
             const nodeHit = hits.find(
                 (h): h is Selector.NodeHit =>
                     h.kind === 'node' && h.node !== playerNode && !isAncestorOf(playerNode, h.node) && h.node !== editorNode,
@@ -344,7 +344,7 @@ export function updateInspect(
 
         // exclude the local player node + descendants, and the editor lens node.
         const playerNode = room.playerNode;
-        const editorNode = room.editor?.editorNode;
+        const editorNode = room.editor?.subject;
 
         // find the nearest node hit (excluding player) and nearest voxel hit.
         // hits are distance-sorted, use the nearest of each type, then let

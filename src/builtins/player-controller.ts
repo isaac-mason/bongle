@@ -42,19 +42,19 @@ import {
     isTouchButtonDown,
 } from '../api/input';
 import { isTouchDevice, isTouchPrimary } from '../api/mobile';
-import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import type { Physics } from '../api/physics';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
-import { getPov } from '../api/pov';
 import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
+import { getCamera, getSubject } from '../api/subject';
+import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import { control, type TraitType, trait } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { UILayer } from '../client/ui-layers';
 import type * as vcc from '../core/physics/vcc';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
-import { type CameraTrait, resolveCamera } from './camera';
+import { CameraTrait } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
 
@@ -744,15 +744,6 @@ script(
         const debugHelpers = createDebugHelpers();
         let debugPanelEl: HTMLDivElement | null = null;
 
-        // handles to the camera this controller drives. resolved in onInit
-        // through CameraRefTrait on ctx.node (with fallback to `ctx.client.camera`),
-        // so bespoke setups that re-point CameraRefTrait still work. null for
-        // non-owner instances (onInit bails early on isOwner). nothing to tear
-        // down on dispose, camera-node lifecycle is owned by whoever installed
-        // CameraRefTrait (room init or editor lens).
-        let cameraTransform: TransformTrait | null = null;
-        let cameraTrait: CameraTrait | null = null;
-
         const ensureDebugPanel = (): HTMLDivElement | null => {
             if (debugPanelEl) return debugPanelEl;
             const viewport = ctx.client?.viewport;
@@ -940,14 +931,6 @@ script(
 
             const domElement = ctx.client?.domElement;
             if (domElement) domElement.addEventListener('click', onCanvasClick);
-
-            // grab handles to the camera this controller drives. CameraRefTrait
-            // on ctx.node is pre-installed at room init pointing at the room's
-            // default camera; bespoke setups can re-point it before the
-            // controller's onInit runs. fall back to client.camera defensively.
-            const { camera: cam, node: camNode } = resolveCamera(ctx);
-            cameraTrait = cam;
-            cameraTransform = getTrait(camNode, TransformTrait)!;
         });
 
         onDispose(ctx, () => {
@@ -959,8 +942,6 @@ script(
             removeDebugPanel();
             removeCrosshair();
             disposeAllHud();
-            cameraTransform = null;
-            cameraTrait = null;
         });
 
         // crosshair: target → current lerp + canvas repaint when drift exceeds eps.
@@ -1064,7 +1045,7 @@ script(
             // touched. owner-only state (perspective, fov lerp) is implied,
             // control => owner, since only owners can hold control of their
             // own player node.
-            if (getPov(ctx) !== ctx.node) return;
+            if (getSubject(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc) return;
 
@@ -1108,7 +1089,7 @@ script(
             // noclip drives the player's transform from input (cc.move/jump).
             // gated on control so a non-control player can't keep flying
             // around after the POV moves elsewhere.
-            if (getPov(ctx) !== ctx.node) return;
+            if (getSubject(ctx) !== ctx.node) return;
             const cc = getTrait(ctx.node, CharacterControllerTrait);
             if (!cc?.input.noclip) return;
             const transform = getTrait(ctx.node, TransformTrait);
@@ -1126,10 +1107,15 @@ script(
             // to its CameraTrait or paints the HUD overlay. when POV swaps
             // away, the crosshair is torn down so a stale tickmark doesn't
             // linger over whatever lens is now active.
-            if (getPov(ctx) === ctx.node) {
-                if (cameraTransform && cameraTrait) {
-                    updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
-                }
+            if (getSubject(ctx) === ctx.node) {
+                // resolve the active camera each frame: when this node is the
+                // subject, client.camera is the camera it drives (no init-time
+                // caching, so it stays correct across editor lens swaps). onFrame
+                // is client-only and a camera is always wired, so no null dance.
+                const cameraNode = getCamera(ctx)!;
+                const cameraTransform = getTrait(cameraNode, TransformTrait)!;
+                const cameraTrait = getTrait(cameraNode, CameraTrait)!;
+                updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
                 updateCrosshair(pc, delta);
             } else {
                 removeCrosshair();

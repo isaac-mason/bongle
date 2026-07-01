@@ -29,51 +29,39 @@ import type { TraitBase, TraitHandle } from './traits';
 export type Unsubscribe = () => void;
 
 /**
- * mutable POV pointer, the node whose CameraTrait the renderer binds into
- * the scene pass each frame, and which scripts compare against via
- * `getPov(ctx) === ctx.node`. wrapped in an object (not a bare field) so
- * ClientRoom and ClientContext can share a single reference: swapping the
- * pointer is a single in-place write that every existing handle observes.
- *
- * default: room.playerNode. swapped by `setPov` when entering a local
- * editor view, taking control of an NPC, or peeking at another POV.
- */
-export type PovState = {
-    node: nodes.Node | null;
-};
-
-/**
  * client-side editor lens. when present, this client is in some flavor of
- * edit mode, either a real edit room (server-authoritative, editorNode ===
- * playerNode) or a local-only peek into a play room (editorNode is a
+ * edit mode, either a real edit room (server-authoritative, `subject` ===
+ * playerNode) or a local-only peek into a play room (`subject` is a
  * `realm: 'client'` node carrying EditorTrait + CameraTrait).
  *
  * the existence of `room.editor` is the on/off switch for the editor lens.
  * scripts declared with `{ editor: true }` also run in edit mode and read
  * the lens via `ctx.client.room?.editor`.
  *
- * grows over time with selection / hover / gizmo state. today: just the
- * editor node pointer.
+ * grows over time with selection / hover / gizmo state. today: the lens's
+ * subject + camera nodes. while the lens is active `client.subject` /
+ * `client.camera` point at these.
  */
 export type EditRoomState = {
     /** stable opaque id for this editor view; surfaces as RoomViewId so the
-     *  UI can address the editor-node POV separately from the player POV
+     *  UI can address the editor POV separately from the player POV
      *  even though both belong to the same ClientRoom. */
     id: string;
 
     /**
-     * The node representing the editor actor.
+     * the node representing the editor actor. becomes `client.subject` while
+     * the lens is active.
      */
-    editorNode: nodes.Node;
+    subject: nodes.Node;
 
     /**
      * lens-private camera node, `realm: 'client'` with TransformTrait +
-     * CameraTrait. editorNode's CameraRefTrait points here so the lens's
-     * pose is preserved across play/edit tab toggles, independently of
+     * CameraTrait. becomes `client.camera` while the lens is active, so the
+     * lens's pose is preserved across play/edit tab toggles, independently of
      * `room.cameraNode` (which the player controller drives while in play
      * view). torn down with the lens.
      */
-    cameraNode: nodes.Node;
+    camera: nodes.Node;
 };
 
 export type ClientContext = {
@@ -81,25 +69,45 @@ export type ClientContext = {
     scene: Scene;
 
     /**
-     * mutable POV state, same object as `room.pov`. scripts read
-     * `ctx.client.pov.node` to know which node currently drives the
-     * camera + input. swap via `setPov(ctx, node)`. read the
-     * active render camera with `getPovCamera(ctx)`.
+     * the subject: the node local input drives and what the renderer + audio
+     * treat as this client's point of view. a plain field on the single client
+     * state (no box), so a write is observed everywhere that holds this
+     * ClientContext (scripts via `ctx.client`, room-layer via `room.client`).
+     * read it with `getSubject(ctx)`, swap with `setSubject(ctx, node)`.
+     * defaults to `defaultSubject` (the player node).
      */
-    pov: PovState;
+    subject: nodes.Node | null;
 
-    /** local player body node, alias for `room.playerNode`. */
+    /** local player body node, alias for `room.playerNode`. the server-side
+     *  streaming anchor; keep it where interest should be. */
     player: nodes.Node;
 
     /**
-     * default room camera node, alias for `room.cameraNode`. has a
-     * TransformTrait (pose) and a CameraTrait (projection). builtin
-     * controllers write to it each frame; scripts can pre-seed pose
-     * before adding a controller, override via a CameraRefTrait pointing
-     * at a different camera trait for bespoke setups, or write fov here
-     * directly.
+     * active render camera node: what the renderer composes the render camera
+     * from each frame (TransformTrait pose + CameraTrait projection). defaults
+     * to `defaultCamera` (`room.cameraNode`) and is repointed by whichever
+     * controller / lens is driving the view. read it with `getCamera(ctx)`
+     * (or `ctx.client.camera`), swap it with `setCamera(ctx, node)`. single
+     * source of truth; room-layer reaches it via `room.client`.
      */
     camera: nodes.Node;
+
+    /**
+     * the subject to return to when a temporary override (editor lens,
+     * spectator, cinematic) ends. plain config field, seeded to the player
+     * node at room setup; games may repoint it to control something other
+     * than the player by default. no set/reset helpers, editor and games read
+     * it and restore `subject` themselves.
+     */
+    defaultSubject: nodes.Node | null;
+
+    /**
+     * the camera to return to alongside `defaultSubject`. plain config field,
+     * seeded to `room.cameraNode` at room setup. mostly a follower of the
+     * default subject's controller camera; stands alone for controller-less
+     * default views (a fixed / scripted camera).
+     */
+    defaultCamera: nodes.Node;
 
     /** the canvas element the renderer draws into */
     domElement: HTMLCanvasElement;
@@ -877,7 +885,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
     // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
     // instantiate (the room object doesn't exist yet at this point), so hold
     // the reference directly, a copy here would freeze those fields as
-    // `undefined` forever, breaking isOwner / playMono / getPov for
+    // `undefined` forever, breaking isOwner / playMono / getSubject for
     // editor:true world systems. The editor lens is reachable via
     // `ctx.client.room?.editor`.
     const client = runtime.client;
