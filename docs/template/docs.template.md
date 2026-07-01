@@ -880,11 +880,21 @@ Builtin controllers and view-only scripts gate their per-frame work on it with
 `getSubject(ctx) === ctx.node`, so only the active subject writes the camera or
 consumes input. Read the active camera pose off `getCamera(ctx)`'s
 `TransformTrait` for aiming, reticles, or raycasts from the eye (the render camera
-object itself is renderer-private). To move the subject elsewhere, such as a
-spectator target, a vehicle a player enters, or a death cam, call
-`setSubject(ctx, node)`. It is client-only and purely local: it changes what that
-client sees and controls, never ownership, and never the server-side streaming
-anchor (that stays the player node). Pass `null` to clear it. The client also
+object itself is renderer-private).
+
+You write your own controller the same way: gate on being the subject, then drive
+`getCamera(ctx)`'s transform however you like (follow, orbit, first-person). The
+builtin orbit / fly / player controllers are just this pattern; the snippet below
+is a minimal one.
+
+To **possess** a different node, a free-flying spectator or death cam, or a
+vehicle you own, call `setSubject(ctx, node)`. That node needs its own controller
+so your input drives it and the camera follows; `setSubject` alone only redirects
+input + POV. It is client-only and purely local: it changes what that client
+controls, never ownership, and never the server-side streaming anchor (that stays
+the player node). Pass `null` to clear it. To merely **view** something you do not
+control, a fixed shot, another player, call `setCamera(ctx, node)` instead, which
+repoints just the render camera and leaves control where it is. The client also
 holds `defaultSubject` / `defaultCamera` (seeded to the player node and the room
 camera) as the values to restore when a temporary override ends.
 

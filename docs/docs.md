@@ -1414,43 +1414,58 @@ Builtin controllers and view-only scripts gate their per-frame work on it with
 `getSubject(ctx) === ctx.node`, so only the active subject writes the camera or
 consumes input. Read the active camera pose off `getCamera(ctx)`'s
 `TransformTrait` for aiming, reticles, or raycasts from the eye (the render camera
-object itself is renderer-private). To move the subject elsewhere, such as a
-spectator target, a vehicle a player enters, or a death cam, call
-`setSubject(ctx, node)`. It is client-only and purely local: it changes what that
-client sees and controls, never ownership, and never the server-side streaming
-anchor (that stays the player node). Pass `null` to clear it. The client also
+object itself is renderer-private).
+
+You write your own controller the same way: gate on being the subject, then drive
+`getCamera(ctx)`'s transform however you like (follow, orbit, first-person). The
+builtin orbit / fly / player controllers are just this pattern; the snippet below
+is a minimal one.
+
+To **possess** a different node, a free-flying spectator or death cam, or a
+vehicle you own, call `setSubject(ctx, node)`. That node needs its own controller
+so your input drives it and the camera follows; `setSubject` alone only redirects
+input + POV. It is client-only and purely local: it changes what that client
+controls, never ownership, and never the server-side streaming anchor (that stays
+the player node). Pass `null` to clear it. To merely **view** something you do not
+control, a fixed shot, another player, call `setCamera(ctx, node)` instead, which
+repoints just the render camera and leaves control where it is. The client also
 holds `defaultSubject` / `defaultCamera` (seeded to the player node and the room
 camera) as the values to restore when a temporary override ends.
 
 ```ts
-// the subject is the node local input drives and the engine treats as this
-// client's point of view. attach a trait to a node and gate view-only work to
-// whichever node is the subject.
-const Viewpoint = trait('viewpoint');
-script(Viewpoint, 'subject', (ctx) => {
+// The subject is the node local input drives and the engine treats as this
+// client's point of view (camera + audio). `getSubject(ctx)` returns it; it
+// defaults to the player node.
+//
+// A minimal DIY controller: gate on being the subject, then drive the active
+// camera node's transform yourself. Same shape the builtin orbit / fly / player
+// controllers use, so you can write bespoke camera behaviour without the engine.
+const FollowCam = trait('follow-cam');
+script(FollowCam, 'drive', (ctx) => {
     onFrame(ctx, () => {
-        // only the active subject runs this; everything else returns early
-        if (getSubject(ctx) !== ctx.node) return;
-        // the active camera node; read its TransformTrait for pose (aiming,
-        // reticles, raycasts from the eye). null when no camera is wired; the
-        // render camera object itself is renderer-private.
-        const cameraNode = getCamera(ctx);
-        const cameraTransform = cameraNode ? getTrait(cameraNode, TransformTrait) : null;
-        if (cameraTransform) {
-            const eyePosition = getWorldPosition(cameraTransform);
-            void eyePosition; // ... aim from here
-        }
-    });
-
-    onInit(ctx, () => {
-        // swap the subject to another node for a spectator target, a vehicle a
-        // player enters, or a death cam. client-only and purely local: it
-        // changes what this client sees and controls, not ownership, and not
-        // the server-side streaming anchor (that stays the player node). pass
-        // null to clear it.
-        setSubject(ctx, ctx.node);
+        if (getSubject(ctx) !== ctx.node) return; // only the active subject drives the view
+        const cameraNode = getCamera(ctx); // the active render camera node
+        if (!cameraNode) return; // no camera wired (e.g. offline icon render)
+        const camera = getTrait(cameraNode, TransformTrait);
+        const self = getTrait(ctx.node, TransformTrait);
+        if (!camera || !self) return;
+        // ...position `camera` relative to `self` here (follow / orbit / first-person).
     });
 });
+
+// Possess a node you control: a free-flying spectator / death cam, or a vehicle
+// you own. It needs its own controller (like FollowCam above) so your input
+// drives it and the camera follows, setSubject alone only redirects input + POV.
+// Purely local: never changes ownership or the server-side streaming anchor (the
+// player node stays put, so the world keeps streaming around it). To merely VIEW
+// something you don't control (another player, a fixed shot), use setCamera
+// instead. Restore control with the client's `defaultSubject`.
+export function possess(ctx: ScriptContext, node: Node): void {
+    setSubject(ctx, node);
+}
+export function release(ctx: ScriptContext): void {
+    if (ctx.client) setSubject(ctx, ctx.client.defaultSubject);
+}
 ```
 
 ### Lighting and sky
