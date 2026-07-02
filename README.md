@@ -13,10 +13,10 @@ it powers [bongle.io](https://bongle.io), and is available here as free open sou
 
 ## Documentation
 
-- [Guide](./docs/guide.md): read top to bottom to learn the engine and its API, with getting started, examples, and guidance.
+- [Guide](./docs/docs.md): read top to bottom to learn the engine and its API, with getting started, examples, and guidance.
 - [API reference](./docs/api.md): the full public API surface.
 
-New here? The guide's [Getting Started](./docs/guide.md#getting-started) walks you from zero to a running editor.
+New here? The guide's [Getting Started](./docs/docs.md#getting-started) walks you from zero to a running editor.
 
 ## Games
 
