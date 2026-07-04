@@ -6,14 +6,18 @@ import type { Vec3 } from 'mathcat';
 import {
     addChild,
     addTrait,
+    COLLISION_GROUP_CHARACTERS,
     ContactsTrait,
     createNode,
+    defineCollisionGroups,
     destroyNode,
     env,
+    exceptGroups,
     log,
     MotionType,
     OBJECT_LAYER_NODE_MOVING,
     onInit,
+    onlyGroups,
     onPostPhysicsStep,
     PlayerTrait,
     query,
@@ -124,3 +128,40 @@ script(WorldTrait, 'coins', (ctx) => {
     });
 });
 /* SNIPPET_END: coin-pickup */
+
+/* SNIPPET_START: collision-groups */
+// declare a game's groups once, in a fixed order. each name gets a bit above the
+// engine-reserved range; assignment is positional, so it is identical on every
+// side (groups are not synced, so never build the list conditionally).
+const Groups = defineCollisionGroups('enemies', 'pickups');
+
+script(WorldTrait, 'group-demo', (ctx) => {
+    if (!env.server) return;
+
+    onInit(ctx, () => {
+        // an enemy ignores other enemies but still collides with the world and
+        // everything else. `exceptGroups` = "collide with all but these".
+        const enemy = createNode({ name: 'enemy' });
+        setPosition(addTrait(enemy, TransformTrait), [0, 5, 0]);
+        addTrait(enemy, RigidBodyTrait).def = {
+            shape: { type: 'sphere', radius: 0.4 },
+            collisionGroups: Groups.enemies,
+            collisionMask: exceptGroups(Groups.enemies),
+        };
+        addChild(ctx.node, enemy);
+
+        // a pickup only reacts to characters (players / npcs), nothing else.
+        // `onlyGroups` = "collide with only these".
+        const pickup = createNode({ name: 'pickup' });
+        setPosition(addTrait(pickup, TransformTrait), [2, 1, 0]);
+        addTrait(pickup, RigidBodyTrait).def = {
+            shape: { type: 'sphere', radius: 0.5 },
+            motionType: MotionType.STATIC,
+            sensor: true,
+            collisionGroups: Groups.pickups,
+            collisionMask: onlyGroups(COLLISION_GROUP_CHARACTERS),
+        };
+        addChild(ctx.node, pickup);
+    });
+});
+/* SNIPPET_END: collision-groups */

@@ -2233,12 +2233,61 @@ excluding one specific body, such as the shooter's own.
 
 Layers decide which broad category a query or the simulation considers; **collision
 groups** give finer, per-body control through a group and mask bitfield, set on a
-`RigidBodyTrait` def as `collisionGroups` and `collisionMask`. The engine reserves
-the low bits for its own bodies, `COLLISION_GROUP_VOXELS` (`1 << 0`) and
-`COLLISION_GROUP_NODES` (`1 << 1`); your game uses `1 << 2` and up for its own
-groups. Reach for them when a layer is too coarse for the rule you want: projectiles
-that pass through their own team, entities that ignore each other but not the world,
-triggers only certain bodies activate.
+`RigidBodyTrait` def as `collisionGroups` and `collisionMask`. Two bodies collide only
+when each one's group is in the other's mask. The engine reserves the low bits for its
+own bodies, `COLLISION_GROUP_VOXELS` (`1 << 0`), `COLLISION_GROUP_NODES` (`1 << 1`),
+and `COLLISION_GROUP_CHARACTERS` (`1 << 2`); your game uses `1 << 3` and up.
+
+Characters use this by default: their mask excludes `COLLISION_GROUP_CHARACTERS`, so
+they pass through each other Minecraft-style while still colliding with the world and
+other bodies. Change it through a `CharacterControllerTrait`'s `config.collisionGroups`
+/ `config.collisionMask` (applied live each tick); `collisionMask: 0xffffffff`
+re-enables character-vs-character collision.
+
+Declare your own groups with `defineCollisionGroups`, which hands out a named bit per
+name above the reserved range. Assignment is positional, so it matches on every side;
+groups are not synced, so call it once with a fixed list. Build masks with
+`onlyGroups(...)` (collide with only these) and `exceptGroups(...)` (collide with all
+but these). Reach for groups when a layer is too coarse for the rule you want:
+projectiles that pass through their own team, entities that ignore each other but not
+the world, triggers only certain bodies activate.
+
+```ts
+// declare a game's groups once, in a fixed order. each name gets a bit above the
+// engine-reserved range; assignment is positional, so it is identical on every
+// side (groups are not synced, so never build the list conditionally).
+const Groups = defineCollisionGroups('enemies', 'pickups');
+
+script(WorldTrait, 'group-demo', (ctx) => {
+    if (!env.server) return;
+
+    onInit(ctx, () => {
+        // an enemy ignores other enemies but still collides with the world and
+        // everything else. `exceptGroups` = "collide with all but these".
+        const enemy = createNode({ name: 'enemy' });
+        setPosition(addTrait(enemy, TransformTrait), [0, 5, 0]);
+        addTrait(enemy, RigidBodyTrait).def = {
+            shape: { type: 'sphere', radius: 0.4 },
+            collisionGroups: Groups.enemies,
+            collisionMask: exceptGroups(Groups.enemies),
+        };
+        addChild(ctx.node, enemy);
+
+        // a pickup only reacts to characters (players / npcs), nothing else.
+        // `onlyGroups` = "collide with only these".
+        const pickup = createNode({ name: 'pickup' });
+        setPosition(addTrait(pickup, TransformTrait), [2, 1, 0]);
+        addTrait(pickup, RigidBodyTrait).def = {
+            shape: { type: 'sphere', radius: 0.5 },
+            motionType: MotionType.STATIC,
+            sensor: true,
+            collisionGroups: Groups.pickups,
+            collisionMask: onlyGroups(COLLISION_GROUP_CHARACTERS),
+        };
+        addChild(ctx.node, pickup);
+    });
+});
+```
 
 ## Pathfinding
 
