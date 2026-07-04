@@ -468,6 +468,15 @@ export type VccSettings = {
     /** maximum walkable slope angle in radians. surfaces with `angle(normal, up) > this` are steep. */
     maxSlopeAngle: number;
 
+    /** collision group bitfield for the inner body + all of the character's
+     *  own sweeps (crashcat body queries AND the AABB-body sweep). defaults to
+     *  all bits set. */
+    collisionGroups?: number;
+    /** collision mask bitfield: which groups the character collides with.
+     *  applied symmetrically to the inner body, the body-query filter, and the
+     *  AABB-body sweep. defaults to all bits set. */
+    collisionMask?: number;
+
     /** outer slide-loop iteration cap. KCC default 5. */
     maxCollisionIterations?: number;
     /** inner constraint-solve iteration cap. KCC default 15. */
@@ -545,6 +554,10 @@ export type VCC = {
     // body queries.
     innerBody: RigidBody;
     innerBodyId: BodyId;
+    /** collision group/mask the character sweeps with, applied to both the
+     *  crashcat body-query filter and the AABB-body sweep. */
+    collisionGroups: number;
+    collisionMask: number;
     /** filter for body queries. layer-filters out voxels; body filter rejects innerBodyId. */
     bodyFilter: Filter;
     /** body-overlap state: collector + reusable settings + scratch query box. */
@@ -581,6 +594,8 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
     const halfExtents: Vec3 = [settings.halfExtents[0], settings.halfExtents[1], settings.halfExtents[2]];
     const position: Vec3 = [settings.position[0], settings.position[1], settings.position[2]];
     const cosMaxSlopeAngle = Math.cos(settings.maxSlopeAngle);
+    const collisionGroups = settings.collisionGroups ?? 0xffffffff;
+    const collisionMask = settings.collisionMask ?? 0xffffffff;
 
     // inner shape: `transformed` wrapper that lifts the box by halfExtents[1] so
     // that the body's reference point (and thus our `position`) sits at the
@@ -596,6 +611,8 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
         quaternion: [0, 0, 0, 1],
         motionType: MotionType.KINEMATIC,
         objectLayer: OBJECT_LAYER_NODE_MOVING,
+        collisionGroups,
+        collisionMask,
     });
 
     // body filter: exclude voxels (we iterate them ourselves), editor
@@ -610,6 +627,11 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
     // directly via the AabbPhysics.World sweep pass, so the impostor would
     // double-count and stall the slide loop.
     createFilter.disableObjectLayer(bodyFilter, world.settings.layers, OBJECT_LAYER_AABB_IMPOSTOR);
+    // group/mask filtering: the query is symmetric with the inner body, so a
+    // character whose mask excludes the CHARACTERS group sweeps straight
+    // through other characters' inner bodies (they collide by default).
+    bodyFilter.collisionGroups = collisionGroups;
+    bodyFilter.collisionMask = collisionMask;
     const innerBodyId = innerBody.id;
     // sensor bodies generate contact events through the global contact
     // listener but must not block character movement (mirrors KCC's
@@ -653,6 +675,8 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
 
         innerBody,
         innerBodyId: innerBody.id,
+        collisionGroups,
+        collisionMask,
         bodyFilter,
         bodyOverlapCollector: createAllCollideShapeCollector(),
         bodyOverlapSettings: createDefaultCollideShapeSettings(),
@@ -1453,10 +1477,10 @@ function getFirstContactForSweep(
     }
 
     // aabb body sweep, analytical, broadphase-backed. character is matched
-    // against every body whose envelope overlaps the swept aabb. uses the
-    // character's default groups/mask (all/all) since vcc doesn't expose them,
-    // VCC contacts are filtered through the bodyFilter for crashcat bodies,
-    // and AabbBodies don't have a "self" entry to filter against.
+    // against every body whose envelope overlaps the swept aabb, filtered by
+    // the character's own groups/mask (same values the crashcat bodyFilter
+    // uses) so the filtering is uniform across both collision paths. AabbBodies
+    // have no "self" entry, so the self-body id is -1.
     const aabbHit = AabbPhysics.sweepBodies(
         aabbWorld,
         _sweepCenter[0],
@@ -1468,8 +1492,8 @@ function getFirstContactForSweep(
         dispX,
         dispY,
         dispZ,
-        0xffffffff,
-        0xffffffff,
+        vcc.collisionGroups,
+        vcc.collisionMask,
         -1,
         _aabbSweepResult,
     );

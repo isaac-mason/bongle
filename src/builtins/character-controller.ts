@@ -26,7 +26,7 @@ import { rigidBody } from 'crashcat';
 import type { Quat, Spherical, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec2, vec3 } from 'mathcat';
 import { pack } from '../api/pack';
-import type { Physics } from '../api/physics';
+import { COLLISION_GROUP_CHARACTERS, exceptGroups, type Physics } from '../api/physics';
 import { getTrait } from '../api/scene-graph';
 import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scripts';
 import { sync, type TraitType, trait } from '../api/traits';
@@ -280,6 +280,16 @@ type CharacterControllerConfig = {
     /** crouched eye height (m); the eased `state.eyeHeight` (and the camera +
      *  `view.origin`) lerp between the two by `state.crouchAmount`. */
     crouchEyeHeight: number;
+    /** collision group bitfield for the character's inner body + all of its
+     *  own sweeps. defaults to `COLLISION_GROUP_CHARACTERS`. pushed onto the
+     *  live VCC every tick, so runtime changes take effect immediately. */
+    collisionGroups: number;
+    /** which collision groups the character collides with. defaults to
+     *  everything EXCEPT `COLLISION_GROUP_CHARACTERS`, so characters pass
+     *  through each other (Minecraft-style) while still colliding with the
+     *  world + node/aabb bodies. set to `0xffffffff` to re-enable
+     *  character-vs-character collision. applied live each tick. */
+    collisionMask: number;
 };
 
 type CharacterControllerState = {
@@ -476,6 +486,8 @@ export const CharacterControllerTrait = trait(
             crouchLerpRate: 12,
             eyeHeight: 1.62,
             crouchEyeHeight: 1.37,
+            collisionGroups: COLLISION_GROUP_CHARACTERS,
+            collisionMask: exceptGroups(COLLISION_GROUP_CHARACTERS),
         }),
 
         state: (): CharacterControllerState => ({
@@ -1092,6 +1104,8 @@ function ensureVCC(cc: CharacterControllerTrait, transform: TransformTrait, phys
         halfExtents: cc.config.halfExtents.standing,
         position: [feet[0], feet[1], feet[2]],
         maxSlopeAngle: MAX_SLOPE_ANGLE,
+        collisionGroups: cc.config.collisionGroups,
+        collisionMask: cc.config.collisionMask,
     });
     cc.state.isCrouchShape = false;
     // attribute crashcat contact events on the VCC inner body back to this
@@ -1129,6 +1143,22 @@ function updateCrouchShape(cc: CharacterControllerTrait, physics: Physics): void
         vcc.resize(physics.rigid.world, v, wantCrouchShape ? config.halfExtents.crouching : config.halfExtents.standing);
         state.isCrouchShape = wantCrouchShape;
     }
+}
+
+// push the config's collision group/mask onto the live VCC every tick, so a
+// script that flips `config.collisionMask` at runtime (team swap, ghost mode)
+// takes effect like every other live config field. cheap, and keeps the three
+// homes (VCC struct, inner body, body-query filter) coherent with config.
+function syncCollisionFilter(cc: CharacterControllerTrait): void {
+    const v = cc.state.vcc;
+    if (!v) return;
+    const { collisionGroups, collisionMask } = cc.config;
+    v.collisionGroups = collisionGroups;
+    v.collisionMask = collisionMask;
+    v.innerBody.collisionGroups = collisionGroups;
+    v.innerBody.collisionMask = collisionMask;
+    v.bodyFilter.collisionGroups = collisionGroups;
+    v.bodyFilter.collisionMask = collisionMask;
 }
 
 // ── per-tick movement ─────────────────────────────────────────────────
@@ -1734,6 +1764,7 @@ script(
             // character work uniformly. only the owner steps the sim.
             ensureVCC(cc, transform, ctx.physics);
             updateCrouchShape(cc, ctx.physics);
+            syncCollisionFilter(cc);
 
             if (isOwner(ctx, ctx.node)) {
                 // noclip drives motion from the writer (PlayerController);

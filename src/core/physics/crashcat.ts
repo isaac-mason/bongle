@@ -34,10 +34,15 @@ export const OBJECT_LAYER_AABB_IMPOSTOR = addObjectLayer(settings, BROADPHASE_LA
 
 // crashcat collision groups (the per-body groups/mask bitfields, distinct from
 // the baked object layers above). the engine reserves the low bits to tag its
-// own bodies, the voxel terrain body and node rigid bodies, so games can
-// filter against them; games use 1 << 2 and up for their own groups.
+// own bodies, the voxel terrain body, node rigid bodies, and characters, so
+// they (and games) can filter against them; games use 1 << 3 and up for their
+// own groups.
 export const COLLISION_GROUP_VOXELS = 1 << 0;
 export const COLLISION_GROUP_NODES = 1 << 1;
+// characters (CharacterControllerTrait / VCC inner bodies). the default
+// character mask excludes this bit, so characters pass through each other
+// (Minecraft-style) while still colliding with the world + node/aabb bodies.
+export const COLLISION_GROUP_CHARACTERS = 1 << 2;
 
 enableCollision(settings, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_VOXELS);
 enableCollision(settings, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_NODE_MOVING);
