@@ -71,6 +71,12 @@ export type InitOptions = {
      * Required so engine-client owns no environment-specific I/O.
      */
     resourceLoader: ResourceLoader;
+    /**
+     * The element the engine mounts its UI root into. Full-page boot templates
+     * pass `document.body`; a library consumer embedding the engine into a page
+     * it doesn't own passes its own container so nothing lands on the page body.
+     */
+    domElement: HTMLElement;
 };
 
 // Re-export the registry-dispatch entry so the client boot template can call
@@ -85,17 +91,21 @@ export { mountPlayUI } from './ui/play-ui';
 export function init(opts: InitOptions) {
     const mode = opts.mode;
 
-    // domElement hosts the React UI root and is mounted in `load()`. We attach
-    // it to document.body here so the host doesn't have to; dispose() detaches it.
-    const domElement = document.createElement('div');
-    document.body.appendChild(domElement);
+    // The engine's React UI root, mounted in `load()`. Appended into the caller's
+    // `domElement` (`document.body` for full-page hosts; a library consumer passes
+    // its own container so nothing lands on the page body). dispose() detaches it.
+    const uiRoot = document.createElement('div');
+    opts.domElement.appendChild(uiRoot);
 
     const renderer = Renderer.init();
     const net = Net.init();
 
+    // hardware capability probe, resolved once at boot (touch never pointer-locks).
+    const device = Device.init();
+
     // client-level DOM listener layer; routes events into whichever room's
     // Input is the active target (set by setActivePlayer).
-    const inputManager = Input.createInputManager();
+    const inputManager = Input.createInputManager(device.touch);
 
     const content = Content.init();
 
@@ -115,7 +125,7 @@ export function init(opts: InitOptions) {
         net,
         rpc,
         driver: opts.driver,
-        domElement,
+        domElement: uiRoot,
         inputManager,
         rooms: Rooms.init(),
         /** per-player buffer of chunk coords decoded + applied since the last
@@ -128,7 +138,7 @@ export function init(opts: InitOptions) {
         /** hardware capability probe, resolved once at boot. touch capability
          *  doesn't change for the session, so per-frame predicates
          *  (`isTouchDevice`) read this instead of recomputing. */
-        device: Device.init(),
+        device,
         /** engine-global viewport dimensions. populated by the resize hook
          *  registered in `load()`; per-frame consumers read width/height
          *  here instead of calling `clientWidth`/`clientHeight` (which
@@ -407,6 +417,9 @@ export async function load(state: EngineClient) {
 
     // expose global client metrics to the debug panel.
     useClient.getState().setClientGlobalMetrics(state.metrics);
+
+    // expose the InputManager so React overlays can free the cursor while open.
+    useClient.getState().setInputManager(state.inputManager);
 
     // gate per-frame Debug.begin/end work on `debugOpen`, those samples are
     // only consumed by the panel, and the timer calls add up on profile traces.
@@ -1375,6 +1388,10 @@ export function update(state: EngineClient, delta: number) {
         Input.resetInput(room.input);
     }
 
+    /* derive pointer-lock from the active room's intent + UI/touch/focus. release
+       runs here every frame; acquire only fires from user-gesture handlers. */
+    Input.reconcilePointerLock(state.inputManager);
+
     /* flush outbox */
     Net.flush(state.net);
 
@@ -1389,7 +1406,7 @@ export function dispose(state: EngineClient): void {
     }
     state.rooms.rooms.clear();
     state.rooms.activePlayerId = null;
-    useClient.setState({ rooms: new Map(), activePlayerId: null });
+    useClient.setState({ rooms: new Map(), activePlayerId: null, inputManager: null });
 
     if (state.inputManager) Input.disposeInputManager(state.inputManager);
     if (state.shadowResources) ShadowResources.dispose(state.shadowResources);

@@ -82,6 +82,7 @@ export async function start(opts: StartOptions) {
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
         },
         resourceLoader: browserResourceLoader,
+        domElement: document.body,
     });
 
     // EditorScript + commands land in the registry before load()'s

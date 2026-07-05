@@ -39,6 +39,7 @@ const state = EngineClient.init({
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
     },
     resourceLoader: browserResourceLoader,
+    domElement: document.body,
 })
 // Mount the play-mode UI shell before load() — the React Viewport
 // component owns the canvas, and the resize callback in load() needs

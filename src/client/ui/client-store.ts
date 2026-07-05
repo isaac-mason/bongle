@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { env } from '../../api/env';
 import type { PlayerId } from '../../core/client';
 import type * as Debug from '../../core/debug';
+import type { InputManager } from '../input';
 import type { ClientRoom } from '../rooms';
 
 /** debug panel tab. 'logs' and 'deps' are editor-only and filtered out of
@@ -61,6 +62,11 @@ export type ClientStore = {
     /** the focused room, mirrors `Rooms.activePlayerId`. */
     activePlayerId: PlayerId | null;
     setActivePlayerId: (id: PlayerId | null) => void;
+
+    /** the client-level InputManager, so React overlays can free the cursor while
+     *  open via `useReleasePointer`. Set at boot, cleared on teardown. */
+    inputManager: InputManager | null;
+    setInputManager: (m: InputManager | null) => void;
 };
 
 export const useClient = create<ClientStore>((set) => ({
@@ -96,6 +102,9 @@ export const useClient = create<ClientStore>((set) => ({
 
     activePlayerId: null,
     setActivePlayerId: (activePlayerId) => set({ activePlayerId }),
+
+    inputManager: null,
+    setInputManager: (inputManager) => set({ inputManager }),
 }));
 
 /**

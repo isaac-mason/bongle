@@ -19,6 +19,7 @@
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
 import { env } from '../api/env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
+import { setPointerLock } from '../api/pointer-lock';
 import { getTrait } from '../api/scene-graph';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
@@ -84,6 +85,10 @@ script(
         const { input } = client;
         const viewport = client.state!.viewport;
         const mk = input.mouseKeyboard;
+
+        // orbit never pointer-locks (drag rotate/pan/dolly). clear any intent a
+        // prior lens (character) left set on this room so it doesn't grab on click.
+        setPointerLock(ctx, false);
 
         // ── camera: the active camera node on the client state
         // (`getCamera(ctx)`, the room default in play, a lens-private camera

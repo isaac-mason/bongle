@@ -19,7 +19,7 @@ export default client({
         env.client = true;
         env.server = false;
         env.editor = false;
-        return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader });
+        return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader, domElement: document.body });
     },
     load: async (state) => {
         // Mount the play-mode React UI shell before load() — the

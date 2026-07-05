@@ -61,9 +61,8 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     const root = document.createElement('div');
     root.style.width = `${size}px`;
     root.style.height = `${size}px`;
-    root.style.borderRadius = '50%';
-    root.style.background = 'rgba(255, 255, 255, 0.6)';
-    root.style.border = '2px solid #000';
+    root.style.background = 'rgba(20, 20, 20, 0.55)';
+    root.style.border = '2px solid rgba(255, 255, 255, 0.5)';
     root.style.touchAction = 'none';
     root.style.pointerEvents = 'auto';
     root.style.userSelect = 'none';
@@ -77,8 +76,7 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     thumb.style.height = `${thumbSize}px`;
     thumb.style.marginLeft = `${-thumbSize / 2}px`;
     thumb.style.marginTop = `${-thumbSize / 2}px`;
-    thumb.style.borderRadius = '50%';
-    thumb.style.background = '#fff';
+    thumb.style.background = 'rgba(255, 255, 255, 0.9)';
     thumb.style.border = '2px solid #000';
     thumb.style.pointerEvents = 'none';
     root.appendChild(thumb);
@@ -188,13 +186,13 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
     const root = document.createElement('div');
     root.style.width = `${opts.width}px`;
     root.style.height = `${opts.height}px`;
-    root.style.background = 'rgba(255, 255, 255, 0.85)';
-    root.style.border = '2px solid #000';
+    root.style.background = 'rgba(20, 20, 20, 0.6)';
+    root.style.border = '2px solid rgba(255, 255, 255, 0.5)';
     root.style.display = 'flex';
     root.style.alignItems = 'center';
     root.style.justifyContent = 'center';
     root.style.font = '20px system-ui, -apple-system, sans-serif';
-    root.style.color = '#000';
+    root.style.color = '#fff';
     root.style.touchAction = 'none';
     root.style.pointerEvents = 'auto';
     root.style.userSelect = 'none';
@@ -209,8 +207,8 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
 
     const setDown = (down: boolean): void => {
         state.down = down;
-        root.style.background = down ? 'rgba(0, 0, 0, 0.85)' : 'rgba(255, 255, 255, 0.85)';
-        root.style.color = down ? '#fff' : '#000';
+        root.style.background = down ? 'rgba(255, 255, 255, 0.9)' : 'rgba(20, 20, 20, 0.6)';
+        root.style.color = down ? '#000' : '#fff';
     };
 
     const onDown = (e: PointerEvent): void => {
@@ -256,6 +254,16 @@ export function createTouchButtonImpl(ctx: ScriptContext, opts: CreateTouchButto
 
     return {
         dispose(): void {
+            // if a finger is still down when the button is torn down (e.g. dying
+            // while holding to charge), release the capture explicitly so the
+            // pointer isn't left implicitly bound to a detached node.
+            if (activePointerId !== null) {
+                try {
+                    root.releasePointerCapture(activePointerId);
+                } catch {
+                    // capture may already be gone; nothing to release.
+                }
+            }
             root.removeEventListener('pointerdown', onDown);
             root.removeEventListener('pointermove', onMove);
             root.removeEventListener('pointerup', onUp);

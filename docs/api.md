@@ -1115,6 +1115,32 @@ Also exported: `pack`.
 
 Attach behaviour and register lifecycle hooks.
 
+#### `system`
+
+```ts
+/**
+ * register a **system**: scene-scoped logic hosted on the always-attached
+ * `WorldTrait`, running once per scene per side. sugar for
+ * `script(WorldTrait, id, factory, opts)`, and the preferred spelling.
+ *
+ * use for logic that operates "globally" e.g. via querying entities based on their composition with `query(ctx, [...])`
+ *
+ * @example
+ * ```ts
+ * system('character-animation', (ctx) => {
+ *     if (!env.client) return;
+ *     const q = query(ctx, [CharacterTrait, CharacterControllerTrait, TransformTrait]);
+ *     onFrame(ctx, ({ delta }) => {
+ *         for (const [ch, cc, transform] of q.matches) {
+ *             // …drive bones, read camera, etc.
+ *         }
+ *     });
+ * });
+ * ```
+ */
+export function system(id: string, factory: ScriptFactory<WorldScriptBase>, opts?: ScriptOptions): ScriptDef;
+```
+
 #### `ClientId`
 
 ```ts
@@ -4758,6 +4784,33 @@ export type Avatar = {
 
 Rigid bodies, AABB bodies, contacts, and the physics layers and groups.
 
+#### `Physics`
+
+```ts
+export type Physics = {
+    rigid: RigidPhysics.World;
+    aabb: AabbPhysics.World;
+    contacts: PhysicsContacts;
+    rigidBodyContactPool: RigidBodyContactPool;
+    aabbBodyContactPool: AabbBodyContactPool;
+    voxelContactPool: VoxelContactPool;
+    contactPairPool: ContactPairPool;
+    contactsQuery: ReturnType<typeof query<[
+        typeof ContactsTrait
+    ]>>;
+    aabbPairSink: AabbPhysics.PairSink;
+    vccContacts: VccBodyContact[];
+    vccContactCount: number;
+    _companionNodes: Set<number>;
+};
+```
+
+#### `objectLayerForMotionType`
+
+```ts
+export function objectLayerForMotionType(mt: MotionType): number;
+```
+
 #### `COLLISION_GROUP_CHARACTERS`
 
 ```ts
@@ -4792,31 +4845,6 @@ export const OBJECT_LAYER_NODE_NOT_MOVING;
 
 ```ts
 export const OBJECT_LAYER_VOXELS;
-```
-
-#### `Physics`
-
-```ts
-export type Physics = {
-    rigid: RigidPhysics.World;
-    aabb: AabbPhysics.World;
-    contacts: PhysicsContacts;
-    rigidBodyContactPool: RigidBodyContactPool;
-    aabbBodyContactPool: AabbBodyContactPool;
-    voxelContactPool: VoxelContactPool;
-    contactPairPool: ContactPairPool;
-    contactsQuery: ReturnType<typeof query<[
-        typeof ContactsTrait
-    ]>>;
-    aabbPairSink: AabbPhysics.PairSink;
-    _companionNodes: Set<number>;
-};
-```
-
-#### `objectLayerForMotionType`
-
-```ts
-export function objectLayerForMotionType(mt: MotionType): number;
 ```
 
 #### `RESERVED_COLLISION_GROUP_BITS`
@@ -4859,6 +4887,8 @@ export function onlyGroups(...groups: number[]): number;
 /** mask of everything EXCEPT the given groups (collide with all but these). */
 export function exceptGroups(...groups: number[]): number;
 ```
+
+Also exported: `aabbBody`.
 #### `AutoShapeDef`
 
 ```ts
@@ -4924,12 +4954,6 @@ export const AabbBodyMotionType;
 
 ```ts
 export const AabbBodyTrait;
-```
-#### `aabbBody.setVelocity`
-
-```ts
-/** overwrite velocity (kinematic drive / explicit set). wakes the body. */
-export function setVelocity(world: World, body: Body, vx: number, vy: number, vz: number): void;
 ```
 #### `ContactsTrait`
 
@@ -5316,6 +5340,7 @@ export type CanvasTouch = {
 export type Input = {
     mouseKeyboard: MouseKeyboardInput;
     touch: TouchInput;
+    _lockWanted: boolean;
 };
 ```
 
@@ -5591,6 +5616,49 @@ export function createTouchButton(ctx: ScriptContext, opts: CreateTouchButtonOpt
 ```
 
 Also exported: `CreateTouchJoystickOpts`, `CreateTouchButtonOpts`.
+#### `setPointerLock`
+
+```ts
+/**
+ * Declare whether this room wants the pointer locked for mouse-look. Persistent
+ * room intent (unlike the web's one-shot `element.requestPointerLock()`). Setting
+ * `true` attempts to lock right away *if* called during a user gesture (e.g. a
+ * held mouse button); otherwise the lock is acquired on the next desktop click.
+ * Locking never happens on touch. The player controller sets this `true` in
+ * `onInit`; fly/orbit set it `false`; a top-down game opts out with `false`.
+ */
+export function setPointerLock(ctx: ScriptContext, wanted: boolean): void;
+```
+
+#### `isPointerLocked`
+
+```ts
+/**
+ * Is the pointer locked right now? Use to gate custom look/aim code AND gameplay
+ * actions (fire, interact): because acquisition is async, the click that grabs
+ * the lock still reads `false` here, so it's naturally swallowed and the next
+ * click acts. Always `false` on touch and while any UI is holding the cursor free.
+ */
+export function isPointerLocked(_ctx: ScriptContext): boolean;
+```
+
+#### `releasePointer`
+
+```ts
+/**
+ * Free the cursor while an in-game panel is open (shop, settings, inventory).
+ * Stacks, so nested panels are fine. Does NOT freeze gameplay input — pair with
+ * `controls.enabled = false` if you also want movement to stop.
+ *
+ * `restore()` re-locks *synchronously*, so call it from the panel's close handler
+ * (a real user gesture) for a seamless re-lock; closing without a gesture (timer,
+ * network) falls back to re-locking on the next canvas click. Returns a no-op
+ * handle on the server.
+ */
+export function releasePointer(ctx: ScriptContext): {
+    restore(): void;
+};
+```
 
 ## Audio
 

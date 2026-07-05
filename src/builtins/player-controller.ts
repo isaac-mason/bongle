@@ -41,8 +41,9 @@ import {
     isKeyJustDown,
     isTouchButtonDown,
 } from '../api/input';
-import { isTouchDevice, isTouchPrimary } from '../api/mobile';
+import { isTouchPrimary } from '../api/mobile';
 import type { Physics } from '../api/physics';
+import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
 import { getTrait } from '../api/scene-graph';
 import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
@@ -819,19 +820,6 @@ script(
             }
         };
 
-        const onCanvasClick = (): void => {
-            if (!ctx.trait.controls.enabled) return;
-            // pointer lock is the desktop mouse-look affordance; touch devices look via
-            // canvasLook (drag), and locking the pointer on a tap breaks that, plus
-            // pointer-lock + touch is undefined in browsers. so never lock on a touch
-            // device. (the `click` event is a plain MouseEvent in Chromium, so we can't
-            // tell touch from mouse per-event, gate on the device instead.)
-            if (isTouchDevice(ctx)) return;
-            if (!document.pointerLockElement) {
-                ctx.client?.domElement.requestPointerLock();
-            }
-        };
-
         /* ── mobile HUD (reactive) ── */
         // Each piece reconciles per-tick against (controls.enabled && isTouchPrimary(ctx)
         // && controls.touch.<flag>). flipping any of those mounts or disposes
@@ -844,7 +832,6 @@ script(
             sprintButton: HudHandle;
             crouchButton: HudHandle;
         } = { joystick: null, jumpButton: null, sprintButton: null, crouchButton: null };
-        let prevControlsEnabled = false;
 
         function reconcileHud(key: keyof typeof hud, want: boolean, make: () => HudHandle): void {
             if (want && !hud[key]) {
@@ -864,12 +851,9 @@ script(
 
         const syncHud = (pc: PlayerControllerTrait): void => {
             const on = pc.controls.enabled;
-            // edge: falling enabled, release pointer lock so whatever UI is
-            // taking over (pause menu, dialog) gets a normal cursor back.
-            if (prevControlsEnabled && !on && document.pointerLockElement) {
-                document.exitPointerLock();
-            }
-            prevControlsEnabled = on;
+            // pointer lock is no longer released here: it's derived each frame from
+            // the room's intent + UI releases (see api/pointer-lock). A pause menu
+            // frees the cursor via `releasePointer`, independent of controls.enabled.
 
             // touch controls show whenever touch is the primary input, viewport size
             // independent, so tablets and landscape phones get them too (a width gate
@@ -929,15 +913,17 @@ script(
                 return;
             }
 
-            const domElement = ctx.client?.domElement;
-            if (domElement) domElement.addEventListener('click', onCanvasClick);
+            // this controller wants desktop mouse-look while it's mounted. cleared
+            // symmetrically in onDispose; a takeover camera (death-cam) re-asserts
+            // across the respawn gap. because the lock is reconciled once at
+            // end-of-frame, an onDispose(false)→takeover(true) swap in the same
+            // frame nets out to `true` and never releases.
+            setPointerLock(ctx, true);
         });
 
         onDispose(ctx, () => {
             if (!isOwner(ctx, ctx.node)) return;
-            const domElement = ctx.client?.domElement;
-            if (domElement) domElement.removeEventListener('click', onCanvasClick);
-            if (document.pointerLockElement) document.exitPointerLock();
+            setPointerLock(ctx, false);
             clearDebugHelpers(ctx.client?.scene, debugHelpers);
             removeDebugPanel();
             removeCrosshair();

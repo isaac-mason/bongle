@@ -100,7 +100,6 @@ Rigid bodies, AABB bodies, contacts, and the physics layers and groups.
 <RenderModule select="api/physics" />
 <RenderModule select="builtins/rigid-body" />
 <RenderModule select="builtins/aabb-body" />
-<RenderModule select="api/aabb-body" />
 <RenderModule select="builtins/contacts" />
 
 ## Controllers
@@ -125,6 +124,7 @@ Reading mouse, keyboard, and touch input.
 <RenderModule select="api/input" />
 <RenderModule select="api/mobile" />
 <RenderModule select="api/touch-controls" />
+<RenderModule select="api/pointer-lock" />
 
 ## Audio
 

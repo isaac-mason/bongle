@@ -16,6 +16,7 @@
 import * as Icons from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
+import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
 import { assetUrl } from '../../render/asset-url';
 import { useEditRoom } from '../edit-room-store';
@@ -36,13 +37,14 @@ export function LibraryOverlay() {
     const close = useEditRoom((s) => s.setLibraryOpen);
     const [tab, setTab] = useState<Tab>('inventory');
 
-    // close on Esc (and drop carry implicitly via setLibraryOpen). also
-    // release pointer lock on open, fly/character controllers grab it on
-    // canvas click and the user can't interact with the overlay without it
-    // being released.
+    // free the cursor while open so the user can interact with the overlay;
+    // otherwise fly/character controllers re-grab pointer lock on canvas click.
+    // the engine re-locks on the next canvas click after this closes.
+    useReleasePointer('editor:library', open);
+
+    // close on Esc (and drop carry implicitly via setLibraryOpen).
     useEffect(() => {
         if (!open) return;
-        if (document.pointerLockElement) document.exitPointerLock();
         const onKey = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 e.preventDefault();

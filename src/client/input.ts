@@ -537,10 +537,16 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: In
 export type Input = {
     mouseKeyboard: MouseKeyboardInput;
     touch: TouchInput;
+    /** does this room want the pointer locked (desktop mouse-look)? Persistent
+     *  room intent, set via `setPointerLock`. Lives here (not on a controller
+     *  trait) so it survives a controller being removed and re-added — e.g. the
+     *  death→respawn churn — with no relock dance. Default false; the player
+     *  controller sets it true in `onInit`, fly/orbit set it false. */
+    _lockWanted: boolean;
 };
 
 export function createInput(): Input {
-    return { mouseKeyboard: createMouseKeyboardInput(), touch: createTouchInput() };
+    return { mouseKeyboard: createMouseKeyboardInput(), touch: createTouchInput(), _lockWanted: false };
 }
 
 export function resetInput(input: Input): void {
@@ -553,6 +559,15 @@ export function resetInput(input: Input): void {
 export type InputManager = {
     /** the Input that DOM events currently write into. null = drop events. */
     target: Input | null;
+    /** touch capability, resolved once at boot. touch never pointer-locks. */
+    _touch: boolean;
+    /** UI / ad / host surfaces holding the cursor free while shown. */
+    _lockReleases: Set<string>;
+    /** element to pointer-lock; captured from the last canvas mousedown. */
+    _lockTargetEl: HTMLElement | null;
+    /** tracked from window focus/blur — don't poll document.hasFocus() (unreliable
+     *  in the embed iframe, would flicker the lock). */
+    _focused: boolean;
     _handlers: {
         keydown: (e: KeyboardEvent) => void;
         keyup: (e: KeyboardEvent) => void;
@@ -560,12 +575,18 @@ export type InputManager = {
         mouseup: (e: MouseEvent) => void;
         mousemove: (e: MouseEvent) => void;
         wheel: (e: WheelEvent) => void;
+        focus: () => void;
+        blur: () => void;
     };
 };
 
-export function createInputManager(): InputManager {
+export function createInputManager(touch: boolean): InputManager {
     const m: InputManager = {
         target: null,
+        _touch: touch,
+        _lockReleases: new Set(),
+        _lockTargetEl: null,
+        _focused: typeof document === 'undefined' ? true : document.hasFocus(),
         _handlers: null as any,
     };
 
@@ -644,6 +665,11 @@ export function createInputManager(): InputManager {
             // native undo history. the canvas itself isn't focusable, so
             // without this the previously-focused input keeps focus.
             if (isTextInputFocused()) (document.activeElement as HTMLElement).blur();
+            // this is a real user gesture on the game surface — the only place
+            // the browser lets us ACQUIRE pointer lock. remember the element so
+            // `releasePointer().restore()` can re-lock later, then try now.
+            m._lockTargetEl = e.target;
+            tryAcquirePointerLock(m);
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
@@ -708,6 +734,15 @@ export function createInputManager(): InputManager {
             mk._wheelDeltaY += e.deltaY;
             if (document.pointerLockElement || onCanvas) e.preventDefault();
         },
+        focus: () => {
+            m._focused = true;
+        },
+        blur: () => {
+            // the browser already drops pointer lock on blur; mirror it so the
+            // formula agrees and we don't try to re-acquire while unfocused.
+            m._focused = false;
+            reconcilePointerLock(m);
+        },
     };
 
     m._handlers = handlers;
@@ -718,12 +753,17 @@ export function createInputManager(): InputManager {
     window.addEventListener('mouseup', handlers.mouseup);
     window.addEventListener('mousemove', handlers.mousemove);
     window.addEventListener('wheel', handlers.wheel, { passive: false });
+    window.addEventListener('focus', handlers.focus);
+    window.addEventListener('blur', handlers.blur);
 
     return m;
 }
 
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
     m.target = target;
+    // a room swap changes whose `_lockWanted` we read — re-derive. If the new
+    // target doesn't want the lock, this releases it; acquiring waits for a click.
+    reconcilePointerLock(m);
 }
 
 export function disposeInputManager(m: InputManager): void {
@@ -734,5 +774,51 @@ export function disposeInputManager(m: InputManager): void {
     window.removeEventListener('mouseup', h.mouseup);
     window.removeEventListener('mousemove', h.mousemove);
     window.removeEventListener('wheel', h.wheel);
+    window.removeEventListener('focus', h.focus);
+    window.removeEventListener('blur', h.blur);
     m.target = null;
+}
+
+/* ── pointer lock ─────────────────────────────────────────────────────
+ * Whether the pointer is locked is a value DERIVED each frame from the active
+ * room's intent + UI releases + touch + focus (Quake `IN_Frame`). The web adds
+ * one asymmetry over a native grab: releasing works any time, acquiring needs a
+ * user gesture — so the reconciler only RELEASES, and acquisition happens from
+ * gesture handlers (canvas mousedown, `releasePointer().restore()`). */
+
+/** pure derivation, no side effects. */
+export function computeShouldBeLocked(m: InputManager): boolean {
+    return (m.target?._lockWanted ?? false) && m._lockReleases.size === 0 && !m._touch && m._focused;
+}
+
+/** RELEASE-only. Runs end-of-frame, on target swap/blur, and on release add. */
+export function reconcilePointerLock(m: InputManager): void {
+    if (!computeShouldBeLocked(m) && document.pointerLockElement) document.exitPointerLock();
+}
+
+/** ACQUIRE — call only from a real user gesture. `unadjustedMovement` gives raw,
+ *  un-accelerated deltas (better aim); older Safari rejects it, so retry plain,
+ *  and always swallow the post-Esc cooldown's rejection. */
+export function tryAcquirePointerLock(m: InputManager): void {
+    if (!computeShouldBeLocked(m) || document.pointerLockElement) return;
+    const el = m._lockTargetEl;
+    if (!el) return;
+    const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
+        unadjustedMovement: true,
+    });
+    if (p?.catch) p.catch(() => (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(() => {}));
+}
+
+/** UI/ad/host surface asks to free the cursor while shown. Releases immediately
+ *  (no waiting a frame with a menu over a locked cursor). */
+export function addLockRelease(m: InputManager, id: string): void {
+    m._lockReleases.add(id);
+    reconcilePointerLock(m);
+}
+
+/** the surface closed. Re-acquire synchronously — call from the close gesture so
+ *  the lock comes back in that gesture; otherwise it waits for the next click. */
+export function removeLockRelease(m: InputManager, id: string): void {
+    m._lockReleases.delete(id);
+    tryAcquirePointerLock(m);
 }

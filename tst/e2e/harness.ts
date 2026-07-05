@@ -271,6 +271,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
                     matchmake: () => {},
                     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
                 },
+                domElement: document.body,
             });
             await EngineClientModule.load(clientState);
 
