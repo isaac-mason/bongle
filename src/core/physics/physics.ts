@@ -1,3 +1,5 @@
+import { type BodyId, rigidBody } from 'crashcat';
+import { type Vec3, vec3 } from 'mathcat';
 import { AabbBodyTrait } from '../../builtins/aabb-body';
 import { ContactsTrait } from '../../builtins/contacts';
 import { setInterpolation } from '../../builtins/transform';
@@ -17,7 +19,7 @@ import {
 import type { BlockRegistry } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';
-import * as AabbPhysics from './aabb-physics';
+import * as AabbPhysics from './aabb';
 import {
     type AabbBodyContactPool,
     aabbBodySideKey,
@@ -42,7 +44,7 @@ import {
     type VoxelContactPool,
     voxelSideKey,
 } from './contacts';
-import * as RigidPhysics from './rigid-physics';
+import * as RigidPhysics from './rigid/rigid-world';
 
 // shared world settings + layer constants live in ./crashcat. re-exported
 // here so existing import sites (`from './physics'`) keep working.
@@ -59,22 +61,23 @@ export {
     OBJECT_LAYER_NODE_NOT_MOVING,
     OBJECT_LAYER_VOXELS,
     settings,
-} from './crashcat';
+} from './rigid/rigid-world-settings';
 
 // ── physics struct ───────────────────────────────────────────────────
 //
 // `Physics` is a thin coordinator over self-contained sub-worlds:
 //   - `rigid`, crashcat-backed rigid bodies + voxel terrain body. trait
 //     sync (RigidBodyTrait → World), listener, shape building, script hooks
-//     all live in `rigid-physics.ts`.
+//     all live in `rigid/`.
 //   - `aabb`, analytical aabb sweep + items / particles. trait sync
-//     (AabbBodyTrait → World) lives in `aabb-physics.ts` behind
-//     `bindNodeSync` (kept off the cycle path: trait passed in by the
-//     coordinator rather than imported as a value by the subsystem).
+//     (AabbBodyTrait → World) lives in `aabb/` behind `bindNodeSync` (kept
+//     off the cycle path: trait passed in by the coordinator rather than
+//     imported as a value by the subsystem).
 //
 // the coordinator owns: the shared contact stream both subsystems write
-// into, the aabb→ContactPair translation sink, the fan-out from pairs into
-// per-node `ContactsTrait` observers, and the companion-trait policy
+// into, the aabb→ContactPair translation sink, the character-VCC contact
+// bridge (staged + replayed via the rigid recorder), the fan-out from pairs
+// into per-node `ContactsTrait` observers, and the companion-trait policy
 // (Interpolate, Contacts) that unifies across subsystems.
 
 export type Physics = {
@@ -101,15 +104,38 @@ export type Physics = {
     /** sink passed into `AabbPhysics.tick`. drains pairs into `contacts`. */
     aabbPairSink: AabbPhysics.PairSink;
 
+    /** body contacts gathered by character VCCs during `runOnTick` (which runs
+     *  before the rigid solver). a VCC depenetrates its character off the bodies
+     *  it touches and teleport-follows its kinematic inner body, so by the time
+     *  the solver steps there's no overlap and no manifold, a fast projectile
+     *  would pass straight through with no contact event. these are replayed into
+     *  `contacts` each tick (see {@link ingestVccContacts}) so they reach both
+     *  bodies' `ContactsTrait` like any solver contact. staged here (coordinator
+     *  level, not on the rigid world) since the producer is the character
+     *  controller and the replay writes the shared stream. `vccContactCount` is
+     *  the live length; records are reused (no per-frame allocation). */
+    vccContacts: VccBodyContact[];
+    vccContactCount: number;
+
     /** set of nodes that currently hold companion traits (Interpolate, Contacts)
      *  because at least one subsystem has a body for them. diffed each preStep
      *  against the union of `rigid.nodeToBody ∪ aabb.nodeToBody`. */
     _companionNodes: Set<number>;
 };
 
+/** one body contact reported by a character VCC, pending replay into the
+ *  contact stream. body ids (not refs) so a body removed mid-tick is skipped. */
+export type VccBodyContact = {
+    innerBodyId: BodyId;
+    otherBodyId: BodyId;
+    point: Vec3;
+    normal: Vec3;
+    penetrationDepth: number;
+};
+
 export function init(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): Physics {
     const rigid = RigidPhysics.create(nodes, voxels, registry);
-    const aabb = AabbPhysics.create(voxels);
+    const aabb = AabbPhysics.createWorld(voxels);
     AabbPhysics.bindNodeSync(aabb, nodes, AabbBodyTrait);
 
     const contacts = createPhysicsContacts();
@@ -126,8 +152,79 @@ export function init(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): Phy
         contactPairPool,
         contactsQuery: query(nodes, [ContactsTrait]),
         aabbPairSink,
+        vccContacts: [],
+        vccContactCount: 0,
         _companionNodes: new Set(),
     };
+}
+
+// ── vcc contact bridge ───────────────────────────────────────────────
+//
+// character VCCs surface the bodies they slide off during `runOnTick`, before
+// the rigid solver. we stage those contacts here and replay them into the
+// shared stream each tick via the rigid subsystem's contact recorder, so a
+// fast body (an arrow) the VCC depenetrated clear of still fires a contact
+// event on both bodies' `ContactsTrait`.
+
+/** record a body contact a character VCC saw this frame, to be replayed by
+ *  {@link ingestVccContacts}. called from the character controller's VCC
+ *  listener during `runOnTick`. `innerBodyId` is the VCC's kinematic inner body
+ *  (maps back to the character node); `otherBodyId` is the body it touched.
+ *  `normal` is surface→character (VCC convention). */
+export function pushVccContact(
+    physics: Physics,
+    innerBodyId: BodyId,
+    otherBodyId: BodyId,
+    pointX: number,
+    pointY: number,
+    pointZ: number,
+    normalX: number,
+    normalY: number,
+    normalZ: number,
+    penetrationDepth: number,
+): void {
+    let rec = physics.vccContacts[physics.vccContactCount];
+    if (!rec) {
+        rec = { innerBodyId: -1, otherBodyId: -1, point: vec3.create(), normal: vec3.create(), penetrationDepth: 0 };
+        physics.vccContacts[physics.vccContactCount] = rec;
+    }
+    rec.innerBodyId = innerBodyId;
+    rec.otherBodyId = otherBodyId;
+    rec.point[0] = pointX;
+    rec.point[1] = pointY;
+    rec.point[2] = pointZ;
+    rec.normal[0] = normalX;
+    rec.normal[1] = normalY;
+    rec.normal[2] = normalZ;
+    rec.penetrationDepth = penetrationDepth;
+    physics.vccContactCount++;
+}
+
+/** replay this tick's VCC body contacts into the contact stream, then clear the
+ *  buffer. MUST run inside the contacts frame (after the solver tick, before the
+ *  frame ends) so the pairs diff and fan out like solver contacts. a pair the
+ *  solver also recorded (a slow body the VCC didn't depenetrate clear of) shares
+ *  the same key, so this just refreshes it, no double contact. resolves + records
+ *  through the rigid subsystem, whose bodies these contacts involve. */
+function ingestVccContacts(physics: Physics): void {
+    const rigid = physics.rigid;
+    for (let i = 0; i < physics.vccContactCount; i++) {
+        const rec = physics.vccContacts[i]!;
+        const innerBody = rigidBody.get(rigid.world, rec.innerBodyId);
+        const otherBody = rigidBody.get(rigid.world, rec.otherBodyId);
+        if (!innerBody || !otherBody) continue;
+        RigidPhysics.recordBodyContact(
+            rigid,
+            physics.contacts,
+            physics.contactPairPool,
+            innerBody,
+            otherBody,
+            rec.point,
+            rec.normal,
+            rec.penetrationDepth,
+        );
+    }
+    physics.vccContactCount = 0;
 }
 
 /** step the physics world. fires pre/post hooks and runs the world update. */
@@ -149,7 +246,7 @@ export function tick(physics: Physics, nodes: Nodes, dt: number): void {
     // before the solver) into the same stream. without this a VCC depenetrates
     // its character off a fast body and the solver never forms the manifold, so
     // the contact is silently lost (e.g. an arrow passing through a player).
-    RigidPhysics.ingestVccContacts(physics.rigid, physics.contacts, physics.contactPairPool);
+    ingestVccContacts(physics);
 
     endPhysicsContactsFrame(physics.contacts);
 

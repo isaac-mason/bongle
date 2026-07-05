@@ -128,6 +128,11 @@ export type ContactPair = {
     penetrationDepth: number;
     /** bLin - aLin at contact, world space. */
     relativeVelocity: Vec3;
+
+    /** canonical pair key, set by `recordContactPair`. cached so the frame-begin
+     *  eviction sweep can drop the pair from `_byKey` without rebuilding the key
+     *  from its side fields (which would duplicate the key-construction logic). */
+    _key: string;
 };
 
 // ── pools ────────────────────────────────────────────────────────────
@@ -226,6 +231,7 @@ function createContactPair(): ContactPair {
         normal: vec3.create(),
         penetrationDepth: 0,
         relativeVelocity: vec3.create(),
+        _key: '',
     };
 }
 
@@ -350,7 +356,7 @@ export function beginPhysicsContactsFrame(pc: PhysicsContacts, pairPool: Contact
     pc._frameOpen = true;
 
     for (const stale of pc.removed) {
-        pc._byKey.delete(pairKeyFromPair(stale));
+        pc._byKey.delete(stale._key);
         releaseContactPair(pairPool, stale);
     }
     pc.removed.length = 0;
@@ -385,6 +391,7 @@ export function recordContactPair(pc: PhysicsContacts, pairPool: ContactPairPool
     }
 
     const fresh = acquireContactPair(pairPool);
+    fresh._key = key;
     pc._byKey.set(key, fresh);
     pc.added.push(fresh);
     pc.active.push(fresh);
@@ -404,30 +411,4 @@ export function endPhysicsContactsFrame(pc: PhysicsContacts): void {
         if (!pc._seen.has(k)) pc.removed.push(pair);
     }
     pc._frameOpen = false;
-}
-
-// ── internal: rebuild a pair's canonical key from its fields ─────────
-//
-// only used in `begin` to evict the previous step's `removed` entries.
-// hot path callers should compute keys up front and reuse them.
-
-function sideKeyFromPair(
-    kind: ContactPairSideKind,
-    nodeId: number,
-    subShapeId: number,
-    aabbBodyId: number,
-    voxelX: number,
-    voxelY: number,
-    voxelZ: number,
-    subAabbIndex: number,
-): string {
-    if (kind === 'rigidBody') return rigidBodySideKey(nodeId, subShapeId);
-    if (kind === 'aabbBody') return aabbBodySideKey(aabbBodyId);
-    return voxelSideKey(voxelX, voxelY, voxelZ, subAabbIndex);
-}
-
-function pairKeyFromPair(p: ContactPair): string {
-    const a = sideKeyFromPair(p.aKind, p.aNodeId, p.aSubShapeId, p.aAabbBodyId, p.aVoxelX, p.aVoxelY, p.aVoxelZ, p.aSubAabbIndex);
-    const b = sideKeyFromPair(p.bKind, p.bNodeId, p.bSubShapeId, p.bAabbBodyId, p.bVoxelX, p.bVoxelY, p.bVoxelZ, p.bSubAabbIndex);
-    return pairKey(a, b);
 }

@@ -1,10 +1,10 @@
 import { createWorld, registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { BlockDef } from '../voxels/blocks';
-import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from '../voxels/test-helpers';
-import { createChunk, createVoxels, linkChunkNeighbors, setChunkBlock } from '../voxels/voxels';
-import * as AabbPhysics from './aabb-physics';
-import { settings as physicsSettings } from './physics';
+import type { BlockDef } from '../../voxels/blocks';
+import { buildTestRegistry, resetVoxelRegistry, type TestBlockSpec } from '../../voxels/test-helpers';
+import { createChunk, createVoxels, linkChunkNeighbors, setChunkBlock } from '../../voxels/voxels';
+import { settings as physicsSettings } from '../physics';
+import * as AabbPhysics from '.';
 
 beforeAll(() => {
     registerAllShapes();
@@ -46,7 +46,7 @@ function setupWorld(blocks: { id: string; def: Partial<BlockDef> }[]) {
     const registry = buildMaterialRegistry(blocks);
     const voxels = createVoxels(registry);
     const crashWorld = createWorld(physicsSettings);
-    const world = AabbPhysics.create(voxels, {
+    const world = AabbPhysics.createWorld(voxels, {
         // disable the noa-style minimum so tests can probe small-impact bounces.
         minBounceVelocity: 0.01,
     });
@@ -70,7 +70,7 @@ describe('aabb-physics — friction combine', () => {
         // horizontal velocity.
         AabbPhysics.tick(stone.world, stone.crashWorld, 1 / 60, NULL_SINK);
         AabbPhysics.tick(stone.world, stone.crashWorld, 1 / 60, NULL_SINK);
-        AabbPhysics.setBodyVelocity(stone.world, stoneBody, 5, 0, 0);
+        AabbPhysics.setVelocity(stone.world, stoneBody, 5, 0, 0);
         AabbPhysics.tick(stone.world, stone.crashWorld, 1 / 60, NULL_SINK);
         const stoneVx = stoneBody.linearVelocity[0];
 
@@ -84,7 +84,7 @@ describe('aabb-physics — friction combine', () => {
         });
         AabbPhysics.tick(ice.world, ice.crashWorld, 1 / 60, NULL_SINK);
         AabbPhysics.tick(ice.world, ice.crashWorld, 1 / 60, NULL_SINK);
-        AabbPhysics.setBodyVelocity(ice.world, iceBody, 5, 0, 0);
+        AabbPhysics.setVelocity(ice.world, iceBody, 5, 0, 0);
         AabbPhysics.tick(ice.world, ice.crashWorld, 1 / 60, NULL_SINK);
         const iceVx = iceBody.linearVelocity[0];
 
@@ -110,7 +110,7 @@ describe('aabb-physics — friction combine', () => {
         });
         AabbPhysics.tick(world, crashWorld, 1 / 60, NULL_SINK);
         AabbPhysics.tick(world, crashWorld, 1 / 60, NULL_SINK);
-        AabbPhysics.setBodyVelocity(world, body, 5, 0, 0);
+        AabbPhysics.setVelocity(world, body, 5, 0, 0);
         AabbPhysics.tick(world, crashWorld, 1 / 60, NULL_SINK);
         // zero body friction → no damping → velocity unchanged.
         expect(body.linearVelocity[0]).toBeCloseTo(5);

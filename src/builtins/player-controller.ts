@@ -51,7 +51,7 @@ import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import { control, type TraitType, trait } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { UILayer } from '../client/ui-layers';
-import type * as vcc from '../core/physics/vcc';
+import type * as vcc from '../core/physics/vcc/vcc';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { CameraTrait } from './camera';

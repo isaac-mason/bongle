@@ -32,8 +32,8 @@ import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scri
 import { sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
-import { pushVccContact, type World as RigidWorld } from '../core/physics/rigid-physics';
-import * as vcc from '../core/physics/vcc';
+import { pushVccContact } from '../core/physics/physics';
+import * as vcc from '../core/physics/vcc/vcc';
 import {
     BLOCK_FLAG_CLIMBABLE,
     BLOCK_FLAG_COLLISION,
@@ -71,10 +71,10 @@ const _bodyYawQuat = quat.create();
 let _vccListenerIsIntentional = false;
 let _vccListenerTerrainBodyId = -1;
 let _vccListenerBlockRest: Float32Array | null = null;
-// rigid world the VCC's body contacts are replayed into (see pushVccContact /
-// ingestVccContacts). set before each vcc.move so the listener can record the
+// physics coordinator the VCC's body contacts are staged on (see pushVccContact
+// / ingestVccContacts). set before each vcc.move so the listener can record the
 // bodies the character touched this frame.
-let _vccListenerRigid: RigidWorld | null = null;
+let _vccListenerPhysics: Physics | null = null;
 
 // minimum downward speed (m/s) at landing to consider a bounce. avoids
 // reflecting near-zero velocities (settled rest contacts).
@@ -111,9 +111,9 @@ const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 // event on both bodies' ContactsTrait. added + persisted both report (a body can
 // linger a frame before the reactor that consumes the hit removes it).
 function recordVccBodyContact(vccInstance: vcc.VCC, body: RigidBody, contactPosition: Vec3, contactNormal: Vec3): void {
-    if (_vccListenerRigid === null) return;
+    if (_vccListenerPhysics === null) return;
     pushVccContact(
-        _vccListenerRigid,
+        _vccListenerPhysics,
         vccInstance.innerBodyId,
         body.id,
         contactPosition[0],
@@ -1163,12 +1163,7 @@ function syncCollisionFilter(cc: CharacterControllerTrait): void {
 
 // ── per-tick movement ─────────────────────────────────────────────────
 
-function tickCharacterController(
-    cc: CharacterControllerTrait,
-    transform: TransformTrait,
-    physics: Physics,
-    dt: number,
-): void {
+function tickCharacterController(cc: CharacterControllerTrait, transform: TransformTrait, physics: Physics, dt: number): void {
     const input = cc.input;
     const config = cc.config;
     const state = cc.state;
@@ -1297,7 +1292,7 @@ function tickCharacterController(
     _vccListenerIsIntentional = state.isIntentionalMovement;
     _vccListenerTerrainBodyId = physics.rigid.terrainBody.id;
     _vccListenerBlockRest = registry.restitution;
-    _vccListenerRigid = physics.rigid;
+    _vccListenerPhysics = physics;
 
     vcc.move(world, voxels, aabbWorld, v, dt, _vccListener);
 

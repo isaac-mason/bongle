@@ -1,3 +1,8 @@
+/** per-body verb namespace for AABB bodies, mirroring crashcat's `rigidBody.*`.
+ *  curated to the script-facing surface in `aabb/aabb-verbs.ts`. */
+export { aabbBody } from '../core/physics/aabb';
+export type { Physics } from '../core/physics/physics';
+export { objectLayerForMotionType } from '../core/physics/rigid/rigid-world';
 export {
     COLLISION_GROUP_CHARACTERS,
     COLLISION_GROUP_NODES,
@@ -5,9 +10,7 @@ export {
     OBJECT_LAYER_NODE_MOVING,
     OBJECT_LAYER_NODE_NOT_MOVING,
     OBJECT_LAYER_VOXELS,
-} from '../core/physics/crashcat';
-export type { Physics } from '../core/physics/physics';
-export { objectLayerForMotionType } from '../core/physics/rigid-physics';
+} from '../core/physics/rigid/rigid-world-settings';
 
 // ── collision groups ──────────────────────────────────────────────────
 //

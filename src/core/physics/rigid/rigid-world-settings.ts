@@ -13,7 +13,7 @@ import {
     enableCollision,
     registerShapes,
 } from 'crashcat';
-import { voxelPhysicsShapeDef } from '../voxels/voxel-physics-shape';
+import { voxelPhysicsShapeDef } from '../../voxels/voxel-physics-shape';
 
 registerShapes([...ALL_SHAPE_DEFS, voxelPhysicsShapeDef]);
 export const settings = createWorldSettings();

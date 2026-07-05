@@ -9,7 +9,6 @@
 // graph acyclic: builtins depend on api helpers, this file depends on both,
 // but neither depends on this file.
 
-export * as aabbBody from './api/aabb-body';
 export * from './api/animation';
 export * from './api/audio';
 export * from './api/avatars';

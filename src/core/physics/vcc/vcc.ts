@@ -42,11 +42,11 @@ import {
 } from 'crashcat';
 import type { Quat, Vec3 } from 'mathcat';
 import { vec3 } from 'mathcat';
-import type { SweepResult } from '../math/aabb-sweep';
-import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../voxels/voxel-aabb-sweep';
-import type { Voxels } from '../voxels/voxels';
-import * as AabbPhysics from './aabb-physics';
-import { OBJECT_LAYER_AABB_IMPOSTOR, OBJECT_LAYER_EDITOR_NODES, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_VOXELS } from './physics';
+import type { SweepResult } from '../../math/aabb-sweep';
+import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../../voxels/voxel-aabb-sweep';
+import type { Voxels } from '../../voxels/voxels';
+import * as AabbPhysics from '../aabb';
+import { OBJECT_LAYER_AABB_IMPOSTOR, OBJECT_LAYER_EDITOR_NODES, OBJECT_LAYER_NODE_MOVING, OBJECT_LAYER_VOXELS } from '../physics';
 
 // ── invalid body id ──────────────────────────────────────────────────
 //
