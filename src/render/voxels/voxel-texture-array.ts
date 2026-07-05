@@ -111,6 +111,8 @@ export async function loadBlockTextureAtlasIntoTextureArray(
     meta: BlockTextureAtlasMetadata,
     textureCutout: Uint8Array,
 ): Promise<void> {
+    // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
+    if (meta.textures.length === 0) return;
     let img: HTMLImageElement;
     try {
         img = await loadImage(assetUrl('voxels-atlas.png'));
