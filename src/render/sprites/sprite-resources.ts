@@ -196,7 +196,9 @@ export function init(): SpriteResources {
  */
 export async function load(res: SpriteResources): Promise<boolean> {
     const meta = await fetchSpriteAtlasMetadata();
-    if (!meta) {
+    // An empty manifest (0 sprites) has no PNG on disk — treat it exactly like
+    // a missing atlas so we don't fetch (and 404 on) sprites-atlas.png.
+    if (!meta || meta.atlasSize === 0) {
         if (res.metadata === null) return false;
         swapAtlas(res, createPlaceholderTexture());
         res.pixels = null;
