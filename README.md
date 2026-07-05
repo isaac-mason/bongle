@@ -22,8 +22,9 @@ New here? The guide's [Getting Started](./docs/docs.md#getting-started) walks yo
 
 These are multiplayer games built on bongle, each living in their own repo:
 
-- [bongle-wizard-game](https://github.com/isaac-mason/bongle-wizard-game), a multiplayer wizard arena.
 - [bongle-one-shot](https://github.com/isaac-mason/bongle-one-shot), a bow pvp game.
+- [bongle-wizard-game](https://github.com/isaac-mason/bongle-wizard-game), a multiplayer wizard arena.
+- [bongle-circus-obby](https://github.com/isaac-mason/bongle-circus-obby), a roll-a-ball obstacle course.
 
 ## Examples
 
