@@ -40,27 +40,15 @@ Running the above will scaffold a minimal project and start the editor on
 From there, you can edit the game code in `src/`, and see your changes live in
 the editor.
 
-If you'd rather poke around without scaffolding, clone the repo and run any of
-the projects in [`../examples/`](../examples). Clone recursively so the
-submodules come along:
-
-```sh
-git clone --recurse-submodules https://github.com/isaac-mason/bongle.git
-cd bongle
-```
-
-Already cloned without `--recurse-submodules`? Run
-`git submodule update --init --recursive`.
-
 ### Start from the new-bongle template
 
 [new-bongle](https://github.com/isaac-mason/new-bongle) is a ready-made starter
-project. Open it in the cloud with one click:
+project. Not yet set up for local development? You can poke around with a cloud environment like GitHub Codespaces:
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/isaac-mason/new-bongle)
 
 It boots a container, installs dependencies, and starts the editor (forwarded on
-`:3002`). You can also clone it and run `npm install && npm run edit` locally.
+`:3002`). You can also clone the `new-bongle` project and run `npm install && npm run edit` locally.
 
 ## Project structure
 
@@ -70,12 +58,12 @@ A scaffolded project is a small npm package. The pieces you work with:
 my-game/
 ├── src/
 │   ├── index.ts        your game code (the entry point the engine loads)
-│   └── generated/      typed handles the pipeline writes (do not edit)
-├── assets/             source files: glTF, textures, audio, sprites
-├── content/            editor-authored scenes (.scene.json)
+│   └── generated/      generated code written by the editor (do not edit! changes will be wiped away!)
+├── assets/             put your source files here: glTF, textures, audio, sprites
+├── content/            editor-authored data (.scene.json)
 ├── dist/               build output: bundle.zip, from `bongle build`
 ├── package.json        the `bongle` dependency and scripts
-└── tsconfig.json
+└── tsconfig.json       typescript config, you probably don't need to touch this
 ```
 
 - **`src/index.ts`** is where your code lives, the entry the engine loads. Split it
@@ -116,12 +104,15 @@ Next, a script that sets up the sky and sun:
 
 <Snippet source="first-game.snippet.ts" select="environment" />
 
-A script attaches behaviour to a trait. `script(WorldTrait, 'environment',
-factory, opts)` runs its factory for every node carrying a `WorldTrait`, which
-here is the single world node. Inside, `onInit` registers a one-time setup
+Game logic lives in scripts. A script attaches behaviour to a trait, and
+`system('environment', factory, opts)` is the scene-wide form: sugar for a
+script on the always-present world node, so its factory runs once per scene.
+(The general form, `script(SomeTrait, ...)`, binds behaviour to a specific
+trait, running once per node that carries it, covered in [the programming
+model](#the-programming-model).) Inside, `onInit` registers a one-time setup
 callback that calls `setEnvironment` and `setEnvironmentTime` to choose a preset
-sky and a 9am sun. The `{ editor: true }` option runs the script in the editor
-as well as at play time, so the world is lit while you build it.
+sky and a 9am sun. The `{ editor: true }` option runs it in the editor as well
+as at play time, so the world is lit while you build it.
 
 Finally, place players as they join:
 
@@ -171,7 +162,8 @@ a transform gives a node a position, a rigid body gives it physics, a sprite
 makes it draw. A node is just the traits it carries.
 
 **Scripts**: your game logic. A script attaches to a trait and runs on lifecycle
-hooks.
+hooks. Scene-wide logic that runs over many entities, spawning, scoring, AI, uses
+`system(...)`, a script on the world node.
 
 ### The multiplayer model
 
@@ -393,13 +385,14 @@ with `trait._node`).
 
 These primitives support two ways to organize logic, and you can mix them.
 
-The **systems** style is ECS-like: put a script on `WorldTrait` (or on your own
-trait on the root node), define data-only traits on your entities, and have the
-script `query` for those traits and iterate them each tick. Logic is centralized
-in a few systems and entities are just data. This suits anything that runs over
-many entities at once, such as scoring, spawning, or AI.
+The **systems** style is ECS-like: write a `system('name', factory)`, sugar for a
+script on the always-present `WorldTrait` world node, define data-only traits on
+your entities, and have the system `query` for those traits and iterate them each
+tick. Logic is centralized in a few systems and entities are just data. This
+suits anything that runs over many entities at once, such as scoring, spawning,
+or AI.
 
-The **actor** style puts a script directly on an entity's own trait, so each node
+The **actor** style puts a `script` directly on an entity's own trait, so each node
 carries its own behaviour. The factory runs once per entity, with `ctx.node` and
 `ctx.trait` scoped to that one. This suits self-contained objects: a door, a
 pickup, a projectile.

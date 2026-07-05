@@ -6,20 +6,19 @@
 
 import {
     CharacterControllerTrait,
-    setCharacterLookAt,
     ENVIRONMENT_OVERWORLD,
     env,
     getTrait,
     matchmaking,
     onInit,
     onJoin,
-    script,
+    setCharacterLookAt,
     setEnvironment,
     setEnvironmentTime,
     setPosition,
+    system,
     TransformTrait,
     use,
-    WorldTrait,
 } from 'bongle';
 import { blocks } from 'bongle/starter';
 
@@ -34,8 +33,7 @@ matchmaking({ maxPlayers: 32 });
 /* SNIPPET_START: environment */
 // sky + a late-morning sun. { editor: true } runs this in the editor too, so
 // the world is lit while you build it, not only at play time.
-script(
-    WorldTrait,
+system(
     'environment',
     (ctx) => {
         onInit(ctx, () => {
@@ -49,7 +47,7 @@ script(
 
 /* SNIPPET_START: spawn */
 // place each joining player. server-authoritative, so it only runs there.
-script(WorldTrait, 'spawn', (ctx) => {
+system('spawn', (ctx) => {
     if (!env.server) return;
 
     onJoin(ctx, ({ playerNode }) => {

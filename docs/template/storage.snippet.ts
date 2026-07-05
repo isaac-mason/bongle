@@ -2,7 +2,7 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import type { ClientId } from 'bongle';
-import { clientToUser, onJoin, script, userStorage, WorldTrait } from 'bongle';
+import { clientToUser, onJoin, system, userStorage } from 'bongle';
 import type { JsonValue } from 'bongle/interface';
 
 /* SNIPPET_START: store */
@@ -17,7 +17,7 @@ function loadSave(stored: JsonValue | undefined): PlayerSave {
 }
 
 // userStorage is server-only and per-player; onJoin runs on the server.
-script(WorldTrait, 'profiles', (ctx) => {
+system('profiles', (ctx) => {
     async function onPlayerJoin(client: ClientId) {
         const user = clientToUser(ctx, client);
 

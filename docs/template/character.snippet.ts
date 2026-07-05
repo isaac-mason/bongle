@@ -2,26 +2,25 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import {
-    addChild,
     Animation,
     AnimatorTrait,
+    addChild,
     cloneModel,
     findByName,
     getTrait,
     model,
     onInit,
     onPostAnimate,
-    script,
     setPosition,
+    system,
     TransformTrait,
-    WorldTrait,
 } from 'bongle';
 
 /* SNIPPET_START: place-model */
 // declare a model from a glTF at module scope
 const ChestModel = model('chest', { src: new URL('./assets/chest.gltf', import.meta.url) });
 
-script(WorldTrait, 'place-chest', (ctx) => {
+system('place-chest', (ctx) => {
     onInit(ctx, () => {
         // clone the model's scene and attach it; cloneModel installs the
         // render slot a visible subtree needs
@@ -34,7 +33,7 @@ script(WorldTrait, 'place-chest', (ctx) => {
 /* SNIPPET_START: reference-node */
 // a model's named glTF nodes are reachable on the placed clone by name, so you can
 // drive a sub-part from code: open a lid, mount an item on a hand, attach an effect.
-script(WorldTrait, 'open-chest', (ctx) => {
+system('open-chest', (ctx) => {
     onInit(ctx, () => {
         const chest = cloneModel(ChestModel.scene);
         addChild(ctx.node, chest);
@@ -53,7 +52,7 @@ script(WorldTrait, 'open-chest', (ctx) => {
 // glTF's TRS tracks (node translation/rotation/scale). there is no skinning.
 const CrabModel = model('crab', { src: new URL('./assets/crab.gltf', import.meta.url) });
 
-script(WorldTrait, 'crab-anim', (ctx) => {
+system('crab-anim', (ctx) => {
     onInit(ctx, () => {
         const node = cloneModel(CrabModel.scene);
         addChild(ctx.node, node);
@@ -71,7 +70,7 @@ script(WorldTrait, 'crab-anim', (ctx) => {
 /* SNIPPET_END: animate */
 
 /* SNIPPET_START: procedural */
-script(WorldTrait, 'head-look', (ctx) => {
+system('head-look', (ctx) => {
     // fires after the animator samples this tick's clips, before world matrices
     // recompute: write bone local TRS here to layer a head-look, spring, or
     // joint clamp on top of the sampled pose instead of being overwritten by it

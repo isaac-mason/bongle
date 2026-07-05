@@ -9,11 +9,10 @@ import {
     createVoxelModel,
     createVoxels,
     onInit,
-    script,
     setBlock,
+    system,
     TransformTrait,
     VoxelMeshTrait,
-    WorldTrait,
 } from 'bongle';
 import { blockTextures } from 'bongle/starter';
 
@@ -23,7 +22,7 @@ const PlankBlock = block('guide:plank', {
 });
 
 /* SNIPPET_START: voxel-model */
-script(WorldTrait, 'spawn-platform', (ctx) => {
+system('spawn-platform', (ctx) => {
     if (!ctx.client) return; // VoxelMeshTrait is a visual; build the model client-side
 
     onInit(ctx, () => {

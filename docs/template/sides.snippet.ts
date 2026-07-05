@@ -15,15 +15,14 @@ import {
     onFrame,
     onJoin,
     query,
-    script,
     setPosition,
-    trait,
+    system,
     TransformTrait,
-    WorldTrait,
+    trait,
 } from 'bongle';
 
 /* SNIPPET_START: sides */
-script(WorldTrait, 'sides', (ctx) => {
+system('sides', (ctx) => {
     // server-only: authoritative logic, compiled out of the client bundle
     if (env.server) {
         onJoin(ctx, ({ playerNode }) => {
@@ -51,8 +50,7 @@ const SpawnTrait = trait('spawn', {});
 // level. `{ editor: true }` lets the script run in edit mode at all; the guard
 // limits it to an editor build (env.editor) in edit mode (ctx.mode), so it never
 // appears in play or in a shipped bundle.
-script(
-    WorldTrait,
+system(
     'spawn-markers',
     (ctx) => {
         if (!env.editor || ctx.mode !== 'edit') return;

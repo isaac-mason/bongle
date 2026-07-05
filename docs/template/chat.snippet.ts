@@ -1,10 +1,10 @@
 // Typechecked snippets for Multiplayer — chat.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { chat, log, onInit, script, WorldTrait } from 'bongle';
+import { chat, log, onInit, system } from 'bongle';
 
 /* SNIPPET_START: message */
-script(WorldTrait, 'announcer', (ctx) => {
+system('announcer', (ctx) => {
     onInit(ctx, () => {
         // a system message broadcast to everyone in the room. inline tags style
         // the text: [#rrggbb] colour, [b]/[i]/[u]/[s] for bold/italic/underline/
@@ -21,7 +21,7 @@ script(WorldTrait, 'announcer', (ctx) => {
 
 /* SNIPPET_START: command */
 // a typed slash command: `/tp <x> <z>`
-script(WorldTrait, 'commands', (ctx) => {
+system('commands', (ctx) => {
     // register the spec on both sides (this is a shared script), so the client
     // gets autocomplete and argument validation as the player types.
     const teleport = chat.command(ctx, {

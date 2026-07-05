@@ -1,7 +1,7 @@
 // Typechecked snippets for Math.
 // Compiles against `bongle` (+ mathcat); regions are pulled into guide.md by build.js.
 
-import { getTrait, getWorldPosition, onTick, script, setPosition, trait, TransformTrait } from 'bongle';
+import { getTrait, getWorldPosition, onTick, script, setPosition, TransformTrait, trait } from 'bongle';
 import { type Vec3, vec3 } from 'mathcat';
 
 const MoverTrait = trait('mover', { speed: 3 });

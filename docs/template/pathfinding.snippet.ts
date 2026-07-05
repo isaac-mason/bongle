@@ -1,7 +1,17 @@
 // Typechecked snippets for Pathfinding.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { CharacterControllerTrait, setCharacterLook, env, getTrait, getWorldPosition, nav, onTick, script, TransformTrait } from 'bongle';
+import {
+    CharacterControllerTrait,
+    env,
+    getTrait,
+    getWorldPosition,
+    nav,
+    onTick,
+    script,
+    setCharacterLook,
+    TransformTrait,
+} from 'bongle';
 import type { Vec3 } from 'mathcat';
 
 /* SNIPPET_START: path */

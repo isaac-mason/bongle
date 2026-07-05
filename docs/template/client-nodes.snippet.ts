@@ -1,7 +1,18 @@
 // Typechecked snippets for Multiplayer — client-only nodes.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { addChild, addTrait, createNode, findChildByName, HtmlTrait, onFrame, PlayerTrait, script, setPosition, TransformTrait } from 'bongle';
+import {
+    addChild,
+    addTrait,
+    createNode,
+    findChildByName,
+    HtmlTrait,
+    onFrame,
+    PlayerTrait,
+    script,
+    setPosition,
+    TransformTrait,
+} from 'bongle';
 
 /* SNIPPET_START: client-node */
 // give every player a name tag, built and kept entirely on the client.

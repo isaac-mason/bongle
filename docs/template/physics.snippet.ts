@@ -2,7 +2,6 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import type { Node } from 'bongle';
-import type { Vec3 } from 'mathcat';
 import {
     addChild,
     addTrait,
@@ -22,17 +21,17 @@ import {
     PlayerTrait,
     query,
     RigidBodyTrait,
-    script,
     setPosition,
-    trait,
+    system,
     TransformTrait,
-    WorldTrait,
+    trait,
 } from 'bongle';
 import { box, rigidBody } from 'crashcat';
+import type { Vec3 } from 'mathcat';
 
 /* SNIPPET_START: drop-body */
 // a dynamic body is a node with a RigidBodyTrait. assign its `def` to build one.
-script(WorldTrait, 'drop-ball', (ctx) => {
+system('drop-ball', (ctx) => {
     if (!env.server) return; // spawn on the server; physics replicates to clients
 
     onInit(ctx, () => {
@@ -52,7 +51,7 @@ script(WorldTrait, 'drop-ball', (ctx) => {
 // "adopt mode": leave `def` null and hand the trait a crashcat body you built
 // yourself, for shapes or settings the declarative def does not expose. the trait
 // replicates it and tears it down on dispose, just as if it had built it.
-script(WorldTrait, 'custom-body', (ctx) => {
+system('custom-body', (ctx) => {
     if (!env.server) return;
 
     onInit(ctx, () => {
@@ -94,7 +93,7 @@ function spawnCoin(parent: Node, position: Vec3) {
     addChild(parent, coin);
 }
 
-script(WorldTrait, 'coins', (ctx) => {
+system('coins', (ctx) => {
     if (!env.server) return; // the server owns pickups
 
     // per-room running total. factory-scope state lives in this one script
@@ -116,9 +115,7 @@ script(WorldTrait, 'coins', (ctx) => {
         for (const [player] of players) playerNodeIds.add(player._node.id);
 
         for (const [coin, contacts] of coins) {
-            const touchedByPlayer = contacts.added.some(
-                (c) => c.type === 'rigidBody' && playerNodeIds.has(c.nodeId),
-            );
+            const touchedByPlayer = contacts.added.some((c) => c.type === 'rigidBody' && playerNodeIds.has(c.nodeId));
             if (touchedByPlayer) {
                 coinsCollected += coin.value;
                 log(ctx, `coin collected (total ${coinsCollected})`);
@@ -135,7 +132,7 @@ script(WorldTrait, 'coins', (ctx) => {
 // side (groups are not synced, so never build the list conditionally).
 const Groups = defineCollisionGroups('enemies', 'pickups');
 
-script(WorldTrait, 'group-demo', (ctx) => {
+system('group-demo', (ctx) => {
     if (!env.server) return;
 
     onInit(ctx, () => {

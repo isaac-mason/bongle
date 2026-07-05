@@ -1,11 +1,11 @@
 // Typechecked snippets for Players & input.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { createTouchButton, isKeyDown, isTouchButtonDown, isTouchPrimary, onDispose, onInput, script, WorldTrait } from 'bongle';
+import { createTouchButton, isKeyDown, isTouchButtonDown, isTouchPrimary, onDispose, onInput, system } from 'bongle';
 
 /* SNIPPET_START: read-input */
 // onInput runs first each frame, so read input and set intent here
-script(WorldTrait, 'read-input', (ctx) => {
+system('read-input', (ctx) => {
     onInput(ctx, () => {
         if (!ctx.client) return;
         const mouseKeyboard = ctx.client.input.mouseKeyboard;
@@ -22,7 +22,7 @@ script(WorldTrait, 'read-input', (ctx) => {
 // a PlayerControllerTrait already auto-mounts a move joystick and jump button on
 // touch devices. mount game-specific controls yourself, gated on isTouchPrimary so
 // tablets and touch laptops get them too, not just small phone screens.
-script(WorldTrait, 'touch-controls', (ctx) => {
+system('touch-controls', (ctx) => {
     if (!ctx.client || !isTouchPrimary(ctx)) return;
 
     // createTouchButton mounts under the room's touch overlay and returns a

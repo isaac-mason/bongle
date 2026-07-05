@@ -12,14 +12,13 @@ import {
     onInit,
     randomDisplayName,
     sampleAvatars,
-    script,
+    system,
     TransformTrait,
-    WorldTrait,
 } from 'bongle';
 
 /* SNIPPET_START: spawn-npc */
 // spawn an NPC and give it a platform avatar. server-only.
-script(WorldTrait, 'spawn-npc', (ctx) => {
+system('spawn-npc', (ctx) => {
     if (!env.server) return;
 
     async function spawnNpc() {

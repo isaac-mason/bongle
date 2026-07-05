@@ -19,14 +19,14 @@ import {
     setSubject,
     spawnParticle,
     sprite,
+    system,
     TransformTrait,
     trait,
-    WorldTrait,
 } from 'bongle';
 
 /* SNIPPET_START: camera */
 // the room already has a camera node; read its CameraTrait to set field of view
-script(WorldTrait, 'camera-setup', (ctx) => {
+system('camera-setup', (ctx) => {
     onInit(ctx, () => {
         if (!ctx.client) return;
         const camera = getTrait(ctx.client.camera, CameraTrait);
@@ -73,8 +73,7 @@ export function release(ctx: ScriptContext): void {
 
 /* SNIPPET_START: lighting */
 // sky preset + voxel flood-fill lighting, set once on the world
-script(
-    WorldTrait,
+system(
     'lighting',
     (ctx) => {
         onInit(ctx, () => {
@@ -95,7 +94,7 @@ const SmokeParticle = particle('smoke', {
     update: particleUpdate.smoke,
 });
 
-script(WorldTrait, 'smoke-puffs', (ctx) => {
+system('smoke-puffs', (ctx) => {
     onInit(ctx, () => {
         // emit one at a position; no-ops on the server
         spawnParticle(ctx, SmokeParticle, [0, 2, 0]);
@@ -122,7 +121,7 @@ const SparkParticle = particle('spark', {
     },
 });
 
-script(WorldTrait, 'sparks', (ctx) => {
+system('sparks', (ctx) => {
     onInit(ctx, () => {
         // a scattered burst: randomize each particle's velocity, lifetime, and size at
         // spawn so no two move alike.

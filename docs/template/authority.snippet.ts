@@ -1,7 +1,7 @@
 // Typechecked snippets for Multiplayer — mixing authority on one entity.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { addChild, addTrait, createNode, env, onJoin, pack, script, sync, trait, WorldTrait } from 'bongle';
+import { addChild, addTrait, createNode, env, onJoin, pack, sync, system, trait } from 'bongle';
 
 /* SNIPPET_START: mixed-authority */
 const InventoryTrait = trait('inventory', { coins: 0 });
@@ -16,7 +16,7 @@ sync(InventoryTrait, 'coins', {
     },
 });
 
-script(WorldTrait, 'inventories', (ctx) => {
+system('inventories', (ctx) => {
     if (!env.server) return;
 
     onJoin(ctx, ({ playerNode }) => {

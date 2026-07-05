@@ -40,27 +40,15 @@ Running the above will scaffold a minimal project and start the editor on
 From there, you can edit the game code in `src/`, and see your changes live in
 the editor.
 
-If you'd rather poke around without scaffolding, clone the repo and run any of
-the projects in [`../examples/`](../examples). Clone recursively so the
-submodules come along:
-
-```sh
-git clone --recurse-submodules https://github.com/isaac-mason/bongle.git
-cd bongle
-```
-
-Already cloned without `--recurse-submodules`? Run
-`git submodule update --init --recursive`.
-
 ### Start from the new-bongle template
 
 [new-bongle](https://github.com/isaac-mason/new-bongle) is a ready-made starter
-project. Open it in the cloud with one click:
+project. Not yet set up for local development? You can poke around with a cloud environment like GitHub Codespaces:
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/isaac-mason/new-bongle)
 
 It boots a container, installs dependencies, and starts the editor (forwarded on
-`:3002`). You can also clone it and run `npm install && npm run edit` locally.
+`:3002`). You can also clone the `new-bongle` project and run `npm install && npm run edit` locally.
 
 ## Project structure
 
@@ -70,12 +58,12 @@ A scaffolded project is a small npm package. The pieces you work with:
 my-game/
 ├── src/
 │   ├── index.ts        your game code (the entry point the engine loads)
-│   └── generated/      typed handles the pipeline writes (do not edit)
-├── assets/             source files: glTF, textures, audio, sprites
-├── content/            editor-authored scenes (.scene.json)
+│   └── generated/      generated code written by the editor (do not edit! changes will be wiped away!)
+├── assets/             put your source files here: glTF, textures, audio, sprites
+├── content/            editor-authored data (.scene.json)
 ├── dist/               build output: bundle.zip, from `bongle build`
 ├── package.json        the `bongle` dependency and scripts
-└── tsconfig.json
+└── tsconfig.json       typescript config, you probably don't need to touch this
 ```
 
 - **`src/index.ts`** is where your code lives, the entry the engine loads. Split it
@@ -123,8 +111,7 @@ Next, a script that sets up the sky and sun:
 ```ts
 // sky + a late-morning sun. { editor: true } runs this in the editor too, so
 // the world is lit while you build it, not only at play time.
-script(
-    WorldTrait,
+system(
     'environment',
     (ctx) => {
         onInit(ctx, () => {
@@ -136,18 +123,21 @@ script(
 );
 ```
 
-A script attaches behaviour to a trait. `script(WorldTrait, 'environment',
-factory, opts)` runs its factory for every node carrying a `WorldTrait`, which
-here is the single world node. Inside, `onInit` registers a one-time setup
+Game logic lives in scripts. A script attaches behaviour to a trait, and
+`system('environment', factory, opts)` is the scene-wide form: sugar for a
+script on the always-present world node, so its factory runs once per scene.
+(The general form, `script(SomeTrait, ...)`, binds behaviour to a specific
+trait, running once per node that carries it, covered in [the programming
+model](#the-programming-model).) Inside, `onInit` registers a one-time setup
 callback that calls `setEnvironment` and `setEnvironmentTime` to choose a preset
-sky and a 9am sun. The `{ editor: true }` option runs the script in the editor
-as well as at play time, so the world is lit while you build it.
+sky and a 9am sun. The `{ editor: true }` option runs it in the editor as well
+as at play time, so the world is lit while you build it.
 
 Finally, place players as they join:
 
 ```ts
 // place each joining player. server-authoritative, so it only runs there.
-script(WorldTrait, 'spawn', (ctx) => {
+system('spawn', (ctx) => {
     if (!env.server) return;
 
     onJoin(ctx, ({ playerNode }) => {
@@ -207,7 +197,8 @@ a transform gives a node a position, a rigid body gives it physics, a sprite
 makes it draw. A node is just the traits it carries.
 
 **Scripts**: your game logic. A script attaches to a trait and runs on lifecycle
-hooks.
+hooks. Scene-wide logic that runs over many entities, spawning, scoring, AI, uses
+`system(...)`, a script on the world node.
 
 ### The multiplayer model
 
@@ -540,7 +531,7 @@ every match is a tuple of the requested trait instances (reach the node itself
 with `trait._node`).
 
 ```ts
-script(WorldTrait, 'enemies', (ctx) => {
+system('enemies', (ctx) => {
     // create the live query once; it stays in sync as nodes match and unmatch
     const enemies = query(ctx, [EnemyTrait, TransformTrait]);
 
@@ -562,13 +553,14 @@ script(WorldTrait, 'enemies', (ctx) => {
 
 These primitives support two ways to organize logic, and you can mix them.
 
-The **systems** style is ECS-like: put a script on `WorldTrait` (or on your own
-trait on the root node), define data-only traits on your entities, and have the
-script `query` for those traits and iterate them each tick. Logic is centralized
-in a few systems and entities are just data. This suits anything that runs over
-many entities at once, such as scoring, spawning, or AI.
+The **systems** style is ECS-like: write a `system('name', factory)`, sugar for a
+script on the always-present `WorldTrait` world node, define data-only traits on
+your entities, and have the system `query` for those traits and iterate them each
+tick. Logic is centralized in a few systems and entities are just data. This
+suits anything that runs over many entities at once, such as scoring, spawning,
+or AI.
 
-The **actor** style puts a script directly on an entity's own trait, so each node
+The **actor** style puts a `script` directly on an entity's own trait, so each node
 carries its own behaviour. The factory runs once per entity, with `ctx.node` and
 `ctx.trait` scoped to that one. This suits self-contained objects: a door, a
 pickup, a projectile.
@@ -588,7 +580,7 @@ authoritative simulation behind `env.server`, and visuals, input, and UI behind
 handles, present only on their side.
 
 ```ts
-script(WorldTrait, 'sides', (ctx) => {
+system('sides', (ctx) => {
     // server-only: authoritative logic, compiled out of the client bundle
     if (env.server) {
         onJoin(ctx, ({ playerNode }) => {
@@ -628,8 +620,7 @@ point while editing, gone at play time.
 // level. `{ editor: true }` lets the script run in edit mode at all; the guard
 // limits it to an editor build (env.editor) in edit mode (ctx.mode), so it never
 // appears in play or in a shipped bundle.
-script(
-    WorldTrait,
+system(
     'spawn-markers',
     (ctx) => {
         if (!env.editor || ctx.mode !== 'edit') return;
@@ -809,7 +800,7 @@ sync(InventoryTrait, 'coins', {
     },
 });
 
-script(WorldTrait, 'inventories', (ctx) => {
+system('inventories', (ctx) => {
     if (!env.server) return;
 
     onJoin(ctx, ({ playerNode }) => {
@@ -963,7 +954,7 @@ serializes it. Handle incoming commands with `listen`, and send with `send` (or
 // a typed client-to-server command
 const FireWeaponCommand = command('fire-weapon', CLIENT_TO_SERVER, pack.object({ charge: pack.float32() }));
 
-script(WorldTrait, 'weapon-rpc', (ctx) => {
+system('weapon-rpc', (ctx) => {
     // the server is the only side that handles an incoming client command
     if (env.server) {
         listen(ctx, FireWeaponCommand, (data, from) => {
@@ -1003,7 +994,7 @@ over new `gameOptions` to switch gamemodes or move from a lobby into a match.
 
 ```ts
 // move this client into another gamemode by re-entering matchmaking
-script(WorldTrait, 'switch-mode', (ctx) => {
+system('switch-mode', (ctx) => {
     onInit(ctx, () => {
         if (ctx.client) client.matchmake(ctx, { gameOptions: { mode: 'ffa' } });
     });
@@ -1024,7 +1015,7 @@ feed or highlight an announcement. `chat.onMessage(ctx, fn)`, client-only, fires
 the plain messages players type.
 
 ```ts
-script(WorldTrait, 'announcer', (ctx) => {
+system('announcer', (ctx) => {
     onInit(ctx, () => {
         // a system message broadcast to everyone in the room. inline tags style
         // the text: [#rrggbb] colour, [b]/[i]/[u]/[s] for bold/italic/underline/
@@ -1051,7 +1042,7 @@ receives the parsed `args`, any `flags`, and the `from` client.
 
 ```ts
 // a typed slash command: `/tp <x> <z>`
-script(WorldTrait, 'commands', (ctx) => {
+system('commands', (ctx) => {
     // register the spec on both sides (this is a shared script), so the client
     // gets autocomplete and argument validation as the player types.
     const teleport = chat.command(ctx, {
@@ -1122,7 +1113,7 @@ prefab's contents on the next tick.
 ```ts
 // instantiate inside a script: createPrefab returns a detached node, attach
 // it to make it live
-script(WorldTrait, 'spawn-penguins', (ctx) => {
+system('spawn-penguins', (ctx) => {
     onInit(ctx, () => {
         const penguin = createPrefab(ctx, PenguinPrefab);
         addChild(ctx.node, penguin);
@@ -1321,7 +1312,7 @@ that has been set. Server edits replicate to clients automatically.
 
 ```ts
 // read and write blocks through ctx.voxels, addressed by world x/y/z
-script(WorldTrait, 'place-ruby', (ctx) => {
+system('place-ruby', (ctx) => {
     onInit(ctx, () => {
         // write a block; server edits replicate to clients automatically
         setBlock(ctx.voxels, 0, 0, 0, RubyBlock.defaultKey());
@@ -1357,7 +1348,7 @@ are server-only and hand you the world coordinates of the change.
 
 ```ts
 // react when a block of this type is placed or broken (server-only)
-script(WorldTrait, 'ruby-events', (ctx) => {
+system('ruby-events', (ctx) => {
     onBlockBuild(ctx, RubyBlock, (ev) => {
         console.log('placed at', ev.worldX, ev.worldY, ev.worldZ);
     });
@@ -1399,7 +1390,7 @@ at a different camera node.
 
 ```ts
 // the room already has a camera node; read its CameraTrait to set field of view
-script(WorldTrait, 'camera-setup', (ctx) => {
+system('camera-setup', (ctx) => {
     onInit(ctx, () => {
         if (!ctx.client) return;
         const camera = getTrait(ctx.client.camera, CameraTrait);
@@ -1477,8 +1468,7 @@ server-only `configureFloodFillLighting`.
 
 ```ts
 // sky preset + voxel flood-fill lighting, set once on the world
-script(
-    WorldTrait,
+system(
     'lighting',
     (ctx) => {
         onInit(ctx, () => {
@@ -1508,7 +1498,7 @@ by hand.
 // declare a model from a glTF at module scope
 const ChestModel = model('chest', { src: new URL('./assets/chest.gltf', import.meta.url) });
 
-script(WorldTrait, 'place-chest', (ctx) => {
+system('place-chest', (ctx) => {
     onInit(ctx, () => {
         // clone the model's scene and attach it; cloneModel installs the
         // render slot a visible subtree needs
@@ -1527,7 +1517,7 @@ of a named node with `findByName(clone, name)`, then read or write its traits.
 ```ts
 // a model's named glTF nodes are reachable on the placed clone by name, so you can
 // drive a sub-part from code: open a lid, mount an item on a hand, attach an effect.
-script(WorldTrait, 'open-chest', (ctx) => {
+system('open-chest', (ctx) => {
     onInit(ctx, () => {
         const chest = cloneModel(ChestModel.scene);
         addChild(ctx.node, chest);
@@ -1657,7 +1647,7 @@ the NPC despawns, and `randomDisplayName` gives ambient NPCs a plausible name.
 
 ```ts
 // spawn an NPC and give it a platform avatar. server-only.
-script(WorldTrait, 'spawn-npc', (ctx) => {
+system('spawn-npc', (ctx) => {
     if (!env.server) return;
 
     async function spawnNpc() {
@@ -1701,7 +1691,7 @@ blending. A model's clips are reachable by name off its handle, as
 // glTF's TRS tracks (node translation/rotation/scale). there is no skinning.
 const CrabModel = model('crab', { src: new URL('./assets/crab.gltf', import.meta.url) });
 
-script(WorldTrait, 'crab-anim', (ctx) => {
+system('crab-anim', (ctx) => {
     onInit(ctx, () => {
         const node = cloneModel(CrabModel.scene);
         addChild(ctx.node, node);
@@ -1734,7 +1724,7 @@ Built-in character locomotion (arm and leg swing, head-look) runs in exactly thi
 phase.
 
 ```ts
-script(WorldTrait, 'head-look', (ctx) => {
+system('head-look', (ctx) => {
     // fires after the animator samples this tick's clips, before world matrices
     // recompute: write bone local TRS here to layer a head-look, spring, or
     // joint clamp on top of the sampled pose instead of being overwritten by it
@@ -1756,7 +1746,7 @@ it with `setBlock`, wrap it in a model with `createVoxelModel`, and point a
 `VoxelMeshTrait` at it.
 
 ```ts
-script(WorldTrait, 'spawn-platform', (ctx) => {
+system('spawn-platform', (ctx) => {
     if (!ctx.client) return; // VoxelMeshTrait is a visual; build the model client-side
 
     onInit(ctx, () => {
@@ -1811,7 +1801,7 @@ const SmokeParticle = particle('smoke', {
     update: particleUpdate.smoke,
 });
 
-script(WorldTrait, 'smoke-puffs', (ctx) => {
+system('smoke-puffs', (ctx) => {
     onInit(ctx, () => {
         // emit one at a position; no-ops on the server
         spawnParticle(ctx, SmokeParticle, [0, 2, 0]);
@@ -1858,7 +1848,7 @@ const SparkParticle = particle('spark', {
     },
 });
 
-script(WorldTrait, 'sparks', (ctx) => {
+system('sparks', (ctx) => {
     onInit(ctx, () => {
         // a scattered burst: randomize each particle's velocity, lifetime, and size at
         // spawn so no two move alike.
@@ -1907,7 +1897,7 @@ the `RigidBodySettings` surface.
 
 ```ts
 // a dynamic body is a node with a RigidBodyTrait. assign its `def` to build one.
-script(WorldTrait, 'drop-ball', (ctx) => {
+system('drop-ball', (ctx) => {
     if (!env.server) return; // spawn on the server; physics replicates to clients
 
     onInit(ctx, () => {
@@ -1933,7 +1923,7 @@ when you need a shape, joint, or setting the declarative `def` does not expose.
 // "adopt mode": leave `def` null and hand the trait a crashcat body you built
 // yourself, for shapes or settings the declarative def does not expose. the trait
 // replicates it and tears it down on dispose, just as if it had built it.
-script(WorldTrait, 'custom-body', (ctx) => {
+system('custom-body', (ctx) => {
     if (!env.server) return;
 
     onInit(ctx, () => {
@@ -1970,7 +1960,7 @@ It falls under gravity and collides with voxels and other AABB bodies out of the
 ```ts
 // spawn a light, axis-aligned mover. no rotation and no full rigid-body solve, so you
 // can afford many of them; it still falls under gravity and collides with voxels.
-script(WorldTrait, 'spawn-pellet', (ctx) => {
+system('spawn-pellet', (ctx) => {
     if (!env.server) return; // the server simulates; AABB bodies replicate to clients
 
     onInit(ctx, () => {
@@ -2063,7 +2053,7 @@ function spawnCoin(parent: Node, position: Vec3) {
     addChild(parent, coin);
 }
 
-script(WorldTrait, 'coins', (ctx) => {
+system('coins', (ctx) => {
     if (!env.server) return; // the server owns pickups
 
     // per-room running total. factory-scope state lives in this one script
@@ -2085,9 +2075,7 @@ script(WorldTrait, 'coins', (ctx) => {
         for (const [player] of players) playerNodeIds.add(player._node.id);
 
         for (const [coin, contacts] of coins) {
-            const touchedByPlayer = contacts.added.some(
-                (c) => c.type === 'rigidBody' && playerNodeIds.has(c.nodeId),
-            );
+            const touchedByPlayer = contacts.added.some((c) => c.type === 'rigidBody' && playerNodeIds.has(c.nodeId));
             if (touchedByPlayer) {
                 coinsCollected += coin.value;
                 log(ctx, `coin collected (total ${coinsCollected})`);
@@ -2165,15 +2153,19 @@ restricts hits to blocks that collide). Allocate the result once with
 ```ts
 // hit-test the block grid: walk a ray from an origin along a direction and read
 // the first solid block hit (build cursor, hitscan vs terrain, line of sight).
-script(WorldTrait, 'block-pick', (ctx) => {
+system('block-pick', (ctx) => {
     onInit(ctx, () => {
         const out = createVoxelRaycastResult();
         raycastVoxels(
             out,
             ctx.voxels,
             ctx.blocks, // the block registry, for per-block flags
-            0, 10, 0, // origin x/y/z
-            0, -1, 0, // direction x/y/z (straight down)
+            0,
+            10,
+            0, // origin x/y/z
+            0,
+            -1,
+            0, // direction x/y/z (straight down)
             32, // max distance
             BLOCK_FLAG_COLLISION, // only blocks with collision count as a hit
         );
@@ -2198,7 +2190,7 @@ the encouraged way to do physics queries.
 ```ts
 // hit-test the physics world (rigid bodies, character controllers). bongle does
 // not wrap this; cast against the crashcat world directly with the crashcat API.
-script(WorldTrait, 'body-pick', (ctx) => {
+system('body-pick', (ctx) => {
     onInit(ctx, () => {
         const world = ctx.physics.rigid.world;
 
@@ -2258,7 +2250,7 @@ the world, triggers only certain bodies activate.
 // side (groups are not synced, so never build the list conditionally).
 const Groups = defineCollisionGroups('enemies', 'pickups');
 
-script(WorldTrait, 'group-demo', (ctx) => {
+system('group-demo', (ctx) => {
     if (!env.server) return;
 
     onInit(ctx, () => {
@@ -2406,7 +2398,7 @@ report this frame's state:
 
 ```ts
 // onInput runs first each frame, so read input and set intent here
-script(WorldTrait, 'read-input', (ctx) => {
+system('read-input', (ctx) => {
     onInput(ctx, () => {
         if (!ctx.client) return;
         const mouseKeyboard = ctx.client.input.mouseKeyboard;
@@ -2461,7 +2453,7 @@ show touch controls at all.
 // a PlayerControllerTrait already auto-mounts a move joystick and jump button on
 // touch devices. mount game-specific controls yourself, gated on isTouchPrimary so
 // tablets and touch laptops get them too, not just small phone screens.
-script(WorldTrait, 'touch-controls', (ctx) => {
+system('touch-controls', (ctx) => {
     if (!ctx.client || !isTouchPrimary(ctx)) return;
 
     // createTouchButton mounts under the room's touch overlay and returns a
@@ -2499,7 +2491,7 @@ no-op and return `null` on the server.
 // declare a sound at module scope, then play it following a node
 const ChimeSound = sound('chime', { src: new URL('./assets/chime.ogg', import.meta.url) });
 
-script(WorldTrait, 'play-chime', (ctx) => {
+system('play-chime', (ctx) => {
     onInit(ctx, () => {
         // panner tracks the node each frame; safely no-ops on the server
         playOnNode(ctx, ChimeSound, ctx.node);
@@ -2520,7 +2512,7 @@ anything interactive.
 
 ```ts
 // append a screen-space overlay to the room's viewport (client only)
-script(WorldTrait, 'hud', (ctx) => {
+system('hud', (ctx) => {
     onInit(ctx, () => {
         if (!ctx.client) return;
         const hud = document.createElement('div');
@@ -2560,7 +2552,7 @@ function loadSave(stored: JsonValue | undefined): PlayerSave {
 }
 
 // userStorage is server-only and per-player; onJoin runs on the server.
-script(WorldTrait, 'profiles', (ctx) => {
+system('profiles', (ctx) => {
     async function onPlayerJoin(client: ClientId) {
         const user = clientToUser(ctx, client);
 

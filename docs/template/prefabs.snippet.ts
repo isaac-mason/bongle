@@ -1,7 +1,7 @@
 // Typechecked snippets for Scenes & prefabs.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { addChild, cloneNode, createPrefab, onInit, prefab, scene, script, WorldTrait } from 'bongle';
+import { addChild, cloneNode, createPrefab, onInit, prefab, scene, system } from 'bongle';
 
 // a scene authored in the editor, referenced here by id
 const PenguinScene = scene('penguin');
@@ -22,7 +22,7 @@ const PenguinPrefab = prefab('penguin', {
 /* SNIPPET_START: spawn-prefab */
 // instantiate inside a script: createPrefab returns a detached node, attach
 // it to make it live
-script(WorldTrait, 'spawn-penguins', (ctx) => {
+system('spawn-penguins', (ctx) => {
     onInit(ctx, () => {
         const penguin = createPrefab(ctx, PenguinPrefab);
         addChild(ctx.node, penguin);

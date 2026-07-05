@@ -1,12 +1,25 @@
 // Typechecked snippets for Physics & movement — AABB bodies.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { aabbBody, AabbBodyTrait, addChild, addTrait, createNode, env, onInit, onTick, script, setPosition, TransformTrait, WorldTrait } from 'bongle';
+import {
+    AabbBodyTrait,
+    aabbBody,
+    addChild,
+    addTrait,
+    createNode,
+    env,
+    onInit,
+    onTick,
+    script,
+    setPosition,
+    system,
+    TransformTrait,
+} from 'bongle';
 
 /* SNIPPET_START: create */
 // spawn a light, axis-aligned mover. no rotation and no full rigid-body solve, so you
 // can afford many of them; it still falls under gravity and collides with voxels.
-script(WorldTrait, 'spawn-pellet', (ctx) => {
+system('spawn-pellet', (ctx) => {
     if (!env.server) return; // the server simulates; AABB bodies replicate to clients
 
     onInit(ctx, () => {

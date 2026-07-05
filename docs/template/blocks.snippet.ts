@@ -12,9 +12,8 @@ import {
     onBlockBreak,
     onBlockBuild,
     onInit,
-    script,
     setBlock,
-    WorldTrait,
+    system,
 } from 'bongle';
 import { blockTextures } from 'bongle/starter';
 
@@ -29,7 +28,7 @@ const RubyBlock = block('guide:ruby', {
 
 /* SNIPPET_START: edit-world */
 // read and write blocks through ctx.voxels, addressed by world x/y/z
-script(WorldTrait, 'place-ruby', (ctx) => {
+system('place-ruby', (ctx) => {
     onInit(ctx, () => {
         // write a block; server edits replicate to clients automatically
         setBlock(ctx.voxels, 0, 0, 0, RubyBlock.defaultKey());
@@ -54,7 +53,7 @@ script(WorldTrait, 'place-ruby', (ctx) => {
 
 /* SNIPPET_START: block-events */
 // react when a block of this type is placed or broken (server-only)
-script(WorldTrait, 'ruby-events', (ctx) => {
+system('ruby-events', (ctx) => {
     onBlockBuild(ctx, RubyBlock, (ev) => {
         console.log('placed at', ev.worldX, ev.worldY, ev.worldZ);
     });
