@@ -563,6 +563,20 @@ export function onExit(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Un
     return () => instance.onExit.delete(fn);
 }
 
+/** join-data key carrying the editor's viewpoint when a session is launched
+ *  via the editor "play" button. absent for normal (production) joins, so a
+ *  game reading it degrades to its usual spawn. games opt in for "play from
+ *  here" — read it with `editorPlayData()`. */
+export const EDITOR_JOIN_KEY = '__editor';
+
+/** editor viewpoint pose passed under `EDITOR_JOIN_KEY` in join data. */
+export type EditorPlayData = {
+    /** editor camera world position at play time. */
+    position: [number, number, number];
+    /** editor camera world orientation at play time. */
+    quaternion: [number, number, number, number];
+};
+
 export type JoinArgs = {
     client: ClientId;
     playerNode: nodes.Node;

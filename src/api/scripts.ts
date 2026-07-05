@@ -1,5 +1,13 @@
+import type { JsonValue } from 'bongle/interface';
 import { WorldTrait } from '../builtins/world';
-import { type ScriptDef, type ScriptFactory, type ScriptOptions, script } from '../core/scene/scripts';
+import {
+    EDITOR_JOIN_KEY,
+    type EditorPlayData,
+    type ScriptDef,
+    type ScriptFactory,
+    type ScriptOptions,
+    script,
+} from '../core/scene/scripts';
 import type { TraitHandle } from '../core/scene/traits';
 
 type WorldScriptBase = typeof WorldTrait extends TraitHandle<infer B> ? B : never;
@@ -32,6 +40,7 @@ export type { ClientId } from '../core/client';
 export type { QueryMatch, QueryMatches } from '../core/scene/nodes';
 export type {
     ClientContext,
+    EditorPlayData,
     EditRoomState,
     FrameArgs,
     JoinArgs,
@@ -42,6 +51,24 @@ export type {
     TickArgs,
     UpdateArgs,
 } from '../core/scene/scripts';
+
+/**
+ * read the editor viewpoint from join data, if this session was launched via
+ * the editor "play" button. returns `null` for normal joins (the key is
+ * absent), so a game can fall back to its usual spawn. games use this to offer
+ * "play from here" during development.
+ */
+export function editorPlayData(joinData: Record<string, JsonValue>): EditorPlayData | null {
+    const raw = joinData[EDITOR_JOIN_KEY];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const d = raw as Record<string, JsonValue>;
+    if (!Array.isArray(d.position) || d.position.length < 3) return null;
+    if (!Array.isArray(d.quaternion) || d.quaternion.length < 4) return null;
+    return {
+        position: [Number(d.position[0]), Number(d.position[1]), Number(d.position[2])],
+        quaternion: [Number(d.quaternion[0]), Number(d.quaternion[1]), Number(d.quaternion[2]), Number(d.quaternion[3])],
+    };
+}
 export {
     broadcast,
     filter,

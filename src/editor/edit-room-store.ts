@@ -19,12 +19,15 @@
  * selection/hover/etc.
  */
 
+import type { JsonValue } from 'bongle/interface';
 import type { Vec3 } from 'mathcat';
 import { create, type StoreApi, useStore } from 'zustand';
+import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
+import { getTrait } from '../core/scene/nodes';
 import type { PrefabConfig, Realm } from '../core/scene/nodes';
-import type { ScriptContext } from '../core/scene/scripts';
+import { EDITOR_JOIN_KEY, type ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import * as Actions from './actions';
@@ -581,7 +584,27 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         /* ── room cmds ── */
         play: () => {
             const net = ctx.client!.state!.net;
-            Net.send(net, { type: 'play', sceneId: room.sceneId, sourceRoomId: room.roomId, gameOptions: '{}', joinData: '{}' });
+            // ride the editor's current viewpoint along as `__editor` join data
+            // so games can offer "play from here" (they opt in to using it).
+            // absent outside this editor play flow, so production joins are
+            // unaffected.
+            const joinData: Record<string, JsonValue> = {};
+            const cameraTransform = getTrait(room.client.camera, TransformTrait);
+            if (cameraTransform) {
+                const p = getWorldPosition(cameraTransform);
+                const q = getWorldQuaternion(cameraTransform);
+                joinData[EDITOR_JOIN_KEY] = {
+                    position: [p[0], p[1], p[2]],
+                    quaternion: [q[0], q[1], q[2], q[3]],
+                };
+            }
+            Net.send(net, {
+                type: 'play',
+                sceneId: room.sceneId,
+                sourceRoomId: room.roomId,
+                gameOptions: '{}',
+                joinData: JSON.stringify(joinData),
+            });
         },
         openScene: (sceneId) => {
             const net = ctx.client!.state!.net;
