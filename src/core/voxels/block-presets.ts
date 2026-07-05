@@ -369,18 +369,23 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
                 } as const
             )[f];
 
-            // FRONT neighbour (one cell beyond the low step): if it's a
-            // perpendicular stair, we form an OUTER corner. CW-facing
-            // neighbour → outer_left; CCW → outer_right.
-            const front = readStairAt(ctx.voxels, handle, ctx.worldX + dir[0], ctx.worldY, ctx.worldZ + dir[1], h);
-            if (front === cw) return handle.stateId({ facing: f, half: h, shape: 'outer_left' });
-            if (front === ccw) return handle.stateId({ facing: f, half: h, shape: 'outer_right' });
-
-            // BACK neighbour (one cell beyond the high step): perpendicular
-            // stair pointing toward us → INNER corner.
+            // BACK neighbour (one cell beyond the high step, toward -dir):
+            // a perpendicular stair there continues the raised strip around
+            // a convex corner → OUTER. we keep the back quarter on the same
+            // side as the neighbour's raised strip: CW-facing neighbour →
+            // outer_left, CCW → outer_right. checked before the front case so
+            // outer wins when both neighbours are present.
             const back = readStairAt(ctx.voxels, handle, ctx.worldX - dir[0], ctx.worldY, ctx.worldZ - dir[1], h);
-            if (back === ccw) return handle.stateId({ facing: f, half: h, shape: 'inner_left' });
-            if (back === cw) return handle.stateId({ facing: f, half: h, shape: 'inner_right' });
+            if (back === cw) return handle.stateId({ facing: f, half: h, shape: 'outer_left' });
+            if (back === ccw) return handle.stateId({ facing: f, half: h, shape: 'outer_right' });
+
+            // FRONT neighbour (one cell beyond the low step, toward +dir): a
+            // perpendicular stair there sits in the concave nook → INNER. we
+            // add a front quarter on the neighbour's side: CW → inner_left,
+            // CCW → inner_right.
+            const front = readStairAt(ctx.voxels, handle, ctx.worldX + dir[0], ctx.worldY, ctx.worldZ + dir[1], h);
+            if (front === cw) return handle.stateId({ facing: f, half: h, shape: 'inner_left' });
+            if (front === ccw) return handle.stateId({ facing: f, half: h, shape: 'inner_right' });
 
             return handle.stateId({ facing: f, half: h, shape: 'straight' });
         },
