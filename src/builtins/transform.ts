@@ -133,10 +133,17 @@ export const TransformTrait = trait('transform', {
     /** local pose at the start of the current fixed tick. seeded by
      *  `setInterpolation(true)` / `resetInterpolation` and refreshed by
      *  `snapshot()` drain. only meaningful for owner-driven (fixed-step)
-     *  transforms; remote-driven transforms render via chase-lerp
-     *  against `position` and don't read these fields. */
+     *  transforms; remote-driven transforms render from the snapshot ring
+     *  (`_netSnapshots`) and don't read these fields. */
     prevPosition: vec3.create(),
     prevQuaternion: quat.create(),
+
+    /** remote snapshot-interpolation ring (client-only). null until the first
+     *  remote pose lands, so owner/local/static nodes pay nothing. holds
+     *  independently-timestamped position and rotation keyframes the sampler
+     *  brackets against the render clock. see `pushPositionSnapshot` / the
+     *  sampler in render/interpolation.ts. */
+    _netSnapshots: null as NetSnapshots | null,
 
     // ── prediction-correction blend state (predicted physics bodies) ──
     /** frames remaining in an active correction blend; 0 when idle */
@@ -150,6 +157,185 @@ export const TransformTrait = trait('transform', {
 
 /** instance type for TransformTrait */
 export type TransformTrait = TraitType<typeof TransformTrait>;
+
+/* ── remote snapshot-interpolation ring ──────────────────────────────────
+ *
+ * a non-owner transform's pose lands from the network at an irregular cadence
+ * (threshold-gated, 5cm / ~1.1°). instead of chasing the latest value, we buffer
+ * timestamped keyframes and let the sampler (render/interpolation.ts) render on a
+ * render-behind server-clock timeline, bracketing the two keyframes around render
+ * time. constant visual lag regardless of speed, jitter absorbed by the buffer.
+ *
+ * position and rotation are independent sync slices (a mover with static rotation
+ * only re-emits position), so each gets its own ring, its own timestamps, sampled
+ * independently at the same render time. keyframes are stamped with the raw
+ * authoritative server time (`clock.lastServerStamp`) at unpack, NOT arrival time.
+ */
+
+/** ring depth. a few hundred ms at tick cadence, comfortably past the ~50ms
+ *  render-behind buffer, so jitter or a short loss never empties the bracket. */
+const NET_SNAPSHOT_CAP = 16;
+
+export type NetSnapshots = {
+    /** position keyframes: server-clock seconds, and x/y/z flat (stride 3). */
+    posTime: Float64Array;
+    pos: Float32Array;
+    /** ring index of the newest position keyframe; -1 when empty. */
+    posHead: number;
+    posCount: number;
+    /** rotation keyframes: server-clock seconds, and x/y/z/w flat (stride 4). */
+    rotTime: Float64Array;
+    rot: Float32Array;
+    rotHead: number;
+    rotCount: number;
+};
+
+function newNetSnapshots(): NetSnapshots {
+    return {
+        posTime: new Float64Array(NET_SNAPSHOT_CAP),
+        pos: new Float32Array(NET_SNAPSHOT_CAP * 3),
+        posHead: -1,
+        posCount: 0,
+        rotTime: new Float64Array(NET_SNAPSHOT_CAP),
+        rot: new Float32Array(NET_SNAPSHOT_CAP * 4),
+        rotHead: -1,
+        rotCount: 0,
+    };
+}
+
+/** lazily allocate the ring on the first remote pose. owner/local/static nodes
+ *  never call this, so they carry a null field and pay nothing. */
+export function ensureNetSnapshots(t: TransformTrait): NetSnapshots {
+    if (t._netSnapshots === null) t._netSnapshots = newNetSnapshots();
+    return t._netSnapshots;
+}
+
+/** append a position keyframe stamped at server-clock `time`. */
+export function pushPositionSnapshot(t: TransformTrait, time: number, p: Vec3): void {
+    const snaps = ensureNetSnapshots(t);
+    const i = (snaps.posHead + 1) % NET_SNAPSHOT_CAP;
+    snaps.posHead = i;
+    snaps.posTime[i] = time;
+    const base = i * 3;
+    snaps.pos[base] = p[0];
+    snaps.pos[base + 1] = p[1];
+    snaps.pos[base + 2] = p[2];
+    if (snaps.posCount < NET_SNAPSHOT_CAP) snaps.posCount++;
+}
+
+/** append a rotation keyframe stamped at server-clock `time`. */
+export function pushRotationSnapshot(t: TransformTrait, time: number, q: Quat): void {
+    const snaps = ensureNetSnapshots(t);
+    const i = (snaps.rotHead + 1) % NET_SNAPSHOT_CAP;
+    snaps.rotHead = i;
+    snaps.rotTime[i] = time;
+    const base = i * 4;
+    snaps.rot[base] = q[0];
+    snaps.rot[base + 1] = q[1];
+    snaps.rot[base + 2] = q[2];
+    snaps.rot[base + 3] = q[3];
+    if (snaps.rotCount < NET_SNAPSHOT_CAP) snaps.rotCount++;
+}
+
+/** collapse both rings to a single keyframe at `(pos, quat, time)`. used on a
+ *  teleport edge (and local→remote ownership handoff) so the sampler holds on the
+ *  new pose instead of interpolating across the discontinuity. */
+export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, time: number): void {
+    const snaps = ensureNetSnapshots(t);
+    snaps.posHead = 0;
+    snaps.posCount = 1;
+    snaps.posTime[0] = time;
+    snaps.pos[0] = pos[0];
+    snaps.pos[1] = pos[1];
+    snaps.pos[2] = pos[2];
+    snaps.rotHead = 0;
+    snaps.rotCount = 1;
+    snaps.rotTime[0] = time;
+    snaps.rot[0] = rotation[0];
+    snaps.rot[1] = rotation[1];
+    snaps.rot[2] = rotation[2];
+    snaps.rot[3] = rotation[3];
+}
+
+// bracket search result, reused across calls (single-threaded sampler).
+const _bracket = { lo: 0, hi: 0, frac: 0 };
+
+/**
+ * find the two ring entries bracketing `renderTime` and the [0,1] fraction
+ * between them, written into the shared `_bracket`. ring is time-ordered
+ * oldest→newest. edge cases collapse to a single-entry hold (`lo === hi`):
+ * past the newest keyframe (buffer dry → hold newest), before the oldest (only
+ * right after join → hold oldest), or a lone entry.
+ */
+function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
+    const cap = time.length;
+    const newest = head;
+    const oldest = (head - count + 1 + cap) % cap;
+
+    if (count === 1 || renderTime >= time[newest]!) {
+        _bracket.lo = _bracket.hi = newest;
+        _bracket.frac = 0;
+        return;
+    }
+    if (renderTime <= time[oldest]!) {
+        _bracket.lo = _bracket.hi = oldest;
+        _bracket.frac = 0;
+        return;
+    }
+    // walk back from the newest until an entry sits at/under renderTime.
+    let hi = newest;
+    for (let n = 1; n < count; n++) {
+        const lo = (newest - n + cap) % cap;
+        if (time[lo]! <= renderTime) {
+            const span = time[hi]! - time[lo]!;
+            _bracket.lo = lo;
+            _bracket.hi = hi;
+            _bracket.frac = span > 0 ? (renderTime - time[lo]!) / span : 0;
+            return;
+        }
+        hi = lo;
+    }
+    // unreachable (renderTime > time[oldest] is guaranteed here); hold oldest.
+    _bracket.lo = _bracket.hi = oldest;
+    _bracket.frac = 0;
+}
+
+/** sample the interpolated local position at `renderTime` into `out`. */
+export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void {
+    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
+    const lo = _bracket.lo * 3;
+    const hi = _bracket.hi * 3;
+    const f = _bracket.frac;
+    out[0] = snaps.pos[lo]! + (snaps.pos[hi]! - snaps.pos[lo]!) * f;
+    out[1] = snaps.pos[lo + 1]! + (snaps.pos[hi + 1]! - snaps.pos[lo + 1]!) * f;
+    out[2] = snaps.pos[lo + 2]! + (snaps.pos[hi + 2]! - snaps.pos[lo + 2]!) * f;
+}
+
+const _rotLo = quat.create();
+const _rotHi = quat.create();
+
+/** sample the interpolated local rotation at `renderTime` into `out`. */
+export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void {
+    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime);
+    const lo = _bracket.lo * 4;
+    const hi = _bracket.hi * 4;
+    if (_bracket.lo === _bracket.hi) {
+        out[0] = snaps.rot[lo]!;
+        out[1] = snaps.rot[lo + 1]!;
+        out[2] = snaps.rot[lo + 2]!;
+        out[3] = snaps.rot[lo + 3]!;
+        return;
+    }
+    _rotLo[0] = snaps.rot[lo]!;
+    _rotLo[1] = snaps.rot[lo + 1]!;
+    _rotLo[2] = snaps.rot[lo + 2]!;
+    _rotLo[3] = snaps.rot[lo + 3]!;
+    _rotHi[0] = snaps.rot[hi]!;
+    _rotHi[1] = snaps.rot[hi + 1]!;
+    _rotHi[2] = snaps.rot[hi + 2]!;
+    _rotHi[3] = snaps.rot[hi + 3]!;
+    quat.slerp(out, _rotLo, _rotHi, _bracket.frac);
+}
 
 /* ── controls (editor + persistence) ── */
 
@@ -202,10 +388,13 @@ sync(TransformTrait, 'teleport', {
  * actually changed. `setPosition` / `setQuaternion` dirty just their own slice;
  * `markTransformDirty` (physics, animator, compound/world writes) dirties both.
  *
- * receiving side copies the value and invalidates world caches, the per-frame
- * `interpolate()` chase-lerps `interpolatedWorld*` toward the freshly-landed
- * pose, with a teleport edge handled via the `teleport` counter. no snapshot
- * buffer, no prev seeding.
+ * receiving side copies the value into the live field (world caches invalidated
+ * for matrix/raycast/debug readers) and, client-side, appends a timestamped
+ * keyframe to the snapshot ring the per-frame `interpolate()` samples. keyframes
+ * are stamped with the raw authoritative server time (`clock.lastServerStamp`,
+ * refreshed per-tick by `server_clock`), NOT arrival time, so packet jitter never
+ * leaks into the timeline. teleport edges are handled by the sampler via the
+ * `teleport` counter.
  */
 const transformPositionSync = sync(TransformTrait, 'position', {
     schema: pack.position(),
@@ -213,6 +402,8 @@ const transformPositionSync = sync(TransformTrait, 'position', {
     unpack: (p, t) => {
         vec3.copy(t.position, p);
         markWorldDirty(t);
+        const runtime = t._node?.scene?.runtime;
+        if (runtime?.client) pushPositionSnapshot(t, runtime.clock.lastServerStamp, p);
     },
     authority: 'owner',
     rate: syncRate.distance(0.05), // 5cm
@@ -224,6 +415,8 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
     unpack: (q, t) => {
         quat.copy(t.quaternion, q);
         markWorldDirty(t);
+        const runtime = t._node?.scene?.runtime;
+        if (runtime?.client) pushRotationSnapshot(t, runtime.clock.lastServerStamp, q);
     },
     authority: 'owner',
     rate: syncRate.angle(0.02), // ~1.1°

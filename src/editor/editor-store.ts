@@ -114,10 +114,15 @@ export type EditorStore = {
     /* ── network latency simulation (editor dev only) ──
      * When enabled, edit-client's RAF loop holds outbound + inbound WS
      * frames to simulate round-trip latency; `netSimRttMs` is split in
-     * half across each direction. Read by kit/runtime/edit-client.ts via
+     * half across each direction. `netSimJitterMs` adds a per-frame uniform
+     * random [0, jitter] on top, so releases are unevenly spaced — the
+     * variable-latency condition that exercises snapshot interpolation and
+     * the server-clock estimator (a constant delay alone spaces releases
+     * evenly and hides jitter). Read by kit/runtime/edit-client.ts via
      * `useEditor.getState()` each frame. Per-session, never persisted. */
     netSimEnabled: boolean;
     netSimRttMs: number;
+    netSimJitterMs: number;
 
     /* ── hotbar (localStorage-persisted user palette, shared across rooms) ── */
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
@@ -158,6 +163,7 @@ export type EditorStore = {
     /* ── net sim ── */
     setNetSimEnabled: (enabled: boolean) => void;
     setNetSimRttMs: (ms: number) => void;
+    setNetSimJitterMs: (ms: number) => void;
 };
 
 export const useEditor = create<EditorStore>((set, _get) => ({
@@ -206,6 +212,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     netSimEnabled: false,
     netSimRttMs: 100,
+    netSimJitterMs: 0,
 
     hotbar: loadHotbar(),
 
@@ -268,6 +275,7 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     setNetSimEnabled: (netSimEnabled) => set({ netSimEnabled }),
     setNetSimRttMs: (netSimRttMs) => set({ netSimRttMs }),
+    setNetSimJitterMs: (netSimJitterMs) => set({ netSimJitterMs }),
 }));
 
 // persist hotbar slot changes to localStorage. only fires when the array

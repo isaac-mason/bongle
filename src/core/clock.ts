@@ -34,6 +34,14 @@ export type Clock = {
     /** client-side continuous-sync state for `server` (see ClockSync). unused on
      *  the server and on local rooms, there `server` just dead-reckons via `tick`. */
     sync: ClockSync;
+    /** RAW authoritative server time (seconds) the most recent `server_clock` push
+     *  carried, stored unfiltered (NOT the skewed `server` render clock). refreshed
+     *  every tick (server_clock is per-tick), so it timestamps remote-transform
+     *  snapshot keyframes at the cadence a moving entity emits them. reading the
+     *  skewed `server` here instead would smuggle arrival jitter back into keyframe
+     *  timestamps, the exact thing this stamp exists to remove. 0 until the first
+     *  push; on the server / local rooms it stays 0 (no pushes arrive). */
+    lastServerStamp: number;
 };
 
 /**
@@ -82,6 +90,32 @@ export type ClockSync = {
     samples: ClockSample[];
     /** false until the first sample lands, `server` rides the join seed until then. */
     synced: boolean;
+    /** local-monotonic time of the last sample folded into the estimator. gates
+     *  the feed to ~`SYNC_OBSERVE_MIN_INTERVAL`: `server_clock` is per-tick (~60Hz)
+     *  so `lastServerStamp` stays fresh for keyframes, but the least-delayed window
+     *  (12s TTL, 16-sample cap) needs samples spread across time, not 16 crammed
+     *  into ~0.27s. decimating the feed reproduces the pre-per-tick ~10Hz cadence. */
+    lastObserved: number;
+
+    // ── adaptive remote-transform interp buffer (Source cl_interp_ratio style) ──
+    /** measured one-way latency SPREAD over the sample window (seconds): the gap
+     *  between the least-delayed sample and the `JITTER_COVERAGE` percentile of the
+     *  most-delayed. `clock.server` is anchored to the least-delayed (min latency),
+     *  so remote snapshots landing slower than that arrive behind render time and
+     *  snap; holding render time back by this spread keeps `JITTER_COVERAGE` of them
+     *  bracketable. a percentile (not the raw max) so a lone outlier doesn't pin the
+     *  buffer wide for the whole window. */
+    latencyJitter: number;
+    /** transform-only render-behind currently applied on top of `clock.server`
+     *  (seconds), slewed toward `max(0, latencyJitter − SERVER_CLOCK_INTERP_DELAY)`.
+     *  0 whenever jitter fits inside the fixed 50ms buffer (i.e. good connections),
+     *  so those are byte-identical to a fixed buffer. projectiles are unaffected —
+     *  this rides only the transform render clock. */
+    interpMargin: number;
+    /** monotonic transform render clock (`clock.server − interpMargin`, clamped
+     *  non-decreasing). the clamp guards the one case the slew can't: a backward
+     *  snap of `clock.server` (refocused tab) would otherwise rewind remote motion. */
+    serverRenderTime: number;
 };
 
 /** one push observation: `offset` is render-behind (`serverClock − recvTime`);
@@ -96,6 +130,12 @@ const SYNC_SAMPLE_TTL = 12;
 /** residual beyond this (seconds) snaps instead of slewing, matches ioq3's
  *  RESET_TIME (500ms); slewing a multi-second gap (refocused tab) would lag reality. */
 const SYNC_SNAP_THRESHOLD = 0.5;
+/** min local-monotonic gap between estimator samples (seconds). `server_clock`
+ *  arrives per-tick (~60Hz) to keep `lastServerStamp` fresh for keyframe stamping,
+ *  but the least-delayed offset filter is fed at ~10Hz so its 12s TTL window holds
+ *  samples spread over time rather than a fraction of a second. matches the prior
+ *  every-6-ticks push cadence. */
+const SYNC_OBSERVE_MIN_INTERVAL = 0.1;
 /** proportional pull strength (per second): a small error decays with ~1s time
  *  constant, invisibly slow at the sub-10ms drift we see in steady state. */
 const SYNC_CORRECTION_STIFFNESS = 1.0;
@@ -108,15 +148,38 @@ const SYNC_MAX_SLEW_RATE = 0.1;
  *  reliable+ordered (no loss), so this covers connection jitter only: ~50ms absorbs a
  *  typical head-of-line stall, keeping server-stamped events from rendering early. */
 export const SERVER_CLOCK_INTERP_DELAY = 0.05;
+/** fraction of packets the adaptive transform buffer keeps bracketable. the jitter
+ *  spread is measured to this percentile of latency (not the raw max), so the worst
+ *  ~5% snap rather than dragging the whole buffer (and the visible lag) out to a lone
+ *  outlier. this is Source's `cl_interp_ratio` tolerance expressed as a percentile. */
+const JITTER_COVERAGE = 0.95;
+/** slew caps for `interpMargin` (fraction of real time). grow fast so a rising jitter
+ *  floor is covered before it snaps; shrink slow (hysteresis) so a lull doesn't yank
+ *  the lag back and immediately re-dry. both stay < 1 so `clock.server − interpMargin`
+ *  keeps advancing (render clock never freezes on the slew path). */
+const INTERP_MARGIN_GROW_RATE = 0.5;
+const INTERP_MARGIN_SHRINK_RATE = 0.1;
+
+/** scratch for the per-observe percentile sort (≤ SYNC_SAMPLES_MAX live samples). */
+const _sortedOffsets = new Float64Array(SYNC_SAMPLES_MAX);
 
 function newSync(): ClockSync {
-    return { targetOffset: 0, appliedOffset: 0, samples: [], synced: false };
+    return {
+        targetOffset: 0,
+        appliedOffset: 0,
+        samples: [],
+        synced: false,
+        lastObserved: 0,
+        latencyJitter: 0,
+        interpMargin: 0,
+        serverRenderTime: 0,
+    };
 }
 
 /** `seed` is the server clock to align `server` to (from the join handshake);
  *  0 for the server itself and for local rooms. `time`/`wall` start at 0. */
 export function init(seed = 0): Clock {
-    return { time: 0, server: seed, wall: 0, sync: newSync() };
+    return { time: 0, server: seed, wall: 0, sync: newSync(), lastServerStamp: 0 };
 }
 
 /** advance the fixed-cadence clocks by the elapsed tick delta (seconds). `time` is
@@ -152,25 +215,46 @@ export function advanceWall(clock: Clock, delta: number): void {
  *  offset) as the target, the tightest "behind by one-way latency". */
 export function observeSample(clock: Clock, serverClock: number, recvTime: number): void {
     const sync = clock.sync;
-    const offset = serverClock - recvTime;
 
+    // store the raw authoritative stamp EVERY push (per-tick), so remote-transform
+    // keyframes timestamp against a value that refreshes at the cadence a moving
+    // entity emits poses. this is the unfiltered server time, distinct from the
+    // skewed `server` render clock the estimator drives below.
+    clock.lastServerStamp = serverClock;
+
+    // decimate the estimator feed to ~`SYNC_OBSERVE_MIN_INTERVAL`. the first sample
+    // always passes (it flips `synced` and adopts the offset); afterward we skip
+    // pushes that arrive closer than the interval so the least-delayed window spans
+    // real time. `lastServerStamp` above is unaffected, it always updated.
+    if (sync.synced && recvTime - sync.lastObserved < SYNC_OBSERVE_MIN_INTERVAL) return;
+    sync.lastObserved = recvTime;
+
+    const offset = serverClock - recvTime;
     sync.samples.push({ offset, recvTime });
     // age out the window (oldest first), then bound its size as a backstop.
     const cutoff = recvTime - SYNC_SAMPLE_TTL;
     while (sync.samples.length > 0 && sync.samples[0].recvTime < cutoff) sync.samples.shift();
     while (sync.samples.length > SYNC_SAMPLES_MAX) sync.samples.shift();
 
-    let best = sync.samples[0];
-    for (let i = 1; i < sync.samples.length; i++) {
-        if (sync.samples[i].offset > best.offset) best = sync.samples[i];
-    }
-    sync.targetOffset = best.offset;
+    // sort the live offsets ascending (offset falls as latency rises, so ascending
+    // is most-delayed → least-delayed). the top entry is the least-delayed sample
+    // (→ targetOffset); the gap from it down to the `JITTER_COVERAGE` percentile of
+    // the most-delayed is the latency spread the transform buffer must absorb.
+    const n = sync.samples.length;
+    for (let i = 0; i < n; i++) _sortedOffsets[i] = sync.samples[i]!.offset;
+    _sortedOffsets.subarray(0, n).sort();
+    sync.targetOffset = _sortedOffsets[n - 1]!;
+    // drop the worst ~(1 − JITTER_COVERAGE) of samples (rounded, so a full 16-sample
+    // window trims the single most-delayed) — outlier robustness, else one spike pins
+    // the buffer wide for the whole window.
+    const coverageIndex = Math.min(n - 1, Math.round((1 - JITTER_COVERAGE) * n));
+    sync.latencyJitter = _sortedOffsets[n - 1]! - _sortedOffsets[coverageIndex]!;
 
     // first fix: adopt the offset outright, the next `syncServer` snaps `server`
     // off the dead-reckoned join seed onto the shared timeline.
     if (!sync.synced) {
         sync.synced = true;
-        sync.appliedOffset = best.offset;
+        sync.appliedOffset = sync.targetOffset;
     }
 }
 
@@ -202,4 +286,35 @@ export function syncServer(clock: Clock, now: number, dt: number): void {
     // the interp delay is a constant, so it doesn't affect monotonicity.
     const next = now + sync.appliedOffset - SERVER_CLOCK_INTERP_DELAY;
     if (next > clock.server) clock.server = next;
+}
+
+/**
+ * the render clock remote transform snapshots are sampled on: `clock.server` held
+ * back by an adaptive, jitter-sized margin. `clock.server` tracks the LEAST-delayed
+ * packets (min latency), so on a jittery link the slower packets land behind it and
+ * their keyframes snap; `interpMargin` widens the render-behind to cover
+ * `JITTER_COVERAGE` of the observed latency spread, keeping them bracketable.
+ *
+ * call once per frame per room (after `syncServer`, so `clock.server` is fresh). it
+ * slews `interpMargin` toward `max(0, latencyJitter − SERVER_CLOCK_INTERP_DELAY)` —
+ * 0 while jitter fits the fixed 50ms buffer, so good connections match a fixed
+ * buffer exactly — and returns the monotonic render time. projectiles read
+ * `clock.server` directly and are unaffected.
+ */
+export function transformRenderTime(clock: Clock, dt: number): number {
+    const sync = clock.sync;
+
+    // the fixed 50ms buffer already covers the first slice of spread, so only the
+    // excess needs an adaptive margin (target 0 → no margin on good connections).
+    const target = Math.max(0, sync.latencyJitter - SERVER_CLOCK_INTERP_DELAY);
+    const rate = target > sync.interpMargin ? INTERP_MARGIN_GROW_RATE : INTERP_MARGIN_SHRINK_RATE;
+    const maxStep = rate * dt;
+    const residual = target - sync.interpMargin;
+    sync.interpMargin += residual > maxStep ? maxStep : residual < -maxStep ? -maxStep : residual;
+
+    // monotonic clamp: the slew keeps this advancing, but a backward snap of
+    // `clock.server` (refocused tab) must not rewind remote motion.
+    const next = clock.server - sync.interpMargin;
+    if (next > sync.serverRenderTime) sync.serverRenderTime = next;
+    return sync.serverRenderTime;
 }

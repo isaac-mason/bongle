@@ -1185,8 +1185,13 @@ export function update(state: EngineClient, delta: number) {
         // interpolate replicated transforms first so rig roots are at their
         // visual position for the frame (animator writes to child bones, not
         // rig roots, so visibility only needs roots, not bones, settled).
+        // renderTime is the render-behind server clock (plus an adaptive jitter
+        // margin): remote snapshot rings are sampled against it, so peers render
+        // ~one-way-latency + interp-buffer behind live, smoothly bracketed between the
+        // poses they actually sent. the margin widens on jittery links so slow packets
+        // stay bracketable instead of snapping; 0 on good ones.
         Debug.begin(room.clientMetrics, 'interpolate');
-        Interpolation.interpolate(room.interpolation, alpha, delta);
+        Interpolation.interpolate(room.interpolation, alpha, Clock.transformRenderTime(room.clock, delta));
         Debug.end(room.clientMetrics, 'interpolate');
 
         // user frame scripts (camera follow, local player motion, etc.) run

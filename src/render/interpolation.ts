@@ -8,12 +8,14 @@
  *     lerps `prev` → `position` with the fixed-step alpha. classic
  *     prev→cur interpolation, godot-style.
  *
- *   remote (non-owner): position changes whenever a `pose` sync lands
- *     (jittery, not tick-aligned). `interpolate()` chase-lerps
- *     `interpolatedWorld*` toward `world*` with a frame-rate-
- *     independent rate. teleport edge (counter changed since last
- *     frame) snaps instead of lerping so a discontinuity doesn't
- *     smear visually.
+ *   remote (non-owner): pose syncs land into a timestamped ring
+ *     (`_netSnapshots`, filled by the transform sync unpacks). every
+ *     frame `interpolate()` samples the ring at the render-behind
+ *     server clock (`clock.server`), bracketing the two keyframes
+ *     around render time. constant visual lag regardless of speed,
+ *     jitter absorbed by the buffer, motion follows the true sent
+ *     path. teleport edge (counter changed) collapses the ring to the
+ *     current pose so a discontinuity doesn't smear visually.
  *
  *   predicted physics (owner with prediction): separate path,
  *     world-space correction-blend against an authoritative pose with
@@ -38,6 +40,9 @@ import {
     getWorldMatrix,
     hasTransformedParent,
     markInterpolatedDescendantsDirty,
+    resetNetSnapshots,
+    samplePositionSnapshot,
+    sampleRotationSnapshot,
     TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
     TRANSFORM_DIRTY_INTERPOLATED_TRS,
     type TransformTrait,
@@ -56,11 +61,6 @@ const CORRECTION_SNAP_THRESHOLD = 0.01;
 const CORRECTION_HARD_SNAP_THRESHOLD = 2.0;
 /** frames over which to blend a small correction */
 const CORRECTION_BLEND_FRAMES = 6;
-
-/** chase-lerp catch-up rate (1/s). visual position reaches ~95% of
- *  target in ~3/rate seconds. higher = snappier, more packet-jitter
- *  visible; lower = smoother, more visible lag. */
-const REMOTE_CHASE_RATE = 30;
 
 // ── scratch (reused to avoid allocation) ────────────────────────────────
 
@@ -121,15 +121,17 @@ export function snapshot(state: Interpolation): void {
  * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
  * ancestor on next read.
  *
+ * `renderTime` is the room's render-behind server clock (`clock.server`), the
+ * timeline remote snapshots are sampled on.
+ *
  * per-frame routing pivot:
  *   - predicted physics → world-space correction-blend (stateful)
  *   - owner (node.owner === this room's playerId) → fixed-step
  *     prev→cur lerp at `alpha`
- *   - remote (non-owner) → chase-lerp `interpolatedWorld*` toward
- *     `world*` with frame-rate-independent rate; teleport edge snaps
+ *   - remote (non-owner) → sample the snapshot ring at `renderTime`;
+ *     teleport edge collapses the ring to the current pose
  */
-export function interpolate(state: Interpolation, alpha: number, dt: number): void {
-    const chaseK = 1 - Math.exp(-REMOTE_CHASE_RATE * dt);
+export function interpolate(state: Interpolation, alpha: number, renderTime: number): void {
     const playerId = state._playerId;
 
     for (const transform of state._nodes._interpolating) {
@@ -145,7 +147,7 @@ export function interpolate(state: Interpolation, alpha: number, dt: number): vo
             sampleFixedStepPose(transform, alpha, _interpLocalPos, _interpLocalQuat);
             writeInterpolated(transform, _interpLocalPos, _interpLocalQuat);
         } else {
-            applyChaseInterpolation(transform, chaseK);
+            sampleSnapshotPose(transform, renderTime);
         }
 
         if (node.children.length > 0) markInterpolatedDescendantsDirty(node);
@@ -169,48 +171,39 @@ function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, out
 }
 
 /**
- * remote chase path. position is the authoritative latest target
- * (refreshed whenever a pose sync lands). visual lerps toward it with
- * a frame-rate-independent rate. teleport edge snaps instead of
- * smearing across the discontinuity.
+ * remote snapshot-interpolation path. pose syncs landed into a timestamped ring
+ * (`_netSnapshots`, filled by the position/rotation sync unpacks). sample the ring
+ * at `renderTime` (the render-behind server clock) to get a smooth local pose, then
+ * publish it through the shared interpolated-world write — which handles both
+ * top-level (local === world) and nested (compose with the parent's interpolated
+ * matrix) exactly as the owner path does.
  *
- * works directly in world space, top-level nodes have world === local
- * so the chase target is `position`; nested nodes resolve their world
- * target via `getWorldMatrix`'s lazy recompute (already invalidated by
- * pose unpack's `markWorldDirty`), decomposed for slerp.
+ * a teleport edge (counter changed since last frame) collapses the ring to the
+ * current pose so we hold on it instead of smearing across the discontinuity. an
+ * empty ring (enrolled but no pose landed yet) holds at the current local pose.
  */
-function applyChaseInterpolation(t: TransformTrait, k: number): void {
+function sampleSnapshotPose(t: TransformTrait, renderTime: number): void {
+    const snaps = t._netSnapshots;
+
     if (t.teleport !== t.lastTeleport) {
         t.lastTeleport = t.teleport;
-        sampleWorldPose(t, _authWorldPos, _authWorldQuat, _authWorldScale);
-        vec3.copy(t.interpolatedWorldPosition, _authWorldPos);
-        quat.copy(t.interpolatedWorldQuaternion, _authWorldQuat);
-        vec3.copy(t.interpolatedWorldScale, _authWorldScale);
-    } else {
-        sampleWorldPose(t, _authWorldPos, _authWorldQuat, _authWorldScale);
-        vec3.lerp(t.interpolatedWorldPosition, t.interpolatedWorldPosition, _authWorldPos, k);
-        quat.slerp(t.interpolatedWorldQuaternion, t.interpolatedWorldQuaternion, _authWorldQuat, k);
-        vec3.copy(t.interpolatedWorldScale, _authWorldScale);
+        if (snaps) resetNetSnapshots(t, t.position, t.quaternion, renderTime);
+        writeInterpolated(t, t.position, t.quaternion);
+        return;
     }
-    mat4.fromRotationTranslationScale(
-        t.interpolatedWorldMatrix,
-        t.interpolatedWorldQuaternion,
-        t.interpolatedWorldPosition,
-        t.interpolatedWorldScale,
-    );
-    t._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
-}
-
-/** read the transform's current world pose (lazy-recompute via the
- *  world chain) into the provided scratch outputs. */
-function sampleWorldPose(t: TransformTrait, outPos: Vec3, outQuat: Quat, outScale: Vec3): void {
-    if (!hasTransformedParent(t)) {
-        vec3.copy(outPos, t.position);
-        quat.copy(outQuat, t.quaternion);
-        vec3.copy(outScale, t.scale);
-    } else {
-        mat4.decompose(outQuat, outPos, outScale, getWorldMatrix(t));
+    if (!snaps) {
+        writeInterpolated(t, t.position, t.quaternion);
+        return;
     }
+    // sample each ring independently; a slice with no keyframes yet holds the
+    // current local value (position and rotation are independent syncs, so an
+    // entity that only rotates in place never fills the position ring, and vice
+    // versa).
+    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos);
+    else vec3.copy(_interpLocalPos, t.position);
+    if (snaps.rotCount > 0) sampleRotationSnapshot(snaps, renderTime, _interpLocalQuat);
+    else quat.copy(_interpLocalQuat, t.quaternion);
+    writeInterpolated(t, _interpLocalPos, _interpLocalQuat);
 }
 
 /**

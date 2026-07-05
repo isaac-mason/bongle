@@ -62,10 +62,16 @@ function drain(q: DelayQueue, now: number, sink: (bytes: Uint8Array) => void) {
     }
 }
 
-/** Per-direction hold in ms — half the configured round-trip, or 0 when off. */
-function simHalfRttMs(): number {
+/** Per-frame, per-direction hold in ms: half the configured round-trip plus a
+ *  fresh uniform [0, jitter] sample, or 0 when off. Sampled per enqueue so the
+ *  delay varies frame to frame — with the queue's monotonic release clamp a
+ *  CONSTANT delay would space frames evenly (no jitter); the random term is what
+ *  produces uneven inter-arrival gaps, the condition snapshot interpolation and
+ *  the server-clock estimator need to be exercised against. */
+function simDelayMs(): number {
     const s = EngineEditor.useEditor.getState();
-    return s.netSimEnabled ? s.netSimRttMs / 2 : 0;
+    if (!s.netSimEnabled) return 0;
+    return s.netSimRttMs / 2 + Math.random() * s.netSimJitterMs;
 }
 
 export async function start(opts: StartOptions) {
@@ -164,7 +170,7 @@ export async function start(opts: StartOptions) {
     const outbound = createDelayQueue();
     ws.onmessage = (ev) => {
         if (typeof ev.data === 'string') return;
-        enqueue(inbound, new Uint8Array(ev.data as ArrayBuffer), performance.now(), simHalfRttMs());
+        enqueue(inbound, new Uint8Array(ev.data as ArrayBuffer), performance.now(), simDelayMs());
     };
 
     let last = performance.now();
@@ -173,7 +179,7 @@ export async function start(opts: StartOptions) {
         last = now;
         drain(inbound, now, (bytes) => state.net.inbox.push(bytes));
         EngineClient.update(state, dt);
-        for (const msg of state.net.outbox) enqueue(outbound, msg, now, simHalfRttMs());
+        for (const msg of state.net.outbox) enqueue(outbound, msg, now, simDelayMs());
         state.net.outbox.length = 0;
         drain(outbound, now, (bytes) => {
             if (ws.readyState === WebSocket.OPEN) ws.send(bytes);

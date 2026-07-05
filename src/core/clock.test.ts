@@ -102,7 +102,9 @@ describe('Clock server-clock sync', () => {
     it('snaps when the gap is too large to slew (e.g. a refocused tab)', () => {
         const clock = Clock.init(0);
         Clock.observeSample(clock, 0.0, 0.0); // offset 0 → synced, applied 0
-        Clock.observeSample(clock, 2.0, 0.0); // offset 2.0 (> snap threshold)
+        // second sample spaced past the estimator decimation interval (per-tick
+        // pushes are decimated to ~10Hz); offset 2.0 (> snap threshold).
+        Clock.observeSample(clock, 2.2, 0.2);
         Clock.syncServer(clock, 10, 1 / 60);
         expect(clock.sync.appliedOffset).toBeCloseTo(2.0, 9);
         expect(clock.server).toBeCloseTo(12.0 - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
@@ -132,5 +134,80 @@ describe('Clock server-clock sync', () => {
         const trueServerNow = finalNow + trueOffset;
         // behind true server-now by the one-way latency AND the fixed interp buffer.
         expect(clock.server).toBeCloseTo(trueServerNow - L - Clock.SERVER_CLOCK_INTERP_DELAY, 6);
+    });
+});
+
+describe('Clock raw server stamp (keyframe timestamps)', () => {
+    it('stores lastServerStamp on EVERY push, even decimated ones', () => {
+        const clock = Clock.init(0);
+        Clock.observeSample(clock, 5.0, 0.0); // first: synced + folded
+        expect(clock.lastServerStamp).toBe(5.0);
+        // second arrives within the decimation interval: estimator skips it, but the
+        // raw stamp (which keyframes read) must still refresh at the per-tick cadence.
+        Clock.observeSample(clock, 5.1, 0.01);
+        expect(clock.lastServerStamp).toBe(5.1);
+        expect(clock.sync.samples.length).toBe(1); // feed was decimated
+    });
+});
+
+describe('Clock adaptive transform interp margin', () => {
+    // feed n samples ≥ the decimation interval apart (so all fold) with the given
+    // per-sample offset, offsets chosen so the sorted spread is known.
+    function feed(clock: Clock.Clock, offsets: number[]): void {
+        for (let i = 0; i < offsets.length; i++) {
+            const recvTime = i * 0.1; // 0.1s spacing ≥ SYNC_OBSERVE_MIN_INTERVAL
+            Clock.observeSample(clock, recvTime + offsets[i]!, recvTime);
+        }
+    }
+
+    // slew the margin to steady state (grow 0.5/s, so ~0.5s to cover 250ms).
+    function settleMargin(clock: Clock.Clock): void {
+        for (let i = 0; i < 300; i++) Clock.transformRenderTime(clock, 1 / 60);
+    }
+
+    it('stays at 0 when jitter fits inside the fixed 50ms buffer', () => {
+        const clock = Clock.init(0);
+        // 20ms spread — under SERVER_CLOCK_INTERP_DELAY, so no extra margin needed.
+        feed(
+            clock,
+            Array.from({ length: 16 }, (_, i) => 1.0 + (i % 2) * 0.02),
+        );
+        expect(clock.sync.latencyJitter).toBeCloseTo(0.02, 6);
+        settleMargin(clock);
+        expect(clock.sync.interpMargin).toBeCloseTo(0, 4);
+    });
+
+    it('widens to cover the jitter spread beyond the fixed buffer', () => {
+        const clock = Clock.init(0);
+        // half fast (offset 1.0), half slow (0.7): 300ms spread.
+        feed(
+            clock,
+            Array.from({ length: 16 }, (_, i) => (i < 8 ? 1.0 : 0.7)),
+        );
+        expect(clock.sync.latencyJitter).toBeCloseTo(0.3, 6);
+        settleMargin(clock);
+        // target = spread − fixed buffer = 0.30 − 0.05.
+        expect(clock.sync.interpMargin).toBeCloseTo(0.25, 3);
+    });
+
+    it('trims a lone outlier from the spread (percentile, not raw max)', () => {
+        const clock = Clock.init(0);
+        // 15 tight samples + 1 huge outlier; the outlier is dropped so it does not
+        // pin the buffer wide.
+        const offsets = Array.from({ length: 16 }, () => 1.0);
+        offsets[3] = 0.1; // 900ms outlier
+        feed(clock, offsets);
+        expect(clock.sync.latencyJitter).toBeCloseTo(0, 6); // outlier trimmed away
+    });
+
+    it('render time is monotonic across a backward snap of clock.server', () => {
+        const clock = Clock.init(0);
+        Clock.observeSample(clock, 0, 0); // synced, jitter 0 → margin 0
+        clock.server = 100;
+        const r1 = Clock.transformRenderTime(clock, 1 / 60);
+        expect(r1).toBeCloseTo(100, 6);
+        clock.server = 90; // refocused-tab style backward snap
+        const r2 = Clock.transformRenderTime(clock, 1 / 60);
+        expect(r2).toBeGreaterThanOrEqual(r1); // clamp holds, no rewind
     });
 });
