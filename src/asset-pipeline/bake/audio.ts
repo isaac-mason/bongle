@@ -161,14 +161,13 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
         .sort((a, b) => a.id.localeCompare(b.id));
 
     if (all.length === 0) {
-        // no sounds declared, clean up any leftover artifacts + codegen.
+        // No sounds declared: emit a valid empty manifest (no clips) rather than
+        // deleting it, so the client never 404s on audio-manifest.json. Drop the
+        // atlas/standalone binaries (unreferenced with 0 clips). The empty `hash`
+        // reads back falsy, so change gates treat it like missing audio and a
+        // later non-empty build rebuilds.
         try {
             fs.unlinkSync(paths.atlasFile);
-        } catch {
-            /* missing is fine */
-        }
-        try {
-            fs.unlinkSync(paths.manifestPath);
         } catch {
             /* missing is fine */
         }
@@ -177,6 +176,16 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
         } catch {
             /* */
         }
+        const empty: AudioManifest = {
+            hash: '',
+            atlasHash: '',
+            standaloneHash: '',
+            sampleRate: SAMPLE_RATE,
+            atlas: [],
+            standalone: [],
+        };
+        ensureDir(paths.outDir);
+        fs.writeFileSync(paths.manifestPath, JSON.stringify(empty, null, 2));
         ensureDir(path.dirname(paths.barrelPath));
         writeFileIfChanged(paths.barrelPath, EMPTY_BARREL);
         return false;

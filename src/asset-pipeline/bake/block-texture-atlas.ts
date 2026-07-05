@@ -90,19 +90,28 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
     const textures = registry.textures;
 
     if (textures.length === 0) {
-        // no textures, drop any leftover artifacts so downstream icon tasks
-        // hash a clean slate. Deleting the JSON also clears the cache marker,
-        // so the next non-empty build rebuilds unconditionally.
+        // No textures, but still emit a valid empty manifest so the client
+        // always gets a well-formed atlas (0 layers) rather than a 404. Drop
+        // the PNG (nothing references it at 0 layers). The empty `hash` reads
+        // back falsy, so downstream icon tasks + change gates treat this exactly
+        // like a missing atlas did, and a later non-empty build's real hash
+        // differs, forcing an unconditional rebuild.
         try {
             fs.unlinkSync(atlasPng);
         } catch {
             /* missing is fine */
         }
-        try {
-            fs.unlinkSync(atlasJson);
-        } catch {
-            /* missing is fine */
-        }
+        const empty: BlockTextureAtlasMetadata = {
+            tileSize: TILE_SIZE,
+            columns: 0,
+            rows: 0,
+            atlasWidth: 0,
+            atlasHeight: 0,
+            textures: [],
+            hash: '',
+        };
+        fs.mkdirSync(atlasDir, { recursive: true });
+        fs.writeFileSync(atlasJson, JSON.stringify(empty, null, 2));
         return false;
     }
 

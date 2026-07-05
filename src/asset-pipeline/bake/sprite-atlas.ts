@@ -92,18 +92,19 @@ export async function buildSpriteAtlas(
     const handles = [...spritesRegistry.byId.values()].map((h) => h.payload);
 
     if (handles.length === 0) {
-        // empty registry, drop any leftover artifacts so the cache marker
-        // resets cleanly. parallels buildBlockTextureAtlas's empty path.
+        // Empty registry: emit a valid empty manifest (no sprites) rather than
+        // deleting it, so the client never 404s on sprites-atlas.json. Drop the
+        // PNG (unreferenced at 0 sprites). The empty `hash` reads back falsy, so
+        // change gates treat it like a missing atlas and a later non-empty build
+        // rebuilds. Parallels buildBlockTextureAtlas's empty path.
         try {
             fs.unlinkSync(atlasPng);
         } catch {
             /* missing is fine */
         }
-        try {
-            fs.unlinkSync(atlasJson);
-        } catch {
-            /* missing is fine */
-        }
+        const empty: SpriteAtlasMetadata = { atlasSize: 0, sprites: {}, hash: '' };
+        fs.mkdirSync(atlasDir, { recursive: true });
+        fs.writeFileSync(atlasJson, JSON.stringify(empty, null, 2));
         return false;
     }
 
