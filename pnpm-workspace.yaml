@@ -14,7 +14,6 @@ onlyBuiltDependencies:
   - '@ffmpeg-installer/*'
   - '@ffprobe-installer/*'
   - canvas
-  - esbuild
   - puppeteer
   - sharp
   - skia-canvas
