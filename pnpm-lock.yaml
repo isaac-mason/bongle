@@ -2044,10 +2044,6 @@ packages:
       use-sync-external-store:
         optional: true
 
-ignoredOptionalDependencies:
-  - esbuild
-  - tsx
-
 snapshots:
 
   '@babel/runtime@7.29.2': {}
