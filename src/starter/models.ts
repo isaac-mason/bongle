@@ -13,7 +13,3 @@ import { model } from 'bongle';
 export const spark = model('starter:spark', {
     src: new URL('./assets/models/spark.gltf', import.meta.url),
 });
-
-export const peng = model('starter:peng', {
-    src: new URL('./assets/models/peng.gltf', import.meta.url),
-});
