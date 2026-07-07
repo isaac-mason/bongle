@@ -1,15 +1,3 @@
-/**
- * per-room game clock. monotonic seconds, advanced by the engine's tick
- * loop, paused implicitly when no tick fires (tab hidden, paused engine,
- * etc.). read by scripts via `ctx.clock.time`; reaches into the room handle
- * exposed on ClientContext / ServerContext.
- *
- * a tiny module rather than a free scalar on each room: gives the concept
- * a name, keeps the advance call self-explanatory at the engine tick
- * site, and leaves room to grow (tick count, paused flag, started-at
- * wall clock) without scattering disjoint scalars across room shapes.
- */
-
 export type Clock = {
     /** seconds since this room's clock started locally, advanced at the FIXED tick
      *  cadence (it steps, it does not advance between ticks within a frame). a
@@ -22,7 +10,15 @@ export type Clock = {
      *  it sits a touch behind by the one-way join latency, the offset wanted when
      *  placing server-stamped events (e.g. a projectile's spawn time). also fixed
      *  cadence. use this (not `time`) for anything compared across the wire. */
-    server: number;
+    serverSmoothed: number;
+    /** RAW authoritative server time (seconds) the most recent `server_clock` push
+     *  carried, stored unfiltered (NOT the skewed `server` render clock). refreshed
+     *  every tick (server_clock is per-tick), so it timestamps remote-transform
+     *  snapshot keyframes at the cadence a moving entity emits them. reading the
+     *  skewed `server` here instead would smuggle arrival jitter back into keyframe
+     *  timestamps, the exact thing this stamp exists to remove. 0 until the first
+     *  push; on the server / local rooms it stays 0 (no pushes arrive). */
+    serverLatest: number;
     /** smooth render time (seconds): advances every RENDER FRAME by the REAL frame
      *  delta, UNCLAMPED, unlike the integrator delta, so it never loses time to the
      *  stall clamp and tracks true elapsed across hitches/backgrounding. per-frame
@@ -34,14 +30,6 @@ export type Clock = {
     /** client-side continuous-sync state for `server` (see ClockSync). unused on
      *  the server and on local rooms, there `server` just dead-reckons via `tick`. */
     sync: ClockSync;
-    /** RAW authoritative server time (seconds) the most recent `server_clock` push
-     *  carried, stored unfiltered (NOT the skewed `server` render clock). refreshed
-     *  every tick (server_clock is per-tick), so it timestamps remote-transform
-     *  snapshot keyframes at the cadence a moving entity emits them. reading the
-     *  skewed `server` here instead would smuggle arrival jitter back into keyframe
-     *  timestamps, the exact thing this stamp exists to remove. 0 until the first
-     *  push; on the server / local rooms it stays 0 (no pushes arrive). */
-    lastServerStamp: number;
 };
 
 /**
@@ -179,7 +167,7 @@ function newSync(): ClockSync {
 /** `seed` is the server clock to align `server` to (from the join handshake);
  *  0 for the server itself and for local rooms. `time`/`wall` start at 0. */
 export function init(seed = 0): Clock {
-    return { time: 0, server: seed, wall: 0, sync: newSync(), lastServerStamp: 0 };
+    return { time: 0, serverSmoothed: seed, wall: 0, sync: newSync(), serverLatest: 0 };
 }
 
 /** advance the fixed-cadence clocks by the elapsed tick delta (seconds). `time` is
@@ -190,7 +178,7 @@ export function init(seed = 0): Clock {
  *  here so there's a single integrator (localMonotonic + offset), not two that fight. */
 export function tick(clock: Clock, delta: number): void {
     clock.time += delta;
-    if (!clock.sync.synced) clock.server += delta;
+    if (!clock.sync.synced) clock.serverSmoothed += delta;
 }
 
 /** advance the smooth render clock by a real frame delta, every frame on the
@@ -220,7 +208,7 @@ export function observeSample(clock: Clock, serverClock: number, recvTime: numbe
     // keyframes timestamp against a value that refreshes at the cadence a moving
     // entity emits poses. this is the unfiltered server time, distinct from the
     // skewed `server` render clock the estimator drives below.
-    clock.lastServerStamp = serverClock;
+    clock.serverLatest = serverClock;
 
     // decimate the estimator feed to ~`SYNC_OBSERVE_MIN_INTERVAL`. the first sample
     // always passes (it flips `synced` and adopts the offset); afterward we skip
@@ -273,7 +261,7 @@ export function syncServer(clock: Clock, now: number, dt: number): void {
     const residual = sync.targetOffset - sync.appliedOffset;
     if (Math.abs(residual) > SYNC_SNAP_THRESHOLD) {
         sync.appliedOffset = sync.targetOffset; // snap, too far to slew without lagging reality.
-        clock.server = now + sync.appliedOffset - SERVER_CLOCK_INTERP_DELAY;
+        clock.serverSmoothed = now + sync.appliedOffset - SERVER_CLOCK_INTERP_DELAY;
         return;
     }
 
@@ -285,7 +273,7 @@ export function syncServer(clock: Clock, now: number, dt: number): void {
     // against any non-monotonic `now`; the snap above is the only sanctioned jump.
     // the interp delay is a constant, so it doesn't affect monotonicity.
     const next = now + sync.appliedOffset - SERVER_CLOCK_INTERP_DELAY;
-    if (next > clock.server) clock.server = next;
+    if (next > clock.serverSmoothed) clock.serverSmoothed = next;
 }
 
 /**
@@ -314,7 +302,7 @@ export function transformRenderTime(clock: Clock, dt: number): number {
 
     // monotonic clamp: the slew keeps this advancing, but a backward snap of
     // `clock.server` (refocused tab) must not rewind remote motion.
-    const next = clock.server - sync.interpMargin;
+    const next = clock.serverSmoothed - sync.interpMargin;
     if (next > sync.serverRenderTime) sync.serverRenderTime = next;
     return sync.serverRenderTime;
 }

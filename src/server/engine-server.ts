@@ -660,7 +660,7 @@ export function update(state: EngineServer, delta: number) {
         Net.broadcastToRoom(state.net, state.rooms, room, {
             type: 'server_clock',
             roomId: room.id,
-            serverClock: room.clock.server,
+            serverClock: room.clock.serverSmoothed,
         });
 
         Debug.begin(room.metrics, 'nodes/update');

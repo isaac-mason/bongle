@@ -403,7 +403,7 @@ const transformPositionSync = sync(TransformTrait, 'position', {
         vec3.copy(t.position, p);
         markWorldDirty(t);
         const runtime = t._node?.scene?.runtime;
-        if (runtime?.client) pushPositionSnapshot(t, runtime.clock.lastServerStamp, p);
+        if (runtime?.client) pushPositionSnapshot(t, runtime.clock.serverLatest, p);
     },
     authority: 'owner',
     rate: syncRate.distance(0.05), // 5cm
@@ -416,7 +416,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
         quat.copy(t.quaternion, q);
         markWorldDirty(t);
         const runtime = t._node?.scene?.runtime;
-        if (runtime?.client) pushRotationSnapshot(t, runtime.clock.lastServerStamp, q);
+        if (runtime?.client) pushRotationSnapshot(t, runtime.clock.serverLatest, q);
     },
     authority: 'owner',
     rate: syncRate.angle(0.02), // ~1.1°

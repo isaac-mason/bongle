@@ -106,6 +106,7 @@
         "@tailwindcss/vite": "^4.2.2",
         "@tanstack/react-virtual": "^3.13.24",
         "archiver": "^7.0.1",
+        "bongle": "link:",
         "canvas": "^3.2.3",
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",

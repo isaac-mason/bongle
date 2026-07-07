@@ -5,7 +5,7 @@ describe('Clock.init', () => {
     it('seeds server, starts time/wall at 0, and is unsynced', () => {
         const clock = Clock.init(100);
         expect(clock.time).toBe(0);
-        expect(clock.server).toBe(100);
+        expect(clock.serverSmoothed).toBe(100);
         expect(clock.wall).toBe(0);
         expect(clock.sync.synced).toBe(false);
     });
@@ -15,19 +15,19 @@ describe('Clock server-clock sync', () => {
     it('dead-reckons server before any sample (offline / pre-sync fallback)', () => {
         const clock = Clock.init(100);
         Clock.tick(clock, 1 / 60);
-        expect(clock.server).toBeCloseTo(100 + 1 / 60, 6);
+        expect(clock.serverSmoothed).toBeCloseTo(100 + 1 / 60, 6);
         // not yet synced, syncServer must leave the dead-reckoned value alone.
         Clock.syncServer(clock, 5, 1 / 60);
-        expect(clock.server).toBeCloseTo(100 + 1 / 60, 6);
+        expect(clock.serverSmoothed).toBeCloseTo(100 + 1 / 60, 6);
     });
 
     it('once synced, the fixed tick no longer advances server (single integrator)', () => {
         const clock = Clock.init(0);
         Clock.observeSample(clock, 0, 0); // synced
         Clock.syncServer(clock, 100, 1 / 60); // server := 100 + offset(0) = 100
-        const before = clock.server;
+        const before = clock.serverSmoothed;
         Clock.tick(clock, 1 / 60); // must NOT bump server; syncServer owns it now
-        expect(clock.server).toBe(before);
+        expect(clock.serverSmoothed).toBe(before);
         expect(clock.time).toBeCloseTo(1 / 60, 9); // time still steps locally
     });
 
@@ -46,7 +46,7 @@ describe('Clock server-clock sync', () => {
         // server == the server-time we observed, minus the interp buffer, i.e. behind
         // true server-now by the one-way latency the push took PLUS the jitter buffer.
         // that lag is what lines up server-stamped events without pop-in.
-        expect(clock.server).toBeCloseTo(serverClock - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
+        expect(clock.serverSmoothed).toBeCloseTo(serverClock - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
     });
 
     it('keeps the least-delayed (max-offset) sample as the target', () => {
@@ -90,11 +90,11 @@ describe('Clock server-clock sync', () => {
         expect(clock.sync.appliedOffset).toBeLessThan(0.1);
 
         // drive frames: converges to the target, and server stays monotonic.
-        let prev = clock.server;
+        let prev = clock.serverSmoothed;
         for (let i = 1; i <= 1200; i++) {
             Clock.syncServer(clock, 5 + i / 60, 1 / 60);
-            expect(clock.server).toBeGreaterThanOrEqual(prev);
-            prev = clock.server;
+            expect(clock.serverSmoothed).toBeGreaterThanOrEqual(prev);
+            prev = clock.serverSmoothed;
         }
         expect(clock.sync.appliedOffset).toBeCloseTo(0.1, 4);
     });
@@ -107,7 +107,7 @@ describe('Clock server-clock sync', () => {
         Clock.observeSample(clock, 2.2, 0.2);
         Clock.syncServer(clock, 10, 1 / 60);
         expect(clock.sync.appliedOffset).toBeCloseTo(2.0, 9);
-        expect(clock.server).toBeCloseTo(12.0 - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
+        expect(clock.serverSmoothed).toBeCloseTo(12.0 - Clock.SERVER_CLOCK_INTERP_DELAY, 9);
     });
 
     it('end-to-end: client server clock tracks the server, one-way latency behind', () => {
@@ -133,7 +133,7 @@ describe('Clock server-clock sync', () => {
         const finalNow = 1200 * dt;
         const trueServerNow = finalNow + trueOffset;
         // behind true server-now by the one-way latency AND the fixed interp buffer.
-        expect(clock.server).toBeCloseTo(trueServerNow - L - Clock.SERVER_CLOCK_INTERP_DELAY, 6);
+        expect(clock.serverSmoothed).toBeCloseTo(trueServerNow - L - Clock.SERVER_CLOCK_INTERP_DELAY, 6);
     });
 });
 
@@ -141,11 +141,11 @@ describe('Clock raw server stamp (keyframe timestamps)', () => {
     it('stores lastServerStamp on EVERY push, even decimated ones', () => {
         const clock = Clock.init(0);
         Clock.observeSample(clock, 5.0, 0.0); // first: synced + folded
-        expect(clock.lastServerStamp).toBe(5.0);
+        expect(clock.serverLatest).toBe(5.0);
         // second arrives within the decimation interval: estimator skips it, but the
         // raw stamp (which keyframes read) must still refresh at the per-tick cadence.
         Clock.observeSample(clock, 5.1, 0.01);
-        expect(clock.lastServerStamp).toBe(5.1);
+        expect(clock.serverLatest).toBe(5.1);
         expect(clock.sync.samples.length).toBe(1); // feed was decimated
     });
 });
@@ -203,10 +203,10 @@ describe('Clock adaptive transform interp margin', () => {
     it('render time is monotonic across a backward snap of clock.server', () => {
         const clock = Clock.init(0);
         Clock.observeSample(clock, 0, 0); // synced, jitter 0 → margin 0
-        clock.server = 100;
+        clock.serverSmoothed = 100;
         const r1 = Clock.transformRenderTime(clock, 1 / 60);
         expect(r1).toBeCloseTo(100, 6);
-        clock.server = 90; // refocused-tab style backward snap
+        clock.serverSmoothed = 90; // refocused-tab style backward snap
         const r2 = Clock.transformRenderTime(clock, 1 / 60);
         expect(r2).toBeGreaterThanOrEqual(r1); // clamp holds, no rewind
     });

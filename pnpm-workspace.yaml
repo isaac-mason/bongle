@@ -8,7 +8,7 @@ minimumReleaseAge: 10080
 
 minimumReleaseAgeExclude:
   - '@bongle/*'
-  - 'vite'
+  - vite
 
 onlyBuiltDependencies:
   - '@ffmpeg-installer/*'
@@ -19,12 +19,5 @@ onlyBuiltDependencies:
   - sharp
   - skia-canvas
 
-# The engine's example projects depend on `bongle`; alias it to the engine
-# root so they build against local source. (Game submodules under games/*
-# are separate repos and intentionally NOT workspace members — keeping them
-# out means lib installs cleanly anywhere, including the website Docker
-# build, without the game checkouts present. They pin `bongle: github:...`
-# to stay fork-clean; add a local, gitignored workspace entry if you want
-# live engine changes while developing one.)
 overrides:
-  bongle: link:.
+  bongle: 'link:'

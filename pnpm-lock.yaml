@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  bongle: link:.
+  bongle: 'link:'
 
 importers:
 
@@ -252,6 +252,12 @@ importers:
         version: link:../..
 
   examples/voxel-model:
+    dependencies:
+      bongle:
+        specifier: link:../..
+        version: link:../..
+
+  games/wizard-game:
     dependencies:
       bongle:
         specifier: link:../..
