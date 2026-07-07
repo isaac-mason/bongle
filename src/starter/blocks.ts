@@ -142,6 +142,16 @@ export const glassPane = blockPreset.pane(
     { all: { texture: tex.glass } },
     { name: 'Glass Pane', sounds: soundPreset.glass },
 );
+export const snowBlock = block('starter:snow_block', {
+    name: 'Snow Block',
+    model: () => ({ type: 'cube', textures: { all: { texture: tex.snow } } }),
+    sounds: soundPreset.snow,
+});
+export const snowSlab = blockPreset.slab(
+    'starter:snow_slab',
+    { all: { texture: tex.snow } },
+    { name: 'Snow Slab', sounds: soundPreset.snow },
+);
 export const snowCarpet = blockPreset.carpet(
     'starter:snow_carpet',
     { all: { texture: tex.snow } },
