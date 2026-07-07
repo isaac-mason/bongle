@@ -220,6 +220,20 @@ export function installSelectionChatCommands(
     }
 
     /**
+     * The inspect / transform tools suppress the voxel-selection path — they
+     * wipe `selection.chunks` every frame — so a voxel selection committed
+     * from a chat command while one of them is active would vanish instantly.
+     * Switch to box-select first so the committed selection stays and renders.
+     * (All other tools keep the voxel selection, so leave them be.)
+     */
+    function ensureVoxelSelectionToolActive(): void {
+        const s = store.getState();
+        if (s.activeTool === 'inspect' || s.activeTool === 'transform') {
+            s.setActiveTool('box-select');
+        }
+    }
+
+    /**
      * Finalise a freshly-built shape selection: query nodes if requested,
      * gate voxels/nodes by the target filter, compose with current
      * selection per the algebra flag, and commit.
@@ -231,6 +245,7 @@ export function installSelectionChatCommands(
             scratch.nodes.clear();
         }
         if (!target.voxels) scratch.chunks.clear();
+        if (target.voxels) ensureVoxelSelectionToolActive();
 
         const next = compose(store.getState().selection, scratch, flags);
         store.setState({ selection: next });
