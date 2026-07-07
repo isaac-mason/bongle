@@ -41,7 +41,7 @@ const SMOOTH_SAMPLES_TICK = 30; // ~500ms at 60Hz
 const SMOOTH_SAMPLES_NET = 60; // ~1s at 60Hz
 
 type MetricFilter = (id: string) => boolean;
-const isNetMetric: MetricFilter = (id) => id.startsWith('net/in/') || id.startsWith('net/out/');
+const isNetMetric: MetricFilter = (id) => id.startsWith('net/in/') || id.startsWith('net/out/') || id === 'net/ping';
 const isCpuMetric: MetricFilter = (id) => !id.startsWith('net/');
 
 type Scope = {
@@ -322,6 +322,11 @@ function drawSummaryStrip(ctx: CanvasRenderingContext2D, x: number, y: number, w
             unit: 'ms',
         },
         {
+            label: 'ping',
+            value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/ping', SMOOTH_SAMPLES_NET).toFixed(0),
+            unit: 'ms',
+        },
+        {
             label: 'client in',
             value: smoothedAvg(data.activeRoom?.clientMetrics, 'net/ingress', SMOOTH_SAMPLES_NET).toFixed(1),
             unit: 'kb/s',
@@ -500,26 +505,31 @@ function drawMetricRow(
     }
     const avg = values.length > 0 ? sum / values.length : 0;
 
+    // reserved stats column at the RIGHT end of the row: the current value (bright) on
+    // top, with labeled min / avg / max STACKED below it (dim, smaller). the graph narrows
+    // to leave this column clear.
+    const STATS_W = 72;
+    const pad = 8;
+    const sxr = x + w - pad; // right edge for the right-aligned stats column
+
     ctx.font = '9px monospace';
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#888';
-    ctx.fillText(id, x + 8, y + 8);
+    ctx.fillText(id, x + pad, y + 8);
 
-    // header, right-aligned: current value (bright) at the far right, with labeled
-    // min/avg/max (dim, smaller) to its left, both up here so the graph stays clean.
-    const valText = cfg.format(last);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#eee';
-    ctx.fillText(valText, x + w - 10, y + 8);
-    const valW = ctx.measureText(valText).width; // measured at 9px, before the font shrink
+    ctx.fillText(cfg.format(last), sxr, y + 8);
     ctx.font = '8px monospace';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`min ${cfg.format(min)}  avg ${cfg.format(avg)}  max ${cfg.format(max)}`, x + w - 16 - valW, y + 8);
+    ctx.fillStyle = '#999';
+    ctx.fillText(`min ${cfg.format(min)}`, sxr, y + 19);
+    ctx.fillText(`avg ${cfg.format(avg)}`, sxr, y + 29);
+    ctx.fillText(`max ${cfg.format(max)}`, sxr, y + 39);
 
-    const gx = x + 8;
+    const gx = x + pad;
     const gy = y + 14;
-    const gw = w - 16;
+    const gw = w - STATS_W - pad * 2 - 6; // reserve the stats column (+ a small gap) at the end
     const gh = h - 18;
     ctx.fillStyle = cfg.bg;
     ctx.fillRect(gx, gy, gw, gh);
@@ -878,6 +888,25 @@ function TabStrip({ tab, onSelect }: { tab: DebugTab; onSelect: (t: DebugTab) =>
 // whole panel (all tabs, xyflow, dagre, log virtualization, metrics
 // widgets) lives in one chunk that only loads after the user opens it.
 
+// the cpu/net graph views: a right-aligned third of the width inside the full-width shell,
+// so the graphs are readable-narrow and most of the screen stays visible behind them.
+const graphColumnStyle: React.CSSProperties = {
+    alignSelf: 'flex-end',
+    width: 'calc(33.333vw - 16px)',
+    display: 'flex',
+    flex: '1 1 auto',
+    minHeight: 0,
+};
+
+// summary view: full-width, but only the stat-strip tall — the canvas captures pointer events,
+// so leaving it full-height would swallow clicks across the whole (now full-width) screen.
+const summaryRowStyle: React.CSSProperties = {
+    flex: '0 0 auto',
+    height: TOP_H,
+    display: 'flex',
+    minHeight: 0,
+};
+
 export default function DebugPanel({ tab }: { tab: DebugTab }) {
     const rooms = useClient((s) => s.rooms);
     const activePlayerId = useClient((s) => s.activePlayerId);
@@ -890,10 +919,11 @@ export default function DebugPanel({ tab }: { tab: DebugTab }) {
                 position: 'absolute',
                 top: 8,
                 left: 8,
+                right: 8,
                 bottom: 8,
-                // a third of the viewport wide rather than full-width, leaving an
-                // 8px gutter on each side of the column.
-                width: 'calc(33.333vw - 16px)',
+                // full-width shell: the tab bar + summary stats span the whole width, but the
+                // cpu/net GRAPH views are wrapped to a right-aligned third (graphColumn) so most
+                // of the screen stays visible while they're open.
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8,
@@ -904,9 +934,21 @@ export default function DebugPanel({ tab }: { tab: DebugTab }) {
         >
             <TabStrip tab={tab} onSelect={setDebugTab} />
 
-            {tab === 'summary' && <PerfCanvas view="summary" />}
-            {tab === 'perf' && <PerfCanvas view="cpu" />}
-            {tab === 'net' && <PerfCanvas view="net" />}
+            {tab === 'summary' && (
+                <div style={summaryRowStyle}>
+                    <PerfCanvas view="summary" />
+                </div>
+            )}
+            {tab === 'perf' && (
+                <div style={graphColumnStyle}>
+                    <PerfCanvas view="cpu" />
+                </div>
+            )}
+            {tab === 'net' && (
+                <div style={graphColumnStyle}>
+                    <PerfCanvas view="net" />
+                </div>
+            )}
             {tab === 'logs' && <LogsRow activeRoom={activeRoom} />}
             {tab === 'deps' && <DepsTab />}
             {/* renderer tab: panel body is empty, gpucat Inspector overlay

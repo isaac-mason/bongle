@@ -863,9 +863,12 @@ script(
             reconcileHud('joystick', wantHud && pc.controls.touch.joystick, () =>
                 createTouchJoystick(ctx, {
                     id: PlayerControllerTouchIds.moveJoystick,
+                    // dynamic: appears where you touch in the lower-left; a dimmed hint sits
+                    // at this anchor until the first touch, then it only shows while held.
+                    dynamic: true,
                     left: 24,
                     bottom: 24,
-                    size: 140,
+                    size: 104,
                     deadzone: 0.12,
                 }),
             );
@@ -876,7 +879,7 @@ script(
                     bottom: 24,
                     width: 96,
                     height: 96,
-                    label: '⤒',
+                    icon: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', // lucide arrow-up
                 }),
             );
             reconcileHud('sprintButton', wantHud && pc.controls.touch.sprintButton, () =>

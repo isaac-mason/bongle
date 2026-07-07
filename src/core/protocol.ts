@@ -224,6 +224,15 @@ export const Ping = pack.object({
     type: pack.literal('ping'),
 });
 
+/** Client → server: echoes the latest `NetPing.serverStamp` seen, so the server can measure
+ *  this client's RTT in its own clock (Quake `SV_CalcPings`-style). rides the per-tick packet
+ *  — no dedicated ping/pong exchange. 0 = none seen yet. */
+export const NetPingAck = pack.object({
+    type: pack.literal('net_ping_ack'),
+    serverStampAck: pack.uint32(),
+});
+export type NetPingAck = pack.SchemaType<typeof NetPingAck>;
+
 /** Client tells the server which Player is their active focus. */
 export const SetActiveRoom = pack.object({
     type: pack.literal('set_active_room'),
@@ -483,6 +492,7 @@ export type VoxelAck = pack.SchemaType<typeof VoxelAck>;
 
 export const ClientMessage = pack.union('type', [
     Ping,
+    NetPingAck,
     SetActiveRoom,
     RequestMetrics,
     DebugSubscribe,
@@ -570,6 +580,16 @@ export const ServerClock = pack.object({
 });
 
 export type ServerClock = pack.SchemaType<typeof ServerClock>;
+
+/** Server → client: `serverStamp` (server monotonic ms at send) for the client to echo back
+ *  via `NetPingAck`; `pingMs` is the server's smoothed RTT measurement, sent down for the
+ *  client's net HUD. rides the per-tick packet. both 0 until known. */
+export const NetPing = pack.object({
+    type: pack.literal('net_ping'),
+    serverStamp: pack.uint32(),
+    pingMs: pack.uint16(),
+});
+export type NetPing = pack.SchemaType<typeof NetPing>;
 
 /**
  * Server instructs client to join a room. Sent on initial join, scene
@@ -846,6 +866,7 @@ export const DEBUG_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>([
 export const ServerMessage = pack.union('type', [
     Pong,
     ServerClock,
+    NetPing,
     JoinRoom,
     ActivateRoom,
     RoomList,

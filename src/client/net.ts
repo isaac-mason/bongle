@@ -13,6 +13,11 @@ export function init() {
         outboxMessages: [] as OutboxEntry[],
         bytesInByType: new Map<string, number>(),
         bytesOutByType: new Map<string, number>(),
+        /** latest `net_ping.serverStamp` from the server; echoed back each tick via
+         *  `net_ping_ack` so the server can measure our RTT (Quake-style). */
+        lastServerStamp: 0,
+        /** the server's smoothed measurement of OUR ping (ms), for the net HUD. */
+        pingMs: 0,
     };
 }
 

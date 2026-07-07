@@ -490,6 +490,13 @@ function processInbox(state: EngineClient): void {
                     break;
                 }
 
+                case 'net_ping':
+                    // remember the server's stamp to echo back (measures our RTT server-side);
+                    // stash the server's smoothed ping for the net HUD.
+                    state.net.lastServerStamp = message.serverStamp;
+                    state.net.pingMs = message.pingMs;
+                    break;
+
                 case 'activate_room':
                     processActivateRoom(state, message);
                     break;
@@ -1384,6 +1391,9 @@ export function update(state: EngineClient, delta: number) {
         if (delta > 0) {
             recordNetStats(activeRoom.clientMetrics, netStats, delta);
         }
+        // server-measured RTT, recorded every frame so the graph is continuous (the value
+        // refreshes as net_ping messages arrive).
+        Debug.record(activeRoom.clientMetrics, 'net/ping', state.net.pingMs, 'ms');
     }
 
     /* reset per-room input, snapshots prev and clears per-frame deltas.
@@ -1396,6 +1406,10 @@ export function update(state: EngineClient, delta: number) {
     /* derive pointer-lock from the active room's intent + UI/touch/focus. release
        runs here every frame; acquire only fires from user-gesture handlers. */
     Input.reconcilePointerLock(state.inputManager);
+
+    /* echo the latest server ping-stamp so the server can measure our RTT — rides this
+       tick's packet (Quake-style), no dedicated ping/pong. */
+    Net.send(state.net, { type: 'net_ping_ack', serverStampAck: state.net.lastServerStamp });
 
     /* flush outbox */
     Net.flush(state.net);

@@ -122,6 +122,10 @@ export function init(opts: InitOptions) {
         rpc,
         /** global metrics (tick timing) */
         metrics: Debug.createMetrics() as Debug.Metrics,
+        /** monotonic server time (ms), accumulated from the tick delta — the engine clock the
+         *  per-connection ping RTT is measured in (NOT performance.now / OS wall time). ping is
+         *  connection-level, so it can't ride a per-room `clock`; this is the server-global one. */
+        netTimeMs: 0,
         /** seconds accumulated since the last edit-mode perf digest (see perf-report) */
         perfSince: 0,
         /** seconds accumulated since the last auto-flush of dirty edit rooms to disk */
@@ -425,6 +429,14 @@ export function processInbox(state: EngineServer) {
                         Net.send(state.net, client, { type: 'pong' });
                         break;
 
+                    case 'net_ping_ack': {
+                        // client echoed the latest net_ping.serverStamp — fold the round trip
+                        // into this connection's smoothed ping (server clock, so no offset).
+                        const cs = state.clients.connected.get(client);
+                        if (cs) Clients.recordPingAck(cs, message.serverStampAck, Math.round(state.netTimeMs) >>> 0);
+                        break;
+                    }
+
                     case 'voxel_ack':
                         Discovery.handleVoxelAck(state.discovery, client, message);
                         break;
@@ -622,6 +634,10 @@ export function processInbox(state: EngineServer) {
 export function update(state: EngineServer, delta: number) {
     Debug.begin(state.metrics, 'tick');
 
+    // advance the server-global net clock first, so both the ping-ack RTT (in processInbox)
+    // and the net_ping stamps sent below read the same "now" this tick.
+    state.netTimeMs += delta * 1000;
+
     // inbox drains client messages, joins/room-creates do scene instantiation here,
     // a one-frame spike source distinct from the per-room tick stages.
     Debug.begin(state.metrics, 'inbox');
@@ -771,6 +787,14 @@ export function update(state: EngineServer, delta: number) {
                 if (!seen.has(key)) cursors.delete(key);
             }
         }
+    }
+
+    // per-connection ping beacon: stamp each client with the server-global net clock (it
+    // echoes it back via net_ping_ack) + hand it its current server-measured ping for the HUD.
+    // rides the per-tick packet the client already receives (server_clock), no extra ws frame.
+    const netStamp = Math.round(state.netTimeMs) >>> 0;
+    for (const cs of state.clients.connected.values()) {
+        Net.send(state.net, cs.id, { type: 'net_ping', serverStamp: netStamp, pingMs: Math.min(65535, cs.pingMs) });
     }
 
     // pack typed outbox messages into Uint8Array packets for the runtime

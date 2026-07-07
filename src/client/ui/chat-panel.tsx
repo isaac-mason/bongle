@@ -1,11 +1,13 @@
 /**
  * chat panel, minecraft-style bottom-of-viewport overlay.
  *
- *   closed: last few lines float bottom-left and fade after RECENT_LIFETIME_MS.
- *           non-interactive, the game keeps the clicks.
- *   open:   fullscreen-ish history pane appears above the input, scrolled to
- *           the bottom. clicking inside is allowed; clicking outside or Esc
- *           closes. opens with seed '/' (slash key) or '' (t key).
+ *   closed: desktop floats the last few lines bottom-left, fading after
+ *           RECENT_LIFETIME_MS. play-mode touch shows only the single newest line
+ *           beside a mid-left chat button (no stacked log under the joystick).
+ *   open:   history pane above the input, scrolled to the bottom. clicking outside
+ *           or Esc closes. opens with '/' (slash) or 't' on desktop; on play-mode
+ *           touch, the chat button opens a bottom-sheet docked above the soft keyboard,
+ *           over a dim backdrop that closes on tap and keeps touches off the controls.
  *
  * input handling: Enter sends verbatim; Tab accepts the highlighted
  * completion; ArrowUp/Down cycles the suggestion list (or recalls prior
@@ -18,13 +20,44 @@
  * outbox for the next tick to forward to the server.
  */
 
+import { MessageSquare } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ParseState, Suggestion } from '../../core/chat-commands';
 import * as ChatCommands from '../../core/chat-commands';
+import * as Device from '../../render/device';
 import type { ChatClient, ChatLine } from '../chat';
 import * as ClientChat from '../chat';
 import { useRoom } from './client-store';
+
+/** touch-primary (phone/tablet) — reuses the robust boot-time device probe. drives the
+ *  on-screen chat opener + bottom-sheet, since the `/`,`t` key openers don't exist there. */
+function useIsTouch(): boolean {
+    const [device] = useState(() => Device.init());
+    return device.touchPrimary;
+}
+
+/** px the soft keyboard covers at the bottom, tracked via visualViewport, so the open
+ *  sheet can dock just above it. 0 when inactive or unsupported. */
+function useKeyboardInset(active: boolean): number {
+    const [inset, setInset] = useState(0);
+    useEffect(() => {
+        const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+        if (!active || !vv) {
+            setInset(0);
+            return;
+        }
+        const update = () => setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+        update();
+        vv.addEventListener('resize', update);
+        vv.addEventListener('scroll', update);
+        return () => {
+            vv.removeEventListener('resize', update);
+            vv.removeEventListener('scroll', update);
+        };
+    }, [active]);
+    return inset;
+}
 
 const HISTORY_LIMIT = 50;
 const OPEN_HISTORY_LINES = 100;
@@ -34,6 +67,10 @@ const CLOSED_RECENT_LINES = 5;
 const RECENT_LIFETIME_MS = 10_000;
 /** trailing fade window, opacity ramps from 1→0 over this slice at the end. */
 const RECENT_FADE_MS = 1_000;
+/** touch: the single latest line beside the chat button lingers only briefly (a glance
+ *  nudge), fading over the trailing slice. */
+const TOUCH_LATEST_MS = 4_500;
+const TOUCH_LATEST_FADE_MS = 800;
 
 /** panel-local open + seed state. shared across the (one) on-screen panel
  *  instance, the active room's `ChatClient` owns the line buffer. */
@@ -173,6 +210,12 @@ export function ChatPanel() {
     const close = useChatPanel((s) => s.close);
     const chat = useRoom((r) => r.chat);
     const lines = useChatLines(chat);
+    // the touch chat UX (edge button + bottom-sheet + single latest line) is gated on the
+    // active room being in PLAY mode (not the UI shell — the editor renders this panel too,
+    // and play-from-here flips playerMode to 'play'). editing keeps plain keyboard chat.
+    const playMode = useRoom((r) => r.playerMode) === 'play';
+    const touchUi = useIsTouch() && playMode;
+    const keyboardInset = useKeyboardInset(touchUi && isOpen);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -203,6 +246,10 @@ export function ChatPanel() {
         setCursor(seed.length);
         setSelectedIndex(0);
         setHistoryCursor(-1);
+        // desktop: focus the input so you can type immediately. touch: DON'T — auto-focus
+        // pops the soft keyboard over the history; let the user read first and tap the input
+        // (or start with a seed, e.g. an editor '/' command) to summon the keyboard.
+        if (touchUi && !seed) return;
         const id = requestAnimationFrame(() => {
             const el = inputRef.current;
             if (!el) return;
@@ -210,7 +257,7 @@ export function ChatPanel() {
             el.setSelectionRange(seed.length, seed.length);
         });
         return () => cancelAnimationFrame(id);
-    }, [isOpen]);
+    }, [isOpen, touchUi]);
 
     // pin history to bottom when open + whenever a new line arrives.
     // biome-ignore lint/correctness/useExhaustiveDependencies: lines.length is a re-pin trigger, not read in the body
@@ -361,102 +408,170 @@ export function ChatPanel() {
 
     const openHistory = isOpen ? lines.slice(-OPEN_HISTORY_LINES) : EMPTY_LINES;
 
+    // touch closed-state shows ONLY the single newest line beside the button (no stacked
+    // log), and only briefly — a nudge to glance, not a persistent readout.
+    const latestLine = !isOpen && lines.length > 0 ? lines[lines.length - 1]! : null;
+    const latestAge = latestLine ? now - latestLine.ts : Number.POSITIVE_INFINITY;
+    const latestVisible = latestAge < TOUCH_LATEST_MS;
+    const latestOpacity =
+        latestAge < TOUCH_LATEST_MS - TOUCH_LATEST_FADE_MS
+            ? 1
+            : Math.max(0, 1 - (latestAge - (TOUCH_LATEST_MS - TOUCH_LATEST_FADE_MS)) / TOUCH_LATEST_FADE_MS);
+
+    // desktop: the classic bottom-left overlay. touch: no `/`,`t` keys and the bottom-left
+    // sits under the joystick, so — open → a bottom-sheet docked above the soft keyboard
+    // (above the touch-controls layer so it captures their touches); closed → the panel is
+    // empty (the newest line rides beside the edge chat button instead).
+    const panelBase = 'pointer-events-none flex flex-col items-stretch gap-1';
+    const panelClass = touchUi ? panelBase : `absolute bottom-24 left-3 right-3 z-50 ${panelBase}`;
+    const panelStyle: React.CSSProperties = !touchUi
+        ? {}
+        : isOpen
+          ? { position: 'fixed', left: 0, right: 0, bottom: keyboardInset, padding: '0 8px 8px', zIndex: 450 }
+          : {};
+
     return (
-        <div
-            ref={panelRef}
-            className="absolute bottom-24 left-3 right-3 z-50 pointer-events-none flex flex-col items-stretch gap-1"
-        >
-            {isOpen ? (
+        <>
+            {/* touch open: a dim backdrop above the touch-controls layer — captures stray
+                touches (so the joystick/buttons under it are inert while typing) + taps to close. */}
+            {touchUi && isOpen && (
                 <div
-                    ref={historyScrollRef}
-                    className="pointer-events-auto bg-black/50 px-2 py-1 max-w-md max-h-[60vh] overflow-y-auto text-[12px] font-mono flex flex-col gap-0.5"
+                    className="fixed inset-0 bg-black/40"
+                    style={{ zIndex: 449 }}
+                    onPointerDown={() => {
+                        setInput('');
+                        setCursor(0);
+                        close();
+                    }}
+                />
+            )}
+            {/* touch closed: the opener — a chat bubble on the left edge, a little past centre
+                (below any top-notch/HUD, above the lower-left move zone). the single newest
+                line briefly flashes to its RIGHT so it stays on-screen. */}
+            {touchUi && !isOpen && (
+                <div
+                    className="fixed left-3 top-[56%] -translate-y-1/2 flex items-center gap-2 pointer-events-none"
+                    // above the touch-controls layer (z-400): the button sits inside the
+                    // lower-left dynamic-joystick zone, so it must capture its own taps.
+                    style={{ zIndex: 410 }}
                 >
-                    {openHistory.length === 0 ? (
-                        <div className="text-neutral-400">no messages yet.</div>
-                    ) : (
-                        openHistory.map((l, i) => (
-                            // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
-                            <div key={`${l.ts}-${i}`} className={`${lineColor(l.kind)} whitespace-pre-wrap`}>
-                                <FormattedText text={formatLine(l)} />
-                            </div>
-                        ))
+                    <button
+                        type="button"
+                        aria-label="Open chat"
+                        onClick={() => useChatPanel.getState().open()}
+                        className="pointer-events-auto flex items-center justify-center w-10 h-10 select-none shrink-0"
+                        style={{
+                            background: 'rgba(20, 20, 20, 0.55)',
+                            border: '2px solid rgba(255, 255, 255, 0.5)',
+                            borderRadius: 8,
+                            color: '#fff',
+                        }}
+                    >
+                        <MessageSquare size={20} strokeWidth={2.2} />
+                    </button>
+                    {latestVisible && latestLine && (
+                        <div
+                            style={{ opacity: latestOpacity }}
+                            className={`bg-black/50 px-2 py-0.5 text-[12px] leading-snug font-mono max-w-[33vw] line-clamp-2 ${lineColor(latestLine.kind)}`}
+                        >
+                            <FormattedText text={formatLine(latestLine)} />
+                        </div>
                     )}
                 </div>
-            ) : (
-                recentClosed.length > 0 && (
-                    <div className="max-w-md flex flex-col gap-0.5 text-[12px] font-mono">
-                        {recentClosed.map((l, i) => (
-                            <div
+            )}
+            <div ref={panelRef} className={panelClass} style={panelStyle}>
+                {isOpen ? (
+                    <div
+                        ref={historyScrollRef}
+                        className="pointer-events-auto bg-black/50 px-2 py-1 max-w-md max-h-[60vh] overflow-y-auto text-[12px] font-mono flex flex-col gap-0.5"
+                    >
+                        {openHistory.length === 0 ? (
+                            <div className="text-neutral-400">no messages yet.</div>
+                        ) : (
+                            openHistory.map((l, i) => (
                                 // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
-                                key={`${l.ts}-${i}`}
-                                style={{ opacity: recentOpacity(l) }}
-                                className={`bg-black/50 px-2 py-0.5 ${lineColor(l.kind)} whitespace-pre-wrap`}
+                                <div key={`${l.ts}-${i}`} className={`${lineColor(l.kind)} whitespace-pre-wrap`}>
+                                    <FormattedText text={formatLine(l)} />
+                                </div>
+                            ))
+                        )}
+                    </div>
+                ) : touchUi ? null : (
+                    recentClosed.length > 0 && (
+                        <div className="max-w-md flex flex-col gap-0.5 text-[12px] font-mono">
+                            {recentClosed.map((l, i) => (
+                                <div
+                                    // biome-ignore lint/suspicious/noArrayIndexKey: append-only log lines (no stable id)
+                                    key={`${l.ts}-${i}`}
+                                    style={{ opacity: recentOpacity(l) }}
+                                    className={`bg-black/50 px-2 py-0.5 ${lineColor(l.kind)} whitespace-pre-wrap`}
+                                >
+                                    <FormattedText text={formatLine(l)} />
+                                </div>
+                            ))}
+                        </div>
+                    )
+                )}
+
+                {isOpen && suggestions.length > 0 && (
+                    <div className="pointer-events-auto max-w-md bg-black/70 text-[12px] font-mono max-h-48 overflow-y-auto">
+                        {suggestions.map((sug, i) => (
+                            // biome-ignore lint/a11y/noStaticElementInteractions: suggestion option; keyboard nav is handled at the input level
+                            <div
+                                key={sug.text}
+                                className={`flex items-baseline justify-between px-2 py-0.5 cursor-pointer ${
+                                    i === selectedIndex ? 'bg-white/20 text-white' : 'text-neutral-200 hover:bg-white/10'
+                                }`}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    acceptSuggestion(sug);
+                                }}
                             >
-                                <FormattedText text={formatLine(l)} />
+                                <span>{sug.label ?? sug.text}</span>
+                                {sug.detail && (
+                                    <span className={i === selectedIndex ? 'text-neutral-300 ml-3' : 'text-neutral-400 ml-3'}>
+                                        {sug.detail}
+                                    </span>
+                                )}
                             </div>
                         ))}
                     </div>
-                )
-            )}
+                )}
 
-            {isOpen && suggestions.length > 0 && (
-                <div className="pointer-events-auto max-w-md bg-black/70 text-[12px] font-mono max-h-48 overflow-y-auto">
-                    {suggestions.map((sug, i) => (
-                        // biome-ignore lint/a11y/noStaticElementInteractions: suggestion option; keyboard nav is handled at the input level
-                        <div
-                            key={sug.text}
-                            className={`flex items-baseline justify-between px-2 py-0.5 cursor-pointer ${
-                                i === selectedIndex ? 'bg-white/20 text-white' : 'text-neutral-200 hover:bg-white/10'
-                            }`}
-                            onMouseDown={(e) => {
-                                e.preventDefault();
-                                acceptSuggestion(sug);
+                {isOpen && input.startsWith('/') && <Signature parsed={parsed} />}
+
+                {isOpen && (
+                    <div className="pointer-events-auto max-w-md bg-black/50 flex items-center px-2 py-1.5 text-[12px] font-mono">
+                        <span className="text-neutral-400 mr-1.5">›</span>
+                        <input
+                            ref={inputRef}
+                            type="text"
+                            value={input}
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            spellCheck={false}
+                            className="flex-1 bg-transparent outline-none text-white placeholder:text-neutral-400"
+                            placeholder="say something — /help for commands"
+                            onChange={(e) => {
+                                setInput(e.target.value);
+                                setCursor(e.target.selectionStart ?? e.target.value.length);
+                                setSelectedIndex(0);
+                                setHistoryCursor(-1);
                             }}
-                        >
-                            <span>{sug.label ?? sug.text}</span>
-                            {sug.detail && (
-                                <span className={i === selectedIndex ? 'text-neutral-300 ml-3' : 'text-neutral-400 ml-3'}>
-                                    {sug.detail}
-                                </span>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {isOpen && input.startsWith('/') && <Signature parsed={parsed} />}
-
-            {isOpen && (
-                <div className="pointer-events-auto max-w-md bg-black/50 flex items-center px-2 py-1.5 text-[12px] font-mono">
-                    <span className="text-neutral-400 mr-1.5">›</span>
-                    <input
-                        ref={inputRef}
-                        type="text"
-                        value={input}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        className="flex-1 bg-transparent outline-none text-white placeholder:text-neutral-400"
-                        placeholder="say something — /help for commands"
-                        onChange={(e) => {
-                            setInput(e.target.value);
-                            setCursor(e.target.selectionStart ?? e.target.value.length);
-                            setSelectedIndex(0);
-                            setHistoryCursor(-1);
-                        }}
-                        onKeyUp={(e) => {
-                            const t = e.target as HTMLInputElement;
-                            setCursor(t.selectionStart ?? t.value.length);
-                        }}
-                        onClick={(e) => {
-                            const t = e.target as HTMLInputElement;
-                            setCursor(t.selectionStart ?? t.value.length);
-                        }}
-                        onKeyDown={onKeyDown}
-                    />
-                </div>
-            )}
-        </div>
+                            onKeyUp={(e) => {
+                                const t = e.target as HTMLInputElement;
+                                setCursor(t.selectionStart ?? t.value.length);
+                            }}
+                            onClick={(e) => {
+                                const t = e.target as HTMLInputElement;
+                                setCursor(t.selectionStart ?? t.value.length);
+                            }}
+                            onKeyDown={onKeyDown}
+                        />
+                    </div>
+                )}
+            </div>
+        </>
     );
 }
 
