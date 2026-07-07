@@ -1,12 +1,3 @@
 [submodule "new-bongle"]
 	path = new-bongle
 	url = https://github.com/isaac-mason/new-bongle.git
-[submodule "games/wizard-game"]
-	path = games/wizard-game
-	url = https://github.com/isaac-mason/bongle-wizard-game.git
-[submodule "games/circus-obby"]
-	path = games/circus-obby
-	url = https://github.com/isaac-mason/bongle-circus-obby.git
-[submodule "games/one-shot"]
-	path = games/one-shot
-	url = https://github.com/isaac-mason/bongle-one-shot.git
