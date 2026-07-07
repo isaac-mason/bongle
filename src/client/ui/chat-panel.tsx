@@ -272,6 +272,9 @@ export function ChatPanel() {
     const rawSuggestions: Suggestion[] = useMemo(() => ChatCommands.suggestAt(commands, parsed), [commands, parsed]);
     // hide completions when the user is typing plain chat (no leading '/').
     const suggestions = input.startsWith('/') ? rawSuggestions : EMPTY_SUGGESTIONS;
+    // arrow keys walk chat history (not suggestions) while the input is empty
+    // or just the bare '/' opener — no meaningful command has been typed yet.
+    const arrowsRecallHistory = input === '' || input === '/';
 
     useEffect(() => {
         if (selectedIndex >= suggestions.length && suggestions.length > 0) setSelectedIndex(0);
@@ -369,21 +372,19 @@ export function ChatPanel() {
             return;
         }
         if (e.key === 'ArrowUp') {
-            if (suggestions.length > 0) {
-                e.preventDefault();
+            e.preventDefault();
+            if (suggestions.length > 0 && !arrowsRecallHistory) {
                 setSelectedIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
             } else {
-                e.preventDefault();
                 recallHistory(1);
             }
             return;
         }
         if (e.key === 'ArrowDown') {
-            if (suggestions.length > 0) {
-                e.preventDefault();
+            e.preventDefault();
+            if (suggestions.length > 0 && !arrowsRecallHistory) {
                 setSelectedIndex((i) => (i + 1) % suggestions.length);
             } else {
-                e.preventDefault();
                 recallHistory(-1);
             }
             return;
