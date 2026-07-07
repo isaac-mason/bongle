@@ -10,5 +10,12 @@
     },
     "dependencies": {
         "bongle": "github:isaac-mason/bongle#main"
+    },
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "sharp",
+            "skia-canvas",
+            "webgpu"
+        ]
     }
 }

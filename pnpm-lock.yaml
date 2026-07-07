@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  bongle: 'link:'
-
 importers:
 
   .:
@@ -50,6 +47,9 @@ importers:
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
+      bongle:
+        specifier: 'link:'
+        version: 'link:'
       canvas:
         specifier: ^3.2.3
         version: 3.2.3
@@ -160,19 +160,19 @@ importers:
   docs/template:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/audio:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/blocks:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
     devDependencies:
       webgpu:
@@ -182,85 +182,79 @@ importers:
   examples/dom-ui:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-animated-meshes:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-chunks:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-lighting:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-meshes:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-physics-aabb-body:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-physics-rigid-body:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/performance-terrain:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/persistent-data:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/rooms:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/sprites:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/terrain:
     dependencies:
       bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
   examples/voxel-model:
     dependencies:
       bongle:
-        specifier: link:../..
-        version: link:../..
-
-  games/wizard-game:
-    dependencies:
-      bongle:
-        specifier: link:../..
+        specifier: workspace:*
         version: link:../..
 
 packages:

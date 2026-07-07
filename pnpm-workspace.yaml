@@ -18,6 +18,3 @@ onlyBuiltDependencies:
   - puppeteer
   - sharp
   - skia-canvas
-
-overrides:
-  bongle: 'link:'
