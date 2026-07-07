@@ -175,6 +175,11 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                 toGlob(path.join(BONGLE_ROOT, 'src/client/**/*.{ts,tsx}')),
                 toGlob(path.join(BONGLE_ROOT, 'src/editor/**/*.{ts,tsx}')),
                 toGlob(path.join(projectDir, 'src/**/*.{ts,tsx}')),
+                // test/bench files import vitest and aren't part of the app
+                // graph — keep them out of the dep scan (they'd fail to resolve
+                // in a consuming game that has no test deps installed).
+                `!${toGlob(path.join(BONGLE_ROOT, 'src/**/*.{test,bench}.{ts,tsx}'))}`,
+                `!${toGlob(path.join(projectDir, 'src/**/*.{test,bench}.{ts,tsx}'))}`,
             ],
             // engine + workspace deps must share the SAME module instance
             // across user code and engine code; pre-bundling would fork
