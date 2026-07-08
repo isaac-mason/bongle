@@ -12,7 +12,6 @@ async function main() {
         options: {
             help: { type: 'boolean', short: 'h' },
             inspect: { type: 'boolean' },
-            'performance-logs': { type: 'boolean' },
             static: { type: 'boolean' },
             share: { type: 'boolean' },
             port: { type: 'string' },
@@ -32,7 +31,7 @@ async function main() {
 
 Usage:
   bongle new <project-dir> [--template NAME] [--skip-install]   scaffold a new project
-  bongle edit    [--inspect] [--performance-logs] [--share]   run the editor in dev mode
+  bongle edit    [--inspect] [--share]   run the editor in dev mode
   bongle build   [--static]                         build the project into dist/bundle.zip
   bongle start   [--port N]                         serve a built dist/ locally (smoke test)
   bongle migrate [--check]                          migrate content/* to latest schema;
@@ -44,7 +43,6 @@ All commands except \`new\` operate on the current working directory.
 Flags:
   --inspect          with edit: open a node inspector on this process so a debugger
                      or profiler can attach (chrome://inspect)
-  --performance-logs with edit: print the per-tick server perf digest to the CLI
   --static        with build: emit a self-contained browser bundle (no server, no
                   matchmaking) servable from any static host or iframed subpath
   --share         with edit: expose the dev server publicly via a cloudflared
@@ -75,7 +73,6 @@ Flags:
             await edit(process.cwd(), {
                 inspect: values.inspect,
                 share: values.share,
-                performanceLogs: values['performance-logs'],
             });
             break;
         }

@@ -11,7 +11,7 @@ import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import type { ValidationIssue } from './prop/validate';
 import { logScriptError } from './script-errors';
-import type { FrameArgs, NodesContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
+import type { FrameArgs, SceneTreeContext, ScriptInstance, TickArgs, UpdateArgs } from './scripts';
 import { createScriptInstance, disposeScriptInstance, fireEnterHooks, fireExitHooks, initScriptInstance } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef, type TraitHandle } from './traits';
 
@@ -26,13 +26,13 @@ export type { TraitHandle } from './traits';
  * - `'server'`: lives only on the server; never replicated
  * - `'each'`: server AND every client get their own independent copy on attach
  *
- * the scene graph root is always `'shared'`, so an `'inherit'` node with no
+ * the scene tree root is always `'shared'`, so an `'inherit'` node with no
  * explicit realm anywhere in its chain resolves to `'shared'`.
  */
 export type Realm = 'inherit' | 'shared' | 'client' | 'server' | 'each';
 
 export type Node = {
-    /** runtime-only numeric ID, assigned by the scene graph's incrementing counter. not persisted. */
+    /** runtime-only numeric ID, assigned by the scene tree's incrementing counter. not persisted. */
     id: number;
 
     /** optional name, a non-unique label. */
@@ -44,8 +44,8 @@ export type Node = {
     /** ordered list of child nodes */
     children: Node[];
 
-    /** the scene graph this node belongs to, or null if detached */
-    scene: Nodes | null;
+    /** the scene tree this node belongs to, or null if detached */
+    scene: SceneTree | null;
 
     /**
      * which Player owns this node. null = server-owned (default).
@@ -163,64 +163,49 @@ export type NodeSyncState = {
     version: number;
 };
 
-/** mark a node into its scene graph's per-tick discovery dirty set. server-side
+/** mark a node into its scene tree's per-tick discovery dirty set. server-side
  *  only (gated on `!env.client`), a no-op in the client bundle, where nothing
  *  drains the set. every version bump funnels through here, so structural, trait,
  *  and field changes all land in `dirtyNodes` for the per-client fan-out. room
- *  graphs are drained + cleared each tick by `Discovery.flush`. */
-export function markNodeDirty(sg: Nodes, node: Node): void {
-    if (!env.client) sg.dirtyNodes.add(node);
+ *  scene trees are drained + cleared each tick by `Discovery.flush`. */
+export function markNodeDirty(sceneTree: SceneTree, node: Node): void {
+    if (!env.client) sceneTree.dirtyNodes.add(node);
 }
 
 /** bump a node's structural version */
-export function bumpNodeVersion(sg: Nodes, node: Node): void {
-    node._sync.version = ++sg._versions.counter;
-    markNodeDirty(sg, node);
+export function bumpNodeVersion(sceneTree: SceneTree, node: Node): void {
+    node._sync.version = ++sceneTree._versions.counter;
+    markNodeDirty(sceneTree, node);
 }
 
 /** bump a specific trait's version on a node (+ the node version). */
-export function bumpTraitVersion(sg: Nodes, node: Node, traitSlot: number): void {
-    const v = ++sg._versions.counter;
+export function bumpTraitVersion(sceneTree: SceneTree, node: Node, traitSlot: number): void {
+    const v = ++sceneTree._versions.counter;
     const inst = node._traits.get(traitSlot);
     if (inst?._sync) inst._sync.traitVersion = v;
     node._sync.version = v;
-    markNodeDirty(sg, node);
+    markNodeDirty(sceneTree, node);
 }
 
 /** bump a single field's version (+ the trait + node versions). takes the
  *  instance + slice index directly, the diff already has both in hand. */
-export function bumpFieldVersion(sg: Nodes, node: Node, instance: TraitBase, i: number): void {
-    const v = ++sg._versions.counter;
+export function bumpFieldVersion(sceneTree: SceneTree, node: Node, instance: TraitBase, i: number): void {
+    const v = ++sceneTree._versions.counter;
     if (instance._sync) {
         instance._sync.versions[i] = v;
         instance._sync.traitVersion = v;
     }
     node._sync.version = v;
-    markNodeDirty(sg, node);
+    markNodeDirty(sceneTree, node);
 }
 
-/* node scene graph */
+/* node scene tree */
 
-export type Nodes = {
-    /** the root node of this scene graph. always present, cannot be destroyed. */
+export type SceneTree = {
+    /** the root node of this scene tree. always present, cannot be destroyed. */
     root: Node;
 
-    /**
-     * the viewer's mode for this scene graph (the PlayerMode of the
-     * Player it represents). passed to scripts via `ctx.mode`. drives
-     * script-side filtering of editor vs play behavior.
-     */
-    mode: 'edit' | 'play';
-
-    /**
-     * the room's authoritative mode (independent of the viewer). drives
-     * room-level decisions like prefab previews vs voxel baking, an
-     * edit Player attached to a play room still bakes voxels (no
-     * preview ghosts), because the room is play.
-     */
-    roomMode: 'edit' | 'play';
-
-    /** all nodes in this scene graph (including root) */
+    /** all nodes in this scene tree (including root) */
     nodes: Set<Node>;
 
     /** monotonically incrementing counter for runtime node IDs (server / shared) */
@@ -304,24 +289,14 @@ export type Nodes = {
     /**
      * optional runtime reference. when set, registerSubtree creates script instances,
      * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
-     * set this after createSceneGraph, before adding live nodes.
+     * set this after createSceneTree, before adding live nodes.
      */
-    runtime?: NodesContext;
+    runtime: SceneTreeContext | undefined;
 };
 
-export type CreateSceneGraphOptions = {
-    /** viewer's PlayerMode for this scene graph. defaults to `'edit'`. */
-    mode?: 'edit' | 'play';
-    /** room's authoritative RoomMode. defaults to `mode`. */
-    roomMode?: 'edit' | 'play';
-};
-
-export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
-    const mode = options?.mode ?? 'edit';
-    const sg: Nodes = {
+export function createSceneTree(): SceneTree {
+    const sceneTree: SceneTree = {
         root: null!,
-        mode,
-        roomMode: options?.roomMode ?? mode,
         nodes: new Set(),
         queries: new Map(),
         _nextNodeId: 1,
@@ -334,18 +309,19 @@ export function createSceneGraph(options?: CreateSceneGraphOptions): Nodes {
         _transformDirty: new Set(),
         _interpolating: new Set(),
         dirtyNodes: new Set(),
+        runtime: undefined,
     };
 
     // create root node, always present, cannot be destroyed.
     // root is explicitly 'shared' so 'inherit' descendants resolve there.
     const root = createNodeObject('Root', undefined, undefined, 'shared');
-    root.id = sg._nextNodeId++;
-    root.scene = sg;
-    sg.nodes.add(root);
-    sg._idToNode.set(root.id, root);
-    sg.root = root;
+    root.id = sceneTree._nextNodeId++;
+    root.scene = sceneTree;
+    sceneTree.nodes.add(root);
+    sceneTree._idToNode.set(root.id, root);
+    sceneTree.root = root;
 
-    return sg;
+    return sceneTree;
 }
 
 /* node lifecycle */
@@ -359,16 +335,16 @@ export type CreateNodeOptions = {
     /**
      * which side(s) this node lives on. defaults to `'inherit'`, which means
      * "take the effective realm from the nearest non-inherit ancestor". the
-     * scene graph root is `'shared'`, so an `'inherit'` chain bottoms out
+     * scene tree root is `'shared'`, so an `'inherit'` chain bottoms out
      * there unless an ancestor explicitly opts into `'server'`/`'client'`/`'each'`.
      */
     realm?: Realm;
 };
 
 /**
- * create a new **detached** node, not registered in any scene graph,
+ * create a new **detached** node, not registered in any scene tree,
  * no script init, no queries. attach with `addChild(parent, node)` to
- * make it live; the scene graph allocates an id at attach time (negative
+ * make it live; the scene tree allocates an id at attach time (negative
  * on the client, positive on the server).
  *
  * realm defaults to `'inherit'`, so the node takes whatever its eventual
@@ -382,39 +358,39 @@ export function createNode(options?: CreateNodeOptions): Node {
 /**
  * look up a node by its runtime ID. returns undefined if not found.
  */
-export function getNodeById(sg: Nodes, id: number): Node | undefined {
-    return sg._idToNode.get(id);
+export function getNodeById(sceneTree: SceneTree, id: number): Node | undefined {
+    return sceneTree._idToNode.get(id);
 }
 
 /**
- * returns whether a node is alive (registered in a scene graph).
+ * returns whether a node is alive (registered in a scene tree).
  */
 export function nodeExists(node: Node): boolean {
     return node.scene !== null;
 }
 
 /**
- * set a node's owner, keeping `sg.playerIdToOwnedNodes` in sync. all owner
+ * set a node's owner, keeping `sceneTree.playerIdToOwnedNodes` in sync. all owner
  * writes outside tests should route through here, the index drives the
  * client's per-tick owner-sync replication loop, so silent direct assignment
  * to `node.owner` will desync that walk.
  */
-export function setOwner(sg: Nodes, node: Node, owner: PlayerId | null): void {
+export function setOwner(sceneTree: SceneTree, node: Node, owner: PlayerId | null): void {
     const prev = node.owner;
     if (prev === owner) return;
     if (prev !== null) {
-        const prevSet = sg.playerIdToOwnedNodes.get(prev);
+        const prevSet = sceneTree.playerIdToOwnedNodes.get(prev);
         if (prevSet) {
             prevSet.delete(node);
-            if (prevSet.size === 0) sg.playerIdToOwnedNodes.delete(prev);
+            if (prevSet.size === 0) sceneTree.playerIdToOwnedNodes.delete(prev);
         }
     }
     node.owner = owner;
     if (owner !== null) {
-        let set = sg.playerIdToOwnedNodes.get(owner);
+        let set = sceneTree.playerIdToOwnedNodes.get(owner);
         if (!set) {
             set = new Set();
-            sg.playerIdToOwnedNodes.set(owner, set);
+            sceneTree.playerIdToOwnedNodes.set(owner, set);
         }
         set.add(node);
     }
@@ -478,41 +454,41 @@ export function isLocalNode(node: Node): boolean {
 
 /**
  * destroy a node: dispose scripts, remove from parent, recursively
- * destroy children, remove from all queries, and detach from the scene graph.
+ * destroy children, remove from all queries, and detach from the scene tree.
  *
- * the scene graph's root node cannot be destroyed.
+ * the scene tree's root node cannot be destroyed.
  */
-export function destroyNode(nodes: Nodes, node: Node): void {
-    if (node.scene !== nodes) return;
-    if (node === nodes.root) return; // root node is permanent
+export function destroyNode(sceneTree: SceneTree, node: Node): void {
+    if (node.scene !== sceneTree) return;
+    if (node === sceneTree.root) return; // root node is permanent
 
     // park the node in the discovery dirty set (server-side; no-op on the client).
     // node.scene is nulled at the end of this fn, so the fan-out sees node.scene
     // === null and emits node_destroyed. recurses, so each destroyed node lands
     // here. if the same node is re-added this tick it becomes live again → the
     // fan-out treats it as a create/update instead (add→remove→add correctness).
-    if (!env.client) nodes.dirtyNodes.add(node);
+    if (!env.client) sceneTree.dirtyNodes.add(node);
 
     // destroy children first (iterate a copy since we mutate)
     const childrenCopy = node.children.slice();
     for (let i = 0; i < childrenCopy.length; i++) {
-        destroyNode(nodes, childrenCopy[i]);
+        destroyNode(sceneTree, childrenCopy[i]);
     }
 
     // dispose all script instances from runtime
-    if (nodes.runtime) {
-        const nodeInstances = nodes.runtime.instances.get(node.id);
+    if (sceneTree.runtime) {
+        const nodeInstances = sceneTree.runtime.instances.get(node.id);
         if (nodeInstances) {
             for (const instance of nodeInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            nodes.runtime.instances.delete(node.id);
+            sceneTree.runtime.instances.delete(node.id);
         }
     }
     node._unresolvedTraits.clear();
 
     // remove from all queries
-    for (const q of nodes.queries.values()) {
+    for (const q of sceneTree.queries.values()) {
         if (q.nodeToIndex.has(node)) {
             removeNodeFromQuery(q, node);
         }
@@ -523,16 +499,16 @@ export function destroyNode(nodes: Nodes, node: Node): void {
         removeChildInternal(node.parent, node);
     }
 
-    // detach from scene graph
-    setOwner(nodes, node, null);
-    nodes.nodes.delete(node);
-    nodes._idToNode.delete(node.id);
-    nodes._prefabNodes.delete(node);
-    nodes._prefabsDirty.delete(node);
+    // detach from scene tree
+    setOwner(sceneTree, node, null);
+    sceneTree.nodes.delete(node);
+    sceneTree._idToNode.delete(node.id);
+    sceneTree._prefabNodes.delete(node);
+    sceneTree._prefabsDirty.delete(node);
     const t = getTrait(node, TransformTrait);
     if (t) {
-        nodes._transformDirty.delete(t);
-        nodes._interpolating.delete(t);
+        sceneTree._transformDirty.delete(t);
+        sceneTree._interpolating.delete(t);
     }
     node.scene = null;
 }
@@ -603,12 +579,12 @@ export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | 
  *
  *   addTrait(node, Health, { current: 50, max: 100 })
  *
- * works on both detached and live nodes. for detached nodes, sg-level ops
+ * works on both detached and live nodes. for detached nodes, scene-tree-level ops
  * (version bump, query reindex) and script instantiation are skipped and
  * deferred to registerSubtree.
  *
  * if the trait def has registered scripts (via `script(handle, ...)`) and
- * the node is live in a scene graph with a runtime, one ScriptInstance is
+ * the node is live in a scene tree with a runtime, one ScriptInstance is
  * created per script and onInit/onEnter fire immediately.
  */
 export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>, props?: TraitProps<T>): T {
@@ -655,7 +631,7 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
  * fire `onInit`, then `onEnter` if the node is in-graph. used by addTrait
  * (live path) and registerSubtree (scene-load path).
  */
-function instantiateTraitScripts(runtime: NodesContext, node: Node, trait: TraitBase, def: TraitDef): ScriptInstance[] {
+function instantiateTraitScripts(runtime: SceneTreeContext, node: Node, trait: TraitBase, def: TraitDef): ScriptInstance[] {
     if (def.scripts.length === 0) return [];
 
     let nodeInstances = runtime.instances.get(node.id);
@@ -678,7 +654,7 @@ function instantiateTraitScripts(runtime: NodesContext, node: Node, trait: Trait
  * dispose every live script instance bound to a specific trait on a node.
  * fires onExit then onDispose. called from removeTrait and destroyNode paths.
  */
-function disposeTraitScripts(runtime: NodesContext, node: Node, def: TraitDef): void {
+function disposeTraitScripts(runtime: SceneTreeContext, node: Node, def: TraitDef): void {
     if (def.scripts.length === 0) return;
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;
@@ -704,7 +680,7 @@ function disposeTraitScripts(runtime: NodesContext, node: Node, def: TraitDef): 
 
 /**
  * write a trait instance into a node's trait map and bitset. does not touch
- * the scene graph, queries, or transform parent pointers, those side
+ * the scene tree, queries, or transform parent pointers, those side
  * effects belong to addTrait. used by addTrait and cloneNode.
  */
 function attachTraitInstance(node: Node, traitSlot: number, instance: TraitBase): void {
@@ -904,39 +880,39 @@ export function refreshTraitIssues(node: Node, def: TraitDef, instance: TraitBas
 /* script lifecycle (driven by trait attach / detach) */
 
 /**
- * fire onInit on all uninitialized script instances in a scene graph.
+ * fire onInit on all uninitialized script instances in a scene tree.
  *
  * scripts are now owned by traits, for each trait on each node, instantiate
  * any missing script instance, then init, then fire enter hooks.
  *
- * call this after the graph is fully built and all runtime context is wired
+ * call this after the tree is fully built and all runtime context is wired
  * (e.g. client.room, client.state) so onInit handlers can safely access them.
- * used by the client after unpackSceneGraph + room wiring, before the first tick.
+ * used by the client after unpackSceneTree + room wiring, before the first tick.
  */
-export function initSceneGraph(sg: Nodes): void {
-    if (!sg.runtime) return;
+export function initSceneTree(sceneTree: SceneTree): void {
+    if (!sceneTree.runtime) return;
 
     // pass 1: create instances for any node-trait pairs that don't have one
-    // (e.g. the client unpack path: unpackSceneGraph runs without runtime, then
-    // engine-client sets sg.runtime and calls initSceneGraph to instantiate)
-    for (const node of sg.nodes) {
+    // (e.g. the client unpack path: unpackSceneTree runs without runtime, then
+    // engine-client sets sceneTree.runtime and calls initSceneTree to instantiate)
+    for (const node of sceneTree.nodes) {
         for (const [traitSlot, trait] of node._traits) {
             const def = registry.traitsBySlot.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
-            instantiateTraitScripts(sg.runtime, node, trait, def);
+            instantiateTraitScripts(sceneTree.runtime, node, trait, def);
         }
     }
 
     // pass 2: init all instances that haven't been initialized
-    for (const nodeInstances of sg.runtime.instances.values()) {
+    for (const nodeInstances of sceneTree.runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
             if (!instance.initialized) initScriptInstance(instance);
         }
     }
 
     // pass 3: fire enter hooks after all inits
-    for (const node of sg.nodes) {
-        if (node.parent) fireEnterHooks(sg.runtime, node, node.parent);
+    for (const node of sceneTree.nodes) {
+        if (node.parent) fireEnterHooks(sceneTree.runtime, node, node.parent);
     }
 }
 
@@ -944,8 +920,8 @@ export function initSceneGraph(sg: Nodes): void {
 
 /**
  * add a child node to a parent. if the child already has a parent, it is
- * removed from the old parent first. if the parent is in a scene graph, the
- * child (and its descendants) are registered in that scene graph.
+ * removed from the old parent first. if the parent is in a scene tree, the
+ * child (and its descendants) are registered in that scene tree.
  */
 export function addChild(parent: Node, child: Node): void {
     // if child already has a parent, detach first
@@ -956,7 +932,7 @@ export function addChild(parent: Node, child: Node): void {
     child.parent = parent;
     parent.children.push(child);
 
-    // if parent is in a scene graph, register child subtree
+    // if parent is in a scene tree, register child subtree
     if (parent.scene) {
         registerSubtree(parent.scene, child);
     }
@@ -968,12 +944,12 @@ export function addChild(parent: Node, child: Node): void {
 
 /**
  * remove a child from its parent. the child (and its descendants) are
- * detached from the scene graph and removed from all queries.
+ * detached from the scene tree and removed from all queries.
  */
 export function removeChild(parent: Node, child: Node): void {
     if (child.parent !== parent) return;
 
-    // detach subtree from scene graph first
+    // detach subtree from scene tree first
     if (child.scene) {
         unregisterSubtree(child.scene, child);
     }
@@ -991,20 +967,20 @@ export function getParent(node: Node): Node | null {
 /**
  * get a readonly snapshot of a node's children.
  */
-export function getChildren(node: Node): readonly Node[] {
+export function getChildren(node: Node): Node[] {
     return node.children;
 }
 
 /**
- * move a node to a new parent. the node must be in the same scene graph as
- * the new parent, or detached (will be registered if parent is in a scene graph).
+ * move a node to a new parent. the node must be in the same scene tree as
+ * the new parent, or detached (will be registered if parent is in a scene tree).
  */
 export function reparent(node: Node, newParent: Node): void {
     if (node.parent === newParent) return;
 
-    // can only reparent within the same scene graph (or from detached)
+    // can only reparent within the same scene tree (or from detached)
     if (node.scene !== null && node.scene !== newParent.scene) {
-        throw new Error(`cannot reparent node to a different scene graph`);
+        throw new Error(`cannot reparent node to a different scene tree`);
     }
     if (newParent.scene === null) {
         throw new Error(`cannot reparent to a detached parent`);
@@ -1096,7 +1072,7 @@ export function isAncestorOf(ancestor: Node, descendant: Node): boolean {
 
 /* hierarchy internals */
 
-/** remove a child from parent's children array (does not touch scene graph registration) */
+/** remove a child from parent's children array (does not touch scene tree registration) */
 function removeChildInternal(parent: Node, child: Node): void {
     const idx = parent.children.indexOf(child);
     if (idx !== -1) {
@@ -1106,7 +1082,7 @@ function removeChildInternal(parent: Node, child: Node): void {
 }
 
 /**
- * register a node and all its descendants into a scene graph.
+ * register a node and all its descendants into a scene tree.
  *
  * two-pass for scripts:
  *   pass 1, register: register nodes, index into queries, create script instances (if runtime present).
@@ -1115,48 +1091,48 @@ function removeChildInternal(parent: Node, child: Node): void {
  * this ensures all nodes in the subtree are registered and all scripts
  * have their state available before any onInit fires.
  */
-function registerSubtree(sg: Nodes, node: Node): void {
+function registerSubtree(sceneTree: SceneTree, node: Node): void {
     // collect all nodes in the subtree (pre-order)
     const subtree: Node[] = [];
     collectSubtree(node, subtree);
 
-    // pass 1: register all nodes in the scene graph + index into queries + create script instances
+    // pass 1: register all nodes in the scene tree + index into queries + create script instances
     const newScriptInstances: ScriptInstance[] = [];
 
     for (const n of subtree) {
-        n.scene = sg;
-        sg.nodes.add(n);
-        // a node entering the live graph is a create for the discovery fan-out.
+        n.scene = sceneTree;
+        sceneTree.nodes.add(n);
+        // a node entering the live tree is a create for the discovery fan-out.
         // server-only (gated inside markNodeDirty); pre-order so creates emit
         // parent-first (fan-out also depth-orders as a backstop).
-        markNodeDirty(sg, n);
+        markNodeDirty(sceneTree, n);
         if (n.prefab) {
-            sg._prefabNodes.add(n);
-            sg._prefabsDirty.add(n);
+            sceneTree._prefabNodes.add(n);
+            sceneTree._prefabsDirty.add(n);
         }
 
-        // assign runtime ID if needed (node entering scene graph from detached state).
+        // assign runtime ID if needed (node entering scene tree from detached state).
         // client picks from the negative id space, server from the positive id space.
         if (n.id === 0) {
-            n.id = env.client ? sg._nextClientNodeId-- : sg._nextNodeId++;
-        } else if (n.id >= sg._nextNodeId) {
+            n.id = env.client ? sceneTree._nextClientNodeId-- : sceneTree._nextNodeId++;
+        } else if (n.id >= sceneTree._nextNodeId) {
             // pre-assigned id (e.g. from network unpack), bump counter past it
-            sg._nextNodeId = n.id + 1;
+            sceneTree._nextNodeId = n.id + 1;
         }
-        sg._idToNode.set(n.id, n);
+        sceneTree._idToNode.set(n.id, n);
 
-        for (const q of sg.queries.values()) {
+        for (const q of sceneTree.queries.values()) {
             if (nodeMatchesQuery(n, q) && !q.nodeToIndex.has(n)) {
                 addNodeToQuery(q, n);
             }
         }
 
         // create script instances for every trait on this node
-        if (sg.runtime) {
+        if (sceneTree.runtime) {
             for (const [traitSlot, trait] of n._traits) {
                 const def = registry.traitsBySlot.get(traitSlot);
                 if (!def || def.scripts.length === 0) continue;
-                const created = instantiateTraitScripts(sg.runtime, n, trait, def);
+                const created = instantiateTraitScripts(sceneTree.runtime, n, trait, def);
                 for (const i of created) newScriptInstances.push(i);
             }
         }
@@ -1168,62 +1144,62 @@ function registerSubtree(sg: Nodes, node: Node): void {
     }
 
     // pass 3: fire onEnter on each node that has a parent (all nodes in the subtree do)
-    if (sg.runtime) {
+    if (sceneTree.runtime) {
         for (const n of subtree) {
             if (n.parent) {
-                fireEnterHooks(sg.runtime, n, n.parent);
+                fireEnterHooks(sceneTree.runtime, n, n.parent);
             }
         }
     }
 }
 
 /**
- * unregister a node and all its descendants from a scene graph.
- * disposes scripts, removes from queries, detaches from scene graph.
+ * unregister a node and all its descendants from a scene tree.
+ * disposes scripts, removes from queries, detaches from scene tree.
  */
-function unregisterSubtree(sg: Nodes, node: Node): void {
+function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
     // unregister children first (bottom-up)
     for (let i = 0; i < node.children.length; i++) {
-        unregisterSubtree(sg, node.children[i]);
+        unregisterSubtree(sceneTree, node.children[i]);
     }
 
     // fire onExit before disposing, parent is still set here
-    if (sg.runtime && node.parent) {
-        fireExitHooks(sg.runtime, node, node.parent);
+    if (sceneTree.runtime && node.parent) {
+        fireExitHooks(sceneTree.runtime, node, node.parent);
     }
 
     // dispose all script instances from runtime, scripts re-instantiate
     // from traits when the subtree re-registers, so we drop the lot here.
-    if (sg.runtime) {
-        const nodeInstances = sg.runtime.instances.get(node.id);
+    if (sceneTree.runtime) {
+        const nodeInstances = sceneTree.runtime.instances.get(node.id);
         if (nodeInstances) {
             for (const instance of nodeInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            sg.runtime.instances.delete(node.id);
+            sceneTree.runtime.instances.delete(node.id);
         }
     }
 
     // remove from all queries
-    for (const q of sg.queries.values()) {
+    for (const q of sceneTree.queries.values()) {
         if (q.nodeToIndex.has(node)) {
             removeNodeFromQuery(q, node);
         }
     }
 
-    setOwner(sg, node, null);
-    sg.nodes.delete(node);
-    sg._idToNode.delete(node.id);
-    sg._prefabNodes.delete(node);
-    sg._prefabsDirty.delete(node);
-    // a node leaving the live graph is a destroy for the discovery fan-out,
+    setOwner(sceneTree, node, null);
+    sceneTree.nodes.delete(node);
+    sceneTree._idToNode.delete(node.id);
+    sceneTree._prefabNodes.delete(node);
+    sceneTree._prefabsDirty.delete(node);
+    // a node leaving the live tree is a destroy for the discovery fan-out,
     // symmetric with registerSubtree marking entering nodes dirty. server-only
     // (gated inside markNodeDirty). the node ends this fn in dirtyNodes with
     // scene === null, so the fan-out emits node_destroyed (only to clients that
     // knew it). without this, removing a server-owned (owner === null) node via
     // removeChild never replicated, setOwner above only dirties when the owner
     // actually changes, which it doesn't for an already-server-owned node.
-    markNodeDirty(sg, node);
+    markNodeDirty(sceneTree, node);
     node.scene = null;
 }
 
@@ -1240,7 +1216,7 @@ function collectSubtree(node: Node, out: Node[]): void {
 // re-exported from traverse.ts
 export { traverse } from './traverse';
 
-/* scene-graph-level script driving */
+/* scene-tree-level script driving */
 
 // memoised `script/<hook>/<key>` metric ids, built once per (hook, script) so the
 // hot path (incl. while the client panel is closed and begin/end no-op) does no
@@ -1268,14 +1244,14 @@ const SILENT = Debug.createMetrics(false);
 // `select`-ed hook fn with `args`, time it as `script/<hook>/<key>` (begin/end
 // self-gate on metrics.enabled), and log errors with the node + hook name.
 function runHook<A>(
-    sg: Nodes,
+    sceneTree: SceneTree,
     args: A,
     metrics: Debug.Metrics,
     hook: string,
     select: (i: ScriptInstance) => Iterable<(a: A) => void>,
 ): void {
-    if (!sg.runtime) return;
-    for (const nodeInstances of sg.runtime.instances.values()) {
+    if (!sceneTree.runtime) return;
+    for (const nodeInstances of sceneTree.runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
             if (!instance.initialized) continue;
             for (const fn of select(instance)) {
@@ -1297,59 +1273,59 @@ function runHook<A>(
  * before runOnUpdate, so consumers can pre-process / consume input (e.g. an
  * editor zeroing mk._dx/_dy) before player controllers read it.
  */
-export function runOnInput(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): void {
-    runHook(sg, args, metrics, 'onInput', (i) => i.onInput);
+export function runOnInput(sceneTree: SceneTree, args: FrameArgs, metrics: Debug.Metrics): void {
+    runHook(sceneTree, args, metrics, 'onInput', (i) => i.onInput);
 }
 
 /**
- * update all scripts in the scene graph. fires once per frame before the
+ * update all scripts in the scene tree. fires once per frame before the
  * fixed-timestep tick loop, intended for input polling and camera binding.
  */
-export function runOnUpdate(sg: Nodes, args: UpdateArgs, metrics: Debug.Metrics): void {
-    runHook(sg, args, metrics, 'onUpdate', (i) => i.onUpdate);
+export function runOnUpdate(sceneTree: SceneTree, args: UpdateArgs, metrics: Debug.Metrics): void {
+    runHook(sceneTree, args, metrics, 'onUpdate', (i) => i.onUpdate);
 }
 
 /**
- * tick all scripts in the scene graph. iterates all nodes and calls onTick
+ * tick all scripts in the scene tree. iterates all nodes and calls onTick
  * on each script instance.
  */
-export function runOnTick(sg: Nodes, args: TickArgs, metrics: Debug.Metrics): void {
-    runHook(sg, args, metrics, 'onTick', (i) => i.onTick);
+export function runOnTick(sceneTree: SceneTree, args: TickArgs, metrics: Debug.Metrics): void {
+    runHook(sceneTree, args, metrics, 'onTick', (i) => i.onTick);
 }
 
 /**
- * fire onPrePhysicsStep hooks on all scripts in the scene graph. called after
- * tickSceneGraph but before the physics step. routes through SILENT, it runs
+ * fire onPrePhysicsStep hooks on all scripts in the scene tree. called after
+ * tickSceneTree but before the physics step. routes through SILENT, it runs
  * from physics.tick, which carries no metrics, and isn't surfaced in the digest.
  */
-export function runOnPrePhysicsStep(sg: Nodes, args: TickArgs): void {
-    runHook(sg, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
+export function runOnPrePhysicsStep(sceneTree: SceneTree, args: TickArgs): void {
+    runHook(sceneTree, args, SILENT, 'onPrePhysicsStep', (i) => i.onPrePhysicsStep);
 }
 
 /**
- * fire onPostPhysicsStep hooks on all scripts in the scene graph. called after
- * the physics step, before frameSceneGraph. SILENT, see runOnPrePhysicsStep.
+ * fire onPostPhysicsStep hooks on all scripts in the scene tree. called after
+ * the physics step, before frameSceneTree. SILENT, see runOnPrePhysicsStep.
  */
-export function runOnPostPhysicsStep(sg: Nodes, args: TickArgs): void {
-    runHook(sg, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
+export function runOnPostPhysicsStep(sceneTree: SceneTree, args: TickArgs): void {
+    runHook(sceneTree, args, SILENT, 'onPostPhysicsStep', (i) => i.onPostPhysicsStep);
 }
 
 /**
- * fire onPostAnimate hooks on all scripts in the scene graph.
+ * fire onPostAnimate hooks on all scripts in the scene tree.
  * called after Animation.tick (animator sampling) and before world-matrix
  * recompute, so post-anim callbacks see fresh local TRS but world matrices
  * are still last-tick.
  */
-export function runOnPostAnimate(sg: Nodes, args: TickArgs, metrics: Debug.Metrics): void {
-    runHook(sg, args, metrics, 'onPostAnimate', (i) => i.onPostAnimate);
+export function runOnPostAnimate(sceneTree: SceneTree, args: TickArgs, metrics: Debug.Metrics): void {
+    runHook(sceneTree, args, metrics, 'onPostAnimate', (i) => i.onPostAnimate);
 }
 
 /**
- * frame all scripts in the scene graph. iterates all nodes and calls onFrame
+ * frame all scripts in the scene tree. iterates all nodes and calls onFrame
  * on each script instance. intended for client-side render frame updates.
  */
-export function runOnFrame(sg: Nodes, args: FrameArgs, metrics: Debug.Metrics): void {
-    runHook(sg, args, metrics, 'onFrame', (i) => i.onFrame);
+export function runOnFrame(sceneTree: SceneTree, args: FrameArgs, metrics: Debug.Metrics): void {
+    runHook(sceneTree, args, metrics, 'onFrame', (i) => i.onFrame);
 }
 
 /* serialization, schema-driven */
@@ -1453,7 +1429,7 @@ export function serializeNode(node: Node, options?: SerializeOptions): Serialize
  * caller is responsible for `addChild(parent, node)` if attachment is desired.
  *
  * traits are restored from their definitions; their bound scripts are
- * instantiated by registerSubtree (via addChild) if sg.runtime is set.
+ * instantiated by registerSubtree (via addChild) if sceneTree.runtime is set.
  *
  * resilient to schema changes:
  * - if a property field exists in saved data but not in the current schema, it is ignored.
@@ -1503,7 +1479,7 @@ export function deserializeNode(data: SerializedNode): Node {
 
 /**
  * clone a node and all its descendants. the returned subtree is **detached**,
- * it has no parent, is not registered in any scene graph, and its scripts are
+ * it has no parent, is not registered in any scene tree, and its scripts are
  * not instantiated. add it to the graph with `addChild(parent, clone)` to wake
  * it up; `onInit` for any scripts fires at that point.
  *
@@ -1591,52 +1567,52 @@ function collectChildrenByName(out: Node[], node: Node, name: string): void {
 }
 
 /**
- * serialize the entire scene graph. the root node is a regular SerializedNode
+ * serialize the entire scene tree. the root node is a regular SerializedNode
  * with its children nested inside.
  */
-export type SerializedSceneGraph = {
+export type SerializedSceneTree = {
     /** the root node of the scene, including all descendants */
     root: SerializedNode;
 };
 
 /**
- * save the scene graph to a JSON-friendly structure for writing to disk.
+ * save the scene tree to a JSON-friendly structure for writing to disk.
  * respects persist flags, skips nodes with persist: false and traits with
  * persist: false. only property fields are included.
  *
  * the root node is serialized as a regular node with its children nested inside.
  */
-export function saveSceneGraph(sg: Nodes): SerializedSceneGraph {
+export function saveSceneTree(sceneTree: SceneTree): SerializedSceneTree {
     const options: SerializeOptions = { persistOnly: true };
-    return { root: serializeNode(sg.root, options) };
+    return { root: serializeNode(sceneTree.root, options) };
 }
 
 /**
- * load a scene graph from serialized JSON data (from disk).
+ * load a scene tree from serialized JSON data (from disk).
  * clears existing children of root and replaces them with the loaded scene.
  * root traits, scripts, and name are restored from the saved data.
  *
- * if sg.runtime is set, script instances are created and initialized as nodes
- * are added. set sg.runtime before calling this function if you want live scripts.
+ * if sceneTree.runtime is set, script instances are created and initialized as nodes
+ * are added. set sceneTree.runtime before calling this function if you want live scripts.
  */
-export function loadSceneGraph(sg: Nodes, data: SerializedSceneGraph): void {
-    const root = sg.root;
+export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): void {
+    const root = sceneTree.root;
     const rootData = data.root;
 
     // clear existing children
     const existingChildren = root.children.slice();
     for (const child of existingChildren) {
-        destroyNode(sg, child);
+        destroyNode(sceneTree, child);
     }
 
     // clear existing root scripts (data + instances)
-    if (sg.runtime) {
-        const rootInstances = sg.runtime.instances.get(root.id);
+    if (sceneTree.runtime) {
+        const rootInstances = sceneTree.runtime.instances.get(root.id);
         if (rootInstances) {
             for (const instance of rootInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            sg.runtime.instances.delete(root.id);
+            sceneTree.runtime.instances.delete(root.id);
         }
     }
     root._traits.clear();
@@ -1664,15 +1640,15 @@ export function loadSceneGraph(sg: Nodes, data: SerializedSceneGraph): void {
             bitset.add(root._bitset, def.slot);
             refreshTraitIssues(root, def, instance, 'root node');
         }
-        reindex(sg, root);
+        reindex(sceneTree, root);
     }
 
     // root scripts ride on traits, instantiate per trait if runtime present
-    if (sg.runtime) {
+    if (sceneTree.runtime) {
         for (const [traitSlot, trait] of root._traits) {
             const def = registry.traitsBySlot.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
-            const created = instantiateTraitScripts(sg.runtime, root, trait, def);
+            const created = instantiateTraitScripts(sceneTree.runtime, root, trait, def);
             for (const i of created) initScriptInstance(i);
         }
     }
@@ -1804,7 +1780,7 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     return { parsedConditions, withBitset, withoutBitset, withTraits };
 }
 
-export function query<const Args extends ConditionArgs[]>(sg: Nodes, conditions: Args): Query<ConditionArgsToConditions<Args>> {
+export function query<const Args extends ConditionArgs[]>(sceneTree: SceneTree, conditions: Args): Query<ConditionArgsToConditions<Args>> {
     const { parsedConditions, withBitset, withoutBitset, withTraits } = buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort)
@@ -1823,7 +1799,7 @@ export function query<const Args extends ConditionArgs[]>(sg: Nodes, conditions:
     const hash = hashParts.join(',');
 
     // return existing query if already registered
-    const existing = sg.queries.get(hash);
+    const existing = sceneTree.queries.get(hash);
     if (existing) {
         return existing as Query<ConditionArgsToConditions<Args>>;
     }
@@ -1847,10 +1823,10 @@ export function query<const Args extends ConditionArgs[]>(sg: Nodes, conditions:
     };
 
     // register query
-    sg.queries.set(hash, q);
+    sceneTree.queries.set(hash, q);
 
     // populate with existing matching nodes
-    for (const node of sg.nodes) {
+    for (const node of sceneTree.nodes) {
         if (nodeMatchesQuery(node, q)) {
             addNodeToQuery(q, node);
         }
@@ -1862,36 +1838,36 @@ export function query<const Args extends ConditionArgs[]>(sg: Nodes, conditions:
 /**
  * acquire a script-side reference to a query. paired with `releaseQuery`.
  * engine-side callers of `query()` skip this and let the query persist for
- * the lifetime of the scene graph.
+ * the lifetime of the scene tree.
  */
-export function acquireQuery(_sg: Nodes, q: Query<any>): void {
+export function acquireQuery(_sceneTree: SceneTree, q: Query<any>): void {
     q.refcount++;
     q.acquired = true;
 }
 
 /**
  * release a script-side reference. when refcount hits zero on a query that
- * was ever acquired, evict from `sg.queries` so per-mutation walks stop
+ * was ever acquired, evict from `sceneTree.queries` so per-mutation walks stop
  * paying for it.
  */
-export function releaseQuery(sg: Nodes, q: Query<any>): void {
+export function releaseQuery(sceneTree: SceneTree, q: Query<any>): void {
     q.refcount--;
     if (q.refcount <= 0 && q.acquired) {
-        sg.queries.delete(q.hash);
+        sceneTree.queries.delete(q.hash);
     }
 }
 
 /**
  * one-shot match, returns nodes satisfying `conditions` at call time.
  *
- * unlike `query()`, no caching, no event subscriptions, no `sg.queries` entry.
+ * unlike `query()`, no caching, no event subscriptions, no `sceneTree.queries` entry.
  * use this when you need a snapshot (e.g. populating an inspector picker)
  * rather than a live-maintained set.
  */
-export function filter<const Args extends ConditionArgs[]>(sg: Nodes, conditions: Args): Node[] {
+export function filter<const Args extends ConditionArgs[]>(sceneTree: SceneTree, conditions: Args): Node[] {
     const { withBitset, withoutBitset } = buildConditionBitsets(conditions);
     const result: Node[] = [];
-    for (const node of sg.nodes) {
+    for (const node of sceneTree.nodes) {
         if (bitset.containsAll(node._bitset, withBitset) && bitset.containsNone(node._bitset, withoutBitset)) {
             result.push(node);
         }
@@ -1957,8 +1933,8 @@ function removeNodeFromQuery(q: Query<any>, node: Node): void {
     q.nodeToIndex.delete(node);
 }
 
-function reindex(sg: Nodes, node: Node): void {
-    for (const q of sg.queries.values()) {
+function reindex(sceneTree: SceneTree, node: Node): void {
+    for (const q of sceneTree.queries.values()) {
         const matches = nodeMatchesQuery(node, q);
         const wasInQuery = q.nodeToIndex.has(node);
 
@@ -2049,7 +2025,7 @@ export type PrefabState = {
 /* ── prefab helpers ── */
 
 /**
- * set or clear a node's prefab config and reconcile the scene graph's
+ * set or clear a node's prefab config and reconcile the scene tree's
  * `_prefabNodes` / `_prefabsDirty` indices. callers mutating `node.prefab`
  * on a *live* node (one that's already attached) MUST use this, direct
  * assignment leaves the indices stale and the prefab tick driver won't
@@ -2079,7 +2055,7 @@ export function setPrefab(node: Node, config: PrefabConfig | null): void {
 /**
  * flip a live node's `persist` flag, controls whether the node is written to
  * scene files. use this rather than mutating `node.persist` directly when the
- * node is already attached to a scene graph.
+ * node is already attached to a scene tree.
  */
 export function setNodePersist(node: Node, persist: boolean): void {
     if (node.persist === persist) return;
@@ -2094,11 +2070,11 @@ export function setNodePersist(node: Node, persist: boolean): void {
  * uniformly off the same dirty set, neither side scans the full prefab
  * node set on its own.
  */
-export function markPrefabAnchorsDirty(sg: Nodes, dirtyPrefabIds: ReadonlySet<string>): void {
+export function markPrefabAnchorsDirty(sceneTree: SceneTree, dirtyPrefabIds: ReadonlySet<string>): void {
     if (dirtyPrefabIds.size === 0) return;
-    for (const node of sg._prefabNodes) {
+    for (const node of sceneTree._prefabNodes) {
         if (!node.prefab) continue;
-        if (dirtyPrefabIds.has(node.prefab.prefabId)) sg._prefabsDirty.add(node);
+        if (dirtyPrefabIds.has(node.prefab.prefabId)) sceneTree._prefabsDirty.add(node);
     }
 }
 

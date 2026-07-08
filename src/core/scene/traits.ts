@@ -1,6 +1,6 @@
 import { recordTrait } from '../capture/module-scope';
 import { registry, structuralHash, upsert } from '../registry';
-import type { Node } from './nodes';
+import type { Node } from './scene-tree';
 import type { pack } from './pack';
 import type { prop } from './prop';
 import type { ScriptDef } from './scripts';
@@ -75,33 +75,44 @@ export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
 
 /** measures how much a sync value changed, receives the previously-emitted value
- *  and the current one, returns a magnitude compared against a `ThresholdRate`'s
- *  `threshold`. `syncMetric.{distance,angle,scalar}` cover the common shapes. */
+ *  and the current one, returns a magnitude compared against a `DirtyThreshold`'s
+ *  `threshold`. `dirty.{distance,angle,scalar}` cover the common shapes. */
 export type SyncMetric = (previous: any, current: any) => number;
 
-/** threshold-gated rate: re-emit only once `metric(previous, current)` reaches
- *  `threshold` since the last emit. sub-threshold changes accumulate against the
- *  last emitted value, so slow drift still reconciles. body-agnostic, it reads the
- *  field's own value, so it works for any field and any driver (rigid body, AABB
- *  body, script, animation). this replaces the old velocity-based 'movement' rate. */
-export type ThresholdRate = { threshold: number; metric: SyncMetric };
+/** threshold dirtiness: the value counts as changed only once `metric(previous,
+ *  current)` reaches `threshold` since the last emit. sub-threshold changes
+ *  accumulate against the last emitted value, so slow drift still reconciles.
+ *  body-agnostic, it reads the field's own value, so it works for any field and any
+ *  driver (rigid body, AABB body, script, animation). */
+export type DirtyThreshold = { threshold: number; metric: SyncMetric };
 
 /**
- * sync rate category or explicit Hz cap for per-sync rate gating.
- * - 'realtime', emit whenever bytes change (no throttle)
- * - 'dirty', never auto-emit; only when SyncHandle.dirty() is called
- * - number, explicit Hz cap for the cold-path byte diff
- * - ThresholdRate, emit only on a significant value change (movement/rotation/etc.)
+ * DIRTINESS policy: what counts as a change worth sending. orthogonal to `rate`
+ * (how often) — nothing un-dirty ever sends, regardless of rate.
+ * - 'onChange' (default), dirty whenever the packed bytes differ.
+ * - 'explicit', never auto-dirty; only `SyncHandle.dirty()` marks it (set-once
+ *   fields whose value the byte-diff can't be trusted to catch cheaply).
+ * - DirtyThreshold, dirty only on a significant value change (movement/rotation/…).
  */
-export type SyncRateConfig = 'realtime' | 'dirty' | number | ThresholdRate;
+export type DirtyConfig = 'onChange' | 'explicit' | DirtyThreshold;
+
+/**
+ * RATE policy: the maximum send cadence for a dirty value. orthogonal to `dirty`.
+ * - 'realtime' (default), send every tick the value is dirty (no throttle).
+ * - { hz }, send at most `hz` times/sec — a dirty value that comes up before the
+ *   interval elapses waits, then sends its latest (Quake's snapshotMsec gate).
+ */
+export type RateConfig = 'realtime' | { hz: number };
 
 /** body passed by the user to `sync()`, fields only, no stamps. */
 export type SyncBody<T extends TraitBase = TraitBase, S = unknown> = {
     schema: pack.Schema;
     pack: (instance: T) => S;
     unpack: (value: S, instance: T) => void;
-    /** tick-rate gate for the cold (byte-diff) path. 'realtime' default. */
-    rate?: SyncRateConfig;
+    /** what counts as a change worth sending. default 'onChange' (byte-diff). */
+    dirty?: DirtyConfig;
+    /** max send cadence for a dirty value. default 'realtime'. */
+    rate?: RateConfig;
     /** authority for accepting writes. default 'server'. */
     authority?: 'server' | 'owner';
 };
@@ -135,7 +146,7 @@ export type TraitSyncState = {
     dirty: Uint32Array;
     /** [i] = last-emitted serialized bytes for slice i (the byte-diff snapshot). */
     bytes: Array<Uint8Array | undefined>;
-    /** [i] = last-emitted value for slice i, ThresholdRate slices only. */
+    /** [i] = last-emitted value for slice i, DirtyThreshold slices only. */
     values: unknown[];
     /** [i] = monotonic replication version for slice i. f64 because the version
      *  counter grows unbounded and must not wrap an int32. */

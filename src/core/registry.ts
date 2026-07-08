@@ -22,7 +22,7 @@ import { DEFAULT_MATCHMAKING_CONFIG, type MatchmakingConfig } from './matchmakin
 import type { ModelHandle } from './models/handle';
 import type { ParticleHandle } from './particles/particles';
 import type { CommandDef } from './rpc';
-import type { Realm } from './scene/nodes';
+import type { Realm } from './scene/scene-tree';
 import type { Schema } from './scene/prop/prop';
 import type { SceneHandle } from './scene/scene-handle';
 import type { ScriptDef } from './scene/scripts';
@@ -707,6 +707,7 @@ const syncHash = (s: SyncDef) =>
         schema: s.schema,
         pack: s.pack,
         unpack: s.unpack,
+        dirty: s.dirty,
         rate: s.rate,
         authority: s.authority,
     });

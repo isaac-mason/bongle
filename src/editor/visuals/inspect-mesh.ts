@@ -9,8 +9,8 @@ import { type Box3, box3 } from 'mathcat';
 import { getVisualWorldPosition } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Resources } from '../../core/resources';
-import type { Node } from '../../core/scene/nodes';
-import { getTrait } from '../../core/scene/nodes';
+import type { Node } from '../../core/scene/scene-tree';
+import { getTrait } from '../../core/scene/scene-tree';
 import { unionSubtreeWorldAabb } from '../node-aabb';
 import { INSPECT_OUTLINE } from './editor-colors';
 

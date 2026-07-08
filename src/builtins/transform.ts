@@ -16,11 +16,11 @@
 
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { mat4, quat, vec3 } from 'mathcat';
-import type { Node, Nodes } from '../core/scene/nodes';
-import { getTrait } from '../core/scene/nodes';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
+import { getTrait } from '../core/scene/scene-tree';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
-import { syncRate } from '../core/scene/sync/sync-rate';
+import { dirty, rate } from '../core/scene/sync/sync-rate';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
 
@@ -172,9 +172,23 @@ export type TransformTrait = TraitType<typeof TransformTrait>;
  * authoritative server time (`clock.lastServerStamp`) at unpack, NOT arrival time.
  */
 
-/** ring depth. a few hundred ms at tick cadence, comfortably past the ~50ms
- *  render-behind buffer, so jitter or a short loss never empties the bracket. */
-const NET_SNAPSHOT_CAP = 16;
+/** ring depth (keyframes). must exceed the deepest the render clock ever sits behind
+ *  the frontier — `SERVER_CLOCK_INTERP_DELAY + MAX_INTERP_MARGIN` = 0.25s — so render
+ *  time never falls before the oldest keyframe (which would freeze the entity at a
+ *  stale pose). the binding case is a fast mover at the 20Hz broadcast cap
+ *  (`rate.hz(20)`): one keyframe per ~50ms, so 8 spans ~0.4s of history, ~3 keyframes
+ *  of headroom past the 0.25s ceiling. slow movers emit sparser keyframes, so their 8
+ *  entries span even more time. ~0.35KB/entity, lazily allocated, only for remotes
+ *  that actually move — single-digit depth, like Source's time-bounded history. */
+const NET_SNAPSHOT_CAP = 8;
+
+/** cap (seconds) on how far past the newest keyframe the sampler will extrapolate
+ *  when the buffer runs dry (a stall beyond the render-behind reserve). continues the
+ *  last-known velocity instead of freezing on the frontier, so a brief starvation
+ *  glides rather than snapping; capped tight because extrapolation overshoots on a
+ *  direction change, and the bracketing reserve makes this a rare safety net, not the
+ *  common path. mirrors Source's `cl_extrapolate_amount` (position only). */
+const MAX_EXTRAPOLATION = 0.05;
 
 export type NetSnapshots = {
     /** position keyframes: server-clock seconds, and x/y/z flat (stride 3). */
@@ -261,11 +275,13 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
 const _bracket = { lo: 0, hi: 0, frac: 0 };
 
 /**
- * find the two ring entries bracketing `renderTime` and the [0,1] fraction
- * between them, written into the shared `_bracket`. ring is time-ordered
- * oldest→newest. edge cases collapse to a single-entry hold (`lo === hi`):
- * past the newest keyframe (buffer dry → hold newest), before the oldest (only
- * right after join → hold oldest), or a lone entry.
+ * find the two ring entries bracketing `renderTime` and the fraction between them,
+ * written into the shared `_bracket`. ring is time-ordered oldest→newest. normally
+ * `frac ∈ [0,1]`; past the newest keyframe with ≥2 entries it returns the two newest
+ * with `frac > 1` (a capped extrapolation — the buffer ran dry, continue the last
+ * velocity rather than freeze). other edges collapse to a single-entry hold
+ * (`lo === hi`, `frac 0`): before the oldest (only right after join → hold oldest),
+ * or a lone entry (nothing to extrapolate from → hold it).
  */
 function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
     const cap = time.length;
@@ -273,6 +289,19 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     const oldest = (head - count + 1 + cap) % cap;
 
     if (count === 1 || renderTime >= time[newest]!) {
+        // dry buffer with history: extrapolate off the two newest (frac > 1, capped).
+        if (count >= 2 && renderTime > time[newest]!) {
+            const prev = (newest - 1 + cap) % cap;
+            const span = time[newest]! - time[prev]!;
+            if (span > 0) {
+                const frac = (renderTime - time[prev]!) / span;
+                const fracMax = 1 + MAX_EXTRAPOLATION / span;
+                _bracket.lo = prev;
+                _bracket.hi = newest;
+                _bracket.frac = frac < fracMax ? frac : fracMax;
+                return;
+            }
+        }
         _bracket.lo = _bracket.hi = newest;
         _bracket.frac = 0;
         return;
@@ -300,7 +329,8 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     _bracket.frac = 0;
 }
 
-/** sample the interpolated local position at `renderTime` into `out`. */
+/** sample the interpolated local position at `renderTime` into `out`. `frac > 1`
+ *  (dry buffer) extrapolates the last-known velocity, the lerp form handles it as-is. */
 export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void {
     findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
     const lo = _bracket.lo * 3;
@@ -334,7 +364,10 @@ export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, 
     _rotHi[1] = snaps.rot[hi + 1]!;
     _rotHi[2] = snaps.rot[hi + 2]!;
     _rotHi[3] = snaps.rot[hi + 3]!;
-    quat.slerp(out, _rotLo, _rotHi, _bracket.frac);
+    // clamp to the newest on a dry buffer (frac > 1): position extrapolates, but
+    // extrapolating the rotation arc reads as jitter, so hold the last-known facing.
+    const f = _bracket.frac > 1 ? 1 : _bracket.frac;
+    quat.slerp(out, _rotLo, _rotHi, f);
 }
 
 /* ── controls (editor + persistence) ── */
@@ -406,7 +439,8 @@ const transformPositionSync = sync(TransformTrait, 'position', {
         if (runtime?.client) pushPositionSnapshot(t, runtime.clock.serverLatest, p);
     },
     authority: 'owner',
-    rate: syncRate.distance(0.05), // 5cm
+    dirty: dirty.distance(0.05), // 5cm counts as a change
+    rate: rate.hz(20), // ≤20/s: keyframes ~50ms apart, interpolation fills the gaps
 });
 
 const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
@@ -419,7 +453,8 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
         if (runtime?.client) pushRotationSnapshot(t, runtime.clock.serverLatest, q);
     },
     authority: 'owner',
-    rate: syncRate.angle(0.02), // ~1.1°
+    dirty: dirty.angle(0.02), // ~1.1° counts as a change
+    rate: rate.hz(20), // ≤20/s, matched to position
 });
 
 const transformScaleSync = sync(TransformTrait, 'scale', {
@@ -1129,7 +1164,7 @@ export function getVisualWorldScale(t: TransformTrait): Vec3 {
  * (read during the tick). this just catches anything that was dirtied
  * but never read.
  */
-export function computeWorldTransforms(nodes: Nodes): void {
+export function computeWorldTransforms(nodes: SceneTree): void {
     traverse(nodes.root, (node: Node) => {
         const t = getTrait(node, TransformTrait);
         if (!t) return;

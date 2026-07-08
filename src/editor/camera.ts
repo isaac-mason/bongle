@@ -8,7 +8,7 @@ import type { Input } from '../client/input';
 import { isKeyJustDown } from '../client/input';
 import type { ClientRoom } from '../client/rooms';
 import type { Resources } from '../core/resources';
-import { getNodeById, getTrait } from '../core/scene/nodes';
+import { getNodeById, getTrait } from '../core/scene/scene-tree';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { NUDGE_KEYS } from './editor-controls';
 

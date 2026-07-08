@@ -190,30 +190,30 @@ export const PackedNode = pack.object({
 export type PackedNode = pack.SchemaType<typeof PackedNode>;
 
 /**
- * full binary scene graph for network transfer (join_room, play snapshot).
+ * full binary scene tree for network transfer (join_room, play snapshot).
  * includes ALL nodes regardless of persist flag. trait field data is
  * packcat-encoded via getControlSerDes.
  *
  * root is the first node in the list with parentId: 0.
  * remaining nodes are flat parent-first.
  */
-export const PackedSceneGraph = pack.object({
+export const PackedSceneTree = pack.object({
     nodes: pack.list(PackedNode),
 });
 
-export type PackedSceneGraph = pack.SchemaType<typeof PackedSceneGraph>;
+export type PackedSceneTree = pack.SchemaType<typeof PackedSceneTree>;
 
-const PackedSceneGraphSerDes = pack.build(PackedSceneGraph);
+const PackedSceneTreeSerDes = pack.build(PackedSceneTree);
 
-export function packPackedSceneGraph(data: PackedSceneGraph): Uint8Array {
-    return PackedSceneGraphSerDes.pack(data);
+export function packPackedSceneTree(data: PackedSceneTree): Uint8Array {
+    return PackedSceneTreeSerDes.pack(data);
 }
 
-export function unpackPackedSceneGraph(data: Uint8Array): PackedSceneGraph {
+export function unpackPackedSceneTree(data: Uint8Array): PackedSceneTree {
     try {
-        return PackedSceneGraphSerDes.unpack(data);
+        return PackedSceneTreeSerDes.unpack(data);
     } catch (e) {
-        console.error('[bongle] failed to unpack scene graph:', e);
+        console.error('[bongle] failed to unpack scene tree:', e);
         throw e;
     }
 }

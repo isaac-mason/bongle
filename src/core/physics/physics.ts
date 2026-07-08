@@ -5,7 +5,7 @@ import { ContactsTrait } from '../../builtins/contacts';
 import { setInterpolation } from '../../builtins/transform';
 import type { PlayerId } from '../client';
 import type * as Resources from '../resources';
-import type { Nodes } from '../scene/nodes';
+import type { SceneTree } from '../scene/scene-tree';
 import {
     addTrait,
     getNodeById,
@@ -15,7 +15,7 @@ import {
     removeTrait,
     runOnPostPhysicsStep,
     runOnPrePhysicsStep,
-} from '../scene/nodes';
+} from '../scene/scene-tree';
 import type { BlockRegistry } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';
@@ -133,10 +133,10 @@ export type VccBodyContact = {
     penetrationDepth: number;
 };
 
-export function init(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): Physics {
-    const rigid = RigidPhysics.create(nodes, voxels, registry);
+export function init(sceneTree: SceneTree, voxels: Voxels, registry: BlockRegistry): Physics {
+    const rigid = RigidPhysics.create(sceneTree, voxels, registry);
     const aabb = AabbPhysics.createWorld(voxels);
-    AabbPhysics.bindNodeSync(aabb, nodes, AabbBodyTrait);
+    AabbPhysics.bindNodeSync(aabb, sceneTree, AabbBodyTrait);
 
     const contacts = createPhysicsContacts();
     const contactPairPool = createContactPairPool();
@@ -150,7 +150,7 @@ export function init(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): Phy
         aabbBodyContactPool: createAabbBodyContactPool(),
         voxelContactPool: createVoxelContactPool(),
         contactPairPool,
-        contactsQuery: query(nodes, [ContactsTrait]),
+        contactsQuery: query(sceneTree, [ContactsTrait]),
         aabbPairSink,
         vccContacts: [],
         vccContactCount: 0,
@@ -228,8 +228,8 @@ function ingestVccContacts(physics: Physics): void {
 }
 
 /** step the physics world. fires pre/post hooks and runs the world update. */
-export function tick(physics: Physics, nodes: Nodes, dt: number): void {
-    runOnPrePhysicsStep(nodes, { delta: dt });
+export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
+    runOnPrePhysicsStep(sceneTree, { delta: dt });
 
     beginPhysicsContactsFrame(physics.contacts, physics.contactPairPool);
 
@@ -251,9 +251,9 @@ export function tick(physics: Physics, nodes: Nodes, dt: number): void {
     endPhysicsContactsFrame(physics.contacts);
 
     // fan out pairs - writes to per-node ContactsTrait traits
-    fanOutContacts(physics, nodes);
+    fanOutContacts(physics, sceneTree);
 
-    runOnPostPhysicsStep(nodes, { delta: dt });
+    runOnPostPhysicsStep(sceneTree, { delta: dt });
 }
 
 /** release all tracked bodies. call before discarding the physics world. */
@@ -264,17 +264,17 @@ export function dispose(physics: Physics): void {
 
 export function preStep(
     physics: Physics,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     resources: Resources.Resources,
     identity: PlayerId | null,
     simulate: boolean,
 ): void {
     RigidPhysics.preStep(physics.rigid, resources, identity, simulate);
     AabbPhysics.preStep(physics.aabb, physics.rigid.world, identity, simulate);
-    syncCompanionTraits(physics, nodes);
+    syncCompanionTraits(physics, sceneTree);
 }
 
-export function postStep(physics: Physics, _nodes: Nodes, identity: PlayerId | null): void {
+export function postStep(physics: Physics, _sceneTree: SceneTree, identity: PlayerId | null): void {
     RigidPhysics.postStep(physics.rigid, identity);
     AabbPhysics.postStep(physics.aabb);
 }
@@ -298,7 +298,7 @@ export function flush(_physics: Physics): void {
 // the diff live in one place, subsystems stay independent of these
 // import paths.
 
-function syncCompanionTraits(physics: Physics, nodes: Nodes): void {
+function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
     const want = new Set<number>();
     for (const nid of physics.rigid.nodeToBody.keys()) want.add(nid);
     for (const nid of physics.aabb.nodeToBody.keys()) want.add(nid);
@@ -306,7 +306,7 @@ function syncCompanionTraits(physics: Physics, nodes: Nodes): void {
     // add to new entries
     for (const nid of want) {
         if (physics._companionNodes.has(nid)) continue;
-        const node = getNodeById(nodes, nid);
+        const node = getNodeById(sceneTree, nid);
         if (!node) continue;
         setInterpolation(node, true);
         if (!hasTrait(node, ContactsTrait)) addTrait(node, ContactsTrait);
@@ -314,7 +314,7 @@ function syncCompanionTraits(physics: Physics, nodes: Nodes): void {
     // remove from gone entries
     for (const nid of physics._companionNodes) {
         if (want.has(nid)) continue;
-        const node = getNodeById(nodes, nid);
+        const node = getNodeById(sceneTree, nid);
         if (!node) continue;
         setInterpolation(node, false);
         if (hasTrait(node, ContactsTrait)) removeTrait(node, ContactsTrait);
@@ -382,7 +382,7 @@ function makeAabbPairSink(contacts: PhysicsContacts, pool: ContactPairPool): Aab
 // fan-out clears every list, releases instances back to per-type pools,
 // then re-acquires fresh ones for active+removed.
 
-function fanOutContacts(physics: Physics, nodes: Nodes): void {
+function fanOutContacts(physics: Physics, sceneTree: SceneTree): void {
     // 1. release the previous step's per-trait Contacts back to pools, clear lists.
     for (const [ct] of physics.contactsQuery) {
         for (const c of ct.active)
@@ -397,23 +397,23 @@ function fanOutContacts(physics: Physics, nodes: Nodes): void {
 
     // 2. for each pair in this step's added/persisted/removed, project to up
     //    to two per-observer Contacts.
-    fanOutBucket(physics, nodes, physics.contacts.added, 'added');
-    fanOutBucket(physics, nodes, physics.contacts.persisted, 'persisted');
-    fanOutBucket(physics, nodes, physics.contacts.removed, 'removed');
+    fanOutBucket(physics, sceneTree, physics.contacts.added, 'added');
+    fanOutBucket(physics, sceneTree, physics.contacts.persisted, 'persisted');
+    fanOutBucket(physics, sceneTree, physics.contacts.removed, 'removed');
 }
 
-function fanOutBucket(physics: Physics, nodes: Nodes, bucket: ContactPair[], phase: 'added' | 'persisted' | 'removed'): void {
+function fanOutBucket(physics: Physics, sceneTree: SceneTree, bucket: ContactPair[], phase: 'added' | 'persisted' | 'removed'): void {
     for (let i = 0; i < bucket.length; i++) {
         const pair = bucket[i]!;
         const aObserverNodeId = observerNodeIdForSide(pair, 'a');
         if (aObserverNodeId !== -1) {
-            const node = getNodeById(nodes, aObserverNodeId);
+            const node = getNodeById(sceneTree, aObserverNodeId);
             const ct = node ? getTrait(node, ContactsTrait) : undefined;
             if (ct) emitForObserver(physics, ct, pair, 'a', phase);
         }
         const bObserverNodeId = observerNodeIdForSide(pair, 'b');
         if (bObserverNodeId !== -1) {
-            const node = getNodeById(nodes, bObserverNodeId);
+            const node = getNodeById(sceneTree, bObserverNodeId);
             const ct = node ? getTrait(node, ContactsTrait) : undefined;
             if (ct) emitForObserver(physics, ct, pair, 'b', phase);
         }

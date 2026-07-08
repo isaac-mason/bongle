@@ -10,7 +10,7 @@
 import type { PlayerId } from '../core/client';
 import type { BinaryField } from '../core/protocol';
 import { registry } from '../core/registry';
-import type { Node, Nodes } from '../core/scene/nodes';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getSyncCodecs } from '../core/scene/packcat-bridge';
 import { diffSync } from '../core/scene/sync/sync-diff';
 import type { ClientNet } from './net';
@@ -31,7 +31,7 @@ export function createSyncSnapshots(): Set<Node> {
  * per-slice byte snapshot lives on `instance._sync`, same store the server
  * diff uses.
  */
-export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, playerId: PlayerId, tracked: Set<Node>): void {
+export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: string, playerId: PlayerId, tracked: Set<Node>): void {
     const owned = sg.playerIdToOwnedNodes.get(playerId);
 
     // reset + untrack nodes we no longer own (destroyed, or owner handed off) so
@@ -78,7 +78,7 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: Nodes, roomId: string, 
             for (let i = 0; i < codecs.length; i++) {
                 if (def.sync[i].authority !== 'owner') continue;
 
-                // shared cold path: byte-diff or ThresholdRate metric. the client
+                // shared cold path: byte-diff or DirtyThreshold metric. the client
                 // uploads a first-seen owned slice (the server needs the initial
                 // value), so emitOnFirstSeen = true.
                 if (diffSync(def.sync[i], codecs[i], instance, node, i, sync, true)) {

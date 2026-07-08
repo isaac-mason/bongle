@@ -15,7 +15,7 @@
 import type { Box3 } from 'mathcat';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
-import { addChild, addTrait, createNode, type Node } from '../scene/nodes';
+import { addChild, addTrait, createNode, type Node } from '../scene/scene-tree';
 import type { ClipDef, MeshId, ModelHandle } from './handle';
 import type { Model, ModelNode } from './model';
 
@@ -23,8 +23,8 @@ import type { Model, ModelNode } from './model';
 const TRS_EPS = 1e-6;
 
 /**
- * Hydrate `handle` from `model` in place. Reads the scene tree under
- * `model.root`, the by-name indices, and per-mesh AABBs. Writes scene
+ * Hydrate `handle` from `model` in place. Reads the node tree under
+ * `model.root`, the by-name indices, and per-mesh AABBs. Writes node
  * tree, flat node index, mesh ref index, clip ref index, root-local
  * AABB. Bumps `handle.version`.
  *

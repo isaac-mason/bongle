@@ -31,7 +31,7 @@ import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { SpriteTrait } from '../../builtins/sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
-import { type Nodes, query } from '../../core/scene/nodes';
+import { type SceneTree, query } from '../../core/scene/scene-tree';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
@@ -120,7 +120,7 @@ export type SpriteVisuals = {
 
 // ── init ────────────────────────────────────────────────────────────
 
-export function init(scene: Scene, nodes: Nodes, resources: SpriteResources, env: EnvironmentResources): SpriteVisuals {
+export function init(scene: Scene, sceneTree: SceneTree, resources: SpriteResources, env: EnvironmentResources): SpriteVisuals {
     const instanceCapacity = INITIAL_INSTANCE_CAPACITY;
 
     // Shared 1×1 plane geometry, positions in [-0.5..0.5] × [-0.5..0.5],
@@ -161,7 +161,7 @@ export function init(scene: Scene, nodes: Nodes, resources: SpriteResources, env
         instanceCapacity,
         slotOwner: new Array(instanceCapacity).fill(null),
         aliveStates: [],
-        _query: query(nodes, [SpriteTrait, TransformTrait]),
+        _query: query(sceneTree, [SpriteTrait, TransformTrait]),
         frameId: 0,
         scene,
     };

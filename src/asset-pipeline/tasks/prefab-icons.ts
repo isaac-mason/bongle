@@ -11,7 +11,7 @@
 // the orchestrator (one PNG per prefab, like scenes, no atlas).
 
 import { registry as engineRegistry } from '../../core/registry';
-import { addChild, createNode, createPrefabConfig } from '../../core/scene/nodes';
+import { addChild, createNode, createPrefabConfig } from '../../core/scene/scene-tree';
 import type { State } from '../engine';
 import { createRoom, disposeRoom } from '../rooms';
 import { beginSnapshotSession, endSnapshotSession } from '../snapshot';

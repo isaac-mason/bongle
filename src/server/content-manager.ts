@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ScenePayload } from '../core/content/scene-store';
-import type { SerializedSceneGraph } from '../core/scene/nodes';
+import type { SerializedSceneTree } from '../core/scene/scene-tree';
 import type { SavedChunk } from '../core/voxels/voxel-savefile';
 
 export type { ScenePayload };
@@ -41,7 +41,7 @@ export type SceneEntry = {
 /** on-disk shape. nodes is required; chunks is omitted when voxels are empty. */
 export type SceneFile = {
     version: number;
-    nodes: SerializedSceneGraph;
+    nodes: SerializedSceneTree;
     chunks?: Record<string, SavedChunk>;
 };
 

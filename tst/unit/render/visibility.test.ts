@@ -2,7 +2,7 @@ import { PerspectiveCamera } from 'gpucat';
 import { box3, mat4 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
-import { addChild, addTrait, createNode, createSceneGraph } from '../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode, createSceneTree } from '../../../src/core/scene/scene-tree';
 import * as Visibility from '../../../src/render/visibility';
 
 function makeCamera(): PerspectiveCamera {
@@ -15,7 +15,7 @@ function makeCamera(): PerspectiveCamera {
 /** create a transformed node, register a unit-box cull entry for it with the
  *  culler, and return the entry so the test can read `cull.visible`. */
 function spawn(
-    sgRoot: ReturnType<typeof createSceneGraph>['root'],
+    sgRoot: ReturnType<typeof createSceneTree>['root'],
     visibility: Visibility.Visibility,
     pos: [number, number, number],
 ) {
@@ -29,7 +29,7 @@ function spawn(
 
 describe('Visibility', () => {
     it('marks in-frustum entries visible, out-of-frustum entries invisible', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const visibility = Visibility.init();
         const inFront = spawn(sg.root, visibility, [0, 0, 0]);
         const offToSide = spawn(sg.root, visibility, [200, 0, 0]);
@@ -41,7 +41,7 @@ describe('Visibility', () => {
     });
 
     it('refreshes the DBVT leaf when transform._version bumps past the fat-aabb margin', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const visibility = Visibility.init();
         const a = spawn(sg.root, visibility, [0, 0, 0]);
         const camera = makeCamera();
@@ -57,7 +57,7 @@ describe('Visibility', () => {
     });
 
     it('drops a leaf on unregister so it stops being culled', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const visibility = Visibility.init();
         const a = spawn(sg.root, visibility, [0, 0, 0]);
 
@@ -75,7 +75,7 @@ describe('Visibility', () => {
     });
 
     it('distance-culls past viewRadius, with hysteresis across the margin', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const visibility = Visibility.init();
         // camera at world-space [0,0,30] looking toward origin. lookAt
         // only fills the view matrix; position is read separately by the
@@ -114,7 +114,7 @@ describe('Visibility', () => {
     });
 
     it('registering an empty box returns an unregistered, visible handle', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const visibility = Visibility.init();
         const n = createNode({ name: 'empty' });
         const t = addTrait(n, TransformTrait);

@@ -49,7 +49,7 @@ import {
     updateInterpolatedWorldTransform,
 } from '../builtins/transform';
 import type { PlayerId } from '../core/client';
-import { getTrait, type Nodes } from '../core/scene/nodes';
+import { getTrait, type SceneTree } from '../core/scene/scene-tree';
 
 export { resetInterpolation, setInterpolation } from '../builtins/transform';
 
@@ -75,14 +75,14 @@ const _authWorldScale: Vec3 = vec3.create();
 // ── state ───────────────────────────────────────────────────────────────
 
 export type Interpolation = {
-    _nodes: Nodes;
+    _nodes: SceneTree;
     /** room player id, used per-frame to route owner vs remote path
      *  for each enrolled transform. fixed for the room's lifetime. */
     _playerId: PlayerId;
 };
 
-export function init(nodes: Nodes, playerId: PlayerId): Interpolation {
-    return { _nodes: nodes, _playerId: playerId };
+export function init(sceneTree: SceneTree, playerId: PlayerId): Interpolation {
+    return { _nodes: sceneTree, _playerId: playerId };
 }
 
 /* ── snapshot ── */

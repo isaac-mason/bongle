@@ -52,7 +52,7 @@ import type { Mat4 } from 'mathcat';
 import { box3 } from 'mathcat';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
-import { getTrait, type Nodes, query } from '../../core/scene/nodes';
+import { getTrait, type SceneTree, query } from '../../core/scene/scene-tree';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
@@ -174,7 +174,7 @@ export type ExtrudedSpriteVisuals = {
 
 export function init(
     scene: Scene,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     extrudedSpriteResources: ExtrudedSpriteResources,
     env: EnvironmentResources,
 ): ExtrudedSpriteVisuals {
@@ -230,7 +230,7 @@ export function init(
         maxUniqueSprites,
         instanceAllocator: createSlotAllocator(instanceCapacity),
         aliveStates: [],
-        _query: query(nodes, [ExtrudedSpriteMeshTrait, TransformTrait]),
+        _query: query(sceneTree, [ExtrudedSpriteMeshTrait, TransformTrait]),
         frameId: 0,
         scene,
     };

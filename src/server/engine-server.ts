@@ -11,7 +11,7 @@ import { buildWireIndex, clearPendingChanges, registry, touch } from '../core/re
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
-import * as Nodes from '../core/scene/nodes';
+import * as SceneTree from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import * as Scripts from '../core/scene/scripts';
@@ -24,7 +24,6 @@ import * as Clients from './clients';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
 import * as Net from './net';
-import { formatPerfDigest, PERF_EMIT_INTERVAL_S } from './perf-report';
 import * as ResourceManager from './resource-manager';
 import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
@@ -126,16 +125,8 @@ export function init(opts: InitOptions) {
          *  per-connection ping RTT is measured in (NOT performance.now / OS wall time). ping is
          *  connection-level, so it can't ride a per-room `clock`; this is the server-global one. */
         netTimeMs: 0,
-        /** seconds accumulated since the last edit-mode perf digest (see perf-report) */
-        perfSince: 0,
         /** seconds accumulated since the last auto-flush of dirty edit rooms to disk */
         flushSince: 0,
-        /** emit the per-tick perf digest to the CLI, opt-in via `bongle edit
-         *  --performance-logs` (or `BONGLE_PERFORMANCE_LOGS=1`). per-tick timing is
-         *  always collected for the debug panel; this only gates the stdout digest,
-         *  which is otherwise too noisy for normal editing. read here (not at module
-         *  load) so the cli flag can set the env before the engine boots. */
-        performanceLogs: process.env.BONGLE_PERFORMANCE_LOGS === '1' || process.env.BONGLE_PERFORMANCE_LOGS === 'true',
         /**
          * debug log subscribers: per-client `roomId → last cursor sent`
          * cache. presence in the outer map = client wants pushes; the inner
@@ -485,7 +476,7 @@ export function processInbox(state: EngineServer) {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
 
-                        const node = Nodes.getNodeById(room.nodes, message.nodeId);
+                        const node = SceneTree.getNodeById(room.nodes, message.nodeId);
                         if (!node || node.owner === null) break;
                         const ownerPlayer = state.rooms.players.get(node.owner);
                         if (!ownerPlayer || ownerPlayer.client !== client || ownerPlayer.roomId !== room.id) break;
@@ -548,7 +539,7 @@ export function processInbox(state: EngineServer) {
                             Rooms.getOrCreateNamespace(state.rooms, namespace, gameOptions);
                             if (message.joinData) joinData = JSON.parse(message.joinData) as Record<string, JsonValue>;
                         } else {
-                            namespace = `play-${Nodes.generateUuid()}`;
+                            namespace = `play-${SceneTree.generateUuid()}`;
                             Rooms.getOrCreateNamespace(state.rooms, namespace, {});
                         }
 
@@ -664,13 +655,13 @@ export function update(state: EngineServer, delta: number) {
         });
 
         Debug.begin(room.metrics, 'nodes/update');
-        Nodes.runOnUpdate(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnUpdate(room.nodes, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/update');
 
         // game-script onTick, the usual home of game-logic spikes (ai, projectile
         // sweeps, the round reset). also timed per-script as `script/<key>`.
         Debug.begin(room.metrics, 'nodes/tick');
-        Nodes.runOnTick(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnTick(room.nodes, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/tick');
 
         // sample animations into rig TransformTraits before physics so the
@@ -682,7 +673,7 @@ export function update(state: EngineServer, delta: number) {
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(room.metrics, 'nodes/post-animate');
-        Nodes.runOnPostAnimate(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnPostAnimate(room.nodes, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/post-animate');
 
         // tick prefab system, discovers and re-instantiates stale prefab nodes
@@ -714,7 +705,7 @@ export function update(state: EngineServer, delta: number) {
         Debug.end(room.metrics, 'lighting');
 
         Debug.begin(room.metrics, 'nodes/frame');
-        Nodes.runOnFrame(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnFrame(room.nodes, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/frame');
 
         // drain chat inbox/outbox: parse queued `chat_input` lines from
@@ -815,20 +806,6 @@ export function update(state: EngineServer, delta: number) {
     }
 
     Debug.end(state.metrics, 'tick');
-
-    // perf digest to the server CLI every PERF_EMIT_INTERVAL_S, for edit rooms,
-    // when --performance-logs is on. timing itself is always collected (it feeds the panel).
-    if (state.performanceLogs) {
-        state.perfSince += delta;
-        if (state.perfSince >= PERF_EMIT_INTERVAL_S) {
-            state.perfSince = 0;
-            for (const room of state.rooms.rooms.values()) {
-                if (room.mode !== 'edit') continue;
-                const digest = formatPerfDigest(state.metrics, room.metrics, room.id);
-                if (digest) console.log(digest);
-            }
-        }
-    }
 
     // auto-flush dirty edit rooms to disk on an interval (no-op when clean).
     Save.tick(state, delta);

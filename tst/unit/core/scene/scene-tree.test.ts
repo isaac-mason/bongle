@@ -8,13 +8,13 @@ import {
     addTrait,
     cloneNode,
     createNode,
-    createSceneGraph,
+    createSceneTree,
     deserializeNode,
     destroyNode,
     findAncestor,
     getTrait,
     isReplicable,
-    loadSceneGraph,
+    loadSceneTree,
     type Node,
     Not,
     query,
@@ -22,11 +22,11 @@ import {
     removeTrait,
     reorderChild,
     reparent,
-    saveSceneGraph,
+    saveSceneTree,
     serializeNode,
-} from '../../../../src/core/scene/nodes';
+} from '../../../../src/core/scene/scene-tree';
 import { prop } from '../../../../src/core/scene/prop';
-import { packSceneGraph, unpackSceneGraph } from '../../../../src/core/scene/scene-pack';
+import { packSceneTree, unpackSceneTree } from '../../../../src/core/scene/scene-pack';
 import { applyTraitSwap, onDispose, onInit, pruneRemovedScript, script, query as scriptQuery } from '../../../../src/core/scene/scripts';
 import { control, type TraitType, trait } from '../../../../src/core/scene/traits';
 
@@ -128,20 +128,20 @@ const TEST_SCRIPT_RUNTIME = server.runtime;
 /* ── helpers ── */
 
 function setup() {
-    return createSceneGraph();
+    return createSceneTree();
 }
 
 /* ── existing query behaviour (With / Not) ── */
 
 describe('query — With / Not (existing behaviour)', () => {
     it('matches nodes with required traits', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, RigidBody, { mass: 5 });
         addTrait(node, Transform);
 
-        const q = query(sg, [RigidBody, Transform]);
+        const q = query(sceneTree, [RigidBody, Transform]);
         expect(q.matches.length).toBe(1);
         expect((q.matches[0][0] as RigidBody).mass).toBe(5);
         expect(q.matches[0][0]._node).toBe(node);
@@ -150,26 +150,26 @@ describe('query — With / Not (existing behaviour)', () => {
     });
 
     it('Not() excludes nodes', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const a = createNode({ name: 'A' });
-        addChild(sg.root, a);
+        addChild(sceneTree.root, a);
         addTrait(a, RigidBody);
         addTrait(a, Tag);
 
         const b = createNode({ name: 'B' });
-        addChild(sg.root, b);
+        addChild(sceneTree.root, b);
         addTrait(b, RigidBody);
 
-        const q = query(sg, [RigidBody, Not(Tag)]);
+        const q = query(sceneTree, [RigidBody, Not(Tag)]);
         expect(q.matches.length).toBe(1);
         expect(q.matches[0][0]._node).toBe(b);
     });
 
     it('live updates when traits are added/removed', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
-        const q = query(sg, [RigidBody]);
+        addChild(sceneTree.root, node);
+        const q = query(sceneTree, [RigidBody]);
 
         expect(q.matches.length).toBe(0);
 
@@ -181,9 +181,9 @@ describe('query — With / Not (existing behaviour)', () => {
     });
 
     it('deduplicates queries by hash', () => {
-        const sg = setup();
-        const q1 = query(sg, [RigidBody, Transform]);
-        const q2 = query(sg, [RigidBody, Transform]);
+        const sceneTree = setup();
+        const q1 = query(sceneTree, [RigidBody, Transform]);
+        const q2 = query(sceneTree, [RigidBody, Transform]);
         expect(q1).toBe(q2);
     });
 });
@@ -192,15 +192,15 @@ describe('query — With / Not (existing behaviour)', () => {
 
 describe('query — onAdd / onRemove callbacks', () => {
     it('onAdd fires with correct values', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
-        const q = query(sg, [RigidBody, Transform]);
+        const q = query(sceneTree, [RigidBody, Transform]);
 
         const added: any[] = [];
         q.onAdd.add((...args) => added.push(args));
 
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, RigidBody, { mass: 7 });
         addTrait(node, Transform);
 
@@ -213,12 +213,12 @@ describe('query — onAdd / onRemove callbacks', () => {
     });
 
     it('onRemove fires when trait is removed', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, RigidBody);
 
-        const q = query(sg, [RigidBody]);
+        const q = query(sceneTree, [RigidBody]);
         expect(q.matches.length).toBe(1);
 
         const removed: any[] = [];
@@ -235,15 +235,15 @@ describe('query — onAdd / onRemove callbacks', () => {
 
 describe('query — destroy', () => {
     it('destroying a matched node removes it from queries', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, RigidBody);
 
-        const q = query(sg, [RigidBody]);
+        const q = query(sceneTree, [RigidBody]);
         expect(q.matches.length).toBe(1);
 
-        destroyNode(sg, node);
+        destroyNode(sceneTree, node);
         expect(q.matches.length).toBe(0);
     });
 });
@@ -252,9 +252,9 @@ describe('query — destroy', () => {
 
 describe('findAncestor', () => {
     it('finds direct parent with the trait', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'P' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, Physics, { gravity: -10 });
 
         const child = createNode({ name: 'C' });
@@ -268,9 +268,9 @@ describe('findAncestor', () => {
     });
 
     it('finds grandparent with the trait', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, Physics, { gravity: -15 });
 
         const parent = createNode({ name: 'P' });
@@ -286,9 +286,9 @@ describe('findAncestor', () => {
     });
 
     it('returns the CLOSEST ancestor with the trait', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, Physics, { gravity: -1 });
 
         const parent = createNode({ name: 'P' });
@@ -306,9 +306,9 @@ describe('findAncestor', () => {
     });
 
     it('returns null when no ancestor has the trait', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'P' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const child = createNode({ name: 'C' });
         addChild(parent, child);
 
@@ -317,9 +317,9 @@ describe('findAncestor', () => {
     });
 
     it('does NOT match trait on the node itself', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'N' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, Physics);
 
         const result = findAncestor(node, [Physics]);
@@ -327,9 +327,9 @@ describe('findAncestor', () => {
     });
 
     it('works with deep nesting', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const root = createNode({ name: 'Root' });
-        addChild(sg.root, root);
+        addChild(sceneTree.root, root);
         addTrait(root, Physics, { gravity: -5 });
 
         let current: Node = root;
@@ -347,9 +347,9 @@ describe('findAncestor', () => {
     });
 
     it('returns live reference — mutations are visible', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'P' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, Physics, { gravity: -9.8 });
 
         const child = createNode({ name: 'C' });
@@ -369,9 +369,9 @@ describe('findAncestor', () => {
     });
 
     it('multiple traits: finds first ancestor with ALL traits', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, Physics, { gravity: -9.8 });
         // GP has Physics but not Renderer
 
@@ -393,9 +393,9 @@ describe('findAncestor', () => {
     });
 
     it('multiple traits: returns null if no single ancestor has all', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, Physics);
 
         const parent = createNode({ name: 'P' });
@@ -411,9 +411,9 @@ describe('findAncestor', () => {
     });
 
     it('ancestor node can be used to read other traits', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const worldNode = createNode({ name: 'World' });
-        addChild(sg.root, worldNode);
+        addChild(sceneTree.root, worldNode);
         addTrait(worldNode, Physics, { gravity: -9.8 });
         addTrait(worldNode, Renderer, { visible: false });
 
@@ -433,13 +433,13 @@ describe('findAncestor', () => {
     });
 
     it('reflects reparenting immediately', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const worldA = createNode({ name: 'WorldA' });
-        addChild(sg.root, worldA);
+        addChild(sceneTree.root, worldA);
         addTrait(worldA, Physics, { gravity: -10 });
 
         const worldB = createNode({ name: 'WorldB' });
-        addChild(sg.root, worldB);
+        addChild(sceneTree.root, worldB);
         addTrait(worldB, Physics, { gravity: -20 });
 
         const container = createNode({ name: 'Container' });
@@ -467,41 +467,41 @@ describe('findAncestor', () => {
 
 describe('reorderChild', () => {
     it('moves a child to a specific index', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const a = createNode({ name: 'A' });
         const b = createNode({ name: 'B' });
         const c = createNode({ name: 'C' });
 
-        addChild(sg.root, a);
-        addChild(sg.root, b);
-        addChild(sg.root, c);
+        addChild(sceneTree.root, a);
+        addChild(sceneTree.root, b);
+        addChild(sceneTree.root, c);
 
         // order: A, B, C, move C to index 0
-        reorderChild(sg.root, c, 0);
-        expect(sg.root.children.map((n) => n.name)).toEqual(['C', 'A', 'B']);
+        reorderChild(sceneTree.root, c, 0);
+        expect(sceneTree.root.children.map((n) => n.name)).toEqual(['C', 'A', 'B']);
     });
 
     it('clamps index to children length', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const a = createNode({ name: 'A' });
         const b = createNode({ name: 'B' });
 
-        addChild(sg.root, a);
-        addChild(sg.root, b);
+        addChild(sceneTree.root, a);
+        addChild(sceneTree.root, b);
 
         // move A to index 999, should end up at end
-        reorderChild(sg.root, a, 999);
-        expect(sg.root.children.map((n) => n.name)).toEqual(['B', 'A']);
+        reorderChild(sceneTree.root, a, 999);
+        expect(sceneTree.root.children.map((n) => n.name)).toEqual(['B', 'A']);
     });
 
     it('does nothing if child is not a child of parent', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const a = createNode({ name: 'A' });
         addChild(parent, a);
         const b = createNode({ name: 'B' }); // child of root, not parent
-        addChild(sg.root, b);
+        addChild(sceneTree.root, b);
 
         reorderChild(parent, b, 0);
         expect(parent.children.map((n) => n.name)).toEqual(['A']);
@@ -528,9 +528,9 @@ describe('persist — node-level', () => {
     });
 
     it('persistOnly skips non-persistent children', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const a = createNode({ name: 'PersistChild' });
         addChild(parent, a);
         const b = createNode({ name: 'EphemeralChild', persist: false });
@@ -542,9 +542,9 @@ describe('persist — node-level', () => {
     });
 
     it('without persistOnly, non-persistent children are included', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const a = createNode({ name: 'A' });
         addChild(parent, a);
         const b = createNode({ name: 'B', persist: false });
@@ -574,9 +574,9 @@ describe('persist — node-level', () => {
 
 describe('persist — trait-level', () => {
     it('non-persistent traits are skipped with persistOnly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, EphemeralTrait, { value: 99 });
         addTrait(node, Transform);
 
@@ -586,9 +586,9 @@ describe('persist — trait-level', () => {
     });
 
     it('non-persistent traits are included without persistOnly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, EphemeralTrait, { value: 99 });
         addTrait(node, Transform);
 
@@ -597,67 +597,67 @@ describe('persist — trait-level', () => {
     });
 });
 
-describe('persist — scene graph level', () => {
-    it('saveSceneGraph skips non-persistent root children', () => {
-        const sg = setup();
+describe('persist — scene tree level', () => {
+    it('saveSceneTree skips non-persistent root children', () => {
+        const sceneTree = setup();
         const keeper = createNode({ name: 'Keeper' });
-        addChild(sg.root, keeper);
+        addChild(sceneTree.root, keeper);
         const ephemeral = createNode({ name: 'Ephemeral', persist: false });
-        addChild(sg.root, ephemeral);
+        addChild(sceneTree.root, ephemeral);
 
-        const data = saveSceneGraph(sg);
+        const data = saveSceneTree(sceneTree);
         expect(data.root.children.length).toBe(1);
         expect(data.root.children[0].name).toBe('Keeper');
     });
 
-    it('packSceneGraph includes everything (non-persistent nodes too)', () => {
-        const sg = setup();
+    it('packSceneTree includes everything (non-persistent nodes too)', () => {
+        const sceneTree = setup();
         const keeper = createNode({ name: 'Keeper' });
-        addChild(sg.root, keeper);
+        addChild(sceneTree.root, keeper);
         const ephemeral = createNode({ name: 'Ephemeral', persist: false });
-        addChild(sg.root, ephemeral);
+        addChild(sceneTree.root, ephemeral);
 
-        const packed = packSceneGraph(sg, 'edit');
-        const sg2 = createSceneGraph();
-        unpackSceneGraph(sg2, TEST_SCRIPT_RUNTIME, packed);
+        const packed = packSceneTree(sceneTree, 'edit');
+        const sceneTree2 = createSceneTree();
+        unpackSceneTree(sceneTree2, TEST_SCRIPT_RUNTIME, packed);
 
-        expect(sg2.root.children.length).toBe(2);
+        expect(sceneTree2.root.children.length).toBe(2);
     });
 
     it('full round-trip preserves persist=false through pack/unpack', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const a = createNode({ name: 'A' });
-        addChild(sg.root, a);
+        addChild(sceneTree.root, a);
         const b = createNode({ name: 'B', persist: false });
-        addChild(sg.root, b);
+        addChild(sceneTree.root, b);
 
         // binary pack/unpack (network/reload path) includes everything
-        const packed = packSceneGraph(sg, 'edit');
+        const packed = packSceneTree(sceneTree, 'edit');
 
-        const sg2 = createSceneGraph();
-        unpackSceneGraph(sg2, TEST_SCRIPT_RUNTIME, packed);
+        const sceneTree2 = createSceneTree();
+        unpackSceneTree(sceneTree2, TEST_SCRIPT_RUNTIME, packed);
 
-        expect(sg2.root.children.length).toBe(2);
-        expect(sg2.root.children[0].name).toBe('A');
-        expect(sg2.root.children[0].persist).toBe(true);
-        expect(sg2.root.children[1].name).toBe('B');
-        expect(sg2.root.children[1].persist).toBe(false);
+        expect(sceneTree2.root.children.length).toBe(2);
+        expect(sceneTree2.root.children[0].name).toBe('A');
+        expect(sceneTree2.root.children[0].persist).toBe(true);
+        expect(sceneTree2.root.children[1].name).toBe('B');
+        expect(sceneTree2.root.children[1].persist).toBe(false);
     });
 
     it('save/load round-trip drops non-persistent nodes (disk save path)', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const a = createNode({ name: 'A' });
-        addChild(sg.root, a);
+        addChild(sceneTree.root, a);
         const b = createNode({ name: 'B', persist: false });
-        addChild(sg.root, b);
+        addChild(sceneTree.root, b);
 
-        const data = saveSceneGraph(sg);
+        const data = saveSceneTree(sceneTree);
 
-        const sg2 = createSceneGraph();
-        loadSceneGraph(sg2, data);
+        const sceneTree2 = createSceneTree();
+        loadSceneTree(sceneTree2, data);
 
-        expect(sg2.root.children.length).toBe(1);
-        expect(sg2.root.children[0].name).toBe('A');
+        expect(sceneTree2.root.children.length).toBe(1);
+        expect(sceneTree2.root.children[0].name).toBe('A');
     });
 });
 
@@ -677,9 +677,9 @@ describe('realm', () => {
     });
 
     it('isReplicable: shared chain → true', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'p', realm: 'shared' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const child = createNode({ name: 'c', realm: 'shared' });
         addChild(parent, child);
         expect(isReplicable(parent)).toBe(true);
@@ -687,9 +687,9 @@ describe('realm', () => {
     });
 
     it('isReplicable: inherit chain under shared root → true', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'p' }); // inherit
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const child = createNode({ name: 'c' }); // inherit
         addChild(parent, child);
         expect(isReplicable(parent)).toBe(true);
@@ -697,25 +697,25 @@ describe('realm', () => {
     });
 
     it('isReplicable: inherit child under server ancestor → false', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const ancestor = createNode({ name: 'svr', realm: 'server' });
-        addChild(sg.root, ancestor);
+        addChild(sceneTree.root, ancestor);
         const child = createNode({ name: 'c' }); // inherit → server
         addChild(ancestor, child);
         expect(isReplicable(child)).toBe(false);
     });
 
     it('isReplicable: non-shared self → false', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'svr', realm: 'server' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         expect(isReplicable(node)).toBe(false);
     });
 
     it('isReplicable: non-shared ancestor cascades to descendants', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const ancestor = createNode({ name: 'svr', realm: 'server' });
-        addChild(sg.root, ancestor);
+        addChild(sceneTree.root, ancestor);
         // explicit shared child under a server-only ancestor → still
         // unreachable to clients because the parent never replicates.
         const child = createNode({ name: 'c', realm: 'shared' });
@@ -736,36 +736,36 @@ describe('realm', () => {
 /* ── query ref-counting (engine primitives) ── */
 
 describe('query — acquireQuery / releaseQuery', () => {
-    it('engine-only queries (no acquire) stay in sg.queries forever', () => {
-        const sg = setup();
-        const before = sg.queries.size;
-        query(sg, [RigidBody]);
-        expect(sg.queries.size).toBe(before + 1);
+    it('engine-only queries (no acquire) stay in sceneTree.queries forever', () => {
+        const sceneTree = setup();
+        const before = sceneTree.queries.size;
+        query(sceneTree, [RigidBody]);
+        expect(sceneTree.queries.size).toBe(before + 1);
         // a second engine-only get of the same query just dedups, no acquire.
-        query(sg, [RigidBody]);
-        expect(sg.queries.size).toBe(before + 1);
+        query(sceneTree, [RigidBody]);
+        expect(sceneTree.queries.size).toBe(before + 1);
     });
 
     it('acquire + release evicts the query', () => {
-        const sg = setup();
-        const before = sg.queries.size;
-        const q = query(sg, [RigidBody]);
-        acquireQuery(sg, q);
-        expect(sg.queries.size).toBe(before + 1);
-        releaseQuery(sg, q);
-        expect(sg.queries.size).toBe(before);
+        const sceneTree = setup();
+        const before = sceneTree.queries.size;
+        const q = query(sceneTree, [RigidBody]);
+        acquireQuery(sceneTree, q);
+        expect(sceneTree.queries.size).toBe(before + 1);
+        releaseQuery(sceneTree, q);
+        expect(sceneTree.queries.size).toBe(before);
     });
 
     it('refcount: two acquires require two releases before eviction', () => {
-        const sg = setup();
-        const before = sg.queries.size;
-        const q = query(sg, [RigidBody]);
-        acquireQuery(sg, q);
-        acquireQuery(sg, q);
-        releaseQuery(sg, q);
-        expect(sg.queries.size).toBe(before + 1);
-        releaseQuery(sg, q);
-        expect(sg.queries.size).toBe(before);
+        const sceneTree = setup();
+        const before = sceneTree.queries.size;
+        const q = query(sceneTree, [RigidBody]);
+        acquireQuery(sceneTree, q);
+        acquireQuery(sceneTree, q);
+        releaseQuery(sceneTree, q);
+        expect(sceneTree.queries.size).toBe(before + 1);
+        releaseQuery(sceneTree, q);
+        expect(sceneTree.queries.size).toBe(before);
     });
 });
 
@@ -773,7 +773,7 @@ describe('query — acquireQuery / releaseQuery', () => {
 
 describe('script removal on reload', () => {
     it('prunes a removed script from its trait def, disposing the instance, with no re-creation', () => {
-        const sg = server.nodes;
+        const sceneTree = server.room.nodes;
         const runtime = TEST_SCRIPT_RUNTIME;
 
         let initCount = 0;
@@ -803,7 +803,7 @@ describe('script removal on reload', () => {
         __popModule(prev);
 
         const node = createNode({ name: 'hmr-a' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, HmrTrait);
 
         expect(initCount).toBe(1);
@@ -835,12 +835,12 @@ describe('script removal on reload', () => {
         // def-prune (not just instance disposal) means a fresh node carrying the
         // trait does NOT resurrect the deleted script.
         const node2 = createNode({ name: 'hmr-b' });
-        addChild(sg.root, node2);
+        addChild(sceneTree.root, node2);
         addTrait(node2, HmrTrait);
         expect(initCount).toBe(1);
 
-        destroyNode(sg, node);
-        destroyNode(sg, node2);
+        destroyNode(sceneTree, node);
+        destroyNode(sceneTree, node2);
     });
 });
 
@@ -848,86 +848,86 @@ describe('script removal on reload', () => {
 
 describe('query — script-instance lifecycle', () => {
     it('attaching a script-bearing trait registers the query; removing it evicts', () => {
-        const sg = server.nodes;
-        const before = sg.queries.size;
+        const sceneTree = server.room.nodes;
+        const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, Tracked);
-        expect(sg.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.size).toBe(before + 1);
 
         removeTrait(node, Tracked);
-        expect(sg.queries.size).toBe(before);
+        expect(sceneTree.queries.size).toBe(before);
 
-        destroyNode(sg, node);
+        destroyNode(sceneTree, node);
     });
 
     it('destroying the node evicts the query', () => {
-        const sg = server.nodes;
-        const before = sg.queries.size;
+        const sceneTree = server.room.nodes;
+        const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, Tracked);
-        expect(sg.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.size).toBe(before + 1);
 
-        destroyNode(sg, node);
-        expect(sg.queries.size).toBe(before);
+        destroyNode(sceneTree, node);
+        expect(sceneTree.queries.size).toBe(before);
     });
 
     it('two script instances sharing one query evict only on the second dispose', () => {
-        const sg = server.nodes;
-        const before = sg.queries.size;
+        const sceneTree = server.room.nodes;
+        const before = sceneTree.queries.size;
 
         const a = createNode({ name: 'A' });
-        addChild(sg.root, a);
+        addChild(sceneTree.root, a);
         addTrait(a, Tracked);
 
         const b = createNode({ name: 'B' });
-        addChild(sg.root, b);
+        addChild(sceneTree.root, b);
         addTrait(b, Tracked);
 
-        // both instances dedup to the same Query → only one entry in sg.queries.
-        expect(sg.queries.size).toBe(before + 1);
+        // both instances dedup to the same Query → only one entry in sceneTree.queries.
+        expect(sceneTree.queries.size).toBe(before + 1);
 
-        destroyNode(sg, a);
-        expect(sg.queries.size).toBe(before + 1);
+        destroyNode(sceneTree, a);
+        expect(sceneTree.queries.size).toBe(before + 1);
 
-        destroyNode(sg, b);
-        expect(sg.queries.size).toBe(before);
+        destroyNode(sceneTree, b);
+        expect(sceneTree.queries.size).toBe(before);
     });
 
     it('per-instance dedup: two query() calls in one factory still release cleanly', () => {
-        const sg = server.nodes;
-        const before = sg.queries.size;
+        const sceneTree = server.room.nodes;
+        const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TrackedTwice);
-        expect(sg.queries.size).toBe(before + 1);
+        expect(sceneTree.queries.size).toBe(before + 1);
 
-        destroyNode(sg, node);
-        expect(sg.queries.size).toBe(before);
+        destroyNode(sceneTree, node);
+        expect(sceneTree.queries.size).toBe(before);
     });
 
     it('engine-side query persists across a script-side release', () => {
-        const sg = server.nodes;
-        const before = sg.queries.size;
+        const sceneTree = server.room.nodes;
+        const before = sceneTree.queries.size;
 
         // engine-side caller, no acquire, persistent.
-        const engineQ = query(sg, [Transform]);
-        expect(sg.queries.size).toBe(before + 1);
+        const engineQ = query(sceneTree, [Transform]);
+        expect(sceneTree.queries.size).toBe(before + 1);
 
         // script-side caller picks up the same query, then disposes.
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, Tracked);
         // Tracked queries [RigidBody], not [Transform], so engine query is independent.
         // sanity: engineQ entry still present.
-        expect(sg.queries.has(engineQ.hash)).toBe(true);
+        expect(sceneTree.queries.has(engineQ.hash)).toBe(true);
 
-        destroyNode(sg, node);
+        destroyNode(sceneTree, node);
         // engine-only query untouched.
-        expect(sg.queries.has(engineQ.hash)).toBe(true);
+        expect(sceneTree.queries.has(engineQ.hash)).toBe(true);
     });
 });

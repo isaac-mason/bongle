@@ -17,8 +17,8 @@
 // Per-instance lifecycle that doesn't benefit from batching (one-shot
 // onInit setup tied to a specific node) stays on the data trait.
 
-import type { Node } from '../core/scene/nodes';
-import { addTrait, hasTrait } from '../core/scene/nodes';
+import type { Node } from '../core/scene/scene-tree';
+import { addTrait, hasTrait } from '../core/scene/scene-tree';
 import { trait, type TraitType } from '../core/scene/traits';
 
 export const WorldTrait = trait('world', {}, { persist: false });
@@ -27,7 +27,7 @@ export type WorldTrait = TraitType<typeof WorldTrait>;
 
 /** idempotent, attach WorldTrait to the scene root if it isn't already
  *  there. called from room creation on both sides, and again after
- *  `loadSceneGraph` on the server (which clears `root._traits` and
+ *  `loadSceneTree` on the server (which clears `root._traits` and
  *  repopulates from persisted data, which never includes WorldTrait
  *  because `persist: false`). */
 export function attachWorldTrait(root: Node): void {

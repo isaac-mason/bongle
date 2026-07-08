@@ -146,9 +146,6 @@ export type EditOptions = {
     /** open a node inspector on this process. the engine runs in-process, so a
      *  debugger or CPU/heap profiler can attach directly via chrome://inspect. */
     inspect?: boolean;
-    /** print the per-tick server perf digest to the CLI (sets BONGLE_PERFORMANCE_LOGS,
-     *  which engine-server reads at init). */
-    performanceLogs?: boolean;
     /** expose the dev server publicly via a `cloudflared` tunnel. */
     share?: boolean;
 };
@@ -166,10 +163,6 @@ export async function edit(projectDir: string, opts: EditOptions = {}) {
 
     printBanner();
     console.log(`${DIM}› starting ${BOLD}edit${RESET}${DIM} mode in ${resolvedProjectDir}${RESET}`);
-
-    // opt-in server perf digest. set before the dev server boots — engine-server
-    // reads BONGLE_PERFORMANCE_LOGS at init(), which runs inside startDevServer.
-    if (opts.performanceLogs) process.env.BONGLE_PERFORMANCE_LOGS = '1';
 
     // the engine runs in *this* process, so opening a node inspector here lets a
     // debugger or CPU/heap profiler attach directly — no subprocess to target.

@@ -12,9 +12,9 @@ import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
 import { registry, type WireIndex } from '../core/registry';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
-import * as Nodes from '../core/scene/nodes';
-import { unpackSceneGraph } from '../core/scene/scene-pack';
-import type { ClientContext, EditRoomState, NodesContext } from '../core/scene/scripts';
+import * as SceneTree from '../core/scene/scene-tree';
+import { unpackSceneTree } from '../core/scene/scene-pack';
+import type { ClientContext, EditRoomState, SceneTreeContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
@@ -84,13 +84,13 @@ export type ClientRoom = {
     local: boolean;
 
     /** scene graph */
-    nodes: Nodes.Nodes;
+    nodes: SceneTree.SceneTree;
 
     /** the gpucat scene for this room. contains all renderable objects */
     scene: Scene;
 
     /** the scripting runtime for this room */
-    scriptRuntime: NodesContext;
+    scriptRuntime: SceneTreeContext;
 
     /** snapshot of the last scene graph state we sent to the server, for replication diffing. */
     syncSnapshots: ReturnType<typeof Replication.createSyncSnapshots>;
@@ -128,7 +128,7 @@ export type ClientRoom = {
     audio: Audio.Audio;
 
     /** the owned player node, cached at join time. */
-    playerNode: Nodes.Node;
+    playerNode: SceneTree.Node;
 
     /**
      * default per-room camera node. created at room init with TransformTrait
@@ -137,7 +137,7 @@ export type ClientRoom = {
      * controllers write pose to whichever node `client.camera` points at, and
      * bespoke setups repoint it via `setCamera(ctx, node)`.
      */
-    cameraNode: Nodes.Node;
+    cameraNode: SceneTree.Node;
 
     /**
      * this room's client state, the single mutable ClientContext every script
@@ -395,7 +395,7 @@ export type CreateRoomOptions = {
         serverClockTime: number;
     };
     net: Net.ClientNet;
-    rpc: NodesContext['rpc'];
+    rpc: SceneTreeContext['rpc'];
     resources: Resources;
     renderer: Renderer.Renderer;
     modelResources: ModelResourcesNs.ModelResources;
@@ -430,7 +430,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
 
     // server-driven path: unpack the wire payload into the fresh scene
     // graph. voxels arrive separately via voxel chunk messages.
-    unpackSceneGraph(nodes, scriptRuntime, packedNodes, inboundTraitWireIndex);
+    unpackSceneTree(nodes, scriptRuntime, packedNodes, inboundTraitWireIndex);
     const playerNode = findPlayerNode(nodes, playerId, roomId);
 
     return createRoomCore({
@@ -475,7 +475,7 @@ type CreateRoomCoreOptions = {
     namespace: string;
     local: boolean;
     net: Net.ClientNet;
-    rpc: NodesContext['rpc'];
+    rpc: SceneTreeContext['rpc'];
     resources: Resources;
     renderer: Renderer.Renderer;
     modelResources: ModelResourcesNs.ModelResources;
@@ -494,13 +494,13 @@ type CreateRoomCoreOptions = {
      * createRoomCore wires the post-populate state (CameraTrait, pov,
      * runtime hookup) and builds all the visuals.
      */
-    nodes: Nodes.Nodes;
+    nodes: SceneTree.SceneTree;
     voxels: Voxels.Voxels;
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: NodesContext;
-    playerNode: Nodes.Node;
+    scriptRuntime: SceneTreeContext;
+    playerNode: SceneTree.Node;
 };
 
 /**
@@ -516,7 +516,7 @@ type CreateRoomCoreOptions = {
  */
 function newRoomCore(opts: {
     resources: Resources;
-    rpc: NodesContext['rpc'];
+    rpc: SceneTreeContext['rpc'];
     roomId: string;
     playerMode: PlayerMode;
     roomMode: RoomMode;
@@ -524,21 +524,23 @@ function newRoomCore(opts: {
      *  supplies it on the networked path; omitted for local rooms (starts at 0). */
     clockSeed?: number;
 }): {
-    nodes: Nodes.Nodes;
+    nodes: SceneTree.SceneTree;
     voxels: Voxels.Voxels;
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: NodesContext;
+    scriptRuntime: SceneTreeContext;
 } {
     const blocks = registry.blockRegistry;
     const voxels = Voxels.createVoxels(blocks);
-    const nodes = Nodes.createSceneGraph({ mode: opts.playerMode, roomMode: opts.roomMode });
+    const nodes = SceneTree.createSceneTree();
     const physics = Physics.init(nodes, voxels, blocks);
     const clock = Clock.init(opts.clockSeed);
     const chat = Chat.init();
-    const scriptRuntime: NodesContext = {
+    const scriptRuntime: SceneTreeContext = {
         roomId: opts.roomId,
+        playerMode: opts.playerMode,
+        roomMode: opts.roomMode,
         resources: opts.resources,
         rpc: opts.rpc,
         client: undefined,
@@ -557,12 +559,12 @@ function newRoomCore(opts: {
  * by the local and offline room paths (the wire path receives a serialised
  * player node from the server and just queries for it).
  */
-function synthesizePlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, clientId: number, name?: string): Nodes.Node {
-    const playerNode = Nodes.createNode({ name: name ?? `player:${playerId}`, persist: false });
-    Nodes.addChild(nodes.root, playerNode);
-    Nodes.setOwner(nodes, playerNode, playerId);
-    Nodes.addTrait(playerNode, TransformTrait);
-    const trait = Nodes.addTrait(playerNode, PlayerTrait);
+function synthesizePlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, clientId: number, name?: string): SceneTree.Node {
+    const playerNode = SceneTree.createNode({ name: name ?? `player:${playerId}`, persist: false });
+    SceneTree.addChild(nodes.root, playerNode);
+    SceneTree.setOwner(nodes, playerNode, playerId);
+    SceneTree.addTrait(playerNode, TransformTrait);
+    const trait = SceneTree.addTrait(playerNode, PlayerTrait);
     trait.playerId = playerId;
     trait.client = clientId;
     return playerNode;
@@ -572,8 +574,8 @@ function synthesizePlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, clientId: 
  * find the wire-unpacked player node the server created for this Player.
  * shared by initial join (`createRoom`) and resync (`resyncRoom`).
  */
-function findPlayerNode(nodes: Nodes.Nodes, playerId: PlayerId, roomId: string): Nodes.Node {
-    for (const [trait] of Nodes.query(nodes, [PlayerTrait])) {
+function findPlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, roomId: string): SceneTree.Node {
+    for (const [trait] of SceneTree.query(nodes, [PlayerTrait])) {
         if (trait.playerId === playerId) return trait._node!;
     }
     throw new Error(`[bongle] failed to find player node for player ${playerId} in room ${roomId}`);
@@ -628,7 +630,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // default camera node, TransformTrait + CameraTrait at the scene root.
     // builtin controllers (orbit / fly / player) write to this each frame
     // instead of creating their own. recreated on resyncRoom because
-    // unpackSceneGraph wipes root's children.
+    // unpackSceneTree wipes root's children.
     const cameraNode = createDefaultCameraNode(nodes, playerNode);
 
     // the single client state. scriptRuntime.client and room.client both
@@ -668,7 +670,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     // post-populate wiring. sceneGraph + voxels came in already populated.
     // seed the subject at the player node, swappable via setSubject.
-    // initSceneGraph fires onInit/onEnter for instances registered during populate.
+    // initSceneTree fires onInit/onEnter for instances registered during populate.
     client.subject = playerNode;
 
     // WorldTrait is attached by callers after they wire `client.room`/`.state`,
@@ -786,20 +788,20 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * scene graph contents and the playerNode (CameraTrait is re-attached on
  * the fresh playerNode).
  *
- * relies on `unpackSceneGraph` clearing existing children + script
+ * relies on `unpackSceneTree` clearing existing children + script
  * instances before rebuilding.
  */
 export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inboundTraitWireIndex: WireIndex): void {
-    unpackSceneGraph(room.nodes, room.scriptRuntime, message.packedNodes, inboundTraitWireIndex);
+    unpackSceneTree(room.nodes, room.scriptRuntime, message.packedNodes, inboundTraitWireIndex);
 
-    // unpackSceneGraph clears root._traits and rebuilds from the wire,
+    // unpackSceneTree clears root._traits and rebuilds from the wire,
     // which never carries WorldTrait (persist: false). re-attach so the
     // host script(WorldTrait, …) instances respawn against the fresh graph.
     attachWorldTrait(room.nodes.root);
 
     const playerNode = findPlayerNode(room.nodes, message.playerId, message.roomId);
     room.playerNode = playerNode;
-    // unpackSceneGraph wiped the default camera node along with the rest of
+    // unpackSceneTree wiped the default camera node along with the rest of
     // root's children, re-create it.
     room.cameraNode = createDefaultCameraNode(room.nodes, playerNode);
     // re-seat the client state to the fresh nodes. plain writes to the one
@@ -817,13 +819,13 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
 
 /**
  * build the per-room default camera node. used at room creation and again
- * on resync (since unpackSceneGraph clears the existing tree).
+ * on resync (since unpackSceneTree clears the existing tree).
  */
-function createDefaultCameraNode(nodes: Nodes.Nodes, playerNode: Nodes.Node): Nodes.Node {
-    const node = Nodes.createNode({ name: `${playerNode.name}:camera`, persist: false });
-    Nodes.addTrait(node, TransformTrait);
-    Nodes.addTrait(node, CameraTrait);
-    Nodes.addChild(nodes.root, node);
+function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTree.Node): SceneTree.Node {
+    const node = SceneTree.createNode({ name: `${playerNode.name}:camera`, persist: false });
+    SceneTree.addTrait(node, TransformTrait);
+    SceneTree.addTrait(node, CameraTrait);
+    SceneTree.addChild(nodes.root, node);
     return node;
 }
 
@@ -841,7 +843,7 @@ function createDefaultCameraNode(nodes: Nodes.Nodes, playerNode: Nodes.Node): No
  * camera node's TransformTrait instead.
  */
 export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
-    const cameraTrait = Nodes.getTrait(room.client.camera, CameraTrait) ?? null;
+    const cameraTrait = SceneTree.getTrait(room.client.camera, CameraTrait) ?? null;
     Renderer.syncRenderCamera(room._pipeline, cameraTrait);
     return room._pipeline.camera;
 }
@@ -852,7 +854,7 @@ export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
  * pulls viewport size from canvasTarget each frame in `bindRenderCamera`
  * and writes aspect into the active POV camera. caller is responsible
  * for wiring `room.scriptRuntime.client.state`/`.room` and calling
- * `Nodes.initSceneGraph(room.nodes)` after mount.
+ * `SceneTree.initSceneTree(room.nodes)` after mount.
  */
 export function mountRoomViewport(room: ClientRoom): void {
     const viewport = useClient.getState().viewportElement;
@@ -916,20 +918,20 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     });
 
     // copy declared voxels first (may be null if scene has none). must
-    // precede loadSceneGraph: any seed scripts that call setBlock on
+    // precede loadSceneTree: any seed scripts that call setBlock on
     // onInit would otherwise be wiped, though runtime isn't wired
-    // until after populate, so onInit defers to initSceneGraph anyway.
+    // until after populate, so onInit defers to initSceneTree anyway.
     if (handle.voxels) {
         Voxels.copyVoxels(voxels, handle.voxels);
     }
 
     // load the scene from the raw payload so root-level traits land
     // on sceneGraph.root. iterating handle.node.children drops them,
-    // server-mirrored rooms bypass this path via loadSceneGraph on
+    // server-mirrored rooms bypass this path via loadSceneTree on
     // disk data; local rooms need the same treatment.
     const payload = state.content.payloads.get(sceneId);
     if (payload) {
-        Nodes.loadSceneGraph(nodes, payload.nodes);
+        SceneTree.loadSceneTree(nodes, payload.nodes);
     }
 
     const playerNode = synthesizePlayerNode(nodes, playerId, clientId);
@@ -970,12 +972,12 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
-    // host-script onInit reads client.room/.state (wired above); initSceneGraph fires it.
+    // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
     attachWorldTrait(room.nodes.root);
     console.log(
         `[bongle room] createLocalRoom: room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
-    Nodes.initSceneGraph(room.nodes);
+    SceneTree.initSceneTree(room.nodes);
     rooms.rooms.set(playerId, room);
     useClient.getState().setRoom(playerId, room);
     // append a synthetic RoomInfo so this local room participates in

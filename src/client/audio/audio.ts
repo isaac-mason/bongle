@@ -46,8 +46,8 @@
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
 import { getVisualWorldMatrix, getVisualWorldPosition, TransformTrait } from '../../builtins/transform';
-import type { Node } from '../../core/scene/nodes';
-import * as Nodes from '../../core/scene/nodes';
+import type { Node } from '../../core/scene/scene-tree';
+import * as SceneTree from '../../core/scene/scene-tree';
 import { assetUrl } from '../../render/asset-url';
 import type { ClientRoom } from '../rooms';
 
@@ -591,7 +591,7 @@ function cleanup(audio: Audio, p: ActivePlayback): void {
 function updateListener(audio: Audio, room: ClientRoom): void {
     const listenerNode = resolveListenerNode(room);
     if (!listenerNode) return;
-    const transform = Nodes.getTrait(listenerNode, TransformTrait);
+    const transform = SceneTree.getTrait(listenerNode, TransformTrait);
     if (!transform) return;
 
     const pos = getVisualWorldPosition(transform);
@@ -670,7 +670,7 @@ function updateListener(audio: Audio, room: ClientRoom): void {
 }
 
 function resolveListenerNode(room: ClientRoom): Node | null {
-    for (const [trait] of Nodes.query(room.nodes, [AudioListenerTrait])) {
+    for (const [trait] of SceneTree.query(room.nodes, [AudioListenerTrait])) {
         if (trait.active) return trait._node!;
     }
     return room.client.subject;
@@ -679,7 +679,7 @@ function resolveListenerNode(room: ClientRoom): Node | null {
 /* ── node position helper ──────────────────────────────────────────── */
 
 function readNodePosition(node: Node): [number, number, number] | null {
-    const transform = Nodes.getTrait(node, TransformTrait);
+    const transform = SceneTree.getTrait(node, TransformTrait);
     if (!transform) return null;
     const v = getVisualWorldPosition(transform);
     return [v[0], v[1], v[2]];

@@ -10,9 +10,9 @@
 
 import * as Resources from '../../src/core/resources';
 import * as Rpc from '../../src/core/rpc';
-import type { SerializedSceneGraph } from '../../src/core/scene/nodes';
-import * as Nodes from '../../src/core/scene/nodes';
-import type { NodesContext } from '../../src/core/scene/scripts';
+import type { SerializedSceneTree } from '../../src/core/scene/scene-tree';
+import * as SceneTree from '../../src/core/scene/scene-tree';
+import type { SceneTreeContext } from '../../src/core/scene/scripts';
 import * as Rooms from '../../src/server/rooms';
 
 // ── types ───────────────────────────────────────────────────────────
@@ -25,18 +25,15 @@ export type TestServer = {
     room: Rooms.Room;
 
     /** shorthand for room.scriptRuntime */
-    runtime: NodesContext;
-
-    /** shorthand for room.nodes */
-    nodes: Nodes.Nodes;
+    runtime: SceneTreeContext;
 
     /** destroy the room and clean up */
     dispose(): void;
 };
 
 export type TestServerOptions = {
-    /** scene to load into the room. if omitted, room starts with an empty scene graph. */
-    scene?: SerializedSceneGraph;
+    /** scene to load into the room. if omitted, room starts with an empty scene tree. */
+    scene?: SerializedSceneTree;
 
     /** room mode. defaults to 'edit'. */
     mode?: 'edit' | 'play';
@@ -58,14 +55,13 @@ export function createTestServer(opts: TestServerOptions = {}): TestServer {
     });
 
     if (opts.scene) {
-        Nodes.loadSceneGraph(room.nodes, opts.scene);
+        SceneTree.loadSceneTree(room.nodes, opts.scene);
     }
 
     return {
         rooms,
         room,
         runtime: room.scriptRuntime,
-        nodes: room.nodes,
         dispose() {
             Rooms.destroyRoom(rooms, room.id);
         },

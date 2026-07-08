@@ -3,7 +3,7 @@ import { bench, describe } from 'vitest';
 import { createTestServer } from '../../integration/server-integration-test';
 import * as Debug from '../../../src/core/debug';
 import * as Resources from '../../../src/core/resources';
-import { addChild, addTrait, createNode } from '../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode } from '../../../src/core/scene/scene-tree';
 import { syncRate } from '../../../src/core/scene/sync/sync-rate';
 import { sync, trait } from '../../../src/core/scene/traits';
 import * as Discovery from '../../../src/server/discovery';

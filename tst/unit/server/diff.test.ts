@@ -1,6 +1,6 @@
 import * as p from 'packcat';
 import { describe, expect, it } from 'vitest';
-import { addChild, addTrait, createNode, createSceneGraph, destroyNode, getTrait, removeTrait } from '../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode, createSceneTree, destroyNode, getTrait, removeTrait } from '../../../src/core/scene/scene-tree';
 import { prop } from '../../../src/core/scene/prop';
 import { control, sync, trait } from '../../../src/core/scene/traits';
 import { runDiffDetection } from '../../../src/server/discovery';
@@ -58,7 +58,7 @@ const DiffTag = trait('diff-tag');
 
 describe('diff detection', () => {
     it('does not bump versions on first snapshot (initialization)', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -75,7 +75,7 @@ describe('diff detection', () => {
     });
 
     it('bumps versions when synced field changes', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -91,7 +91,7 @@ describe('diff detection', () => {
     });
 
     it('bumps versions when sync field changes', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Position);
@@ -106,7 +106,7 @@ describe('diff detection', () => {
     });
 
     it('does not bump versions when nothing changed', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -125,7 +125,7 @@ describe('diff detection', () => {
     });
 
     it('skips traits with no serializable fields', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, DiffTag);
@@ -138,7 +138,7 @@ describe('diff detection', () => {
     });
 
     it('detects sync-only field changes', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Position); // @sync only, no @property
@@ -156,7 +156,7 @@ describe('diff detection', () => {
     });
 
     it('does not bump version for control-only field changes (sync drives diff)', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -175,7 +175,7 @@ describe('diff detection', () => {
     });
 
     it('per-instance snapshots die with a destroyed node', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -192,7 +192,7 @@ describe('diff detection', () => {
     });
 
     it('per-instance snapshots are dropped when a trait is removed', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const node = createNode({ name: 'a' });
         addChild(sg.root, node);
         addTrait(node, Health);
@@ -213,7 +213,7 @@ describe('diff detection', () => {
     });
 
     it('detects changes across multiple nodes independently', () => {
-        const sg = createSceneGraph();
+        const sg = createSceneTree();
         const a = createNode({ name: 'a' });
         addChild(sg.root, a);
         const b = createNode({ name: 'b' });

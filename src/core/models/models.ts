@@ -33,7 +33,7 @@
 
 import { recordModel } from '../capture/module-scope';
 import { claimOwnership, get, registry, touch, upsert, upsertPlaceholder } from '../registry';
-import { createNode } from '../scene/nodes';
+import { createNode } from '../scene/scene-tree';
 import type { ModelHandle } from './handle';
 
 /* ── types ── */
@@ -120,7 +120,8 @@ export function _registerModelHandle(id: string, handle: ModelHandle): void {
  * declares a model before codegen has run for it, the placeholder sits
  * in the registry so the cli can discover the declaration (`.src` is
  * the cli's codegen input). `_registerModelHandle` mutates this payload
- * in place once codegen catches up, preserving the user-held reference.
+ * in place once codegen catches up, preserving the user-held reference. No
+ * scene graph/tree dependencies.
  */
 function createPlaceholderHandle(id: string, src: string, name: string): ModelHandle {
     return {

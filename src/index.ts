@@ -1,7 +1,7 @@
 // public engine surface, what user scripts import as `bongle`.
 //
 // re-exports the two project-facing layers:
-//   - `./api/*`, helper modules (transforms, scene-graph, rpc, ...)
+//   - `./api/*`, helper modules (transforms, scene-tree, rpc, ...)
 //   - `./builtins/*`, engine-shipped traits (TransformTrait, CameraTrait, ...)
 //
 // engine internals must NOT import from this file. they reach into
@@ -34,7 +34,7 @@ export * from './api/prefabs';
 export * from './api/prop';
 export * as rooms from './api/rooms';
 export * from './api/rpc';
-export * from './api/scene-graph';
+export * from './api/scene-tree';
 export * from './api/scenes';
 export * from './api/scripts';
 export * from './api/sounds';

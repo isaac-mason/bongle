@@ -15,6 +15,7 @@ import { recordScript } from '../capture/module-scope';
 import type { ClientId } from '../client';
 import type { Clock } from '../clock';
 import type { Physics } from '../physics/physics';
+import type { PlayerMode, RoomMode } from '../protocol';
 import { registry, upsert } from '../registry';
 import type { Resources } from '../resources';
 import type { CommandHandle } from '../rpc';
@@ -22,7 +23,7 @@ import * as Rpc from '../rpc';
 import * as blockHooks from '../voxels/block-hooks';
 import type { BlockRegistry } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
-import * as nodes from './nodes';
+import * as SceneTree from './scene-tree';
 import { logScriptError } from './script-errors';
 import type { TraitBase, TraitHandle } from './traits';
 
@@ -52,7 +53,7 @@ export type EditRoomState = {
      * the node representing the editor actor. becomes `client.subject` while
      * the lens is active.
      */
-    subject: nodes.Node;
+    subject: SceneTree.Node;
 
     /**
      * lens-private camera node, `realm: 'client'` with TransformTrait +
@@ -61,7 +62,7 @@ export type EditRoomState = {
      * `room.cameraNode` (which the player controller drives while in play
      * view). torn down with the lens.
      */
-    camera: nodes.Node;
+    camera: SceneTree.Node;
 };
 
 export type ClientContext = {
@@ -76,11 +77,11 @@ export type ClientContext = {
      * read it with `getSubject(ctx)`, swap with `setSubject(ctx, node)`.
      * defaults to `defaultSubject` (the player node).
      */
-    subject: nodes.Node | null;
+    subject: SceneTree.Node | null;
 
     /** local player body node, alias for `room.playerNode`. the server-side
      *  streaming anchor; keep it where interest should be. */
-    player: nodes.Node;
+    player: SceneTree.Node;
 
     /**
      * active render camera node: what the renderer composes the render camera
@@ -90,7 +91,7 @@ export type ClientContext = {
      * (or `ctx.client.camera`), swap it with `setCamera(ctx, node)`. single
      * source of truth; room-layer reaches it via `room.client`.
      */
-    camera: nodes.Node;
+    camera: SceneTree.Node;
 
     /**
      * the subject to return to when a temporary override (editor lens,
@@ -99,7 +100,7 @@ export type ClientContext = {
      * than the player by default. no set/reset helpers, editor and games read
      * it and restore `subject` themselves.
      */
-    defaultSubject: nodes.Node | null;
+    defaultSubject: SceneTree.Node | null;
 
     /**
      * the camera to return to alongside `defaultSubject`. plain config field,
@@ -107,7 +108,7 @@ export type ClientContext = {
      * default subject's controller camera; stands alone for controller-less
      * default views (a fixed / scripted camera).
      */
-    defaultCamera: nodes.Node;
+    defaultCamera: SceneTree.Node;
 
     /** the canvas element the renderer draws into */
     domElement: HTMLCanvasElement;
@@ -163,9 +164,26 @@ export type ServerContext = {
     readonly gameOptions: Readonly<Record<string, string | number | boolean>>;
 };
 
-export type NodesContext = {
+export type SceneTreeContext = {
     /** room id for rpc send/broadcast */
     roomId: string;
+
+    /**
+     * the viewer's mode for this room (the PlayerMode of the Player it
+     * represents). surfaced to scripts as `ctx.mode`; drives script-side
+     * filtering of editor vs play behavior. on the server this equals
+     * `roomMode` (no distinct viewer); the edit-viewer-of-a-play-room split
+     * is a client concern.
+     */
+    playerMode: PlayerMode;
+
+    /**
+     * the room's authoritative mode (independent of the viewer). drives
+     * room-level decisions like prefab previews vs voxel baking: an edit
+     * Player attached to a play room still bakes voxels (no preview ghosts),
+     * because the room is play.
+     */
+    roomMode: RoomMode;
 
     /** shared resources (scenes cache, per-scene versions) */
     resources: Resources;
@@ -226,10 +244,10 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     trait: T;
 
     /** the node the bound trait is attached to (shortcut for `ctx.trait._node`) */
-    node: nodes.Node;
+    node: SceneTree.Node;
 
-    /** the scene graph this script is running in */
-    nodes: nodes.Nodes;
+    /** the scene tree this script is running in */
+    nodes: SceneTree.SceneTree;
 
     /** per-room voxel data */
     voxels: Voxels;
@@ -252,8 +270,8 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     /** @internal reference to script instance for hook/RPC functions */
     _instance?: ScriptInstance;
 
-    /** @internal reference to nodes runtime for hook/RPC functions */
-    _runtime?: NodesContext;
+    /** @internal reference to scene tree runtime for hook/RPC functions */
+    _runtime?: SceneTreeContext;
 };
 
 export type ScriptInstance = {
@@ -264,7 +282,7 @@ export type ScriptInstance = {
     initialized: boolean;
 
     /** the node this script instance is attached to */
-    node: nodes.Node;
+    node: SceneTree.Node;
 
     /** the trait instance this script is bound to. used to filter live
      *  instances on removeTrait. */
@@ -290,10 +308,10 @@ export type ScriptInstance = {
     onDispose: Set<() => void>;
 
     /** fired when the node enters the scene tree (initial attach or reparent attach) */
-    onEnter: Set<(parent: nodes.Node) => void>;
+    onEnter: Set<(parent: SceneTree.Node) => void>;
 
     /** fired when the node exits the scene tree (detach or before reparent detach) */
-    onExit: Set<(parent: nodes.Node) => void>;
+    onExit: Set<(parent: SceneTree.Node) => void>;
 
     /** server-only: fired when a client joins the room */
     onJoin: Set<(args: JoinArgs) => void>;
@@ -324,8 +342,8 @@ export type ScriptInstance = {
     onSwap: { ser: () => unknown; des: (data: unknown) => void } | null;
 
     /** queries acquired via `query(ctx, ...)`. released on dispose so unused
-     *  queries are evicted from the scene graph's query map. */
-    queries: Set<nodes.Query<any>>;
+     *  queries are evicted from the scene tree's query map. */
+    queries: Set<SceneTree.Query<any>>;
 
     /** rpc listener registrations owned by this instance, each record is
      *  the data needed to remove the entry from `runtime.rpc.listeners`:
@@ -336,7 +354,7 @@ export type ScriptInstance = {
     netListeners: Array<{ commandId: string; entry: Rpc.ListenerEntry }>;
 
     /** runtime env for this instance */
-    _runtime: NodesContext;
+    _runtime: SceneTreeContext;
 
     /** context passed to the factory, held until initScriptInstance runs the factory, then cleared */
     _ctx: ScriptContext;
@@ -441,25 +459,25 @@ const noop: Unsubscribe = () => {};
  * the query is released when the script instance disposes, do not hold
  * references across `onSwap` boundaries.
  */
-export function query<const Args extends nodes.ConditionArgs[]>(
+export function query<const Args extends SceneTree.ConditionArgs[]>(
     ctx: ScriptContext,
     conditions: Args,
-): nodes.Query<nodes.ConditionArgsToConditions<Args>> {
-    const q = nodes.query(ctx.nodes, conditions);
+): SceneTree.Query<SceneTree.ConditionArgsToConditions<Args>> {
+    const q = SceneTree.query(ctx.nodes, conditions);
     const instance = ctx._instance;
     if (instance && !instance.queries.has(q)) {
         instance.queries.add(q);
-        nodes.acquireQuery(ctx.nodes, q);
+        SceneTree.acquireQuery(ctx.nodes, q);
     }
     return q;
 }
 
-export function filter<const Args extends nodes.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): nodes.Node[] {
-    return nodes.filter(ctx.nodes, conditions);
+export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[] {
+    return SceneTree.filter(ctx.nodes, conditions);
 }
 
 export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandle<T>): T | null {
-    const node = nodes.findAncestor(ctx.node, [trait]);
+    const node = SceneTree.findAncestor(ctx.node, [trait]);
     if (!node) return null;
     return node[0];
 }
@@ -543,7 +561,7 @@ export function onDispose(ctx: ScriptContext, fn: () => void): Unsubscribe {
  * register a callback that fires when this script's node enters the scene tree.
  * fires on initial attach and on every reparent (after the new parent is set).
  */
-export function onEnter(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Unsubscribe {
+export function onEnter(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
@@ -555,7 +573,7 @@ export function onEnter(ctx: ScriptContext, fn: (parent: nodes.Node) => void): U
  * register a callback that fires when this script's node exits the scene tree.
  * fires on detach and before every reparent detach.
  */
-export function onExit(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Unsubscribe {
+export function onExit(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
@@ -579,7 +597,7 @@ export type EditorPlayData = {
 
 export type JoinArgs = {
     client: ClientId;
-    playerNode: nodes.Node;
+    playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
     /** Model id the player renders with, resolved upstream (matchmaker /
@@ -607,7 +625,7 @@ export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubs
 /** args passed to onLeave callbacks */
 export type LeaveArgs = {
     client: ClientId;
-    playerNode: nodes.Node;
+    playerNode: SceneTree.Node;
 };
 
 /**
@@ -803,7 +821,7 @@ export function onSwap(ctx: ScriptContext, ser: () => unknown, des: (data: unkno
  *  - on a client, true iff the active Player in this script's room is the node's owner.
  *  - on the server, true iff the node has no client owner (server is the implicit
  *    owner of unowned nodes, so server-driven NPCs / props tick from the server side). */
-export function isOwner(ctx: ScriptContext, node: nodes.Node): boolean {
+export function isOwner(ctx: ScriptContext, node: SceneTree.Node): boolean {
     if (env.server) return node.owner == null;
     const playerId = ctx.client?.room?.playerId;
     return playerId != null && node.owner === playerId;
@@ -864,7 +882,7 @@ export function listen(
 
 /* ── script instance creation ───────────────────────────────────── */
 
-export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nodes.Node, runtime: NodesContext): ScriptInstance {
+export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: SceneTree.Node, runtime: SceneTreeContext): ScriptInstance {
     const instance: ScriptInstance = {
         def,
         node,
@@ -893,8 +911,6 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
         _ctx: undefined as unknown as ScriptContext, // set below
     };
 
-    const isEdit = node.scene?.mode === 'edit';
-
     // ctx.client is the live, shared per-room client context. The engine
     // wires `.room`/`.state`/`.camera` onto it shortly AFTER scripts
     // instantiate (the room object doesn't exist yet at this point), so hold
@@ -908,7 +924,7 @@ export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: nod
         trait,
         node,
         nodes: node.scene!,
-        mode: isEdit ? 'edit' : 'play',
+        mode: runtime.playerMode,
         voxels: runtime.voxels,
         physics: runtime.physics,
         clock: runtime.clock,
@@ -976,7 +992,7 @@ export function disposeScriptInstance(instance: ScriptInstance): void {
     // release queries
     if (instance.node.scene) {
         for (const q of instance.queries) {
-            nodes.releaseQuery(instance.node.scene, q);
+            SceneTree.releaseQuery(instance.node.scene, q);
         }
     }
     instance.queries.clear();
@@ -1034,11 +1050,11 @@ export function inputScriptInstance(instance: ScriptInstance, args: FrameArgs): 
  * called by the server after a client joins a room.
  */
 export function fireJoinHooks(
-    runtime: NodesContext,
+    runtime: SceneTreeContext,
     client: ClientId,
     user: User,
     joinData: Record<string, JsonValue>,
-    playerNode: nodes.Node,
+    playerNode: SceneTree.Node,
     avatar: Avatar,
 ): void {
     const args: JoinArgs = {
@@ -1066,7 +1082,7 @@ export function fireJoinHooks(
  * fire leave hooks on all script instances in a scene graph.
  * called by the server before a client leaves a room.
  */
-export function fireLeaveHooks(runtime: NodesContext, client: ClientId, playerNode: nodes.Node): void {
+export function fireLeaveHooks(runtime: SceneTreeContext, client: ClientId, playerNode: SceneTree.Node): void {
     const args: LeaveArgs = { client, playerNode };
     for (const nodeInstances of runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
@@ -1082,7 +1098,7 @@ export function fireLeaveHooks(runtime: NodesContext, client: ClientId, playerNo
 }
 
 /** fire onEnter hooks on all script instances of a node */
-export function fireEnterHooks(runtime: NodesContext, node: nodes.Node, parent: nodes.Node): void {
+export function fireEnterHooks(runtime: SceneTreeContext, node: SceneTree.Node, parent: SceneTree.Node): void {
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;
     for (const instance of nodeInstances.values()) {
@@ -1097,7 +1113,7 @@ export function fireEnterHooks(runtime: NodesContext, node: nodes.Node, parent: 
 }
 
 /** fire onExit hooks on all script instances of a node */
-export function fireExitHooks(runtime: NodesContext, node: nodes.Node, parent: nodes.Node): void {
+export function fireExitHooks(runtime: SceneTreeContext, node: SceneTree.Node, parent: SceneTree.Node): void {
     const nodeInstances = runtime.instances.get(node.id);
     if (!nodeInstances) return;
     for (const instance of nodeInstances.values()) {
@@ -1111,7 +1127,7 @@ export function fireExitHooks(runtime: NodesContext, node: nodes.Node, parent: n
     }
 }
 
-export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDef, runtime: NodesContext): ScriptInstance {
+export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDef, runtime: SceneTreeContext): ScriptInstance {
     let snapshot: unknown;
     if (oldInstance.onSwap) {
         snapshot = oldInstance.onSwap.ser();
@@ -1138,7 +1154,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * opt-in for preserving state across reloads.
  *
  * called from `applyRegistryChanges*` per-room. removed defs are disposed
- * here; newly-added defs get picked up by the subsequent `initSceneGraph`
+ * here; newly-added defs get picked up by the subsequent `initSceneTree`
  * pass via `instantiateTraitScripts`.
  *
  * `dirtyScriptIds` narrows the swap to a known-affected subset (DepGraph
@@ -1170,7 +1186,7 @@ export function pruneRemovedScript(def: ScriptDef): void {
     });
 }
 
-export function applyTraitSwap(runtime: NodesContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
+export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
     for (const [nodeId, nodeInstances] of runtime.instances) {
         for (const [instanceKey, oldInstance] of nodeInstances) {
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;

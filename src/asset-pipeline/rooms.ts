@@ -3,7 +3,7 @@
  *
  * A third room composition alongside `src/client` (createRoomCore) and
  * `src/server`. Like the server, it builds the engine's core simulation
- * primitives itself (voxels, nodes, physics, clock, a NodesContext) rather than
+ * primitives itself (voxels, nodes, physics, clock, a SceneTreeContext) rather than
  * reusing the client's `createRoomCore`. On top of the core it adds ONLY the
  * render subsystems an icon render needs: a Scene + voxel/voxel-mesh/model
  * visuals + a (disabled) Environment + visibility + interpolation.
@@ -24,8 +24,8 @@ import * as Physics from '../core/physics/physics';
 import { registry } from '../core/registry';
 import type { Resources } from '../core/resources';
 import * as Rpc from '../core/rpc';
-import * as Nodes from '../core/scene/nodes';
-import type { NodesContext } from '../core/scene/scripts';
+import * as SceneTree from '../core/scene/scene-tree';
+import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type * as CloudResources from '../render/cloud-resources';
 import * as Environment from '../render/environment';
@@ -44,7 +44,7 @@ import * as VoxelVisuals from '../render/voxels/voxel-visuals';
  *  icon frame. */
 const ASSET_PIPELINE_PLAYER_ID = -1 as PlayerId;
 
-/** The offline path never networks or fires script hooks, but NodesContext
+/** The offline path never networks or fires script hooks, but SceneTreeContext
  *  requires an rpc driver. Drop everything. */
 const NOOP_RPC_DRIVER: Rpc.RpcDriver = {
     send() {},
@@ -53,11 +53,11 @@ const NOOP_RPC_DRIVER: Rpc.RpcDriver = {
 
 export type AssetPipelineRoom = {
     scene: Scene;
-    nodes: Nodes.Nodes;
+    nodes: SceneTree.SceneTree;
     voxels: Voxels.Voxels;
     physics: Physics.Physics;
     clock: Clock.Clock;
-    scriptRuntime: NodesContext;
+    scriptRuntime: SceneTreeContext;
     environment: Environment.Environment;
     voxelVisuals: VoxelVisuals.VoxelVisuals;
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
@@ -82,13 +82,15 @@ export function createRoom(deps: AssetPipelineRoomDeps): AssetPipelineRoom {
     const env = deps.renderer.environmentResources;
 
     const voxels = Voxels.createVoxels(blocks);
-    const nodes = Nodes.createSceneGraph({ mode: 'play', roomMode: 'play' });
+    const nodes = SceneTree.createSceneTree();
     const physics = Physics.init(nodes, voxels, blocks);
     const clock = Clock.init();
     const scene = new Scene();
 
-    const scriptRuntime: NodesContext = {
+    const scriptRuntime: SceneTreeContext = {
         roomId: 'asset-pipeline',
+        playerMode: 'play',
+        roomMode: 'play',
         resources: deps.resources,
         rpc: Rpc.init(NOOP_RPC_DRIVER),
         client: undefined,

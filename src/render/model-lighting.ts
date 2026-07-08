@@ -12,8 +12,8 @@
 import { getVisualWorldMatrix } from '../api/transforms';
 import { ModelTrait } from '../builtins/model';
 import { TransformTrait } from '../builtins/transform';
-import type { Nodes } from '../core/scene/nodes';
-import { query } from '../core/scene/nodes';
+import type { SceneTree } from '../core/scene/scene-tree';
+import { query } from '../core/scene/scene-tree';
 import { sampleVoxelLight } from '../core/voxels/light';
 import type { Voxels } from '../core/voxels/voxels';
 
@@ -23,8 +23,8 @@ export type ModelLighting = {
     _query: LightingQuery;
 };
 
-export function init(sg: Nodes): ModelLighting {
-    return { _query: query(sg, [ModelTrait, TransformTrait]) };
+export function init(sceneTree: SceneTree): ModelLighting {
+    return { _query: query(sceneTree, [ModelTrait, TransformTrait]) };
 }
 
 export function update(ml: ModelLighting, voxels: Voxels): void {

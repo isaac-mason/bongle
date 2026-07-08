@@ -1,4 +1,4 @@
-import type * as nodes from './nodes';
+import type * as sceneTree from './scene-tree';
 import type { ScriptContext } from './scripts';
 
 /**
@@ -12,7 +12,7 @@ import type { ScriptContext } from './scripts';
  * is observed everywhere without re-seating. server-side, ctx.client is
  * undefined and this returns null (server scripts shouldn't gate on POV).
  */
-export function getSubject(ctx: ScriptContext): nodes.Node | null {
+export function getSubject(ctx: ScriptContext): sceneTree.Node | null {
     return ctx.client?.subject ?? null;
 }
 
@@ -22,7 +22,7 @@ export function getSubject(ctx: ScriptContext): nodes.Node | null {
  * changes what this client controls/sees, never ownership or the server-side
  * streaming anchor (that stays the player node).
  */
-export function setSubject(ctx: ScriptContext, node: nodes.Node | null): void {
+export function setSubject(ctx: ScriptContext, node: sceneTree.Node | null): void {
     if (ctx.client) ctx.client.subject = node;
 }
 
@@ -33,7 +33,7 @@ export function setSubject(ctx: ScriptContext, node: nodes.Node | null): void {
  *
  * server-side, ctx.client is undefined and this returns null.
  */
-export function getCamera(ctx: ScriptContext): nodes.Node | null {
+export function getCamera(ctx: ScriptContext): sceneTree.Node | null {
     return ctx.client?.camera ?? null;
 }
 
@@ -42,6 +42,6 @@ export function getCamera(ctx: ScriptContext): nodes.Node | null {
  * client state (`ctx.client.camera`), observed by the renderer and every
  * script without re-seating. client-only: a no-op on the server.
  */
-export function setCamera(ctx: ScriptContext, node: nodes.Node): void {
+export function setCamera(ctx: ScriptContext, node: sceneTree.Node): void {
     if (ctx.client) ctx.client.camera = node;
 }

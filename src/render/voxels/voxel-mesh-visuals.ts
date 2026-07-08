@@ -45,8 +45,8 @@ import { getVisualWorldMatrix } from '../../api/transforms';
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
-import type { Node, Nodes } from '../../core/scene/nodes';
-import { getTrait, query } from '../../core/scene/nodes';
+import type { Node, SceneTree } from '../../core/scene/scene-tree';
+import { getTrait, query } from '../../core/scene/scene-tree';
 import { buildMeshInput, createMeshOutput, meshChunk, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
@@ -195,7 +195,7 @@ export type VoxelMeshVisuals = {
 
 export function init(
     scene: Scene,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     voxelMeshResources: VoxelMeshResources,
     env: Environment.EnvironmentResources,
 ): VoxelMeshVisuals {
@@ -261,7 +261,7 @@ export function init(
         aliveStates: [],
         modelEntries: new Map(),
         nextModelId: 0,
-        _query: query(nodes, [VoxelMeshTrait, TransformTrait]),
+        _query: query(sceneTree, [VoxelMeshTrait, TransformTrait]),
         frameId: 0,
         scene,
     };

@@ -30,18 +30,18 @@ import {
     addChild,
     addTrait,
     createNode,
-    createSceneGraph,
+    createSceneTree,
     deserializeNode,
     getTrait,
     removeTrait,
     reparent,
     serializeNode,
-} from '../../../../src/core/scene/nodes';
+} from '../../../../src/core/scene/scene-tree';
 
 /* ── helpers ── */
 
 function setup() {
-    return createSceneGraph();
+    return createSceneTree();
 }
 
 /** approximate equality for vec3 */
@@ -84,14 +84,14 @@ function rotY90(): Quat {
 
 describe('computeWorldTransforms', () => {
     it('top-level node: local === world', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(10, 20, 30),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         expectVec3Near(getWorldPosition(t), vec3.fromValues(10, 20, 30));
@@ -100,9 +100,9 @@ describe('computeWorldTransforms', () => {
     });
 
     it('top-level node: worldMatrix matches TRS', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         const pos = vec3.fromValues(1, 2, 3);
         const rot = rotY90();
         const scl = vec3.fromValues(2, 2, 2);
@@ -112,7 +112,7 @@ describe('computeWorldTransforms', () => {
             scale: scl,
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         const expected: Mat4 = mat4.create();
@@ -121,11 +121,11 @@ describe('computeWorldTransforms', () => {
     });
 
     it('nested 2-level: child world = parent world * child local', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         // parent at (10, 0, 0)
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -137,18 +137,18 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(15, 0, 0));
     });
 
     it('nested 2-level with rotation: child position rotated by parent', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         // parent rotated 90° around Y → local +X becomes world +Z
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             quaternion: rotY90(),
         });
@@ -161,7 +161,7 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         // build expected manually
         const parentMat: Mat4 = mat4.create();
@@ -179,10 +179,10 @@ describe('computeWorldTransforms', () => {
     });
 
     it('nested 2-level with scale: child world scale is product', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             scale: vec3.fromValues(2, 2, 2),
         });
@@ -194,7 +194,7 @@ describe('computeWorldTransforms', () => {
             scale: vec3.fromValues(3, 3, 3),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         // world position: parent scale 2 * child local pos 5 = 10
@@ -204,10 +204,10 @@ describe('computeWorldTransforms', () => {
     });
 
     it('nested 3-level: grandchild accumulates all ancestors', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -224,7 +224,7 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(1, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(111, 0, 0));
@@ -234,11 +234,11 @@ describe('computeWorldTransforms', () => {
     });
 
     it('intermediate node without transform: child skips to grandparent', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         // grandparent has transform
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, TransformTrait, {
             position: vec3.fromValues(50, 0, 0),
         });
@@ -254,17 +254,17 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(55, 0, 0));
     });
 
     it('multiple children at the same level get correct world positions', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -281,7 +281,7 @@ describe('computeWorldTransforms', () => {
         addChild(parent, c);
         addTrait(c, TransformTrait, { position: vec3.fromValues(0, 0, 3) });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         expectVec3Near(getWorldPosition(getTrait(a, TransformTrait)!), vec3.fromValues(101, 0, 0));
         expectVec3Near(getWorldPosition(getTrait(b, TransformTrait)!), vec3.fromValues(100, 2, 0));
@@ -289,10 +289,10 @@ describe('computeWorldTransforms', () => {
     });
 
     it('repeated calls produce consistent results', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -303,9 +303,9 @@ describe('computeWorldTransforms', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
-        computeWorldTransforms(sg);
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
+        computeWorldTransforms(sceneTree);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getWorldPosition(ct), vec3.fromValues(15, 0, 0));
@@ -318,9 +318,9 @@ describe('computeWorldTransforms', () => {
 
 describe('parent transform bookkeeping', () => {
     it('top-level node has null parent transform', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
         const t = getTrait(node, TransformTrait)!;
@@ -328,10 +328,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('child under transform parent gets parent transform set', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait);
 
         const child = createNode({ name: 'Child' });
@@ -344,10 +344,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('child under non-transform parent has null parent transform', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'NoTransform' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         // no transform on parent
 
         const child = createNode({ name: 'Child' });
@@ -359,10 +359,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('adding transform to parent updates existing children', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const child = createNode({ name: 'Child' });
         addChild(parent, child);
         addTrait(child, TransformTrait);
@@ -378,10 +378,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('removing transform from parent updates children to inherit grandparent', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, TransformTrait);
 
         const parent = createNode({ name: 'Parent' });
@@ -405,10 +405,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('removing transform from parent with no grandparent sets children to null', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait);
 
         const child = createNode({ name: 'Child' });
@@ -424,14 +424,14 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('addChild updates parent transform for moved subtree', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const oldParent = createNode({ name: 'OldParent' });
-        addChild(sg.root, oldParent);
+        addChild(sceneTree.root, oldParent);
         addTrait(oldParent, TransformTrait);
 
         const newParent = createNode({ name: 'NewParent' });
-        addChild(sg.root, newParent);
+        addChild(sceneTree.root, newParent);
         addTrait(newParent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -452,14 +452,14 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('reparent updates parent transform for moved subtree', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parentA = createNode({ name: 'ParentA' });
-        addChild(sg.root, parentA);
+        addChild(sceneTree.root, parentA);
         addTrait(parentA, TransformTrait);
 
         const parentB = createNode({ name: 'ParentB' });
-        addChild(sg.root, parentB);
+        addChild(sceneTree.root, parentB);
         addTrait(parentB, TransformTrait);
 
         const child = createNode({ name: 'Child' });
@@ -477,14 +477,14 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('reparent updates deep subtree pointers', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parentA = createNode({ name: 'ParentA' });
-        addChild(sg.root, parentA);
+        addChild(sceneTree.root, parentA);
         addTrait(parentA, TransformTrait);
 
         const parentB = createNode({ name: 'ParentB' });
-        addChild(sg.root, parentB);
+        addChild(sceneTree.root, parentB);
         addTrait(parentB, TransformTrait);
 
         // subtree: container → child → grandchild
@@ -514,10 +514,10 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('intermediate node without transform: grandchild points to grandparent', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, TransformTrait);
 
         // middle node has no transform
@@ -534,11 +534,11 @@ describe('parent transform bookkeeping', () => {
     });
 
     it('deserializeNode sets parent transform correctly', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         // create a parent with transform, then a child with transform
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 20, 30),
         });
@@ -553,7 +553,7 @@ describe('parent transform bookkeeping', () => {
         const data = serializeNode(parent);
 
         // deserialize into a fresh scene graph
-        const sg2 = createSceneGraph();
+        const sg2 = createSceneTree();
         const restored = deserializeNode(data);
         addChild(sg2.root, restored);
 
@@ -574,9 +574,9 @@ describe('parent transform bookkeeping', () => {
 
 describe('hasTransformedParent', () => {
     it('returns false for top-level transform', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
         const t = getTrait(node, TransformTrait)!;
@@ -584,9 +584,9 @@ describe('hasTransformedParent', () => {
     });
 
     it('returns true for nested transform', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait);
 
         const child = createNode({ name: 'Child' });
@@ -604,12 +604,12 @@ describe('hasTransformedParent', () => {
 
 describe('worldToLocalPosition', () => {
     it('top-level: world === local (fast path)', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         const out: Vec3 = vec3.create();
@@ -618,9 +618,9 @@ describe('worldToLocalPosition', () => {
     });
 
     it('nested with translation: subtracts parent offset', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -629,7 +629,7 @@ describe('worldToLocalPosition', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         const out: Vec3 = vec3.create();
@@ -638,9 +638,9 @@ describe('worldToLocalPosition', () => {
     });
 
     it('nested with rotation: inverse rotates correctly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             quaternion: rotY90(),
         });
@@ -649,7 +649,7 @@ describe('worldToLocalPosition', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         // get child's world position from a known local position
         // first compute what world position local (5,0,0) maps to
@@ -664,9 +664,9 @@ describe('worldToLocalPosition', () => {
     });
 
     it('nested with scale: inverse scales correctly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             scale: vec3.fromValues(2, 2, 2),
         });
@@ -675,7 +675,7 @@ describe('worldToLocalPosition', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         const out: Vec3 = vec3.create();
@@ -687,12 +687,12 @@ describe('worldToLocalPosition', () => {
 
 describe('worldToLocalQuaternion', () => {
     it('top-level: world === local (fast path)', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         const worldQ = rotY90();
@@ -702,9 +702,9 @@ describe('worldToLocalQuaternion', () => {
     });
 
     it('nested: strips parent rotation', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         const parentRot = rotY90();
         addTrait(parent, TransformTrait, {
             quaternion: parentRot,
@@ -714,7 +714,7 @@ describe('worldToLocalQuaternion', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         // if world rotation equals parent rotation, local should be identity
@@ -726,12 +726,12 @@ describe('worldToLocalQuaternion', () => {
 
 describe('setWorldPosition', () => {
     it('top-level: sets position directly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         setWorldPosition(t, vec3.fromValues(42, 0, 0));
@@ -739,9 +739,9 @@ describe('setWorldPosition', () => {
     });
 
     it('nested: converts world to local correctly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -750,7 +750,7 @@ describe('setWorldPosition', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         // set world pos to (110, 0, 0) → local should be (10, 0, 0)
@@ -761,12 +761,12 @@ describe('setWorldPosition', () => {
 
 describe('setWorldQuaternion', () => {
     it('top-level: sets quaternion directly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const t = getTrait(node, TransformTrait)!;
         const worldQ = rotY90();
@@ -775,9 +775,9 @@ describe('setWorldQuaternion', () => {
     });
 
     it('nested: strips parent rotation', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             quaternion: rotY90(),
         });
@@ -786,7 +786,7 @@ describe('setWorldQuaternion', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         // set world rotation to same as parent → local should be identity
@@ -801,9 +801,9 @@ describe('setWorldQuaternion', () => {
 
 describe('dirty-flag lazy recompute', () => {
     it('getWorldPosition triggers lazy recompute after setPosition', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -826,9 +826,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('setPosition on parent marks children dirty', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -853,10 +853,10 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('markDirty cascades through 3-level hierarchy', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const gp = createNode({ name: 'GP' });
-        addChild(sg.root, gp);
+        addChild(sceneTree.root, gp);
         addTrait(gp, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -886,9 +886,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('setQuaternion marks dirty and getWorldQuaternion recomputes', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
         const t = getTrait(node, TransformTrait)!;
@@ -897,9 +897,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('setScale marks dirty and getWorldScale recomputes', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait);
 
         const t = getTrait(node, TransformTrait)!;
@@ -908,9 +908,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('getVisualWorld* returns world values for non-Interp nodes', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(7, 8, 9),
         });
@@ -922,9 +922,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('getVisualWorldPosition reflects ancestor composition', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -950,9 +950,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('_dirty starts TRANSFORM_DIRTY_ALL so first read triggers compute', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(42, 0, 0),
         });
@@ -968,9 +968,9 @@ describe('dirty-flag lazy recompute', () => {
     });
 
     it('markDirty early-outs if already dirty', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait);
 
         const child = createNode({ name: 'Child' });
@@ -1004,9 +1004,9 @@ describe('dirty-flag lazy recompute', () => {
 
 describe('snapshot', () => {
     it('refreshes prev fields from current pose for dirty transforms', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(0, 0, 0),
         });
@@ -1017,7 +1017,7 @@ describe('snapshot', () => {
         setPosition(t, vec3.fromValues(1, 2, 3));
         setQuaternion(t, rotY90());
 
-        snapshot(initInterpolation(sg, 1));
+        snapshot(initInterpolation(sceneTree, 1));
 
         // snapshot drain copied the post-mutation pose into prev
         expectVec3Near(t.prevPosition, vec3.fromValues(1, 2, 3));
@@ -1025,9 +1025,9 @@ describe('snapshot', () => {
     });
 
     it('prev values remain stable after position mutation without re-snapshot', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(1, 2, 3),
         });
@@ -1049,16 +1049,16 @@ describe('snapshot', () => {
 
 describe('interpolate', () => {
     it('top-level non-owned: copies position directly', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(10, 20, 30),
             scale: vec3.fromValues(2, 2, 2),
         });
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 20, 30));
@@ -1066,9 +1066,9 @@ describe('interpolate', () => {
     });
 
     it('top-level owned: lerps between prev and current', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         node.owner = 1;
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(0, 0, 0),
@@ -1077,23 +1077,23 @@ describe('interpolate', () => {
 
         // prime: consume the setInterpolation cold-start teleport snap so
         // the next interpolate() actually exercises the lerp path.
-        interpolate(initInterpolation(sg, 1), 0, 1);
+        interpolate(initInterpolation(sceneTree, 1), 0, 1);
 
         // move to (10, 0, 0)
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0.5, 1);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 1);
 
         // at alpha=0.5, should be halfway: (5, 0, 0)
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(5, 0, 0));
     });
 
     it('top-level owned at alpha=0: equals prev position', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         node.owner = 1;
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(0, 0, 0),
@@ -1101,48 +1101,48 @@ describe('interpolate', () => {
         setInterpolation(node, true);
 
         // prime: consume the cold-start teleport snap.
-        interpolate(initInterpolation(sg, 1), 0, 1);
+        interpolate(initInterpolation(sceneTree, 1), 0, 1);
 
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0, 1);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0, 1);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(0, 0, 0));
     });
 
     it('top-level owned at alpha=1: equals current position', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         node.owner = 1;
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(0, 0, 0),
         });
 
-        snapshot(initInterpolation(sg, 1));
+        snapshot(initInterpolation(sceneTree, 1));
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 1, 1);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 1, 1);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 0, 0));
     });
 
     it('builds interpolatedWorldMatrix from interpolated TRS', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(5, 10, 15),
             scale: vec3.fromValues(2, 2, 2),
         });
         setInterpolation(node, true);
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         const expected: Mat4 = mat4.create();
@@ -1156,14 +1156,14 @@ describe('interpolate', () => {
     });
 
     it('child of interpolated ancestor composes visual chain against interpolated parent', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         // parent is interpolated; child is not. child reads through
         // getVisualWorldMatrix and should see the interpolated parent matrix.
         // parent is owned so interpolate() lerps prev→current (non-owned
         // top-level nodes snap to current and would defeat the assertion).
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         parent.owner = 1;
         addTrait(parent, TransformTrait, { position: vec3.fromValues(0, 0, 0) });
         setInterpolation(parent, true); // seeds prev = (0,0,0)
@@ -1172,11 +1172,11 @@ describe('interpolate', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         // prime: consume the cold-start teleport snap on parent so the
         // next interpolate() exercises the lerp path.
-        interpolate(initInterpolation(sg, 1), 0, 1);
+        interpolate(initInterpolation(sceneTree, 1), 0, 1);
 
         // now move parent (the "current" pose), interpolate at alpha=0.5
         // should produce parent.visualPos = (5,0,0), so child world =
@@ -1184,17 +1184,17 @@ describe('interpolate', () => {
         const pt = getTrait(parent, TransformTrait)!;
         pt.position[0] = 10;
         markTransformDirty(pt);
-        interpolate(initInterpolation(sg, 1), 0.5, 1);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 1);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(ct), vec3.fromValues(6, 0, 0));
     });
 
     it('nested non-owned: composes local with parent worldMatrix', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
         });
@@ -1205,8 +1205,8 @@ describe('interpolate', () => {
             position: vec3.fromValues(10, 0, 0),
         });
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         const ct = getTrait(child, TransformTrait)!;
         // nested non-owned uses current local directly, composed with parent world
@@ -1214,38 +1214,38 @@ describe('interpolate', () => {
     });
 
     it('teleport flag causes snap instead of lerp', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         node.owner = 1;
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(0, 0, 0),
         });
 
-        snapshot(initInterpolation(sg, 1));
+        snapshot(initInterpolation(sceneTree, 1));
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 100, 0, 0);
         t.teleport = 1; // trigger teleport
 
-        computeWorldTransforms(sg);
-        interpolate(initInterpolation(sg, 1), 0.5, 1);
+        computeWorldTransforms(sceneTree);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 1);
 
         // should snap to current, not lerp
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(100, 0, 0));
     });
 
     it('static node never under Interp: _interpolated stays 0, visual getters return world', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'Static' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(7, 8, 9),
         });
 
         // run interpolate over a scene with no Interp nodes, should not
         // touch this node's _interpolated bit.
-        snapshot(initInterpolation(sg, 1));
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        snapshot(initInterpolation(sceneTree, 1));
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
@@ -1255,25 +1255,25 @@ describe('interpolate', () => {
     });
 
     it('interpolated node sets its own _interpolated bit after first interpolate()', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(0, 0, 0) });
         setInterpolation(node, true);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
 
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         expect(t._interpolated).toBe(1);
     });
 
     it('descendants of interpolated node get _interpolated set by descendant-mark walk', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, { position: vec3.fromValues(0, 0, 0) });
         setInterpolation(parent, true);
 
@@ -1290,7 +1290,7 @@ describe('interpolate', () => {
         expect(ct._interpolated).toBe(0);
         expect(gct._interpolated).toBe(0);
 
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         expect(ct._interpolated).toBe(1);
         expect(gct._interpolated).toBe(1);
@@ -1300,10 +1300,10 @@ describe('interpolate', () => {
         // boundary case at transforms.ts compose: when an Interp child has
         // a non-Interp parent, the parent's interpolatedWorldMatrix is
         // never populated. compose must source parent.worldMatrix instead.
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'StaticParent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, { position: vec3.fromValues(10, 0, 0) });
 
         const child = createNode({ name: 'InterpChild' });
@@ -1312,7 +1312,7 @@ describe('interpolate', () => {
         setInterpolation(child, true);
 
         // refresh parent.worldMatrix, the chain compose() will read against
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const pt = getTrait(parent, TransformTrait)!;
         const ct = getTrait(child, TransformTrait)!;
@@ -1321,7 +1321,7 @@ describe('interpolate', () => {
         // directly, which still exercises the parent-matrix boundary.
         setPosition(ct, vec3.fromValues(3, 0, 0));
 
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         // parent never participated, bit stays 0, boundary takes the
         // parent.worldMatrix branch.
@@ -1334,9 +1334,9 @@ describe('interpolate', () => {
     });
 
     it('setInterpolation(true) seeds prev = current immediately', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, {
             position: vec3.fromValues(7, 8, 9),
             quaternion: rotY90(),
@@ -1352,32 +1352,32 @@ describe('interpolate', () => {
         expectVec3Near(t.prevPosition, vec3.fromValues(7, 8, 9));
         expectQuatNear(t.prevQuaternion, rotY90());
         expect(t.interpolate).toBe(1);
-        expect(sg._interpolating.has(t)).toBe(true);
+        expect(sceneTree._interpolating.has(t)).toBe(true);
     });
 
     it('setInterpolation(false) clears _interpolated and removes from set', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
         setInterpolation(node, true);
-        interpolate(initInterpolation(sg, 1), 0.5, 0);
+        interpolate(initInterpolation(sceneTree, 1), 0.5, 0);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(1);
-        expect(sg._interpolating.has(t)).toBe(true);
+        expect(sceneTree._interpolating.has(t)).toBe(true);
 
         setInterpolation(node, false);
 
         expect(t.interpolate).toBe(0);
         expect(t._interpolated).toBe(0);
-        expect(sg._interpolating.has(t)).toBe(false);
+        expect(sceneTree._interpolating.has(t)).toBe(false);
     });
 
     it('setInterpolation is idempotent on repeated calls', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(1, 2, 3) });
 
         setInterpolation(node, true);
@@ -1394,9 +1394,9 @@ describe('interpolate', () => {
     });
 
     it('resetInterpolation re-seeds prev from current pose', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(0, 0, 0) });
         setInterpolation(node, true);
 
@@ -1409,9 +1409,9 @@ describe('interpolate', () => {
     });
 
     it('resetInterpolation is a no-op for non-interpolated nodes', () => {
-        const sg = setup();
+        const sceneTree = setup();
         const node = createNode({ name: 'A' });
-        addChild(sg.root, node);
+        addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(1, 2, 3) });
 
         const t = getTrait(node, TransformTrait)!;
@@ -1427,10 +1427,10 @@ describe('interpolate', () => {
 
 describe('round-trip: mutation → compute → verify', () => {
     it('moving parent updates child world position on next compute', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
@@ -1441,26 +1441,26 @@ describe('round-trip: mutation → compute → verify', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
         expectVec3Near(getWorldPosition(getTrait(child, TransformTrait)!), vec3.fromValues(15, 0, 0));
 
         // move parent via setter (marks dirty)
         setPosition(getTrait(parent, TransformTrait)!, vec3.fromValues(50, 0, 0));
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
         expectVec3Near(getWorldPosition(getTrait(child, TransformTrait)!), vec3.fromValues(55, 0, 0));
     });
 
     it('reparenting then computing gives correct world position', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parentA = createNode({ name: 'A' });
-        addChild(sg.root, parentA);
+        addChild(sceneTree.root, parentA);
         addTrait(parentA, TransformTrait, {
             position: vec3.fromValues(10, 0, 0),
         });
 
         const parentB = createNode({ name: 'B' });
-        addChild(sg.root, parentB);
+        addChild(sceneTree.root, parentB);
         addTrait(parentB, TransformTrait, {
             position: vec3.fromValues(200, 0, 0),
         });
@@ -1471,20 +1471,20 @@ describe('round-trip: mutation → compute → verify', () => {
             position: vec3.fromValues(5, 0, 0),
         });
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
         expectVec3Near(getWorldPosition(getTrait(child, TransformTrait)!), vec3.fromValues(15, 0, 0));
 
         // reparent child to B
         reparent(child, parentB);
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
         expectVec3Near(getWorldPosition(getTrait(child, TransformTrait)!), vec3.fromValues(205, 0, 0));
     });
 
     it('setWorldPosition + compute round-trip preserves world position', () => {
-        const sg = setup();
+        const sceneTree = setup();
 
         const parent = createNode({ name: 'Parent' });
-        addChild(sg.root, parent);
+        addChild(sceneTree.root, parent);
         addTrait(parent, TransformTrait, {
             position: vec3.fromValues(100, 0, 0),
             scale: vec3.fromValues(2, 2, 2),
@@ -1494,14 +1494,14 @@ describe('round-trip: mutation → compute → verify', () => {
         addChild(parent, child);
         addTrait(child, TransformTrait);
 
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
 
         const ct = getTrait(child, TransformTrait)!;
         const desiredWorldPos = vec3.fromValues(120, 0, 0);
         setWorldPosition(ct, desiredWorldPos);
 
         // recompute, child world position should match desired
-        computeWorldTransforms(sg);
+        computeWorldTransforms(sceneTree);
         expectVec3Near(getWorldPosition(ct), desiredWorldPos);
     });
 });

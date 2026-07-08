@@ -17,8 +17,8 @@ import { type Vec3, vec3 } from 'mathcat';
 import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/aabb-body';
 import { TransformTrait } from '../../../builtins/transform';
 import { type SweepResult, sweepAabbVsAabb } from '../../math/aabb-sweep';
-import type { Nodes } from '../../scene/nodes';
-import { query } from '../../scene/nodes';
+import type { SceneTree } from '../../scene/scene-tree';
+import { query } from '../../scene/scene-tree';
 import type { TraitHandle } from '../../scene/traits';
 import type { Voxels } from '../../voxels/voxels';
 import {
@@ -399,8 +399,8 @@ export function createWorld(voxels: Voxels, opts?: CreateWorldOpts): World {
  * Called by the top-level `Physics` coordinator only, tests and headless
  * callers leave this unbound and skip `preStep`/`postStep`.
  */
-export function bindNodeSync(world: World, nodes: Nodes, bodyTrait: TraitHandle<AabbBodyTraitInstance>): void {
-    world._bodyQuery = query(nodes, [bodyTrait, TransformTrait]);
+export function bindNodeSync(world: World, sceneTree: SceneTree, bodyTrait: TraitHandle<AabbBodyTraitInstance>): void {
+    world._bodyQuery = query(sceneTree, [bodyTrait, TransformTrait]);
 }
 
 /** tear down all bodies (including impostors) before disposing the world. */

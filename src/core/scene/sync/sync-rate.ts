@@ -1,16 +1,18 @@
-// ── adaptive sync rate ───────────────────────────────────────────────
+// ── sync dirtiness + rate ─────────────────────────────────────────────
 //
-// all server→client send rate logic lives here. discovery.ts calls in
-// to gate which syncs get sent each tick. no abstractions, just the
-// logic needed.
+// two orthogonal per-sync policies, and the send-side helpers that read them:
+//   - `dirty`: WHAT counts as a change worth sending (byte-diff, threshold, or
+//     explicit-only). consumed by the diff pass (sync-diff.ts).
+//   - `rate`: HOW OFTEN a dirty value may send, at most. consumed by the send
+//     path (discovery.ts fanout). nothing un-dirty ever sends, regardless of rate.
 //
-// diff detection still runs every tick for all nodes (cheap byte compare).
-// rate gating only applies to the send path (serialization + network I/O).
+// diff detection still runs every tick for all nodes (cheap byte compare); rate
+// gating only applies to the send path (serialization + network I/O).
 
-import type { ThresholdRate } from '../traits';
+import type { DirtyThreshold } from '../traits';
 
 /**
- * change metrics for `ThresholdRate`. each receives the previously-emitted value
+ * change metrics for `DirtyThreshold`. each receives the previously-emitted value
  * and the current one (the field's own value, not bytes), returning a magnitude
  * the diff compares against the rate's `threshold`. body-agnostic: a node moved by
  * a rigid body, an AABB body, a script, or an animation all measure the same way.
@@ -37,25 +39,38 @@ export const syncMetric = {
 };
 
 /**
- * `ThresholdRate` constructors for the common shapes, bake the metric so it can't
- * be mismatched with the value, and read as English at the call site:
- * `rate: syncRate.distance(0.05)`. for an exotic metric, write the raw
- * `{ threshold, metric }` form instead.
+ * `dirty` policy constructors — what counts as a change worth sending. the metric
+ * variants bake their metric so it can't be mismatched with the value, and read as
+ * English at the call site: `dirty: dirty.distance(0.05)`.
  */
-export const syncRate = {
-    /** emit when a vector/scalar-list value moves ≥ `threshold` (euclidean). */
-    distance: (threshold: number): ThresholdRate => ({ threshold, metric: syncMetric.distance }),
-    /** emit when a quaternion [x,y,z,w] rotates ≥ `threshold` radians. */
-    angle: (threshold: number): ThresholdRate => ({ threshold, metric: syncMetric.angle }),
-    /** emit when a scalar changes by ≥ `threshold`. */
-    scalar: (threshold: number): ThresholdRate => ({ threshold, metric: syncMetric.scalar }),
+export const dirty = {
+    /** dirty when a vector/scalar-list value moves ≥ `threshold` (euclidean). */
+    distance: (threshold: number): DirtyThreshold => ({ threshold, metric: syncMetric.distance }),
+    /** dirty when a quaternion [x,y,z,w] rotates ≥ `threshold` radians. */
+    angle: (threshold: number): DirtyThreshold => ({ threshold, metric: syncMetric.angle }),
+    /** dirty when a scalar changes by ≥ `threshold`. */
+    scalar: (threshold: number): DirtyThreshold => ({ threshold, metric: syncMetric.scalar }),
+    /** dirty on any byte change (the default). */
+    onChange: (): 'onChange' => 'onChange',
+    /** never auto-dirty; only `SyncHandle.dirty()` marks it. */
+    explicit: (): 'explicit' => 'explicit',
 };
 
 /**
- * returns true if an update should be sent this tick given the rate and timing.
+ * `rate` policy constructors — the maximum send cadence for a dirty value.
  */
-export function shouldSendThisTick(rate: number, lastSentTick: number, currentTick: number, tickRate: number): boolean {
-    if (rate <= 0) return false;
-    const ticksPerSend = tickRate / rate;
+export const rate = {
+    /** send at most `hz` times/sec (a per-field time-gate, Quake's snapshotMsec). */
+    hz: (hz: number): { hz: number } => ({ hz }),
+    /** send every tick the value is dirty (the default, no throttle). */
+    realtime: (): 'realtime' => 'realtime',
+};
+
+/**
+ * returns true if a dirty value may send this tick given its `hz` cap and timing.
+ */
+export function shouldSendThisTick(hz: number, lastSentTick: number, currentTick: number, tickRate: number): boolean {
+    if (hz <= 0) return false;
+    const ticksPerSend = tickRate / hz;
     return currentTick - lastSentTick >= ticksPerSend;
 }

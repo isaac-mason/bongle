@@ -8,7 +8,7 @@
 //      on mouseUp.
 //
 //   2. placement mode: creates client-local ghost
-//      nodes in the scene graph, points selectedNodeIds at the root ghost pivot,
+//      nodes in the scene tree, points selectedNodeIds at the root ghost pivot,
 //      and the existing gizmo machinery drives the ghost just like a real node.
 //      on commit, ghost positions are materialized as voxel ops + real nodes.
 //      on cancel, ghosts are destroyed and cut ops are reversed.
@@ -31,8 +31,8 @@ import type { Physics } from '../../core/physics/physics';
 import { OBJECT_LAYER_NODE_MOVING } from '../../core/physics/physics';
 import { registry } from '../../core/registry';
 import type { Resources } from '../../core/resources';
-import type { Node, Nodes, SerializedNode } from '../../core/scene/nodes';
-import { addChild, addTrait, createNode, deserializeNode, destroyNode, getNodeById, getTrait } from '../../core/scene/nodes';
+import type { Node, SceneTree, SerializedNode } from '../../core/scene/scene-tree';
+import { addChild, addTrait, createNode, deserializeNode, destroyNode, getNodeById, getTrait } from '../../core/scene/scene-tree';
 import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { ScriptContext } from '../../core/scene/scripts';
 import { send } from '../../core/scene/scripts';
@@ -87,7 +87,7 @@ export type PlacementState = {
     placed: boolean;
 
     // separate standalone node holding VoxelMeshTrait for the voxel ghost.
-    // NOT a scene-graph child of root, its interpolatedPosition is set manually
+    // NOT a scene tree child of root, its interpolatedPosition is set manually
     // each frame in _syncProxyFromPlacementRoot.
     voxelNodeId: number | null;
 
@@ -219,7 +219,7 @@ export function createTransformTool(
     camera: PerspectiveCamera,
     canvas: HTMLElement,
     scene: Scene,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     ctx: ScriptContext,
 ): TransformToolState {
     const proxy = new Object3D();
@@ -254,7 +254,7 @@ export function createTransformTool(
         // on first click in placement mode, mark as placed and sync proxy position
         if (state.placement && !state.placement.placed) {
             state.placement.placed = true;
-            const root = getNodeById(nodes, state.placement.rootId);
+            const root = getNodeById(sceneTree, state.placement.rootId);
             if (root) {
                 const t = getTrait(root, TransformTrait);
                 if (t) {
@@ -268,7 +268,7 @@ export function createTransformTool(
         const nodeIds = _activeNodeIds(state);
         state.snapshots = [];
         for (const nodeId of nodeIds) {
-            const node = getNodeById(nodes, nodeId);
+            const node = getNodeById(sceneTree, nodeId);
             if (!node) continue;
             const t = getTrait(node, TransformTrait);
             if (!t) continue;
@@ -305,7 +305,7 @@ export function createTransformTool(
             const dz = proxy.position[2] - state.proxyStartPosition[2];
 
             for (const snap of state.snapshots) {
-                const node = getNodeById(nodes, snap.nodeId);
+                const node = getNodeById(sceneTree, snap.nodeId);
                 if (!node) continue;
                 const t = getTrait(node, TransformTrait);
                 if (!t) continue;
@@ -362,14 +362,14 @@ export function createTransformTool(
                             const dir = delta > 0 ? 1 : -1;
                             const count = Math.abs(delta);
                             for (let i = 0; i < count; i++) {
-                                rotatePlacement(state, nodes, dir as 1 | -1, axis);
+                                rotatePlacement(state, sceneTree, dir as 1 | -1, axis);
                             }
                             placement.dragRotSteps[idx] = totalSteps;
                         }
                     }
                     quat.copy(proxy.quaternion, state.proxyStartQuaternion);
                     for (const snap of state.snapshots) {
-                        const node = getNodeById(nodes, snap.nodeId);
+                        const node = getNodeById(sceneTree, snap.nodeId);
                         if (!node) continue;
                         const t = getTrait(node, TransformTrait);
                         if (!t) continue;
@@ -396,7 +396,7 @@ export function createTransformTool(
                 }
 
                 for (const snap of state.snapshots) {
-                    const node = getNodeById(nodes, snap.nodeId);
+                    const node = getNodeById(sceneTree, snap.nodeId);
                     if (!node) continue;
                     const t = getTrait(node, TransformTrait);
                     if (!t) continue;
@@ -417,7 +417,7 @@ export function createTransformTool(
             }
 
             for (const snap of state.snapshots) {
-                const node = getNodeById(nodes, snap.nodeId);
+                const node = getNodeById(sceneTree, snap.nodeId);
                 if (!node) continue;
                 const t = getTrait(node, TransformTrait);
                 if (!t) continue;
@@ -439,7 +439,7 @@ export function createTransformTool(
             const sz = proxy.scale[2] / state.proxyStartScale[2];
 
             for (const snap of state.snapshots) {
-                const node = getNodeById(nodes, snap.nodeId);
+                const node = getNodeById(sceneTree, snap.nodeId);
                 if (!node) continue;
                 const t = getTrait(node, TransformTrait);
                 if (!t) continue;
@@ -468,7 +468,7 @@ export function createTransformTool(
 
         const finals: TransformSnapshot[] = [];
         for (const snap of state.snapshots) {
-            const node = getNodeById(nodes, snap.nodeId);
+            const node = getNodeById(sceneTree, snap.nodeId);
             if (!node) continue;
             const t = getTrait(node, TransformTrait);
             if (!t) continue;
@@ -486,14 +486,14 @@ export function createTransformTool(
             label: `transform ${gizmo.mode}`,
             do() {
                 for (const f of finals) {
-                    const n = getNodeById(nodes, f.nodeId);
+                    const n = getNodeById(sceneTree, f.nodeId);
                     if (!n) continue;
                     const props = {
                         position: vec3.clone(f.position),
                         quaternion: quat.clone(f.quaternion),
                         scale: vec3.clone(f.scale),
                     };
-                    setTraitProps(nodes, n, 'transform', props);
+                    setTraitProps(sceneTree, n, 'transform', props);
                     send(ctx, SetTraitCommand, {
                         id: f.nodeId,
                         traitId: 'transform',
@@ -504,14 +504,14 @@ export function createTransformTool(
             },
             undo() {
                 for (const s of prevSnapshots) {
-                    const n = getNodeById(nodes, s.nodeId);
+                    const n = getNodeById(sceneTree, s.nodeId);
                     if (!n) continue;
                     const props = {
                         position: vec3.clone(s.position),
                         quaternion: quat.clone(s.quaternion),
                         scale: vec3.clone(s.scale),
                     };
-                    setTraitProps(nodes, n, 'transform', props);
+                    setTraitProps(sceneTree, n, 'transform', props);
                     send(ctx, SetTraitCommand, {
                         id: s.nodeId,
                         traitId: 'transform',
@@ -555,7 +555,7 @@ const _placeScratch: Vec3 = [0, 0, 0];
  *
  * returns the current pivot world position so the caller can pass it to updatePivotDot.
  */
-export function updateTransformTool(state: TransformToolState, nodes: Nodes): Vec3 | null {
+export function updateTransformTool(state: TransformToolState, sceneTree: SceneTree): Vec3 | null {
     const storeState = state.store.getState();
     const { transformMode, transformSpace, translationSnap, rotationSnap, scaleSnap } = storeState;
 
@@ -566,13 +566,13 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
         // in placement mode, still sync the voxel ghost position
         const placement = state.placement;
         if (placement) {
-            const root = getNodeById(nodes, placement.rootId);
+            const root = getNodeById(sceneTree, placement.rootId);
             if (root) {
                 const t = getTrait(root, TransformTrait);
                 if (t) {
                     // sync voxel ghost
                     if (placement.voxelNodeId !== null) {
-                        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
+                        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
                         if (voxelNode) {
                             const vt = getTrait(voxelNode, TransformTrait);
                             if (vt) {
@@ -598,7 +598,7 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
         _detachGizmo(state);
         const grab = state.grab;
         if (grab) {
-            const node = getNodeById(nodes, grab.nodeId);
+            const node = getNodeById(sceneTree, grab.nodeId);
             const t = node ? getTrait(node, TransformTrait) : null;
             if (t) return [...getVisualWorldPosition(t)] as Vec3;
         }
@@ -614,7 +614,7 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
     let effectiveTranslationSnap = translationSnap;
     let effectiveRotationSnap = rotationSnap;
     const effectiveScaleSnap = scaleSnap;
-    if (computeTransformHasVoxels(state, nodes)) {
+    if (computeTransformHasVoxels(state, sceneTree)) {
         effectiveTranslationSnap = 1;
         effectiveRotationSnap = 90;
         if (gizmoMode === 'scale') {
@@ -631,13 +631,13 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
 
     // in placement mode, drive proxy from root ghost node only
     if (state.placement) {
-        return _syncProxyFromPlacementRoot(state, nodes);
+        return _syncProxyFromPlacementRoot(state, sceneTree);
     }
 
     // normal mode: drive proxy from selected nodes
     const selectedNodes: { node: Node; transform: TransformTrait }[] = [];
     for (const nodeId of storeState.selection.nodes) {
-        const node = getNodeById(nodes, nodeId);
+        const node = getNodeById(sceneTree, nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -684,10 +684,10 @@ export function updateTransformTool(state: TransformToolState, nodes: Nodes): Ve
 }
 
 // returns the pivot world position, or null if root is missing.
-function _syncProxyFromPlacementRoot(state: TransformToolState, nodes: Nodes): Vec3 | null {
+function _syncProxyFromPlacementRoot(state: TransformToolState, sceneTree: SceneTree): Vec3 | null {
     const placement = state.placement;
     if (!placement) return null;
-    const root = getNodeById(nodes, placement.rootId);
+    const root = getNodeById(sceneTree, placement.rootId);
     if (!root) return null;
     const t = getTrait(root, TransformTrait);
     if (!t) return null;
@@ -708,7 +708,7 @@ function _syncProxyFromPlacementRoot(state: TransformToolState, nodes: Nodes): V
     // the commit anchor (root.interpolatedPosition - pivotOffset), we set:
     //   voxelPosition = root.interpolatedPosition - pivotOffset + [sx/2, sy/2, sz/2]
     if (placement.voxelNodeId !== null) {
-        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
+        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
         if (voxelNode) {
             const vt = getTrait(voxelNode, TransformTrait);
             if (vt) {
@@ -784,7 +784,7 @@ export function pivotOffsetForPreset(store: EditRoomStoreApi, preset: PivotPrese
  * set the pivot preset during active placement.
  * updates both the store and the cached state so the root ghost repositions immediately.
  */
-export function setPlacementPivot(state: TransformToolState, preset: PivotPreset, nodes: Nodes): void {
+export function setPlacementPivot(state: TransformToolState, preset: PivotPreset, sceneTree: SceneTree): void {
     const placement = state.placement;
     if (!placement) return;
 
@@ -794,7 +794,7 @@ export function setPlacementPivot(state: TransformToolState, preset: PivotPreset
     // reposition root ghost: keep voxel min-corner where it is, shift pivot.
     // old root position = min-corner + old pivot offset
     // new root position = min-corner + new pivot offset
-    const root = getNodeById(nodes, placement.rootId);
+    const root = getNodeById(sceneTree, placement.rootId);
     if (root) {
         const t = getTrait(root, TransformTrait);
         if (t) {
@@ -835,7 +835,7 @@ export function enterPlacement(
     blueprint: BlueprintData,
     isCut: boolean,
     cutReverseOps: VoxelOp[] | null,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     _ctx: ScriptContext,
 ): void {
     // bail if already in placement
@@ -855,21 +855,21 @@ export function enterPlacement(
     // sits at blueprint.origin + pivotOffset in world space.
     // has no geometry, pure pivot for the gizmo.
     const rootNode = createNode({ name: '__placement_root', persist: false });
-    addChild(nodes.root, rootNode);
+    addChild(sceneTree.root, rootNode);
     const rootTransform = addTrait(rootNode, TransformTrait);
     rootTransform.position[0] = blueprint.origin[0] + pivotOffset[0];
     rootTransform.position[1] = blueprint.origin[1] + pivotOffset[1];
     rootTransform.position[2] = blueprint.origin[2] + pivotOffset[2];
     vec3.copy(rootTransform.interpolatedWorldPosition, rootTransform.position);
 
-    // ── voxel ghost: standalone node (NOT a scene-graph child of root) ──
+    // ── voxel ghost: standalone node (NOT a scene tree child of root) ──
     // we avoid parenting because the engine does not propagate parent transforms
     // into child interpolatedPosition values. we set its interpolatedPosition
     // manually each frame in _syncProxyFromPlacementRoot instead.
     let voxelNodeId: number | null = null;
     if (blueprint.hasVoxels && rotatedBlueprint.voxels) {
         const voxelNode = createNode({ name: '__placement_voxels', persist: false });
-        addChild(nodes.root, voxelNode);
+        addChild(sceneTree.root, voxelNode);
         const voxelTransform = addTrait(voxelNode, TransformTrait);
         // initial interpolatedPosition: root - pivotOffset + [sx/2, sy/2, sz/2]
         const [sx, sy, sz] = rotatedBlueprint.size;
@@ -957,7 +957,7 @@ export function enterPlacement(
  */
 export function updatePlacementFromRaycast(
     state: TransformToolState,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     hitVoxel: [number, number, number],
     hitNormal: [number, number, number],
     hitPoint: [number, number, number] | null,
@@ -1003,7 +1003,7 @@ export function updatePlacementFromRaycast(
         let czAvg = 0;
         let count = 0;
         for (const id of selectedNodeIds) {
-            const node = getNodeById(nodes, id);
+            const node = getNodeById(sceneTree, id);
             if (!node) continue;
             const tt = getTrait(node, TransformTrait);
             if (!tt) continue;
@@ -1026,7 +1026,7 @@ export function updatePlacementFromRaycast(
         if (state.placeSnapshots === null) {
             const snaps: TransformSnapshot[] = [];
             for (const id of selectedNodeIds) {
-                const node = getNodeById(nodes, id);
+                const node = getNodeById(sceneTree, id);
                 if (!node) continue;
                 const tt = getTrait(node, TransformTrait);
                 if (!tt) continue;
@@ -1041,7 +1041,7 @@ export function updatePlacementFromRaycast(
         }
 
         for (const id of selectedNodeIds) {
-            const node = getNodeById(nodes, id);
+            const node = getNodeById(sceneTree, id);
             if (!node) continue;
             const tt = getTrait(node, TransformTrait);
             if (!tt) continue;
@@ -1054,7 +1054,7 @@ export function updatePlacementFromRaycast(
         return;
     }
 
-    const root = getNodeById(nodes, placement.rootId);
+    const root = getNodeById(sceneTree, placement.rootId);
     if (!root) return;
     const t = getTrait(root, TransformTrait);
     if (!t) return;
@@ -1149,10 +1149,10 @@ export function updatePlacementFromRaycast(
  * no-op if no active placement or blueprint has no voxels.
  * recomputes pivot offset if preset is 'center' or 'max' so it tracks the new size.
  */
-export function nudgePlacement(state: TransformToolState, nodes: Nodes, dx: number, dy: number, dz: number): void {
+export function nudgePlacement(state: TransformToolState, sceneTree: SceneTree, dx: number, dy: number, dz: number): void {
     const placement = state.placement;
     if (!placement) return;
-    const root = getNodeById(nodes, placement.rootId);
+    const root = getNodeById(sceneTree, placement.rootId);
     if (!root) return;
     const t = getTrait(root, TransformTrait);
     if (!t) return;
@@ -1165,7 +1165,7 @@ export function nudgePlacement(state: TransformToolState, nodes: Nodes, dx: numb
 
     // move the voxel ghost too if present
     if (placement.voxelNodeId !== null) {
-        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
+        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
         if (voxelNode) {
             const vt = getTrait(voxelNode, TransformTrait);
             if (vt) {
@@ -1185,7 +1185,7 @@ export function nudgePlacement(state: TransformToolState, nodes: Nodes, dx: numb
  */
 export function nudgeNodes(
     state: TransformToolState,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     ctx: ScriptContext,
     dx: number,
     dy: number,
@@ -1199,7 +1199,7 @@ export function nudgeNodes(
     const snapshots: { nodeId: number; position: Vec3 }[] = [];
     const finals: { nodeId: number; position: Vec3 }[] = [];
     for (const nodeId of nodeIds) {
-        const node = getNodeById(nodes, nodeId);
+        const node = getNodeById(sceneTree, nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -1209,9 +1209,9 @@ export function nudgeNodes(
 
     const apply = (entries: { nodeId: number; position: Vec3 }[]) => {
         for (const e of entries) {
-            const n = getNodeById(nodes, e.nodeId);
+            const n = getNodeById(sceneTree, e.nodeId);
             if (!n) continue;
-            setTraitProps(nodes, n, 'transform', { position: vec3.clone(e.position) });
+            setTraitProps(sceneTree, n, 'transform', { position: vec3.clone(e.position) });
             send(ctx, SetTraitCommand, {
                 id: e.nodeId,
                 traitId: 'transform',
@@ -1241,7 +1241,7 @@ const _nudgeResult: Quat = quat.create();
  * uses the rotation snap from the store if set, otherwise falls back to the provided angle.
  * wrapped in an undo action so ctrl+z reverts it.
  */
-export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptContext, axis: Vec3, angle: number): void {
+export function rotateNodes(state: TransformToolState, sceneTree: SceneTree, ctx: ScriptContext, axis: Vec3, angle: number): void {
     const storeState = state.store.getState();
     const nodeIds = Array.from(storeState.selection.nodes);
     if (nodeIds.length === 0) return;
@@ -1255,7 +1255,7 @@ export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: Script
     const snapshots: { nodeId: number; quaternion: Quat }[] = [];
     const finals: { nodeId: number; quaternion: Quat }[] = [];
     for (const nodeId of nodeIds) {
-        const node = getNodeById(nodes, nodeId);
+        const node = getNodeById(sceneTree, nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -1269,9 +1269,9 @@ export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: Script
 
     const apply = (entries: { nodeId: number; quaternion: Quat }[]) => {
         for (const e of entries) {
-            const n = getNodeById(nodes, e.nodeId);
+            const n = getNodeById(sceneTree, e.nodeId);
             if (!n) continue;
-            setTraitProps(nodes, n, 'transform', { quaternion: quat.clone(e.quaternion) });
+            setTraitProps(sceneTree, n, 'transform', { quaternion: quat.clone(e.quaternion) });
             send(ctx, SetTraitCommand, {
                 id: e.nodeId,
                 traitId: 'transform',
@@ -1297,7 +1297,7 @@ export function rotateNodes(state: TransformToolState, nodes: Nodes, ctx: Script
  * uses the scale snap from the store as the step size.
  * wrapped in an undo action so ctrl+z reverts it.
  */
-export function scaleNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptContext, factor: number): void {
+export function scaleNodes(state: TransformToolState, sceneTree: SceneTree, ctx: ScriptContext, factor: number): void {
     const storeState = state.store.getState();
     const nodeIds = Array.from(storeState.selection.nodes);
     if (nodeIds.length === 0) return;
@@ -1306,7 +1306,7 @@ export function scaleNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptC
     const snapshots: { nodeId: number; scale: Vec3 }[] = [];
     const finals: { nodeId: number; scale: Vec3 }[] = [];
     for (const nodeId of nodeIds) {
-        const node = getNodeById(nodes, nodeId);
+        const node = getNodeById(sceneTree, nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -1316,9 +1316,9 @@ export function scaleNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptC
 
     const apply = (entries: { nodeId: number; scale: Vec3 }[]) => {
         for (const e of entries) {
-            const n = getNodeById(nodes, e.nodeId);
+            const n = getNodeById(sceneTree, e.nodeId);
             if (!n) continue;
-            setTraitProps(nodes, n, 'transform', { scale: vec3.clone(e.scale) });
+            setTraitProps(sceneTree, n, 'transform', { scale: vec3.clone(e.scale) });
             send(ctx, SetTraitCommand, {
                 id: e.nodeId,
                 traitId: 'transform',
@@ -1344,7 +1344,7 @@ export function scaleNodes(state: TransformToolState, nodes: Nodes, ctx: ScriptC
  */
 export function nudgeVoxelsFromSelection(
     state: TransformToolState,
-    _nodes: Nodes,
+    _sceneTree: SceneTree,
     ctx: ScriptContext,
     dx: number,
     dy: number,
@@ -1384,7 +1384,7 @@ export function nudgeVoxelsFromSelection(
 
 export function rotatePlacement(
     state: TransformToolState,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     direction: 1 | -1 = 1,
     axis: 'x' | 'y' | 'z' = 'y',
 ): void {
@@ -1397,7 +1397,7 @@ export function rotatePlacement(
 
     // update VoxelMeshTrait on the standalone voxel ghost node
     if (placement.voxelNodeId !== null && newRotatedBlueprint.voxels) {
-        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
+        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
         if (voxelNode) {
             const vmTrait = getTrait(voxelNode, VoxelMeshTrait);
             if (vmTrait) {
@@ -1426,7 +1426,7 @@ export function rotatePlacement(
     // recompute pivot offset for non-custom presets so it tracks the new size
     if (placement.pivotPreset !== 'custom') {
         const newOffset = pivotOffsetForPreset(state.store, placement.pivotPreset, newRotatedBlueprint.size, true);
-        const root = getNodeById(nodes, placement.rootId);
+        const root = getNodeById(sceneTree, placement.rootId);
         if (root) {
             const t = getTrait(root, TransformTrait);
             if (t) {
@@ -1444,7 +1444,7 @@ export function rotatePlacement(
     }
 }
 
-export function flipPlacement(state: TransformToolState, nodes: Nodes, axis: 'x' | 'y' | 'z'): void {
+export function flipPlacement(state: TransformToolState, sceneTree: SceneTree, axis: 'x' | 'y' | 'z'): void {
     const placement = state.placement;
     if (!placement) return;
     if (placement.rotation === null) return; // node-only: gizmo handles it
@@ -1452,7 +1452,7 @@ export function flipPlacement(state: TransformToolState, nodes: Nodes, axis: 'x'
     const newRotatedBlueprint = Blueprint.flipAxis(placement.rotatedBlueprint, axis);
 
     if (placement.voxelNodeId !== null && newRotatedBlueprint.voxels) {
-        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
+        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
         if (voxelNode) {
             const vmTrait = getTrait(voxelNode, VoxelMeshTrait);
             if (vmTrait) {
@@ -1479,7 +1479,7 @@ export function flipPlacement(state: TransformToolState, nodes: Nodes, axis: 'x'
  * commit placement: materialize ghost content as real voxel ops + nodes.
  * creates an undo action that covers everything.
  */
-export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVoxels: Voxels, ctx: ScriptContext): void {
+export function commitPlacement(state: TransformToolState, sceneTree: SceneTree, worldVoxels: Voxels, ctx: ScriptContext): void {
     const placement = state.placement;
     if (!placement) return;
 
@@ -1487,7 +1487,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
     const rotatedBlueprint = placement.rotatedBlueprint;
 
     // read final position and rotation from root ghost
-    const rootNode = getNodeById(nodes, placement.rootId);
+    const rootNode = getNodeById(sceneTree, placement.rootId);
     const rootTransform = rootNode ? getTrait(rootNode, TransformTrait) : null;
 
     // voxel anchor = root position - pivot offset = blueprint min corner in world space
@@ -1533,7 +1533,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
     }
 
     // destroy ghost nodes now (before pushing undo so redo can recreate)
-    _destroyGhosts(state, nodes);
+    _destroyGhosts(state, sceneTree);
     _exitPlacementState(state);
 
     // allocate node ids upfront so do/undo/redo all reference the same nodes.
@@ -1542,7 +1542,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
     const createdIds: number[] = [];
     const wrapperEntryCount = sourcePrefab ? 1 : nodePasteEntries.length;
     for (let i = 0; i < wrapperEntryCount; i++) {
-        createdIds.push(nodes._nextNodeId++);
+        createdIds.push(sceneTree._nextNodeId++);
     }
 
     state.store.getState().action({
@@ -1553,8 +1553,8 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
                 // voxels + child nodes on the real node.
                 send(ctx, CreateNodeCommand, {
                     id: createdIds[0]!,
-                    parentId: nodes.root.id,
-                    index: nodes.root.children.length,
+                    parentId: sceneTree.root.id,
+                    index: sceneTree.root.children.length,
                     name: sourcePrefab.prefabId,
                     persist: true,
                     traits: JSON.stringify([
@@ -1584,8 +1584,8 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
                 const entry = nodePasteEntries[i]!;
                 send(ctx, CreateNodeCommand, {
                     id: createdIds[i]!,
-                    parentId: nodes.root.id,
-                    index: nodes.root.children.length,
+                    parentId: sceneTree.root.id,
+                    index: sceneTree.root.children.length,
                     name: entry.name,
                     persist: true,
                     traits: JSON.stringify(entry.traits),
@@ -1606,8 +1606,8 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
             }
             // destroy nodes created in do(). server cascades child destruction.
             for (const id of createdIds) {
-                const n = getNodeById(nodes, id);
-                if (n) destroyNode(nodes, n);
+                const n = getNodeById(sceneTree, id);
+                if (n) destroyNode(sceneTree, n);
                 send(ctx, DestroyNodeCommand, { id });
             }
             state.store.getState().markDirty();
@@ -1619,7 +1619,7 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
     // shift+paste / shift+cut-paste from the clipboard handlers.
     if (state.store.getState().placementContinuous) {
         const reBlueprint: BlueprintData = { ...blueprint, origin: [anchor[0], anchor[1], anchor[2]] };
-        enterPlacement(state, reBlueprint, false, null, nodes, ctx);
+        enterPlacement(state, reBlueprint, false, null, sceneTree, ctx);
         if (state.placement) state.placement.sourcePrefabId = sourcePrefabId;
         return;
     }
@@ -1633,11 +1633,11 @@ export function commitPlacement(state: TransformToolState, nodes: Nodes, worldVo
 /**
  * cancel placement: destroy ghosts and restore cut content if applicable.
  */
-export function cancelPlacement(state: TransformToolState, nodes: Nodes, ctx: ScriptContext): void {
+export function cancelPlacement(state: TransformToolState, sceneTree: SceneTree, ctx: ScriptContext): void {
     if (!state.placement) return;
 
     const cutReverseOps = state.placement.cutReverseOps;
-    _destroyGhosts(state, nodes);
+    _destroyGhosts(state, sceneTree);
     _exitPlacementState(state);
 
     if (cutReverseOps && cutReverseOps.length > 0) {
@@ -1656,12 +1656,12 @@ export function cancelPlacement(state: TransformToolState, nodes: Nodes, ctx: Sc
  * called on cancel paths (mode-key, escape, tool change) so the cursor follow
  * acts as a non-destructive preview, no history entry is created.
  */
-export function revertPlaceSelection(state: TransformToolState, nodes: Nodes): void {
+export function revertPlaceSelection(state: TransformToolState, sceneTree: SceneTree): void {
     const snaps = state.placeSnapshots;
     state.placeSnapshots = null;
     if (!snaps) return;
     for (const s of snaps) {
-        const node = getNodeById(nodes, s.nodeId);
+        const node = getNodeById(sceneTree, s.nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -1680,7 +1680,7 @@ export function revertPlaceSelection(state: TransformToolState, nodes: Nodes): v
  * called only on explicit confirm (click), see revertPlaceSelection for the
  * cancel path. no-op when nothing actually moved (avoids noise in undo stack).
  */
-export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ctx: ScriptContext): void {
+export function commitPlaceSelection(state: TransformToolState, sceneTree: SceneTree, ctx: ScriptContext): void {
     const prevSnapshots = state.placeSnapshots;
     state.placeSnapshots = null;
     if (!prevSnapshots || prevSnapshots.length === 0) return;
@@ -1688,7 +1688,7 @@ export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ct
     const finals: TransformSnapshot[] = [];
     let changed = false;
     for (const snap of prevSnapshots) {
-        const node = getNodeById(nodes, snap.nodeId);
+        const node = getNodeById(sceneTree, snap.nodeId);
         if (!node) continue;
         const t = getTrait(node, TransformTrait);
         if (!t) continue;
@@ -1708,28 +1708,28 @@ export function commitPlaceSelection(state: TransformToolState, nodes: Nodes, ct
         label: 'place',
         do() {
             for (const f of finals) {
-                const n = getNodeById(nodes, f.nodeId);
+                const n = getNodeById(sceneTree, f.nodeId);
                 if (!n) continue;
                 const props = {
                     position: vec3.clone(f.position),
                     quaternion: quat.clone(f.quaternion),
                     scale: vec3.clone(f.scale),
                 };
-                setTraitProps(nodes, n, 'transform', props);
+                setTraitProps(sceneTree, n, 'transform', props);
                 send(ctx, SetTraitCommand, { id: f.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             }
             state.store.getState().markDirty();
         },
         undo() {
             for (const s of prevSnapshots) {
-                const n = getNodeById(nodes, s.nodeId);
+                const n = getNodeById(sceneTree, s.nodeId);
                 if (!n) continue;
                 const props = {
                     position: vec3.clone(s.position),
                     quaternion: quat.clone(s.quaternion),
                     scale: vec3.clone(s.scale),
                 };
-                setTraitProps(nodes, n, 'transform', props);
+                setTraitProps(sceneTree, n, 'transform', props);
                 send(ctx, SetTraitCommand, { id: s.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             }
             state.store.getState().markDirty();
@@ -1754,7 +1754,7 @@ export function enterPrefabPlacement(
     state: TransformToolState,
     prefabId: string,
     anchor: Vec3,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     ctx: ScriptContext,
 ): void {
     if (state.placement !== null) return;
@@ -1765,7 +1765,7 @@ export function enterPrefabPlacement(
     const blueprint = Blueprint.createPrefabBlueprint(prefabId, anchor, runtime, ctx.blocks);
     if (!blueprint) return;
 
-    enterPlacement(state, blueprint, false, null, nodes, ctx);
+    enterPlacement(state, blueprint, false, null, sceneTree, ctx);
     // enterPlacement always installs state.placement on success, but the
     // assertion bypasses TS narrowing from the bail-check above.
     const placement = state.placement as PlacementState | null;
@@ -1782,13 +1782,13 @@ export function enterBlueprintPlacement(
     state: TransformToolState,
     sceneId: string,
     anchor: Vec3,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     ctx: ScriptContext,
 ): void {
     if (state.placement !== null) return;
     const blueprint = Blueprint.createSceneBlueprint(sceneId, anchor, ctx.blocks);
     if (!blueprint) return;
-    enterPlacement(state, blueprint, false, null, nodes, ctx);
+    enterPlacement(state, blueprint, false, null, sceneTree, ctx);
     const placement = state.placement as PlacementState | null;
     if (placement) placement.sourceSceneId = sceneId;
 }
@@ -1804,13 +1804,13 @@ export function isInPlacement(state: TransformToolState): boolean {
  * off the integer grid, so snapTo must be forced to 'corner' when this is true.
  * called per-frame from inspect.ts; result is mirrored to store.transformHasVoxels.
  */
-export function computeTransformHasVoxels(state: TransformToolState, nodes: Nodes): boolean {
+export function computeTransformHasVoxels(state: TransformToolState, sceneTree: SceneTree): boolean {
     const store = state.store.getState();
     if (state.placement?.blueprint.hasVoxels) return true;
     const room = useEditor.getState().room;
     if (!room) return false;
     for (const id of store.selection.nodes) {
-        const node = getNodeById(nodes, id);
+        const node = getNodeById(sceneTree, id);
         if (!node) continue;
         const def = node.prefab ? registry.prefabs.byId.get(node.prefab.prefabId)?.payload : null;
         if (def && prefabHasVoxels(def)) return true;
@@ -1842,20 +1842,20 @@ function _initGhostInterpolation(node: Node): void {
     for (const child of node.children) _initGhostInterpolation(child);
 }
 
-function _destroyGhosts(state: TransformToolState, nodes: Nodes): void {
+function _destroyGhosts(state: TransformToolState, sceneTree: SceneTree): void {
     _detachGizmo(state);
 
     const placement = state.placement;
     if (!placement) return;
 
     if (placement.voxelNodeId !== null) {
-        const voxelNode = getNodeById(nodes, placement.voxelNodeId);
-        if (voxelNode) destroyNode(nodes, voxelNode);
+        const voxelNode = getNodeById(sceneTree, placement.voxelNodeId);
+        if (voxelNode) destroyNode(sceneTree, voxelNode);
     }
 
-    const rootNode = getNodeById(nodes, placement.rootId);
+    const rootNode = getNodeById(sceneTree, placement.rootId);
     // destroyNode recurses into children (node ghosts), so this covers everything
-    if (rootNode) destroyNode(nodes, rootNode);
+    if (rootNode) destroyNode(sceneTree, rootNode);
 }
 
 function _exitPlacementState(state: TransformToolState): void {
@@ -1953,13 +1953,13 @@ function _grabBodyAabb(node: Node, resources: Resources, outCenter: Vec3, outHal
 export function enterGrab(
     state: TransformToolState,
     nodeId: number,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     physics: Physics,
     resources: Resources,
     camera: PerspectiveCamera,
 ): void {
     if (state.grab) return;
-    const node = getNodeById(nodes, nodeId);
+    const node = getNodeById(sceneTree, nodeId);
     if (!node) return;
     const transform = getTrait(node, TransformTrait);
     if (!transform) return;
@@ -2144,10 +2144,10 @@ export function prePhysicsGrab(state: TransformToolState, physics: Physics, came
  *
  * no-op when no grab is active.
  */
-export function postPhysicsGrab(state: TransformToolState, nodes: Nodes, physics: Physics): void {
+export function postPhysicsGrab(state: TransformToolState, sceneTree: SceneTree, physics: Physics): void {
     const grab = state.grab;
     if (!grab) return;
-    const node = getNodeById(nodes, grab.nodeId);
+    const node = getNodeById(sceneTree, grab.nodeId);
     if (!node) return;
     const transform = getTrait(node, TransformTrait);
     if (!transform) return;
@@ -2249,14 +2249,14 @@ export function endRotate(state: TransformToolState, physics: Physics, camera: P
  * for the start→end transform. no-op if no grab active. if `commit` is false
  * (e.g. exiting tool/mode mid-hold), still destroys the body but no undo.
  */
-export function exitGrab(state: TransformToolState, nodes: Nodes, physics: Physics, ctx: ScriptContext): void {
+export function exitGrab(state: TransformToolState, sceneTree: SceneTree, physics: Physics, ctx: ScriptContext): void {
     const grab = state.grab;
     if (!grab) return;
 
     const body = rigidBody.get(physics.rigid.world, grab.bodyId);
     if (body) rigidBody.remove(physics.rigid.world, body);
 
-    const node = getNodeById(nodes, grab.nodeId);
+    const node = getNodeById(sceneTree, grab.nodeId);
     if (!node) {
         state.grab = null;
         return;
@@ -2288,26 +2288,26 @@ export function exitGrab(state: TransformToolState, nodes: Nodes, physics: Physi
     state.store.getState().action({
         label: 'grab',
         do() {
-            const n = getNodeById(nodes, grab.nodeId);
+            const n = getNodeById(sceneTree, grab.nodeId);
             if (!n) return;
             const props = {
                 position: vec3.clone(final.position),
                 quaternion: quat.clone(final.quaternion),
                 scale: vec3.clone(final.scale),
             };
-            setTraitProps(nodes, n, 'transform', props);
+            setTraitProps(sceneTree, n, 'transform', props);
             send(ctx, SetTraitCommand, { id: grab.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             state.store.getState().markDirty();
         },
         undo() {
-            const n = getNodeById(nodes, grab.nodeId);
+            const n = getNodeById(sceneTree, grab.nodeId);
             if (!n) return;
             const props = {
                 position: vec3.clone(start.position),
                 quaternion: quat.clone(start.quaternion),
                 scale: vec3.clone(start.scale),
             };
-            setTraitProps(nodes, n, 'transform', props);
+            setTraitProps(sceneTree, n, 'transform', props);
             send(ctx, SetTraitCommand, { id: grab.nodeId, traitId: 'transform', props: JSON.stringify(props) });
             state.store.getState().markDirty();
         },
@@ -2329,7 +2329,7 @@ export function handleTransformKeys(
     input: Input,
     cameraQuat: Quat,
     state: TransformToolState,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     ctx: ScriptContext,
 ): void {
     const inPlacement = isInPlacement(state);
@@ -2352,12 +2352,12 @@ export function handleTransformKeys(
 
         // Enter → commit placement
         if (isKeyJustDown(mk, 'Enter')) {
-            commitPlacement(state, nodes, ctx.voxels, ctx);
+            commitPlacement(state, sceneTree, ctx.voxels, ctx);
         }
 
         // Escape → cancel placement (restores cut voxels if applicable)
         if (isKeyJustDown(mk, 'Escape')) {
-            cancelPlacement(state, nodes, ctx);
+            cancelPlacement(state, sceneTree, ctx);
         }
 
         // arrow keys + [ / ] → mode-aware nudge during placement
@@ -2373,7 +2373,7 @@ export function handleTransformKeys(
                         placement.placed = true;
                         state.store.setState({ transformMode: 'translate' });
                     }
-                    nudgePlacement(state, nodes, nudge[0], nudge[1], nudge[2]);
+                    nudgePlacement(state, sceneTree, nudge[0], nudge[1], nudge[2]);
                 }
             } else if (plMode === 'rotate') {
                 if (isVoxelPlacement(state)) {
@@ -2395,17 +2395,17 @@ export function handleTransformKeys(
                     const rgtSign = (fwdX !== 0 ? -fwdX : fwdZ) as 1 | -1;
 
                     if (isKeyJustDown(mk, NUDGE_KEYS.left)) {
-                        rotatePlacement(state, nodes, 1, 'y');
+                        rotatePlacement(state, sceneTree, 1, 'y');
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.right)) {
-                        rotatePlacement(state, nodes, -1, 'y');
+                        rotatePlacement(state, sceneTree, -1, 'y');
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.forward)) {
-                        rotatePlacement(state, nodes, (1 * rgtSign) as 1 | -1, rgtAxis);
+                        rotatePlacement(state, sceneTree, (1 * rgtSign) as 1 | -1, rgtAxis);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.backward)) {
-                        rotatePlacement(state, nodes, (-1 * rgtSign) as 1 | -1, rgtAxis);
+                        rotatePlacement(state, sceneTree, (-1 * rgtSign) as 1 | -1, rgtAxis);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.up)) {
-                        rotatePlacement(state, nodes, (1 * fwdSign) as 1 | -1, fwdAxis);
+                        rotatePlacement(state, sceneTree, (1 * fwdSign) as 1 | -1, fwdAxis);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.down)) {
-                        rotatePlacement(state, nodes, (-1 * fwdSign) as 1 | -1, fwdAxis);
+                        rotatePlacement(state, sceneTree, (-1 * fwdSign) as 1 | -1, fwdAxis);
                     }
                 } else {
                     // node-only placement: quaternion rotation via nudge
@@ -2417,25 +2417,25 @@ export function handleTransformKeys(
                         rgtZ = -fwdX;
 
                     if (isKeyJustDown(mk, NUDGE_KEYS.left)) {
-                        rotateNodes(state, nodes, ctx, [0, 1, 0], snap);
+                        rotateNodes(state, sceneTree, ctx, [0, 1, 0], snap);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.right)) {
-                        rotateNodes(state, nodes, ctx, [0, 1, 0], -snap);
+                        rotateNodes(state, sceneTree, ctx, [0, 1, 0], -snap);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.forward)) {
-                        rotateNodes(state, nodes, ctx, [rgtX, 0, rgtZ], snap);
+                        rotateNodes(state, sceneTree, ctx, [rgtX, 0, rgtZ], snap);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.backward)) {
-                        rotateNodes(state, nodes, ctx, [rgtX, 0, rgtZ], -snap);
+                        rotateNodes(state, sceneTree, ctx, [rgtX, 0, rgtZ], -snap);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.up)) {
-                        rotateNodes(state, nodes, ctx, [fwdX, 0, fwdZ], snap);
+                        rotateNodes(state, sceneTree, ctx, [fwdX, 0, fwdZ], snap);
                     } else if (isKeyJustDown(mk, NUDGE_KEYS.down)) {
-                        rotateNodes(state, nodes, ctx, [fwdX, 0, fwdZ], -snap);
+                        rotateNodes(state, sceneTree, ctx, [fwdX, 0, fwdZ], -snap);
                     }
                 }
             } else if (plMode === 'scale') {
                 const snap = state.store.getState().scaleSnap ?? 0.25;
                 if (isKeyJustDown(mk, NUDGE_KEYS.up)) {
-                    scaleNodes(state, nodes, ctx, 1 + snap);
+                    scaleNodes(state, sceneTree, ctx, 1 + snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.down)) {
-                    scaleNodes(state, nodes, ctx, 1 / (1 + snap));
+                    scaleNodes(state, sceneTree, ctx, 1 / (1 + snap));
                 }
             }
         }
@@ -2462,7 +2462,7 @@ export function handleTransformKeys(
             const presets: PivotPreset[] = ['min', 'center', 'max'];
             const idx = presets.indexOf(current);
             const next = presets[(idx + 1) % 3];
-            setPlacementPivot(state, next, nodes);
+            setPlacementPivot(state, next, sceneTree);
         }
 
         // Escape → clear selection first, then return to inspect
@@ -2494,8 +2494,8 @@ export function handleTransformKeys(
                         state.store.setState({ transformMode: 'translate' });
                     }
                     const [ndx, ndy, ndz] = nudge;
-                    nudgeNodes(state, nodes, ctx, ndx, ndy, ndz);
-                    nudgeVoxelsFromSelection(state, nodes, ctx, ndx, ndy, ndz);
+                    nudgeNodes(state, sceneTree, ctx, ndx, ndy, ndz);
+                    nudgeVoxelsFromSelection(state, sceneTree, ctx, ndx, ndy, ndz);
                 }
             } else if (mode === 'rotate') {
                 // left/right = rotate around Y
@@ -2505,7 +2505,7 @@ export function handleTransformKeys(
                 // any other value produces non-cardinal quats which don't round-trip
                 // through rotateVoxelsByQuat.
                 const baseSnapDeg = state.store.getState().rotationSnap ?? 45;
-                const snapDeg = computeTransformHasVoxels(state, nodes) ? 90 : baseSnapDeg;
+                const snapDeg = computeTransformHasVoxels(state, sceneTree) ? 90 : baseSnapDeg;
                 const snap = snapDeg * (Math.PI / 180);
                 const yaw = yawFromQuat(cameraQuat[0], cameraQuat[1], cameraQuat[2], cameraQuat[3]);
                 const [fwdX, fwdZ] = snapCardinal(yaw);
@@ -2514,25 +2514,25 @@ export function handleTransformKeys(
                     rgtZ = -fwdX;
 
                 if (isKeyJustDown(mk, NUDGE_KEYS.left)) {
-                    rotateNodes(state, nodes, ctx, [0, 1, 0], snap);
+                    rotateNodes(state, sceneTree, ctx, [0, 1, 0], snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.right)) {
-                    rotateNodes(state, nodes, ctx, [0, 1, 0], -snap);
+                    rotateNodes(state, sceneTree, ctx, [0, 1, 0], -snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.forward)) {
-                    rotateNodes(state, nodes, ctx, [rgtX, 0, rgtZ], snap);
+                    rotateNodes(state, sceneTree, ctx, [rgtX, 0, rgtZ], snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.backward)) {
-                    rotateNodes(state, nodes, ctx, [rgtX, 0, rgtZ], -snap);
+                    rotateNodes(state, sceneTree, ctx, [rgtX, 0, rgtZ], -snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.up)) {
-                    rotateNodes(state, nodes, ctx, [fwdX, 0, fwdZ], snap);
+                    rotateNodes(state, sceneTree, ctx, [fwdX, 0, fwdZ], snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.down)) {
-                    rotateNodes(state, nodes, ctx, [fwdX, 0, fwdZ], -snap);
+                    rotateNodes(state, sceneTree, ctx, [fwdX, 0, fwdZ], -snap);
                 }
             } else if (mode === 'scale') {
                 // ] = scale up, [ = scale down
                 const snap = state.store.getState().scaleSnap ?? 0.25;
                 if (isKeyJustDown(mk, NUDGE_KEYS.up)) {
-                    scaleNodes(state, nodes, ctx, 1 + snap);
+                    scaleNodes(state, sceneTree, ctx, 1 + snap);
                 } else if (isKeyJustDown(mk, NUDGE_KEYS.down)) {
-                    scaleNodes(state, nodes, ctx, 1 / (1 + snap));
+                    scaleNodes(state, sceneTree, ctx, 1 / (1 + snap));
                 }
             }
         }

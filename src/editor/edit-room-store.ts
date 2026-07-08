@@ -15,7 +15,7 @@
  *
  * `sceneRevision` is a separate, narrow signal: bumped by `markDirty()`
  * (and the engine's scene_sync handler) to tell the inspector/hierarchy
- * "the scene graph changed externally, re-derive". It does NOT fire on
+ * "the scene tree changed externally, re-derive". It does NOT fire on
  * selection/hover/etc.
  */
 
@@ -25,8 +25,8 @@ import { create, type StoreApi, useStore } from 'zustand';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
-import { getTrait } from '../core/scene/nodes';
-import type { PrefabConfig, Realm } from '../core/scene/nodes';
+import { getTrait } from '../core/scene/scene-tree';
+import type { PrefabConfig, Realm } from '../core/scene/scene-tree';
 import { EDITOR_JOIN_KEY, type ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
@@ -326,7 +326,7 @@ export type EditRoomState = {
     undoStack: Action[];
     redoStack: Action[];
 
-    /** bumped when the scene graph mutates externally (action runs, scene_sync
+    /** bumped when the scene tree mutates externally (action runs, scene_sync
      *  arrives). Subscribed by inspector/hierarchy to re-derive their views. */
     sceneRevision: number;
 

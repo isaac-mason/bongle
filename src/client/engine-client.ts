@@ -13,7 +13,7 @@ import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
-import * as Nodes from '../core/scene/nodes';
+import * as SceneTree from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
@@ -617,7 +617,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     const existing = state.rooms.rooms.get(message.playerId);
     if (existing && existing.roomId === message.roomId) {
         Rooms.resyncRoom(existing, message, state.inboundTraitWireIndex);
-        Nodes.initSceneGraph(existing.nodes);
+        SceneTree.initSceneTree(existing.nodes);
         Rooms.syncJoinedPlayers(state.rooms);
         return;
     }
@@ -648,12 +648,12 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
     }
-    // host-script onInit reads client.room/.state (wired above); initSceneGraph fires it.
+    // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
     attachWorldTrait(room.nodes.root);
     console.log(
         `[bongle room] processJoinRoom: message.playerId=${String(message.playerId)} -> room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
-    Nodes.initSceneGraph(room.nodes);
+    SceneTree.initSceneTree(room.nodes);
 
     if (existing) {
         Rooms.disposeRoom(state, existing);
@@ -1112,7 +1112,7 @@ export function update(state: EngineClient, delta: number) {
     // input, its canvas is the only one mounted as `display: block`.
     if (activeRoom) {
         Debug.begin(activeRoom.clientMetrics, 'on-input');
-        Nodes.runOnInput(activeRoom.nodes, { delta }, activeRoom.clientMetrics);
+        SceneTree.runOnInput(activeRoom.nodes, { delta }, activeRoom.clientMetrics);
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
@@ -1127,7 +1127,7 @@ export function update(state: EngineClient, delta: number) {
         Clock.syncServer(room.clock, room.clock.wall, delta);
 
         Debug.begin(room.clientMetrics, 'on-update');
-        Nodes.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');
         // particles are visual fx, framerate-dependent motion is fine, and
         // running per-frame (not per fixed-step) avoids the spawn→render
@@ -1149,7 +1149,7 @@ export function update(state: EngineClient, delta: number) {
 
             Interpolation.snapshot(room.interpolation);
 
-            Nodes.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
+            SceneTree.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
 
             // tick prefab system, discovers and re-instantiates stale prefab nodes
             Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
@@ -1204,7 +1204,7 @@ export function update(state: EngineClient, delta: number) {
         // user frame scripts (camera follow, local player motion, etc.) run
         // on settled visual transforms.
         Debug.begin(room.clientMetrics, 'on-frame');
-        Nodes.runOnFrame(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnFrame(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-frame');
 
         // drain chat inbox/outbox: inbox payloads append to room.chat.lines +
@@ -1256,7 +1256,7 @@ export function update(state: EngineClient, delta: number) {
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(room.clientMetrics, 'on-post-animate');
-        Nodes.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
 
         // engine-global voxel arenas hold only the active room's chunks
@@ -1365,20 +1365,23 @@ export function update(state: EngineClient, delta: number) {
         // for shipped games).
         Renderer.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
 
-        if (env.editor) {
-            if (debugOpen && (debugTab === 'summary' || debugTab === 'perf' || debugTab === 'net' || debugTab === 'logs')) {
-                const seen = new Set<string>();
-                for (const room of state.rooms.rooms.values()) {
-                    if (seen.has(room.roomId)) continue;
-                    if (room.local) continue; // local rooms have no server peer
-                    seen.add(room.roomId);
-                    Net.send(state.net, { type: 'request_metrics', roomId: room.roomId });
-                }
+        // request server metrics for the summary/perf/net panels in EVERY build, not
+        // just the editor, so a shipped game surfaces server-side perf too. a player
+        // who opens the panel (backtick) can see it — an accepted tradeoff.
+        if (debugOpen && (debugTab === 'summary' || debugTab === 'perf' || debugTab === 'net' || debugTab === 'logs')) {
+            const seen = new Set<string>();
+            for (const room of state.rooms.rooms.values()) {
+                if (seen.has(room.roomId)) continue;
+                if (room.local) continue; // local rooms have no server peer
+                seen.add(room.roomId);
+                Net.send(state.net, { type: 'request_metrics', roomId: room.roomId });
             }
+        }
 
+        if (env.editor) {
             /* log subscription: flat per-client bit. server pushes
              * `debug_logs` for every room we hold a Player in while enabled.
-             * only active in the logs view, perf view doesn't render logs. */
+             * only active in the logs view (editor-only tab). */
             const subscribeLogs = debugOpen && debugTab === 'logs';
             if (subscribeLogs !== state.debugLogsSubscribed) {
                 Net.send(state.net, { type: 'debug_subscribe', enabled: subscribeLogs });

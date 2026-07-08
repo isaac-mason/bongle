@@ -43,7 +43,7 @@ import {
     setNodePersist,
     setPrefab,
     setRealm,
-} from '../core/scene/nodes';
+} from '../core/scene/scene-tree';
 import {
     isOwner,
     listen,
@@ -243,8 +243,8 @@ script(
             CreateNodeCommand,
             editMutate((args, _client) => {
                 const { room } = ctx.server!;
-                const sg = room.nodes;
-                const parent = getNodeById(sg, args.parentId);
+                const sceneTree = room.nodes;
+                const parent = getNodeById(sceneTree, args.parentId);
                 if (!parent) return;
                 const node = createNode({
                     id: args.id,
@@ -324,17 +324,17 @@ script(
             ReparentCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
-                if (node === sg.root) return;
-                const newParent = getNodeById(sg, args.parentId);
+                if (node === sceneTree.root) return;
+                const newParent = getNodeById(sceneTree, args.parentId);
                 if (!newParent) return;
                 if (node === newParent || isAncestorOf(node, newParent)) return;
                 reparent(node, newParent);
                 reorderChild(newParent, node, args.index);
-                bumpNodeVersion(sg, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                bumpNodeVersion(sceneTree, node);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -343,12 +343,12 @@ script(
             ReorderCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node?.parent) return;
                 reorderChild(node.parent, node, args.index);
-                bumpNodeVersion(sg, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                bumpNodeVersion(sceneTree, node);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -369,17 +369,17 @@ script(
             AddTraitCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId)?.payload;
                 if (!def) {
                     node._unresolvedTraits.set(args.traitId, { json: args.props ? JSON.parse(args.props) : undefined });
-                    bumpNodeVersion(sg, node);
+                    bumpNodeVersion(sceneTree, node);
                 } else {
                     addTraitBySlot(node, def.slot, args.props ? JSON.parse(args.props) : undefined);
                 }
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -388,17 +388,17 @@ script(
             RemoveTraitCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId)?.payload;
                 if (!def) {
                     node._unresolvedTraits.delete(args.traitId);
-                    bumpNodeVersion(sg, node);
+                    bumpNodeVersion(sceneTree, node);
                 } else {
                     removeTraitBySlot(node, def.slot);
                 }
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -407,8 +407,8 @@ script(
             SetPrefabCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 if (args.prefab) {
                     try {
@@ -419,8 +419,8 @@ script(
                 } else {
                     setPrefab(node, null);
                 }
-                bumpNodeVersion(sg, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                bumpNodeVersion(sceneTree, node);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -429,12 +429,12 @@ script(
             SetNodePersistCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sg = room.nodes;
-                const node = getNodeById(sg, args.id);
+                const sceneTree = room.nodes;
+                const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 setNodePersist(node, args.persist);
-                bumpNodeVersion(sg, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sg, args.id);
+                bumpNodeVersion(sceneTree, node);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, sceneTree, args.id);
                 return true;
             }),
         );
@@ -742,7 +742,7 @@ script(
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 
-            // sync editor node bodies with the scene graph for broadphase queries
+            // sync editor node bodies with the scene tree for broadphase queries
             NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
 
             // redraw the per-node selection AABB outlines. called from

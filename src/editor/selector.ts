@@ -10,8 +10,8 @@
 import { CastRayStatus, createAllCastRayCollector, createDefaultCastRaySettings, castRay as queryCastRay } from 'crashcat';
 import type { Vec3 } from 'mathcat';
 import type { Physics } from '../core/physics/physics';
-import type { Node, Nodes } from '../core/scene/nodes';
-import { getNodeById } from '../core/scene/nodes';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
+import { getNodeById } from '../core/scene/scene-tree';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import type { Voxels } from '../core/voxels/voxels';
 import type { NodeBodies } from './node-bodies';
@@ -65,7 +65,7 @@ const _raySettings = createDefaultCastRaySettings();
 export function castRay(
     physics: Physics,
     nodeBodies: NodeBodies,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     voxels: Voxels,
     ox: number,
     oy: number,
@@ -115,7 +115,7 @@ export function castRay(
         const nid = nodeIdForBody(nodeBodies, hit.bodyIdB);
         if (nid === undefined) continue;
 
-        const node = getNodeById(nodes, nid);
+        const node = getNodeById(sceneTree, nid);
         if (!node) continue;
 
         const dist = hit.fraction * maxDist;

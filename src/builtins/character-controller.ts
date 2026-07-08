@@ -27,7 +27,7 @@ import type { Quat, Spherical, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec2, vec3 } from 'mathcat';
 import { pack } from '../api/pack';
 import { COLLISION_GROUP_CHARACTERS, exceptGroups, type Physics } from '../api/physics';
-import { getTrait } from '../api/scene-graph';
+import { getTrait } from '../api/scene-tree';
 import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scripts';
 import { sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';

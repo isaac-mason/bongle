@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 import { createTestServer } from '../../integration/server-integration-test';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
 import * as Debug from '../../../src/core/debug';
-import { unpackPackedSceneGraph, unpackServerMessage } from '../../../src/core/protocol';
+import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
 import * as Resources from '../../../src/core/resources';
-import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../../../src/core/scene/scene-tree';
 import { setBlock } from '../../../src/core/voxels/voxels';
 import * as Discovery from '../../../src/server/discovery';
 import * as Net from '../../../src/server/net';
@@ -101,16 +101,16 @@ describe('discovery — realm filtering', () => {
 
         // shared node, should appear
         const sharedA = createNode({ name: 'shared-A' });
-        addChild(server.nodes.root, sharedA);
+        addChild(server.room.nodes.root, sharedA);
         // server-only node with a shared descendant, entire subtree pruned
         const serverOnly = createNode({ name: 'server-B', realm: 'server' });
-        addChild(server.nodes.root, serverOnly);
+        addChild(server.room.nodes.root, serverOnly);
         const sharedC = createNode({ name: 'shared-C', realm: 'shared' });
         addChild(serverOnly, sharedC);
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         const join = takeJoinRoom(net, FAKE_CLIENT);
-        const names = unpackPackedSceneGraph(join.packedNodes).nodes.map((n) => n.name);
+        const names = unpackPackedSceneTree(join.packedNodes).nodes.map((n: any) => n.name);
 
         expect(names).toContain('shared-A');
         expect(names).not.toContain('server-B');
@@ -123,15 +123,15 @@ describe('discovery — realm filtering', () => {
         const { server, discovery, net, player, resources } = setupRoom('edit');
 
         const sharedA = createNode({ name: 'shared-A' });
-        addChild(server.nodes.root, sharedA);
+        addChild(server.room.nodes.root, sharedA);
         const serverOnly = createNode({ name: 'server-B', realm: 'server' });
-        addChild(server.nodes.root, serverOnly);
+        addChild(server.room.nodes.root, serverOnly);
         const sharedC = createNode({ name: 'shared-C', realm: 'shared' });
         addChild(serverOnly, sharedC);
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         const join = takeJoinRoom(net, FAKE_CLIENT);
-        const names = unpackPackedSceneGraph(join.packedNodes).nodes.map((n) => n.name);
+        const names = unpackPackedSceneTree(join.packedNodes).nodes.map((n: any) => n.name);
 
         expect(names).toContain('shared-A');
         expect(names).toContain('server-B');
@@ -144,7 +144,7 @@ describe('discovery — realm filtering', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
 
         const node = createNode({ name: 'morphs' });
-        addChild(server.nodes.root, node);
+        addChild(server.room.nodes.root, node);
 
         // emit join_room synchronously with the populated scene
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
@@ -170,15 +170,15 @@ describe('discovery — realm filtering', () => {
     it('play mode: scene_sync skips non-shared subtree on incremental sync', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
 
-        // emit empty join_room (only sg.root exists), then quiesce
+        // emit empty join_room (only sceneTree.root exists), then quiesce
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources);
 
         // add mixed-realm nodes after join, incremental sync path
         const sharedX = createNode({ name: 'shared-X' });
-        addChild(server.nodes.root, sharedX);
+        addChild(server.room.nodes.root, sharedX);
         const svr = createNode({ name: 'server-Y', realm: 'server' });
-        addChild(server.nodes.root, svr);
+        addChild(server.room.nodes.root, svr);
         const sharedZ = createNode({ name: 'shared-Z', realm: 'shared' });
         addChild(svr, sharedZ);
 
@@ -206,9 +206,9 @@ describe('discovery — realm filtering', () => {
         // one tick. c was dirtied before p, but p is now c's parent, so the
         // fan-out must emit p's node_created before c's (depth order).
         const c = createNode({ name: 'child' });
-        addChild(server.nodes.root, c);
+        addChild(server.room.nodes.root, c);
         const p = createNode({ name: 'parent' });
-        addChild(server.nodes.root, p);
+        addChild(server.room.nodes.root, p);
         reparent(c, p);
 
         const messages = flushUntilQuiet(discovery, server.rooms, resources);
@@ -227,7 +227,7 @@ describe('discovery — realm filtering', () => {
     it('idle: a tick with no changes emits no scene_sync', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'static' });
-        addChild(server.nodes.root, n);
+        addChild(server.room.nodes.root, n);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources); // drains the create
         const idle = flushUntilQuiet(discovery, server.rooms, resources);
@@ -238,7 +238,7 @@ describe('discovery — realm filtering', () => {
     it('field change on a known node emits node_trait_fields incrementally', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'mover' });
-        addChild(server.nodes.root, n);
+        addChild(server.room.nodes.root, n);
         const t = addTrait(n, TransformTrait);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources); // drains the create
@@ -255,7 +255,7 @@ describe('discovery — realm filtering', () => {
     it('play mode: non-shared→shared transition emits node_created (reveal)', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'reveal-me', realm: 'server' });
-        addChild(server.nodes.root, n);
+        addChild(server.room.nodes.root, n);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         // not shared yet → never sent to the play client
         const before = flushUntilQuiet(discovery, server.rooms, resources);
@@ -278,10 +278,10 @@ describe('discovery — realm filtering', () => {
         flushUntilQuiet(discovery, server.rooms, resources);
 
         const node = createNode({ name: 'flicker' });
-        addChild(server.nodes.root, node);
-        destroyNode(server.nodes, node);
+        addChild(server.room.nodes.root, node);
+        destroyNode(server.room.nodes, node);
         // re-add the same node object, it becomes live again this tick.
-        addChild(server.nodes.root, node);
+        addChild(server.room.nodes.root, node);
 
         const messages = flushUntilQuiet(discovery, server.rooms, resources);
         const sync = messages.find(([, m]) => m.type === 'scene_sync');
@@ -290,7 +290,7 @@ describe('discovery — realm filtering', () => {
         expect(updates.some((u) => u.type === 'node_created' && u.id === node.id)).toBe(true);
         expect(updates.some((u) => u.type === 'node_destroyed' && u.id === node.id)).toBe(false);
         // node is live in the graph at end of tick
-        expect(getNodeById(server.nodes, node.id)).toBeDefined();
+        expect(getNodeById(server.room.nodes, node.id)).toBeDefined();
 
         server.dispose();
     });
@@ -543,7 +543,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         // give the player a movable node so getPlayerChunkCoord tracks position
         // (the default harness has no node → anchor pinned at origin).
         const node = createNode({ name: 'p' });
-        addChild(server.nodes.root, node);
+        addChild(server.room.nodes.root, node);
         const t = addTrait(node, TransformTrait);
         setPosition(t, [0, 0, 0]);
         server.room.playerNodes.set(player.id, node);

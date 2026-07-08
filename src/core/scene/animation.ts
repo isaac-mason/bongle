@@ -12,7 +12,7 @@ import {
 } from '../../builtins/transform';
 import type { ClipChannel, ClipChannels, ClipDef } from '../models/handle';
 import * as Resources from '../resources';
-import { addTrait, findChildByName, getTrait, type Node, type Nodes, query } from './nodes';
+import { addTrait, findChildByName, getTrait, type Node, type SceneTree, query } from './scene-tree';
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -452,8 +452,8 @@ export type Animations = {
     _nextLodPhase: number;
 };
 
-export function init(nodes: Nodes): Animations {
-    return { _query: query(nodes, [AnimatorTrait]), _frameCount: 0, _nextLodPhase: 0 };
+export function init(sceneTree: SceneTree): Animations {
+    return { _query: query(sceneTree, [AnimatorTrait]), _frameCount: 0, _nextLodPhase: 0 };
 }
 
 export function tick(animations: Animations, resources: Resources.Resources, dt: number): void {

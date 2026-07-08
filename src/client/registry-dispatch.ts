@@ -43,7 +43,7 @@ import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
 import { bumpVersion, type KindStore, logPendingChanges, registry } from '../core/registry';
 import * as Resources from '../core/resources';
-import { markPrefabAnchorsDirty } from '../core/scene/nodes';
+import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
@@ -205,7 +205,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // directly-changed prefabs and transitive dep-change consumers.
     if (dirtyPrefabIds.size > 0) {
         for (const room of state.rooms.rooms.values()) {
-            if (room.nodes.roomMode !== 'edit') continue;
+            if (room.roomMode !== 'edit') continue;
             markPrefabAnchorsDirty(room.nodes, dirtyPrefabIds);
         }
     }

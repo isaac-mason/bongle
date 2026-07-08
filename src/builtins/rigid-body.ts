@@ -5,7 +5,7 @@ export { MaterialCombineMode, MotionQuality, MotionType } from 'crashcat';
 import { type Vec3, vec3 } from 'mathcat';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';
-import { control, sync, syncRate, type TraitType, trait } from '../api/traits';
+import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
 
 // observer-normalized contact lifecycle lives on `ContactsTrait` (see
 // builtins/contacts.ts) and is driven by physics.ts fan-out.
@@ -220,7 +220,8 @@ sync(RigidBodyTrait, 'linear-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    rate: syncRate.distance(0.1), // resting bodies go silent
+    dirty: dirty.distance(0.1), // resting bodies go silent
+    rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
 });
 
 sync(RigidBodyTrait, 'angular-velocity', {
@@ -229,5 +230,6 @@ sync(RigidBodyTrait, 'angular-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.angularVelocity, v as Vec3);
     },
-    rate: syncRate.distance(0.1), // resting bodies go silent
+    dirty: dirty.distance(0.1), // resting bodies go silent
+    rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
 });

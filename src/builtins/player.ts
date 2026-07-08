@@ -1,4 +1,5 @@
 import { pack } from '../core/scene/pack';
+import { dirty } from '../core/scene/sync/sync-rate';
 import { sync, type TraitType, trait } from '../core/scene/traits';
 
 /**
@@ -7,7 +8,7 @@ import { sync, type TraitType, trait } from '../core/scene/traits';
  * ephemeral, created at Player join time.
  *
  * playerId/client/userId/username are server-set runtime state. they're
- * replicated as 'dirty' syncs (no editor exposure, no auto byte-diff).
+ * replicated as explicit-dirty syncs (no editor exposure, no auto byte-diff).
  * server code that mutates them must call <field>Sync.dirty(t).
  */
 export const PlayerTrait = trait(
@@ -39,7 +40,7 @@ export const playerIdSync = sync(PlayerTrait, 'playerId', {
     unpack: (v, t) => {
         t.playerId = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
 });
 
 export const clientSync = sync(PlayerTrait, 'client', {
@@ -48,7 +49,7 @@ export const clientSync = sync(PlayerTrait, 'client', {
     unpack: (v, t) => {
         t.client = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
 });
 
 export const userIdSync = sync(PlayerTrait, 'userId', {
@@ -57,7 +58,7 @@ export const userIdSync = sync(PlayerTrait, 'userId', {
     unpack: (v, t) => {
         t.userId = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
 });
 
 export const usernameSync = sync(PlayerTrait, 'username', {
@@ -66,7 +67,7 @@ export const usernameSync = sync(PlayerTrait, 'username', {
     unpack: (v, t) => {
         t.username = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
 });
 
 export const viewRadiusSync = sync(PlayerTrait, 'viewRadius', {
@@ -75,6 +76,6 @@ export const viewRadiusSync = sync(PlayerTrait, 'viewRadius', {
     unpack: (v, t) => {
         t.viewRadius = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
     authority: 'owner',
 });

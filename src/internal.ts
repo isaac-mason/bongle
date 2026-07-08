@@ -35,11 +35,11 @@ export type { ModelBin, ModelBinChannel, ModelBinClip, ModelBinImage, ModelBinMe
 export { modelBinSchema, pack as packModelBin, unpack as unpackModelBin } from './core/models/model-bin';
 export type { ParticleHandle, ParticleOptions, ParticlePlayback, ParticlePool, UpdateFn } from './core/particles/particles';
 export { particle } from './core/particles/particles';
-// detached-node primitives for codegen sidecars. the public scene-graph
-// versions in `api/scene-graph.ts` take ScriptContext for parity with
+// detached-node primitives for codegen sidecars. the public scene-tree
+// versions in `api/scene-tree.ts` take ScriptContext for parity with
 // other script apis; these are the raw underlying functions, suitable
 // for module-scope codegen that operates on detached nodes.
-export { addChild, addTrait, createNode } from './core/scene/nodes';
+export { addChild, addTrait, createNode } from './core/scene/scene-tree';
 export type { SceneHandle } from './core/scene/scene-handle';
 export { extractScenePrefabDeps } from './core/scene/scene-handle';
 export type { SoundHandle, SoundOptions } from './core/sounds/sounds';

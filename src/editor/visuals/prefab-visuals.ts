@@ -13,9 +13,9 @@ import { type Quat, quat } from 'mathcat';
 import { markTransformDirty, TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait, VoxelModel } from '../../builtins/voxel-mesh';
 import { registry as kindRegistry } from '../../core/registry';
-import { addChild, addTrait, createNode, destroyNode, getTrait, type Node, type Nodes } from '../../core/scene/nodes';
+import { addChild, addTrait, createNode, destroyNode, getTrait, type Node, type SceneTree } from '../../core/scene/scene-tree';
 import { prefabHasVoxels } from '../../core/scene/prefab';
-import type { NodesContext } from '../../core/scene/scripts';
+import type { SceneTreeContext } from '../../core/scene/scripts';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { rotateVoxelsByQuat } from '../../core/voxels/voxel-rotate';
 
@@ -44,10 +44,10 @@ export function dispose(state: PrefabVisuals): void {
 
 // ── per-frame update ──────────────────────────────────────────────
 
-export function update(state: PrefabVisuals, sg: Nodes, _runtime: NodesContext, registry: BlockRegistry): void {
-    if (sg.roomMode !== 'edit') return;
+export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: SceneTreeContext, registry: BlockRegistry): void {
+    if (runtime.roomMode !== 'edit') return;
 
-    for (const node of sg.nodes) {
+    for (const node of sceneTree.nodes) {
         const config = node.prefab;
 
         // clean up: ghost child whose parent no longer wants voxels
@@ -55,7 +55,7 @@ export function update(state: PrefabVisuals, sg: Nodes, _runtime: NodesContext, 
             const parentConfig = node.parent?.prefab;
             const parentDef = parentConfig ? kindRegistry.prefabs.byId.get(parentConfig.prefabId)?.payload : null;
             if (!parentDef || !prefabHasVoxels(parentDef)) {
-                destroyNode(sg, node);
+                destroyNode(sceneTree, node);
             }
             continue;
         }

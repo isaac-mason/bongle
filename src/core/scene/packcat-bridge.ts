@@ -1,6 +1,6 @@
 import type { Schema as PackcatSchema } from 'packcat';
 import * as p from 'packcat';
-import type { Node } from './nodes';
+import type { Node } from './scene-tree';
 import type { Schema as PropSchema } from './prop/prop';
 import { enumValue } from './prop/prop';
 import { clearSyncDirty, type SyncDef, type TraitBase, type TraitDef } from './traits';

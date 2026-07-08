@@ -201,14 +201,14 @@ room. So per-room state belongs on `ctx`-reachable things, a trait or the world
 itself, never in a module-scope variable, which every room in the process would
 share. Rooms get a fuller treatment in [Multiplayer](#rooms).
 
-### Nodes and the scene graph
+### Nodes and the scene tree
 
 A node is one object in the scene tree. On its own it carries almost nothing;
 what it can do comes from the traits you add. `createNode` returns a **detached**
 node, `addTrait` gives it a capability, `addChild` attaches it under a parent so
 it goes live, and `destroyNode` removes a node and its subtree.
 
-<Snippet source="scene-graph.snippet.ts" select="hierarchy" />
+<Snippet source="scene-tree.snippet.ts" select="hierarchy" />
 
 `addTrait(node, Trait)` returns the new trait instance. `getTrait(node, Trait)`
 reads it back later (or `null` if absent), and `hasTrait` tests presence.
@@ -256,7 +256,7 @@ read back where it lands in world space:
 
 <Snippet source="transforms.snippet.ts" select="place-node" />
 
-See the [API reference](./api.md#transforms--scene-graph) for the full set of
+See the [API reference](./api.md#transforms--scene-tree) for the full set of
 transform setters and getters.
 
 ### Traits
@@ -469,7 +469,7 @@ with RPC; and managing multiple rooms.
 Most multiplayer state never needs an explicit message: give a trait field a `sync`
 and it replicates from its authoritative side to every other side automatically, on
 every change. (Replication applies only to shared-realm nodes; the
-[realm](#nodes-and-the-scene-graph) section covers the others.)
+[realm](#nodes-and-the-scene-tree) section covers the others.)
 
 When a field gets noisy, tune how often it emits with the sync's `rate`. The default
 is `'realtime'`, every change. The alternatives trade freshness for bandwidth:

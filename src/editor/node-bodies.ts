@@ -30,8 +30,8 @@ import { TransformTrait } from '../builtins/transform';
 import type { Physics } from '../core/physics/physics';
 import { OBJECT_LAYER_EDITOR_NODES, settings } from '../core/physics/physics';
 import type { Resources } from '../core/resources';
-import type { Node, Nodes } from '../core/scene/nodes';
-import { getNodeById, getTrait, isAncestorOf, query } from '../core/scene/nodes';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
+import { getNodeById, getTrait, isAncestorOf, query } from '../core/scene/scene-tree';
 import type { EditRoomStoreApi } from './edit-room-store';
 import { EditorTrait } from './editor-trait';
 import { unionSubtreeWorldAabb } from './node-aabb';
@@ -141,19 +141,19 @@ function addEligibleChildren(parent: Node, playerNode: Node | null, root: Node, 
     return added;
 }
 
-function recomputeFrontier(state: NodeBodies, nodes: Nodes, store: EditRoomStoreApi): void {
+function recomputeFrontier(state: NodeBodies, sceneTree: SceneTree, store: EditRoomStoreApi): void {
     const { targetable } = state;
     targetable.clear();
 
     // refresh cached player id
     let playerNode: Node | null = null;
-    for (const [player] of query(nodes, [PlayerTrait])) {
+    for (const [player] of query(sceneTree, [PlayerTrait])) {
         playerNode = player._node!;
         break;
     }
     state.playerNodeId = playerNode ? playerNode.id : -1;
 
-    const root = nodes.root;
+    const root = sceneTree.root;
     const selectedIds = store.getState().selection.nodes;
 
     // root.children are always part of the frontier (so a different top-level
@@ -164,7 +164,7 @@ function recomputeFrontier(state: NodeBodies, nodes: Nodes, store: EditRoomStore
     // added, drop the selected node from the frontier (drill-down). otherwise
     // keep the leaf-selected node so it remains clickable.
     for (const sid of selectedIds) {
-        const sel = getNodeById(nodes, sid);
+        const sel = getNodeById(sceneTree, sid);
         if (!sel || sel === root) continue;
         const childrenAdded = addEligibleChildren(sel, playerNode, root, targetable);
         if (childrenAdded) {
@@ -204,12 +204,12 @@ function syncBodyToWorldAabb(physics: Physics, entry: BodyEntry, aabb: Box3): vo
     rigidBody.setPosition(physics.rigid.world, body, _scratchPos, false);
 }
 
-export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store: EditRoomStoreApi, resources: Resources): void {
+export function update(state: NodeBodies, physics: Physics, sceneTree: SceneTree, store: EditRoomStoreApi, resources: Resources): void {
     const { nodeToBody, bodyToNode, targetable } = state;
     const world = physics.rigid.world;
 
     if (state.targetableDirty) {
-        recomputeFrontier(state, nodes, store);
+        recomputeFrontier(state, sceneTree, store);
         state.targetableDirty = false;
 
         // remove bodies for nodes that left the frontier
@@ -231,7 +231,7 @@ export function update(state: NodeBodies, physics: Physics, nodes: Nodes, store:
     }
 
     for (const nodeId of targetable) {
-        const node = getNodeById(nodes, nodeId);
+        const node = getNodeById(sceneTree, nodeId);
         if (!node) continue;
         const transform = getTrait(node, TransformTrait);
         if (!transform) continue;

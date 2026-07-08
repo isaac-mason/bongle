@@ -12,7 +12,7 @@
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import { registry } from '../core/registry';
-import * as Nodes from '../core/scene/nodes';
+import * as SceneTree from '../core/scene/scene-tree';
 import { type SavedVoxels, saveVoxelsIncremental, seedVoxelSaveCache } from '../core/voxels/voxel-savefile';
 import * as ContentManager from './content-manager';
 import type { EngineServer } from './engine-server';
@@ -30,7 +30,7 @@ export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
     if (!room.edit) return false; // edit === null ⇔ play room (never persists)
 
     const payload = {
-        nodes: Nodes.saveSceneGraph(room.nodes),
+        nodes: SceneTree.saveSceneTree(room.nodes),
         voxels: saveVoxelsIncremental(room.voxels, room.edit.voxelSaveCache),
     };
     const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);

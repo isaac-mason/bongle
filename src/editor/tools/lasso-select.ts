@@ -20,8 +20,8 @@ import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Input } from '../../client/input';
 import { isKeyDown } from '../../client/input';
-import type { Nodes } from '../../core/scene/nodes';
-import { getNodeById, getTrait } from '../../core/scene/nodes';
+import type { SceneTree } from '../../core/scene/scene-tree';
+import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import * as Selection from '../../core/scene/selection';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
@@ -82,7 +82,7 @@ export function updateLassoSelect(
     voxels: Voxels,
     blocks: BlockRegistry,
     nodeBodies: NodeBodies | null,
-    nodes: Nodes,
+    sceneTree: SceneTree,
 ): void {
     const justDown = pointerJustDown(pointer, input);
     const held = pointerHeld(pointer, input);
@@ -119,7 +119,7 @@ export function updateLassoSelect(
     if (lasso && justUp) {
         const stroke = lasso.points;
         clearLassoStroke(store);
-        commitLasso(store, stroke, input, camera, voxels, blocks, nodeBodies, nodes);
+        commitLasso(store, stroke, input, camera, voxels, blocks, nodeBodies, sceneTree);
     }
 }
 
@@ -133,7 +133,7 @@ function commitLasso(
     voxels: Voxels,
     blocks: BlockRegistry,
     nodeBodies: NodeBodies | null,
-    nodes: Nodes,
+    sceneTree: SceneTree,
 ): void {
     const s = store.getState();
     const { selectionBehavior, selectTarget, lassoOptions } = s;
@@ -233,7 +233,7 @@ function commitLasso(
         mat4.multiply(_vp, camera.projectionMatrix, camera.matrixWorldInverse);
 
         for (const nodeId of nodeBodies.nodeToBody.keys()) {
-            const node = getNodeById(nodes, nodeId);
+            const node = getNodeById(sceneTree, nodeId);
             if (!node) continue;
             const transform = getTrait(node, TransformTrait);
             if (!transform) continue;

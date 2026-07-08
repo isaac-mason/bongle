@@ -12,7 +12,7 @@
 // orchestrator (one PNG per scene).
 
 import { registry as engineRegistry } from '../../core/registry';
-import { addChild, deserializeNode } from '../../core/scene/nodes';
+import { addChild, deserializeNode } from '../../core/scene/scene-tree';
 import { loadVoxels } from '../../core/voxels/voxel-savefile';
 import type { State } from '../engine';
 import { createRoom, disposeRoom } from '../rooms';

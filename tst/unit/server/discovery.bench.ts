@@ -1,13 +1,13 @@
 import * as p from 'packcat';
 import { bench, describe } from 'vitest';
-import { addChild, addTrait, createNode, createSceneGraph } from '../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode, createSceneTree } from '../../../src/core/scene/scene-tree';
 import { syncRate } from '../../../src/core/scene/sync/sync-rate';
 import { sync, trait } from '../../../src/core/scene/traits';
 import { runDiffDetection } from '../../../src/server/discovery';
 
 // ── runDiffDetection bench ───────────────────────────────────────────
 //
-// the REAL per-tick diff: a real scene graph, real trait sync codecs, real packcat
+// the REAL per-tick diff: a real scene tree, real trait sync codecs, real packcat
 // serialization. measures what shows up as `discovery/diff` in the perf digest,
 // packInto, bytesEqual, storeSnapshot, the threshold compares, version bumps.
 //
@@ -43,50 +43,50 @@ const N = 1000;
 // so the benched passes measure steady state, not first-seen or construction.
 // each instance gets its own pos/rot arrays so per-node mutation is independent.
 function scene() {
-    const sg = createSceneGraph();
+    const sceneTree = createSceneTree();
     const movers: Array<{ pos: number[]; rot: number[] }> = [];
     for (let i = 0; i < N; i++) {
         const n = createNode();
-        addChild(sg.root, n);
+        addChild(sceneTree.root, n);
         const m = addTrait(n, Mover);
         m.pos = [0, 0, 0];
         m.rot = [0, 0, 0, 1];
         movers.push(m);
     }
-    runDiffDetection(sg); // seed
-    return { sg, movers };
+    runDiffDetection(sceneTree); // seed
+    return { sceneTree, movers };
 }
 
 describe('runDiffDetection', () => {
     {
         // static: nothing moves. every slice is re-checked (threshold compare) and
         // emits nothing, the steady "wasted work over unchanged" cost.
-        const { sg } = scene();
+        const { sceneTree } = scene();
         bench(`${N} static nodes (no change)`, () => {
-            runDiffDetection(sg);
+            runDiffDetection(sceneTree);
         });
     }
     {
         // every node moves past threshold each tick → every slice emits: real pack +
         // storeSnapshot + version bump. the change-burst cost.
-        const { sg, movers } = scene();
+        const { sceneTree, movers } = scene();
         let tick = 0;
         bench(`${N} moving nodes (all emit)`, () => {
             tick++;
             const d = tick * 0.1; // > 5cm each tick
             for (const m of movers) m.pos[0] = d;
-            runDiffDetection(sg);
+            runDiffDetection(sceneTree);
         });
     }
     {
         // ~20% moving, rest static, a more typical frame.
-        const { sg, movers } = scene();
+        const { sceneTree, movers } = scene();
         let tick = 0;
         bench(`${N} nodes, 20% moving`, () => {
             tick++;
             const d = tick * 0.1;
             for (let i = 0; i < movers.length; i += 5) movers[i].pos[0] = d;
-            runDiffDetection(sg);
+            runDiffDetection(sceneTree);
         });
     }
 });

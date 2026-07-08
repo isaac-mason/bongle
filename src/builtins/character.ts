@@ -119,15 +119,15 @@ import {
     hasTrait,
     isLocalNode,
     type Node,
-} from '../api/scene-graph';
+} from '../api/scene-tree';
 import { isOwner, onFrame, query, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
-import { sync, type TraitType, trait } from '../api/traits';
+import { dirty, sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
-import type { TraitProps } from '../core/scene/nodes';
+import type { TraitProps } from '../core/scene/scene-tree';
 import { pack } from '../core/scene/pack';
 import type { ScriptContext } from '../core/scene/scripts';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
@@ -323,7 +323,7 @@ export const modelIdSync = sync(CharacterTrait, 'model-id', {
     unpack: (v, t) => {
         t.modelId = v;
     },
-    rate: 'dirty',
+    dirty: dirty.explicit(),
 });
 
 // ── per-frame character systems (world-script) ──────────────────────

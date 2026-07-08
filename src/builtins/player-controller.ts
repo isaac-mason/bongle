@@ -45,7 +45,7 @@ import { isTouchPrimary } from '../api/mobile';
 import type { Physics } from '../api/physics';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
-import { getTrait } from '../api/scene-graph';
+import { getTrait } from '../api/scene-tree';
 import { isOwner, onDispose, onFrame, onInit, onTick, onUpdate, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { createTouchButton, createTouchJoystick } from '../api/touch-controls';

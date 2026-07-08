@@ -18,15 +18,15 @@ import {
     addTrait,
     bumpNodeVersion,
     createNode,
-    createSceneGraph,
+    createSceneTree,
     destroyNode,
     hasTrait,
-    loadSceneGraph,
+    loadSceneTree,
     type Node,
-    type Nodes,
+    type SceneTree,
     setOwner,
-} from '../core/scene/nodes';
-import type { NodesContext } from '../core/scene/scripts';
+} from '../core/scene/scene-tree';
+import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Scripts from '../core/scene/scripts';
 import { SetBlockFlags } from '../core/voxels/block-flags';
 import { formatKey } from '../core/voxels/block-registry';
@@ -73,8 +73,8 @@ export type Room = {
     /** Scene file path (e.g. "scenes/main.scene.json"). */
     sceneId: string;
 
-    /** The live scene graph. */
-    nodes: Nodes;
+    /** The live scene tree. */
+    nodes: SceneTree;
 
     /** Players (per (client, mode)) currently in this room. */
     players: Set<PlayerId>;
@@ -90,7 +90,7 @@ export type Room = {
     sourceRoomId: string | null;
 
     /** Runtime env for scripts in this room */
-    scriptRuntime: NodesContext;
+    scriptRuntime: SceneTreeContext;
 
     /** PlayerId → in-scene node bearing PlayerTrait. one body per Player. */
     playerNodes: Map<PlayerId, Node>;
@@ -267,7 +267,7 @@ export type CreateRoomOptions = {
     sceneId: string;
     kind: 'edit' | 'play';
     sourceRoomId?: string;
-    rpc: NodesContext['rpc'];
+    rpc: SceneTreeContext['rpc'];
     resources: Resources.Resources;
     /** Namespace for this room. Defaults to 'main'. */
     namespace?: string;
@@ -284,10 +284,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     // or by the `play` handler when a gameOptions-keyed namespace is born.
     getOrCreateNamespace(state, namespace);
 
-    const sceneGraph = createSceneGraph({
-        mode: opts.kind,
-        roomMode: opts.kind,
-    });
+    const sceneGraph = createSceneTree();
 
     const blocks = registry.blockRegistry;
     const voxels = createVoxels(blocks);
@@ -318,6 +315,8 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         namespace,
         scriptRuntime: {
             roomId: id,
+            playerMode: opts.kind,
+            roomMode: opts.kind,
             resources: opts.resources,
             client: undefined,
             server: undefined,
@@ -698,7 +697,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const disposeMs = performance.now() - disposeT0;
 
     // single scene file read covers both halves. load voxels BEFORE
-    // loading the scene graph: loadSceneGraph fires script onInit hooks
+    // loading the scene graph: loadSceneTree fires script onInit hooks
     // synchronously, and those hooks may call setBlock to author terrain.
     // loadVoxels clears voxels.chunks, so it must run first or it will
     // wipe whatever the scripts wrote.
@@ -717,7 +716,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
             voxDeserMs = performance.now() - desT0;
         }
         const parseT0 = performance.now();
-        loadSceneGraph(room.nodes, sceneFile.data.nodes);
+        loadSceneTree(room.nodes, sceneFile.data.nodes);
         sceneParseMs = performance.now() - parseT0;
         // seed dedupe cache so the first flush compares against real disk
         // bytes, see saveScene / engine-server boot loop for context.
@@ -734,7 +733,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const physMs = performance.now() - physT0;
     room.scriptRuntime.physics = room.physics;
 
-    // re-attach after loadSceneGraph: it clears root._traits and re-populates
+    // re-attach after loadSceneTree: it clears root._traits and re-populates
     // from persisted data, which never includes these traits (persist: false).
     // idempotent, no-op when createRoom already attached and load was skipped.
     attachWorldTrait(room.nodes.root);

@@ -18,7 +18,7 @@
 //
 // Intentionally no `@gltf-transform/core` dep here, keeps this module
 // trivially testable + reusable. Worker adapts its parsed gltf
-// `Document` into the `RigSceneView` shape below.
+// `Document` into the `RigSceneView` shape below. No scene graph/tree imports.
 
 /* ── tags ── */
 

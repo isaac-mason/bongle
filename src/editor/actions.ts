@@ -26,7 +26,7 @@ import {
     getTrait,
     isAncestorOf,
     type Node,
-    type Nodes,
+    type SceneTree,
     type PrefabConfig,
     type Realm,
     removeTraitBySlot,
@@ -35,7 +35,7 @@ import {
     type SerializedTrait,
     serializeNode,
     setPrefab,
-} from '../core/scene/nodes';
+} from '../core/scene/scene-tree';
 import type { ScriptContext } from '../core/scene/scripts';
 import { send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
@@ -848,12 +848,12 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
     return props;
 }
 
-export function setTraitProps(sg: Nodes, node: Node, traitId: string, props: Record<string, unknown>): void {
+export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string, props: Record<string, unknown>): void {
     const def = registry.traits.byId.get(traitId)?.payload;
     if (!def) {
         const unresolved = node._unresolvedTraits.get(traitId);
         if (unresolved) unresolved.json = { ...unresolved.json, ...props };
-        bumpNodeVersion(sg, node);
+        bumpNodeVersion(sceneTree, node);
         return;
     }
     const instance = node._traits.get(def.slot);
@@ -863,8 +863,8 @@ export function setTraitProps(sg: Nodes, node: Node, traitId: string, props: Rec
         if (!ci) continue;
         ci.reg.set(instance, props[key]);
     }
-    bumpTraitVersion(sg, node, def.slot);
-    bumpNodeVersion(sg, node);
+    bumpTraitVersion(sceneTree, node, def.slot);
+    bumpNodeVersion(sceneTree, node);
 }
 
 /* ── prefab actions ── */

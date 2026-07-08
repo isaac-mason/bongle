@@ -12,7 +12,7 @@ import * as Transforms from '../builtins/transform';
 import { TransformTrait } from '../builtins/transform';
 import { VoxelMeshTrait } from '../builtins/voxel-mesh';
 import * as Resources from '../core/resources';
-import { query } from '../core/scene/nodes';
+import { query } from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';

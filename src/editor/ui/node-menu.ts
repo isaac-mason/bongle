@@ -11,7 +11,7 @@
 // shared entries inline.
 
 import * as Icons from 'lucide-react';
-import type { Node } from '../../core/scene/nodes';
+import type { Node } from '../../core/scene/scene-tree';
 
 export type NodeMenuItem = {
     kind: 'item';

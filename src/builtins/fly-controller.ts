@@ -18,7 +18,7 @@ import { env } from '../api/env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
-import { getTrait } from '../api/scene-graph';
+import { getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { control, type TraitType, trait } from '../api/traits';

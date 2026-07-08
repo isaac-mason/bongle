@@ -14,10 +14,10 @@ import type { Quat, Vec3 } from 'mathcat';
 import { TransformTrait } from '../builtins/transform';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry as kindRegistry } from '../core/registry';
-import type { Nodes, PrefabConfig, SerializedNode } from '../core/scene/nodes';
-import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/nodes';
+import type { SceneTree, PrefabConfig, SerializedNode } from '../core/scene/scene-tree';
+import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../core/scene/scene-tree';
 import { expandPrefab } from '../core/scene/prefab';
-import type { NodesContext } from '../core/scene/scripts';
+import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import type { BlockRegistry } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
@@ -120,7 +120,7 @@ let nextBlueprintId = 1;
  * node trait data is serialized via serializeNode. positions are stored
  * relative to the blueprint origin.
  */
-export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Selection.Selection): Blueprint {
+export function copySelection(worldVoxels: Voxels, sceneTree: SceneTree, selection: Selection.Selection): Blueprint {
     const voxelCount = Selection.countVoxels(selection);
     const hasVoxels = voxelCount > 0;
     const hasNodes = selection.nodes.size > 0;
@@ -179,7 +179,7 @@ export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Sele
             let cz = 0;
             let count = 0;
             for (const nodeId of selection.nodes) {
-                const node = getNodeById(nodes, nodeId);
+                const node = getNodeById(sceneTree, nodeId);
                 if (!node) continue;
                 const transform = getTrait(node, TransformTrait);
                 if (!transform) continue;
@@ -197,7 +197,7 @@ export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Sele
         }
 
         for (const nodeId of selection.nodes) {
-            const node = getNodeById(nodes, nodeId);
+            const node = getNodeById(sceneTree, nodeId);
             if (!node) continue;
 
             const serialized = serializeNode(node);
@@ -246,8 +246,8 @@ export function copySelection(worldVoxels: Voxels, nodes: Nodes, selection: Sele
 // selected nodes as children + serialized voxels in local space. used by
 // the "save selection as blueprint" flow (chat command, context menu).
 
-export function selectionToScenePayload(worldVoxels: Voxels, nodes: Nodes, selection: Selection.Selection): ScenePayload | null {
-    const bp = copySelection(worldVoxels, nodes, selection);
+export function selectionToScenePayload(worldVoxels: Voxels, sceneTree: SceneTree, selection: Selection.Selection): ScenePayload | null {
+    const bp = copySelection(worldVoxels, sceneTree, selection);
     if (!bp.hasVoxels && !bp.hasNodes) return null;
 
     const root: SerializedNode = {
@@ -383,7 +383,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
 export function createPrefabBlueprint(
     prefabId: string,
     anchor: Vec3,
-    runtime: NodesContext,
+    runtime: SceneTreeContext,
     registry: BlockRegistry,
 ): Blueprint | null {
     const def = kindRegistry.prefabs.byId.get(prefabId)?.payload;

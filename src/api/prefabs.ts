@@ -36,9 +36,9 @@
 import { type DepHandle, setDeps } from '../core/capture/dep-graph';
 import { recordPrefab } from '../core/capture/module-scope';
 import { type PrefabDef as CapturedPrefabDef, registry, upsert } from '../core/registry';
-import type { Node, Realm } from '../core/scene/nodes';
-import * as Nodes from '../core/scene/nodes';
-import { createPrefabConfig } from '../core/scene/nodes';
+import type { Node, Realm } from '../core/scene/scene-tree';
+import * as SceneTree from '../core/scene/scene-tree';
+import { createPrefabConfig } from '../core/scene/scene-tree';
 import type { PrefabApplyContext } from '../core/scene/prefab';
 import type { Schema, SchemaType } from '../core/scene/prop/prop';
 import type { ScriptContext } from '../core/scene/scripts';
@@ -191,7 +191,7 @@ export function createPrefab<Args = unknown>(
     },
 ): Node {
     const realm = opts?.realm ?? handle.node?.realm ?? 'inherit';
-    const node = Nodes.createNode({
+    const node = SceneTree.createNode({
         name: opts?.name,
         realm,
     });

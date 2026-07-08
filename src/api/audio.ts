@@ -23,7 +23,7 @@
  */
 
 import * as Audio from '../client/audio/audio';
-import type { Node } from '../core/scene/nodes';
+import type { Node } from '../core/scene/scene-tree';
 import type { ScriptContext } from '../core/scene/scripts';
 import type { SoundHandle } from '../core/sounds/sounds';
 

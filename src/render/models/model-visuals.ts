@@ -32,8 +32,8 @@ import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';
 import type { MeshId } from '../../core/models/handle';
 import * as Resources from '../../core/resources';
-import type { Node, Nodes } from '../../core/scene/nodes';
-import { getTrait, query } from '../../core/scene/nodes';
+import type { Node, SceneTree } from '../../core/scene/scene-tree';
+import { getTrait, query } from '../../core/scene/scene-tree';
 import type * as Environment from '../environment';
 import * as Visibility from '../visibility';
 import {
@@ -202,7 +202,7 @@ export type ModelVisuals = {
  */
 export function init(
     scene: Scene,
-    nodes: Nodes,
+    sceneTree: SceneTree,
     modelResources: ModelResources,
     env: Environment.EnvironmentResources,
 ): ModelVisuals {
@@ -253,7 +253,7 @@ export function init(
         maxUniqueMeshes,
         instanceAllocator: createAllocator(instanceCapacity),
         aliveStates: [],
-        _query: query(nodes, [MeshTrait, TransformTrait]),
+        _query: query(sceneTree, [MeshTrait, TransformTrait]),
         frameId: 0,
         scene,
     };

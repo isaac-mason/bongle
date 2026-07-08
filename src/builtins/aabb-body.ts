@@ -1,7 +1,7 @@
 import { type Vec3, vec3 } from 'mathcat';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
-import { control, sync, syncRate, type TraitType, trait } from '../api/traits';
+import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
 import * as AabbPhysics from '../core/physics/aabb';
 import { COLLISION_GROUP_NODES } from '../core/physics/rigid/rigid-world-settings';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
@@ -149,7 +149,8 @@ sync(AabbBodyTrait, 'linearVelocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    rate: syncRate.distance(0.1), // 0.1 m/s, resting bodies go silent
+    dirty: dirty.distance(0.1), // 0.1 m/s, resting bodies go silent
+    rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
 });
 
 sync(AabbBodyTrait, 'gravityFactor', {

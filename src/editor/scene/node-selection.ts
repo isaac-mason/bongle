@@ -16,7 +16,7 @@ import type { Box3 } from 'mathcat';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Physics } from '../../core/physics/physics';
-import { getNodeById, getTrait } from '../../core/scene/nodes';
+import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import type { ScriptContext } from '../../core/scene/scripts';
 import * as Selection from '../../core/scene/selection';
 import type { NodeBodies } from '../node-bodies';

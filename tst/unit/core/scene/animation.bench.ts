@@ -37,7 +37,7 @@ import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { bench, describe } from 'vitest';
 import { composeWorldMatrix, TransformTrait } from '../../../../src/builtins/transform';
 import type { ClipChannel } from '../../../../src/core/models/handle';
-import { addChild, addTrait, createNode, createSceneGraph } from '../../../../src/core/scene/nodes';
+import { addChild, addTrait, createNode, createSceneTree } from '../../../../src/core/scene/scene-tree';
 
 const LAYER_STRIDE = 13;
 
@@ -48,9 +48,9 @@ function buildRig(boneCount: number): {
     traits: TransformTrait[];
     subtreeEnd: Int32Array;
 } {
-    const sg = createSceneGraph();
+    const sceneTree = createSceneTree();
     const traits: TransformTrait[] = [];
-    const root = sg.root;
+    const root = sceneTree.root;
 
     const spineLen = Math.max(2, Math.floor(boneCount * 0.3));
 

@@ -1,16 +1,16 @@
 /**
- * binary scene graph packing / unpacking for network transfer.
+ * binary scene tree packing / unpacking for network transfer.
  *
- * packSceneGraph(sg) → Uint8Array, full scene graph to binary
- * unpackSceneGraph(sg, data), binary to scene graph (clears + rebuilds)
- * applySceneSyncUpdate(sg, update), apply a single incremental scene_sync update
+ * packSceneTree(sceneTree) → Uint8Array, full scene tree to binary
+ * unpackSceneTree(sceneTree, data), binary to scene tree (clears + rebuilds)
+ * applySceneSyncUpdate(sceneTree, update), apply a single incremental scene_sync update
  *
  * all trait field data is packcat-encoded. the receiver uses traitId to
  * look up the per-trait serdes for unpacking.
  */
 
 import type { BinaryField, BinaryTrait, PackedNode, RoomMode, SceneSyncUpdate } from '../protocol';
-import { packPackedSceneGraph, unpackPackedSceneGraph } from '../protocol';
+import { packPackedSceneTree, unpackPackedSceneTree } from '../protocol';
 import { registry, resolveTraitWireRef, type WireIndex } from '../registry';
 import {
     addChild,
@@ -22,22 +22,22 @@ import {
     encodePrefabConfig,
     getNodeById,
     type Node,
-    type Nodes,
+    type SceneTree,
     type Realm,
     removeTraitBySlot,
     reorderChild,
     reparent,
     setOwner,
     setPrefab,
-} from './nodes';
+} from './scene-tree';
 import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
-import { disposeScriptInstance, type NodesContext } from './scripts';
+import { disposeScriptInstance, type SceneTreeContext } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
 
 /* ── pack ── */
 
 /**
- * pack a scene graph into a binary Uint8Array for network transfer.
+ * pack a scene tree into a binary Uint8Array for network transfer.
  * includes all nodes regardless of persist flag. trait control data is
  * packcat-encoded per-control via getControlCodecs.
  *
@@ -46,8 +46,8 @@ import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
  * mode: 'edit' includes node.prefab in packed data. 'play' omits it,
  * play mode instantiates children server-side, clients just see normal nodes.
  */
-export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
-    const root = sg.root;
+export function packSceneTree(sceneTree: SceneTree, mode: RoomMode): Uint8Array {
+    const root = sceneTree.root;
     const wireIndex = registry.traitWireIndex;
 
     // pack all nodes in parent-first order (root first). in play mode prunes
@@ -88,13 +88,13 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
         });
     });
 
-    return packPackedSceneGraph({ nodes });
+    return packPackedSceneTree({ nodes });
 }
 
 /* ── unpack ── */
 
 /**
- * unpack a binary scene graph into an existing scene graph.
+ * unpack a binary scene tree into an existing scene tree.
  * clears existing children/traits/scripts on root, then rebuilds
  * the full tree from the packed data.
  *
@@ -105,15 +105,15 @@ export function packSceneGraph(sg: Nodes, mode: RoomMode): Uint8Array {
  * and passes it here. callers without a peer (in-process pack/unpack in
  * tests) omit it and the runtime's local table is used.
  */
-export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Array, traitWireIndex?: WireIndex): void {
-    const unpacked = unpackPackedSceneGraph(data);
-    const root = sg.root;
+export function unpackSceneTree(sceneTree: SceneTree, runtime: SceneTreeContext, data: Uint8Array, traitWireIndex?: WireIndex): void {
+    const unpacked = unpackPackedSceneTree(data);
+    const root = sceneTree.root;
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
 
     // clear existing children
     const existingChildren = root.children.slice();
     for (const child of existingChildren) {
-        destroyNode(sg, child);
+        destroyNode(sceneTree, child);
     }
 
     // clear existing root traits + script instances (scripts re-instantiate from traits)
@@ -132,18 +132,18 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Ar
     if (!rootPacked) return;
 
     // restore root id to match the server's
-    sg._idToNode.delete(root.id);
+    sceneTree._idToNode.delete(root.id);
     root.id = rootPacked.id;
-    sg._idToNode.set(root.id, root);
-    if (root.id >= sg._nextNodeId) {
-        sg._nextNodeId = root.id + 1;
+    sceneTree._idToNode.set(root.id, root);
+    if (root.id >= sceneTree._nextNodeId) {
+        sceneTree._nextNodeId = root.id + 1;
     }
 
     // restore root name
     root.name = rootPacked.name;
 
     // restore root owner
-    setOwner(sg, root, rootPacked.owner ?? null);
+    setOwner(sceneTree, root, rootPacked.owner ?? null);
 
     // restore root prefab config
     setPrefab(root, decodePrefabConfig(rootPacked.prefab) ?? null);
@@ -165,19 +165,19 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Ar
         root._traits.set(def.slot, instance);
     }
 
-    // root script instances re-instantiate from the trait list at initSceneGraph time
+    // root script instances re-instantiate from the trait list at initSceneTree time
 
     // create remaining nodes in parent-first order
     for (let i = 1; i < unpacked.nodes.length; i++) {
         const pn = unpacked.nodes[i];
-        applyNodeCreated(sg, runtime, pn, wireIndex);
+        applyNodeCreated(sceneTree, runtime, pn, wireIndex);
     }
 }
 
 /* ── apply a single scene_sync update to a client scene graph ── */
 
 /**
- * apply a single incremental scene_sync update to a scene graph.
+ * apply a single incremental scene_sync update to a scene tree.
  * used by the client to process server discovery updates.
  *
  * `traitWireIndex` is the INBOUND wire-index table for the peer that
@@ -185,50 +185,50 @@ export function unpackSceneGraph(sg: Nodes, runtime: NodesContext, data: Uint8Ar
  * absent → runtime's local table is used (in-process tests).
  */
 export function applySceneSyncUpdate(
-    sg: Nodes,
-    runtime: NodesContext,
+    sceneTree: SceneTree,
+    runtime: SceneTreeContext,
     update: SceneSyncUpdate,
     traitWireIndex?: WireIndex,
 ): void {
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
     switch (update.type) {
         case 'node_created': {
-            applyNodeCreated(sg, runtime, update, wireIndex);
+            applyNodeCreated(sceneTree, runtime, update, wireIndex);
             break;
         }
 
         case 'node_structure': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
-            const newParent = getNodeById(sg, update.parentId);
+            const newParent = getNodeById(sceneTree, update.parentId);
             if (!newParent) break;
 
             if (node.parent !== newParent) {
                 reparent(node, newParent);
             }
             reorderChild(newParent, node, update.index);
-            bumpNodeVersion(sg, node);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
 
         case 'node_name': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
             node.name = update.name;
-            bumpNodeVersion(sg, node);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
 
         case 'node_owner': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
-            setOwner(sg, node, update.owner ?? null);
-            bumpNodeVersion(sg, node);
+            setOwner(sceneTree, node, update.owner ?? null);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
 
         case 'node_trait_fields': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
             const traitId = wireIndex.indexToId[update.traitNetIndex];
             if (traitId === undefined) break;
@@ -239,12 +239,12 @@ export function applySceneSyncUpdate(
             if (!instance) break;
 
             applySyncFields(def, update.fields, instance);
-            bumpNodeVersion(sg, node);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
 
         case 'node_trait_added': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
             const traitId = resolveTraitWireRef(wireIndex, update.traitNetIndex, update.traitId);
             if (traitId === undefined) break;
@@ -252,7 +252,7 @@ export function applySceneSyncUpdate(
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${traitId}" in node_trait_added sync — preserving`);
                 node._unresolvedTraits.set(traitId, { binary: new Uint8Array(0) });
-                bumpNodeVersion(sg, node);
+                bumpNodeVersion(sceneTree, node);
                 break;
             }
 
@@ -266,12 +266,12 @@ export function applySceneSyncUpdate(
                 const instance = addTraitBySlot(node, def.slot, props ?? undefined);
                 if (instance) applySyncFields(def, update.syncs, instance);
             }
-            bumpNodeVersion(sg, node);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
 
         case 'node_trait_removed': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
             const traitId = resolveTraitWireRef(wireIndex, update.traitNetIndex, update.traitId);
             if (traitId === undefined) break;
@@ -279,7 +279,7 @@ export function applySceneSyncUpdate(
             if (!def) {
                 // remove from unresolved if present
                 node._unresolvedTraits.delete(traitId);
-                bumpNodeVersion(sg, node);
+                bumpNodeVersion(sceneTree, node);
                 break;
             }
             removeTraitBySlot(node, def.slot);
@@ -287,17 +287,17 @@ export function applySceneSyncUpdate(
         }
 
         case 'node_destroyed': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
-            destroyNode(sg, node);
+            destroyNode(sceneTree, node);
             break;
         }
 
         case 'node_prefab': {
-            const node = getNodeById(sg, update.id);
+            const node = getNodeById(sceneTree, update.id);
             if (!node) break;
             setPrefab(node, decodePrefabConfig(update.prefab) ?? null);
-            bumpNodeVersion(sg, node);
+            bumpNodeVersion(sceneTree, node);
             break;
         }
     }
@@ -327,11 +327,11 @@ function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callb
 }
 
 /**
- * create a node from packed data and add it to the scene graph.
- * shared between unpackSceneGraph and applySceneSyncUpdate('node_created').
+ * create a node from packed data and add it to the scene tree.
+ * shared between unpackSceneTree and applySceneSyncUpdate('node_created').
  */
-function applyNodeCreated(sg: Nodes, _runtime: NodesContext, pn: PackedNode, traitWireIndex: WireIndex): void {
-    const parent = getNodeById(sg, pn.parentId);
+function applyNodeCreated(sceneTree: SceneTree, _runtime: SceneTreeContext, pn: PackedNode, traitWireIndex: WireIndex): void {
+    const parent = getNodeById(sceneTree, pn.parentId);
     if (!parent) return;
 
     const node = createNode({
@@ -340,7 +340,7 @@ function applyNodeCreated(sg: Nodes, _runtime: NodesContext, pn: PackedNode, tra
         persist: pn.persist !== false,
     });
     addChild(parent, node);
-    setOwner(sg, node, pn.owner ?? null);
+    setOwner(sceneTree, node, pn.owner ?? null);
     setPrefab(node, decodePrefabConfig(pn.prefab) ?? null);
 
     // add traits
@@ -367,7 +367,7 @@ function applyNodeCreated(sg: Nodes, _runtime: NodesContext, pn: PackedNode, tra
 /**
  * pack all controls of a trait instance to BinaryField entries (positional,
  * the wire `index` is the control's position in `def.controls`). used by
- * packSceneGraph for full scene serialization.
+ * packSceneTree for full scene serialization.
  */
 function packAllControls(def: TraitDef, instance: TraitBase, node: Node): BinaryField[] {
     const codecs = getControlCodecs(def);

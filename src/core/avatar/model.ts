@@ -13,7 +13,7 @@
 
 import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
 import type { ResolvedAvatar } from 'bongle/interface';
-import { getTrait, type Node } from '../../api/scene-graph';
+import { getTrait, type Node } from '../../api/scene-tree';
 import { CharacterTrait, modelIdSync } from '../../builtins/character';
 import * as Resources from '../resources';
 

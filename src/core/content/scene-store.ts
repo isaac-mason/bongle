@@ -14,7 +14,7 @@
 // is the source of truth.
 
 import { registry } from '../registry';
-import { addChild, deserializeNode, type Node, refreshTraitIssues, type SerializedSceneGraph } from '../scene/nodes';
+import { addChild, deserializeNode, type Node, refreshTraitIssues, type SerializedSceneTree } from '../scene/scene-tree';
 import { buildTraitInstance } from '../scene/traits';
 import * as bitset from '../utils/bitset';
 import type { BlockRegistry } from '../voxels/block-registry';
@@ -30,7 +30,7 @@ import type { Content } from './index';
  * `SceneHandle`.
  */
 export type ScenePayload = {
-    nodes: SerializedSceneGraph;
+    nodes: SerializedSceneTree;
     voxels: SavedVoxels | null;
 };
 
@@ -66,7 +66,7 @@ export function populateScene(
     if (side === 'client' && !handle.client) return;
 
     // detach current children, the handle's node is free-floating (no
-    // Nodes runtime), so no unregister is needed; just clear the list and
+    // scene tree runtime), so no unregister is needed; just clear the list and
     // null parent pointers.
     for (const child of handle.node.children) {
         detachOrphan(child);
@@ -79,7 +79,7 @@ export function populateScene(
     handle.node._unresolvedTraits.clear();
     handle.node._traitIssues.clear();
 
-    // apply root-level traits. handle.node is free-floating (no sg, no
+    // apply root-level traits. handle.node is free-floating (no sceneTree, no
     // runtime), so no reindex / script instantiation, closures over
     // `handle.node` see the full authored shape including root traits.
     if (raw.nodes.root.traits) {
@@ -124,8 +124,7 @@ export function populateScene(
  * scene declaration is removed, or a `bongle:scene-clear` HMR event fires
  * after an authored file is deleted on disk). gates handle mutation on the
  * side flag, mirroring `populateScene`.
- * the handle reference itself stays valid, module-scope closures still
- * resolve.
+ * the handle reference itself stays valid, module-scope closures still resolve.
  */
 export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
     content.payloads.delete(id);
@@ -145,7 +144,7 @@ export function clearScene(content: Content, id: string, side: 'server' | 'clien
 
 /**
  * detach a free-floating subtree's root from its parent. the handle's
- * children are not registered in any Nodes runtime, so we just clear
+ * children are not registered in any scene tree runtime, so we just clear
  * the parent pointer, descendants are unreachable and get GC'd.
  */
 function detachOrphan(child: Node): void {

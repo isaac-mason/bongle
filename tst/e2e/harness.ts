@@ -33,7 +33,7 @@ import * as EngineClientModule from '../../src/client/engine-client';
 import * as ClientNet from '../../src/client/net';
 import type * as ClientRooms from '../../src/client/rooms';
 import { registry } from '../../src/core/registry';
-import * as Nodes from '../../src/core/scene/nodes';
+import * as SceneTree from '../../src/core/scene/scene-tree';
 import { createFallbackAvatarsDriver } from '../../src/server/avatars-fallback';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
@@ -41,7 +41,7 @@ import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory'
 
 // ── types ───────────────────────────────────────────────────────────
 
-export type SetupFn<D> = (root: Nodes.Node) => D | Promise<D>;
+export type SetupFn<D> = (root: SceneTree.Node) => D | Promise<D>;
 
 export type TestHarness<D> = {
     /** raw server engine state */
@@ -202,11 +202,11 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
     env.editor = false;
 
     // ── 2. build root node + run user setup ─────────────────────
-    const root = Nodes.createNode({ name: 'Root' });
+    const root = SceneTree.createNode({ name: 'Root' });
     const data = await setup(root);
 
     // ── 3. serialize root tree to disk for the real loader ──────
-    const serialized = Nodes.serializeNode(root);
+    const serialized = SceneTree.serializeNode(root);
     fs.writeFileSync(
         path.join(scenesDir, 'main.scene.json'),
         JSON.stringify({ version: 1, nodes: { root: serialized } }, null, 2),
@@ -288,12 +288,12 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
                 get characterController() {
                     const room = this.room;
                     if (!room?.playerNode) return null;
-                    return Nodes.getTrait(room.playerNode, CharacterControllerTrait) ?? null;
+                    return SceneTree.getTrait(room.playerNode, CharacterControllerTrait) ?? null;
                 },
                 get transform() {
                     const room = this.room;
                     if (!room?.playerNode) return null;
-                    return Nodes.getTrait(room.playerNode, TransformTrait) ?? null;
+                    return SceneTree.getTrait(room.playerNode, TransformTrait) ?? null;
                 },
             };
 

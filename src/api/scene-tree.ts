@@ -1,9 +1,9 @@
 import { ModelTrait } from '../builtins/model';
-import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/nodes';
-import * as Nodes from '../core/scene/nodes';
+import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/scene-tree';
+import * as SceneTree from '../core/scene/scene-tree';
 import type { TraitBase } from '../core/scene/traits';
 
-export type { Node, Realm } from '../core/scene/nodes';
+export type { Node, Realm } from '../core/scene/scene-tree';
 export {
     addChild,
     findAncestor,
@@ -14,7 +14,7 @@ export {
     isLocalNode,
     removeChild,
     replaceChildren,
-} from '../core/scene/nodes';
+} from '../core/scene/scene-tree';
 export { traverse } from '../core/scene/traverse';
 
 /**
@@ -22,7 +22,7 @@ export { traverse } from '../core/scene/traverse';
  * attach with `addChild(parent, clone)` to wake it up.
  */
 export function cloneNode(node: Node): Node {
-    return Nodes.cloneNode(node);
+    return SceneTree.cloneNode(node);
 }
 
 /**
@@ -45,9 +45,9 @@ export function cloneNode(node: Node): Node {
  * one is left in place.
  */
 export function cloneModel(node: Node): Node {
-    const clone = Nodes.cloneNode(node);
-    if (!Nodes.getTrait(clone, ModelTrait)) {
-        Nodes.addTrait(clone, ModelTrait);
+    const clone = SceneTree.cloneNode(node);
+    if (!SceneTree.getTrait(clone, ModelTrait)) {
+        SceneTree.addTrait(clone, ModelTrait);
     }
     return clone;
 }
@@ -63,21 +63,21 @@ export function cloneModel(node: Node): Node {
  * `'client'` for purely local client-side nodes.
  */
 export function createNode(options?: { name?: string; persist?: boolean; realm?: Realm }): Node {
-    return Nodes.createNode({ name: options?.name, persist: options?.persist, realm: options?.realm });
+    return SceneTree.createNode({ name: options?.name, persist: options?.persist, realm: options?.realm });
 }
 
 /**
  * add a trait to a node. returns the new trait instance.
  */
 export function addTrait<T extends TraitBase>(node: Node, traitHandle: TraitHandle<T>, props?: TraitProps<T>): T {
-    return Nodes.addTrait(node, traitHandle, props);
+    return SceneTree.addTrait(node, traitHandle, props);
 }
 
 /**
  * remove a trait from a node.
  */
 export function removeTrait(node: Node, traitHandle: TraitHandle): void {
-    Nodes.removeTrait(node, traitHandle);
+    SceneTree.removeTrait(node, traitHandle);
 }
 
 /**
@@ -85,7 +85,7 @@ export function removeTrait(node: Node, traitHandle: TraitHandle): void {
  */
 export function destroyNode(node: Node): void {
     if (node.scene) {
-        Nodes.destroyNode(node.scene, node);
+        SceneTree.destroyNode(node.scene, node);
     }
 }
 

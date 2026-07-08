@@ -5,7 +5,7 @@
 //   - server diff (discovery.ts), server-authority broadcast
 //   - client upload (replication.ts), owner-authority send
 //
-// keeping one implementation means the byte-diff and the ThresholdRate metric
+// keeping one implementation means the byte-diff and the DirtyThreshold metric
 // behave identically on both ends, no drift between mirror copies.
 //
 // the per-slice snapshot (last-emitted bytes + value) lives on the trait
@@ -13,7 +13,7 @@
 // keyed side-map lookups.
 
 import { bytesEqualPrefix } from '../../utils/bytes';
-import type { Node } from '../nodes';
+import type { Node } from '../scene-tree';
 import type { SyncCodec } from '../packcat-bridge';
 import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
 
@@ -25,7 +25,7 @@ import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
 let scratch = new Uint8Array(256);
 
 /**
- * snapshot a ThresholdRate slice's last-emitted `value`. `value` is a live
+ * snapshot a DirtyThreshold slice's last-emitted `value`. `value` is a live
  * reference, so it must be copied, reusing `prev`'s buffer when shape-compatible
  * (zero-alloc steady state), cloning otherwise. scalars store directly.
  */
@@ -88,13 +88,15 @@ export function writeSnapshot(codec: SyncCodec, instance: TraitBase, node: Node,
 
 /**
  * decide whether `syncDef`'s slice `i` on `instance` should emit this tick,
- * updating the byte snapshot (+ the value snapshot for ThresholdRate) to the
+ * updating the byte snapshot (+ the value snapshot for DirtyThreshold) to the
  * emitted value when so. after a `true` return the freshly packed bytes are in
  * `sync.bytes[i]`, ready for the caller to send.
  *
- * - ThresholdRate → emits once `metric(lastEmitted, current) ≥ threshold`; the
+ * - DirtyThreshold → emits once `metric(lastEmitted, current) ≥ threshold`; the
  *   value snapshot only advances on emit, so sub-threshold drift accumulates.
- * - else → byte-diff: emits when the packed bytes differ.
+ * - else ('onChange'/'explicit') → byte-diff: emits when the packed bytes differ.
+ *   ('explicit' fields are kept off the diff pass by the caller; here they byte-
+ *   diff like 'onChange', matching the prior 'dirty'-rate handling.)
  *
  * `emitOnFirstSeen`, what to do the very first time a slice is seen: the client
  * upload emits it (the server needs the initial owned value); the server diff
@@ -109,13 +111,13 @@ export function diffSync(
     sync: TraitSyncState,
     emitOnFirstSeen: boolean,
 ): boolean {
-    const rate = syncDef.rate;
+    const dirty = syncDef.dirty;
 
-    if (typeof rate === 'object' && rate !== null) {
+    if (typeof dirty === 'object' && dirty !== null) {
         const value = syncDef.pack(instance);
         const prev = sync.values[i];
         // sub-threshold: leave both snapshots untouched so the change accumulates.
-        if (prev !== undefined && rate.metric(prev, value) < rate.threshold) return false;
+        if (prev !== undefined && dirty.metric(prev, value) < dirty.threshold) return false;
         sync.values[i] = captureValue(prev, value);
         const tn = packToScratch(codec, instance, node);
         if (tn > 0) storeSnapshot(sync, i, tn);

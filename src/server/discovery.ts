@@ -13,11 +13,11 @@ import {
     getTrait,
     isReplicable,
     type Node,
-    type Nodes,
+    type SceneTree,
     type Realm,
-} from '../core/scene/nodes';
+} from '../core/scene/scene-tree';
 import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
-import { packSceneGraph } from '../core/scene/scene-pack';
+import { packSceneTree } from '../core/scene/scene-pack';
 import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
@@ -40,7 +40,7 @@ import * as RoomsModule from './rooms';
 /* ── diff snapshots (change detection) ── */
 
 /**
- * run diff detection on a scene graph: compare each trait's current sync values
+ * run diff detection on a scene tree: compare each trait's current sync values
  * against the per-instance snapshots (`instance._sync.bytes/values`), bumping
  * versions and updating the snapshot when a slice changed. diffs both property
  * and sync fields regardless of mode, scripts can mutate either at any time.
@@ -50,13 +50,13 @@ import * as RoomsModule from './rooms';
  *
  * call once per tick, after scripts have run.
  */
-export function runDiffDetection(sg: Nodes): void {
-    for (const node of sg.nodes) {
-        diffNode(sg, node);
+export function runDiffDetection(sceneTree: SceneTree): void {
+    for (const node of sceneTree.nodes) {
+        diffNode(sceneTree, node);
     }
 }
 
-function diffNode(sg: Nodes, node: Node): void {
+function diffNode(sceneTree: SceneTree, node: Node): void {
     for (const [traitSlot, instance] of node._traits) {
         const def = registry.traitsBySlot.get(traitSlot);
         if (!def) continue;
@@ -75,25 +75,25 @@ function diffNode(sg: Nodes, node: Node): void {
             const bit = 1 << (i & 31);
             if ((sync.dirty[word] & bit) !== 0) {
                 sync.dirty[word] &= ~bit;
-                // ThresholdRate slices consume the dirty bit but do NOT emit on it,
+                // threshold-dirty slices consume the dirty bit but do NOT emit on it,
                 // the threshold branch below decides if the change is big enough.
                 // (else setPosition / physics dirtying would bypass the threshold.)
-                if (typeof def.sync[i].rate !== 'object') {
+                if (typeof def.sync[i].dirty !== 'object') {
                     writeSnapshot(codec, instance, node, i, sync);
-                    bumpFieldVersion(sg, node, instance, i);
+                    bumpFieldVersion(sceneTree, node, instance, i);
                     continue;
                 }
             }
 
-            // 'dirty' rate skips cold-path byte-diff entirely, only
+            // 'explicit' dirtiness skips cold-path byte-diff entirely, only
             // SyncHandle.dirty() above can flag emission.
-            if (def.sync[i].rate === 'dirty') continue;
+            if (def.sync[i].dirty === 'explicit') continue;
 
-            // shared cold path: byte-diff or ThresholdRate metric. the server seeds
+            // shared cold path: byte-diff or threshold metric. the server seeds
             // a first-seen slice silently (its initial version already covers it),
             // so emitOnFirstSeen = false.
             if (diffSync(def.sync[i], codec, instance, node, i, sync, false)) {
-                bumpFieldVersion(sg, node, instance, i);
+                bumpFieldVersion(sceneTree, node, instance, i);
             }
         }
     }
@@ -183,10 +183,24 @@ type ClientState = {
      * nodes that a play-Player in the same room would not. A Player entry
      * exists once the client has received join_room for that Player.
      */
-    playerKnowledge: Map<PlayerId, Map<number, ClientNodeKnowledge>>;
+    nodeKnowledge: Map<PlayerId, Map<number, ClientNodeKnowledge>>;
+
+    /**
+     * per-Player set of node ids that still owe this client a `sync()` field — a
+     * `rate.hz` field went dirty but its send was throttled and hasn't shipped yet.
+     * (the field is what's pending; this indexes it by node, since the node is the
+     * unit the fan-out revisits.) it carries no new truth — the field-level "behind"
+     * already lives in `nodeKnowledge` (`TraitKnowledge.versions[i]` lags the
+     * instance, so `ClientNodeKnowledge.nodeVersion` stays < `node._sync.version`).
+     * it exists only so the fan-out can revisit those nodes without scanning every
+     * known node: `dirtyNodes` carries what CHANGED this tick, not what a node that
+     * has since SETTLED still owes. mirrors the voxel `pendingLight`/`pendingFull`
+     * sets. an id lands here when a diff leaves the client behind and clears once it
+     * catches up. key is PlayerId, same as `nodeKnowledge`. */
+    nodeSyncKnowledge: Map<PlayerId, Set<number>>;
 
     /** Players that have received their join_room (and therefore have a
-     *  populated playerKnowledge entry). */
+     *  populated nodeKnowledge entry). */
     knownPlayers: Set<PlayerId>;
 
     /** last room list version this client received (-1 = never). */
@@ -268,7 +282,8 @@ export function flushCommands(state: Discovery, net: ServerNet, rooms: Rooms): v
 
 export function addClient(state: Discovery, client: Client): void {
     state.clients.set(client, {
-        playerKnowledge: new Map(),
+        nodeKnowledge: new Map(),
+        nodeSyncKnowledge: new Map(),
         knownPlayers: new Set(),
         roomListVersion: -1,
         voxelKnowledge: new Map(),
@@ -307,7 +322,8 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
 
     // (re-)initialize per-Player knowledge against the current scene
     const nodeKnowledge = new Map<number, ClientNodeKnowledge>();
-    cs.playerKnowledge.set(player.id, nodeKnowledge);
+    cs.nodeKnowledge.set(player.id, nodeKnowledge);
+    cs.nodeSyncKnowledge.set(player.id, new Set());
     cs.knownPlayers.add(player.id);
 
     cs.voxelKnowledge.set(player.id, {
@@ -331,7 +347,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
     }
 
     const packT0 = performance.now();
-    const packedNodes = packSceneGraph(room.nodes, player.mode);
+    const packedNodes = packSceneTree(room.nodes, player.mode);
     const packMs = performance.now() - packT0;
     Net.send(net, player.client, {
         type: 'join_room',
@@ -351,7 +367,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
     snapshotAllNodeKnowledge(room.nodes, nodeKnowledge, player.mode);
     const snapMs = performance.now() - snapT0;
     console.log(
-        `[room-start]     invalidatePlayer packSceneGraph=${packMs.toFixed(1)} ` +
+        `[room-start]     invalidatePlayer packSceneTree=${packMs.toFixed(1)} ` +
             `snapshotNodes=${snapMs.toFixed(1)} packedBytes=${packedNodes.byteLength}`,
     );
 }
@@ -365,7 +381,8 @@ export function notifyPlayerLeft(state: Discovery, net: ServerNet, player: Playe
     const cs = state.clients.get(player.client);
     if (!cs) return;
 
-    cs.playerKnowledge.delete(player.id);
+    cs.nodeKnowledge.delete(player.id);
+    cs.nodeSyncKnowledge.delete(player.id);
     cs.knownPlayers.delete(player.id);
     cs.voxelKnowledge.delete(player.id);
 
@@ -419,16 +436,16 @@ export function stampNodeKnowledge(
     rooms: Rooms,
     client: Client,
     roomId: string,
-    sg: Nodes,
+    sceneTree: SceneTree,
     nodeId: number,
 ): void {
     const cs = state.clients.get(client);
     if (!cs) return;
-    const node = getNodeById(sg, nodeId);
+    const node = getNodeById(sceneTree, nodeId);
     if (!node) return;
     for (const player of RoomsModule.getPlayersForClient(rooms, client)) {
         if (player.roomId !== roomId) continue;
-        const nodeKnowledge = cs.playerKnowledge.get(player.id);
+        const nodeKnowledge = cs.nodeKnowledge.get(player.id);
         if (!nodeKnowledge) continue;
         snapshotNodeKnowledge(nodeKnowledge, node);
     }
@@ -443,7 +460,7 @@ export function forgetNode(state: Discovery, rooms: Rooms, client: Client, roomI
     if (!cs) return;
     for (const player of RoomsModule.getPlayersForClient(rooms, client)) {
         if (player.roomId !== roomId) continue;
-        const nodeKnowledge = cs.playerKnowledge.get(player.id);
+        const nodeKnowledge = cs.nodeKnowledge.get(player.id);
         if (!nodeKnowledge) continue;
         nodeKnowledge.delete(nodeId);
     }
@@ -460,7 +477,7 @@ export function acceptOwnerFields(
     rooms: Rooms,
     roomId: string,
     client: Client,
-    sg: Nodes,
+    sceneTree: SceneTree,
     node: Node,
     def: TraitDef,
     instance: TraitBase,
@@ -502,10 +519,10 @@ export function acceptOwnerFields(
         //    player-controlled entities.
         writeSnapshot(codec, instance, node, i, sync);
 
-        // for a ThresholdRate slice, keep the value snapshot in lockstep with the
+        // for a threshold-dirty slice, keep the value snapshot in lockstep with the
         // bytes so the next diffNode measures against this just-applied value and
         // doesn't re-emit it.
-        if (typeof syncDef.rate === 'object' && syncDef.rate !== null) {
+        if (typeof syncDef.dirty === 'object' && syncDef.dirty !== null) {
             sync.values[i] = captureValue(sync.values[i], syncDef.pack(instance));
         }
 
@@ -513,7 +530,7 @@ export function acceptOwnerFields(
         //    via the per-client knowledge diff in buildSceneSyncUpdates;
         //    the owner is exempted by stamping their knowledge to the
         //    post-bump version below (step 4) so they don't echo it back.
-        bumpFieldVersion(sg, node, instance, i);
+        bumpFieldVersion(sceneTree, node, instance, i);
 
         // 4. stamp every Player the owner client holds in this room to the
         //    post-bump version so this owner-authority write doesn't echo
@@ -521,7 +538,7 @@ export function acceptOwnerFields(
         if (!cs) continue;
         const fieldVersion = instance._sync?.versions[i] ?? 0;
         for (const player of targetPlayers) {
-            const nodeKnowledge = cs.playerKnowledge.get(player.id);
+            const nodeKnowledge = cs.nodeKnowledge.get(player.id);
             const known = nodeKnowledge?.get(node.id);
             if (!known) continue;
             let traitKnowledge = known.traits.get(def.id);
@@ -602,10 +619,19 @@ export function flush(
             const room = RoomsModule.getRoom(rooms, player.roomId);
             if (!room) continue;
 
-            const nodeKnowledge = cs.playerKnowledge.get(player.id);
+            const nodeKnowledge = cs.nodeKnowledge.get(player.id);
             if (!nodeKnowledge) continue;
+            const nodeSyncKnowledge = cs.nodeSyncKnowledge.get(player.id);
+            if (!nodeSyncKnowledge) continue;
 
-            const updates = buildSceneSyncUpdates(room.nodes, nodeKnowledge, room.tick, player.mode);
+            const updates = buildSceneSyncUpdates(
+                room.nodes,
+                nodeKnowledge,
+                nodeSyncKnowledge,
+                room.tick,
+                player.mode,
+                player.id,
+            );
             if (updates.length > 0) {
                 out.push([
                     client,
@@ -633,7 +659,9 @@ export function flush(
 
     // clear the per-room dirty set now that every client has diffed against it
     // this tick. next tick starts empty; nodes that don't change contribute
-    // nothing. (also drops refs to destroyed nodes that were parked here.)
+    // nothing. (also drops refs to destroyed nodes that were parked here.) nodes
+    // still owed to a client after a rate-throttle are carried per-client in
+    // ClientState.pendingNodes, not here — this set is server-side change only.
     for (const room of rooms.rooms.values()) {
         if (room.nodes.dirtyNodes.size > 0) room.nodes.dirtyNodes.clear();
     }
@@ -683,28 +711,31 @@ function nodeDepth(node: Node): number {
 
 /**
  * build incremental SceneSync updates for a single client's knowledge of a single
- * room, driven by the room's per-tick dirty set (nodes touched this tick), not a
- * whole-tree walk. per dirty node, the same per-client diff as before decides
- * create / update / destroy against this client's knowledge (a destroyed node is a
- * dirty node that's no longer live, `node.scene === null`); the baseline for nodes
- * that never change comes from the join snapshot. reads pre-serialized trait bytes
- * from each instance's `_sync.bytes`.
+ * room, driven by the room's per-tick dirty set (nodes touched this tick) PLUS this
+ * client's `nodeSyncKnowledge` carry-over (nodes that still owe it a rate-throttled
+ * sync() field but have since settled out of the dirty set), not a whole-tree walk.
+ * per node, the same per-client diff decides create / update / destroy against this
+ * client's knowledge (a destroyed node is a dirty node that's no longer live,
+ * `node.scene === null`); the baseline for nodes that never change comes from the
+ * join snapshot. reads pre-serialized trait bytes from each instance's `_sync.bytes`.
  *
  * assembled as: creates (parent-first by depth) → updates → destroys, so a
  * `node_structure` that points at a freshly-created parent finds it already sent,
  * and a child's `node_created` never precedes its parent's.
  */
 function buildSceneSyncUpdates(
-    sg: Nodes,
+    sceneTree: SceneTree,
     nodeKnowledge: Map<number, ClientNodeKnowledge>,
+    nodeSyncKnowledge: Set<number>,
     currentTick: number,
     mode: RoomMode,
+    playerId: PlayerId,
 ): SceneSyncUpdate[] {
     const creates: Node[] = [];
     const updateList: SceneSyncUpdate[] = [];
     const destroys: SceneSyncUpdate[] = [];
 
-    for (const node of sg.dirtyNodes) {
+    for (const node of sceneTree.dirtyNodes) {
         const known = nodeKnowledge.get(node.id);
 
         // detached at flush = destroyed this tick. (a node destroyed then re-added
@@ -715,6 +746,7 @@ function buildSceneSyncUpdates(
             if (known) {
                 destroys.push({ type: 'node_destroyed', id: node.id });
                 nodeKnowledge.delete(node.id);
+                nodeSyncKnowledge.delete(node.id);
             }
             continue;
         }
@@ -725,13 +757,30 @@ function buildSceneSyncUpdates(
         if (visible) {
             if (!known) creates.push(node);
             // diffNodeKnowledge updates knowledge in-place; per-field rate gating
-            // lives inside it.
-            else diffNodeKnowledge(sg, node, known, updateList, mode, currentTick);
+            // lives inside it, and it (un)tracks the node in nodeSyncKnowledge.
+            else diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
         } else if (known) {
             // node left this client's relevance (realm hid it) → destroy.
             destroys.push({ type: 'node_destroyed', id: node.id });
             nodeKnowledge.delete(node.id);
+            nodeSyncKnowledge.delete(node.id);
         }
+    }
+
+    // carry-over: nodes that still owe this client a rate-throttled sync() field but
+    // are NOT in dirtyNodes because their source settled. re-diff each to retry the
+    // throttled field once its cadence allows; diffNodeKnowledge clears it from
+    // nodeSyncKnowledge when the client finally catches up. snapshot first — the diff
+    // mutates the set. skip nodes already handled via dirtyNodes above.
+    for (const nodeId of [...nodeSyncKnowledge]) {
+        const node = getNodeById(sceneTree, nodeId);
+        if (!node || node.scene === null || sceneTree.dirtyNodes.has(node)) continue;
+        const known = nodeKnowledge.get(nodeId);
+        if (!known || !(mode === 'edit' || isReplicable(node))) {
+            nodeSyncKnowledge.delete(nodeId);
+            continue;
+        }
+        diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
     }
 
     // assemble parent-first creates → updates → destroys.
@@ -819,6 +868,7 @@ function readChangedFields(
     known: TraitKnowledge,
     currentTick: number,
     sentFields: Array<{ index: number; version: number }>,
+    playerId: PlayerId,
 ): BinaryField[] {
     const def = registry.traitsBySlot.get(traitSlot);
     if (!def) return [];
@@ -837,12 +887,23 @@ function readChangedFields(
         if (fieldVersion <= knownVersion) continue;
 
         const syncDef = def.sync[i];
-        // only a numeric rate is a send-path Hz throttle; 'realtime'/'dirty'/ThresholdRate
-        // gate elsewhere (the diff itself), so they don't throttle here.
-        const rate = typeof syncDef.rate === 'number' ? syncDef.rate : null;
-        if (rate !== null) {
+        // rate is the send-path cadence gate, orthogonal to dirtiness: this field is
+        // already known-dirty (fieldVersion > knownVersion, gated above by its
+        // `dirty` policy), and { hz } throttles how often that dirty value ships. a
+        // dirty value blocked here stays version-ahead and retries next tick, so the
+        // peer gets the LATEST value at the cadence, never a stale one. 'realtime'
+        // (no `hz`) doesn't throttle.
+        // never rate-gate an owner-authority field being shipped to its OWN owner:
+        // that's an authoritative handoff the owner adopts and then uploads from
+        // (e.g. the server-set spawn transform). throttle it and the owner can boot
+        // on its default, upload that, and — being the authority — clobber the server
+        // value permanently. rate is an observer-fanout cadence limiter, not for the
+        // handoff. everyone else gets the { hz } throttle.
+        const ownerHandoff = syncDef.authority === 'owner' && node.owner === playerId;
+        const hz = typeof syncDef.rate === 'object' ? syncDef.rate.hz : null;
+        if (hz !== null && !ownerHandoff) {
             const lastSent = known.lastSentTicks[i] ?? 0;
-            if (!SyncRate.shouldSendThisTick(rate, lastSent, currentTick, 60)) {
+            if (!SyncRate.shouldSendThisTick(hz, lastSent, currentTick, 60)) {
                 continue;
             }
         }
@@ -898,12 +959,14 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
 
 /** diff a known node against current state and emit updates. updates knowledge in-place for sent fields. */
 function diffNodeKnowledge(
-    _nodes: Nodes,
+    _sceneTree: SceneTree,
     node: Node,
     known: ClientNodeKnowledge,
     updates: SceneSyncUpdate[],
     mode: RoomMode,
     currentTick: number,
+    playerId: PlayerId,
+    nodeSyncKnowledge: Set<number>,
 ): void {
     // structural change (parent or index)
     const parentId = node.parent?.id ?? 0;
@@ -977,7 +1040,7 @@ function diffNodeKnowledge(
         } else {
             // existing trait, send only changed fields, with per-field rate gating
             const sentFields: Array<{ index: number; version: number }> = [];
-            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, sentFields);
+            const changedFields = readChangedFields(node, traitSlot, instance, traitKnowledge, currentTick, sentFields, playerId);
             if (changedFields.length > 0) {
                 updates.push({
                     type: 'node_trait_fields',
@@ -1062,11 +1125,18 @@ function diffNodeKnowledge(
         }
         if (!allFieldsCurrent) break;
     }
+    // `nodeVersion` reaching `node._sync.version` IS this client's "fully caught up"
+    // marker, so it doubles as the pending-index truth: park the node while a field
+    // is still behind (rate-throttled this tick), drop it once current. the fan-out
+    // revisits `pending` even when the node isn't in `dirtyNodes` — otherwise a source
+    // that settled would strand its last throttled update and this client would hold a
+    // stale value. no new state: it indexes the `nodeVersion`/`versions` we already keep.
     if (allFieldsCurrent) {
         known.nodeVersion = node._sync.version;
+        nodeSyncKnowledge.delete(node.id);
+    } else {
+        nodeSyncKnowledge.add(node.id);
     }
-    // if not all fields are current, nodeVersion stays stale, the node will
-    // be re-checked next tick and the throttled fields will be retried
 }
 
 /* ── knowledge snapshotting ── */
@@ -1118,16 +1188,16 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
 }
 
 /**
- * snapshot every (replicable) node in the scene graph into a knowledge map.
+ * snapshot every (replicable) node in the scene tree into a knowledge map.
  * in play mode skips non-shared subtrees, those are never replicated and
  * should not appear in client knowledge.
  */
-function snapshotAllNodeKnowledge(sg: Nodes, nodeKnowledge: Map<number, ClientNodeKnowledge>, mode: RoomMode): void {
+function snapshotAllNodeKnowledge(sceneTree: SceneTree, nodeKnowledge: Map<number, ClientNodeKnowledge>, mode: RoomMode): void {
     // include root: it's sent to the client as part of the packed scene
     // at join_room, so we must mark it known. otherwise the next diff loop
     // will see no knowledge entry and emit a redundant node_created.
     // root traits/scripts still diff normally on subsequent flushes.
-    walkReplicable(sg.root, mode, 'shared', (node) => {
+    walkReplicable(sceneTree.root, mode, 'shared', (node) => {
         snapshotNodeKnowledge(nodeKnowledge, node);
     });
 }

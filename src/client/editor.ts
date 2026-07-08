@@ -18,8 +18,8 @@ import { FlyControllerTrait } from '../builtins/fly-controller';
 import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
 import * as Rpc from '../core/rpc';
-import * as Nodes from '../core/scene/nodes';
-import { getTrait } from '../core/scene/nodes';
+import * as SceneTree from '../core/scene/scene-tree';
+import { getTrait } from '../core/scene/scene-tree';
 import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
 import { useEditor } from '../editor/editor-store';
 import { EditorTrait } from '../editor/editor-trait';
@@ -99,10 +99,10 @@ export function enterLocalEditorView(room: ClientRoom): void {
     // lens-private camera node. realm: 'client' so it doesn't replicate; lives
     // for the lifetime of the lens. its TransformTrait pose is what survives
     // play↔edit toggles, the player controller never writes here.
-    const cameraNode = Nodes.createNode({ name: `editor:${room.playerId}:camera`, persist: false, realm: 'client' });
-    Nodes.addTrait(cameraNode, TransformTrait);
-    Nodes.addTrait(cameraNode, CameraTrait);
-    Nodes.addChild(room.nodes.root, cameraNode);
+    const cameraNode = SceneTree.createNode({ name: `editor:${room.playerId}:camera`, persist: false, realm: 'client' });
+    SceneTree.addTrait(cameraNode, TransformTrait);
+    SceneTree.addTrait(cameraNode, CameraTrait);
+    SceneTree.addChild(room.nodes.root, cameraNode);
 
     // seed lens camera pose from the outgoing view so entry is seamless.
     if (srcPos && srcQuat) {
@@ -111,8 +111,8 @@ export function enterLocalEditorView(room: ClientRoom): void {
         setWorldQuaternion(cameraTransform, srcQuat);
     }
 
-    const editorNode = Nodes.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });
-    Nodes.addChild(room.nodes.root, editorNode);
+    const editorNode = SceneTree.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });
+    SceneTree.addChild(room.nodes.root, editorNode);
 
     // publish the lens pointer *before* attaching EditorTrait, addTrait fires
     // the editor script synchronously, and its ownership gate checks
@@ -127,8 +127,8 @@ export function enterLocalEditorView(room: ClientRoom): void {
     room.client.camera = cameraNode;
 
     // Reconcile may swap this on next tick.
-    Nodes.addTrait(editorNode, FlyControllerTrait);
-    Nodes.addTrait(editorNode, EditorTrait);
+    SceneTree.addTrait(editorNode, FlyControllerTrait);
+    SceneTree.addTrait(editorNode, EditorTrait);
 
     const store = useEditor.getState();
     store.setRoomView(room.playerId, 'edit');
@@ -143,8 +143,8 @@ export function exitLocalEditorView(room: ClientRoom): void {
     if (!lens) return;
     room.client.subject = room.client.defaultSubject;
     room.client.camera = room.client.defaultCamera;
-    Nodes.destroyNode(room.nodes, lens.subject);
-    Nodes.destroyNode(room.nodes, lens.camera);
+    SceneTree.destroyNode(room.nodes, lens.subject);
+    SceneTree.destroyNode(room.nodes, lens.camera);
     room.editor = null;
     const store = useEditor.getState();
     store.clearRoomView(room.playerId);

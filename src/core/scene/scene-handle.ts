@@ -14,7 +14,7 @@
 import type { DepKey } from '../capture/dep-graph';
 import type { ScenePayload } from '../content/scene-store';
 import type { Voxels } from '../voxels/voxels';
-import { createNode, type Node, type SerializedNode } from './nodes';
+import { createNode, type Node, type SerializedNode } from './scene-tree';
 
 /** scene id used as the default landing scene at boot and as the fallback
  *  for editor commands that take an optional sceneId arg. */

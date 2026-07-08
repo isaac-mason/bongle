@@ -8,7 +8,7 @@
 //   - clips by ClipDef ref identity (three.js style, sidecar exports refs, animator keys by identity)
 
 import type { Box3 } from 'mathcat';
-import type { Node } from '../scene/nodes';
+import type { Node } from '../scene/scene-tree';
 
 /**
  * Compound id for a single mesh inside a model.

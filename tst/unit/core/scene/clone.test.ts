@@ -12,7 +12,7 @@ import {
     getTrait,
     type Node,
     query,
-} from '../../../../src/core/scene/nodes';
+} from '../../../../src/core/scene/scene-tree';
 import { prop } from '../../../../src/core/scene/prop';
 import { control, sync, type TraitType, trait } from '../../../../src/core/scene/traits';
 
@@ -55,7 +55,7 @@ sync(SyncMarker, 'health', {
 /* ── capture test module ── */
 
 const server = createTestServer();
-const TEST_NODES = server.nodes; // sg with runtime attached (room.nodes)
+const TEST_NODES = server.room.nodes; // nodes with runtime attached (room.nodes)
 
 /* ── helpers ── */
 

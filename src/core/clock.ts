@@ -86,19 +86,28 @@ export type ClockSync = {
     lastObserved: number;
 
     // ── adaptive remote-transform interp buffer (Source cl_interp_ratio style) ──
-    /** measured one-way latency SPREAD over the sample window (seconds): the gap
-     *  between the least-delayed sample and the `JITTER_COVERAGE` percentile of the
-     *  most-delayed. `clock.server` is anchored to the least-delayed (min latency),
-     *  so remote snapshots landing slower than that arrive behind render time and
-     *  snap; holding render time back by this spread keeps `JITTER_COVERAGE` of them
+    /** measured one-way latency SPREAD (seconds): the gap between the least-delayed
+     *  sample and the `JITTER_COVERAGE` percentile of the most-delayed, over the
+     *  FULL-RATE jitter window (`jitterOffsets`, fed every push). `clock.server` is
+     *  anchored to the least-delayed (min latency), so remote snapshots landing slower
+     *  than that arrive behind render time and snap; holding render time back by this
+     *  spread (plus `INTERP_BRACKET_RESERVE`) keeps `JITTER_COVERAGE` of them
      *  bracketable. a percentile (not the raw max) so a lone outlier doesn't pin the
      *  buffer wide for the whole window. */
     latencyJitter: number;
+    /** full-rate ring of recent raw offsets (`serverClock − recvTime`), one per push,
+     *  the `latencyJitter` spread is measured over. distinct from the decimated
+     *  `samples` window (which tracks the slow latency FLOOR for `targetOffset`);
+     *  jitter is a fast-moving quantity and needs every packet. `-1` head when empty. */
+    jitterOffsets: Float64Array;
+    jitterHead: number;
+    jitterCount: number;
     /** transform-only render-behind currently applied on top of `clock.server`
-     *  (seconds), slewed toward `max(0, latencyJitter − SERVER_CLOCK_INTERP_DELAY)`.
-     *  0 whenever jitter fits inside the fixed 50ms buffer (i.e. good connections),
-     *  so those are byte-identical to a fixed buffer. projectiles are unaffected —
-     *  this rides only the transform render clock. */
+     *  (seconds), slewed toward
+     *  `max(0, INTERP_BRACKET_RESERVE + latencyJitter − SERVER_CLOCK_INTERP_DELAY)`.
+     *  0 whenever `reserve + jitter` fits inside the fixed 50ms buffer (i.e. good
+     *  connections), so those are byte-identical to a fixed buffer. projectiles are
+     *  unaffected — this rides only the transform render clock. */
     interpMargin: number;
     /** monotonic transform render clock (`clock.server − interpMargin`, clamped
      *  non-decreasing). the clamp guards the one case the slew can't: a backward
@@ -141,15 +150,46 @@ export const SERVER_CLOCK_INTERP_DELAY = 0.05;
  *  ~5% snap rather than dragging the whole buffer (and the visible lag) out to a lone
  *  outlier. this is Source's `cl_interp_ratio` tolerance expressed as a percentile. */
 const JITTER_COVERAGE = 0.95;
+/** bracketing headroom the transform render clock ALWAYS holds beyond the measured
+ *  jitter spread (seconds), so `renderTime` sits between two received keyframes even
+ *  for a worst-case (95th-percentile) packet. this is the piece the old target was
+ *  missing: it rendered exactly `jitterSpread` behind the newest keyframe (zero
+ *  reserve), so any near-worst packet landed at/past the frontier and the sampler
+ *  freeze-held then snapped. Source (`c_baseentity.cpp` GetInterpolationAmount)
+ *  renders `cl_interp + 1 server tick`; our transform broadcast is capped at 20Hz
+ *  (`rate.hz(20)`), so one keyframe interval is ~50ms and we reserve that. widens the
+ *  visible lag on other players by this much and nothing else — the price of never
+ *  freezing on jitter. */
+const INTERP_BRACKET_RESERVE = 0.05;
+/** hard ceiling on the adaptive transform render-behind (seconds), so a pathologically
+ *  jittery link can't drive the buffer arbitrarily deep. total render-behind is then
+ *  `SERVER_CLOCK_INTERP_DELAY + this` = 0.25s max. two reasons: (1) the snapshot ring
+ *  is finite (`NET_SNAPSHOT_CAP` keyframes) and render time must stay inside it with a
+ *  few keyframes of headroom; (2) past ~250ms of lag, rendering peers that far in the
+ *  past is already a lot — a link jittery enough to need more is better served by
+ *  snapping the worst ~5% of packets (graceful degradation) than by drifting the whole
+ *  world further into the past. buffer depth tracks JITTER, not ping, so this covers a
+ *  steady 300-400ms link (low jitter → small margin) and up to ~160ms of jitter (95th
+ *  pct) before the tail snaps. Source sizes its history to the live interp amount the
+ *  same way, rather than holding a fixed worst-case depth. */
+const MAX_INTERP_MARGIN = 0.2;
 /** slew caps for `interpMargin` (fraction of real time). grow fast so a rising jitter
  *  floor is covered before it snaps; shrink slow (hysteresis) so a lull doesn't yank
  *  the lag back and immediately re-dry. both stay < 1 so `clock.server − interpMargin`
  *  keeps advancing (render clock never freezes on the slew path). */
-const INTERP_MARGIN_GROW_RATE = 0.5;
+const INTERP_MARGIN_GROW_RATE = 0.6;
 const INTERP_MARGIN_SHRINK_RATE = 0.1;
+
+/** full-rate offset ring depth for the jitter estimator (~0.8s at the 60Hz push
+ *  cadence). the jitter spread is measured over THIS window, fed on every push, not
+ *  the decimated 12s offset window (which sees 1-in-6 packets and so blurs the
+ *  high-frequency arrival jitter the transform buffer actually has to absorb). */
+const JITTER_WINDOW_CAP = 48;
 
 /** scratch for the per-observe percentile sort (≤ SYNC_SAMPLES_MAX live samples). */
 const _sortedOffsets = new Float64Array(SYNC_SAMPLES_MAX);
+/** scratch for the full-rate jitter percentile sort (≤ JITTER_WINDOW_CAP samples). */
+const _jitterSorted = new Float64Array(JITTER_WINDOW_CAP);
 
 function newSync(): ClockSync {
     return {
@@ -159,9 +199,32 @@ function newSync(): ClockSync {
         synced: false,
         lastObserved: 0,
         latencyJitter: 0,
+        jitterOffsets: new Float64Array(JITTER_WINDOW_CAP),
+        jitterHead: -1,
+        jitterCount: 0,
         interpMargin: 0,
         serverRenderTime: 0,
     };
+}
+
+/** fold one offset into the full-rate jitter ring and recompute `latencyJitter`, the
+ *  spread the transform buffer must absorb. runs on EVERY push (before the offset
+ *  estimator's decimation gate), so it sees arrival jitter at packet cadence. */
+function observeJitter(sync: ClockSync, offset: number): void {
+    const i = (sync.jitterHead + 1) % JITTER_WINDOW_CAP;
+    sync.jitterHead = i;
+    sync.jitterOffsets[i] = offset;
+    if (sync.jitterCount < JITTER_WINDOW_CAP) sync.jitterCount++;
+
+    // sort ascending (offset falls as latency rises → most-delayed first, least last).
+    const n = sync.jitterCount;
+    for (let k = 0; k < n; k++) _jitterSorted[k] = sync.jitterOffsets[k]!;
+    _jitterSorted.subarray(0, n).sort();
+    // spread from the least-delayed sample down to the `JITTER_COVERAGE` percentile of
+    // the most-delayed, trimming the worst ~(1 − coverage) so a lone stall doesn't pin
+    // the buffer wide for the whole window.
+    const coverageIndex = Math.min(n - 1, Math.round((1 - JITTER_COVERAGE) * n));
+    sync.latencyJitter = _jitterSorted[n - 1]! - _jitterSorted[coverageIndex]!;
 }
 
 /** `seed` is the server clock to align `server` to (from the join handshake);
@@ -210,33 +273,32 @@ export function observeSample(clock: Clock, serverClock: number, recvTime: numbe
     // skewed `server` render clock the estimator drives below.
     clock.serverLatest = serverClock;
 
-    // decimate the estimator feed to ~`SYNC_OBSERVE_MIN_INTERVAL`. the first sample
-    // always passes (it flips `synced` and adopts the offset); afterward we skip
-    // pushes that arrive closer than the interval so the least-delayed window spans
-    // real time. `lastServerStamp` above is unaffected, it always updated.
+    // feed the FULL-RATE jitter estimator on every push, BEFORE the decimation gate
+    // below — arrival jitter is a fast-moving quantity, so it's measured at the cadence
+    // packets actually land, not the 1-in-6 the offset-floor window sees.
+    const offset = serverClock - recvTime;
+    observeJitter(sync, offset);
+
+    // decimate the OFFSET-FLOOR estimator feed to ~`SYNC_OBSERVE_MIN_INTERVAL`. the
+    // first sample always passes (it flips `synced` and adopts the offset); afterward
+    // we skip pushes closer than the interval so the least-delayed window spans real
+    // time. `serverLatest`/`latencyJitter` above are unaffected, both always updated.
     if (sync.synced && recvTime - sync.lastObserved < SYNC_OBSERVE_MIN_INTERVAL) return;
     sync.lastObserved = recvTime;
 
-    const offset = serverClock - recvTime;
     sync.samples.push({ offset, recvTime });
     // age out the window (oldest first), then bound its size as a backstop.
     const cutoff = recvTime - SYNC_SAMPLE_TTL;
     while (sync.samples.length > 0 && sync.samples[0].recvTime < cutoff) sync.samples.shift();
     while (sync.samples.length > SYNC_SAMPLES_MAX) sync.samples.shift();
 
-    // sort the live offsets ascending (offset falls as latency rises, so ascending
-    // is most-delayed → least-delayed). the top entry is the least-delayed sample
-    // (→ targetOffset); the gap from it down to the `JITTER_COVERAGE` percentile of
-    // the most-delayed is the latency spread the transform buffer must absorb.
+    // sort the live offsets ascending (offset falls as latency rises, so ascending is
+    // most-delayed → least-delayed). the top entry is the least-delayed sample, the
+    // tightest "behind by one-way latency" → targetOffset.
     const n = sync.samples.length;
     for (let i = 0; i < n; i++) _sortedOffsets[i] = sync.samples[i]!.offset;
     _sortedOffsets.subarray(0, n).sort();
     sync.targetOffset = _sortedOffsets[n - 1]!;
-    // drop the worst ~(1 − JITTER_COVERAGE) of samples (rounded, so a full 16-sample
-    // window trims the single most-delayed) — outlier robustness, else one spike pins
-    // the buffer wide for the whole window.
-    const coverageIndex = Math.min(n - 1, Math.round((1 - JITTER_COVERAGE) * n));
-    sync.latencyJitter = _sortedOffsets[n - 1]! - _sortedOffsets[coverageIndex]!;
 
     // first fix: adopt the offset outright, the next `syncServer` snaps `server`
     // off the dead-reckoned join seed onto the shared timeline.
@@ -281,20 +343,28 @@ export function syncServer(clock: Clock, now: number, dt: number): void {
  * back by an adaptive, jitter-sized margin. `clock.server` tracks the LEAST-delayed
  * packets (min latency), so on a jittery link the slower packets land behind it and
  * their keyframes snap; `interpMargin` widens the render-behind to cover
- * `JITTER_COVERAGE` of the observed latency spread, keeping them bracketable.
+ * `JITTER_COVERAGE` of the observed latency spread PLUS a fixed bracketing reserve,
+ * so render time stays between two keyframes (never on the frontier) even for a
+ * worst-case packet.
  *
  * call once per frame per room (after `syncServer`, so `clock.server` is fresh). it
- * slews `interpMargin` toward `max(0, latencyJitter − SERVER_CLOCK_INTERP_DELAY)` —
- * 0 while jitter fits the fixed 50ms buffer, so good connections match a fixed
- * buffer exactly — and returns the monotonic render time. projectiles read
+ * slews `interpMargin` toward
+ * `max(0, INTERP_BRACKET_RESERVE + latencyJitter − SERVER_CLOCK_INTERP_DELAY)` — 0
+ * while `reserve + jitter` fits the fixed 50ms buffer, so good connections match a
+ * fixed buffer exactly — and returns the monotonic render time. projectiles read
  * `clock.server` directly and are unaffected.
  */
 export function transformRenderTime(clock: Clock, dt: number): number {
     const sync = clock.sync;
 
-    // the fixed 50ms buffer already covers the first slice of spread, so only the
-    // excess needs an adaptive margin (target 0 → no margin on good connections).
-    const target = Math.max(0, sync.latencyJitter - SERVER_CLOCK_INTERP_DELAY);
+    // hold render time back by the full measured jitter spread PLUS a fixed bracketing
+    // reserve, so even a worst-case packet lands with a keyframe still ahead of render
+    // time (never freeze-holding on the frontier). the fixed 50ms buffer already baked
+    // into `clock.server` covers the first slice, so only the excess needs an adaptive
+    // margin — target 0 (no margin) whenever `reserve + spread` fits inside it, which
+    // is every good connection, keeping those byte-identical to a fixed buffer.
+    const wanted = INTERP_BRACKET_RESERVE + sync.latencyJitter - SERVER_CLOCK_INTERP_DELAY;
+    const target = wanted < 0 ? 0 : wanted > MAX_INTERP_MARGIN ? MAX_INTERP_MARGIN : wanted;
     const rate = target > sync.interpMargin ? INTERP_MARGIN_GROW_RATE : INTERP_MARGIN_SHRINK_RATE;
     const maxStep = rate * dt;
     const residual = target - sync.interpMargin;

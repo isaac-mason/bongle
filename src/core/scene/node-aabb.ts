@@ -10,8 +10,8 @@ import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait } from '../../builtins/voxel-mesh';
 import type { Resources } from '../resources';
-import type { Node } from './nodes';
-import { getTrait } from './nodes';
+import type { Node } from './scene-tree';
+import { getTrait } from './scene-tree';
 
 const _scratchLocal: Box3 = box3.create();
 const _scratchWorld: Box3 = box3.create();

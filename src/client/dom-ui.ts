@@ -41,8 +41,8 @@ import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { CanvasTrait } from '../builtins/canvas';
 import { HtmlTrait } from '../builtins/html';
 import { getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
-import type { Nodes } from '../core/scene/nodes';
-import { query } from '../core/scene/nodes';
+import type { SceneTree } from '../core/scene/scene-tree';
+import { query } from '../core/scene/scene-tree';
 import { UILayer } from './ui-layers';
 import type { Viewport } from './viewport';
 
@@ -79,7 +79,7 @@ type HtmlState = {
 
 // ── init ───────────────────────────────────────────────────────────
 
-export function init(scene: Scene, viewport: HTMLDivElement, nodes: Nodes) {
+export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree) {
     const htmlOverlay = document.createElement('div');
     htmlOverlay.className = 'engine-html-layer';
     htmlOverlay.style.position = 'absolute';

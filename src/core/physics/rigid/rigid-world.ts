@@ -51,8 +51,8 @@ import {
 import type { PlayerId } from '../../client';
 import type { MeshId } from '../../models/handle';
 import * as Resources from '../../resources';
-import type { Node, Nodes } from '../../scene/nodes';
-import { getTrait, query } from '../../scene/nodes';
+import type { Node, SceneTree } from '../../scene/scene-tree';
+import { getTrait, query } from '../../scene/scene-tree';
 import { logScriptError } from '../../scene/script-errors';
 import type { PhysicsContactArgs } from '../../scene/scripts';
 import { traverse } from '../../scene/traverse';
@@ -126,8 +126,8 @@ export type TransformSnapshot = {
 // ── world ───────────────────────────────────────────────────────────
 
 export type World = {
-    /** scene graph back-ref. needed for trait sync, getNodeById, and script-hook fan-out. */
-    nodes: Nodes;
+    /** scene tree back-ref. needed for trait sync, getNodeById, and script-hook fan-out. */
+    sceneTree: SceneTree;
 
     /** crashcat world, full broadphase + manifold pipeline. */
     world: CrashcatWorld;
@@ -149,7 +149,7 @@ export type World = {
     _bodyQuery: ReturnType<typeof query<[typeof RigidBodyTrait, typeof TransformTrait]>>;
 };
 
-export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): World {
+export function create(sceneTree: SceneTree, voxels: Voxels, registry: BlockRegistry): World {
     const world = createWorld(settings);
     const terrainShape = createVoxelPhysicsShape(voxels, registry, INFINITE_AABB);
     const terrainBody = rigidBody.create(world, {
@@ -159,7 +159,7 @@ export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): W
         collisionGroups: COLLISION_GROUP_VOXELS,
     });
     return {
-        nodes,
+        sceneTree,
         world,
         terrainBody,
         terrainShape,
@@ -167,7 +167,7 @@ export function create(nodes: Nodes, voxels: Voxels, registry: BlockRegistry): W
         bodyToNode: new Map(),
         propertySnapshots: new Map(),
         lastPhysicsTransform: new Map(),
-        _bodyQuery: query(nodes, [RigidBodyTrait, TransformTrait]),
+        _bodyQuery: query(sceneTree, [RigidBodyTrait, TransformTrait]),
     };
 }
 
@@ -891,7 +891,7 @@ export function recordBodyContact(
 }
 
 function fireContactHooks(
-    nodes: Nodes,
+    sceneTree: SceneTree,
     event: 'added' | 'persisted',
     bodyA: RigidBody,
     bodyB: RigidBody,
@@ -899,8 +899,8 @@ function fireContactHooks(
     contactSettings: ContactSettings,
 ): void {
     const args: PhysicsContactArgs = { bodyA, bodyB, manifold, settings: contactSettings };
-    if (!nodes.runtime) return;
-    for (const nodeInstances of nodes.runtime.instances.values()) {
+    if (!sceneTree.runtime) return;
+    for (const nodeInstances of sceneTree.runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
             const set = event === 'added' ? instance.onPhysicsContactAdded : instance.onPhysicsContactPersisted;
             const hookName = event === 'added' ? 'onPhysicsContactAdded' : 'onPhysicsContactPersisted';
@@ -915,9 +915,9 @@ function fireContactHooks(
     }
 }
 
-function fireValidateHooks(nodes: Nodes, bodyA: RigidBody, bodyB: RigidBody): boolean {
-    if (!nodes.runtime) return true;
-    for (const nodeInstances of nodes.runtime.instances.values()) {
+function fireValidateHooks(sceneTree: SceneTree, bodyA: RigidBody, bodyB: RigidBody): boolean {
+    if (!sceneTree.runtime) return true;
+    for (const nodeInstances of sceneTree.runtime.instances.values()) {
         for (const instance of nodeInstances.values()) {
             for (const fn of instance.onPhysicsBodyPairValidate) {
                 try {
@@ -933,15 +933,15 @@ function fireValidateHooks(nodes: Nodes, bodyA: RigidBody, bodyB: RigidBody): bo
 }
 
 function buildListener(world: World, contacts: PhysicsContacts, pool: ContactPairPool): Listener {
-    const nodes = world.nodes;
+    const sceneTree = world.sceneTree;
     return {
         onBodyPairValidate(bodyA: RigidBody, bodyB: RigidBody): boolean {
-            return fireValidateHooks(nodes, bodyA, bodyB);
+            return fireValidateHooks(sceneTree, bodyA, bodyB);
         },
         onContactAdded(bodyA: RigidBody, bodyB: RigidBody, manifold: ContactManifold, contactSettings: ContactSettings): void {
             applyVoxelMaterialOverride(world, bodyA, bodyB, manifold, contactSettings);
             recordContactFromManifold(world, contacts, pool, bodyA, bodyB, manifold);
-            fireContactHooks(nodes, 'added', bodyA, bodyB, manifold, contactSettings);
+            fireContactHooks(sceneTree, 'added', bodyA, bodyB, manifold, contactSettings);
         },
         onContactPersisted(
             bodyA: RigidBody,
@@ -951,7 +951,7 @@ function buildListener(world: World, contacts: PhysicsContacts, pool: ContactPai
         ): void {
             applyVoxelMaterialOverride(world, bodyA, bodyB, manifold, contactSettings);
             recordContactFromManifold(world, contacts, pool, bodyA, bodyB, manifold);
-            fireContactHooks(nodes, 'persisted', bodyA, bodyB, manifold, contactSettings);
+            fireContactHooks(sceneTree, 'persisted', bodyA, bodyB, manifold, contactSettings);
         },
     };
 }

@@ -24,7 +24,7 @@
 import { type Camera, createPlaneGeometry, d, type Geometry, GpuBuffer, Mesh, type Scene } from 'gpucat';
 import { ShadowCasterTrait } from '../../builtins/shadow-caster';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
-import { type Nodes, query } from '../../core/scene/nodes';
+import { type SceneTree, query } from '../../core/scene/scene-tree';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
 import type { Voxels } from '../../core/voxels/voxels';
 import { SHADOW_INSTANCE_STRIDE, ShadowInstance, type ShadowResources } from './shadow-resources';
@@ -77,7 +77,7 @@ export type ShadowVisuals = {
 
 // ── init ────────────────────────────────────────────────────────────
 
-export function init(scene: Scene, nodes: Nodes, resources: ShadowResources): ShadowVisuals {
+export function init(scene: Scene, sceneTree: SceneTree, resources: ShadowResources): ShadowVisuals {
     const capacity = INITIAL_INSTANCE_CAPACITY;
 
     // Shared 1×1 plane geometry, positions in [-0.5..0.5] × [-0.5..0.5].
@@ -109,7 +109,7 @@ export function init(scene: Scene, nodes: Nodes, resources: ShadowResources): Sh
         capacity,
         slotOwner: new Array(capacity).fill(null),
         aliveStates: [],
-        _query: query(nodes, [ShadowCasterTrait, TransformTrait]),
+        _query: query(sceneTree, [ShadowCasterTrait, TransformTrait]),
         frameId: 0,
         scene,
     };

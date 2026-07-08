@@ -20,7 +20,7 @@ import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat'
 import { env } from '../api/env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
-import { getTrait } from '../api/scene-graph';
+import { getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { type TraitType, trait } from '../api/traits';

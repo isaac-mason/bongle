@@ -25,15 +25,15 @@ import {
     destroyNode,
     getTrait,
     type Node,
-    type Nodes,
+    type SceneTree,
     type Realm,
     removeTrait,
     reorderChild,
     reparent,
     setPrefab,
-} from './nodes';
+} from './scene-tree';
 import { logScriptError } from './script-errors';
-import type { NodesContext } from './scripts';
+import type { SceneTreeContext } from './scripts';
 
 /**
  * resolve a node's *effective* realm by walking up parent pointers until
@@ -162,7 +162,7 @@ export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): Pref
  */
 export function expandPrefab(
     node: Node,
-    _runtime: NodesContext,
+    _runtime: SceneTreeContext,
     blockRegistry: import('../voxels/block-registry').BlockRegistry | null,
 ): Voxels | null {
     const config = node.prefab;
@@ -194,14 +194,14 @@ export function expandPrefab(
  * (in play mode) stamps voxel content into the world. idempotent, safe to
  * call repeatedly; only does work when the node is stale.
  */
-export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesContext, worldVoxels: Voxels | null): void {
+export function reconcilePrefabNode(sceneTree: SceneTree, node: Node, runtime: SceneTreeContext, worldVoxels: Voxels | null): void {
     const config = node.prefab!;
     const def = registry.prefabs.byId.get(config.prefabId)?.payload;
 
     // destroy existing prefab children (non-persistent children we placed before)
     const toDestroy = node.children.filter((c) => !c.persist);
     for (const child of toDestroy) {
-        destroyNode(nodes, child);
+        destroyNode(sceneTree, child);
     }
 
     // snapshot before expand so anything it attaches gets persist:false
@@ -217,7 +217,7 @@ export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesCont
 
     // stamp rotated voxels into the world.
     // only in play mode, edit mode uses the ghost visual from prefab-visuals.ts.
-    if (def && prefabHasVoxels(def) && worldVoxels && nodes.roomMode === 'play' && preparedVoxels) {
+    if (def && prefabHasVoxels(def) && worldVoxels && runtime.roomMode === 'play' && preparedVoxels) {
         const t = getTrait(node, TransformTrait);
 
         // anchor's world pose, local is wrong when the anchor has a
@@ -261,11 +261,11 @@ export function reconcilePrefabNode(nodes: Nodes, node: Node, runtime: NodesCont
     node._prefabState = {
         // edit mode: cache for prefab-visuals ghost rendering. play mode:
         // already stamped into worldVoxels above, no need to retain.
-        voxels: nodes.roomMode === 'edit' ? preparedVoxels : null,
+        voxels: runtime.roomMode === 'edit' ? preparedVoxels : null,
         generation: prevGeneration + 1,
     };
 
-    bumpNodeVersion(nodes, node);
+    bumpNodeVersion(sceneTree, node);
 }
 
 /* ── cycle detection ── */
@@ -298,7 +298,7 @@ function hasPrefabCycle(node: Node): boolean {
  * then destroy the anchor. preserves sibling order. no-op for the room
  * root or detached anchors. used by the play-mode bake.
  */
-function dissolveAnchor(sg: Nodes, anchor: Node): void {
+function dissolveAnchor(sceneTree: SceneTree, anchor: Node): void {
     const parent = anchor.parent;
     if (!parent) return; // detached or root, leave it
     const anchorIdx = parent.children.indexOf(anchor);
@@ -306,7 +306,7 @@ function dissolveAnchor(sg: Nodes, anchor: Node): void {
     for (const child of childrenSnapshot) {
         reparent(child, parent); // appends to parent.children
     }
-    destroyNode(sg, anchor); // shrinks parent.children, frees the slot
+    destroyNode(sceneTree, anchor); // shrinks parent.children, frees the slot
     // anchor is gone; reposition the spliced children into anchorIdx..
     for (let i = 0; i < childrenSnapshot.length; i++) {
         reorderChild(parent, childrenSnapshot[i], anchorIdx + i);
@@ -333,8 +333,8 @@ function dissolveAnchor(sg: Nodes, anchor: Node): void {
  * (replicated copy), `server`/`client` run only on their respective side.
  */
 export function tick(
-    sg: Nodes,
-    runtime: NodesContext,
+    sceneTree: SceneTree,
+    runtime: SceneTreeContext,
     _resources: Resources,
     worldVoxels: Voxels | null,
     side: 'server' | 'client',
@@ -348,34 +348,34 @@ export function tick(
     // setPrefab feeds first-time + config edits; `markPrefabAnchorsDirty`
     // (driven by the dispatch DepGraph propagation) feeds dep-content
     // changes. steady state is empty in both modes → tick is O(churn).
-    const isEdit = sg.roomMode === 'edit';
+    const isEdit = runtime.roomMode === 'edit';
     // snapshot so we can mutate the dirty set during iteration,
     // reconcilePrefabNode destroys nested prefab outputs which can also be
     // anchors (nested prefabs), and the drain mutates `_prefabsDirty`.
-    const work = Array.from(sg._prefabsDirty);
+    const work = Array.from(sceneTree._prefabsDirty);
 
     for (const node of work) {
         // node may have been destroyed by an earlier iteration's reconcile
         // (nested-prefab teardown). detached nodes are already off the sets.
-        if (node.scene !== sg) continue;
+        if (node.scene !== sceneTree) continue;
         if (!node.prefab) {
-            sg._prefabsDirty.delete(node);
+            sceneTree._prefabsDirty.delete(node);
             continue;
         }
         const def = registry.prefabs.byId.get(node.prefab.prefabId)?.payload;
         if (!def) {
-            sg._prefabsDirty.delete(node);
+            sceneTree._prefabsDirty.delete(node);
             continue;
         }
         // skip nodes not owned by this side (play mode only)
         if (!isEdit) {
             const effective = effectiveRealm(node);
             if (side === 'server' && effective === 'client') {
-                sg._prefabsDirty.delete(node);
+                sceneTree._prefabsDirty.delete(node);
                 continue;
             }
             if (side === 'client' && effective === 'server') {
-                sg._prefabsDirty.delete(node);
+                sceneTree._prefabsDirty.delete(node);
                 continue;
             }
         }
@@ -384,11 +384,11 @@ export function tick(
         if (!depsReady(def)) continue;
         if (hasPrefabCycle(node)) {
             console.warn(`[bongle] prefab cycle detected for "${node.prefab.prefabId}" — skipping`);
-            sg._prefabsDirty.delete(node);
+            sceneTree._prefabsDirty.delete(node);
             continue;
         }
-        reconcilePrefabNode(sg, node, runtime, worldVoxels);
-        sg._prefabsDirty.delete(node);
+        reconcilePrefabNode(sceneTree, node, runtime, worldVoxels);
+        sceneTree._prefabsDirty.delete(node);
 
         // play-mode bake: sever the prefab link, collapse the anchor's
         // transform into its children's first TransformTrait, then dissolve
@@ -402,7 +402,7 @@ export function tick(
             collapseTransformIntoChildren(node);
             removeTrait(node, TransformTrait);
             setPrefab(node, null);
-            dissolveAnchor(sg, node);
+            dissolveAnchor(sceneTree, node);
         }
     }
 }

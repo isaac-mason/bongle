@@ -17,8 +17,8 @@ import { TreeItem, TreeItemOverlay } from './tree-item';
 import {
     computeReorderOps,
     type FlattenedNode,
-    flattenSceneGraph,
-    flattenSceneGraphFiltered,
+    flattenSceneTree,
+    flattenSceneTreeFiltered,
     getDescendantIds,
     getDragDepth,
     getProjection,
@@ -71,7 +71,7 @@ export function HierarchyPanel() {
     const copyToClipboard = useEditRoom((s) => s.copyToClipboard);
     const setName = useEditRoom((s) => s.setName);
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
-    const sceneGraph = room?.nodes ?? null;
+    const sceneTree = room?.nodes ?? null;
 
     // text filter, when non-empty, the tree shows only matching nodes + their
     // ancestors, ignoring collapsed state.
@@ -84,7 +84,7 @@ export function HierarchyPanel() {
     // node id targeted by the next context menu open. set in onContextMenu of
     // the scroll container before radix opens the shared menu.
     const [contextNodeId, setContextNodeId] = useState<number | null>(null);
-    const contextNode = contextNodeId !== null && sceneGraph ? sceneGraph._idToNode.get(contextNodeId) : null;
+    const contextNode = contextNodeId !== null && sceneTree ? sceneTree._idToNode.get(contextNodeId) : null;
 
     // anchor for shift+click range select, set by plain click and cmd/ctrl+click,
     // unchanged by shift+click so a user can extend the range from a fixed anchor.
@@ -109,16 +109,16 @@ export function HierarchyPanel() {
     // track whether a drag is in progress
     const isDragging = useRef(false);
 
-    // recompute flattened list from scene graph when not dragging.
+    // recompute flattened list from scene tree when not dragging.
     // sceneRevision is intentionally in the dep array to trigger rebuilds on
-    // external scene graph mutations (e.g. node added via inspector).
-    // biome-ignore lint/correctness/useExhaustiveDependencies: sceneRevision triggers rebuild on external scene graph mutations
+    // external scene tree mutations (e.g. node added via inspector).
+    // biome-ignore lint/correctness/useExhaustiveDependencies: sceneRevision triggers rebuild on external scene tree mutations
     useEffect(() => {
-        if (isDragging.current || !sceneGraph) return;
+        if (isDragging.current || !sceneTree) return;
 
         if (filterActive) {
             // skip auto-collapse and use the filtered flatten path
-            const next = flattenSceneGraphFiltered(sceneGraph, filter);
+            const next = flattenSceneTreeFiltered(sceneTree, filter);
             setFlattenedItems((prev) => (flatListsEqual(prev, next) ? prev : next));
             return;
         }
@@ -126,9 +126,9 @@ export function HierarchyPanel() {
         // auto-collapse every non-root node with children on first sight, so
         // the default tree shows just the top level. once a user expands a
         // node we remember it in autoCollapsedSeenIds and never re-collapse.
-        const rootId = sceneGraph.root.id;
+        const rootId = sceneTree.root.id;
         const newlySeen: number[] = [];
-        for (const node of sceneGraph._idToNode.values()) {
+        for (const node of sceneTree._idToNode.values()) {
             if (autoCollapsedSeenIds.current.has(node.id)) continue;
             if (node.id === rootId) continue;
             if (node.children.length === 0) continue;
@@ -143,9 +143,9 @@ export function HierarchyPanel() {
             });
             return; // re-runs once collapsedIds updates
         }
-        const next = flattenSceneGraph(sceneGraph, collapsedIds);
+        const next = flattenSceneTree(sceneTree, collapsedIds);
         setFlattenedItems((prev) => (flatListsEqual(prev, next) ? prev : next));
-    }, [sceneGraph, collapsedIds, sceneRevision, filter, filterActive]);
+    }, [sceneTree, collapsedIds, sceneRevision, filter, filterActive]);
 
     const toggleCollapse = useCallback((nodeId: number) => {
         setCollapsedIds((prev) => {
@@ -283,14 +283,14 @@ export function HierarchyPanel() {
 
     const handleRemove = useCallback(
         (nodeId: number) => {
-            if (!sceneGraph) return;
-            const node = sceneGraph._idToNode.get(nodeId);
-            if (!node || node === sceneGraph.root) return;
+            if (!sceneTree) return;
+            const node = sceneTree._idToNode.get(nodeId);
+            if (!node || node === sceneTree.root) return;
             destroyNode(nodeId);
             // read selection from store at call-time to avoid stale closure
             if (activeEditRoomStore().getState().selection.nodes.has(nodeId)) selectNode(null);
         },
-        [sceneGraph, selectNode, destroyNode],
+        [sceneTree, selectNode, destroyNode],
     );
 
     const handleStartRename = useCallback((nodeId: number) => {
@@ -301,14 +301,14 @@ export function HierarchyPanel() {
         (nodeId: number, newName: string) => {
             setRenamingNodeId(null);
             const trimmed = newName.trim();
-            if (!sceneGraph) return;
-            const node = sceneGraph._idToNode.get(nodeId);
+            if (!sceneTree) return;
+            const node = sceneTree._idToNode.get(nodeId);
             if (!node) return;
             if (trimmed && trimmed !== node.name) {
                 setName(nodeId, trimmed);
             }
         },
-        [sceneGraph, setName],
+        [sceneTree, setName],
     );
 
     const handleCancelRename = useCallback(() => {
@@ -346,11 +346,11 @@ export function HierarchyPanel() {
     }, [contextNodeId]);
 
     const handleMenuCreateChild = useCallback(() => {
-        if (contextNodeId === null || !sceneGraph) return;
-        const node = sceneGraph._idToNode.get(contextNodeId);
+        if (contextNodeId === null || !sceneTree) return;
+        const node = sceneTree._idToNode.get(contextNodeId);
         if (!node) return;
         createNode(contextNodeId, node.children.length, 'New Node');
-    }, [contextNodeId, sceneGraph, createNode]);
+    }, [contextNodeId, sceneTree, createNode]);
 
     // when the right-clicked node is part of a multi-selection, shared menu
     // ops (delete, focus first) act on the full selection in one undo entry;
@@ -373,8 +373,8 @@ export function HierarchyPanel() {
                       },
                       copy: copyToClipboard,
                       duplicate: () => {
-                          if (contextNodeId === null || !sceneGraph) return;
-                          const node = sceneGraph._idToNode.get(contextNodeId);
+                          if (contextNodeId === null || !sceneTree) return;
+                          const node = sceneTree._idToNode.get(contextNodeId);
                           if (!node) return;
                           createNode(node.parent?.id ?? 0, node.parent?.children.length ?? 0, `${node.name} (copy)`);
                       },
@@ -389,7 +389,7 @@ export function HierarchyPanel() {
               })
             : [];
 
-    if (!sceneGraph) {
+    if (!sceneTree) {
         return (
             <div className="flex flex-col">
                 <div className="p-2 text-[10px] text-neutral-400 font-mono">no scene loaded</div>
@@ -505,21 +505,21 @@ export function HierarchyPanel() {
                                 isDragging.current = false;
 
                                 if (event.canceled) {
-                                    // reset to scene graph state
-                                    setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
+                                    // reset to scene tree state
+                                    setFlattenedItems(flattenSceneTree(sceneTree, collapsedIds));
                                     return;
                                 }
 
                                 // compute reparent instructions and dispatch each one
-                                const instructions = computeReorderOps(sceneGraph, flattenedItems, sourceChildren.current);
+                                const instructions = computeReorderOps(sceneTree, flattenedItems, sourceChildren.current);
                                 sourceChildren.current = [];
 
                                 for (const instr of instructions) {
                                     reparentNode(instr.nodeId, instr.parentId, instr.index);
                                 }
 
-                                // rebuild from the now-mutated scene graph
-                                setFlattenedItems(flattenSceneGraph(sceneGraph, collapsedIds));
+                                // rebuild from the now-mutated scene tree
+                                setFlattenedItems(flattenSceneTree(sceneTree, collapsedIds));
                             }}
                         >
                             <ul
@@ -587,8 +587,8 @@ export function HierarchyPanel() {
                     type="button"
                     onClick={() => {
                         const first = selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value : null;
-                        const selectedNode = first ? sceneGraph._idToNode.get(first) : null;
-                        const parent = selectedNode ?? sceneGraph.root;
+                        const selectedNode = first ? sceneTree._idToNode.get(first) : null;
+                        const parent = selectedNode ?? sceneTree.root;
                         createNode(parent.id, parent.children.length, 'New Node');
                     }}
                     className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-mono bg-neutral-50 border border-neutral-200 rounded text-neutral-600 hover:bg-neutral-100 cursor-pointer"
