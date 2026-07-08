@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import archiver from 'archiver';
+import type { Plugin } from 'vite';
 import { AssetPipeline, excludeEditorIcons, resolveEngineRoot } from 'bongle/engine-asset-pipeline';
 import { INTERFACE_VERSION } from 'bongle/interface';
 import { build as viteBuild } from 'vite';
@@ -14,6 +15,33 @@ import { ensureGeneratedStubs, resetGeneratedBarrels } from './user-entry';
 import { virtualEntriesPlugin } from './vite/virtual-entries';
 
 type Target = 'client' | 'server';
+
+// Strips `new URL('./file.{ogg,mp3,wav,flac,glb,gltf}', import.meta.url)` from
+// source files before Vite's asset plugin processes them.
+//
+// In Vite lib mode every binary asset referenced by `new URL(path, import.meta.url)`
+// is inlined as a base64 data URI regardless of size. The starter sounds alone
+// (~80 OGG clips) add ~1.5 MB raw / ~925 KB gzipped to the client bundle even
+// though every clip is already baked into audio-atlas.mp3 by the asset pipeline.
+// The browser runtime loads audio from the atlas (never the raw src URLs) and
+// models from atlas bins, so these source-file URLs are pipeline-only metadata
+// and serve no purpose in the browser bundle.
+//
+// Replacing the expressions with "" keeps the sound/model registration calls
+// intact — sound() and model() both guard against overwriting an already-resolved
+// barrel src with an empty string.
+function stripBinaryAssetUrlsPlugin(): Plugin {
+    const BINARY_EXT = /\.(ogg|mp3|wav|flac|glb|gltf)['"]\s*,\s*import\.meta\.url/;
+    const REPLACE = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf)['"]\s*,\s*import\.meta\.url\)/g;
+    return {
+        name: 'bongle:strip-binary-asset-urls',
+        enforce: 'pre',
+        transform(code) {
+            if (!BINARY_EXT.test(code)) return null;
+            return { code: code.replace(REPLACE, '""'), map: null };
+        },
+    };
+}
 
 // Build entries are virtual modules served by the bongle:virtual-entries
 // plugin (`virtual:bongle/build-{client,server}`). The virtual emits a
@@ -49,6 +77,7 @@ async function runBuild(projectDir: string, target: Target): Promise<void> {
     const plugins =
         target === 'client'
             ? [
+                  stripBinaryAssetUrlsPlugin(),
                   virtualEntriesPlugin({ projectDir }),
                   tailwindcss(),
                   envPlugin({ client: true, server: false, editor: false, offline: false }),

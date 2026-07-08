@@ -170,7 +170,11 @@ export function model<const Id extends string>(
         // re-hashes and fires `changed`, bumping `revision`.
         let dirty = false;
         if (existing.src !== src) {
-            (existing as Mutable<ModelHandle>).src = src;
+            // Guard: don't overwrite a barrel-resolved src with an empty string.
+            // The client build plugin strips `new URL('./model.glb', import.meta.url)`
+            // to "" so Vite lib mode won't inline raw GLB files; the barrel's path
+            // is the correct value and should be preserved.
+            if (src !== '') (existing as Mutable<ModelHandle>).src = src;
             dirty = true;
         }
         if (existing.name !== name) {

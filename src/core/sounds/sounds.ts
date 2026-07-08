@@ -199,7 +199,11 @@ export function sound<const Id extends string>(
         // re-hashes and fires `changed`, bumping `revision`.
         if (existing.src !== src || existing.long !== long || existing.name !== name) {
             const target = existing as Mutable<SoundHandle>;
-            target.src = src;
+            // Guard: don't overwrite a barrel-resolved src with an empty string.
+            // The client build plugin strips `new URL('./clip.ogg', import.meta.url)`
+            // to "" so Vite lib mode won't inline the raw audio files; the barrel's
+            // file:// path is the correct value and should be preserved.
+            if (src !== '') target.src = src;
             target.long = long;
             target.name = name;
             touch(registry.sounds, id);
