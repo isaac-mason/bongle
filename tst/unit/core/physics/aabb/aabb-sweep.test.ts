@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AXIS_NONE, AXIS_X, AXIS_Y, AXIS_Z, sweepAabbVsAabb, sweptBounds } from '../../../../src/core/math/aabb-sweep';
+import { AXIS_NONE, AXIS_X, AXIS_Y, AXIS_Z, sweepAabbVsAabb, sweptBounds } from '../../../../../src/core/physics/aabb/aabb-sweep';
 
 // helper: unit cube character (half-extents 0.5) at given center.
 function sweepUnit(

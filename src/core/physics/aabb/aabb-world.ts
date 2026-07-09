@@ -16,7 +16,6 @@ import * as crashcat from 'crashcat';
 import { type Vec3, vec3 } from 'mathcat';
 import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/aabb-body';
 import { TransformTrait } from '../../../builtins/transform';
-import { type SweepResult, sweepAabbVsAabb } from '../../math/aabb-sweep';
 import type { SceneTree } from '../../scene/scene-tree';
 import { query } from '../../scene/scene-tree';
 import type { TraitHandle } from '../../scene/traits';
@@ -29,6 +28,7 @@ import {
     removeBodyFromBucket,
     type SpatialHash,
 } from './aabb-broadphase';
+import { type SweepResult, sweepAabbVsAabb } from './aabb-sweep';
 
 export enum MotionType {
     STATIC = 0,

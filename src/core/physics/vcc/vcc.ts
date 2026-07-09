@@ -42,7 +42,7 @@ import {
 } from 'crashcat';
 import type { Quat, Vec3 } from 'mathcat';
 import { vec3 } from 'mathcat';
-import type { SweepResult } from '../../math/aabb-sweep';
+import type { SweepResult } from '../../physics/aabb/aabb-sweep';
 import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../../voxels/voxel-aabb-sweep';
 import type { Voxels } from '../../voxels/voxels';
 import * as AabbPhysics from '../aabb';

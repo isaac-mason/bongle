@@ -14,12 +14,12 @@ import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/a
 import type { TransformTrait } from '../../../builtins/transform';
 import { getWorldPosition, hasTransformedParent, markTransformDirty, worldToLocalPosition } from '../../../builtins/transform';
 import type { PlayerId } from '../../client';
-import { type SweepResult, sweepAabbVsAabb } from '../../math/aabb-sweep';
 import { BLOCK_FLAG_COLLISION } from '../../voxels/block-registry';
 import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../../voxels/voxel-aabb-sweep';
 import type { World as RigidWorld } from '../rigid/rigid-world';
 import { OBJECT_LAYER_AABB_IMPOSTOR } from '../rigid/rigid-world-settings';
 import { querySpatialHash } from './aabb-broadphase';
+import { type SweepResult, sweepAabbVsAabb } from './aabb-sweep';
 import {
     addToAwakeSet,
     type Body,
