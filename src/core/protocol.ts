@@ -533,32 +533,6 @@ export function unpackClientMessage(data: Uint8Array): ClientMessage | null {
     }
 }
 
-/**
- * a ClientPacket is a list of opaque pre-packed message buffers. each
- * inner Uint8Array decodes via ClientMessageSerDes; packcat reads them as
- * views into the source buffer so unpack stays zero-copy.
- *
- * the +1B/msg varuint length-prefix overhead is the explicit tradeoff for
- * free per-message byte accounting at send time.
- */
-export const ClientPacket = pack.object({
-    messages: pack.list(pack.uint8Array()),
-});
-
-const ClientPacketSerDes = pack.build(ClientPacket);
-
-export function packClientPacket(packet: { messages: Uint8Array[] }): Uint8Array {
-    return ClientPacketSerDes.pack(packet);
-}
-
-export function unpackClientPacket(data: Uint8Array): { messages: Uint8Array[] } {
-    try {
-        return ClientPacketSerDes.unpack(data);
-    } catch (e) {
-        console.error('[bongle] failed to unpack client packet:', e);
-        return { messages: [] };
-    }
-}
 
 /* ── Server → Client ────────────────────────────────────────────── */
 
@@ -727,8 +701,8 @@ export const VoxelChunkLight = pack.object({
     /** Player these light updates target. */
     playerId: pack.varuint(),
     /** one chunk per message, the transport coalesces a tick's messages into
-     *  one ServerPacket, so per-chunk costs only a few bytes of framing while
-     *  keeping the dispatch/in-flight unit uniform with voxel_chunk_full. */
+     *  one frame, so per-chunk costs only a few bytes of framing while keeping
+     *  the dispatch/in-flight unit uniform with voxel_chunk_full. */
     cx: pack.int32(),
     cy: pack.int32(),
     cz: pack.int32(),
@@ -901,28 +875,5 @@ export function unpackServerMessage(data: Uint8Array): ServerMessage | null {
     } catch (e) {
         console.error('[bongle] failed to unpack server message:', e);
         return null;
-    }
-}
-
-/**
- * mirror of ClientPacket: list of opaque pre-packed message buffers. each
- * inner entry is independently unpackable via ServerMessageSerDes.
- */
-export const ServerPacket = pack.object({
-    messages: pack.list(pack.uint8Array()),
-});
-
-const ServerPacketSerDes = pack.build(ServerPacket);
-
-export function packServerPacket(packet: { messages: Uint8Array[] }): Uint8Array {
-    return ServerPacketSerDes.pack(packet);
-}
-
-export function unpackServerPacket(data: Uint8Array): { messages: Uint8Array[] } {
-    try {
-        return ServerPacketSerDes.unpack(data);
-    } catch (e) {
-        console.error('[bongle] failed to unpack server packet:', e);
-        return { messages: [] };
     }
 }

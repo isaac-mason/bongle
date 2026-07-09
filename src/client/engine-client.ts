@@ -5,6 +5,7 @@ import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import * as Physics from '../core/physics/physics';
+import { acceptFrame, createReassembler } from '../core/net';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
@@ -17,6 +18,7 @@ import * as SceneTree from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
+import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
 import * as CloudResources from '../render/cloud-resources';
@@ -462,10 +464,20 @@ export async function load(state: EngineClient) {
 }
 
 function processInbox(state: EngineClient): void {
-    for (const packet of state.net.inbox) {
-        const unpacked = Protocol.unpackServerPacket(packet);
+    for (const frame of state.net.inbox) {
+        // decode the frame back into a message batch; fragments of a big batch
+        // may span ticks, so the reassembler persists in net state.
+        let messages: Uint8Array[] | null;
+        try {
+            messages = acceptFrame(state.net.reassembler, frame);
+        } catch (err) {
+            console.error('[bongle] inbound framing error:', err);
+            state.net.reassembler = createReassembler();
+            continue;
+        }
+        if (!messages) continue;
 
-        for (const messageBytes of unpacked.messages) {
+        for (const messageBytes of messages) {
             const message = Protocol.unpackServerMessage(messageBytes);
 
             if (!message) {
@@ -844,19 +856,29 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
         if (chunk.data === Voxels.EMPTY_DATA) chunk.data = new Uint16Array(Voxels.EMPTY_DATA);
 
         // apply block data changes, track which boundary faces are touched,
-        // and adjust aggregate incrementally per change (mirrors setChunkBlock).
+        // and adjust nonAirCount + solidCount incrementally per change
+        // (mirrors setChunkBlock).
+        const cull = room.voxels.registry.cull;
         let faces = 0;
         for (const change of entry.changes) {
-            const oldPaletteIdx = chunk.data[change.index]!;
-            const newPaletteIdx = change.data;
+            // explicit `: number` annotations cut the inference chain here:
+            // `change` is a recursive pack.SchemaType, and letting several
+            // locals depend on it trips a tsgo circular-inference bail.
+            const oldPaletteIdx: number = chunk.data[change.index]!;
+            const newPaletteIdx: number = change.data;
             chunk.data[change.index] = newPaletteIdx;
 
             const oldId = chunk.palette[oldPaletteIdx]!;
             const newId = chunk.palette[newPaletteIdx]!;
             const wasAir = oldId === AIR || oldId === MISSING;
             const isAir = newId === AIR || newId === MISSING;
-            if (wasAir && !isAir) chunk.aggregate++;
-            else if (!wasAir && isAir) chunk.aggregate--;
+            if (wasAir && !isAir) chunk.nonAirCount++;
+            else if (!wasAir && isAir) chunk.nonAirCount--;
+
+            const wasSolid = cull[oldId] === CullType.SOLID;
+            const isSolid = cull[newId] === CullType.SOLID;
+            if (!wasSolid && isSolid) chunk.solidCount++;
+            else if (wasSolid && !isSolid) chunk.solidCount--;
 
             const x = change.index & 0xf;
             const y = change.index >> 8;

@@ -1472,7 +1472,7 @@ type DispatchCandidate = { d2: number; key: string; pid: PlayerId; chunk: Chunk 
  * shipped nearest-first under a per-client cap + a global cap (luanti's
  * GetNextBlocks → PrioritySortedBlockTransfer → SendBlocks shape). one message
  * per shipped chunk, the transport coalesces a tick's messages into one
- * ServerPacket, so per-chunk keeps the dispatch unit uniform across channels.
+ * frame, so per-chunk keeps the dispatch unit uniform across channels.
  *
  * `ship` emits the channel's message + any per-winner bookkeeping; the generic
  * loop deletes the shipped key from the pending set. returns the chunks shipped.

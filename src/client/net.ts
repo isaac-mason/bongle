@@ -1,5 +1,6 @@
+import { createReassembler, frameOutbound } from '../core/net';
 import type { ClientMessage } from '../core/protocol';
-import { packClientMessage, packClientPacket } from '../core/protocol';
+import { packClientMessage } from '../core/protocol';
 
 type OutboxEntry = {
     bytes: Uint8Array;
@@ -10,6 +11,9 @@ export function init() {
     return {
         inbox: [] as Uint8Array[],
         outbox: [] as Uint8Array[],
+        /** reassembles inbound fragments back into a whole message batch (a big
+         *  batch is split across frames by the server's transport). */
+        reassembler: createReassembler(),
         outboxMessages: [] as OutboxEntry[],
         bytesInByType: new Map<string, number>(),
         bytesOutByType: new Map<string, number>(),
@@ -31,14 +35,18 @@ export function send(state: ClientNet, message: ClientMessage) {
 }
 
 /**
- * Pack queued OutboxEntries into a single ClientPacket (list of opaque
- * message bytes), enqueue on the outbox, clear the pending queue.
+ * Frame the queued messages onto the outbox and clear the pending queue. The
+ * batch is one atomic unit; `frameOutbound` packs it into a single wire frame,
+ * splitting into fragments only when it would exceed WIRE_BUDGET. The transport
+ * sends each frame opaquely; the server reassembles the batch whole.
  */
 export function flush(state: ClientNet) {
     if (state.outboxMessages.length === 0) return;
 
-    const packet = packClientPacket({ messages: state.outboxMessages.map((m) => m.bytes) });
-    state.outbox.push(packet);
+    frameOutbound(
+        state.outboxMessages.map((m) => m.bytes),
+        state.outbox,
+    );
 
     state.outboxMessages.length = 0;
 }

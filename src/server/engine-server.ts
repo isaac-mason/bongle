@@ -5,6 +5,7 @@ import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bong
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
+import { acceptFrame, createReassembler } from '../core/net';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
 import { buildWireIndex, clearPendingChanges, registry, touch } from '../core/registry';
@@ -236,6 +237,8 @@ export function onClientLeave(state: EngineServer, clientId: Client) {
     Discovery.removeClient(state.discovery, clientId);
     Discovery.invalidateRoomList(state.discovery);
     state.debugLogSubscribers.delete(clientId);
+    // drop any partial reassembly buffer held for this client.
+    state.net.reassemblers.delete(clientId);
 }
 
 /**
@@ -392,11 +395,27 @@ export function processInbox(state: EngineServer) {
     // process inbox, count ingress bytes
     const inbox = state.net.inbox;
 
-    for (const [client, packets] of inbox) {
-        for (const packet of packets) {
-            const unpacked = Protocol.unpackClientPacket(packet);
+    for (const [client, frames] of inbox) {
+        // decode frames back into message batches; fragments of a big batch may
+        // span ticks, so the reassembler persists per client.
+        let reassembler = state.net.reassemblers.get(client);
+        if (!reassembler) {
+            reassembler = createReassembler();
+            state.net.reassemblers.set(client, reassembler);
+        }
+        for (const frame of frames) {
+            let messages: Uint8Array[] | null;
+            try {
+                messages = acceptFrame(reassembler, frame);
+            } catch (err) {
+                console.error(`[bongle] inbound framing error from client ${String(client)}:`, err);
+                reassembler = createReassembler();
+                state.net.reassemblers.set(client, reassembler);
+                continue;
+            }
+            if (!messages) continue;
 
-            for (const messageBytes of unpacked.messages) {
+            for (const messageBytes of messages) {
                 const message = Protocol.unpackClientMessage(messageBytes);
                 if (!message) continue;
                 // bill ingress per message.type using the original bytes
