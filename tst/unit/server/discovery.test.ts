@@ -1,16 +1,17 @@
 import { block } from 'bongle';
 import type { Client } from 'bongle/interface';
 import { describe, expect, it } from 'vitest';
-import { createTestServer } from '../../integration/server-integration-test';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
 import * as Debug from '../../../src/core/debug';
 import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
 import * as Resources from '../../../src/core/resources';
 import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../../../src/core/scene/scene-tree';
 import { setBlock } from '../../../src/core/voxels/voxels';
+import { compressChunkZstd } from '../../../src/server/chunk-encode';
 import * as Discovery from '../../../src/server/discovery';
 import * as Net from '../../../src/server/net';
 import * as Rooms from '../../../src/server/rooms';
+import { createTestServer } from '../../integration/server-integration-test';
 
 /* ── helpers ── */
 
@@ -71,7 +72,7 @@ function ackAllFulls(discovery: Discovery.Discovery, out: Array<[Client, { type:
 
 function setupRoom(mode: 'edit' | 'play') {
     const server = createTestServer({ mode });
-    const discovery = Discovery.init();
+    const discovery = Discovery.init(compressChunkZstd);
     const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
     Discovery.addClient(discovery, FAKE_CLIENT);
     const net = Net.init();

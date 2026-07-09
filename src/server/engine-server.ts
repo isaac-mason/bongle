@@ -12,15 +12,16 @@ import { buildWireIndex, clearPendingChanges, registry, touch } from '../core/re
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
-import * as SceneTree from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
+import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
 import { runBlockEventHooks } from '../core/voxels/block-hooks';
 import * as Light from '../core/voxels/light';
 import type * as EditorModule from '../editor/index';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
+import { compressChunkZstd } from './chunk-encode';
 import * as Clients from './clients';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
@@ -100,7 +101,7 @@ export function init(opts: InitOptions) {
         },
         'server',
     );
-    const discovery = Discovery.init();
+    const discovery = Discovery.init(compressChunkZstd);
 
     // server-side rpc. driver constructed by ./rpc; listener registry +
     // dispatch live in core/rpc. one shared instance across all rooms;

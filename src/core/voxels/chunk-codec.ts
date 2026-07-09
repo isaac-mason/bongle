@@ -1,29 +1,30 @@
 // ── chunk codec ─────────────────────────────────────────────────────
 //
-// encoding pipeline for chunk_full messages:
+// chunk_full payload pipeline:
 //   1. RLE encode data and light as two SEPARATE Uint16 streams
 //   2. concat them under a small length header (data bytes, light bytes)
-//   3. deflate the concatenation via fflate
+//      — this is packChunkStreams(), shared browser+server
+//   3. zstd compress the concatenation. the compress step is SERVER-ONLY
+//      (Node's native zlib zstd) and lives in server/, since only the server
+//      encodes chunks. the client only decodes.
 //
-// decoding pipeline:
-//   1. inflate decompress
-//   2. read the header, RLE decode each stream back into data / light
+// decoding: zstd decompress (vendored fzstd, see utils/fzstd), then read the
+// header and RLE decode each stream — decodeChunk() below.
 //
 // data and light are kept as separate streams rather than interleaved:
 // interleaving alternates two unrelated value distributions, which
-// shortens every RLE run and gives deflate a noisier window. encoding
+// shortens every RLE run and gives the compressor a noisier window. encoding
 // each channel's runs contiguously is both smaller (measured 1.4-6× on
-// structured chunks) and faster to decode (one smaller inflate, no
-// de-interleave pass). RLE before deflate still earns its keep, it
-// pre-collapses the long air/sky runs so deflate's window isn't spent on
-// them. see chunk-codec-bench.ts for the variant comparison.
+// structured chunks) and faster to decode. RLE before zstd still earns its
+// keep: it pre-collapses the long air/sky runs so zstd's window isn't spent
+// on them.
 //
-// the light-only codec (encodeLight/decodeLight, used by chunk_light)
-// skips the deflate step, inflateSync was the dominant decode cost on
-// the client, and RLE alone captures most of the win for low-entropy
-// light data. see notes above encodeLight for the wire format.
+// the light-only codec (encodeLight/decodeLight, used by chunk_light) skips
+// compression entirely — decode cost was the dominant client concern, and RLE
+// alone captures most of the win for low-entropy light data. see notes above
+// encodeLight for the wire format.
 
-import { deflateSync, inflateSync } from 'fflate';
+import { zstdDecompress } from '../utils/fzstd';
 import { CHUNK_VOLUME } from './voxels';
 
 // ── RLE ─────────────────────────────────────────────────────────────
@@ -99,8 +100,14 @@ function bytesAsU16(bytes: Uint8Array): Uint16Array {
         : new Uint16Array(bytes.slice().buffer);
 }
 
-/** encode a chunk's data + light into compressed bytes. */
-export function encodeChunk(data: Uint16Array, light: Uint16Array): Uint8Array {
+/** compresses a packed chunk payload into the wire frame. supplied by whoever
+ *  runs the server (Node native zstd) and injected into encodeChunk, so this
+ *  browser-safe module never hard-depends on a Node compressor. */
+export type ChunkCompressor = (payload: Uint8Array) => Uint8Array;
+
+/** pack a chunk's data + light into the pre-compression byte payload: two RLE
+ *  streams under an 8-byte length header. */
+function packChunkStreams(data: Uint16Array, light: Uint16Array): Uint8Array {
     const dataBytes = u16Bytes(rleEncode(data));
     const lightBytes = u16Bytes(rleEncode(light));
 
@@ -111,12 +118,19 @@ export function encodeChunk(data: Uint16Array, light: Uint16Array): Uint8Array {
     concat.set(dataBytes, CHUNK_HEADER_BYTES);
     concat.set(lightBytes, CHUNK_HEADER_BYTES + dataBytes.length);
 
-    return deflateSync(concat);
+    return concat;
 }
 
-/** decode compressed bytes back to data + light arrays. */
+/** encode a chunk's data + light into a chunk_full wire payload: RLE-pack, then
+ *  compress via the injected `compress` (server-only Node zstd). the client
+ *  reverses this with decodeChunk. */
+export function encodeChunk(data: Uint16Array, light: Uint16Array, compress: ChunkCompressor): Uint8Array {
+    return compress(packChunkStreams(data, light));
+}
+
+/** decode zstd-compressed chunk bytes back to data + light arrays. */
 export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light: Uint16Array } {
-    const raw = inflateSync(compressed);
+    const raw = zstdDecompress(compressed);
     const header = new DataView(raw.buffer, raw.byteOffset, CHUNK_HEADER_BYTES);
     const dataLen = header.getUint32(0, true);
     const lightLen = header.getUint32(4, true);
@@ -138,9 +152,9 @@ export function decodeChunk(compressed: Uint8Array): { data: Uint16Array; light:
 // breaks runs whenever either channel changes; the split keeps each channel's
 // natural run structure intact.
 //
-// no deflate. light entropy is low enough that RLE alone captures the bulk of
-// the compression win, and inflateSync is the dominant cost on the decode
-// side. wire format is rleEncode'd Uint16Array reinterpreted as bytes.
+// no zstd. light entropy is low enough that RLE alone captures the bulk of the
+// compression win, and the decompress step is the dominant decode cost — not
+// worth paying it here. wire format is rleEncode'd Uint16Array reinterpreted as bytes.
 
 /** view a Uint16Array's underlying bytes, typically the result of rleEncode
  *  ready to send on the wire as a uint8Array pack field. */

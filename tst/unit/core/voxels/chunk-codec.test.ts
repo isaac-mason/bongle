@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { decodeChunk, decodeLight, encodeChunk, encodeLight, rleDecode, rleEncode } from '../../../../src/core/voxels/chunk-codec';
+import {
+    decodeChunk,
+    decodeLight,
+    encodeChunk,
+    encodeLight,
+    rleDecode,
+    rleEncode,
+} from '../../../../src/core/voxels/chunk-codec';
 import { CHUNK_VOLUME } from '../../../../src/core/voxels/voxels';
+// the codec takes an injected compressor; the server supplies Node native zstd
+import { compressChunkZstd } from '../../../../src/server/chunk-encode';
 
 describe('rleEncode / rleDecode', () => {
     it('empty input', () => {
@@ -95,7 +104,7 @@ describe('encodeChunk / decodeChunk', () => {
         const data = new Uint16Array(CHUNK_VOLUME); // all zeros
         const light = new Uint16Array(CHUNK_VOLUME); // all zeros
 
-        const compressed = encodeChunk(data, light);
+        const compressed = encodeChunk(data, light, compressChunkZstd);
         expect(compressed.byteLength).toBeLessThan(100); // should compress very small
 
         const result = decodeChunk(compressed);
@@ -107,7 +116,7 @@ describe('encodeChunk / decodeChunk', () => {
         const data = new Uint16Array(CHUNK_VOLUME).fill(1); // all block id 1
         const light = new Uint16Array(CHUNK_VOLUME).fill(0xf000); // full sky light
 
-        const compressed = encodeChunk(data, light);
+        const compressed = encodeChunk(data, light, compressChunkZstd);
         // each channel is uniform → one RLE run apiece → tiny
         expect(compressed.byteLength).toBeLessThan(100);
 
@@ -126,7 +135,7 @@ describe('encodeChunk / decodeChunk', () => {
             light[i] = i < CHUNK_VOLUME / 2 ? 0 : 0xf000;
         }
 
-        const compressed = encodeChunk(data, light);
+        const compressed = encodeChunk(data, light, compressChunkZstd);
         const result = decodeChunk(compressed);
         expect(result.data).toEqual(data);
         expect(result.light).toEqual(light);
@@ -144,7 +153,7 @@ describe('encodeChunk / decodeChunk', () => {
             light[i] = (seed >> 8) & 0xffff;
         }
 
-        const compressed = encodeChunk(data, light);
+        const compressed = encodeChunk(data, light, compressChunkZstd);
         const result = decodeChunk(compressed);
         expect(result.data).toEqual(data);
         expect(result.light).toEqual(light);
@@ -172,7 +181,7 @@ describe('encodeChunk / decodeChunk', () => {
             }
         }
 
-        const compressed = encodeChunk(data, light);
+        const compressed = encodeChunk(data, light, compressChunkZstd);
         // raw data would be 4096 * 2 * 2 = 16384 bytes
         // with RLE + deflate this should be much smaller
         expect(compressed.byteLength).toBeLessThan(200);

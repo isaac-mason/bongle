@@ -6,6 +6,8 @@ import * as Debug from '../core/debug';
 import type { BinaryField, BinaryTrait, RoomInfo, RoomMode, SceneSyncUpdate, ServerMessage, VoxelAck } from '../core/protocol';
 import { registry } from '../core/registry';
 import type { Resources } from '../core/resources';
+import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
+import { packSceneTree } from '../core/scene/scene-pack';
 import {
     bumpFieldVersion,
     encodePrefabConfig,
@@ -13,15 +15,13 @@ import {
     getTrait,
     isReplicable,
     type Node,
-    type SceneTree,
     type Realm,
+    type SceneTree,
 } from '../core/scene/scene-tree';
-import { getControlCodecs, getSyncCodecs } from '../core/scene/packcat-bridge';
-import { packSceneTree } from '../core/scene/scene-pack';
 import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
-import { encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
+import { type ChunkCompressor, encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,
     type Chunk,
@@ -244,13 +244,18 @@ export type Discovery = {
      *  distribution so a command never beats this tick's scene state (join_room
      *  / scene_sync) onto a client's ordered socket. */
     commandQueue: QueuedCommand[];
+
+    /** chunk_full compressor, injected by the server entry (Node zstd). kept off
+     *  the codec so this browser-bundled module never imports node:zlib. */
+    compressChunk: ChunkCompressor;
 };
 
-export function init(): Discovery {
+export function init(compressChunk: ChunkCompressor): Discovery {
     return {
         roomListVersion: 0,
         clients: new Map(),
         commandQueue: [],
+        compressChunk,
     };
 }
 
@@ -1340,11 +1345,11 @@ function buildExpansionOrder(radius: number): [number, number, number][] {
 /* ── compressed snapshot caching ── */
 
 /** get or build the compressed snapshot for a chunk. caches on the chunk. */
-function getCompressedSnapshot(chunk: Chunk): { compressed: Uint8Array; palette: string[] } {
+function getCompressedSnapshot(chunk: Chunk, compress: ChunkCompressor): { compressed: Uint8Array; palette: string[] } {
     if (chunk.compressedSnapshot && chunk.snapshotPalette) {
         return { compressed: chunk.compressedSnapshot, palette: chunk.snapshotPalette };
     }
-    const compressed = encodeChunk(chunk.data, chunk.light);
+    const compressed = encodeChunk(chunk.data, chunk.light, compress);
     const palette = chunk.paletteKeys.slice();
     chunk.compressedSnapshot = compressed;
     chunk.snapshotPalette = palette;
@@ -1573,7 +1578,7 @@ function dispatchFull(
         FULL_CHUNKS_PER_CLIENT_PER_TICK,
         (k) => k.pendingFull,
         (c, knowledge, client) => {
-            const { compressed, palette } = getCompressedSnapshot(c.chunk);
+            const { compressed, palette } = getCompressedSnapshot(c.chunk, state.compressChunk);
             out.push([
                 client,
                 {
