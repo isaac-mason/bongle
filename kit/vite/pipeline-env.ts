@@ -24,7 +24,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MessageChannel, Worker } from 'node:worker_threads';
+import { MessageChannel, type MessagePort, Worker } from 'node:worker_threads';
 import { DevEnvironment, type HotChannel, type HotChannelClient, type HotPayload, type ResolvedConfig } from 'vite';
 import type { PipelineWorkerInbound, PipelineWorkerOutbound } from '../runtime/pipeline-host';
 
@@ -55,6 +55,10 @@ export type PipelineWorkerHandle = {
     sendBoot(): void;
     /** Force a pipeline pass (asset/scene file change relayed from main). */
     triggerRun(forceAll: boolean): void;
+    /** Respawn the worker on an engine-source change: clean-shutdown the current
+     *  worker (its Dawn instance dies with the isolate — no GC segfault, no
+     *  clearCache) and boot a fresh one that fetches the new engine code. */
+    reboot(): Promise<void>;
     /** Subscribe to control messages the worker posts back. `result` is the
      *  browser-forwarding signal; lifecycle (`warm`/`gate`/`error`) is handled
      *  internally and drives the first-run gate. */
@@ -95,23 +99,55 @@ export function createPipelineEnvironment(
     const semiSpaceMb = process.env.BONGLE_PIPELINE_SEMI_SPACE_MB;
     if (semiSpaceMb) workerExecArgv.push(`--max-semi-space-size=${semiSpaceMb}`);
 
-    const { port1, port2 } = new MessageChannel();
-    const worker = new Worker(WORKER_PATH, {
-        workerData: {
-            control: port2,
-            bootId: BOOT_ID,
-            projectDir: deps.projectDir,
-            bongleDir: deps.bongleDir,
-        },
-        transferList: [port2],
-        execArgv: workerExecArgv,
-    });
-    worker.on('error', (err) => console.error('[bongle:pipeline] worker error:', err));
-
-    // ── Vite transport (HotChannel) bridging to the worker via postMessage ──
+    // ── Vite transport (HotChannel) bridging to the CURRENT worker via postMessage ──
+    // Env-durable state survives a worker respawn: the `worker`/`controlPort`
+    // refs swap, but the DevEnvironment (and its transport + listeners + gate)
+    // are created once. `spawnWorker()` re-applies these listeners to each new
+    // worker so Vite's fetchModule/HMR keep flowing after a reboot.
     type ChannelListener = (data: unknown, client: HotChannelClient) => void;
-    const handlerToWorkerListener = new WeakMap<ChannelListener, (value: HotPayload) => void>();
+    // message listeners keyed by the Vite-supplied handler (must survive respawn).
+    const hotListeners = new Map<ChannelListener, (value: HotPayload) => void>();
+    // vite:client:disconnect handlers (fire on worker exit) — detached before a
+    // reboot's shutdown so the old worker's exit isn't read as a real disconnect.
+    const disconnectListeners = new Map<ChannelListener, () => void>();
+
+    let worker!: Worker;
+    let controlPort!: MessagePort;
+
     const client: HotChannelClient = { send: (payload) => worker.postMessage(payload) };
+
+    function spawnWorker(): void {
+        const { port1, port2 } = new MessageChannel();
+        controlPort = port1;
+        worker = new Worker(WORKER_PATH, {
+            workerData: {
+                control: port2,
+                bootId: BOOT_ID,
+                projectDir: deps.projectDir,
+                bongleDir: deps.bongleDir,
+            },
+            transferList: [port2],
+            execArgv: workerExecArgv,
+        });
+        worker.on('error', (err) => console.error('[bongle:pipeline] worker error:', err));
+        // re-attach the HotChannel + control wiring to the fresh worker.
+        for (const listener of hotListeners.values()) worker.on('message', listener);
+        for (const listener of disconnectListeners.values()) worker.on('exit', listener);
+        controlPort.on('message', (msg: PipelineWorkerOutbound) => {
+            switch (msg.type) {
+                case 'warm':
+                    settleFirstRun({ ms: msg.ms, timings: msg.timings });
+                    break;
+                case 'gate':
+                    settleFirstRun();
+                    break;
+                case 'error':
+                    console.error('[bongle:pipeline] worker:', msg.error);
+                    break;
+            }
+            for (const cb of controlListeners) cb(msg);
+        });
+    }
 
     const workerHotChannel = {
         // worker_thread messages aren't network-exposed → skip the fs access check.
@@ -124,35 +160,64 @@ export function createPipelineEnvironment(
             if (event === 'vite:client:connect') return;
             if (event === 'vite:client:disconnect') {
                 const listener = () => fn(undefined, client);
-                handlerToWorkerListener.set(fn, listener as unknown as (value: HotPayload) => void);
+                disconnectListeners.set(fn, listener);
                 worker.on('exit', listener);
                 return;
             }
             const listener = (value: HotPayload) => {
                 if (value?.type === 'custom' && value.event === event) fn(value.data, client);
             };
-            handlerToWorkerListener.set(fn, listener);
+            hotListeners.set(fn, listener);
             worker.on('message', listener);
         },
         off: (event: string, fn: ChannelListener) => {
-            const listener = handlerToWorkerListener.get(fn);
-            if (!listener) return;
-            if (event === 'vite:client:disconnect') worker.off('exit', listener);
-            else worker.off('message', listener);
-            handlerToWorkerListener.delete(fn);
+            if (event === 'vite:client:disconnect') {
+                const listener = disconnectListeners.get(fn);
+                if (listener) worker.off('exit', listener);
+                disconnectListeners.delete(fn);
+                return;
+            }
+            const listener = hotListeners.get(fn);
+            if (listener) worker.off('message', listener);
+            hotListeners.delete(fn);
         },
     };
 
-    const environment = new DevEnvironment(name, config, {
-        hot: true,
-        transport: workerHotChannel as HotChannel,
-    });
+    // shut down a worker cleanly (self-exit from a clean JS stack so Dawn's pump
+    // can't napi-FATAL), hard-terminating only if it wedges past the timeout.
+    const shutdownWorker = (w: Worker, p: MessagePort): Promise<void> =>
+        new Promise((resolve) => {
+            let killTimer: ReturnType<typeof setTimeout>;
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(killTimer);
+                try {
+                    p.close();
+                } catch {
+                    // already closed
+                }
+                resolve();
+            };
+            w.once('exit', finish);
+            try {
+                const msg: PipelineWorkerInbound = { type: 'shutdown' };
+                p.postMessage(msg);
+            } catch {
+                void w.terminate(); // port already gone — fall straight to terminate.
+            }
+            killTimer = setTimeout(() => void w.terminate(), SHUTDOWN_TIMEOUT_MS);
+        });
 
-    // ── first-pipeline-run gate ──
+    // ── first-pipeline-run gate (declared before spawnWorker, whose control
+    // handler settles it) ──
     // The worker reports its first settled pass via 'warm' (success, with
     // timings) or 'gate' (fault/empty). Resolve `firstRun` exactly once on
     // either — or on the timeout guard — so a wedged first pass can't hang the
-    // CLI banner or the editor's /__bongle/ready poll. Never rejects.
+    // CLI banner or the editor's /__bongle/ready poll. Never rejects. A reboot's
+    // passes report 'warm'/'gate' too, but settleFirstRun is idempotent so they
+    // never re-gate.
     let firstRunSettled = false;
     let firstRunStatus: string | null = 'Starting…';
     let resolveFirstRun!: () => void;
@@ -183,27 +248,21 @@ export function createPipelineEnvironment(
         settleFirstRun();
     }, FIRST_RUN_TIMEOUT_MS);
 
-    // ── app-level control port ──
-    // Lifecycle ('warm'/'gate'/'error') is owned here and drives the gate;
-    // 'result' (browser forwarding) is left to subscribers via onControl.
+    // 'result' (browser forwarding) goes to subscribers via onControl; lifecycle
+    // ('warm'/'gate'/'error') is owned in spawnWorker's control handler.
     const controlListeners = new Set<(msg: PipelineWorkerOutbound) => void>();
-    port1.on('message', (msg: PipelineWorkerOutbound) => {
-        switch (msg.type) {
-            case 'warm':
-                settleFirstRun({ ms: msg.ms, timings: msg.timings });
-                break;
-            case 'gate':
-                settleFirstRun();
-                break;
-            case 'error':
-                console.error('[bongle:pipeline] worker:', msg.error);
-                break;
-        }
-        for (const cb of controlListeners) cb(msg);
+
+    spawnWorker();
+
+    const environment = new DevEnvironment(name, config, {
+        hot: true,
+        transport: workerHotChannel as HotChannel,
     });
 
     handle = {
-        worker,
+        get worker() {
+            return worker;
+        },
         firstRun,
         get ready() {
             return firstRunSettled;
@@ -211,43 +270,31 @@ export function createPipelineEnvironment(
         get status() {
             return firstRunStatus;
         },
-        sendBoot: () => port1.postMessage({ type: 'boot' }),
+        sendBoot: () => controlPort.postMessage({ type: 'boot' }),
         triggerRun: (forceAll: boolean) => {
             const msg: PipelineWorkerInbound = { type: 'run', forceAll };
-            port1.postMessage(msg);
+            controlPort.postMessage(msg);
         },
         onControl: (cb) => {
             controlListeners.add(cb);
         },
-        close: () =>
-            new Promise<void>((resolve) => {
-                clearTimeout(firstRunTimer);
-                let killTimer: ReturnType<typeof setTimeout>;
-                let settled = false;
-                const finish = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(killTimer);
-                    try {
-                        port1.close();
-                    } catch {
-                        // already closed
-                    }
-                    handle = null;
-                    resolve();
-                };
-                worker.once('exit', finish);
-                // Ask the worker to exit from its own clean JS stack. Terminating
-                // it from here while Dawn's ProcessEvents pump is mid-callback
-                // aborts the process with a napi FATAL — see pipeline-worker.mjs.
-                try {
-                    const msg: PipelineWorkerInbound = { type: 'shutdown' };
-                    port1.postMessage(msg);
-                } catch {
-                    void worker.terminate(); // port already gone — fall straight to terminate.
-                }
-                killTimer = setTimeout(() => void worker.terminate(), SHUTDOWN_TIMEOUT_MS);
-            }),
+        reboot: async () => {
+            // detach listeners from the outgoing worker so its shutdown exit
+            // isn't read as a real disconnect; clean-exit it, then spawn a fresh
+            // worker (spawnWorker re-attaches the listeners) and re-boot it.
+            const old = worker;
+            const oldPort = controlPort;
+            for (const listener of disconnectListeners.values()) old.off('exit', listener);
+            for (const listener of hotListeners.values()) old.off('message', listener);
+            await shutdownWorker(old, oldPort);
+            spawnWorker();
+            controlPort.postMessage({ type: 'boot' });
+        },
+        close: async () => {
+            clearTimeout(firstRunTimer);
+            await shutdownWorker(worker, controlPort);
+            handle = null;
+        },
     };
 
     return environment;

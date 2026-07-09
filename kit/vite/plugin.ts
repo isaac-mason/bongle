@@ -138,9 +138,26 @@ import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from 
 import { getPipelineWorkerHandle, type PipelineWorkerOutbound } from './pipeline-env';
 import { virtualEntriesPlugin } from './virtual-entries';
 
+/** Mutable handle the dev orchestrator (`kit/dev/start.ts`) sets once the envs
+ *  have booted. The `hotUpdate` hook calls the matching `request*` on an
+ *  engine-source change (per env). Null until boot completes — early changes are
+ *  ignored, the fresh boot already has them. Server + pipeline are separate so a
+ *  server-only change (e.g. `core/net.ts`) doesn't respawn the pipeline worker,
+ *  and vice versa. */
+export type EngineRebootRef = {
+    /** reboot the server env (game runtime + wire format). */
+    requestServer: (() => void) | null;
+    /** respawn the pipeline worker (asset bake + icon render). */
+    requestPipeline: (() => void) | null;
+};
+
 export interface BongleOptions {
     /** absolute path to the project root (the dir containing `src/`, `resources/`). */
     projectDir: string;
+    /** set by the dev orchestrator to reboot the server env on engine-source
+     *  changes (code outside `projectDir` — the bongle package + workspace deps).
+     *  Absent in non-reboot consumers (e.g. build). */
+    engineReboot?: EngineRebootRef;
 }
 
 export function bongle(opts: BongleOptions): Plugin[] {
@@ -164,6 +181,37 @@ export function bongle(opts: BongleOptions): Plugin[] {
 
     return [
         virtualEntriesPlugin({ projectDir }),
+        {
+            // Engine-source HMR. User code (`projectDir/src`), content, and
+            // resources stay on the in-place registry-HMR path (the capture
+            // transform + scene watcher). Engine/workspace code lives OUTSIDE
+            // `projectDir`, has no accept boundary, and would otherwise leave a
+            // stale server runner while the client page-reloads to a new build
+            // — a wire-format skew. So on an engine change we reboot the server
+            // env (start.ts) and suppress the client's racing auto-reload; the
+            // reboot reloads clients once the fresh server is up.
+            name: 'bongle:engine-reboot',
+            hotUpdate(options) {
+                // engine/workspace source = a changed file outside the user
+                // project. (content/resources/user-src are all under projectDir.)
+                if (options.file.startsWith(projectDir)) return; // default HMR
+                if (this.environment.name === 'server') {
+                    opts.engineReboot?.requestServer?.();
+                    return []; // suppress the no-op server "full reload"
+                }
+                if (this.environment.name === 'pipeline') {
+                    // the pipeline worker runs engine code too (AssetPipeline
+                    // bake/render); respawn it so it re-fetches the new code.
+                    opts.engineReboot?.requestPipeline?.();
+                    return [];
+                }
+                if (this.environment.name === 'client') {
+                    // suppress the auto page-reload so it can't beat the async
+                    // server reboot; start.ts sends a full-reload afterwards.
+                    return [];
+                }
+            },
+        },
         {
             name: 'bongle:capture-transform',
             async transform(code, id) {

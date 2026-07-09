@@ -52,7 +52,7 @@ const toGlob = (p: string) => p.replace(/\\/g, '/');
 
 import { envPlugin } from '../env-plugin';
 import { createPipelineEnvironment } from './pipeline-env';
-import { bongle } from './plugin';
+import { bongle, type EngineRebootRef } from './plugin';
 
 export type BongleConfigOptions = {
     /** absolute path to project root (contains src/, resources/). */
@@ -61,6 +61,9 @@ export type BongleConfigOptions = {
     bongleDir: string;
     /** vite dev server port for the client env. */
     port: number;
+    /** set by the dev orchestrator so engine-source changes reboot the server
+     *  env. Omitted by non-dev consumers (build). */
+    engineReboot?: EngineRebootRef;
 };
 
 // Engine + workspace deps are served raw (see `optimizeDeps.exclude`), and
@@ -85,7 +88,7 @@ function makeLogger(): Logger {
 }
 
 export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
-    const { projectDir, bongleDir, port } = opts;
+    const { projectDir, bongleDir, port, engineReboot } = opts;
 
     return defineConfig({
         root: bongleDir,
@@ -116,7 +119,7 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             // the server env's compile-time env so engine + user code evaluate
             // the same branches there (client=false, server=true, editor=true).
             envPlugin({ client: false, server: true, editor: true }, 'pipeline'),
-            ...bongle({ projectDir }),
+            ...bongle({ projectDir, engineReboot }),
         ],
         server: {
             port,

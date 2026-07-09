@@ -24,8 +24,9 @@
  * disposes the user's ServerApp.
  */
 
-import { createServer, type ViteDevServer } from 'vite';
+import { createServer, type RunnableDevEnvironment, type ViteDevServer } from 'vite';
 import { defineBongleConfig } from '../vite/config';
+import type { EngineRebootRef } from '../vite/plugin';
 import { getPipelineWorkerHandle } from '../vite/pipeline-env';
 import { type GameEnvBootResult, initGameEnv } from './game-env';
 
@@ -55,7 +56,12 @@ export type DevHandle = {
 export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> {
     const { projectDir, bongleDir, port } = opts;
 
-    const server = await createServer(defineBongleConfig({ projectDir, bongleDir, port }));
+    // Set below once the envs have booted; the bongle:engine-reboot plugin calls
+    // the matching `request*` on an engine-source change (a file outside
+    // projectDir), per env.
+    const rebootRef: EngineRebootRef = { requestServer: null, requestPipeline: null };
+
+    const server = await createServer(defineBongleConfig({ projectDir, bongleDir, port, engineReboot: rebootRef }));
     await server.listen();
 
     // Source of truth for the bound port: read it off the http server rather
@@ -69,7 +75,54 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
     // http server must already be bound — `server.listen()` above
     // guarantees that. initGameEnv forwards server.httpServer into the
     // virtual's `boot(ctx)` call.
-    const game = await initGameEnv({ server, projectDir, bongleDir });
+    let game = await initGameEnv({ server, projectDir, bongleDir });
+
+    // Engine-source hot-reboot. `bongle:engine-reboot` calls `rebootRef.request()`
+    // when engine/workspace code (outside projectDir) changes — that code has no
+    // HMR accept boundary, so without this the server runner keeps running stale
+    // modules while the client page-reloads to a new build, skewing the wire
+    // format. We dispose the live game, reset the server runner's module cache
+    // (vite@8 `ModuleRunner.clearCache()`), re-boot fresh, then reload connected
+    // clients so they reconnect to the matched server. Re-entrancy is coalesced
+    // (a change mid-reboot queues one more pass); design:
+    // llm/plan-dev-server-engine-reboot.md.
+    let rebooting = false;
+    let rebootQueued = false;
+    async function rebootGameEnv(): Promise<void> {
+        if (rebooting) {
+            rebootQueued = true;
+            return;
+        }
+        rebooting = true;
+        try {
+            do {
+                rebootQueued = false;
+                try {
+                    game.transport.close();
+                } catch (err) {
+                    console.warn('[dev/start] reboot: transport close failed:', err);
+                }
+                try {
+                    game.app.dispose?.(game.state);
+                } catch (err) {
+                    console.warn('[dev/start] reboot: app dispose failed:', err);
+                }
+                (server.environments.server as RunnableDevEnvironment).runner.clearCache();
+                game = await initGameEnv({ server, projectDir, bongleDir });
+                server.environments.client.hot.send({ type: 'full-reload' });
+                console.log('[dev/start] engine-source changed — server env rebooted; clients reloading');
+            } while (rebootQueued);
+        } catch (err) {
+            console.error('[dev/start] engine reboot failed:', err);
+        } finally {
+            rebooting = false;
+        }
+    }
+    let rebootDebounce: ReturnType<typeof setTimeout> | undefined;
+    rebootRef.requestServer = () => {
+        clearTimeout(rebootDebounce);
+        rebootDebounce = setTimeout(() => void rebootGameEnv(), 60);
+    };
 
     // Boot the asset-pipeline worker now that the server is listening (so the
     // pipeline env is initialized before the worker's first fetchModule). The
@@ -78,6 +131,37 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
     // which opens the editor-load gate. Independent of the engine server above.
     const pipelineWorker = getPipelineWorkerHandle();
     pipelineWorker?.sendBoot();
+
+    // Respawn the pipeline worker on a pipeline-engine-source change (it runs
+    // engine bake/render code). A fresh worker fetches the new code; the old
+    // worker's pinned Dawn instance dies with its isolate, so we sidestep the
+    // clearCache-would-GC-the-instance segfault. Coalesced like the server reboot.
+    let pipelineRebooting = false;
+    let pipelineRebootQueued = false;
+    async function rebootPipeline(): Promise<void> {
+        if (!pipelineWorker) return;
+        if (pipelineRebooting) {
+            pipelineRebootQueued = true;
+            return;
+        }
+        pipelineRebooting = true;
+        try {
+            do {
+                pipelineRebootQueued = false;
+                await pipelineWorker.reboot();
+                console.log('[dev/start] engine-source changed — pipeline worker respawned');
+            } while (pipelineRebootQueued);
+        } catch (err) {
+            console.error('[dev/start] pipeline reboot failed:', err);
+        } finally {
+            pipelineRebooting = false;
+        }
+    }
+    let pipelineRebootDebounce: ReturnType<typeof setTimeout> | undefined;
+    rebootRef.requestPipeline = () => {
+        clearTimeout(pipelineRebootDebounce);
+        pipelineRebootDebounce = setTimeout(() => void rebootPipeline(), 60);
+    };
 
     let closed = false;
     async function close(): Promise<void> {
@@ -105,7 +189,10 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
 
     return {
         server,
-        game,
+        // getter, not a snapshot — `game` is reassigned on engine reboot.
+        get game() {
+            return game;
+        },
         port: boundPort,
         firstPipelineRun: pipelineWorker?.firstRun ?? Promise.resolve(),
         close,
