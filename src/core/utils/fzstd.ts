@@ -10,8 +10,7 @@
 //      hidden class instead of two.
 //   2. long literal/match runs copy via copyWithin instead of a scalar loop,
 //      gated on CWMIN so short runs dodge copyWithin's fixed call overhead.
-// Measured ~1.05-1.3x decode on busy voxel chunks, weighted toward the costly
-// ones. See llm notes / chunk-codec.ts for the encode side.
+// Measured ~1.05-1.3x decode on busy voxel chunks, weighted toward the costly ones.
 
 // Some numerical data is initialized as -1 even when it doesn't need initialization to help the JIT infer types
 
@@ -26,7 +25,7 @@ const ab = ArrayBuffer,
 const CWMIN = 16;
 
 // Huffman decoding table
-interface HDT {
+type HDT = {
     // initial bits
     b: number;
     // symbols
@@ -36,13 +35,13 @@ interface HDT {
 }
 
 // FSE decoding table
-interface FSEDT extends HDT {
+type FSEDT = HDT & {
     // next state
     t: Uint16Array;
 }
 
 // decompress Zstandard state
-interface DZstdState {
+type DZstdState = {
     // byte
     b: number;
     // out byte
