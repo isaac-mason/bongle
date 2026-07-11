@@ -40,13 +40,22 @@ const transport = {
 
 const runner = new ModuleRunner({ transport, hmr: true, createImportMeta: createNodeImportMeta }, new ESModulesEvaluator());
 
+// Shutdown routes to this handler. Before boot (or on a boot fault) there's no
+// Dawn device yet, so the default exits immediately from this clean
+// message-callback stack. Boot upgrades it to the host's drain-then-exit, which
+// settles the in-flight pass first — exiting with a pending GPUBuffer.mapAsync()
+// FATALs Dawn. Single owner (the host installs no separate shutdown listener),
+// so there's no split-brain or boot race.
+let onShutdown = () => process.exit(0);
+
 let booted = false;
 control.on('message', async (msg) => {
     if (msg?.type !== 'boot' || booted) return;
     booted = true;
     try {
         const mod = await runner.import(bootId);
-        await mod.boot({ control, projectDir, bongleDir });
+        const result = await mod.boot({ control, projectDir, bongleDir });
+        if (typeof result?.shutdown === 'function') onShutdown = result.shutdown;
     } catch (err) {
         control.postMessage({ type: 'error', error: String(err?.stack ?? err) });
         // open the editor gate anyway — a boot fault must not wedge startup.
@@ -54,12 +63,8 @@ control.on('message', async (msg) => {
     }
 });
 
-// Graceful shutdown. Before boot (or on a boot fault) there's no Dawn device
-// yet, so exit immediately from this clean message-callback stack. Once booted,
-// the pipeline host owns shutdown (`drainAndExit`) so it can drain the in-flight
-// pass first — exiting with a pending GPUBuffer.mapAsync() FATALs Dawn.
 control.on('message', (msg) => {
-    if (msg?.type === 'shutdown' && !booted) process.exit(0);
+    if (msg?.type === 'shutdown') onShutdown();
 });
 
 // surface unexpected faults rather than dying silently.

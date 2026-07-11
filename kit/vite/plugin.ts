@@ -195,13 +195,18 @@ export function bongle(opts: BongleOptions): Plugin[] {
                 // engine/workspace source = a changed file outside the user
                 // project. (content/resources/user-src are all under projectDir.)
                 if (options.file.startsWith(projectDir)) return; // default HMR
+                // log the trigger so a reboot — or a surprising/missing one, if
+                // the classifier misfires — is visible rather than silent staleness.
+                const rel = path.relative(projectDir, options.file);
                 if (this.environment.name === 'server') {
+                    console.log(`[bongle:engine-reboot] server ← ${rel}`);
                     opts.engineReboot?.requestServer?.();
                     return []; // suppress the no-op server "full reload"
                 }
                 if (this.environment.name === 'pipeline') {
                     // the pipeline worker runs engine code too (AssetPipeline
                     // bake/render); respawn it so it re-fetches the new code.
+                    console.log(`[bongle:engine-reboot] pipeline ← ${rel}`);
                     opts.engineReboot?.requestPipeline?.();
                     return [];
                 }

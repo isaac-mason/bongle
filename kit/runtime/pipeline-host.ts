@@ -53,7 +53,7 @@ export type StartOptions = {
     userEntry: () => Promise<unknown>;
 };
 
-export async function start(opts: StartOptions): Promise<void> {
+export async function start(opts: StartOptions): Promise<{ shutdown: () => Promise<void> }> {
     const { control, projectDir, userEntry } = opts;
 
     env.client = false;
@@ -115,8 +115,10 @@ export async function start(opts: StartOptions): Promise<void> {
     };
 
     // drain the in-flight pass (so mapAsync readbacks settle), then exit from
-    // this clean JS stack. Replaces pipeline-worker.mjs's immediate exit once
-    // booted; a wedged pass falls back to the main-side shutdown timeout.
+    // this clean JS stack — exiting with a pending GPUBuffer.mapAsync() FATALs
+    // Dawn. Handed back to the worker entry (see the return below), which routes
+    // 'shutdown' to it once booted; a wedged pass falls back to the main-side
+    // shutdown timeout.
     const drainAndExit = async (): Promise<void> => {
         shuttingDown = true;
         if (busy) await new Promise<void>((resolve) => idleWaiters.push(resolve));
@@ -124,10 +126,10 @@ export async function start(opts: StartOptions): Promise<void> {
     };
 
     // asset/scene file changes are detected by the main process (it owns the
-    // Vite watcher) and relayed here as a control 'run'; 'shutdown' drains first.
+    // Vite watcher) and relayed here as a control 'run'. Shutdown is owned by the
+    // worker entry via the returned handler below — not a second listener here.
     control.on('message', (msg: PipelineWorkerInbound) => {
         if (msg?.type === 'run') void run(!!msg.forceAll);
-        else if (msg?.type === 'shutdown') void drainAndExit();
     });
 
     // every settled HMR cascade in this worker → one pass. This is the
@@ -141,4 +143,9 @@ export async function start(opts: StartOptions): Promise<void> {
     // so the first flush from user-src may have already fired before this
     // handler registered — drive one explicitly to be sure).
     void run();
+
+    // Hand the drained-exit path back to the worker entry. It routes 'shutdown'
+    // here once booted; before that it exits immediately (no Dawn device yet, so
+    // nothing to drain). Single owner, no split-brain, no boot race.
+    return { shutdown: drainAndExit };
 }
