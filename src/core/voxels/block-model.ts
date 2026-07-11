@@ -337,23 +337,74 @@ function rotateNormal(n: Vec3, steps: number): Vec3 {
 }
 
 /**
+ * "uvlock" for a Y rotation: re-derive the uvs of the two faces perpendicular
+ * to the Y axis (normal ±Y) straight from each vertex's (already rotated) world
+ * position, matching Minecraft's uvlock. this pins their texture to world axes
+ * regardless of facing AND keeps 1:1 texel density (the sub-rect a face samples
+ * equals its world footprint), so non-square faces — stair step tops and
+ * exposed tread rects — don't squish.
+ *
+ * the mapping (u=x,v=z for +Y; u=x,v=1-z for -Y) mirrors the full-cube mesher's
+ * top/bottom convention (chunk-mesher.ts FACE_UVS, faces 2/3) — NOT box()'s
+ * local formula, which is rotated 90° from it. keep these in sync with the
+ * mesher so a locked stair tread's grain continues an adjacent full block's.
+ *
+ * faces in the XZ plane are left as authored: a Y rotation keeps their vertical
+ * axis vertical, so their texture is already world-consistent.
+ *
+ * note: for ±Y faces this ignores the authored uvs (they'd fight the lock).
+ * only opt in (uvlock: true) for blocks whose top/bottom should track world,
+ * i.e. planar-tiled surfaces like stairs — not ones with a bespoke top atlas.
+ */
+function lockUvsY(verts: readonly Vec3[], normal: Vec3, uvs: [Vec2, Vec2, Vec2, Vec2] | undefined): [Vec2, Vec2, Vec2, Vec2] | undefined {
+    const ny = normal[1];
+    if (ny > 0.5) {
+        return [
+            [verts[0]![0], verts[0]![2]],
+            [verts[1]![0], verts[1]![2]],
+            [verts[2]![0], verts[2]![2]],
+            [verts[3]![0], verts[3]![2]],
+        ];
+    }
+    if (ny < -0.5) {
+        return [
+            [verts[0]![0], 1 - verts[0]![2]],
+            [verts[1]![0], 1 - verts[1]![2]],
+            [verts[2]![0], 1 - verts[2]![2]],
+            [verts[3]![0], 1 - verts[3]![2]],
+        ];
+    }
+    return uvs;
+}
+
+/**
  * rotate an array of BlockQuad around the Y axis by `steps` × 90° CW.
  * positions rotate around block center (0.5, y, 0.5).
  * normals and cullFace directions rotate accordingly.
- * uvs are preserved, texture orientation stays the same relative to the face.
+ *
+ * uvs are preserved by default (texture orientation stays fixed relative to the
+ * face, so it spins with the geometry). pass `uvlock: true` to instead pin the
+ * top/bottom faces' texture to world axes (see lockUvsY) — this is what keeps a
+ * directional top texture (e.g. wood grain on stairs) aligned across facings.
+ * because uvlock derives ±Y uvs from world position, it applies even at steps=0
+ * so the reference facing matches the rotated ones.
  */
-export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[] {
+export function rotateY(quads: BlockQuad[], steps: number, options?: { uvlock?: boolean }): BlockQuad[] {
     const s = ((steps % 4) + 4) % 4;
-    if (s === 0) return quads;
+    const uvlock = options?.uvlock ?? false;
+    if (s === 0 && !uvlock) return quads;
 
-    return quads.map((q) => ({
-        verts: [rotatePos(q.verts[0], s), rotatePos(q.verts[1], s), rotatePos(q.verts[2], s), rotatePos(q.verts[3], s)] as const,
-        normal: rotateNormal(q.normal, s),
-        texture: q.texture,
-        uvs: q.uvs,
-        cullFace: rotateCullFace(q.cullFace, s),
-        material: q.material,
-    }));
+    return quads.map((q) => {
+        const verts: [Vec3, Vec3, Vec3, Vec3] = [rotatePos(q.verts[0], s), rotatePos(q.verts[1], s), rotatePos(q.verts[2], s), rotatePos(q.verts[3], s)];
+        return {
+            verts,
+            normal: rotateNormal(q.normal, s),
+            texture: q.texture,
+            uvs: uvlock ? lockUvsY(verts, q.normal, q.uvs) : q.uvs,
+            cullFace: rotateCullFace(q.cullFace, s),
+            material: q.material,
+        };
+    });
 }
 
 // ── mirror (X) helper ───────────────────────────────────────────────

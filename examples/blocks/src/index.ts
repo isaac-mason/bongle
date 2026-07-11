@@ -36,6 +36,7 @@ const {
     ice: Ice,
     cobblestone: Cobblestone,
     stoneStairs: StoneStairs,
+    oakStairs: OakStairs,
     stoneSlab: StoneSlab,
     cobblestoneWall: CobblestoneWall,
     glassPane: GlassPane,
@@ -222,6 +223,55 @@ script(GameplayTrait, 'session', (ctx) => {
         setBlock(ctx.voxels, ox + 6, baseY, oz + 2, StoneStairs.stateKey({ facing: 'north', half: 'bottom', shape: 'straight' }));
         setBlock(ctx.voxels, ox + 7, baseY, oz + 2, StoneStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }));
         setBlock(ctx.voxels, ox + 6, baseY + 1, oz + 4, StoneStairs.stateKey({ facing: 'north', half: 'top', shape: 'straight' }));
+
+        // ── wood-stairs uvlock showcase (front-left, x<0 / z<0) ──────
+        // oak stairs use the plank texture on every face, so their TOP
+        // tread grain makes texture orientation obvious. with uvlock the
+        // tread grain stays pinned to world axes across all four facings;
+        // without it the grain spins 90° per facing. laid on a wood-plank
+        // reference floor so the stair treads can be compared to a full
+        // block's (never-rotated) grain directly.
+        // front-right of the platform (x=8..15, z=-4..3): open space clear
+        // of the cave entrance, spawn, and the other showcase columns.
+        const wsx = 8;
+        const wsz = -4;
+        // 8×8 plank reference floor at the walkable surface (overwrites the
+        // stone platform top for this patch).
+        for (let dx = 0; dx <= 7; dx++) {
+            for (let dz = 0; dz <= 7; dz++) {
+                setBlock(ctx.voxels, wsx + dx, baseY - 1, wsz + dz, WoodFloor.defaultKey());
+            }
+        }
+        // comparison row (z = wsz): four stairs, one per facing, spaced out.
+        // the definitive test — with uvlock all four tread grains run the
+        // same world direction (parallel); a full plank block sits at the
+        // end as the reference grain.
+        setBlock(ctx.voxels, wsx + 0, baseY, wsz + 0, OakStairs.stateKey({ facing: 'north', half: 'bottom', shape: 'straight' }));
+        setBlock(ctx.voxels, wsx + 2, baseY, wsz + 0, OakStairs.stateKey({ facing: 'east', half: 'bottom', shape: 'straight' }));
+        setBlock(ctx.voxels, wsx + 4, baseY, wsz + 0, OakStairs.stateKey({ facing: 'south', half: 'bottom', shape: 'straight' }));
+        setBlock(ctx.voxels, wsx + 6, baseY, wsz + 0, OakStairs.stateKey({ facing: 'west', half: 'bottom', shape: 'straight' }));
+        setBlock(ctx.voxels, wsx + 7, baseY, wsz + 0, WoodFloor.defaultKey());
+        // picture-frame ring (z = wsz+2 .. wsz+7): a hollow 6×6 square of
+        // stairs each facing outward, reproducing the big-hill platform lip.
+        // corners auto-derive outer shapes via onNeighbourUpdate. with uvlock
+        // the tread grain reads continuously around the frame; corners miter.
+        const frameMinX = wsx;
+        const frameMaxX = wsx + 5;
+        const frameMinZ = wsz + 2;
+        const frameMaxZ = wsz + 7;
+        for (let x = frameMinX; x <= frameMaxX; x++) {
+            for (let z = frameMinZ; z <= frameMaxZ; z++) {
+                const onWest = x === frameMinX;
+                const onEast = x === frameMaxX;
+                const onNorth = z === frameMinZ;
+                const onSouth = z === frameMaxZ;
+                if (!onWest && !onEast && !onNorth && !onSouth) continue; // interior stays open
+                // outward-facing: engine north = -z, south = +z. corners fall
+                // through to a horizontal edge; onNeighbourUpdate reshapes them.
+                const facing = onNorth ? 'north' : onSouth ? 'south' : onWest ? 'west' : 'east';
+                setBlock(ctx.voxels, x, baseY, z, OakStairs.stateKey({ facing, half: 'bottom', shape: 'straight' }));
+            }
+        }
 
         // carpet (col 9): thin layer on top of stone.
         setBlock(ctx.voxels, ox + 9, baseY, oz + 0, SnowCarpet.defaultKey());

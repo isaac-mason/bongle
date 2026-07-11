@@ -278,12 +278,14 @@ function stairBoxes(p: { half: StairHalf; shape: StairShape }) {
 
 function stairQuads(textures: CubeTextures, topTex: TextureRef, p: { half: StairHalf; shape: StairShape }): BlockQuad[] {
     const quads: BlockQuad[] = [
-        // bottom slab (top face emitted separately as exposed quads)
-        ...blockModel.box([0, 0, 0], [1, 0.5, 1], textures, { exclude: ['up'] }),
+        // bottom slab (top face emitted separately as exposed quads). local uvs
+        // so each partial face samples its world-footprint sub-rect at 1:1 texel
+        // density (a full-texture stretch squishes the 1×0.5 sides).
+        ...blockModel.box([0, 0, 0], [1, 0.5, 1], textures, { exclude: ['up'], uvs: 'local' }),
     ];
     for (const b of stairUpperBoxes(p.shape)) {
         // upper step boxes rest on the slab top, exclude their down face.
-        quads.push(...blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], textures, { exclude: ['down'] }));
+        quads.push(...blockModel.box([b[0], b[1], b[2]], [b[3], b[4], b[5]], textures, { exclude: ['down'], uvs: 'local' }));
     }
     for (const r of stairExposedTopRects(p.shape)) {
         // top quad on the part of the slab that isn't covered by a step box.
@@ -333,7 +335,7 @@ export function stairs(id: string, textures: CubeTextures, options?: PresetOptio
         shape: (p) => blockShape.rotateY(blockShape.aabbs(stairBoxes(p)), (4 - FACING4_STEPS[p.facing]) % 4),
         model: (p) => ({
             type: 'custom' as const,
-            quads: blockModel.rotateY(stairQuads(textures, topTex, p), (4 - FACING4_STEPS[p.facing]) % 4),
+            quads: blockModel.rotateY(stairQuads(textures, topTex, p), (4 - FACING4_STEPS[p.facing]) % 4, { uvlock: true }),
         }),
         cull: CullType.PARTIAL,
         place: (ctx, io) => {
