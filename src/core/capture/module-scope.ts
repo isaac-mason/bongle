@@ -26,12 +26,16 @@
  *     destructure, and adding/removing/renaming a script key changes the
  *     binding identity that the instance map and registry are keyed on.
  *
- * `__decideReload(id)` is called by the plugin's injected hot.accept
- * callback after the module re-evaluates. it returns 'initial' on first
- * evaluation, 'patch' if shape is stable, 'invalidate' otherwise. on
+ * `__decideReload(id, newModule)` is called by the plugin's injected
+ * hot.accept callback after the module re-evaluates, with the fresh module
+ * namespace. it returns 'initial' on first evaluation, 'patch' only when the
+ * module's exports are all hot-swappable handles AND the trait/script shape is
+ * stable, 'invalidate' otherwise (a non-handle export, or a shape change). on
  * 'invalidate' the plugin calls `import.meta.hot.invalidate()` and vite
  * cascades to importers, each of whom self-decides locally.
  */
+
+import type { DepHandle, DepKey } from './dep-graph';
 
 /* ── module-scope stack ─────────────────────────────────────────── */
 
@@ -282,10 +286,54 @@ export function recordScript(key: string): void {
 
 export type ReloadDecision = 'initial' | 'patch' | 'invalidate';
 
-export function __decideReload(id: string): ReloadDecision {
+/**
+ * decide patch vs invalidate for a re-evaluated user module. `newModule` is
+ * the freshly-evaluated module namespace (passed by the injected hot.accept
+ * callback); we inspect its exports to decide whether the change can be
+ * self-accepted or must cascade to importers.
+ *
+ * This mirrors React Fast Refresh's boundary rule: a module may self-accept
+ * (patch its registered handles in place) only if EVERY one of its exports is
+ * a hot-swappable engine handle. Handles are patched by-reference — importers
+ * hold the same handle object and see new state through it — so they stay
+ * current across a patch. A plain export (a helper fn, a constant, a
+ * re-exported value) is captured by-VALUE at import time; patching in place
+ * would leave importers bound to the stale binding until a full reload. So the
+ * moment a module exports anything that isn't a handle, we invalidate and let
+ * Vite cascade to importers (each re-reads the fresh module and self-decides).
+ *
+ * This subsumes the pure-helper case: `games/big-hill/src/course.ts` exports a
+ * `generateCourse` function and no handles, so its export is non-handle →
+ * invalidate → `world.ts` re-imports the fresh generator. A module with no
+ * exports at all (pure side-effect: registers systems/scripts, exports
+ * nothing) is vacuously all-handle and stays surgically patchable.
+ */
+export function __decideReload(id: string, newModule?: Record<string, unknown>): ReloadDecision {
     const pair = snapshots.get(normalizeModuleId(id));
     if (!pair?.previous) return 'initial';
+    if (newModule && hasNonHandleExport(newModule)) return 'invalidate';
     return diffSnapshots(pair.previous, pair.current) ? 'patch' : 'invalidate';
+}
+
+/**
+ * true if the module namespace has any export that isn't an engine handle.
+ * Every declarative handle (trait, block, blockTexture, model, scene, prefab,
+ * sound, sprite, particle, command, script, matchmaking) carries a DepGraph
+ * `dependency: { registry, id }` stamp — that stamp is the shared brand we
+ * test for. Anything without it (functions, constants, plain objects) is
+ * captured by-value by importers and forces an importer cascade.
+ */
+function hasNonHandleExport(mod: Record<string, unknown>): boolean {
+    for (const value of Object.values(mod)) {
+        if (!isHandle(value)) return true;
+    }
+    return false;
+}
+
+function isHandle(value: unknown): value is DepHandle {
+    if (typeof value !== 'object' || value === null) return false;
+    const dep = (value as { dependency?: unknown }).dependency;
+    return typeof dep === 'object' && dep !== null && typeof (dep as DepKey).registry === 'string' && typeof (dep as DepKey).id === 'string';
 }
 
 /**

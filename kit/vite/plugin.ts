@@ -309,17 +309,20 @@ const __kit_prev = __kit.push(import.meta.url);
 `;
 
                 // self-accept: re-evaluating this module records a fresh
-                // snapshot via the new __kit.push; the cb then asks the
-                // engine whether shape changed. on 'invalidate', Vite
-                // cascades to importers (each is also self-accepting and
-                // makes its own decision). either way, __kit.flush()
+                // snapshot via the new __kit.push; the cb hands the fresh
+                // module namespace to `__kit.reload`, which patches only if
+                // every export is a hot-swappable handle and the shape is
+                // stable. on 'invalidate' (a non-handle export, or a shape
+                // change), Vite cascades to importers (each is also
+                // self-accepting and makes its own decision). either way,
+                // __kit.flush()
                 // schedules a microtask-debounced drain — a cascade of
                 // accepts coalesces to one applyRegistryChanges call.
                 const postlude = /* ts */ `
 ;__kit.pop(__kit_prev);
 if (import.meta.hot) {
-  import.meta.hot.accept(() => {
-    if (__kit.reload(import.meta.url) === 'invalidate') {
+  import.meta.hot.accept((__kit_next) => {
+    if (__kit.reload(import.meta.url, __kit_next) === 'invalidate') {
       import.meta.hot.invalidate();
     }
     __kit.flush();
