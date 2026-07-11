@@ -4,19 +4,24 @@
  * must paint above HtmlTrait world overlays, which are DOM, and a
  * canvas-rendered layer can never sit above DOM.
  *
- * Each `Crosshair` owns its DOM + animation state: `updateCrosshair` lerps
- * the three source scalars (spread/length/thickness, CSS px) toward the
- * config and only rewrites the tick styles when a scalar drifts past an
- * epsilon or the color changes, so a stable crosshair is free. Animating
- * transform/size on four tiny elements is far cheaper than a full-viewport
- * canvas clear+repaint.
+ * Each `Crosshair` owns its DOM + animation state. Presence is explicit:
+ * `addCrosshair` mounts it, `removeCrosshair` unmounts it, and
+ * `updateCrosshair` only drives it (lerp + style writes; no-op while
+ * removed). The update lerps the three source scalars
+ * (spread/length/thickness, CSS px) toward the config and only rewrites
+ * the tick styles when a scalar drifts past an epsilon or the color
+ * changes, so a stable crosshair is free. Animating transform/size on
+ * four tiny elements is far cheaper than a full-viewport canvas
+ * clear+repaint.
  */
 
 import type { ScriptContext } from '../api/scripts';
 import { UILayer } from './ui-layers';
 
 export type CrosshairConfig = {
-    /** show the four-tick crosshair HUD. */
+    /** show the four-tick crosshair HUD. controllers map this to
+     *  `addCrosshair`/`removeCrosshair` (`PlayerControllerTrait` removes
+     *  while false); the widget itself doesn't read it. */
     enabled: boolean;
     /** distance from screen center to inner edge of each tick (CSS px). */
     spread: number;
@@ -64,7 +69,7 @@ function applyTickGeometry(el: HTMLDivElement, w: number, h: number, x: number, 
 
 export type Crosshair = {
     ctx: ScriptContext;
-    /** 0×0 anchor div at screen center; null while hidden/unmounted. */
+    /** 0×0 anchor div at screen center; null while removed. */
     root: HTMLDivElement | null;
     /** the four tick divs (top, bottom, left, right) parented to `root`. */
     ticks: HTMLDivElement[];
@@ -72,7 +77,7 @@ export type Crosshair = {
     spread: number;
     length: number;
     thickness: number;
-    /** false until the first update after (re)mount, so geometry snaps to
+    /** false until the first update after (re)adding, so geometry snaps to
      *  config rather than lerping in from stale values. */
     lerpInit: boolean;
     /** last-written geometry, gating style rewrites via `REWRITE_EPS`. */
@@ -101,11 +106,16 @@ export function createCrosshairImpl(ctx: ScriptContext): Crosshair {
     };
 }
 
-/** mount the DOM if it isn't already; false while the client has no viewport. */
-function ensureCrosshair(crosshair: Crosshair): boolean {
+/**
+ * mount the crosshair's DOM under the client viewport. a fresh `Crosshair`
+ * starts removed, so nothing shows until the first add. idempotent, and a
+ * no-op until the client viewport exists, so it's safe to call per frame.
+ * geometry snaps to config on the first update after adding.
+ */
+export function addCrosshair(crosshair: Crosshair): void {
     const viewport = crosshair.ctx.client?.viewport;
-    if (!viewport) return false;
-    if (crosshair.root) return true;
+    if (!viewport) return;
+    if (crosshair.root) return;
     // a 0×0 anchor at screen center; ticks position relative to its origin.
     const anchor = document.createElement('div');
     anchor.style.cssText = [
@@ -127,20 +137,18 @@ function ensureCrosshair(crosshair: Crosshair): boolean {
     viewport.appendChild(anchor);
     crosshair.root = anchor;
     crosshair.ticks = ticks;
-    // force a full rewrite on the first frame after (re)creation: the fresh
-    // divs have no geometry or background yet.
+    // force a full rewrite on the first update after adding: the fresh divs
+    // have no geometry or background yet.
     crosshair.lastSpread = -1;
     crosshair.lastColor[0] = -1;
-    return true;
 }
 
 /**
- * remove the DOM and reset the lerp so the crosshair snaps (rather than
- * crawls) from config when it next shows. idempotent, and a later
- * `updateCrosshair` remounts, so this doubles as "hide": call it on POV
- * loss and from `onDispose`.
+ * unmount the crosshair's DOM and reset the lerp so geometry snaps
+ * (rather than crawls) from config when it's next added. idempotent;
+ * `addCrosshair` re-adds. call on POV loss and from `onDispose`.
  */
-export function disposeCrosshair(crosshair: Crosshair): void {
+export function removeCrosshair(crosshair: Crosshair): void {
     if (crosshair.root) {
         crosshair.root.remove();
         crosshair.root = null;
@@ -150,16 +158,13 @@ export function disposeCrosshair(crosshair: Crosshair): void {
 }
 
 /**
- * drive the crosshair from `cfg` for this frame: mounts the DOM on first
- * call, lerps geometry toward the config, hides while `cfg.enabled` is
- * false. call once per frame while this controller holds the POV.
+ * drive the crosshair from `cfg` for this frame: lerp geometry toward the
+ * config and rewrite the tick styles that changed. no-op while the
+ * crosshair isn't added. call once per frame while this controller holds
+ * the POV.
  */
 export function updateCrosshair(crosshair: Crosshair, cfg: CrosshairConfig, dt: number): void {
-    if (!cfg.enabled) {
-        disposeCrosshair(crosshair);
-        return;
-    }
-    if (!ensureCrosshair(crosshair)) return;
+    if (!crosshair.root) return;
 
     if (!crosshair.lerpInit) {
         crosshair.spread = cfg.spread;

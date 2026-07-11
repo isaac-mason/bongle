@@ -31,11 +31,12 @@ import {
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
 import {
+    addCrosshair,
     type Crosshair,
     type CrosshairConfig,
     createCrosshair,
     defaultCrosshairConfig,
-    disposeCrosshair,
+    removeCrosshair,
     updateCrosshair,
 } from '../api/crosshair';
 import { warn } from '../api/debug';
@@ -876,7 +877,7 @@ script(
             setPointerLock(ctx, false);
             clearDebugHelpers(ctx.client?.scene, debugHelpers);
             removeDebugPanel();
-            if (crosshair) disposeCrosshair(crosshair);
+            if (crosshair) removeCrosshair(crosshair);
             disposeAllHud();
         });
 
@@ -959,9 +960,16 @@ script(
                 const cameraTrait = getTrait(cameraNode, CameraTrait)!;
                 updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
                 crosshair ??= createCrosshair(ctx);
-                if (crosshair) updateCrosshair(crosshair, pc.crosshair, delta);
+                if (crosshair) {
+                    if (pc.crosshair.enabled) {
+                        addCrosshair(crosshair);
+                        updateCrosshair(crosshair, pc.crosshair, delta);
+                    } else {
+                        removeCrosshair(crosshair);
+                    }
+                }
             } else if (crosshair) {
-                disposeCrosshair(crosshair);
+                removeCrosshair(crosshair);
             }
 
             if (env.editor && ctx.mode === 'edit' && isOwner(ctx, ctx.node)) {
