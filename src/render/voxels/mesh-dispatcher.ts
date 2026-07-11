@@ -5,18 +5,26 @@
 // canonical serialized buffer and reslices it per worker on rebuild.
 //
 // Scheduling model:
-//   - N workers, each with a FIFO queue of depth QUEUE_DEPTH. Main can
-//     post up to N*QUEUE_DEPTH jobs simultaneously. Worker drains its
-//     own queue with no postMessage round-trip between jobs.
-//   - inFlightByChunk dedups: a chunk in flight at any slot cannot be
-//     re-enqueued (the caller waits for the result before retrying).
-//   - Per-job buffer sets (blocks/light slab + 3 pre-allocated quad
-//     output bufs) come from a pre-allocated `jobBufferPool` sized to
-//     N*QUEUE_DEPTH. Borrow on enqueue, transfer to worker, echoed
-//     back in the `recycle` field of the result.
+//   - N workers. queueMesh accumulates chunks into per-slot `pending`; a
+//     frame-end flush drains each slot's pending into ONE batched packet, so a
+//     worker meshing K chunks costs a single postMessage, not K.
+//   - Two priority tiers: `pendingUrgent` (near-camera / just-edited) drains
+//     before `pending` and leads the packet, and urgent enqueue bypasses the
+//     queueDepth gate — an edit-in-front-of-you never waits behind streaming
+//     backlog. This replaces the old main-thread sync-remesh fast-path.
+//   - Affinity routing: a chunk's jobs always go to `hash(region) % N`, so its
+//     neighbourhood accumulates in that worker's cache and re-meshes hit it.
+//   - Each worker keeps a versioned chunk mirror; main tracks a matching
+//     per-worker mirror (`slot.mirror`) and dispatches only DELTAS: a packet
+//     carries `set` (chunks the worker lacks at the current version) + `delete`
+//     + `tasks` (the batch). Unchanged chunks are never re-sent. See
+//     mesh-tasks.ts and llm/plan-mesh-worker-chunk-cache.md.
+//   - inFlightByChunk dedups: a chunk pending or in flight cannot be re-enqueued.
+//   - Buffers come from two pools: `packetPool` (one packet buffer per batch)
+//     and `outputPool` (one 3-buffer quad set per task). Borrowed at flush,
+//     transferred to the worker, echoed back in the result `recycle`.
 //   - Generation guard: caller passes chunk.meshGen into enqueue. Worker
-//     echoes it. Caller decides whether the result is fresh (handler
-//     gets the gen and matches against current chunk.meshGen).
+//     echoes it. Caller decides whether the result is fresh.
 //
 // Registry rebuild handshake:
 //   - setRegistry serializes once, slices N times, posts initRegistry
@@ -28,14 +36,8 @@
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { serializeBlockRegistryForWorker } from '../../core/voxels/block-registry-serde';
-import {
-    buildSlabsIntoBuffers,
-    type ChunkMeshResult,
-    MAX_QUADS_PER_PASS,
-    QUAD_STRIDE_U32S,
-    SLAB_BLOCKS_BYTES,
-    SLAB_LIGHT_BYTES,
-} from '../../core/voxels/chunk-mesher';
+import { type ChunkMeshResult, MAX_QUADS_PER_PASS, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { MESH_TASKS_SCRATCH_BYTES, type MeshTaskSet, packMeshTasks } from '../../core/voxels/mesh-tasks';
 import type { MeshWorkerInMsg, MeshWorkerOutMsg } from '../../core/voxels/mesh-worker';
 import type { Chunk, Voxels } from '../../core/voxels/voxels';
 import { chunkKey } from '../../core/voxels/voxels';
@@ -69,14 +71,9 @@ export type MeshDispatcherResult = ChunkMeshResult & {
     gen: number;
 };
 
-/** the buffer set transferred between main and worker for one in-flight
- *  job. `blocksBuf` + `lightBuf` carry the input slab; `opaqueBuf` /
- *  `transparentBuf` / `translucentBuf` are pre-allocated output buffers
- *  the worker writes the final quad stream into. All 5 round-trip with
- *  the result so the pool reclaims them with no fresh allocation. */
-type MeshJobBuffers = {
-    blocksBuf: ArrayBuffer;
-    lightBuf: ArrayBuffer;
+/** one chunk's output quad buffers (one per pass). Borrowed per task from the
+ *  output pool, transferred to the worker, echoed back for recycling. */
+type MeshOutputSet = {
     opaqueBuf: ArrayBuffer;
     transparentBuf: ArrayBuffer;
     translucentBuf: ArrayBuffer;
@@ -86,26 +83,42 @@ const PASS_BUF_BYTES = MAX_QUADS_PER_PASS * QUAD_STRIDE_U32S * 4;
 
 type WorkerSlot = {
     worker: WorkerLike;
-    /** FIFO of in-flight job keys at this slot, entries are spliced
-     *  out by chunkKey when the matching result lands. Length bounded
-     *  by `queueDepth`. */
+    /** high-priority chunks (near the camera / just edited). Drained before
+     *  `pending` and placed at the front of the batch packet so the worker meshes
+     *  them first. Urgent enqueue bypasses the queueDepth gate — the whole point
+     *  is that an edit-in-front-of-you never waits behind streaming backlog. */
+    pendingUrgent: Array<{ chunk: Chunk; gen: number }>;
+    /** normal-priority chunks routed here this/last frame, accumulated by
+     *  queueMesh and drained into batch packets by flushMeshQueue. */
+    pending: Array<{ chunk: Chunk; gen: number }>;
+    /** in-flight job keys at this slot (across all in-flight batches), spliced
+     *  out by chunkKey when the matching result lands. Bounded by `queueDepth`. */
     inFlight: Array<{ chunkKey: string; gen: number }>;
+    /** in-flight batches (packets posted, results pending) — packet buffers to
+     *  replenish on crash. */
+    inFlightBatches: number;
     /** version this slot has acked. Slot is ineligible for dispatch
      *  until this equals `MeshDispatcher.registryVersion`. */
     registryVersion: number;
     /** version most recently posted to this slot. Used to detect
      *  "init pending but not yet acked". */
     pendingRegistryVersion: number;
+    /** authoritative mirror of this worker's chunk cache: chunkKey → chunk
+     *  `version`. main diffs each dispatch against it to emit set/delete deltas.
+     *  cleared on crash (the worker's cache is gone with it). */
+    mirror: Map<string, number>;
 };
 
 export type MeshDispatcher = {
     slots: WorkerSlot[];
     queueDepth: number;
-    /** chunk key → which slot owns it. Used both for dedup ("don't
-     *  enqueue twice") and reverse lookup on result. */
+    /** chunk key → which slot owns it. Tracks a chunk from enqueue (pending)
+     *  through in-flight, for dedup and reverse lookup on result. */
     inFlightByChunk: Map<string, { slot: number; gen: number }>;
-    /** free per-job buffer sets. Borrowed on enqueue, recycled on result. */
-    jobBufferPool: MeshJobBuffers[];
+    /** free packet buffers (one per in-flight batch). */
+    packetPool: ArrayBuffer[];
+    /** free output-buffer sets (one per in-flight task). */
+    outputPool: MeshOutputSet[];
     registryVersion: number;
     /** canonical serialized registry, kept so newly spawned workers
      *  (post-crash respawn) can be re-inited without re-encoding. */
@@ -119,6 +132,26 @@ export type MeshDispatcher = {
     /** kept for crash recovery, respawn calls this to get a fresh
      *  worker for the same slot index. */
     workerFactory: () => WorkerLike;
+    /** per-worker chunk-cache budget: main evicts LRU mirror entries beyond it. */
+    cacheMaxChunks: number;
+    /** per-frame instrumentation, summed as jobs flow, drained by
+     *  `readMeshPerf`. `buildMs`/`postMs` are main-thread slab-pack and
+     *  postMessage cost; `workUs` is worker-reported job time; counts let
+     *  you see posts-per-frame. See readMeshPerf. */
+    perf: MeshPerf;
+};
+
+export type MeshPerf = {
+    /** main-thread ms spent packing the MeshTasks packet (packInto) */
+    buildMs: number;
+    /** main-thread ms spent in postMessage (envelope + transfer) */
+    postMs: number;
+    /** worker-reported µs of mesh work (parallel, not main-thread) */
+    workUs: number;
+    /** main→worker posts (one per batch — the metric batching drives down) */
+    enqueues: number;
+    /** worker→main result messages drained (one per batch) */
+    results: number;
 };
 
 export type MeshDispatcherOpts = {
@@ -126,6 +159,8 @@ export type MeshDispatcherOpts = {
     workerFactory: () => WorkerLike;
     workerCount: number;
     queueDepth: number;
+    /** per-worker chunk-cache budget (chunks). ~16 KB each. defaults to 256 (~4 MB). */
+    cacheMaxChunks?: number;
     /** called when a result lands (fresh or stale, caller's gen guard
      *  decides what to do with it). */
     onResult: (result: MeshDispatcherResult) => void;
@@ -142,29 +177,38 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
         slots,
         queueDepth: opts.queueDepth,
         inFlightByChunk: new Map(),
-        jobBufferPool: [],
+        packetPool: [],
+        outputPool: [],
         registryVersion: -1,
         registryBuf: null,
         onResult: opts.onResult,
         onLost: opts.onLost ?? null,
         workerFactory: opts.workerFactory,
+        cacheMaxChunks: opts.cacheMaxChunks ?? 256,
+        perf: { buildMs: 0, postMs: 0, workUs: 0, enqueues: 0, results: 0 },
     };
 
-    // Pre-allocate the job buffer pool. Sized to cover every slot at
-    // full queue depth, every job borrows one set and transfers it; the
-    // result echoes it back to the pool.
-    const poolSize = opts.workerCount * opts.queueDepth;
-    for (let i = 0; i < poolSize; i++) {
-        d.jobBufferPool.push(allocateJobBuffers());
-    }
+    // output sets: one per in-flight task. Sized workerCount × queueDepth for the
+    // normal tier, plus URGENT_RESERVE_PER_WORKER of headroom per worker so an
+    // urgent chunk (which bypasses the queueDepth gate) can always claim a buffer.
+    // packet buffers: one per in-flight batch; 2 per worker allows a batch to be
+    // recycling while the next flushes. Urgent rides the same batch as normal, so
+    // it needs no extra packet buffers.
+    for (let i = 0; i < opts.workerCount * (opts.queueDepth + URGENT_RESERVE_PER_WORKER); i++)
+        d.outputPool.push(allocateOutputSet());
+    for (let i = 0; i < opts.workerCount * 2; i++) d.packetPool.push(new ArrayBuffer(MESH_TASKS_SCRATCH_BYTES));
 
     for (let i = 0; i < opts.workerCount; i++) {
         const worker = opts.workerFactory();
         const slot: WorkerSlot = {
             worker,
+            pendingUrgent: [],
+            pending: [],
             inFlight: [],
+            inFlightBatches: 0,
             registryVersion: -1,
             pendingRegistryVersion: -1,
+            mirror: new Map(),
         };
         wireWorker(d, i, worker);
         slots.push(slot);
@@ -173,10 +217,8 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
     return d;
 }
 
-function allocateJobBuffers(): MeshJobBuffers {
+function allocateOutputSet(): MeshOutputSet {
     return {
-        blocksBuf: new ArrayBuffer(SLAB_BLOCKS_BYTES),
-        lightBuf: new ArrayBuffer(SLAB_LIGHT_BYTES),
         opaqueBuf: new ArrayBuffer(PASS_BUF_BYTES),
         transparentBuf: new ArrayBuffer(PASS_BUF_BYTES),
         translucentBuf: new ArrayBuffer(PASS_BUF_BYTES),
@@ -212,11 +254,16 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
         d.onLost?.(entry.chunkKey);
     }
 
-    // Replenish pool, the in-flight buffer sets are gone with the crash.
-    for (let i = 0; i < slot.inFlight.length; i++) {
-        d.jobBufferPool.push(allocateJobBuffers());
-    }
+    // Replenish pools, the in-flight buffers are gone with the crash: one
+    // packet buffer per in-flight batch, one output set per in-flight task.
+    for (let i = 0; i < slot.inFlightBatches; i++) d.packetPool.push(new ArrayBuffer(MESH_TASKS_SCRATCH_BYTES));
+    for (let i = 0; i < slot.inFlight.length; i++) d.outputPool.push(allocateOutputSet());
     slot.inFlight.length = 0;
+    slot.inFlightBatches = 0;
+
+    // The respawned worker starts with an empty cache, so drop the mirror —
+    // subsequent dispatches re-`set` the neighbourhood from scratch.
+    slot.mirror.clear();
 
     // Tear down the crashed worker and spawn a fresh one. Re-init with
     // the canonical registry buffer if we have one; until ack lands the
@@ -259,53 +306,237 @@ export function isInFlight(d: MeshDispatcher, key: string): boolean {
     return d.inFlightByChunk.has(key);
 }
 
-/** try to dispatch a mesh job for `chunk`. Returns true on success;
- *  false if no eligible slot has queue capacity, or the job buffer pool
- *  is exhausted, or the chunk is already in flight. */
-export function enqueueMesh(d: MeshDispatcher, voxels: Voxels, chunk: Chunk, gen: number): boolean {
+// worker affinity: a chunk's tasks always route to the same worker (by region
+// hash), so its neighbourhood accumulates in that worker's cache and re-meshes
+// hit it. deterministic + stable across respawns (slot index is fixed).
+const MESH_REGION_BITS = 3; // region = 8 chunks per axis
+
+function affinityWorker(cx: number, cy: number, cz: number, n: number): number {
+    const rx = cx >> MESH_REGION_BITS;
+    const ry = cy >> MESH_REGION_BITS;
+    const rz = cz >> MESH_REGION_BITS;
+    const h = (Math.imul(rx, 73856093) ^ Math.imul(ry, 19349663) ^ Math.imul(rz, 83492791)) | 0;
+    return ((h % n) + n) % n;
+}
+
+/** max tasks per batch packet. bounds message size and keeps a cold batch's
+ *  set-union under the packet scratch. (In-flight is already ≤ queueDepth/slot.) */
+const MESH_BATCH_MAX = 8;
+
+/** extra output-buffer sets reserved per worker beyond queueDepth, so urgent
+ *  chunks (which bypass the queueDepth gate) always find a free buffer at flush. */
+const URGENT_RESERVE_PER_WORKER = 2;
+
+/** the batch being assembled this flush, urgent entries first then normal. reused
+ *  scratch so composing a batch allocates nothing. */
+const _batch: Array<{ chunk: Chunk; gen: number }> = [];
+
+// reused packcat value scratch (avoids allocating it each flush). the set/delete
+// key arrays parallel the entries so the mirror commit can be deferred until
+// packInto succeeds.
+const _setEntries: MeshTaskSet[] = [];
+const _setKeys: string[] = [];
+const _delEntries: Array<{ cx: number; cy: number; cz: number }> = [];
+const _delKeys: string[] = [];
+const _tasks: Array<{ cx: number; cy: number; cz: number; gen: number }> = [];
+const _packetValue = { set: _setEntries, delete: _delEntries, tasks: _tasks };
+const _neighborhoodKeys = new Set<string>();
+
+function slotAcceptable(d: MeshDispatcher, slot: WorkerSlot): boolean {
+    return (
+        slot.registryVersion === d.registryVersion &&
+        slot.pendingRegistryVersion === d.registryVersion &&
+        slot.pending.length + slot.inFlight.length < d.queueDepth
+    );
+}
+
+/** accept `chunk` for meshing. Routes to its affinity worker (warm cache) and
+ *  accumulates into that worker's pending list; `flushMeshQueue` builds and
+ *  posts the batch. Returns false if no worker can take it or the chunk is already
+ *  claimed. Options:
+ *   - `urgent`: high priority (near-camera / just-edited). Bypasses the queueDepth
+ *     gate and joins `pendingUrgent`, drained first — it never waits behind
+ *     streaming backlog. Still requires the affinity worker to be registry-acked.
+ *   - `allowSpill`: normal-tier only. If the affinity worker is full, offload to
+ *     the least-committed ready worker (used when the chunk has been starving). */
+export function queueMesh(
+    d: MeshDispatcher,
+    _voxels: Voxels,
+    chunk: Chunk,
+    gen: number,
+    opts: { urgent?: boolean; allowSpill?: boolean } = {},
+): boolean {
     const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
     if (d.inFlightByChunk.has(key)) return false;
 
-    // Find a dispatch-eligible slot with the shortest queue (load
-    // balance). Eligible = acked at current registry version AND queue
-    // not full.
-    let chosen = -1;
-    let chosenLen = d.queueDepth;
-    for (let i = 0; i < d.slots.length; i++) {
-        const s = d.slots[i]!;
-        if (s.registryVersion !== d.registryVersion) continue;
-        if (s.pendingRegistryVersion !== d.registryVersion) continue;
-        if (s.inFlight.length < chosenLen) {
-            chosen = i;
-            chosenLen = s.inFlight.length;
+    let chosen = affinityWorker(chunk.cx, chunk.cy, chunk.cz, d.slots.length);
+    let slot = d.slots[chosen]!;
+
+    if (opts.urgent) {
+        // urgent bypasses the queueDepth gate but still needs a registry-acked
+        // slot (can't mesh without the registry). If the affinity worker isn't
+        // acked yet (boot / post-crash respawn), leave it dirty to retry.
+        if (slot.registryVersion !== d.registryVersion || slot.pendingRegistryVersion !== d.registryVersion) return false;
+        slot.pendingUrgent.push({ chunk, gen });
+        d.inFlightByChunk.set(key, { slot: chosen, gen });
+        return true;
+    }
+
+    if (!slotAcceptable(d, slot)) {
+        if (!opts.allowSpill) return false;
+        chosen = -1;
+        let best = d.queueDepth;
+        for (let i = 0; i < d.slots.length; i++) {
+            const s = d.slots[i]!;
+            const claimed = s.pending.length + s.inFlight.length;
+            if (slotAcceptable(d, s) && claimed < best) {
+                chosen = i;
+                best = claimed;
+            }
+        }
+        if (chosen === -1) return false;
+        slot = d.slots[chosen]!;
+    }
+
+    slot.pending.push({ chunk, gen });
+    d.inFlightByChunk.set(key, { slot: chosen, gen });
+    return true;
+}
+
+/** diff the union of the first `batchN` chunks in `_batch` (urgent-first) against
+ *  `slot.mirror` → set/delete deltas (into scratch), + LRU eviction, then packInto
+ *  `packetBuf`. Does NOT commit the mirror (deferred to `commitBatch` on success).
+ *  Returns packcat's {ok, size}. */
+function buildBatchPacket(d: MeshDispatcher, slot: WorkerSlot, voxels: Voxels, batchN: number, packetBuf: ArrayBuffer): boolean {
+    _setEntries.length = 0;
+    _setKeys.length = 0;
+    _delEntries.length = 0;
+    _delKeys.length = 0;
+    _tasks.length = 0;
+    _neighborhoodKeys.clear();
+    const mirror = slot.mirror;
+    let newSets = 0;
+    for (let t = 0; t < batchN; t++) {
+        const { chunk, gen } = _batch[t]!;
+        _tasks.push({ cx: chunk.cx, cy: chunk.cy, cz: chunk.cz, gen });
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const ncx = chunk.cx + dx;
+                    const ncy = chunk.cy + dy;
+                    const ncz = chunk.cz + dz;
+                    const nk = chunkKey(ncx, ncy, ncz);
+                    if (_neighborhoodKeys.has(nk)) continue; // union dedup across the batch
+                    _neighborhoodKeys.add(nk);
+                    const nc = voxels.chunks.get(nk);
+                    if (nc !== undefined) {
+                        const mv = mirror.get(nk);
+                        if (mv !== nc.version) {
+                            _setEntries.push({
+                                cx: nc.cx,
+                                cy: nc.cy,
+                                cz: nc.cz,
+                                version: nc.version,
+                                data: nc.data,
+                                light: nc.light,
+                                palette: nc.palette,
+                            });
+                            _setKeys.push(nk);
+                            if (mv === undefined) newSets++;
+                        }
+                    } else if (mirror.has(nk)) {
+                        _delEntries.push({ cx: ncx, cy: ncy, cz: ncz });
+                        _delKeys.push(nk);
+                    }
+                }
+            }
         }
     }
-    if (chosen === -1) return false;
 
-    const set = d.jobBufferPool.pop();
-    if (set === undefined) return false;
+    // bound the mirror to the budget: evict oldest entries not in this batch's
+    // neighbourhood; evictions ride the delete list.
+    let evict = mirror.size + newSets - _delKeys.length - d.cacheMaxChunks;
+    if (evict > 0) {
+        for (const k of mirror.keys()) {
+            if (evict <= 0) break;
+            if (_neighborhoodKeys.has(k)) continue;
+            const c1 = k.indexOf(',');
+            const c2 = k.indexOf(',', c1 + 1);
+            _delEntries.push({ cx: +k.slice(0, c1), cy: +k.slice(c1 + 1, c2), cz: +k.slice(c2 + 1) });
+            _delKeys.push(k);
+            evict--;
+        }
+    }
 
-    buildSlabsIntoBuffers(voxels, chunk, set.blocksBuf, set.lightBuf);
+    return packMeshTasks(_packetValue, new Uint8Array(packetBuf), 0).ok;
+}
 
-    const slot = d.slots[chosen]!;
-    slot.inFlight.push({ chunkKey: key, gen });
-    d.inFlightByChunk.set(key, { slot: chosen, gen });
+/** commit the scratch deltas from the last successful `buildBatchPacket` to the
+ *  mirror. deletes first, then sets re-inserted at the Map tail for LRU recency. */
+function commitBatch(slot: WorkerSlot): void {
+    const mirror = slot.mirror;
+    for (let i = 0; i < _delKeys.length; i++) mirror.delete(_delKeys[i]!);
+    for (let i = 0; i < _setKeys.length; i++) {
+        const k = _setKeys[i]!;
+        mirror.delete(k);
+        mirror.set(k, _setEntries[i]!.version);
+    }
+}
 
-    const msg: MeshWorkerInMsg = {
-        cmd: 'mesh',
-        chunkKey: key,
-        gen,
-        cx: chunk.cx,
-        cy: chunk.cy,
-        cz: chunk.cz,
-        blocksBuf: set.blocksBuf,
-        lightBuf: set.lightBuf,
-        opaqueBuf: set.opaqueBuf,
-        transparentBuf: set.transparentBuf,
-        translucentBuf: set.translucentBuf,
-    };
-    slot.worker.postMessage(msg, [set.blocksBuf, set.lightBuf, set.opaqueBuf, set.transparentBuf, set.translucentBuf]);
-    return true;
+/** build + post one batch for `slot` from its pending queues (urgent first), if it
+ *  has pending work and a packet + output buffers are free. */
+function flushSlot(d: MeshDispatcher, slotIndex: number, voxels: Voxels): void {
+    const slot = d.slots[slotIndex]!;
+    const total = slot.pendingUrgent.length + slot.pending.length;
+    if (total === 0) return;
+    if (slot.registryVersion !== d.registryVersion || slot.pendingRegistryVersion !== d.registryVersion) return;
+    if (d.packetPool.length === 0 || d.outputPool.length === 0) return;
+
+    let batchN = Math.min(total, d.outputPool.length, MESH_BATCH_MAX);
+    // compose the batch urgent-first so those chunks lead the packet (the worker
+    // meshes tasks in array order) and survive the overflow-halving below.
+    _batch.length = 0;
+    for (let i = 0; i < slot.pendingUrgent.length && _batch.length < batchN; i++) _batch.push(slot.pendingUrgent[i]!);
+    for (let i = 0; i < slot.pending.length && _batch.length < batchN; i++) _batch.push(slot.pending[i]!);
+
+    const packetBuf = d.packetPool[d.packetPool.length - 1]!;
+
+    const tBuild = performance.now();
+    // pack, halving the batch on overflow (a single task always fits: ≤27 chunks).
+    while (!buildBatchPacket(d, slot, voxels, batchN, packetBuf) && batchN > 1) batchN = batchN >> 1;
+    // (batchN === 1 is guaranteed to fit, so the loop leaves us with a valid pack)
+
+    d.packetPool.pop();
+    commitBatch(slot);
+
+    const outBufs: ArrayBuffer[] = [];
+    for (let i = 0; i < batchN; i++) {
+        const out = d.outputPool.pop()!;
+        outBufs.push(out.opaqueBuf, out.transparentBuf, out.translucentBuf);
+        const p = _batch[i]!;
+        slot.inFlight.push({ chunkKey: chunkKey(p.chunk.cx, p.chunk.cy, p.chunk.cz), gen: p.gen });
+    }
+    // remove the consumed entries: urgent are at the front of `_batch`, so the
+    // first min(pendingUrgent, batchN) come off pendingUrgent, the rest off pending.
+    const urgentTaken = Math.min(slot.pendingUrgent.length, batchN);
+    slot.pendingUrgent.splice(0, urgentTaken);
+    slot.pending.splice(0, batchN - urgentTaken);
+    slot.inFlightBatches++;
+
+    const tPost = performance.now();
+    slot.worker.postMessage({ cmd: 'meshTasks', packetBuf, outBufs }, [packetBuf, ...outBufs]);
+    const tEnd = performance.now();
+    d.perf.buildMs += tPost - tBuild;
+    d.perf.postMs += tEnd - tPost;
+    d.perf.enqueues++;
+}
+
+/** build + post batches for every worker with pending work. Called once per
+ *  frame after the enqueue loop — and, crucially, after the caller has drained
+ *  the previous frame's results, so buffers recycled on result are safe to
+ *  reuse here (the pending result that referenced them is already copied out). */
+export function flushMeshQueue(d: MeshDispatcher, voxels: Voxels): void {
+    for (let i = 0; i < d.slots.length; i++) flushSlot(d, i, voxels);
 }
 
 function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWorkerOutMsg): void {
@@ -315,35 +546,59 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
         return;
     }
     if (msg.cmd === 'result') {
-        // Find and remove the matching in-flight entry. Workers process
-        // FIFO so usually it's at index 0, but a stale-result scenario
-        // could surface it elsewhere, splice by chunkKey, not by
-        // position.
-        const idx = slot.inFlight.findIndex((e) => e.chunkKey === msg.chunkKey && e.gen === msg.gen);
-        if (idx >= 0) slot.inFlight.splice(idx, 1);
+        d.perf.workUs += msg.workUs;
+        d.perf.results++;
+        slot.inFlightBatches--;
 
-        // Clear the global dedup entry only if it matches the gen we
-        // just got. (In practice nothing else writes to this map
-        // concurrently, we're single-threaded on main, so this is
-        // belt-and-braces.)
-        const tracked = d.inFlightByChunk.get(msg.chunkKey);
-        if (tracked && tracked.gen === msg.gen) d.inFlightByChunk.delete(msg.chunkKey);
+        // recycle the packet buffer + every task's output set.
+        d.packetPool.push(msg.recycle.packetBuf);
+        const outBufs = msg.recycle.outBufs;
+        for (let i = 0; i < outBufs.length; i += 3) {
+            d.outputPool.push({ opaqueBuf: outBufs[i]!, transparentBuf: outBufs[i + 1]!, translucentBuf: outBufs[i + 2]! });
+        }
 
-        // Recycle the full buffer set back to the pool unconditionally.
-        d.jobBufferPool.push(msg.recycle);
+        for (const r of msg.results) {
+            // remove the matching in-flight entry + dedup record (splice by key,
+            // FIFO usually puts it at 0 but a stale-gen result could differ).
+            const idx = slot.inFlight.findIndex((e) => e.chunkKey === r.chunkKey && e.gen === r.gen);
+            if (idx >= 0) slot.inFlight.splice(idx, 1);
+            const tracked = d.inFlightByChunk.get(r.chunkKey);
+            if (tracked && tracked.gen === r.gen) d.inFlightByChunk.delete(r.chunkKey);
 
-        // Forward the result. Caller's gen guard handles staleness;
-        // dispatcher is just the transport.
-        d.onResult({
-            chunkKey: msg.chunkKey,
-            gen: msg.gen,
-            opaque: msg.opaque,
-            transparent: msg.transparent,
-            translucent: msg.translucent,
-            aabb: msg.aabb,
-        });
+            // forward the result; caller's gen guard handles staleness.
+            d.onResult({
+                chunkKey: r.chunkKey,
+                gen: r.gen,
+                opaque: r.opaque,
+                transparent: r.transparent,
+                translucent: r.translucent,
+                aabb: r.aabb,
+            });
+        }
+
+        // NB: do NOT refill the slot here. The output buffers were just recycled
+        // to the pool, but the results referencing them sit in the caller's queue
+        // until it drains them next `update()`. Refilling now would transfer those
+        // buffers back to the worker mid-flight and detach them out from under the
+        // pending result. The next `flushMeshQueue` refills safely — it runs
+        // after the caller has drained (copied out of) this frame's results.
         return;
     }
+}
+
+/** read the accumulated per-frame mesh perf counters and reset them. call
+ *  once per frame (e.g. from voxel-visuals.update) to get the main-thread
+ *  slab-pack vs postMessage split, worker time, and posts-per-frame:
+ *
+ *    const p = readMeshPerf(dispatcher);
+ *    // p.buildMs + p.postMs = main-thread enqueue cost this frame
+ *    // p.enqueues = posts main→worker, p.results = posts worker→main
+ *    // p.workUs = parallel worker time (not main-thread)
+ */
+export function readMeshPerf(d: MeshDispatcher): MeshPerf {
+    const p = d.perf;
+    d.perf = { buildMs: 0, postMs: 0, workUs: 0, enqueues: 0, results: 0 };
+    return p;
 }
 
 export function disposeMeshDispatcher(d: MeshDispatcher): void {
@@ -352,7 +607,8 @@ export function disposeMeshDispatcher(d: MeshDispatcher): void {
         slot.worker.terminate?.();
     }
     d.slots.length = 0;
-    d.jobBufferPool.length = 0;
+    d.packetPool.length = 0;
+    d.outputPool.length = 0;
     d.inFlightByChunk.clear();
     d.registryBuf = null;
 }
@@ -360,18 +616,28 @@ export function disposeMeshDispatcher(d: MeshDispatcher): void {
 /** test-only inspection helpers, kept on the public surface because
  *  they're how the dispatcher test verifies invariants (slot queue
  *  depth, pool size). Cheap O(slots) reads, no internal state changes. */
-export function dispatcherStats(d: MeshDispatcher): {
+export function meshQueueStats(d: MeshDispatcher): {
     poolSize: number;
     inFlightTotal: number;
-    perSlot: Array<{ inFlight: number; registryVersion: number; pendingRegistryVersion: number }>;
+    perSlot: Array<{
+        pendingUrgent: number;
+        pending: number;
+        inFlight: number;
+        registryVersion: number;
+        pendingRegistryVersion: number;
+        mirrorSize: number;
+    }>;
 } {
     return {
-        poolSize: d.jobBufferPool.length,
+        poolSize: d.outputPool.length,
         inFlightTotal: d.inFlightByChunk.size,
         perSlot: d.slots.map((s) => ({
+            pendingUrgent: s.pendingUrgent.length,
+            pending: s.pending.length,
             inFlight: s.inFlight.length,
             registryVersion: s.registryVersion,
             pendingRegistryVersion: s.pendingRegistryVersion,
+            mirrorSize: s.mirror.size,
         })),
     };
 }

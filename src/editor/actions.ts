@@ -951,7 +951,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
 
         const rotated = rotateVoxelsByQuat(preparedVoxels, q, ctx.blocks);
         for (const chunk of rotated.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {

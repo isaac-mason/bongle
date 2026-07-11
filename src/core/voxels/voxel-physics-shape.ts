@@ -471,7 +471,7 @@ function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number 
     const cy = wy >> CHUNK_BITS;
     const cz = wz >> CHUNK_BITS;
     const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
-    if (!chunk || chunk.aggregate === 0) return AIR;
+    if (!chunk || chunk.nonAirCount === 0) return AIR;
     const lx = wx & (CHUNK_SIZE - 1);
     const ly = wy & (CHUNK_SIZE - 1);
     const lz = wz & (CHUNK_SIZE - 1);
@@ -781,7 +781,7 @@ function collideVoxelsVsConvex(
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
                 const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
-                if (!chunk || chunk.aggregate === 0) continue;
+                if (!chunk || chunk.nonAirCount === 0) continue;
 
                 const lx = vx - (cx << CHUNK_BITS);
                 const ly = vy - (cy << CHUNK_BITS);
@@ -1012,7 +1012,7 @@ function castConvexVsVoxels(
                 const cy = vy >> CHUNK_BITS;
                 const cz = vz >> CHUNK_BITS;
                 const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
-                if (!chunk || chunk.aggregate === 0) continue;
+                if (!chunk || chunk.nonAirCount === 0) continue;
 
                 const lx = vx - (cx << CHUNK_BITS);
                 const ly = vy - (cy << CHUNK_BITS);

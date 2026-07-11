@@ -124,7 +124,7 @@ function fillPresence(voxels: Voxels, boundsMin: Vec3, dx: number, _dy: number, 
     const by0 = boundsMin[1];
     const bz0 = boundsMin[2];
     for (const chunk of voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         const { wx, wy, wz, data, palette } = chunk;
         for (let y = 0; y < CHUNK_SIZE; y++) {
             for (let z = 0; z < CHUNK_SIZE; z++) {

@@ -1,8 +1,8 @@
 // ui-layers, z-index bands for the absolutely-positioned children of a
 // room's `viewport`.
 //
-// Every overlay (the html-trait layer, mobile touch controls, the
-// crosshair, the debug panel, a game's screen HUD) is an
+// Every overlay (the html-trait layer, the crosshair, mobile touch controls,
+// the debug panel, a game's screen HUD) is an
 // `position:absolute` sibling under `viewport`. Without an explicit
 // z-index their paint order falls back to DOM insertion order, fragile,
 // and broken outright by the html-trait layer: it assigns its

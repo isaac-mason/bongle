@@ -16,7 +16,7 @@
 //   setActive(profile, 'standard', 'user');   // user override
 //   const s = settingsForTier(profile);       // read tier knobs here
 
-const TIER_ORDER = ['fallback', 'low', 'standard'] as const;
+const TIER_ORDER = ['low', 'standard'] as const;
 export type Tier = (typeof TIER_ORDER)[number];
 
 // ── tier-keyed settings ─────────────────────────────────────────────
@@ -39,22 +39,15 @@ export type Settings = {
      *  passes, voxelMaxSections × 3 × 2 rounded to a power of two. */
     voxelArenaMaxAllocs: number;
     // ── remesh dispatch ─────────────────────────────────────────────
-    // Two paths share the dirty-chunk queue every frame:
-    //   1. main-thread sync, camera-prioritised, capped by
-    //      `voxelMainThreadRemeshBudget`. Lowest latency, blocks the
-    //      frame, so the cap stays tiny.
-    //   2. worker pool, absorbs the rest off-thread. The pool can hold
-    //      `voxelWorkerCount × voxelWorkerQueueDepth` jobs in flight at
-    //      once; results land in `pendingMeshResults` and are drained
-    //      at the top of the next `voxel-visuals.update` call.
+    // All meshing runs on the worker pool (off-thread). The pool holds
+    // `voxelWorkerCount × voxelWorkerQueueDepth` jobs in flight at once;
+    // results land in `pendingMeshResults` and are drained at the top of
+    // the next `voxel-visuals.update` call. Near-camera / just-edited chunks
+    // dispatch URGENT (jump the worker queue) for low edit latency.
     //
     // Per-frame *new* dispatch is implicitly bounded by free pool slots
     // (pool capacity − currently in flight). No explicit per-frame cap.
 
-    /** sync remeshes per frame on the main thread (the camera-prioritised
-     *  fast-path inside `voxel-visuals.update`). Keep small, every one
-     *  of these blocks the frame. */
-    voxelMainThreadRemeshBudget: number;
     /** size of the mesh worker pool. 0 disables workers entirely (every
      *  remesh runs on the main thread synchronously, useful for tests and
      *  the asset-pipeline path). */
@@ -66,22 +59,14 @@ export type Settings = {
 };
 
 const SETTINGS_BY_TIER: Record<Tier, Settings> = {
-    fallback: {
-        voxelViewChunkRadius: 4,
-        voxelArenaDesiredMB: 16,
-        voxelMaxSections: 256,
-        voxelArenaMaxAllocs: 2048, // 256 × 3 passes × 2 ≈ 1536 → 2048
-        voxelMainThreadRemeshBudget: 1,
-        voxelWorkerCount: 1,
-        voxelWorkerQueueDepth: 4,
-    },
     low: {
         voxelViewChunkRadius: 6,
         voxelArenaDesiredMB: 64,
         voxelMaxSections: 1024,
         voxelArenaMaxAllocs: 8192, // 1024 × 3 × 2 ≈ 6144 → 8192
-        voxelMainThreadRemeshBudget: 1,
-        voxelWorkerCount: 2,
+        // single mesh worker: low-end (≤4 cores, Chromebook) keeps memory down
+        // and avoids postMessage overhead; the urgent tier still covers edits.
+        voxelWorkerCount: 1,
         voxelWorkerQueueDepth: 3,
     },
     standard: {
@@ -89,9 +74,10 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelArenaDesiredMB: 96,
         voxelMaxSections: 2048,
         voxelArenaMaxAllocs: 16384, // 2048 × 3 × 2 ≈ 12288 → 16384
-        voxelMainThreadRemeshBudget: 1,
-        voxelWorkerCount:
-            typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, 4) : 4,
+        // 2 mesh workers: past ~2 the postMessage + per-worker chunk-cache
+        // (~4 MB each) overhead outweighs the parallelism, and the urgent tier
+        // covers edit latency, so we no longer scale with core count.
+        voxelWorkerCount: 2,
         voxelWorkerQueueDepth: 3,
     },
 };

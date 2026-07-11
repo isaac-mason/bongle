@@ -117,7 +117,7 @@ describe('setChunkBlock', () => {
 
     bench('overwrite same key — 4096 writes, palette stable', () => {
         const chunk = createChunk(0, 0, 0);
-        // pre-fill so the writes are pure overwrites (no aggregate / palette changes)
+        // pre-fill so the writes are pure overwrites (no nonAirCount / palette changes)
         for (let y = 0; y < CHUNK_SIZE; y++)
             for (let z = 0; z < CHUNK_SIZE; z++)
                 for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(chunk, x, y, z, 'stone', baseRegistry);

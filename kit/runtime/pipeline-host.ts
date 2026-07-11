@@ -72,7 +72,13 @@ export async function start(opts: StartOptions): Promise<void> {
     let queued = false;
     let queuedForceAll = false;
     let firstRunComplete = false;
+    // set on 'shutdown' so no new pass starts; the in-flight pass drains first so
+    // the isolate never exits with a pending GPUBuffer.mapAsync() (Dawn FATALs on
+    // an unresolved map at teardown — the crash a mid-render worker respawn hit).
+    let shuttingDown = false;
+    const idleWaiters: Array<() => void> = [];
     const run = async (forceAll = false): Promise<void> => {
+        if (shuttingDown) return;
         if (forceAll) queuedForceAll = true;
         if (busy) {
             queued = true;
@@ -99,18 +105,29 @@ export async function start(opts: StartOptions): Promise<void> {
                     firstRunComplete = true;
                     control.postMessage({ type: 'warm', ms: performance.now() - passStart, timings: result.timings });
                 }
-            } while (queued);
+            } while (queued && !shuttingDown);
         } finally {
             busy = false;
             // release the editor gate even on a faulted first pass.
             control.postMessage({ type: 'gate' });
+            for (const wake of idleWaiters.splice(0)) wake();
         }
     };
 
+    // drain the in-flight pass (so mapAsync readbacks settle), then exit from
+    // this clean JS stack. Replaces pipeline-worker.mjs's immediate exit once
+    // booted; a wedged pass falls back to the main-side shutdown timeout.
+    const drainAndExit = async (): Promise<void> => {
+        shuttingDown = true;
+        if (busy) await new Promise<void>((resolve) => idleWaiters.push(resolve));
+        process.exit(0);
+    };
+
     // asset/scene file changes are detected by the main process (it owns the
-    // Vite watcher) and relayed here as a control 'run'.
+    // Vite watcher) and relayed here as a control 'run'; 'shutdown' drains first.
     control.on('message', (msg: PipelineWorkerInbound) => {
         if (msg?.type === 'run') void run(!!msg.forceAll);
+        else if (msg?.type === 'shutdown') void drainAndExit();
     });
 
     // every settled HMR cascade in this worker → one pass. This is the

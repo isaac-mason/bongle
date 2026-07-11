@@ -12,8 +12,8 @@ import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
 import { registry, type WireIndex } from '../core/registry';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
-import * as SceneTree from '../core/scene/scene-tree';
 import { unpackSceneTree } from '../core/scene/scene-pack';
+import * as SceneTree from '../core/scene/scene-tree';
 import type { ClientContext, EditRoomState, SceneTreeContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
@@ -88,6 +88,14 @@ export type ClientRoom = {
 
     /** the gpucat scene for this room. contains all renderable objects */
     scene: Scene;
+
+    /**
+     * the gpucat overlay scene for this room: crisp, post-fxaa content rendered
+     * by the engine's overlay pass (CanvasTrait panels, future world-space HUD).
+     * shares the main scene's depth read-only, so meshes with `depthTest` are
+     * occluded by world geometry but never blurred by the post-chain.
+     */
+    overlayScene: Scene;
 
     /** the scripting runtime for this room */
     scriptRuntime: SceneTreeContext;
@@ -588,6 +596,10 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const input: Input.Input = Input.createInput();
 
     const scene = new Scene();
+    // crisp post-fxaa overlay content (CanvasTrait, world-space HUD). rendered
+    // by the engine overlay pass, which shares this room's main-scene depth
+    // read-only for occlusion. see Renderer.EngineRenderPipeline.overlayPassNode.
+    const overlayScene = new Scene();
     // env buffers are engine-global (owned by Renderer); per-room env state
     // lives in its own CPU shadow on `Environment` (below) and only flushes
     // to these buffers when this room is the active one.
@@ -690,7 +702,10 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     const modelVisuals = ModelVisuals.init(scene, nodes, opts.modelResources, environmentResources);
 
-    const domUi: DomUi.DomUi = DomUi.init(scene, viewport, nodes);
+    // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
+    // panels are DOM and unaffected by the scene argument. the scene depth node
+    // lets canvas materials discard fragments occluded by world geometry.
+    const domUi: DomUi.DomUi = DomUi.init(overlayScene, viewport, nodes, renderer.pipeline.sceneDepthNode);
 
     // append touchOverlay after DomUi.init created the html overlay; their
     // paint order is set by UILayer z-index, not by DOM order.
@@ -732,6 +747,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         local,
         nodes,
         scene,
+        overlayScene,
         scriptRuntime,
         syncSnapshots,
         voxels,
@@ -1077,8 +1093,8 @@ export function setActivePlayer(
     // engine-global voxel arenas hold one room's chunks at a time. drop
     // the previous occupant and mark every chunk in this room dirty so
     // the prioritised remesh path cycles them back in over the next few
-    // frames (sync portion capped by `voxelMainThreadRemeshBudget`,
-    // overflow absorbed by the worker pool).
+    // frames (closest chunks dispatched urgently, the rest via the worker
+    // pool's normal tier).
     VoxelVisuals.activateRoom(voxelResources, room.voxelVisuals, room.voxels);
 
     // toggle viewport visibility, only the active room's viewport (and

@@ -76,7 +76,7 @@ const _raySettings = createDefaultCastRaySettings();
 /**
  * cast a ray through the voxel world using DDA.
  *
- * skips empty/missing chunks via aggregate count. for cube blocks
+ * skips empty/missing chunks via nonAirCount. for cube blocks
  * (colliderId=0), the DDA step itself is the intersection test. for
  * custom collider shapes, tests against the prebuilt crashcat shape.
  *
@@ -158,7 +158,7 @@ export function raycastVoxels(
         const chunk = voxels.chunks.get(chunkKey(cx, cy, cz));
 
         // skip empty/missing chunks, advance to chunk exit boundary
-        if (!chunk || chunk.aggregate === 0) {
+        if (!chunk || chunk.nonAirCount === 0) {
             const chunkMinX = cx << CHUNK_BITS;
             const chunkMinY = cy << CHUNK_BITS;
             const chunkMinZ = cz << CHUNK_BITS;

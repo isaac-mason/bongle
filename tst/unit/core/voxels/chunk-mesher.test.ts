@@ -60,7 +60,7 @@ function quadCornerLight(p: PassMesh, quadIdx: number, corner: number): number {
 /** mesh + light a chunk in one call. post Stage 2b: meshChunk emits
  *  geometry+AO+light in one pass, this wrapper now just delegates. */
 function meshAndLight(voxels: Voxels, chunk: Chunk, reg: BlockRegistry): ChunkMeshResult | null {
-    return meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
+    return meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
 }
 
 // ── tests ───────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ describe('meshChunk', () => {
 
             setChunkBlock(chunk, 5, 5, 5, 'water', registry);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             expect(countCubeFaces(result, 'translucent')).toBe(6);
         });
 
@@ -93,7 +93,7 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 5, 5, 'water', registry);
             setChunkBlock(chunk, 6, 5, 5, 'water', registry);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // 2 blocks × 6 faces = 12, minus 2 shared faces = 10
             expect(countCubeFaces(result, 'translucent')).toBe(10);
         });
@@ -111,7 +111,7 @@ describe('meshChunk', () => {
                 setChunkBlock(chunk, 5 + i, 5, 5, 'water', registry);
             }
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // 4 blocks × 6 faces = 24, minus 6 shared faces (3 pairs × 2 faces) = 18
             expect(countCubeFaces(result, 'translucent')).toBe(18);
         });
@@ -129,7 +129,7 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 5, 5, 'glass', registry);
             setChunkBlock(chunk, 6, 5, 5, 'glass', registry);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // self-cull by block id: 2 blocks × 6 faces = 12, minus 2 shared = 10
             expect(countCubeFaces(result, 'translucent')).toBe(10);
         });
@@ -145,7 +145,7 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
             setChunkBlock(chunk, 6, 5, 5, 'stone', registry);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // 2 blocks × 6 faces = 12, minus 2 shared = 10
             expect(countCubeFaces(result, 'opaque')).toBe(10);
         });
@@ -164,7 +164,7 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
             setChunkBlock(chunk, 6, 5, 5, 'water', registry);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // stone: 6 - 1 (face toward water culled by... wait, solid doesn't cull toward translucent_self)
             // actually: stone's face toward water: shouldCullFace(solid, translucent_self) = false → visible
             // water's face toward stone: shouldCullFace(translucent_self, solid) = true → culled
@@ -311,8 +311,8 @@ describe('meshChunk', () => {
             voxels.chunks.set('0,0,0', chunk);
             setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
 
             for (const ba of cubeFaceBuckets(a!, 'opaque')) {
                 const bb = cubeFaceBuckets(b!, 'opaque').find((x) => x.quadCount === ba.quadCount)!;
@@ -331,8 +331,8 @@ describe('meshChunk', () => {
             voxels.chunks.set('0,0,0', chunk);
             for (let i = 0; i < 4; i++) setChunkBlock(chunk, 5 + i, 5, 5, 'water', registry);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
 
             for (const ba of cubeFaceBuckets(a!, 'translucent')) {
                 const bb = cubeFaceBuckets(b!, 'translucent').find((x) => x.quadCount === ba.quadCount)!;
@@ -414,8 +414,8 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
             for (let i = 0; i < chunk.light.length; i++) chunk.light[i] = 15 << 12;
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             const pa = a!.opaque!;
             const pb = b!.opaque!;
             expect(pa.quadCount).toBe(pb.quadCount);
@@ -453,7 +453,7 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 4, 4, 5, 'block', reg);
             setChunkBlock(chunk, 5, 4, 5, 'block', reg);
 
-            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
+            const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             expect(result).not.toBeNull();
             const pass = result!.opaque!;
             expect(pass.quadCount).toBeGreaterThan(0);
@@ -541,8 +541,8 @@ describe('meshChunk', () => {
             setChunkBlock(chunk, 5, 4, 5, 'block', reg);
             setChunkBlock(chunk, 6, 5, 5, 'block', reg);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             expect(a).not.toBeNull();
 
             for (const ba of cubeFaceBuckets(a!, 'opaque')) {

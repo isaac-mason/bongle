@@ -51,6 +51,8 @@ export type {
 } from '../core/voxels/blocks';
 export { block, blockTexture, CullType, MaterialType, resolveTextureRef, VertexAnimation } from '../core/voxels/blocks';
 export { propagateAllLight } from '../core/voxels/light';
+export type { VoxelSweepHit } from '../core/voxels/voxel-aabb-sweep';
+export { createVoxelSweepHit, sweepAabbVsVoxels } from '../core/voxels/voxel-aabb-sweep';
 export type { VoxelRaycastResult } from '../core/voxels/voxel-raycast';
 export { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 export type { Chunk, Voxels, VoxelsAuthority } from '../core/voxels/voxels';

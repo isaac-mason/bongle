@@ -126,11 +126,29 @@ export type CrosshairConfig = {
     length: number;
     /** width of each tick (CSS px). */
     thickness: number;
-    /** CSS color for the tick fill. */
-    color: string;
+    /** tick fill, straight rgba each in 0..1. */
+    color: [number, number, number, number];
     /** how quickly the boxes lerp toward target geometry; higher = snappier. */
     lerpSpeed: number;
 };
+
+/** rewrite the crosshair styles only when a lerped scalar drifts past this many
+ *  CSS px, so a stable crosshair costs nothing per frame. */
+const CROSSHAIR_REWRITE_EPS = 0.25;
+
+/** rgba tuple (0..1) → CSS color string for a crosshair tick's background. */
+function cssRgba(c: [number, number, number, number]): string {
+    return `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
+}
+
+/** position + size one crosshair tick via transform (compositor) + width/height
+ *  (crisp), relative to the 0×0 root anchored at screen center. */
+function applyCrosshairTick(el: HTMLDivElement, w: number, h: number, x: number, y: number, color: string): void {
+    el.style.width = `${w}px`;
+    el.style.height = `${h}px`;
+    el.style.transform = `translate(${x}px, ${y}px)`;
+    el.style.background = color;
+}
 
 // ── trait ─────────────────────────────────────────────────────────────
 
@@ -209,7 +227,7 @@ export const PlayerControllerTrait = trait(
             spread: 0,
             length: 6,
             thickness: 2,
-            color: 'rgba(255, 255, 255, 0.95)',
+            color: [1, 1, 1, 0.95],
             lerpSpeed: 18,
         }),
 
@@ -776,48 +794,65 @@ script(
             }
         };
 
-        // ── crosshair (per-player canvas HUD) ──
-        // four ticks. each tick has a target rect (x,y,w,h) derived from the
-        // trait's `crosshair` params, and a current rect that lerps toward it.
-        // we redraw the canvas only when any current rect drifts past `REDRAW_EPS`
-        // since the last paint, cheap idle (no draw when stable) but smooth
-        // animation when params change.
-        let crosshairCanvas: HTMLCanvasElement | null = null;
-        let crosshairCtx2d: CanvasRenderingContext2D | null = null;
+        // ── crosshair (DOM overlay) ──
+        // four thin divs at screen center. it stays DOM (not the gpucat overlay
+        // pass) because it must paint above HtmlTrait world overlays, which are
+        // DOM, and a canvas-rendered layer can never sit above DOM. we lerp three
+        // source scalars (spread/length/thickness, CSS px) and only rewrite the
+        // tick styles when they drift past an epsilon, so a stable crosshair is
+        // free. animating transform/size on four tiny elements is far cheaper
+        // than the old full-viewport canvas clear+repaint.
+        let crosshairRoot: HTMLDivElement | null = null;
+        let crosshairTicks: HTMLDivElement[] = [];
+        let crosshairSpread = 0;
+        let crosshairLength = 0;
+        let crosshairThickness = 0;
+        let crosshairInit = false;
+        let crosshairLastSpread = -1;
+        let crosshairLastLength = -1;
+        let crosshairLastThickness = -1;
         let crosshairLastColor = '';
-        let crosshairLastViewportW = 0;
-        let crosshairLastViewportH = 0;
-        // [top, bottom, left, right] × [x, y, w, h], current and last-drawn.
-        const crosshairCurrent = new Float32Array(16);
-        const crosshairLastDrawn = new Float32Array(16);
-        let crosshairCurrentInit = false;
 
         const ensureCrosshair = (): boolean => {
             const viewport = ctx.client?.viewport;
             if (!viewport) return false;
-            if (crosshairCanvas) return true;
-            const canvas = document.createElement('canvas');
-            canvas.style.cssText = [
+            if (crosshairRoot) return true;
+            // a 0×0 anchor at screen center; ticks position relative to its origin.
+            const root = document.createElement('div');
+            root.style.cssText = [
                 'position: absolute',
-                'inset: 0',
-                'width: 100%',
-                'height: 100%',
+                'left: 50%',
+                'top: 50%',
+                'width: 0',
+                'height: 0',
                 'pointer-events: none',
                 `z-index: ${UILayer.crosshair}`,
             ].join('; ');
-            viewport.appendChild(canvas);
-            crosshairCanvas = canvas;
-            crosshairCtx2d = canvas.getContext('2d');
-            return crosshairCtx2d !== null;
+            const ticks: HTMLDivElement[] = [];
+            for (let i = 0; i < 4; i++) {
+                const tick = document.createElement('div');
+                tick.style.cssText = 'position: absolute; left: 0; top: 0; will-change: transform';
+                root.appendChild(tick);
+                ticks.push(tick);
+            }
+            viewport.appendChild(root);
+            crosshairRoot = root;
+            crosshairTicks = ticks;
+            // force a rewrite on the first frame after (re)creation.
+            crosshairLastSpread = -1;
+            crosshairLastColor = '';
+            return true;
         };
 
-        const removeCrosshair = (): void => {
-            if (crosshairCanvas) {
-                crosshairCanvas.remove();
-                crosshairCanvas = null;
-                crosshairCtx2d = null;
-                crosshairCurrentInit = false;
+        // remove the crosshair and reset the lerp so it snaps (rather than
+        // crawls) from config when it next becomes visible.
+        const hideCrosshair = (): void => {
+            if (crosshairRoot) {
+                crosshairRoot.remove();
+                crosshairRoot = null;
+                crosshairTicks = [];
             }
+            crosshairInit = false;
         };
 
         /* ── mobile HUD (reactive) ── */
@@ -929,102 +964,55 @@ script(
             setPointerLock(ctx, false);
             clearDebugHelpers(ctx.client?.scene, debugHelpers);
             removeDebugPanel();
-            removeCrosshair();
+            hideCrosshair();
             disposeAllHud();
         });
 
-        // crosshair: target → current lerp + canvas repaint when drift exceeds eps.
-        const CROSSHAIR_REDRAW_EPS = 0.25;
+        // crosshair: lerp the three source scalars toward config, then rewrite
+        // the four tick divs only when they moved past the epsilon or the color
+        // changed (idle is free; animation stays smooth).
         const updateCrosshair = (pc: PlayerControllerTrait, dt: number): void => {
             const cfg = pc.crosshair;
             if (!cfg.enabled) {
-                removeCrosshair();
+                hideCrosshair();
                 return;
             }
             if (!ensureCrosshair()) return;
-            const canvas = crosshairCanvas!;
-            const ctx2d = crosshairCtx2d!;
-            const dpr = window.devicePixelRatio || 1;
-            const w = ctx.client?.state?.viewport.width ?? 0;
-            const h = ctx.client?.state?.viewport.height ?? 0;
 
-            // resize backing store to match viewport (when needed)
-            const cssChanged = w !== crosshairLastViewportW || h !== crosshairLastViewportH;
-            if (cssChanged) {
-                canvas.width = Math.max(1, Math.floor(w * dpr));
-                canvas.height = Math.max(1, Math.floor(h * dpr));
-                crosshairLastViewportW = w;
-                crosshairLastViewportH = h;
-                // force redraw by zeroing last-drawn rects.
-                crosshairLastDrawn.fill(0);
-                // and snap current rects to the new targets, without this
-                // the lerp would crawl from the old-viewport geometry to
-                // the new one (most visible on edit→play, where the HUD
-                // chrome resizes the viewport on the first play frame).
-                crosshairCurrentInit = false;
-            }
-
-            const cx = (w * dpr) / 2;
-            const cy = (h * dpr) / 2;
-            const s = cfg.spread * dpr;
-            const len = cfg.length * dpr;
-            const th = cfg.thickness * dpr;
-
-            // target rects: top, bottom, left, right
-            const targets = [
-                cx - th / 2,
-                cy - s - len,
-                th,
-                len, // top
-                cx - th / 2,
-                cy + s,
-                th,
-                len, // bottom
-                cx - s - len,
-                cy - th / 2,
-                len,
-                th, // left
-                cx + s,
-                cy - th / 2,
-                len,
-                th, // right
-            ];
-
-            if (!crosshairCurrentInit) {
-                for (let i = 0; i < 16; i++) crosshairCurrent[i] = targets[i]!;
-                crosshairCurrentInit = true;
+            if (!crosshairInit) {
+                crosshairSpread = cfg.spread;
+                crosshairLength = cfg.length;
+                crosshairThickness = cfg.thickness;
+                crosshairInit = true;
             } else {
                 const alpha = 1 - Math.exp(-cfg.lerpSpeed * dt);
-                for (let i = 0; i < 16; i++) {
-                    crosshairCurrent[i] += (targets[i]! - crosshairCurrent[i]!) * alpha;
-                }
+                crosshairSpread += (cfg.spread - crosshairSpread) * alpha;
+                crosshairLength += (cfg.length - crosshairLength) * alpha;
+                crosshairThickness += (cfg.thickness - crosshairThickness) * alpha;
             }
 
-            // skip redraw if nothing meaningfully changed
-            let dirty = cfg.color !== crosshairLastColor || cssChanged;
-            if (!dirty) {
-                for (let i = 0; i < 16; i++) {
-                    if (Math.abs(crosshairCurrent[i]! - crosshairLastDrawn[i]!) > CROSSHAIR_REDRAW_EPS) {
-                        dirty = true;
-                        break;
-                    }
-                }
-            }
-            if (!dirty) return;
+            const color = cssRgba(cfg.color);
+            const moved =
+                Math.abs(crosshairSpread - crosshairLastSpread) > CROSSHAIR_REWRITE_EPS ||
+                Math.abs(crosshairLength - crosshairLastLength) > CROSSHAIR_REWRITE_EPS ||
+                Math.abs(crosshairThickness - crosshairLastThickness) > CROSSHAIR_REWRITE_EPS;
+            if (!moved && color === crosshairLastColor) return;
 
-            ctx2d.clearRect(0, 0, canvas.width, canvas.height);
-            ctx2d.fillStyle = cfg.color;
-            for (let i = 0; i < 4; i++) {
-                const o = i * 4;
-                ctx2d.fillRect(
-                    crosshairCurrent[o]!,
-                    crosshairCurrent[o + 1]!,
-                    crosshairCurrent[o + 2]!,
-                    crosshairCurrent[o + 3]!,
-                );
-            }
-            crosshairLastDrawn.set(crosshairCurrent);
-            crosshairLastColor = cfg.color;
+            // ticks in CSS px, positioned from the centered root: top, bottom,
+            // left, right. `spread` = gap from center to each tick's inner edge.
+            const s = crosshairSpread;
+            const len = crosshairLength;
+            const th = crosshairThickness;
+            const half = th / 2;
+            applyCrosshairTick(crosshairTicks[0]!, th, len, -half, -(s + len), color); // top
+            applyCrosshairTick(crosshairTicks[1]!, th, len, -half, s, color); // bottom
+            applyCrosshairTick(crosshairTicks[2]!, len, th, -(s + len), -half, color); // left
+            applyCrosshairTick(crosshairTicks[3]!, len, th, s, -half, color); // right
+
+            crosshairLastSpread = s;
+            crosshairLastLength = len;
+            crosshairLastThickness = th;
+            crosshairLastColor = color;
         };
 
         onUpdate(ctx, ({ delta }) => {
@@ -1107,7 +1095,7 @@ script(
                 updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
                 updateCrosshair(pc, delta);
             } else {
-                removeCrosshair();
+                hideCrosshair();
             }
 
             if (env.editor && ctx.mode === 'edit' && isOwner(ctx, ctx.node)) {

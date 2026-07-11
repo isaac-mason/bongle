@@ -6,31 +6,29 @@
 //     (each worker is a separate module instance, so each gets its own
 //      private scratch, no contention with main or other workers)
 //
-// Per job: main transfers two ArrayBuffers (blocks + light slab bytes)
-// plus chunk coords. Worker copies the bytes into module scratch via
-// `installSlabsAndBuildMeshInput`, runs `meshChunk`, posts back the
-// PassMesh results + recycled input buffers. Recycling lets main return
-// the slab pair to its dispatcher pool with zero re-allocation.
+// Per batch: main transfers ONE packcat MeshTasks buffer (the batch's set/delete
+// mirror deltas + K task chunks) plus K output quad triples (opaque/transparent/
+// translucent). The worker applies the deltas to its chunk cache, then for each
+// task rebuilds the neighbourhood from the cache and runs `buildSlabs` +
+// `meshChunk` — so the strided 18³ slab build happens here, off the main thread —
+// and posts back K PassMesh results + recycled buffers in one message. Batching
+// collapses K chunks' postMessage cost to a single round-trip; recycling lets
+// main return the buffers to its dispatcher pools with zero re-allocation.
 //
 // Protocol:
 //   main → worker
 //     { cmd: 'initRegistry', version: number, buf: ArrayBuffer }
 //         [transfer: buf]
-//     { cmd: 'mesh', chunkKey: string, gen: number,
-//       cx, cy, cz: number,
-//       blocksBuf, lightBuf: ArrayBuffer,
-//       opaqueBuf, transparentBuf, translucentBuf: ArrayBuffer }
-//         [transfer: all 5 buffers]
+//     { cmd: 'meshTasks', packetBuf: ArrayBuffer, outBufs: ArrayBuffer[] }
+//         [transfer: packetBuf + every outBufs entry]
+//         (outBufs[i*3 + {0,1,2}] = opaque/transparent/translucent for task i)
 //   worker → main
 //     { cmd: 'initRegistryAck', version: number }
-//     { cmd: 'result', chunkKey, gen,
-//       opaque, transparent, translucent: PassMesh | null,
-//       aabb: { min, max } | null,
-//       recycle: { blocksBuf, lightBuf,
-//                  opaqueBuf, transparentBuf, translucentBuf } }
-//         [transfer: all 5 recycle buffers, the PassMesh.quads views
-//          point into recycle.{opaque,transparent,translucent}Buf, so
-//          transferring the underlying ArrayBuffers carries them too]
+//     { cmd: 'result', results: MeshWorkerResult[], workUs,
+//       recycle: { packetBuf, outBufs } }
+//         [transfer: packetBuf + every outBufs entry; each result's PassMesh.quads
+//          views point into its outBufs triple, so transferring the underlying
+//          ArrayBuffers carries them too]
 //
 // The worker never references DOM, Voxels, or any main-thread-only
 // resource. It can be unit-tested by importing this module's `handleMessage`
@@ -38,38 +36,34 @@
 
 import type { BlockRegistry } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
-import { type ChunkMeshResult, installSlabsAndBuildMeshInput, type MeshOutput, meshChunk } from './chunk-mesher';
+import { buildMeshInput, type ChunkMeshResult, type MeshOutput, meshChunk } from './chunk-mesher';
+import { type CachedChunk, unpackMeshTasks } from './mesh-tasks';
+import { chunkKey, type Voxels } from './voxels';
 
 export type MeshWorkerInMsg =
     | { cmd: 'initRegistry'; version: number; buf: ArrayBuffer }
     | {
-          cmd: 'mesh';
-          chunkKey: string;
-          gen: number;
-          cx: number;
-          cy: number;
-          cz: number;
-          blocksBuf: ArrayBuffer;
-          lightBuf: ArrayBuffer;
-          opaqueBuf: ArrayBuffer;
-          transparentBuf: ArrayBuffer;
-          translucentBuf: ArrayBuffer;
+          cmd: 'meshTasks';
+          // packcat MeshTasks: the batch's set/delete + K tasks, one buffer
+          packetBuf: ArrayBuffer;
+          // output quad buffers, flat: outBufs[i*3 + {0:opaque,1:transparent,2:translucent}]
+          // for tasks[i]. length === 3 × task count.
+          outBufs: ArrayBuffer[];
       };
+
+/** one meshed chunk in a result batch. */
+export type MeshWorkerResult = ChunkMeshResult & { chunkKey: string; gen: number };
 
 export type MeshWorkerOutMsg =
     | { cmd: 'initRegistryAck'; version: number }
-    | (ChunkMeshResult & {
+    | {
           cmd: 'result';
-          chunkKey: string;
-          gen: number;
-          recycle: {
-              blocksBuf: ArrayBuffer;
-              lightBuf: ArrayBuffer;
-              opaqueBuf: ArrayBuffer;
-              transparentBuf: ArrayBuffer;
-              translucentBuf: ArrayBuffer;
-          };
-      });
+          /** one entry per task in the batch, in the same order. */
+          results: MeshWorkerResult[];
+          /** worker-side wall time for the whole batch (slab build + mesh), µs. */
+          workUs: number;
+          recycle: { packetBuf: ArrayBuffer; outBufs: ArrayBuffer[] };
+      };
 
 /** state held by one worker instance. Module-scope so the worker entry
  *  can call into it after `self.onmessage` dispatches a message. Tests
@@ -77,10 +71,18 @@ export type MeshWorkerOutMsg =
 export type WorkerState = {
     registry: BlockRegistry | null;
     registryVersion: number;
+    /** persistent versioned chunk mirror, kept current by packet set/delete.
+     *  keyed by chunkKey; values stand in for `Chunk` (buildSlabs reads only
+     *  data/light/palette). main tracks a matching per-worker mirror. */
+    cache: Map<string, CachedChunk>;
+    /** `{ chunks: cache }` reused across tasks — the `Voxels`-shaped store the
+     *  mesher reads. cast because cache values are the mesh-relevant slice. */
+    store: Voxels;
 };
 
 export function createWorkerState(): WorkerState {
-    return { registry: null, registryVersion: -1 };
+    const cache = new Map<string, CachedChunk>();
+    return { registry: null, registryVersion: -1, cache, store: { chunks: cache } as unknown as Voxels };
 }
 
 /** main worker message handler. Returns the outbound message (or null
@@ -98,48 +100,46 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         state.registryVersion = msg.version;
         return { cmd: 'initRegistryAck', version: msg.version };
     }
-    if (msg.cmd === 'mesh') {
-        const recycle = {
-            blocksBuf: msg.blocksBuf,
-            lightBuf: msg.lightBuf,
-            opaqueBuf: msg.opaqueBuf,
-            transparentBuf: msg.transparentBuf,
-            translucentBuf: msg.translucentBuf,
-        };
-        if (state.registry === null) {
-            // Drop the job and recycle the buffers. The dispatcher should
-            // never send 'mesh' before an ack, but if it does we still
-            // want the buffers back so the pool doesn't leak.
-            return {
-                cmd: 'result',
-                chunkKey: msg.chunkKey,
-                gen: msg.gen,
-                opaque: null,
-                transparent: null,
-                translucent: null,
-                aabb: null,
-                recycle,
-            };
+    if (msg.cmd === 'meshTasks') {
+        const recycle = { packetBuf: msg.packetBuf, outBufs: msg.outBufs };
+        const mt = unpackMeshTasks(new Uint8Array(msg.packetBuf));
+        // apply the mirror deltas FIRST — always, even on the drop path below —
+        // so the worker cache never diverges from main's per-worker mirror.
+        for (const s of mt.set) {
+            state.cache.set(chunkKey(s.cx, s.cy, s.cz), { version: s.version, data: s.data, light: s.light, palette: s.palette });
         }
-        const blocksU32 = new Uint32Array(msg.blocksBuf);
-        const lightU16 = new Uint16Array(msg.lightBuf);
-        const out: MeshOutput = {
-            opaque: new Uint32Array(msg.opaqueBuf),
-            transparent: new Uint32Array(msg.transparentBuf),
-            translucent: new Uint32Array(msg.translucentBuf),
-        };
-        const input = installSlabsAndBuildMeshInput(msg.cx, msg.cy, msg.cz, blocksU32, lightU16);
-        const result = meshChunk(out, input, state.registry);
-        return {
-            cmd: 'result',
-            chunkKey: msg.chunkKey,
-            gen: msg.gen,
-            opaque: result ? result.opaque : null,
-            transparent: result ? result.transparent : null,
-            translucent: result ? result.translucent : null,
-            aabb: result ? result.aabb : null,
-            recycle,
-        };
+        for (const d of mt.delete) {
+            state.cache.delete(chunkKey(d.cx, d.cy, d.cz));
+        }
+        const t0 = performance.now();
+        const results: MeshWorkerResult[] = [];
+        for (let i = 0; i < mt.tasks.length; i++) {
+            const task = mt.tasks[i]!;
+            const key = chunkKey(task.cx, task.cy, task.cz);
+            // dispatcher should never send before ack, but if it does, drop
+            // (null result) so the buffers still round-trip and the pool holds.
+            let result: ChunkMeshResult | null = null;
+            if (state.registry !== null) {
+                const out: MeshOutput = {
+                    opaque: new Uint32Array(msg.outBufs[i * 3]!),
+                    transparent: new Uint32Array(msg.outBufs[i * 3 + 1]!),
+                    translucent: new Uint32Array(msg.outBufs[i * 3 + 2]!),
+                };
+                // build the 18³ slab from the worker's chunk cache (off the main
+                // thread) — the neighbourhood is already mirrored.
+                const input = buildMeshInput(state.store, task.cx, task.cy, task.cz);
+                result = meshChunk(out, input, state.registry);
+            }
+            results.push({
+                chunkKey: key,
+                gen: task.gen,
+                opaque: result ? result.opaque : null,
+                transparent: result ? result.transparent : null,
+                translucent: result ? result.translucent : null,
+                aabb: result ? result.aabb : null,
+            });
+        }
+        return { cmd: 'result', results, workUs: (performance.now() - t0) * 1000, recycle };
     }
     return null;
 }

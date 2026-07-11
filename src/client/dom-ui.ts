@@ -26,15 +26,22 @@ import {
     cameraProjectionMatrix,
     cameraViewMatrix,
     createPlaneGeometry,
+    type DepthTextureNode,
+    Discard,
     d,
+    Fn,
     f32,
+    fragCoord,
+    If,
     Material,
     Mesh,
     modelWorldMatrix,
     mul,
     type Scene,
+    screenCoordinate,
     texture,
     varying,
+    vec2i,
     vec4f,
 } from 'gpucat';
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
@@ -79,7 +86,12 @@ type HtmlState = {
 
 // ── init ───────────────────────────────────────────────────────────
 
-export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree) {
+// `scene` is the room's overlay scene: CanvasTrait quads are added here so they
+// render crisp in the post-fxaa overlay pass. HtmlTrait panels are DOM (mounted
+// on `htmlOverlay`) and ignore this scene. `sceneDepthNode` is the main scene
+// pass's depth, sampled by canvas materials to discard fragments occluded by
+// world geometry.
+export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree, sceneDepthNode: DepthTextureNode) {
     const htmlOverlay = document.createElement('div');
     htmlOverlay.className = 'engine-html-layer';
     htmlOverlay.style.position = 'absolute';
@@ -94,6 +106,7 @@ export function init(scene: Scene, viewport: HTMLDivElement, nodes: SceneTree) {
 
     return {
         scene,
+        sceneDepthNode,
         viewport,
         htmlOverlay,
         htmlStates: new Map<HtmlTrait, HtmlState>(),
@@ -265,7 +278,7 @@ function installCanvas(domUi: DomUi, trait: CanvasTrait): CanvasState {
     // even if the user hasn't called getContext yet.
     canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
     const tex = new CanvasTexture(canvas);
-    const mesh = new Mesh(createPlaneGeometry(1, 1), createTexturedQuadMaterial(tex));
+    const mesh = new Mesh(createPlaneGeometry(1, 1), createTexturedQuadMaterial(tex, domUi.sceneDepthNode));
     mesh.name = 'dom-ui-canvas';
     mesh.frustumCulled = false;
     domUi.scene.add(mesh);
@@ -369,9 +382,30 @@ function applyQuadPose(
     mesh.position[2] = _meshPos[2];
 }
 
-function createTexturedQuadMaterial(tex: CanvasTexture): Material {
+// occlusion by world geometry, done in-shader (the overlay pass has no shared
+// depth attachment). `sceneZ` is the main scene pass's stored NDC depth at this
+// pixel; discard when this fragment's `fragZ` is behind it. `sceneZ == 1` (no
+// geometry / far plane) never occludes.
+const canvasDepthOcclude = Fn(
+    (color, fragZ, sceneZ) => {
+        If(fragZ.greaterThan(sceneZ), () => {
+            Discard();
+        });
+        return color;
+    },
+    {
+        name: 'canvasDepthOcclude',
+        params: [
+            { name: 'color', type: d.vec4f },
+            { name: 'fragZ', type: d.f32 },
+            { name: 'sceneZ', type: d.f32 },
+        ],
+    },
+);
+
+function createTexturedQuadMaterial(tex: CanvasTexture, sceneDepthNode: DepthTextureNode): Material {
     // simple textured quad: clip = projection * view * model * vec4(pos,1),
-    // fragment = sample(uv).
+    // fragment = sample(uv), discarded where occluded by world geometry.
     const aPosition = attribute('position', d.vec3f);
     const aUv = attribute('uv', d.vec2f);
 
@@ -385,13 +419,21 @@ function createTexturedQuadMaterial(tex: CanvasTexture): Material {
     const texNode = texture(tex);
     const sampled = texNode.sample(vUv);
 
+    // sample the scene pass's depth at this fragment's pixel and discard if we're
+    // behind world geometry. same camera as the scene → same NDC-z space as
+    // `fragCoord.z`, so a direct compare is correct.
+    const sceneZ = sceneDepthNode.load(vec2i(screenCoordinate));
+    const fragment = canvasDepthOcclude(sampled, fragCoord.z, sceneZ);
+
     return new Material({
         name: 'dom-ui-quad',
         vertex: clipPos,
-        fragment: sampled,
+        fragment,
         cullMode: 'none',
-        depthTest: true,
-        depthWrite: true,
+        // occlusion is handled in-shader (above); the overlay pass owns no depth
+        // we test/write against, and transparent panels sort back-to-front.
+        depthTest: false,
+        depthWrite: false,
         transparent: true,
     });
 }

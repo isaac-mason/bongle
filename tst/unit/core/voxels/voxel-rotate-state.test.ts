@@ -81,7 +81,7 @@ function quatY(deg: number): Quat {
 /** find the one and only non-air cell in a rotated voxels and return its key. */
 function singleBlock(v: ReturnType<typeof makeVoxels>): { wx: number; wy: number; wz: number; key: string } {
     for (const chunk of v.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         for (let ly = 0; ly < 16; ly++) {
             for (let lz = 0; lz < 16; lz++) {
                 for (let lx = 0; lx < 16; lx++) {
@@ -156,7 +156,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         // along +Z starting at 0 (reversed in original-block order).
         const found: { wx: number; wy: number; wz: number; key: string }[] = [];
         for (const chunk of rotated.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < 16; ly++) {
                 for (let lz = 0; lz < 16; lz++) {
                     for (let lx = 0; lx < 16; lx++) {
@@ -190,7 +190,7 @@ describe('rotateVoxelsByQuat — per-block state', () => {
         const originals = new Set(['test:column[axis=x]', 'test:stairs[facing=north,half=bottom,shape=straight]']);
         const got = new Set<string>();
         for (const chunk of v.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < 16; ly++) {
                 for (let lz = 0; lz < 16; lz++) {
                     for (let lx = 0; lx < 16; lx++) {

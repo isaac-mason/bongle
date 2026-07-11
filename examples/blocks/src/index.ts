@@ -3,9 +3,11 @@ import {
     BLOCK_AIR,
     blockPreset,
     blockTexture,
+    CullType,
     setCharacterLook,
     draw,
     env,
+    MaterialType,
     getTrait,
     matchmaking,
     onInit,
@@ -67,6 +69,46 @@ const SnowBlock = block('demo:snow_block', {
     model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.snow } } }),
     sounds: blockSoundPresets.snow,
 });
+
+// ── translucent stained-glass cubes (for the translucent-sort lab) ───
+// alpha-BLENDED cubes (MaterialType.TRANSLUCENT), unlike starter `glass` which
+// is TRANSPARENT (alpha-cutout). Translucent geometry is what the GPU per-
+// section quad sort orders back-to-front, so these are the blocks that exercise
+// it. The texture is a semi-transparent colour fill with a higher-alpha 1px
+// frame so stacked panes stay legible through depth. `rgb` is packed into one
+// int param (not a closure array) so each colour bakes to a distinct texture.
+// CullType.SELF so touching cells of one colour read as a single shell.
+const stainedGlass = (id: string, r: number, g: number, b: number) => {
+    const tex = blockTexture(id, {
+        src: draw(
+            (c, _inputs, params) => {
+                const packed = params.rgb as number;
+                const pr = (packed >> 16) & 0xff;
+                const pg = (packed >> 8) & 0xff;
+                const pb = packed & 0xff;
+                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.5)`;
+                c.fillRect(0, 0, 16, 16);
+                c.fillStyle = `rgba(${pr}, ${pg}, ${pb}, 0.85)`;
+                c.fillRect(0, 0, 16, 1);
+                c.fillRect(0, 15, 16, 1);
+                c.fillRect(0, 0, 1, 16);
+                c.fillRect(15, 0, 1, 16);
+            },
+            { size: [16, 16], params: { rgb: (r << 16) | (g << 8) | b } },
+        ),
+    });
+    return block(id, {
+        model: () => ({ type: 'cube', textures: { all: { texture: tex } } }),
+        cull: CullType.SELF,
+        material: MaterialType.TRANSLUCENT,
+        sounds: blockSoundPresets.glass,
+    });
+};
+
+const GlassRed = stainedGlass('demo:glass_red', 220, 60, 60);
+const GlassGreen = stainedGlass('demo:glass_green', 60, 200, 90);
+const GlassBlue = stainedGlass('demo:glass_blue', 70, 110, 230);
+const GlassAmber = stainedGlass('demo:glass_amber', 235, 175, 60);
 
 // ── number blocks (demoing draw() composition) ──────────────────────
 // 10 blocks (0-9) whose top texture is the starter dirt overlaid with
@@ -340,6 +382,88 @@ script(GameplayTrait, 'session', (ctx) => {
         setBlock(ctx.voxels, cMinX + 1, baseY + 1, 0, RedTorch.defaultKey());
         setBlock(ctx.voxels, -18, baseY + 1, cMaxZ - 1, GreenTorch.defaultKey());
         setBlock(ctx.voxels, -18, baseY + 1, cMinZ + 1, BlueTorch.defaultKey());
+
+        // ── translucent-sort lab (east of the showcase, bridged at z=0) ──
+        // Four stations of alpha-BLENDED geometry (stained glass + water) —
+        // the only thing the GPU per-section quad sort orders. Each section's
+        // translucent quads are sorted back-to-front on the GPU and re-sorted as
+        // the camera moves, so orbit each station: correct order reads as clean
+        // layered tint, a sort bug shows as blend artifacts / popping. Stations
+        // A–C classify DYNAMIC (they drive the sort); D is a NONE control.
+        const lx = 34; // lab base x (main platform ends at x=20)
+        const labMinX = 32,
+            labMaxX = 57;
+        const labMinZ = -4,
+            labMaxZ = 14;
+        for (let wx = labMinX; wx <= labMaxX; wx++) {
+            for (let wz = labMinZ; wz <= labMaxZ; wz++) {
+                setBlock(ctx.voxels, wx, baseY - 1, wz, Stone.defaultKey());
+                for (let dy = 0; dy < 5; dy++) setBlock(ctx.voxels, wx, baseY + dy, wz, BLOCK_AIR);
+            }
+        }
+        // 3-wide stone bridge from the main platform (x=20) to the lab (x=32).
+        for (let wx = 21; wx <= labMinX - 1; wx++) {
+            for (let wz = -1; wz <= 1; wz++) setBlock(ctx.voxels, wx, baseY - 1, wz, Stone.defaultKey());
+        }
+
+        const glassCycle = [GlassRed, GlassGreen, GlassBlue, GlassAmber];
+
+        // Station A — depth stack. Alternating-colour translucent cubes every 2
+        // blocks along z with air gaps → many parallel translucent planes at
+        // increasing depth in ONE section. The cleanest intra-section (Level-B)
+        // sort test: walk along its length and the layers must stay ordered.
+        for (let i = 0; i < 6; i++) {
+            const key = glassCycle[i % glassCycle.length]!.defaultKey();
+            setBlock(ctx.voxels, lx, baseY, 2 + i * 2, key);
+            setBlock(ctx.voxels, lx, baseY + 1, 2 + i * 2, key);
+        }
+
+        // Station B — nested shells. An outer amber hollow cube shell around an
+        // inner blue one (air gap between), so any view crosses
+        // outer→inner→inner-far→outer-far translucent layers (multi-plane per
+        // facing → DYNAMIC). The classic nested-transparency ordering test.
+        const shell = (cx: number, cy: number, cz: number, radius: number, handle: (typeof glassCycle)[number]) => {
+            for (let dx = -radius; dx <= radius; dx++) {
+                for (let dy = -radius; dy <= radius; dy++) {
+                    for (let dz = -radius; dz <= radius; dz++) {
+                        if (Math.abs(dx) === radius || Math.abs(dy) === radius || Math.abs(dz) === radius) {
+                            setBlock(ctx.voxels, cx + dx, cy + dy, cz + dz, handle.defaultKey());
+                        }
+                    }
+                }
+            }
+        };
+        shell(lx + 6, baseY + 2, 4, 2, GlassAmber);
+        shell(lx + 6, baseY + 2, 4, 1, GlassBlue);
+
+        // Station C — water pool with a depth step + submerged glass. A 6×6
+        // surface split into two water levels (multi-plane water → DYNAMIC) with
+        // translucent posts standing in it, so water quads and glass quads at
+        // mixed depths sort together.
+        const poolX = lx + 11,
+            poolZ = 1;
+        for (let dx = 0; dx < 6; dx++) {
+            for (let dz = 0; dz < 6; dz++) {
+                setBlock(ctx.voxels, poolX + dx, baseY, poolZ + dz, Water.level(dz < 3 ? 8 : 4));
+            }
+        }
+        setBlock(ctx.voxels, poolX + 1, baseY, poolZ + 1, GlassRed.defaultKey());
+        setBlock(ctx.voxels, poolX + 4, baseY, poolZ + 2, GlassGreen.defaultKey());
+        setBlock(ctx.voxels, poolX + 2, baseY, poolZ + 4, GlassBlue.defaultKey());
+
+        // Station D — NONE control. A flat single-level water pane and a SOLID
+        // 3×3×3 glass box (CullType.SELF → only its convex outer shell draws).
+        // Both classify NONE, so the sort is a no-op here — compare their rock-
+        // steady look against the DYNAMIC stations to sanity-check the trigger.
+        const ctrlX = lx + 20;
+        for (let dx = 0; dx < 4; dx++) {
+            for (let dz = 0; dz < 4; dz++) setBlock(ctx.voxels, ctrlX + dx, baseY, 1 + dz, Water.level(8));
+        }
+        for (let dx = 0; dx < 3; dx++) {
+            for (let dy = 0; dy < 3; dy++) {
+                for (let dz = 0; dz < 3; dz++) setBlock(ctx.voxels, ctrlX + dx, baseY + dy, 8 + dz, GlassAmber.defaultKey());
+            }
+        }
     });
 
     // ── dynamic step machine ────────────────────────────────────────

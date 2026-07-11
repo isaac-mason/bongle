@@ -174,8 +174,8 @@ describe('block-registry-serde', () => {
             setChunkBlock(chunk, 6, 5, 5, 'glass', reg);
             setChunkBlock(chunk, 5, 6, 5, 'lamp', reg);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), decoded);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), decoded);
             resultEqual(a, b);
         });
 
@@ -191,8 +191,8 @@ describe('block-registry-serde', () => {
             setChunkBlock(chunk, 4, 4, 5, 'block', reg);
             setChunkBlock(chunk, 5, 4, 5, 'block', reg);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), decoded);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), decoded);
             resultEqual(a, b);
         });
 
@@ -204,8 +204,8 @@ describe('block-registry-serde', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), reg);
-            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), decoded);
+            const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
+            const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), decoded);
             expect(a).toBeNull();
             expect(b).toBeNull();
         });

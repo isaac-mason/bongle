@@ -17,3 +17,6 @@ onlyBuiltDependencies:
   - puppeteer
   - sharp
   - skia-canvas
+
+overrides:
+  gpucat: link:../../gpucat

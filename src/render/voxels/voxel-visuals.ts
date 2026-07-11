@@ -24,38 +24,28 @@
 // `{origin, arenaBase}`, and renders 1 quad at `arenaBase + localIdx`.
 
 import type { Camera, ComputeDispatch, Scene } from 'gpucat';
-import { frustum, Mesh } from 'gpucat';
-import type { Box3, Vec3 } from 'mathcat';
+import { frustum, Mesh, packTo } from 'gpucat';
+import { plane3, type Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
-import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
-import { CHUNK_SIZE, type Chunk, chunkKey, type Voxels } from '../../core/voxels/voxels';
-import { enqueueMesh, isInFlight } from './mesh-dispatcher';
+import { buildMeshInput, type ChunkMeshResult, meshChunk, TRANSLUCENT_SORT_DYNAMIC } from '../../core/voxels/chunk-mesher';
+import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk, chunkKey, type Voxels } from '../../core/voxels/voxels';
+import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {
-    type ChunkAlloc,
-    EXPAND_WG_SIZE,
+    CULL_WG_SIZE,
     PASSES,
-    type PassRender,
     packerClearAll,
     packerEvictChunk,
     packerHas,
     packerKeys,
     packerSetCameraPos,
     packerUpsertChunk,
-    VISIBLE_SLICE_STRIDE,
+    SORT_CAP,
+    TRANSLUCENT_SORT_ENTRY_STRIDE,
+    TranslucentSortEntry,
     type VoxelResources,
-    WG_INFO_STRIDE,
 } from './voxel-resources';
-
-const VISIBLE_SLICE_U32S = VISIBLE_SLICE_STRIDE / 4;
-const WG_INFO_U32S = WG_INFO_STRIDE / 4;
-
-/** 0=+X,1=-X,2=+Y,3=-Y,4=+Z,5=-Z, matches SectionEntry.face* ordering.
- *  index 6 (UNASSIGNED) is never cone-culled. */
-const FACE_AXIS = [0, 0, 1, 1, 2, 2] as const;
-/** sign of the outward normal along FACE_AXIS for facing 0..5. */
-const FACE_SIGN = [+1, -1, +1, -1, +1, -1] as const;
 
 export type VoxelVisuals = {
     /** per-room `Mesh` instances added to the room's `Scene`. each wraps
@@ -66,11 +56,15 @@ export type VoxelVisuals = {
     frame: number;
     /** chunk key → frame at which it was first observed dirty (remesh). cleared on remesh. */
     dirtyFirstSeen: Map<string, number>;
-    /** one-shot extra remesh budget added to `maxRemeshes` on the next `update()`.
-     *  set by `activateRoom` so the post-swap frame populates a chunk halo around
-     *  the camera in one spike instead of trickling in over hundreds of frames.
-     *  Zeroed after being consumed. */
-    remeshAdditionalBudget: number;
+    /** one-shot count of closest dirty chunks to dispatch URGENT on the next
+     *  `update()`. set by `activateRoom` so the post-swap frame fills a chunk halo
+     *  around the camera immediately (urgent jumps the worker queue) instead of
+     *  trickling in over normal-tier streaming. Zeroed after being consumed. */
+    roomSwapUrgentBurst: number;
+    /** last frame's mesh-dispatch perf (main-thread build vs postMessage split,
+     *  posts/frame, worker time). drained from the dispatcher each update; read
+     *  by the debug HUD / console. null until the first dispatched frame. */
+    lastMeshPerf: MeshPerf | null;
 };
 
 export function initRoomMeshes(scene: Scene, voxelResources: VoxelResources): VoxelVisuals {
@@ -86,13 +80,15 @@ export function initRoomMeshes(scene: Scene, voxelResources: VoxelResources): Vo
         meshes,
         frame: 0,
         dirtyFirstSeen: new Map(),
-        remeshAdditionalBudget: 0,
+        roomSwapUrgentBurst: 0,
+        lastMeshPerf: null,
     };
 }
 
-/** chunks eagerly remeshed on the first frame after `activateRoom`. one
- *  spiky frame is preferable to multi-second pop-in at the per-frame cap. */
-const ROOM_SWAP_REMESH_BUDGET = 20;
+/** closest dirty chunks dispatched urgently on the first frame after
+ *  `activateRoom`, so the scene fills in immediately instead of trickling in
+ *  behind normal-tier streaming. */
+const ROOM_SWAP_URGENT_BURST = 20;
 
 // ── update ──────────────────────────────────────────────────────────
 
@@ -100,13 +96,32 @@ const ROOM_SWAP_REMESH_BUDGET = 20;
 const STARVATION_GRACE_FRAMES = 30;
 const STARVATION_BOOST_PER_FRAME = (CHUNK_SIZE * CHUNK_SIZE) / 2;
 
-/** sync (main-thread) remesh only fires for chunks within this Chebyshev
- *  radius of the camera's chunk. Everything outside is enqueued to the
- *  worker pool. Keeps the main thread responsive while still hiding
- *  one-frame latency for the chunk the player is editing in front of
- *  themselves. CHUNK_SIZE=16 → 2 chunks = the chunk you're in plus its
- *  immediate ring on each axis. */
-const MAIN_THREAD_REMESH_RADIUS_CHUNKS = 2;
+/** chunks within this Chebyshev radius of the camera's chunk dispatch URGENT
+ *  (jump the worker queue) — the block the player is editing in front of
+ *  themselves meshes next frame instead of behind streaming backlog. Everything
+ *  outside is normal-tier. CHUNK_SIZE=16 → 2 chunks = the chunk you're in plus
+ *  its immediate ring on each axis. */
+const URGENT_REMESH_RADIUS_CHUNKS = 2;
+
+/** a fully-opaque chunk whose 6 face-neighbors are all fully opaque has no
+ *  visible surface: every boundary face is culled against a solid neighbor
+ *  and the interior self-culls. Such a chunk can skip meshing entirely and
+ *  have its arena entry evicted, exactly like an all-air chunk.
+ *
+ *  A missing neighbor (unloaded, or the world edge) counts as non-occluding,
+ *  so the exposed face still meshes. This is safe because any state change
+ *  that could reveal a face already re-dirties this chunk: a boundary block
+ *  edit in a neighbor (applyVoxelChunkOps) and a neighbor chunk load/update
+ *  (dirtyAllNeighborChunks) both mark it dirty for face-cull reasons, so the
+ *  occlusion test is re-evaluated before the newly-exposed face could show. */
+function hasNoVisibleSurface(chunk: Chunk): boolean {
+    if (chunk.solidCount !== CHUNK_VOLUME) return false;
+    for (let dir = 0; dir < 6; dir++) {
+        const neighbor = chunk.neighbors[dir];
+        if (neighbor === null || neighbor.solidCount !== CHUNK_VOLUME) return false;
+    }
+    return true;
+}
 
 /**
  * scan all chunks for dirty flags and either main-thread-remesh them or
@@ -114,15 +129,16 @@ const MAIN_THREAD_REMESH_RADIUS_CHUNKS = 2;
  * global arena packer.
  *
  * Two modes:
- * - `cameraPos === undefined` (asset-pipeline): every dirty chunk
- *   meshes synchronously in one pass, no caps.
- * - `cameraPos !== undefined` (live client): dirty chunks sort by
- *   distance² from camera (with starvation boost). A candidate runs on
- *   the main thread only if (a) `mainThreadRemeshBudget` not yet spent
- *   AND (b) the chunk sits within `MAIN_THREAD_REMESH_RADIUS_CHUNKS`
- *   Chebyshev of the camera's chunk. Everything else goes to
- *   `meshDispatcher` (workers); overflow stays dirty and retries next
- *   frame.
+ * - `cameraPos === undefined` OR no worker pool (asset-pipeline, tests,
+ *   workers disabled): every dirty chunk meshes synchronously in one
+ *   pass, no caps — there's nothing to prioritise onto.
+ * - live client with workers: dirty chunks sort by distance² from camera
+ *   (with starvation boost) and ALL dispatch to `meshDispatcher`. A chunk
+ *   within `URGENT_REMESH_RADIUS_CHUNKS` Chebyshev of the camera (or under
+ *   the room-swap burst) dispatches URGENT — it jumps the worker's queue so
+ *   the block you're editing meshes next frame instead of behind streaming
+ *   backlog. Everything else is normal-tier; overflow stays dirty and
+ *   retries next frame.
  *
  * dirty flags are cleared on (re)mesh OR on successful enqueue; chunks
  * with zero geometry (all air) are evicted from the arena. Worker
@@ -135,7 +151,6 @@ export function update(
     voxels: Voxels,
     registry: BlockRegistry,
     cameraPos: Vec3 | undefined,
-    mainThreadRemeshBudget: number,
 ): void {
     const arenas = voxelResources.arenas;
     state.frame++;
@@ -176,8 +191,11 @@ export function update(
         lost.length = 0;
     }
 
-    if (cameraPos === undefined) {
-        // unprioritised: full remesh of every dirty chunk in one pass.
+    const dispatcher = voxelResources.meshDispatcher;
+    if (cameraPos === undefined || dispatcher === null) {
+        // unprioritised: full synchronous remesh of every dirty chunk in one pass.
+        // the offline (asset-pipeline / test) path, and the workers-disabled
+        // fallback — with no worker pool there's nothing to prioritise onto.
         for (const chunk of voxels.dirty.blocks) {
             const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
             chunk.dirty = false;
@@ -207,31 +225,31 @@ export function update(
         }
 
         remeshCandidates.sort((a, b) => a.score - b.score);
-        const remeshBudget = mainThreadRemeshBudget + state.remeshAdditionalBudget;
-        state.remeshAdditionalBudget = 0;
+        // one-shot urgent burst after a room swap: the closest N candidates are
+        // meshed urgently so the scene fills in immediately rather than popping
+        // in over several frames of normal-tier streaming.
+        let roomSwapUrgentBurst = state.roomSwapUrgentBurst;
+        state.roomSwapUrgentBurst = 0;
 
-        // Single pass over sorted (closest-first) candidates. A candidate
-        // sync-remeshes only if (a) we still have main-thread budget AND
-        // (b) it sits within MAIN_THREAD_REMESH_RADIUS_CHUNKS Chebyshev of
-        // the camera. Anything else → dispatcher. Each successful enqueue
-        // clears chunk.dirty and removes from voxels.dirty.blocks so we
-        // don't re-dispatch every frame while a job is in flight. A
-        // mutation during flight re-sets dirty + bumps meshGen → stale
-        // result dropped on drain, chunk re-dispatched next frame.
+        // Single pass over sorted (closest-first) candidates, all off-thread.
+        // A candidate is dispatched URGENT if it's within URGENT_REMESH_RADIUS
+        // Chebyshev of the camera (the block you're editing in front of you) or
+        // covered by the room-swap burst; everything else is normal-tier with
+        // starvation spill. Each successful enqueue clears chunk.dirty and drops
+        // it from voxels.dirty.blocks so we don't re-dispatch while in flight. A
+        // mutation during flight re-sets dirty + bumps meshGen → stale result
+        // dropped on drain, chunk re-dispatched next frame.
         const camCx = Math.floor(cx / CHUNK_SIZE);
         const camCy = Math.floor(cy / CHUNK_SIZE);
         const camCz = Math.floor(cz / CHUNK_SIZE);
-        const dispatcher = voxelResources.meshDispatcher;
-        let syncDone = 0;
         for (let i = 0; i < remeshCandidates.length; i++) {
             const { key, chunk } = remeshCandidates[i]!;
-            const chebyshevChunks = Math.max(Math.abs(chunk.cx - camCx), Math.abs(chunk.cy - camCy), Math.abs(chunk.cz - camCz));
-            const canSync = syncDone < remeshBudget && chebyshevChunks <= MAIN_THREAD_REMESH_RADIUS_CHUNKS;
 
-            // all-air chunks have no geometry to mesh, evict any prior
-            // arena entry inline rather than shipping a ~700 KB no-op job
-            // to a worker. matches the sync path's check in `remeshChunk`.
-            if (chunk.aggregate === 0) {
+            // chunks with no visible geometry (all-air, or a fully-opaque
+            // interior boxed in by fully-opaque neighbors) evict any prior
+            // arena entry inline rather than shipping a ~700 KB no-op job to
+            // a worker. matches the sync path's check in `remeshChunk`.
+            if (chunk.nonAirCount === 0 || hasNoVisibleSurface(chunk)) {
                 chunk.dirty = false;
                 voxels.dirty.blocks.delete(chunk);
                 state.dirtyFirstSeen.delete(key);
@@ -239,22 +257,31 @@ export function update(
                 continue;
             }
 
-            if (canSync) {
-                chunk.dirty = false;
-                voxels.dirty.blocks.delete(chunk);
-                state.dirtyFirstSeen.delete(key);
-                remeshChunk(voxelResources, voxels, registry, key, chunk);
-                syncDone++;
-            } else if (dispatcher !== null) {
-                if (isInFlight(dispatcher, key)) continue;
-                const ok = enqueueMesh(dispatcher, voxels, chunk, chunk.meshGen);
-                if (!ok) break;
-                chunk.dirty = false;
-                voxels.dirty.blocks.delete(chunk);
-                state.dirtyFirstSeen.delete(key);
+            if (isInFlight(dispatcher, key)) continue;
+
+            const chebyshevChunks = Math.max(Math.abs(chunk.cx - camCx), Math.abs(chunk.cy - camCy), Math.abs(chunk.cz - camCz));
+            let urgent = chebyshevChunks <= URGENT_REMESH_RADIUS_CHUNKS;
+            if (!urgent && roomSwapUrgentBurst > 0) {
+                urgent = true;
+                roomSwapUrgentBurst--;
             }
+
+            // a starving normal-tier chunk spills off its (saturated) affinity
+            // worker to any idle one instead of stalling. urgent bypasses the
+            // queue gate, so it needs neither spill nor a `continue`-retry.
+            const firstSeen = state.dirtyFirstSeen.get(key);
+            const starving = firstSeen !== undefined && state.frame - firstSeen > STARVATION_GRACE_FRAMES;
+            const ok = queueMesh(dispatcher, voxels, chunk, chunk.meshGen, urgent ? { urgent: true } : { allowSpill: starving });
+            if (!ok) continue;
+            chunk.dirty = false;
+            voxels.dirty.blocks.delete(chunk);
+            state.dirtyFirstSeen.delete(key);
         }
     }
+
+    // drain each worker's accumulated pending into one batched packet per worker
+    // (a worker meshing K chunks costs a single postMessage, not K).
+    if (dispatcher !== null) flushMeshQueue(dispatcher, voxels);
 
     // evict any arena-held chunk the server has dropped from voxels.chunks.
     // (server discovery owns chunk membership; we just mirror it.)
@@ -263,12 +290,61 @@ export function update(
             packerEvictChunk(arenas.packer, key);
         }
     }
+
+    // drain this frame's dispatch instrumentation for the debug HUD / console.
+    if (voxelResources.meshDispatcher !== null) {
+        const perf = readMeshPerf(voxelResources.meshDispatcher);
+        state.lastMeshPerf = perf;
+        logMeshPerf(perf);
+    }
+}
+
+// ── dispatch perf logging (dev instrumentation) ─────────────────────
+// accumulates per-frame perf over a ~1s window and logs a one-liner when
+// there was dispatch activity. peakMainMs is the worst single-frame
+// main-thread cost (build + postMessage) — that's the hitch to watch.
+const _perfLog = { frames: 0, enqueues: 0, results: 0, buildMs: 0, postMs: 0, workUs: 0, peakMainMs: 0, peakEnq: 0 };
+
+function logMeshPerf(p: MeshPerf): void {
+    _perfLog.frames++;
+    _perfLog.enqueues += p.enqueues;
+    _perfLog.results += p.results;
+    _perfLog.buildMs += p.buildMs;
+    _perfLog.postMs += p.postMs;
+    _perfLog.workUs += p.workUs;
+    const mainMs = p.buildMs + p.postMs;
+    if (mainMs > _perfLog.peakMainMs) _perfLog.peakMainMs = mainMs;
+    if (p.enqueues > _perfLog.peakEnq) _perfLog.peakEnq = p.enqueues;
+
+    if (_perfLog.frames < 60) return;
+    const l = _perfLog;
+    if (l.enqueues > 0) {
+        const perPostBuild = ((l.buildMs / l.enqueues) * 1000).toFixed(1);
+        const perPostPost = ((l.postMs / l.enqueues) * 1000).toFixed(1);
+        console.log(
+            `[mesh] ${l.frames}f | posts→ ${l.enqueues} (peak ${l.peakEnq}/f) results← ${l.results} | ` +
+                `main: build ${l.buildMs.toFixed(1)}ms + post ${l.postMs.toFixed(1)}ms | ` +
+                `PEAK main/frame ${l.peakMainMs.toFixed(2)}ms | worker ${(l.workUs / 1000).toFixed(1)}ms | ` +
+                `per-post: build ${perPostBuild}µs post ${perPostPost}µs`,
+        );
+    }
+    _perfLog.frames = 0;
+    _perfLog.enqueues = 0;
+    _perfLog.results = 0;
+    _perfLog.buildMs = 0;
+    _perfLog.postMs = 0;
+    _perfLog.workUs = 0;
+    _perfLog.peakMainMs = 0;
+    _perfLog.peakEnq = 0;
 }
 
 /** main-thread remesh: run `meshChunk` against the room's shared
  *  `meshOutput`, then install the result via `writeChunkMesh`. */
 function remeshChunk(voxelResources: VoxelResources, voxels: Voxels, registry: BlockRegistry, key: string, chunk: Chunk): void {
-    const mesh = chunk.aggregate === 0 ? null : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk), registry);
+    const mesh =
+        chunk.nonAirCount === 0 || hasNoVisibleSurface(chunk)
+            ? null
+            : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
     writeChunkMesh(voxelResources, key, chunk, mesh);
 }
 
@@ -277,7 +353,7 @@ function remeshChunk(voxelResources: VoxelResources, voxels: Voxels, registry: B
  *  thread `remeshChunk` path and the worker drain path. */
 function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
     const packer = voxelResources.arenas.packer;
-    if (mesh === null || chunk.aggregate === 0 || mesh.aabb === null) {
+    if (mesh === null || chunk.nonAirCount === 0 || mesh.aabb === null) {
         if (packerHas(packer, key)) packerEvictChunk(packer, key);
         return;
     }
@@ -286,229 +362,237 @@ function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chun
 
 // ── render-time CPU work ────────────────────────────────────────────
 
-const _cpuFrustum = frustum.create();
+const _cullFrustum = frustum.create();
 
-/** scratch survivor list, reused across frames. one entry per chunk
- *  that passed the shared frustum test, with sort key (distSq to camera
- *  center). sorted ascending; opaque/transparent iterate forward (near→
- *  far early-Z), translucent iterates backward (far→near blend). */
-type _Survivor = { alloc: ChunkAlloc; key: number };
-const _survivors: _Survivor[] = [];
-const _cmpAsc = (a: _Survivor, b: _Survivor) => a.key - b.key;
-
-/** per-pass running counters during emit; mutated in place by
- *  `emitFacingSlices` / inline translucent emit. */
-type _PassCounters = { sliceCount: number; instStart: number; wgCount: number };
-const _countersO: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
-const _countersT: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
-const _countersTr: _PassCounters = { sliceCount: 0, instStart: 0, wgCount: 0 };
-
-/** opaque / transparent 7-facing emit. fans the section's facing slices,
- *  cone-culls the 6 axis-aligned ones against camera, and appends each
- *  surviving slice (+ its wgInfo entries) to the pass's output buffers.
- *  inlined as a helper because opaque + transparent run identical logic. */
-function emitFacingSlices(
-    c: _PassCounters,
-    sliceOut: Uint32Array,
-    wgOut: Uint32Array,
-    faceOffsets: Uint32Array,
-    faceCounts: Uint32Array,
-    slot: number,
-    aabb: Box3,
-    cx: number,
-    cy: number,
-    cz: number,
-): void {
-    const facingBase = slot * 7;
-    for (let face = 0; face < 7; face++) {
-        const quadCount = faceCounts[facingBase + face]!;
-        if (quadCount === 0) continue;
-
-        if (face < 6) {
-            // back-face test: for axis-aligned n=±axis, "camera in front
-            // of any point on the section's face" reduces to a 1-D bound.
-            //   +face back-facing iff camera ≤ aabb.min[axis]
-            //   −face back-facing iff camera ≥ aabb.max[axis]
-            const axis = FACE_AXIS[face]!;
-            const sign = FACE_SIGN[face]!;
-            const aMin = aabb[axis]!;
-            const aMax = aabb[3 + axis]!;
-            const camAxis = axis === 0 ? cx : axis === 1 ? cy : cz;
-            if (sign > 0 ? camAxis <= aMin : camAxis >= aMax) continue;
-        }
-
-        const base = c.sliceCount * VISIBLE_SLICE_U32S;
-        sliceOut[base + 0] = c.instStart;
-        sliceOut[base + 1] = slot;
-        sliceOut[base + 2] = quadCount;
-        sliceOut[base + 3] = faceOffsets[facingBase + face]!;
-        for (let q = 0; q < quadCount; q += EXPAND_WG_SIZE) {
-            const wgBase = c.wgCount * WG_INFO_U32S;
-            wgOut[wgBase + 0] = c.sliceCount;
-            wgOut[wgBase + 1] = q;
-            c.wgCount++;
-        }
-        c.sliceCount++;
-        c.instStart += quadCount;
-    }
-}
-
-/** CPU cull: one frustum + distance pass over the active arena's
- *  `packer.chunks`, one sort, then per-pass slice emit. opaque/transparent
- *  emit inside the forward loop (near→far for early-Z); translucent runs
- *  a separate reverse loop (far→near for blend). populates each pass's
- *  `visibleSlicesBuffer` + `wgInfoBuffer` + single `indirectBuffer`
- *  (instanceCount = visibleQuads).
+/** Write the per-frame camera view (5 pre-shifted, camera-relative frustum
+ *  planes + camera chunk/frac) into `cullView`, and reset the GPU cull/emit
+ *  counters. The visibility test + slice emission now run on the GPU via
+ *  `cullDispatches`; this just prepares their per-frame inputs. Must run before
+ *  those dispatches.
  *
- *  reads/writes only engine-global state on `voxelResources`; no per-room
- *  VoxelVisuals reference needed. must run before `expandDispatches(voxelRes)`
- *  + the per-pass drawIndirect. */
-export function cullCPU(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
-    frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
+ *  Planes are expressed camera-relative and the world coords go in as integer
+ *  chunk coords + sub-chunk frac, so the whole cull stays f32-exact at
+ *  Minecraft world scale. `viewChunkRadius` is read live from settings, so a
+ *  tier flip applies next frame. */
+export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
+    frustum.setFromViewProjectionMatrix(_cullFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
     const cx = camera.position[0];
     const cy = camera.position[1];
     const cz = camera.position[2];
+    const camCx = Math.floor(cx / CHUNK_SIZE);
+    const camCy = Math.floor(cy / CHUNK_SIZE);
+    const camCz = Math.floor(cz / CHUNK_SIZE);
 
-    // shared frustum + view-radius cull, one test per chunk, AABB lives on
-    // ChunkAlloc. `viewChunkRadius` is read live from settings by the caller,
-    // so a tier flip or settings-panel slider applies on the next frame.
+    // 5 planes (drop the far plane, index 5 — the view-radius test bounds it),
+    // camera-relative with the section half-extent folded into `.w`:
+    //   dot(plane.xyz, relCenter) + plane.w >= 0  keeps the section.
+    const data = voxelResources.cullViewData;
+    const half = CHUNK_SIZE * 0.5;
+    for (let i = 0; i < 5; i++) {
+        const p = _cullFrustum[i]!;
+        const nx = p.normal[0];
+        const ny = p.normal[1];
+        const nz = p.normal[2];
+        // (n·cam + constant), folded with the box support along n; all in f64.
+        const w = plane3.distanceToPoint(p, camera.position) + half * (Math.abs(nx) + Math.abs(ny) + Math.abs(nz));
+        const base = i * 4;
+        data[base + 0] = nx;
+        data[base + 1] = ny;
+        data[base + 2] = nz;
+        data[base + 3] = w;
+    }
+    // camMeta = (camChunk.xyz, recordCount); camFrac = (fracXYZ, viewDist²).
     const viewDist = viewChunkRadius * CHUNK_SIZE;
-    const viewDistSq = viewDist * viewDist;
-    const arenas = voxelResources.arenas;
-    const chunks = arenas.packer.chunks;
-    _survivors.length = 0;
-    for (let i = 0; i < chunks.length; i++) {
-        const alloc = chunks[i]!;
-        const aabb = alloc.aabb;
-        if (!frustum.intersectsBox3(_cpuFrustum, aabb)) continue;
-        const dx = (aabb[0] + aabb[3]) * 0.5 - cx;
-        const dy = (aabb[1] + aabb[4]) * 0.5 - cy;
-        const dz = (aabb[2] + aabb[5]) * 0.5 - cz;
+    data[20] = camCx;
+    data[21] = camCy;
+    data[22] = camCz;
+    data[23] = voxelResources.arenas.packer.chunks.length;
+    data[24] = cx - camCx * CHUNK_SIZE;
+    data[25] = cy - camCy * CHUNK_SIZE;
+    data[26] = cz - camCz * CHUNK_SIZE;
+    data[27] = viewDist * viewDist;
+    voxelResources.cullView.addUpdateRange(0, data.length);
+    voxelResources.cullView.needsUpdate = true;
+
+    // reset the cull append counter (emitArgs[0]); [1]=7, [2]=1 stay.
+    voxelResources.emitArgsData[0] = 0;
+    voxelResources.emitArgs.addUpdateRange(0, voxelResources.emitArgsData.length);
+    voxelResources.emitArgs.needsUpdate = true;
+
+    // zero the per-bucket quad tallies for this frame's count pass (the CPU
+    // mirror stays all-zero; re-uploading it clears the GPU buffer). The draw
+    // instanceCounts are written by the finalize pass, not reset here.
+    voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
+    voxelResources.bucketQuads.needsUpdate = true;
+
+    buildTranslucentSortEntries(voxelResources, cx, cy, cz);
+}
+
+// Level-B translucent quad-sort trigger. The sort key is ROTATION-INVARIANT
+// (distance to each quad's plane), so orbiting the camera in place never changes
+// the correct order — the only events that invalidate a persisted `quadOrder` are
+// camera TRANSLATIONS (crossing a quad plane / a parallel-pair midpoint). So the
+// gate is pure translation: re-sort a DYNAMIC section when the camera has moved
+// far enough since that section's last sort — a tight threshold up close (a small
+// move reorders near geometry, e.g. diving through a water surface), looser far
+// away. First-seen / re-meshed sections (sortValid=false) always sort.
+const SORT_NEAR_DIST_SQ = 32 * 32; // within ~2 chunks of the section center → "near"
+const SORT_MOVE_TRIGGER_NEAR_SQ = 0.25 * 0.25; // 0.25 block of translation, near
+const SORT_MOVE_TRIGGER_FAR_SQ = 1.0 * 1.0; // 1 block, far
+let warnedOversizedSort = false;
+
+function buildTranslucentSortEntries(voxelResources: VoxelResources, camX: number, camY: number, camZ: number): void {
+    const packer = voxelResources.arenas.packer;
+    const entries = voxelResources.translucentSortEntriesData;
+    const half = CHUNK_SIZE * 0.5;
+    let count = 0;
+    for (const chunk of packer.chunks) {
+        const t = chunk.translucent;
+        if (!t || t.sortType !== TRANSLUCENT_SORT_DYNAMIC) continue;
+        if (t.dataCount > SORT_CAP) {
+            // one workgroup can't sort more than SORT_CAP quads; leave the section
+            // on its identity order (a large far-ish blob, rarely misorder-visible).
+            if (!warnedOversizedSort) {
+                warnedOversizedSort = true;
+                console.warn(`[voxel-sort] section has ${t.dataCount} translucent quads > SORT_CAP ${SORT_CAP}; left unsorted`);
+            }
+            continue;
+        }
+
+        // distance to the section center (picks the near vs far move threshold).
+        const dx = chunk.originX + half - camX;
+        const dy = chunk.originY + half - camY;
+        const dz = chunk.originZ + half - camZ;
         const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq > viewDistSq) continue;
-        _survivors.push({ alloc, key: distSq });
-    }
-    _survivors.sort(_cmpAsc);
 
-    const rO = voxelResources.passRender.opaque;
-    const rT = voxelResources.passRender.transparent;
-    const rTr = voxelResources.passRender.translucent;
-    const tO = arenas.tables.opaque;
-    const tT = arenas.tables.transparent;
-    const tTr = arenas.tables.translucent;
-
-    _countersO.sliceCount = 0;
-    _countersO.instStart = 0;
-    _countersO.wgCount = 0;
-    _countersT.sliceCount = 0;
-    _countersT.instStart = 0;
-    _countersT.wgCount = 0;
-    _countersTr.sliceCount = 0;
-    _countersTr.instStart = 0;
-    _countersTr.wgCount = 0;
-
-    // forward loop (near→far): opaque + transparent.
-    for (let i = 0; i < _survivors.length; i++) {
-        const alloc = _survivors[i]!.alloc;
-        const aabb = alloc.aabb;
-
-        if (alloc.opaque) {
-            emitFacingSlices(
-                _countersO,
-                rO.visibleSlicesData,
-                rO.wgInfoData,
-                tO.cpuFaceOffsets,
-                tO.cpuFaceCounts,
-                alloc.opaque.sectionSlot,
-                aabb,
-                cx,
-                cy,
-                cz,
-            );
+        let trigger = !t.sortValid;
+        if (!trigger) {
+            const mx = camX - t.sortCamX;
+            const my = camY - t.sortCamY;
+            const mz = camZ - t.sortCamZ;
+            const movedSq = mx * mx + my * my + mz * mz;
+            const threshold = distSq <= SORT_NEAR_DIST_SQ ? SORT_MOVE_TRIGGER_NEAR_SQ : SORT_MOVE_TRIGGER_FAR_SQ;
+            trigger = movedSq > threshold;
         }
-        if (alloc.transparent) {
-            emitFacingSlices(
-                _countersT,
-                rT.visibleSlicesData,
-                rT.wgInfoData,
-                tT.cpuFaceOffsets,
-                tT.cpuFaceCounts,
-                alloc.transparent.sectionSlot,
-                aabb,
-                cx,
-                cy,
-                cz,
-            );
-        }
+        if (!trigger) continue;
+
+        packTo(TranslucentSortEntry, entries, count * TRANSLUCENT_SORT_ENTRY_STRIDE, {
+            relOrigin: [chunk.originX - camX, chunk.originY - camY, chunk.originZ - camZ],
+            arenaBase: t.dataStart,
+            quadOrderStart: t.quadOrderStart,
+            dataCount: t.dataCount,
+        });
+        t.sortCamX = camX;
+        t.sortCamY = camY;
+        t.sortCamZ = camZ;
+        t.sortValid = true;
+        count++;
     }
 
-    // reverse loop (far→near): translucent. one slice per section, no
-    // facing fan-out, quadOrder handles in-section ordering.
-    const sliceOutTr = rTr.visibleSlicesData;
-    const wgOutTr = rTr.wgInfoData;
-    const dataCountTr = tTr.cpuDataCount;
-    for (let i = _survivors.length - 1; i >= 0; i--) {
-        const alloc = _survivors[i]!.alloc;
-        if (!alloc.translucent) continue;
-        const slot = alloc.translucent.sectionSlot;
-        const quadCount = dataCountTr[slot]!;
-        if (quadCount === 0) continue;
-        const base = _countersTr.sliceCount * VISIBLE_SLICE_U32S;
-        sliceOutTr[base + 0] = _countersTr.instStart;
-        sliceOutTr[base + 1] = slot;
-        sliceOutTr[base + 2] = quadCount;
-        sliceOutTr[base + 3] = 0; // localBase: identity quadOrder
-        for (let q = 0; q < quadCount; q += EXPAND_WG_SIZE) {
-            const wgBase = _countersTr.wgCount * WG_INFO_U32S;
-            wgOutTr[wgBase + 0] = _countersTr.sliceCount;
-            wgOutTr[wgBase + 1] = q;
-            _countersTr.wgCount++;
-        }
-        _countersTr.sliceCount++;
-        _countersTr.instStart += quadCount;
+    voxelResources.translucentSortCount = count;
+    if (count > 0) {
+        voxelResources.translucentSortEntries.addUpdateRange(0, (count * TRANSLUCENT_SORT_ENTRY_STRIDE) / 4);
+        voxelResources.translucentSortEntries.needsUpdate = true;
     }
-
-    // commit + upload per pass.
-    commitPass(rO, _countersO);
-    commitPass(rT, _countersT);
-    commitPass(rTr, _countersTr);
 }
 
-function commitPass(r: PassRender, c: _PassCounters): void {
-    r.visibleSliceCount = c.sliceCount;
-    r.wgCount = c.wgCount;
-    r.visibleQuadCount = c.instStart;
-
-    if (c.sliceCount > 0) {
-        r.visibleSlicesBuffer.addUpdateRange(0, c.sliceCount * VISIBLE_SLICE_U32S);
-        r.visibleSlicesBuffer.needsUpdate = true;
-    }
-    if (c.wgCount > 0) {
-        r.wgInfoBuffer.addUpdateRange(0, c.wgCount * WG_INFO_U32S);
-        r.wgInfoBuffer.needsUpdate = true;
-    }
-    // single-entry indirect: {vertexCount=6, instanceCount, 0, 0}.
-    r.indirectData[1] = c.instStart;
-    r.indirectBuffer.addUpdateRange(0, r.indirectData.length);
-    r.indirectBuffer.needsUpdate = true;
-}
-
-/** engine-global expansion compute dispatches, fans every visible slice
- *  out into per-quad `visibleQuads` entries. push into the renderer's
- *  per-frame dispatch list before `renderer.compute(...)`. one dispatch
- *  per pass; skipped if the pass has zero visible slices this frame. */
-export function expandDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
+/** GPU cull + Level-A ordered emit dispatch chain. gpucat runs each dispatch in
+ *  its own compute pass, so the `cull → count → finalize → emit` data
+ *  dependencies hold. Push into the renderer's dispatch list before
+ *  `renderer.compute(...)`. Empty when no chunks are resident.
+ *
+ *  1. cull: one thread per resident chunk; frustum-test, compact survivors into
+ *     `visibleChunks` (+ distance bucket), write the emit dispatch args.
+ *  2. count (per pass): tally each visible facing's quads into its distance bucket.
+ *  3. finalize: prefix-sum buckets → instance bases + per-pass draw counts.
+ *  4. emit (per pass): opaque/transparent back-face-cull facings and write
+ *     `visibleQuads` front-to-back; translucent emits whole-section in
+ *     `quadOrder` order at the reversed (back-to-front) bucket base. */
+export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
+    const packer = voxelResources.arenas.packer;
+    const recordCount = packer.chunks.length;
     const out: ComputeDispatch[] = [];
-    for (const pass of PASSES) {
-        const r = voxelResources.passRender[pass];
-        if (r.wgCount === 0) continue;
+    if (recordCount === 0) return out;
+    const tables = voxelResources.arenas.tables;
+    const passRender = voxelResources.passRender;
+
+    // Level-B: sort triggered DYNAMIC translucent sections first (writes their
+    // persisted `quadOrder`, which the translucent emit reads below). Separate
+    // pass → the write is visible to the emit. Skipped when nothing triggered.
+    if (voxelResources.translucentSortCount > 0) {
         out.push({
-            node: voxelResources.expandSlices,
-            dispatch: [r.wgCount, 1, 1],
+            node: voxelResources.translucentSort,
+            dispatch: [voxelResources.translucentSortCount, 1, 1],
             buffers: {
-                wgInfo: r.wgInfoBuffer,
-                visibleSlices: r.visibleSlicesBuffer,
-                visibleQuads: r.visibleQuadsBuffer,
+                sortEntries: voxelResources.translucentSortEntries,
+                quads: voxelResources.arenas.quadArena.buffers.quads,
+                quadOrder: voxelResources.arenas.quadOrderArena.buffers.quadOrder,
+            },
+        });
+    }
+
+    out.push({
+        node: voxelResources.cull,
+        dispatch: [Math.ceil(recordCount / CULL_WG_SIZE), 1, 1],
+        buffers: {
+            cullRecords: packer.cullRecordsBuffer,
+            cullView: voxelResources.cullView,
+            visibleChunks: voxelResources.visibleChunks,
+            emitArgs: voxelResources.emitArgs,
+        },
+    });
+    for (const pass of PASSES) {
+        out.push({
+            node: voxelResources.count,
+            indirect: voxelResources.emitArgs,
+            buffers: {
+                visibleChunks: voxelResources.visibleChunks,
+                sectionMeta: tables[pass].metaBuffer,
+                bucketQuads: voxelResources.bucketQuads,
+                emitConfig: voxelResources.emitConfig[pass],
+            },
+        });
+    }
+    out.push({
+        node: voxelResources.finalize,
+        dispatch: [1, 1, 1],
+        buffers: {
+            bucketQuads: voxelResources.bucketQuads,
+            bucketBase: voxelResources.bucketBase,
+            bucketCursor: voxelResources.bucketCursor,
+            drawOpaque: passRender.opaque.indirectBuffer,
+            drawTransparent: passRender.transparent.indirectBuffer,
+            drawTranslucent: passRender.translucent.indirectBuffer,
+        },
+    });
+    for (const pass of PASSES) {
+        // translucent emits whole-section in quadOrder order (back-to-front),
+        // opaque/transparent emit per-facing with back-face cull.
+        if (pass === 'translucent') {
+            out.push({
+                node: voxelResources.translucentEmit,
+                indirect: voxelResources.emitArgs,
+                buffers: {
+                    visibleChunks: voxelResources.visibleChunks,
+                    sectionMeta: tables[pass].metaBuffer,
+                    visibleQuads: passRender[pass].visibleQuadsBuffer,
+                    bucketBase: voxelResources.bucketBase,
+                    bucketCursor: voxelResources.bucketCursor,
+                    quadOrder: voxelResources.arenas.quadOrderArena.buffers.quadOrder,
+                },
+            });
+            continue;
+        }
+        out.push({
+            node: voxelResources.emit,
+            indirect: voxelResources.emitArgs,
+            buffers: {
+                visibleChunks: voxelResources.visibleChunks,
+                sectionMeta: tables[pass].metaBuffer,
+                visibleQuads: passRender[pass].visibleQuadsBuffer,
+                bucketBase: voxelResources.bucketBase,
+                bucketCursor: voxelResources.bucketCursor,
+                emitConfig: voxelResources.emitConfig[pass],
             },
         });
     }
@@ -530,17 +614,17 @@ export function removeChunkMesh(voxelResources: VoxelResources, key: string): vo
  *  path. resets the new room's first-seen tracking too. */
 export function activateRoom(voxelResources: VoxelResources, state: VoxelVisuals, voxels: Voxels): void {
     packerClearAll(voxelResources.arenas.packer);
-    // skip aggregate=0 chunks, those are sparse "discovered empty" stubs
+    // skip nonAirCount=0 chunks, those are sparse "discovered empty" stubs
     // pushed by `voxel_chunk_empty`. they have no blocks to mesh and would
     // otherwise pollute `remeshCandidates` (sort cost) and waste budget on
     // applyRemesh early-returns.
     for (const chunk of voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         chunk.dirty = true;
         voxels.dirty.blocks.add(chunk);
     }
     state.dirtyFirstSeen.clear();
-    state.remeshAdditionalBudget = ROOM_SWAP_REMESH_BUDGET;
+    state.roomSwapUrgentBurst = ROOM_SWAP_URGENT_BURST;
 }
 
 export function dispose(state: VoxelVisuals, scene: Scene): void {

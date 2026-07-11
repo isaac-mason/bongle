@@ -4,8 +4,8 @@ import { attachWorldTrait } from '../builtins/world';
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
-import * as Physics from '../core/physics/physics';
 import { acceptFrame, createReassembler } from '../core/net';
+import * as Physics from '../core/physics/physics';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
@@ -14,9 +14,9 @@ import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
-import * as SceneTree from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
+import * as SceneTree from '../core/scene/scene-tree';
 import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
@@ -917,6 +917,7 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
             if (c) Voxels.markChunkDirty(room.voxels, c);
         }
 
+        chunk.version++;
         Voxels.markChunkDirty(room.voxels, chunk);
     }
 }
@@ -929,6 +930,7 @@ function processVoxelChunkLight(state: EngineClient, message: Protocol.VoxelChun
     if (!chunk) return;
 
     chunk.light = decodeLight(message.sky, message.rgb);
+    chunk.version++;
 
     Voxels.markChunkDirty(room.voxels, chunk);
     dirtyAllNeighborChunks(room.voxels, message.cx, message.cy, message.cz);
@@ -975,6 +977,7 @@ function processVoxelChunkLightDelta(state: EngineClient, message: Protocol.Voxe
         }
     }
 
+    chunk.version++;
     Voxels.markChunkDirty(room.voxels, chunk);
 
     // dirty all set cells in the 3×3×3 mask, skipping self (1,1,1 → 13).
@@ -1287,14 +1290,7 @@ export function update(state: EngineClient, delta: number) {
         // the prioritised remesh path on the next activation.
         if (room === activeRoom) {
             Debug.begin(room.clientMetrics, 'mesh');
-            VoxelVisuals.update(
-                room.voxelVisuals,
-                state.voxelResources,
-                room.voxels,
-                room.voxels.registry,
-                povCamera.position,
-                perfSettings.voxelMainThreadRemeshBudget,
-            );
+            VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, povCamera.position);
             Debug.end(room.clientMetrics, 'mesh');
 
             // arena occupancy + fragmentation, recorded post-update so the

@@ -60,7 +60,7 @@ function scanBounds(voxels: Voxels): { boundsMin: Vec3; boundsMax: Vec3; voxelCo
     let count = 0;
 
     for (const chunk of voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         scanChunkBounds(chunk, (wx, wy, wz) => {
             if (wx < minX) minX = wx;
             if (wy < minY) minY = wy;

@@ -8,8 +8,8 @@
  * rooms' inputs receive no events, so scripts running there see zeros.
  *
  * usage:
- *   const mk = ctx.client!.input.mouseKeyboard
- *   if (mk.isKeyDown('KeyW')) { ... }
+ *   const mouseKeyboard = ctx.client!.input.mouseKeyboard
+ *   if (mouseKeyboard.isKeyDown('KeyW')) { ... }
  */
 
 /* ── text input focus detection ───────────────────────────────────── */
@@ -114,72 +114,72 @@ export function createMouseKeyboardInput(): MouseKeyboardInput {
 }
 
 /** call once per frame to snapshot prev state and clear per-frame accumulators. */
-export function resetMouseKeyboardInput(mk: MouseKeyboardInput): void {
+export function resetMouseKeyboardInput(mouseKeyboard: MouseKeyboardInput): void {
     // snapshot key state into prev
-    const allKeys = new Set([...mk._keyState.keys(), ...mk._prevKeyState.keys()]);
-    mk._prevKeyState.clear();
+    const allKeys = new Set([...mouseKeyboard._keyState.keys(), ...mouseKeyboard._prevKeyState.keys()]);
+    mouseKeyboard._prevKeyState.clear();
     for (const key of allKeys) {
-        mk._prevKeyState.set(key, mk._keyState.get(key) ?? false);
+        mouseKeyboard._prevKeyState.set(key, mouseKeyboard._keyState.get(key) ?? false);
     }
 
     // snapshot modifier state into prev
-    mk._prevMods.mod = mk._mods.mod;
-    mk._prevMods.shift = mk._mods.shift;
-    mk._prevMods.alt = mk._mods.alt;
+    mouseKeyboard._prevMods.mod = mouseKeyboard._mods.mod;
+    mouseKeyboard._prevMods.shift = mouseKeyboard._mods.shift;
+    mouseKeyboard._prevMods.alt = mouseKeyboard._mods.alt;
 
     // snapshot button state into prev
-    mk._prevButtons.left = mk._buttons.left;
-    mk._prevButtons.middle = mk._buttons.middle;
-    mk._prevButtons.right = mk._buttons.right;
+    mouseKeyboard._prevButtons.left = mouseKeyboard._buttons.left;
+    mouseKeyboard._prevButtons.middle = mouseKeyboard._buttons.middle;
+    mouseKeyboard._prevButtons.right = mouseKeyboard._buttons.right;
 
     // clear per-frame accumulators
-    mk._keyJustPressed.clear();
-    mk._dx = 0;
-    mk._dy = 0;
-    mk._wheelDeltaY = 0;
-    mk._gestures.left.dragJustStarted = false;
-    mk._gestures.left.tapped = false;
-    mk._gestures.middle.dragJustStarted = false;
-    mk._gestures.middle.tapped = false;
-    mk._gestures.right.dragJustStarted = false;
-    mk._gestures.right.tapped = false;
+    mouseKeyboard._keyJustPressed.clear();
+    mouseKeyboard._dx = 0;
+    mouseKeyboard._dy = 0;
+    mouseKeyboard._wheelDeltaY = 0;
+    mouseKeyboard._gestures.left.dragJustStarted = false;
+    mouseKeyboard._gestures.left.tapped = false;
+    mouseKeyboard._gestures.middle.dragJustStarted = false;
+    mouseKeyboard._gestures.middle.tapped = false;
+    mouseKeyboard._gestures.right.dragJustStarted = false;
+    mouseKeyboard._gestures.right.tapped = false;
 }
 
-export function isKeyDown(mk: MouseKeyboardInput, code: string): boolean {
-    return mk._keyState.get(code) ?? false;
+export function isKeyDown(mouseKeyboard: MouseKeyboardInput, code: string): boolean {
+    return mouseKeyboard._keyState.get(code) ?? false;
 }
 
-export function isKeyJustDown(mk: MouseKeyboardInput, code: string): boolean {
-    return mk._keyJustPressed.has(code);
+export function isKeyJustDown(mouseKeyboard: MouseKeyboardInput, code: string): boolean {
+    return mouseKeyboard._keyJustPressed.has(code);
 }
 
-export function isKeyJustUp(mk: MouseKeyboardInput, code: string): boolean {
-    return !(mk._keyState.get(code) ?? false) && (mk._prevKeyState.get(code) ?? false);
+export function isKeyJustUp(mouseKeyboard: MouseKeyboardInput, code: string): boolean {
+    return !(mouseKeyboard._keyState.get(code) ?? false) && (mouseKeyboard._prevKeyState.get(code) ?? false);
 }
 
 /** cmd-on-mac / ctrl-on-win held this frame. */
-export function isModDown(mk: MouseKeyboardInput): boolean {
-    return mk._mods.mod;
+export function isModDown(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._mods.mod;
 }
 
-export function isShiftDown(mk: MouseKeyboardInput): boolean {
-    return mk._mods.shift;
+export function isShiftDown(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._mods.shift;
 }
 
-export function isAltDown(mk: MouseKeyboardInput): boolean {
-    return mk._mods.alt;
+export function isAltDown(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._mods.alt;
 }
 
-export function isMouseDown(mk: MouseKeyboardInput, button: MouseButton): boolean {
-    return mk._buttons[button];
+export function isMouseDown(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
+    return mouseKeyboard._buttons[button];
 }
 
-export function isMouseJustDown(mk: MouseKeyboardInput, button: MouseButton): boolean {
-    return mk._buttons[button] && !mk._prevButtons[button];
+export function isMouseJustDown(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
+    return mouseKeyboard._buttons[button] && !mouseKeyboard._prevButtons[button];
 }
 
-export function isMouseJustUp(mk: MouseKeyboardInput, button: MouseButton): boolean {
-    return !mk._buttons[button] && mk._prevButtons[button];
+export function isMouseJustUp(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
+    return !mouseKeyboard._buttons[button] && mouseKeyboard._prevButtons[button];
 }
 
 /**
@@ -188,8 +188,8 @@ export function isMouseJustUp(mk: MouseKeyboardInput, button: MouseButton): bool
  * commit to a drag gesture (e.g. fly-look pointer-lock), so a quick
  * click doesn't trigger them.
  */
-export function isMouseDragStart(mk: MouseKeyboardInput, button: MouseButton): boolean {
-    return mk._gestures[button].dragJustStarted;
+export function isMouseDragStart(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
+    return mouseKeyboard._gestures[button].dragJustStarted;
 }
 
 /**
@@ -197,8 +197,8 @@ export function isMouseDragStart(mk: MouseKeyboardInput, button: MouseButton): b
  * drag threshold. use for click commit actions (e.g. block placement)
  * so a drag release doesn't double as a tap.
  */
-export function isMouseTap(mk: MouseKeyboardInput, button: MouseButton): boolean {
-    return mk._gestures[button].tapped;
+export function isMouseTap(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
+    return mouseKeyboard._gestures[button].tapped;
 }
 
 /* ── touch input ──────────────────────────────────────────────────── */
@@ -592,8 +592,8 @@ export function createInputManager(touch: boolean): InputManager {
 
     const handlers = {
         keydown: (e: KeyboardEvent) => {
-            const mk = m.target?.mouseKeyboard;
-            if (!mk) return;
+            const mouseKeyboard = m.target?.mouseKeyboard;
+            if (!mouseKeyboard) return;
             // suppress game/editor input while a text field has focus so
             // typing in inspector fields, chat, etc. doesn't trigger
             // shortcuts or character movement. Check both `e.target` (stable
@@ -612,26 +612,26 @@ export function createInputManager(touch: boolean): InputManager {
                 if (!onViewport) return;
                 e.preventDefault();
             }
-            mk._keyState.set(e.code, true);
-            if (!e.repeat) mk._keyJustPressed.add(e.code);
-            mk._mods.mod = e.metaKey || e.ctrlKey;
-            mk._mods.shift = e.shiftKey;
-            mk._mods.alt = e.altKey;
+            mouseKeyboard._keyState.set(e.code, true);
+            if (!e.repeat) mouseKeyboard._keyJustPressed.add(e.code);
+            mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
+            mouseKeyboard._mods.shift = e.shiftKey;
+            mouseKeyboard._mods.alt = e.altKey;
         },
         keyup: (e: KeyboardEvent) => {
-            const mk = m.target?.mouseKeyboard;
-            if (!mk) return;
+            const mouseKeyboard = m.target?.mouseKeyboard;
+            if (!mouseKeyboard) return;
             // always clear on keyup to avoid stuck keys when focus
             // changes while a key is held.
-            mk._keyState.set(e.code, false);
-            mk._mods.mod = e.metaKey || e.ctrlKey;
-            mk._mods.shift = e.shiftKey;
-            mk._mods.alt = e.altKey;
+            mouseKeyboard._keyState.set(e.code, false);
+            mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
+            mouseKeyboard._mods.shift = e.shiftKey;
+            mouseKeyboard._mods.alt = e.altKey;
             // macOS swallows letter keyups while Cmd is held, when Cmd
             // itself releases, flush any non-modifier held keys so the
             // next press registers as a fresh just-down.
             if (e.code === 'MetaLeft' || e.code === 'MetaRight') {
-                for (const code of mk._keyState.keys()) {
+                for (const code of mouseKeyboard._keyState.keys()) {
                     if (
                         code === 'MetaLeft' ||
                         code === 'MetaRight' ||
@@ -643,16 +643,16 @@ export function createInputManager(touch: boolean): InputManager {
                         code === 'AltRight'
                     )
                         continue;
-                    mk._keyState.set(code, false);
+                    mouseKeyboard._keyState.set(code, false);
                 }
             }
         },
         mousedown: (e: MouseEvent) => {
-            const mk = m.target?.mouseKeyboard;
-            if (!mk) return;
-            mk._mods.mod = e.metaKey || e.ctrlKey;
-            mk._mods.shift = e.shiftKey;
-            mk._mods.alt = e.altKey;
+            const mouseKeyboard = m.target?.mouseKeyboard;
+            if (!mouseKeyboard) return;
+            mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
+            mouseKeyboard._mods.shift = e.shiftKey;
+            mouseKeyboard._mods.alt = e.altKey;
             // game input is viewport-only: ignore presses that originate on
             // overlay UI (toolbars, inspector, hotbar). otherwise a right-
             // click on UI would arm a drag gesture and the fly controller
@@ -673,23 +673,23 @@ export function createInputManager(touch: boolean): InputManager {
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
-            mk._buttons[name] = true;
-            const g = mk._gestures[name];
+            mouseKeyboard._buttons[name] = true;
+            const g = mouseKeyboard._gestures[name];
             g.downX = e.clientX;
             g.downY = e.clientY;
             g.drag = false;
         },
         mouseup: (e: MouseEvent) => {
-            const mk = m.target?.mouseKeyboard;
-            if (!mk) return;
-            mk._mods.mod = e.metaKey || e.ctrlKey;
-            mk._mods.shift = e.shiftKey;
-            mk._mods.alt = e.altKey;
+            const mouseKeyboard = m.target?.mouseKeyboard;
+            if (!mouseKeyboard) return;
+            mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
+            mouseKeyboard._mods.shift = e.shiftKey;
+            mouseKeyboard._mods.alt = e.altKey;
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
-            mk._buttons[name] = false;
-            const g = mk._gestures[name];
+            mouseKeyboard._buttons[name] = false;
+            const g = mouseKeyboard._gestures[name];
             // a release that never crossed the drag threshold is a tap.
             // a drag-look release isn't mis-fired here because the drag
             // promotion that triggered pointer-lock already set g.drag,
@@ -699,14 +699,14 @@ export function createInputManager(touch: boolean): InputManager {
             if (!g.drag) g.tapped = true;
         },
         mousemove: (e: MouseEvent) => {
-            const mk = m.target?.mouseKeyboard;
-            if (!mk) return;
-            mk._dx += e.movementX;
-            mk._dy += e.movementY;
+            const mouseKeyboard = m.target?.mouseKeyboard;
+            if (!mouseKeyboard) return;
+            mouseKeyboard._dx += e.movementX;
+            mouseKeyboard._dy += e.movementY;
             const t2 = DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX;
             for (const name of ['left', 'middle', 'right'] as const) {
-                if (!mk._buttons[name]) continue;
-                const g = mk._gestures[name];
+                if (!mouseKeyboard._buttons[name]) continue;
+                const g = mouseKeyboard._gestures[name];
                 if (g.drag) continue;
                 const dx = e.clientX - g.downX;
                 const dy = e.clientY - g.downY;
@@ -717,21 +717,21 @@ export function createInputManager(touch: boolean): InputManager {
             }
         },
         wheel: (e: WheelEvent) => {
-            const mk = m.target?.mouseKeyboard;
+            const mouseKeyboard = m.target?.mouseKeyboard;
             // Consume the wheel when it's over the canvas (or while pointer-
             // locked) so the page (or embedding iframe's parent) doesn't
             // also scroll while the user is dolly-zooming. Same viewport-
             // only gate as mousedown: wheel over overlay UI scrolls
             // normally.
             const onCanvas = e.target instanceof HTMLCanvasElement;
-            if (!mk) {
+            if (!mouseKeyboard) {
                 if (document.pointerLockElement || onCanvas) e.preventDefault();
                 return;
             }
-            mk._mods.mod = e.metaKey || e.ctrlKey;
-            mk._mods.shift = e.shiftKey;
-            mk._mods.alt = e.altKey;
-            mk._wheelDeltaY += e.deltaY;
+            mouseKeyboard._mods.mod = e.metaKey || e.ctrlKey;
+            mouseKeyboard._mods.shift = e.shiftKey;
+            mouseKeyboard._mods.alt = e.altKey;
+            mouseKeyboard._wheelDeltaY += e.deltaY;
             if (document.pointerLockElement || onCanvas) e.preventDefault();
         },
         focus: () => {

@@ -38,8 +38,11 @@ const BOOT_ID = 'virtual:bongle/pipeline-host';
 const FIRST_RUN_TIMEOUT_MS = 60_000;
 
 // If the worker doesn't exit on its own this long after a shutdown request,
-// hard-terminate it — a wedged worker must not hang the CLI's exit.
-const SHUTDOWN_TIMEOUT_MS = 2_000;
+// hard-terminate it — a wedged worker must not hang the CLI's exit. Generous
+// enough for the host to drain an in-flight render pass first (draining avoids a
+// Dawn FATAL on a pending mapAsync); it exits as soon as the pass settles, so
+// this only bites a genuinely wedged pass.
+const SHUTDOWN_TIMEOUT_MS = 15_000;
 
 export type PipelineWorkerHandle = {
     worker: Worker;

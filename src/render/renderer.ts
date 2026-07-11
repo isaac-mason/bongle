@@ -1,17 +1,22 @@
 import {
+    add,
     type Camera,
     type CanvasTarget,
     type ComputeDispatch,
+    type DepthTextureNode,
     d,
+    f32,
     fxaa,
     Inspector,
     mix,
+    mul,
     type PassNode,
     PerspectiveCamera,
     pass,
     RenderPipeline,
     renderOutput,
     Scene,
+    sub,
     Uniform,
     uniform,
     vec4f,
@@ -92,10 +97,11 @@ export async function load(state: Renderer): Promise<void> {
  * debugOpen + debugTab. Idempotent: only acts on edges, so the per-frame
  * call is a cheap identity check when state hasn't changed.
  *
- * On show: constructs a fresh Inspector, attaches it via `setInspector`,
- * mounts the panel to document.body (bongle never mounts the WebGPURenderer's
- * implicit canvas, each room renders to its own canvas via canvas targets,
- * so the inspector's self-attach finds nothing), and docks/opens it.
+ * On show: constructs a fresh Inspector, mounts the panel to document.body,
+ * attaches it via `setInspector`, then docks/opens it. The body mount happens
+ * first on purpose: the renderer's active canvas target belongs to a room
+ * `viewport` div (pointer-events:none), and Inspector.setRenderer would
+ * self-attach the unparented panel there, making it visible but click-dead.
  *
  * On hide: `setInspector(null)` triggers the Inspector's dispose path which
  * tears down GPU query resources, removes the DOM, drops window listeners,
@@ -107,14 +113,21 @@ export function setInspectorVisible(state: Renderer, visible: boolean): void {
 
     if (visible) {
         const inspector = new Inspector();
+
+        // Mount on document.body BEFORE attaching to the renderer. Inspector
+        // .setRenderer self-attaches the panel to `renderer.domElement.parentElement`
+        // whenever the panel isn't already parented. The engine-global renderer's
+        // active canvas target is the current room's `viewport` div, which is
+        // `pointer-events: none` — so a self-attach there leaves the whole
+        // inspector visible (z-index 1000 still paints on top) but dead to clicks,
+        // inheriting pointer-events:none. Pre-parenting on body makes the
+        // self-attach a no-op and keeps the panel interactive.
+        document.body.appendChild(inspector.domElement);
         state.renderer.setInspector(inspector);
 
-        if (!inspector.domElement.parentElement) {
-            document.body.appendChild(inspector.domElement);
-            const profiler = inspector.profiler;
-            if (profiler.position !== 'bottom') profiler.setPosition('bottom');
-            if (!profiler.panel.classList.contains('visible')) profiler.togglePanel();
-        }
+        const profiler = inspector.profiler;
+        if (profiler.position !== 'bottom') profiler.setPosition('bottom');
+        if (!profiler.panel.classList.contains('visible')) profiler.togglePanel();
     } else {
         state.renderer.setInspector(null);
     }
@@ -148,6 +161,21 @@ export type EngineRenderPipeline = {
     camera: PerspectiveCamera;
     /** rgba tint uniform, set w=0 for no tint. */
     screenTint: Uniform<d.vec4f>;
+    /**
+     * the overlay pass: renders the active room's `overlayScene` (crisp
+     * CanvasTrait panels, future world-space HUD) *after* fxaa, so overlays are
+     * never blurred by the post-chain. its `scene` rotates to the active room in
+     * `setActiveScene`. occlusion by world geometry is done per-material by
+     * *sampling* `sceneDepthNode` and discarding (not a shared depth attachment).
+     */
+    overlayPassNode: PassNode;
+    /**
+     * the scene pass's depth as a sampled texture node. overlay materials
+     * `.load()` it at their pixel to compare against their own `fragCoord.z` and
+     * discard occluded fragments — the same resize-safe texture-binding path fxaa
+     * uses for the scene color, so no shared-attachment lifetime hazards.
+     */
+    sceneDepthNode: DepthTextureNode;
 };
 
 function createRenderPipeline(webGpuRenderer: WebGPURenderer): EngineRenderPipeline {
@@ -157,17 +185,38 @@ function createRenderPipeline(webGpuRenderer: WebGPURenderer): EngineRenderPipel
     // placeholder and mutate `passNode.scene = activeRoom.scene` each
     // frame. the placeholder is never rendered.
     const placeholderScene = new Scene();
-    const scenePass = pass(placeholderScene, camera);
+    const scenePass = pass(placeholderScene, camera, { label: 'scene' });
     const fxaaPass = fxaa(scenePass.getTextureNode());
 
     const screenTint = new Uniform(d.vec4f, [0, 0, 0, 0]);
     const tintNode = uniform(screenTint);
     const tinted = vec4f(mix(fxaaPass.rgb, tintNode.rgb, tintNode.a), fxaaPass.a).toVar('tinted');
 
-    const outputNode = renderOutput(tinted);
+    // overlay pass: renders the active room's overlay scene composited over the
+    // tinted scene, *after* fxaa (so CanvasTrait text/images stay crisp). its
+    // `scene` starts as the placeholder and rotates per room in `setActiveScene`.
+    // empty overlay collapses to the tinted input (overlayTex.a == 0). occlusion
+    // by world geometry is per-material: overlay materials sample `sceneDepthNode`
+    // and discard, so this pass owns no shared depth (its own depth is unused).
+    //
+    // the overlay blends against a transparent-black clear with straight-alpha
+    // factors (src-alpha / one-minus-src-alpha), so its texture is *premultiplied*
+    // (rgb already × a). composite premultiplied-over: out = bg·(1−a) + rgb.
+    const sceneDepthNode = scenePass.getDepthTextureNode();
+    const overlayPass = pass(placeholderScene, camera, {
+        label: 'overlay',
+        clearColor: [0, 0, 0, 0],
+    });
+    const overlayTex = overlayPass.getTextureNode();
+    const overRgb = add(mul(tinted.rgb, sub(f32(1), overlayTex.a)), overlayTex.rgb);
+    const composited = vec4f(overRgb, tinted.a).toVar('overlayComposite');
+
+    const outputNode = renderOutput(composited);
     return {
         pipeline: new RenderPipeline(webGpuRenderer, outputNode),
         passNode: scenePass,
+        overlayPassNode: overlayPass,
+        sceneDepthNode,
         camera,
         screenTint,
     };
@@ -218,12 +267,13 @@ export function syncRenderCamera(pipeline: EngineRenderPipeline, cameraTrait: Ca
 }
 
 /**
- * point the persistent pass at the active room's scene. `PassNode.scene`
- * is `readonly` in TS but read fresh each frame in `updateBefore`, the
- * runtime resolves the swap on the next render.
+ * point the persistent passes at the active room's scenes (main 3D scene +
+ * overlay scene). `PassNode.scene` is `readonly` in TS but read fresh each
+ * frame in `updateBefore`, so the runtime resolves the swap on the next render.
  */
-function setActiveScene(pipeline: EngineRenderPipeline, scene: Scene): void {
+function setActiveScene(pipeline: EngineRenderPipeline, scene: Scene, overlayScene: Scene): void {
     (pipeline.passNode as { scene: Scene }).scene = scene;
+    (pipeline.overlayPassNode as { scene: Scene }).scene = overlayScene;
 }
 
 /**
@@ -302,22 +352,22 @@ export function render(
     if (camera) {
         updateCameraEnvironment(state.pipeline, room.voxels, camera);
         Environment.updateForCamera(room.environment, camera);
-        // CPU per-(section, facing) cull, builds per-pass visibleSlices
-        // + single-entry drawIndirect. expansion compute fans these out
-        // into per-quad visibleQuads downstream.
-        VoxelVisuals.cullCPU(voxelResources, camera, voxelViewChunkRadius);
+        // prepare the GPU cull: pre-shift the frustum planes camera-relative
+        // and reset the per-frame cull/emit counters. The cull + per-facing
+        // emit computes themselves are queued below via `cullDispatches`.
+        VoxelVisuals.updateCull(voxelResources, camera, voxelViewChunkRadius);
     }
 
     // point the engine-global pass at this room's scene before render,
     // the pipeline graph is shared, only `passNode.scene` rotates.
-    setActiveScene(state.pipeline, room.scene);
+    setActiveScene(state.pipeline, room.scene, room.overlayScene);
 
     const dispatches: ComputeDispatch[] = [];
 
-    // voxel expansion (3 dispatches: opaque, transparent, translucent,
-    // skipped per-pass when no visible slices). fans per-(section, facing)
-    // visible slices into per-quad entries the VS reads.
-    for (const disp of VoxelVisuals.expandDispatches(voxelResources)) dispatches.push(disp);
+    // voxel GPU cull + per-facing emit: 1 cull dispatch + 3 indirect emit
+    // dispatches (opaque/transparent/translucent) that write the per-quad
+    // visibleQuads the VS reads. Empty when no chunks are resident.
+    for (const disp of VoxelVisuals.cullDispatches(voxelResources)) dispatches.push(disp);
 
     // drive the voxel animation clock, gpucat no longer ticks time itself.
     elapsedTime.value = performance.now() / 1000;

@@ -364,7 +364,7 @@ function makeModelDispatch(): Voxels {
  *  light in a single pass. */
 const _benchMeshOutput = createMeshOutput();
 function meshAndLight(voxels: Voxels, chunk: Chunk): void {
-    meshChunk(_benchMeshOutput, buildMeshInput(voxels, chunk), registry);
+    meshChunk(_benchMeshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
 }
 
 describe('meshAndLight', () => {

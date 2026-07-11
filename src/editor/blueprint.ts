@@ -290,7 +290,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
             maxY = -Infinity,
             maxZ = -Infinity;
         for (const chunk of tmp.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -320,7 +320,7 @@ export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Bl
             } else {
                 voxels = createVoxels(registry);
                 for (const chunk of tmp.chunks.values()) {
-                    if (chunk.aggregate === 0) continue;
+                    if (chunk.nonAirCount === 0) continue;
                     for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                         for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                             for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -414,7 +414,7 @@ export function createPrefabBlueprint(
 
     if (preparedVoxels) {
         for (const chunk of preparedVoxels.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -447,7 +447,7 @@ export function createPrefabBlueprint(
         size = [maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1];
         blueprintVoxels = createVoxels(registry);
         for (const chunk of preparedVoxels.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -561,7 +561,7 @@ export function rotateAxis(blueprint: Blueprint, axis: RotationAxis, direction: 
         newBlockCount = 0;
 
         for (const chunk of blueprint.voxels.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -712,7 +712,7 @@ export function flipAxis(blueprint: Blueprint, axis: RotationAxis): Blueprint {
         newBlockCount = 0;
 
         for (const chunk of blueprint.voxels.chunks.values()) {
-            if (chunk.aggregate === 0) continue;
+            if (chunk.nonAirCount === 0) continue;
             for (let ly = 0; ly < CHUNK_SIZE; ly++) {
                 for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -813,7 +813,7 @@ export function buildPasteOps(
     if (!blueprint.voxels || !blueprint.hasVoxels) return { forward, reverse };
 
     for (const chunk of blueprint.voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         for (let ly = 0; ly < CHUNK_SIZE; ly++) {
             for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                 for (let lx = 0; lx < CHUNK_SIZE; lx++) {

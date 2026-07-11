@@ -216,7 +216,7 @@ function makeModelDispatch(registry: ReturnType<typeof buildBenchRegistry>): Vox
 
 const _profileMeshOutput = createMeshOutput();
 function meshAndLight(voxels: Voxels, chunk: Chunk, registry: ReturnType<typeof buildBenchRegistry>): void {
-    meshChunk(_profileMeshOutput, buildMeshInput(voxels, chunk), registry);
+    meshChunk(_profileMeshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
 }
 
 test.skipIf(!SHOULD_RUN)(

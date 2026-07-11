@@ -54,12 +54,12 @@ control.on('message', async (msg) => {
     }
 });
 
-// Graceful shutdown. Exit from this clean message-callback stack rather than
-// letting the main thread `worker.terminate()` us: terminating while Dawn's
-// ProcessEvents pump is mid-callback throws into the dying isolate (napi FATAL).
-// `process.exit` aborts the loop here, so no further pump callback ever fires.
+// Graceful shutdown. Before boot (or on a boot fault) there's no Dawn device
+// yet, so exit immediately from this clean message-callback stack. Once booted,
+// the pipeline host owns shutdown (`drainAndExit`) so it can drain the in-flight
+// pass first — exiting with a pending GPUBuffer.mapAsync() FATALs Dawn.
 control.on('message', (msg) => {
-    if (msg?.type === 'shutdown') process.exit(0);
+    if (msg?.type === 'shutdown' && !booted) process.exit(0);
 });
 
 // surface unexpected faults rather than dying silently.

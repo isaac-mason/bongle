@@ -15,17 +15,11 @@ self.onmessage = (e: MessageEvent<MeshWorkerInMsg>) => {
     if (out === null) return;
     const transfers: Transferable[] = [];
     if (out.cmd === 'result') {
-        // PassMesh.quads views point into the recycle pass buffers (same
-        // underlying ArrayBuffer), transferring the 5 recycle bufs
-        // carries the views along. Listing each only once is required by
-        // the postMessage transfer protocol.
-        transfers.push(
-            out.recycle.blocksBuf,
-            out.recycle.lightBuf,
-            out.recycle.opaqueBuf,
-            out.recycle.transparentBuf,
-            out.recycle.translucentBuf,
-        );
+        // PassMesh.quads views point into the recycle output buffers (same
+        // underlying ArrayBuffer), transferring the recycle bufs carries the
+        // views along. Listing each only once is required by the postMessage
+        // transfer protocol.
+        transfers.push(out.recycle.packetBuf, ...out.recycle.outBufs);
     }
     (
         self as unknown as {

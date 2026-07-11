@@ -603,8 +603,8 @@ function bakeModel(visuals: VoxelMeshVisuals, model: VoxelModel): SourceChunkAll
     const meshOutput = createMeshOutput();
 
     for (const chunk of voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
-        const result = meshChunk(meshOutput, buildMeshInput(voxels, chunk), registry);
+        if (chunk.nonAirCount === 0) continue;
+        const result = meshChunk(meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
         if (!result) continue;
 
         const ranges = [result.opaque, result.transparent, result.translucent].filter(

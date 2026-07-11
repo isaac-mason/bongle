@@ -104,7 +104,7 @@ describe('MODEL_LIQUID mesher', () => {
         voxels.chunks.set('0,0,0', chunk);
         setChunkBlock(chunk, 5, 5, 5, 'water', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         expect(countLiquidFaces(result, 'translucent')).toBe(6);
         // top vertex Y should be y(5) + h(0.875) = 5.875, not 6
         expect(maxLiquidVertexY(result, 'translucent')).toBeCloseTo(5.875);
@@ -131,7 +131,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 4, 'stone', registry);
         setChunkBlock(chunk, 5, 5, 6, 'stone', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         expect(countLiquidFaces(result, 'translucent')).toBe(0);
     });
 
@@ -152,7 +152,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 6, 'stone', registry);
         // y+1 left as air
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         expect(countLiquidFaces(result, 'translucent')).toBe(1);
         // top vertex sits at the meniscus
         expect(maxLiquidVertexY(result, 'translucent')).toBeCloseTo(5.875);
@@ -170,7 +170,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 5, 'water', registry);
         setChunkBlock(chunk, 5, 6, 5, 'water', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // top vertex Y must be the top of the upper cell (6 + 0.875 = 6.875),
         // confirming the lower cell does NOT emit an internal top at y=5.875.
         expect(maxLiquidVertexY(result, 'translucent')).toBeCloseTo(6.875);
@@ -187,7 +187,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 5, 'water', registry);
         setChunkBlock(chunk, 5, 6, 5, 'water', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // no vertex should sit at the seam (y=5.875): the lower cell merges
         // upward to y=6, the upper cell renders the meniscus at y=6.875.
         expect(hasLiquidVertexAtY(result, 'translucent', 5.875)).toBe(false);
@@ -209,7 +209,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 5, 'water', registry);
         setChunkBlock(chunk, 6, 5, 5, 'lava', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // lava (opaque liquid) → model.opaque; water (translucent liquid) → model.translucent
         expect(countLiquidFaces(result, 'opaque')).toBe(6);
         expect(countLiquidFaces(result, 'translucent')).toBe(5);
@@ -231,7 +231,7 @@ describe('MODEL_LIQUID mesher', () => {
         setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
         setChunkBlock(chunk, 5, 6, 5, 'water', registry);
 
-        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk), registry)!;
+        const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // stone (cube path) emits all 6 faces (its top is NOT culled by liquid above)
         expect(countCubeFaces(result, 'opaque')).toBe(6);
     });

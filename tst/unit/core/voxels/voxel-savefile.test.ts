@@ -50,7 +50,7 @@ describe('saveVoxelsIncremental', () => {
         const cache: VoxelSaveCache = new Map();
         const key = Object.keys(saveVoxelsIncremental(voxels, cache).chunks)[0]!;
         expect(cache.has(key)).toBe(true);
-        setBlock(voxels, 1, 1, 1, BLOCK_AIR); // remove the only block → aggregate 0
+        setBlock(voxels, 1, 1, 1, BLOCK_AIR); // remove the only block → nonAirCount 0
         const out = saveVoxelsIncremental(voxels, cache);
         expect(out.chunks[key]).toBeUndefined();
         expect(cache.has(key)).toBe(false); // pruned from the cache too

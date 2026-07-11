@@ -12,8 +12,8 @@ import * as Transforms from '../builtins/transform';
 import { TransformTrait } from '../builtins/transform';
 import { VoxelMeshTrait } from '../builtins/voxel-mesh';
 import * as Resources from '../core/resources';
-import { query } from '../core/scene/scene-tree';
 import * as Prefab from '../core/scene/prefab';
+import { query } from '../core/scene/scene-tree';
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Interpolation from '../render/interpolation';
@@ -170,7 +170,7 @@ export async function renderPopulatedRoom(
     }
 
     // refresh voxel chunk meshes for any stamped chunks.
-    VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, undefined, Infinity);
+    VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, undefined);
 
     // compute scene AABB. needs to happen BEFORE the visuals updates so the
     // camera matches the camera those updates use for frustum culling.
@@ -200,7 +200,7 @@ export async function renderPopulatedRoom(
     ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
 
     room.scene.updateWorldMatrix();
-    VoxelVisuals.cullCPU(state.voxelResources, camera, Infinity);
+    VoxelVisuals.updateCull(state.voxelResources, camera, Infinity);
 
     // build a per-pass pipeline tied to the framing camera. offline icons
     // don't go through the engine-global pipeline (custom camera/framing +
@@ -209,7 +209,7 @@ export async function renderPopulatedRoom(
     try {
         const gpuRenderer = state.renderer.renderer;
         const dispatches: ComputeDispatch[] = [];
-        for (const d of VoxelVisuals.expandDispatches(state.voxelResources)) dispatches.push(d);
+        for (const d of VoxelVisuals.cullDispatches(state.voxelResources)) dispatches.push(d);
         gpuRenderer.compute(dispatches);
         pipeline.render();
         return await captureTile(session);
@@ -242,7 +242,7 @@ function computeSceneAabb(room: AssetPipelineRoom, state: State): [number, numbe
 
     // voxels, tight per-voxel scan.
     for (const chunk of room.voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         const { wx, wy, wz, data, palette } = chunk;
         for (let y = 0; y < CHUNK_SIZE; y++) {
             for (let z = 0; z < CHUNK_SIZE; z++) {

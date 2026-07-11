@@ -357,6 +357,34 @@ export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node
     return { u3, chunkLocalByte, uv, modelNormal };
 }
 
+/** average of the quad's 4 corner positions, in chunk-local byte units (0..255).
+ *  Reads only the 3 position words (not uv/normal), so it's cheaper than 4×
+ *  `decodeQuadCorner`. Caller applies the 16/255 voxel scale. Used by the
+ *  translucent quad-sort compute to order a section's quads by camera distance. */
+export function decodeQuadCentroid(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>) {
+    const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('centroidBase');
+    const u0 = index(quadBuf, add(base, u32(0))).toVar('cu0');
+    const u1 = index(quadBuf, add(base, u32(1))).toVar('cu1');
+    const u2 = index(quadBuf, add(base, u32(2))).toVar('cu2');
+    // 4 corners, 3 bytes each, little-endian across (u0,u1,u2): corner c at
+    // byte 3c (x), 3c+1 (y), 3c+2 (z). Sum then scale by 1/4 for the mean.
+    const sx = add(add(readByte(u0, u1, u2, u32(0)), readByte(u0, u1, u2, u32(3))), add(readByte(u0, u1, u2, u32(6)), readByte(u0, u1, u2, u32(9)))).toF32();
+    const sy = add(add(readByte(u0, u1, u2, u32(1)), readByte(u0, u1, u2, u32(4))), add(readByte(u0, u1, u2, u32(7)), readByte(u0, u1, u2, u32(10)))).toF32();
+    const sz = add(add(readByte(u0, u1, u2, u32(2)), readByte(u0, u1, u2, u32(5))), add(readByte(u0, u1, u2, u32(8)), readByte(u0, u1, u2, u32(11)))).toF32();
+    return vec3f(sx, sy, sz).mul(f32(0.25));
+}
+
+/** the quad's face normal (oct16 in word 3). For axis-aligned voxel faces the
+ *  model normal IS the world normal, so the translucent sort uses `normal·view`
+ *  as its tie-break: two coincident faces of adjacent blocks have opposite
+ *  normals, and the one facing the camera (the farther block's front surface)
+ *  must draw first. */
+export function decodeQuadNormal(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>) {
+    const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('normalBase');
+    const u3 = index(quadBuf, add(base, u32(3)));
+    return decodeOct16(u3.bitwiseAnd(u32(0xffff)));
+}
+
 // ── shared fragment graph ───────────────────────────────────────────
 
 export function buildVoxelFragment(

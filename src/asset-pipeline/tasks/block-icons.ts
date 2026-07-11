@@ -149,7 +149,7 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
 
             // fill light with max sky so icons render fully lit.
             chunk.light.fill(0xf000);
-            const result = meshChunk(meshOutput, buildMeshInput(voxels, chunk), registry);
+            const result = meshChunk(meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
 
             if (!result) {
                 // all-air / no quads after culling: evict any prev icon's
@@ -163,9 +163,9 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
             // replace any prior icon's alloc under the same key.
             VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], result);
 
-            VoxelVisuals.cullCPU(state.voxelResources, camera, Infinity);
+            VoxelVisuals.updateCull(state.voxelResources, camera, Infinity);
 
-            const dispatches: ComputeDispatch[] = VoxelVisuals.expandDispatches(state.voxelResources);
+            const dispatches: ComputeDispatch[] = VoxelVisuals.cullDispatches(state.voxelResources);
 
             iconRoom.scene.updateWorldMatrix();
             if (dispatches.length > 0) renderer.compute(dispatches);

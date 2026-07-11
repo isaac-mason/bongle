@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  gpucat: link:../../gpucat
+
 importers:
 
   .:
@@ -55,13 +58,13 @@ importers:
         version: 3.2.3
       crashcat:
         specifier: github:isaac-mason/crashcat#dev
-        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/0bd937447c5f091dbca9157ee9655eb9d9ffadaf
+        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/34bd11ef825c65796d4f60a9b9a882d057231fd4
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
       gpucat:
-        specifier: github:isaac-mason/gpucat#ac7dda15c1b62fc7e83753298cb7abfdf71a113e
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e
+        specifier: link:../../gpucat
+        version: link:../../gpucat
       lucide-react:
         specifier: ^1.7.0
         version: 1.7.0(react@19.2.4)
@@ -70,7 +73,7 @@ importers:
         version: 0.30.21
       mathcat:
         specifier: github:isaac-mason/mathcat#dev
-        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f
+        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/9a539f9d2c91215d65f7d836e7f0d5fbf9b693e8
       meshoptimizer:
         specifier: ^0.25.0
         version: 0.25.0
@@ -1286,9 +1289,9 @@ packages:
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/0bd937447c5f091dbca9157ee9655eb9d9ffadaf:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/0bd937447c5f091dbca9157ee9655eb9d9ffadaf}
-    version: 0.0.4
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/34bd11ef825c65796d4f60a9b9a882d057231fd4:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/34bd11ef825c65796d4f60a9b9a882d057231fd4}
+    version: 0.0.5
     peerDependencies:
       three: '>=0.182.0'
     peerDependenciesMeta:
@@ -1428,10 +1431,6 @@ packages:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
-
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e}
-    version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
@@ -1575,11 +1574,11 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  mathcat@0.0.12:
-    resolution: {integrity: sha512-gUBe1U/sh7JQ+aSMJDiLG++B3t5rSGAYdEIqPBSEEFUHK9mAcC7yE0f7RZ1SjXI57bDLSYJyrA74XQPT1tJxoA==}
+  mathcat@0.0.13:
+    resolution: {integrity: sha512-d5KhlEP3p6/ACSGpgwSBPCiiubdVXYb95mkK/rfQd5DirqHjMTYpvX5AP3vZXiQGO4y9DomRgSjOYwXW3dhA+w==}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f}
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/9a539f9d2c91215d65f7d836e7f0d5fbf9b693e8:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/9a539f9d2c91215d65f7d836e7f0d5fbf9b693e8}
     version: 0.0.13
 
   meshoptimizer@0.25.0:
@@ -2883,9 +2882,9 @@ snapshots:
 
   core-util-is@1.0.3: {}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/0bd937447c5f091dbca9157ee9655eb9d9ffadaf:
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/34bd11ef825c65796d4f60a9b9a882d057231fd4:
     dependencies:
-      mathcat: 0.0.12
+      mathcat: 0.0.13
 
   crc-32@1.2.2: {}
 
@@ -3016,10 +3015,6 @@ snapshots:
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/ac7dda15c1b62fc7e83753298cb7abfdf71a113e:
-    dependencies:
-      mathcat: 0.0.12
-
   graceful-fs@4.2.11: {}
 
   happy-dom@20.8.9:
@@ -3134,9 +3129,9 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  mathcat@0.0.12: {}
+  mathcat@0.0.13: {}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/4cb3736f1f9ffe549baa2d4eec5ee68198445b4f: {}
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/9a539f9d2c91215d65f7d836e7f0d5fbf9b693e8: {}
 
   meshoptimizer@0.25.0: {}
 

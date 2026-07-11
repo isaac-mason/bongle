@@ -2,6 +2,7 @@ import type { Vec3 } from 'mathcat';
 import { SetBlockFlags } from './block-flags';
 import type { BlockRegistry } from './block-registry';
 import { AIR, MISSING, resolveKey } from './block-registry';
+import { CullType } from './blocks';
 
 export const CHUNK_BITS = 4;
 export const CHUNK_SIZE = 1 << CHUNK_BITS; // 16
@@ -67,7 +68,14 @@ export type Chunk = {
     wz: number;
 
     /** number of non-air blocks in the chunk */
-    aggregate: number;
+    nonAirCount: number;
+
+    /** number of fully-occluding (CullType.SOLID) blocks in the chunk.
+     *  always ≤ nonAirCount. solidCount === CHUNK_VOLUME means the chunk is
+     *  entirely opaque; a chunk whose 6 neighbors are also fully opaque
+     *  has no visible surface and can skip remeshing (intended consumer:
+     *  the enqueue path in render/voxels/voxel-visuals.ts). */
+    solidCount: number;
 
     /**
      * stable string keys per palette slot.
@@ -198,7 +206,8 @@ export function createChunk(cx: number, cy: number, cz: number): Chunk {
         wx: cx * CHUNK_SIZE,
         wy: cy * CHUNK_SIZE,
         wz: cz * CHUNK_SIZE,
-        aggregate: 0,
+        nonAirCount: 0,
+        solidCount: 0,
         paletteKeys: [BLOCK_AIR],
         palette: [AIR],
         paletteMap: new Map([[BLOCK_AIR, 0]]),
@@ -245,7 +254,7 @@ export const EMPTY_LIGHT_MASK = new Uint8Array(CHUNK_VOLUME);
  * create a Chunk stub representing a chunk the server has confirmed is
  * empty (all air). `data` and `light` alias module-level singletons so the
  * stub costs ~a Chunk struct + a 1-entry palette. mesher/light skip it via
- * the existing `aggregate === 0` check; getBlock returns AIR for palette
+ * the existing `nonAirCount === 0` check; getBlock returns AIR for palette
  * index 0; neighbor links work like any other chunk.
  */
 export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk {
@@ -256,7 +265,8 @@ export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk {
         wx: cx * CHUNK_SIZE,
         wy: cy * CHUNK_SIZE,
         wz: cz * CHUNK_SIZE,
-        aggregate: 0,
+        nonAirCount: 0,
+        solidCount: 0,
         paletteKeys: [BLOCK_AIR],
         palette: [AIR],
         paletteMap: new Map([[BLOCK_AIR, 0]]),
@@ -349,11 +359,19 @@ export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key
     const oldPaletteIdx = chunk.data[idx]!;
     chunk.data[idx] = paletteIdx;
 
-    // update aggregate count
+    // update nonAirCount count
     const wasAir = chunk.palette[oldPaletteIdx] === AIR || chunk.palette[oldPaletteIdx] === MISSING;
     const isAir = chunk.palette[paletteIdx] === AIR || chunk.palette[paletteIdx] === MISSING;
-    if (wasAir && !isAir) chunk.aggregate++;
-    else if (!wasAir && isAir) chunk.aggregate--;
+    if (wasAir && !isAir) chunk.nonAirCount++;
+    else if (!wasAir && isAir) chunk.nonAirCount--;
+
+    // update fully-occluding count (air/missing are CullType.NONE, so a
+    // SOLID check naturally excludes them). deltas are safe because any
+    // registry change routes through resolveChunk, which recomputes.
+    const wasSolid = registry.cull[chunk.palette[oldPaletteIdx]!] === CullType.SOLID;
+    const isSolid = registry.cull[chunk.palette[paletteIdx]!] === CullType.SOLID;
+    if (!wasSolid && isSolid) chunk.solidCount++;
+    else if (wasSolid && !isSolid) chunk.solidCount--;
 
     chunk.dirty = true;
     chunk.meshGen++;
@@ -390,18 +408,22 @@ export function setLight(chunk: Chunk, index: number, value: number): void {
  * unresolved keys → MISSING. newly resolved keys → live again.
  */
 export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
-    let aggregate = 0;
+    let nonAirCount = 0;
+    let solidCount = 0;
     for (let i = 0; i < chunk.paletteKeys.length; i++) {
         const key = chunk.paletteKeys[i]!;
         const globalId = resolveKey(registry, key);
         chunk.palette[i] = globalId;
     }
-    // recount aggregate by scanning data
+    // recount nonAirCount + solidCount by scanning data. cull can change on a
+    // registry rebuild, so both are recomputed from scratch here.
     for (let i = 0; i < CHUNK_VOLUME; i++) {
         const globalId = chunk.palette[chunk.data[i]!]!;
-        if (globalId !== AIR && globalId !== MISSING) aggregate++;
+        if (globalId !== AIR && globalId !== MISSING) nonAirCount++;
+        if (registry.cull[globalId] === CullType.SOLID) solidCount++;
     }
-    chunk.aggregate = aggregate;
+    chunk.nonAirCount = nonAirCount;
+    chunk.solidCount = solidCount;
     chunk.dirty = true;
     chunk.meshGen++;
     chunk.version++;
@@ -741,7 +763,7 @@ export function getBlockStateRelative(voxels: Voxels, chunk: Chunk, lx: number, 
 /** iterate every non-air block in a voxels instance, yielding world coords and string key. */
 export function forEachBlock(voxels: Voxels, cb: (wx: number, wy: number, wz: number, key: string) => void): void {
     for (const chunk of voxels.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         for (let ly = 0; ly < CHUNK_SIZE; ly++) {
             for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                 for (let lx = 0; lx < CHUNK_SIZE; lx++) {
@@ -893,7 +915,8 @@ function cloneChunk(src: Chunk): Chunk {
         wx: src.wx,
         wy: src.wy,
         wz: src.wz,
-        aggregate: src.aggregate,
+        nonAirCount: src.nonAirCount,
+        solidCount: src.solidCount,
         paletteKeys: src.paletteKeys.slice(),
         palette: src.palette.slice(),
         paletteMap: new Map(src.paletteMap),
@@ -941,7 +964,7 @@ export function cloneVoxels(src: Voxels): Voxels {
  */
 export function copyVoxels(out: Voxels, src: Voxels): void {
     for (const chunk of src.chunks.values()) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         for (let ly = 0; ly < CHUNK_SIZE; ly++) {
             for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                 for (let lx = 0; lx < CHUNK_SIZE; lx++) {

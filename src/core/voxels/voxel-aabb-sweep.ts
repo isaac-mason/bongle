@@ -180,7 +180,7 @@ export function sweepAabbVsVoxels(
                     }
                     continue;
                 }
-                if (chunk.aggregate === 0) continue; // known empty (all air)
+                if (chunk.nonAirCount === 0) continue; // known empty (all air)
 
                 // cell range within this chunk.
                 const lx0 = Math.max(ix0 - cwx, 0);

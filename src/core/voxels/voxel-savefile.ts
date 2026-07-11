@@ -25,6 +25,7 @@
 import { gunzipSync, gzipSync } from 'fflate';
 import type { BlockRegistry } from './block-registry';
 import { resolveKey } from './block-registry';
+import { CullType } from './blocks';
 import {
     CHUNK_SIZE,
     CHUNK_VOLUME,
@@ -103,14 +104,14 @@ function unpackChunkBytes(b64: string): Uint16Array {
  * `repackChunkSnapshot` so the live chunk's `paletteKeys`/`data` are
  * never mutated (see invariant on Chunk.paletteKeys).
  *
- * skips chunks whose aggregate is zero (all air), they're created
+ * skips chunks whose nonAirCount is zero (all air), they're created
  * lazily by setBlock + ensureChunk but never pruned at runtime.
  */
 export function saveVoxels(voxels: Voxels): SavedVoxels {
     const result: SavedVoxels = { chunks: {} };
 
     for (const [key, chunk] of voxels.chunks) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         const snap = repackChunkSnapshot(chunk);
 
         result.chunks[key] = {
@@ -141,7 +142,7 @@ export function saveVoxelsIncremental(voxels: Voxels, cache: VoxelSaveCache): Sa
     const result: SavedVoxels = { chunks: {} };
 
     for (const [key, chunk] of voxels.chunks) {
-        if (chunk.aggregate === 0) continue;
+        if (chunk.nonAirCount === 0) continue;
         const cached = cache.get(key);
         if (cached && cached.version === chunk.version) {
             result.chunks[key] = cached.saved; // unchanged, skip the re-gzip
@@ -230,11 +231,13 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
             paletteMap.set(pkey, i);
         }
 
-        // count non-air blocks
-        let aggregate = 0;
+        // count non-air blocks + fully-occluding (CullType.SOLID) blocks
+        let nonAirCount = 0;
+        let solidCount = 0;
         for (let i = 0; i < CHUNK_VOLUME; i++) {
             const globalId = palette[data[i]!]!;
-            if (globalId !== 0 && globalId !== 1) aggregate++; // not AIR, not MISSING
+            if (globalId !== 0 && globalId !== 1) nonAirCount++; // not AIR, not MISSING
+            if (registry.cull[globalId] === CullType.SOLID) solidCount++;
         }
 
         const chunk: Chunk = {
@@ -244,7 +247,8 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
             wx: cx * CHUNK_SIZE,
             wy: cy * CHUNK_SIZE,
             wz: cz * CHUNK_SIZE,
-            aggregate,
+            nonAirCount,
+            solidCount,
             paletteKeys,
             palette,
             paletteMap,

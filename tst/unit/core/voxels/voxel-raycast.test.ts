@@ -152,11 +152,11 @@ describe('raycastVoxels', () => {
             expect(out.voxelX).toBe(18);
         });
 
-        it('skips chunk with zero aggregate', () => {
+        it('skips chunk with zero nonAirCount', () => {
             const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
             const voxels = createVoxels(registry);
 
-            // chunk at (0,0,0) exists but is all air (aggregate=0)
+            // chunk at (0,0,0) exists but is all air (nonAirCount=0)
             const emptyChunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', emptyChunk);
 

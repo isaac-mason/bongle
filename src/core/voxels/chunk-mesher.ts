@@ -58,7 +58,7 @@ import {
     SHAPE_IRREGULAR,
     SHAPE_NON_PARALLEL,
 } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, type Chunk, chunkKey, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
 
 const SLAB_SIZE = CHUNK_SIZE + 2; // 18
 const SLAB_SIZE_SQ = SLAB_SIZE * SLAB_SIZE; // 324
@@ -213,7 +213,17 @@ export type PassMesh = {
     quadCount: number;
     faceOffsets: [number, number, number, number, number, number, number];
     faceCounts: [number, number, number, number, number, number, number];
+    /** translucent quad-sort requirement, classified at mesh time (see
+     *  `classifyTranslucentSort`). Always `TRANSLUCENT_SORT_NONE` for the
+     *  opaque/transparent passes (they're never quad-sorted). */
+    sortType: number;
 };
+
+/** translucent quad-sort tiers (v1: no STATIC). NONE → no per-quad sort ever
+ *  (identity order); DYNAMIC → gated back-to-front sort at runtime. Mirrors
+ *  Sodium's SortType, collapsed to the two tiers we need. */
+export const TRANSLUCENT_SORT_NONE = 0;
+export const TRANSLUCENT_SORT_DYNAMIC = 1;
 
 export type ChunkMeshResult = {
     opaque: PassMesh | null;
@@ -941,11 +951,15 @@ const _opaqueMaskSlab = new Uint8Array(SLAB_VOLUME);
 // in the high nibble of byte 1).
 const PACKED_LIGHT_SKY_FULL = 0xf000;
 
-function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: Uint16Array): void {
+// buildSlabs reads only `voxels.chunks`; the worker (mesh-worker) builds a
+// `Voxels`-shaped store from a transferred MeshTasks packet and passes it here,
+// so no live `Voxels` reference crosses the worker boundary.
+function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Uint32Array, lightSlab: Uint16Array): void {
     slab.fill(AIR);
     lightSlab.fill(PACKED_LIGHT_SKY_FULL);
 
-    const { cx, cy, cz } = chunk;
+    const center = voxels.chunks.get(chunkKey(cx, cy, cz));
+    if (center === undefined) return;
 
     // fill the center 16x16x16 from the chunk's own data + light
     for (let y = 0; y < CHUNK_SIZE; y++) {
@@ -954,8 +968,8 @@ function buildSlabs(voxels: Voxels, chunk: Chunk, slab: Uint32Array, lightSlab: 
             const chunkRowBase = (y << (CHUNK_BITS + CHUNK_BITS)) | (z << CHUNK_BITS);
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const ci = chunkRowBase | x;
-                slab[slabRowBase + x] = chunk.palette[chunk.data[ci]!]!;
-                lightSlab[slabRowBase + x] = chunk.light[ci]!;
+                slab[slabRowBase + x] = center.palette[center.data[ci]!]!;
+                lightSlab[slabRowBase + x] = center.light[ci]!;
             }
         }
     }
@@ -1546,7 +1560,137 @@ function finishPassMesh(passBase: number, target: Uint32Array): PassMesh | null 
         quadCount: cursor,
         faceOffsets,
         faceCounts,
+        // opaque/transparent default NONE; the translucent pass is re-classified
+        // by `classifyTranslucentSort` in `meshChunk`.
+        sortType: TRANSLUCENT_SORT_NONE,
     };
+}
+
+// facing bitmap values for the three opposing cardinal pairs
+// (bit f: 0=+X,1=−X,2=+Y,3=−Y,4=+Z,5=−Z).
+const OPPOSING_PAIR_X = (1 << FACING_POS_X) | (1 << FACING_NEG_X);
+const OPPOSING_PAIR_Y = (1 << FACING_POS_Y) | (1 << FACING_NEG_Y);
+const OPPOSING_PAIR_Z = (1 << FACING_POS_Z) | (1 << FACING_NEG_Z);
+
+/**
+ * Classify a translucent PassMesh's quad-sort requirement (Sodium's build-time
+ * heuristic, collapsed to NONE vs DYNAMIC for v1). Conservative: never returns
+ * NONE for geometry that could need sorting (a false DYNAMIC only costs a gated
+ * sort; a false NONE renders wrong).
+ *
+ * NONE when the section can't self-occlude in a view-dependent way:
+ *   - ≤1 quad;
+ *   - a single aligned plane (one facing, one plane position) — flat water;
+ *   - one opposing aligned pair, each single-plane — a glass pane;
+ *   - a convex aligned box: every facing single-plane AND sitting exactly on
+ *     the section AABB (no internal translucent faces) — a glass block.
+ * Everything else (multiple planes per axis, unaligned/model quads, internal
+ * faces) → DYNAMIC.
+ *
+ * Positions are decoded straight from the packed quad header (u8 per axis in
+ * 1/16-voxel units); comparisons stay in those integer units.
+ */
+export function classifyTranslucentSort(mesh: PassMesh): number {
+    if (mesh.quadCount <= 1) return TRANSLUCENT_SORT_NONE;
+    // Unaligned (model/liquid) quads can occlude from many angles; v1 sorts them.
+    if (mesh.faceCounts[FACING_UNASSIGNED] > 0) return TRANSLUCENT_SORT_DYNAMIC;
+
+    const quads = mesh.quads;
+    let bitmap = 0;
+    let minX = 255;
+    let minY = 255;
+    let minZ = 255;
+    let maxX = 0;
+    let maxY = 0;
+    let maxZ = 0;
+    // per-facing plane position along its axis, and a multi-plane flag.
+    const planePos = [0, 0, 0, 0, 0, 0];
+    let anyMultiPlane = false;
+
+    for (let f = 0; f < 6; f++) {
+        const count = mesh.faceCounts[f]!;
+        if (count === 0) continue;
+        bitmap |= 1 << f;
+        const axis = f >> 1; // 0=X (facings 0,1), 1=Y (2,3), 2=Z (4,5)
+        const start = mesh.faceOffsets[f]!;
+        let facePlane = -1;
+        for (let i = 0; i < count; i++) {
+            const off = (start + i) * QUAD_STRIDE_U32S;
+            const w0 = quads[off]!;
+            const w1 = quads[off + 1]!;
+            const w2 = quads[off + 2]!;
+            const cx0 = w0 & 0xff;
+            const cy0 = (w0 >> 8) & 0xff;
+            const cz0 = (w0 >> 16) & 0xff;
+            const cx1 = (w0 >> 24) & 0xff;
+            const cy1 = w1 & 0xff;
+            const cz1 = (w1 >> 8) & 0xff;
+            const cx2 = (w1 >> 16) & 0xff;
+            const cy2 = (w1 >> 24) & 0xff;
+            const cz2 = w2 & 0xff;
+            const cx3 = (w2 >> 8) & 0xff;
+            const cy3 = (w2 >> 16) & 0xff;
+            const cz3 = (w2 >> 24) & 0xff;
+            if (cx0 < minX) minX = cx0;
+            if (cx1 < minX) minX = cx1;
+            if (cx2 < minX) minX = cx2;
+            if (cx3 < minX) minX = cx3;
+            if (cx0 > maxX) maxX = cx0;
+            if (cx1 > maxX) maxX = cx1;
+            if (cx2 > maxX) maxX = cx2;
+            if (cx3 > maxX) maxX = cx3;
+            if (cy0 < minY) minY = cy0;
+            if (cy1 < minY) minY = cy1;
+            if (cy2 < minY) minY = cy2;
+            if (cy3 < minY) minY = cy3;
+            if (cy0 > maxY) maxY = cy0;
+            if (cy1 > maxY) maxY = cy1;
+            if (cy2 > maxY) maxY = cy2;
+            if (cy3 > maxY) maxY = cy3;
+            if (cz0 < minZ) minZ = cz0;
+            if (cz1 < minZ) minZ = cz1;
+            if (cz2 < minZ) minZ = cz2;
+            if (cz3 < minZ) minZ = cz3;
+            if (cz0 > maxZ) maxZ = cz0;
+            if (cz1 > maxZ) maxZ = cz1;
+            if (cz2 > maxZ) maxZ = cz2;
+            if (cz3 > maxZ) maxZ = cz3;
+            // axis-aligned quad → all 4 corners share the axis coordinate.
+            const plane = axis === 0 ? cx0 : axis === 1 ? cy0 : cz0;
+            if (facePlane === -1) facePlane = plane;
+            else if (plane !== facePlane) anyMultiPlane = true;
+        }
+        planePos[f] = facePlane;
+    }
+
+    // >1 plane along any axis → parallel translucent layers that reorder with
+    // the camera → must sort.
+    if (anyMultiPlane) return TRANSLUCENT_SORT_DYNAMIC;
+
+    // count present facings.
+    let facingCount = 0;
+    for (let f = 0; f < 6; f++) if (bitmap & (1 << f)) facingCount++;
+
+    // single plane → flat surface, can't self-occlude.
+    if (facingCount <= 1) return TRANSLUCENT_SORT_NONE;
+
+    // one opposing aligned pair → no line of sight through it.
+    if (facingCount === 2 && (bitmap === OPPOSING_PAIR_X || bitmap === OPPOSING_PAIR_Y || bitmap === OPPOSING_PAIR_Z)) {
+        return TRANSLUCENT_SORT_NONE;
+    }
+
+    // convex box: every present facing sits exactly on the section AABB, so
+    // there are no internal translucent faces to reorder.
+    let convex = true;
+    if (bitmap & (1 << FACING_POS_X) && planePos[FACING_POS_X] !== maxX) convex = false;
+    if (bitmap & (1 << FACING_NEG_X) && planePos[FACING_NEG_X] !== minX) convex = false;
+    if (bitmap & (1 << FACING_POS_Y) && planePos[FACING_POS_Y] !== maxY) convex = false;
+    if (bitmap & (1 << FACING_NEG_Y) && planePos[FACING_NEG_Y] !== minY) convex = false;
+    if (bitmap & (1 << FACING_POS_Z) && planePos[FACING_POS_Z] !== maxZ) convex = false;
+    if (bitmap & (1 << FACING_NEG_Z) && planePos[FACING_NEG_Z] !== minZ) convex = false;
+    if (convex) return TRANSLUCENT_SORT_NONE;
+
+    return TRANSLUCENT_SORT_DYNAMIC;
 }
 
 // ── normal/uv packing for quad headers ──────────────────────────────
@@ -1617,43 +1761,12 @@ const _meshInput: MeshInput = {
     light: _blockLightSlab,
 };
 
-/** build the mesher input for `chunk` by walking the 6 face/12 edge/8
+/** build the mesher input for chunk `(cx,cy,cz)` by walking the 6 face/12 edge/8
  *  corner neighbours into the module-scope slab scratch. Pair with
- *  `meshChunk(input, registry)`. */
-export function buildMeshInput(voxels: Voxels, chunk: Chunk): MeshInput {
-    buildSlabs(voxels, chunk, _slab, _blockLightSlab);
-    _meshInput.cx = chunk.cx;
-    _meshInput.cy = chunk.cy;
-    _meshInput.cz = chunk.cz;
-    return _meshInput;
-}
-
-/** main-side helper used by the worker dispatcher: run `buildSlabs` into
- *  caller-provided ArrayBuffers (typically borrowed from the dispatcher
- *  pool) instead of the module scratch. The buffers are then transferred
- *  to a worker via `postMessage`. Both buffers must be sized to the slab
- *  volume, `blocksBuf` ≥ SLAB_VOLUME*4 bytes, `lightBuf` ≥ SLAB_VOLUME*2
- *  bytes. */
-export const SLAB_BLOCKS_BYTES = SLAB_VOLUME * 4;
-export const SLAB_LIGHT_BYTES = SLAB_VOLUME * 2;
-export function buildSlabsIntoBuffers(voxels: Voxels, chunk: Chunk, blocksBuf: ArrayBuffer, lightBuf: ArrayBuffer): void {
-    buildSlabs(voxels, chunk, new Uint32Array(blocksBuf), new Uint16Array(lightBuf));
-}
-
-/** worker-side helper: copy transferred slab bytes into the worker's
- *  module-scope scratch and return the singleton MeshInput pointing at
- *  it. The copy is ~24 µs (5832 × u32 + 5832 × u16); kept over a buffer
- *  reassign so `_slab` stays `const` and the mesher's hot loop never
- *  rebinds typed-array references. */
-export function installSlabsAndBuildMeshInput(
-    cx: number,
-    cy: number,
-    cz: number,
-    blocksU32: Uint32Array,
-    lightU16: Uint16Array,
-): MeshInput {
-    _slab.set(blocksU32);
-    _blockLightSlab.set(lightU16);
+ *  `meshChunk(input, registry)`. Used both on main (from `voxels`) and in the
+ *  worker (from a MeshTasks-backed store). */
+export function buildMeshInput(voxels: Voxels, cx: number, cy: number, cz: number): MeshInput {
+    buildSlabs(voxels, cx, cy, cz, _slab, _blockLightSlab);
     _meshInput.cx = cx;
     _meshInput.cy = cy;
     _meshInput.cz = cz;
@@ -1981,6 +2094,10 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                             const aboveNeighborId = _slab[slabIdx + faceStride + upStride]!;
                             sameFluidAboveNeighbor = (fluidGroupTable[aboveNeighborId] ?? 0) === neighborFluidGroup;
                         }
+                        // neighbour's exposed/merged surface height: a submerged neighbour
+                        // fills its cell (1), an exposed one sits at its meniscus level.
+                        // Only meaningful when the neighbour is the same fluid (a liquid).
+                        const neighborEffectiveHeight = sameFluidAboveNeighbor ? 1 : (surfaceHeightTable[neighborId] ?? 0);
                         // ── face-aware cull for MODEL_LIQUID (Luanti) ─────
                         const sameFluid = myFluidGroup !== 0 && neighborFluidGroup === myFluidGroup;
                         if (face === 2) {
@@ -1997,16 +2114,17 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                             if (sameFluid) continue;
                             if (neighborCull === CULL_SOLID) continue;
                         } else {
-                            // SIDES (drawLiquidSides): a same-fluid side is drawn ONLY
-                            // where a submerged cell (same fluid directly above) meets a
-                            // neighbour that is NOT submerged (its surface is exposed),
-                            // the visible step down to the neighbour's surface. a flag
-                            // test, NOT a height comparison: matching heights don't make
-                            // a face interior, and a block sitting above the fluid must
-                            // not turn an interior side into a wall.
+                            // SIDES (drawLiquidSides): a same-fluid side is the visible
+                            // step down wherever OUR surface rises above the neighbour's,
+                            // covering both a submerged column meeting a shallower pool
+                            // (ours = 1) AND two exposed cells at different levels (e.g. a
+                            // level-8 cell beside a level-4 one — neither submerged). Equal
+                            // or higher neighbour → the face is interior, skip. `effective-
+                            // Height` already folds the submerged case (== 1) and ignores a
+                            // solid block above, so this stays a height test, not a flag.
+                            // The riser is clipped to [neighbourSurface, ourSurface] below.
                             if (sameFluid) {
-                                if (!sameFluidAbove) continue;
-                                if (sameFluidAboveNeighbor) continue;
+                                if (effectiveHeight <= neighborEffectiveHeight) continue;
                             } else if (neighborCull === CULL_SOLID) {
                                 continue;
                             }
@@ -2022,6 +2140,10 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                         const faceVertBase = face * 12;
                         const faceUvBase = face * 8;
                         const isSide = face !== 2 && face !== 3;
+                        // same-fluid step-down riser: clip the side's bottom to the
+                        // neighbour's surface so the strip beneath (behind their body) isn't
+                        // double-blended. 0 for air/solid-facing sides → full water column.
+                        const sideBottom = isSide && sameFluid ? neighborEffectiveHeight : 0;
                         const topVClamp = isSide ? 1 - effectiveHeight : 0;
 
                         // Sodium AoFaceData edge-share: 4 unique edges around
@@ -2082,9 +2204,11 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
                             const cornerY = FACE_VERTS[vertOffset + 1]!;
                             const cornerV = FACE_UVS[uvOffset + 1]!;
                             const px = x + FACE_VERTS[vertOffset]!;
-                            const py = y + (cornerY === 1 ? effectiveHeight : 0);
+                            const py = y + (cornerY === 1 ? effectiveHeight : sideBottom);
                             const pz = z + FACE_VERTS[vertOffset + 2]!;
-                            const finalV = isSide && cornerV === 0 ? topVClamp : cornerV;
+                            // side V spans [1-ourSurface, 1-sideBottom]; sideBottom=0 → V=1
+                            // at the base as before, a clipped riser maps the strip's texture.
+                            const finalV = isSide ? (cornerV === 0 ? topVClamp : 1 - sideBottom) : cornerV;
 
                             if (corner === 0) {
                                 px0 = px;
@@ -2515,6 +2639,8 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
     const opaque = finishPassMesh(PASS_OPAQUE_BASE, out.opaque);
     const transparent = finishPassMesh(PASS_TRANSPARENT_BASE, out.transparent);
     const translucent = finishPassMesh(PASS_TRANSLUCENT_BASE, out.translucent);
+    // tag the translucent pass with its quad-sort requirement (NONE/DYNAMIC).
+    if (translucent) translucent.sortType = classifyTranslucentSort(translucent);
 
     if (!opaque && !transparent && !translucent) return null;
 

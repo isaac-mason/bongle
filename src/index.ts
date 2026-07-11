@@ -58,6 +58,7 @@ export * from './builtins/extruded-sprite';
 export * from './builtins/fly-controller';
 export * from './builtins/html';
 export * from './builtins/mesh';
+export * from './builtins/model';
 export * from './builtins/orbit-controller';
 export * from './builtins/player';
 export * from './builtins/player-controller';
