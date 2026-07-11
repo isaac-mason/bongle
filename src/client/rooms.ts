@@ -38,7 +38,7 @@ import * as SpriteVisuals from '../render/sprites/sprite-visuals';
 import * as Visibility from '../render/visibility';
 import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import type * as VoxelResourcesNs from '../render/voxels/voxel-resources';
+import * as VoxelResourcesNs from '../render/voxels/voxel-resources';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
@@ -1135,7 +1135,7 @@ export function setActivePlayer(
 export function clearRoomVoxels(room: ClientRoom, voxelResources: VoxelResourcesNs.VoxelResources): void {
     for (const [key, chunk] of room.voxels.chunks) {
         Voxels.unlinkChunkNeighbors(chunk);
-        VoxelVisuals.removeChunkMesh(voxelResources, key);
+        VoxelResourcesNs.removeChunkMesh(voxelResources, key);
     }
     room.voxels.chunks.clear();
 }

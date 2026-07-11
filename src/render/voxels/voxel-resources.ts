@@ -15,7 +15,7 @@
 // load from `module.blocks`, rebuilt on script reload (block defs and
 // textures may have changed).
 
-import type { ArrayTexture, Material, WebGPURenderer } from 'gpucat';
+import type { ArrayTexture, Camera, ComputeDispatch, Material, WebGPURenderer } from 'gpucat';
 import {
     abs,
     add,
@@ -34,6 +34,7 @@ import {
     Fn,
     f32,
     floor,
+    frustum,
     Geometry,
     GpuBuffer,
     globalId,
@@ -64,7 +65,7 @@ import {
     workgroupId,
 } from 'gpucat';
 import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
-import type { Box3, Vec3 } from 'mathcat';
+import { type Box3, plane3, type Vec3 } from 'mathcat';
 import type { Resources } from '../../core/resources';
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import {
@@ -126,68 +127,51 @@ export const VisibleQuad = /* @__PURE__ */ struct('VoxelVisibleQuad', {
 
 // ── translucent global stable radix sort ────────────────────────────
 //
-// The translucent pass draws back-to-front. Every visible translucent quad gets
-// one 32-bit key; a 4-pass (8 bits/pass) STABLE LSD radix sort turns those into a
-// back-to-front `visibleQuads` permutation, re-run only when the order can change
-// (translation / rotation / arena mutation — the gate lives in voxel-visuals).
+// The translucent pass draws back-to-front. A stable 4-pass (8 bits/pass) LSD
+// radix sort turns every visible translucent quad's key into the `visibleQuads`
+// draw permutation, gated to re-run only when the order can change (see
+// `updateTranslucentSortGate`).
 //
 // key = [ cellL1:10 ][ intraDist:20 ][ facing:1 ]  (31 bits; ascending ⇒ far first)
 //
-//   cellL1    = 1023 − OWNER-CELL Manhattan distance from the camera's cell.
-//               THE load-bearing term, and it is EXACT: every quad lies within
-//               its owner block's closed cube, and along any single ray cells
-//               are visited in strictly increasing L1 (per-axis monotonicity) —
-//               so a farther cell's quad can NEVER be hit before a nearer
-//               cell's quad. Ordering by owner cell is per-pixel correct for
-//               ALL cross-cell pairs, and resolves coincident interface faces
-//               (glass|water, glass|glass) as "nearer cell's face on top" —
-//               one uniform, view-consistent rule with no tiebreak conventions.
-//               Integer key ⇒ no quantisation bands, no bisector flips, and the
-//               order only changes when the CAMERA CROSSES A CELL BOUNDARY.
-//               Same-L1 cells can never occlude each other (same proof), so no
-//               refinement is needed between them. 1023 cells ⇒ render distance
-//               ≤ ~21 chunks, matching the accepted ceiling. Cell L1 is global
-//               (chunk boundaries need no special case).
-//   intraDist = WITHIN-cell refinement only: per-section-normalised linear
-//               distance to the camera-NEAREST point of the quad (far first).
-//               Orders a cell's own quads — exact for convex cells (a cube's
-//               back face is strictly farther than its front everywhere they
-//               overlap), best-effort for multi-quad models inside one cell.
-//               20 bits ≈ 3e-5 blocks over the section span: the tie-band
-//               pathology cannot return because all CROSS-cell pairs are now
-//               integer-decided; within a cell nothing real lives that close.
-//   facing    = camera-facing ⇒ 1 ⇒ drawn last. Final same-cell near-tie split
-//               (crossed model quads — inherently unorderable per-quad; this
-//               keeps them deterministic).
+//   cellL1    = 1023 − Manhattan distance of the quad's OWNER cell from the
+//               camera's cell. Exact and load-bearing: a quad never leaves its
+//               owner cube, and along any ray cell L1 strictly increases (per-
+//               axis monotonicity), so a farther cell's quad can never be hit
+//               before a nearer one's. This orders every cross-cell pair per-
+//               pixel-correctly — including coincident interface faces, as
+//               "nearer cell on top" — with no tiebreak convention and no
+//               quantisation bands; the order only changes when the camera
+//               crosses a cell boundary. Same-L1 cells can't occlude (same
+//               proof) so need no refinement. 1023 ⇒ ≤21-chunk view ceiling.
+//   intraDist = within-cell refinement (per-section-normalised nearest-point
+//               distance, far first). Exact for a convex cell's own faces,
+//               best-effort for multi-quad models. Cross-cell pairs never reach
+//               it, so its quantisation can't reintroduce tie-band flicker.
+//   facing    = camera-facing ⇒ drawn last; splits crossed same-cell model
+//               quads (unorderable per-quad, but kept deterministic).
 //
-// Residual ties keep expand order (STABLE sort) = within-section arena order —
-// fixed and view-independent, Sodium's `onPlaneQuads` build-order semantics.
+// Residual exact ties keep expand order (the sort is STABLE) = within-section
+// arena order — fixed and view-independent, Sodium's `onPlaneQuads` semantics.
 //
-// Why stable multi-pass radix (not the single-pass counting sort it replaces):
-// counting sort caps the key at ~20 bits (bin memory), and NO single-pass bin
-// count closes the tie band. LSD radix needs per-pass stability, provided by a
-// deterministic rank-based scatter (zero rank atomics → same camera ⇒ same
-// order). reduce-then-scan structure only — no decoupled-lookback spinning, so
-// no forward-progress assumption (Mali/Adreno-safe), and no subgroup ops.
+// Stable multi-pass (not single-pass counting sort): WebGPU has no forward-
+// progress guarantee, so the scatter is stable via a deterministic per-block
+// rank (zero rank atomics) built with reduce-then-scan — no decoupled-lookback
+// spin, no subgroups.
 //
-// Bandwidth/launch structure (fused-count form):
-//   expand → prep → count₀ → [scan → scatter]×4        (11 dispatches)
-// The passes shuffle (key, ORIGINAL-INDEX) pairs — 8 B/item instead of dragging
-// the 8 B payload through every pass; the LAST scatter is a dedicated variant
-// that gathers `sortPayload[idx]` straight into the translucent `visibleQuads`.
-// Each non-last scatter also tallies the NEXT pass's digit histogram while it
-// holds the key in-register (fused count), so only pass 0 needs a standalone
-// count kernel. The two histograms ping-pong: counts for digit p live in
-// hist[p%2]; scan p consumes hist[p%2] into bases in place AND zeroes the other
-// buffer (bounded by `zeroTo`, the max of this and the previous fire's block
-// count, tracked in sortIndirectArgs) so scatter p can tally digit p+1 into it.
-// Histogram cells use a FIXED row stride (maxBlocks, not this fire's numBlocks)
-// so cross-fire staleness stays addressable by that bound.
+// Chain (11 dispatches): expand → prep → count₀ → [scan → scatter]×4. Passes
+// shuffle (key, index) A→B→A→B (8 B/item, not the payload); the last scatter
+// gathers the payload into `visibleQuads`. Each non-last scatter fused-counts
+// the next pass's digit in-register, so only pass 0 needs a standalone count.
+// The two histograms ping-pong (counts for digit p in hist[p%2]); scan p reads
+// hist[p%2] into bases AND zeroes hist[(p+1)%2] up to `zeroTo` = max(this,
+// previous fire's block count) for the fused count. Rows use a FIXED maxBlocks
+// stride so cross-fire staleness stays addressable.
 const RADIX_WG = 256; // threads per radix workgroup
 const RADIX_ITEMS = 4; // items per thread in count/scatter
 const RADIX_BLOCK = RADIX_WG * RADIX_ITEMS; // 1024 items per workgroup-block
-const RADIX_DIGITS = 256; // 8-bit digit ⇒ 4 LSD passes over the 32-bit key (hardcoded in voxel-visuals)
-const TSORT_EXPAND_WG = 256; // expand threads/section (stride loop over its quads)
+const RADIX_DIGITS = 256; // 8-bit digit ⇒ 4 LSD passes
+const TSORT_EXPAND_WG = 256; // expand threads/section
 const TSORT_CELL_LEVELS = 1024; // 10-bit owner-cell L1 (≈21-chunk view ceiling)
 const TSORT_DIST_LEVELS = 1 << 20; // 20-bit within-cell distance refinement
 
@@ -498,19 +482,11 @@ function createEmitCompute(): ComputeNode {
 }
 
 // ── translucent global stable-radix kernels ─────────────────────────
-//
-// Kernel chain (gated; otherwise last frame's permutation persists):
-//   expand → prep → 4 × (count → scan → scatter)
-// expand flattens visible translucent quads into (key, payload); each radix pass
-// reorders (key, payload) by one 8-bit digit, ping-ponging src/dst buffers; the
-// final pass scatters payloads straight into the translucent `visibleQuads`.
 
-// expand: one workgroup per visible translucent section (dispatched on the shared
-// [visibleChunkCount, 7, 1] emitArgs; only workgroupId.y == 0 works). Reserves the
-// section's key range with ONE workgroup atomic (lane 0), then every lane computes
-// its quads' 32-bit key, payload, and identity sort-index, stride-writing them
-// into the flat sort arrays. The radix passes shuffle only (key, index); the
-// payload stays put here until the last scatter gathers it.
+// expand: one workgroup per visible translucent section (dispatched on the
+// shared [visibleChunkCount, 7, 1] emitArgs; only workgroupId.y == 0 works).
+// Lane 0 reserves the section's flat range with one atomic; lanes stride-write
+// each quad's key (see the key description above), payload, and identity index.
 export function createTranslucentExpandCompute(): ComputeNode {
     const wgBase = WorkgroupVar('wgBase', d.u32);
     return Fn(() => {
@@ -540,24 +516,21 @@ export function createTranslucentExpandCompute(): ComputeNode {
         });
         const arenaBase = chunkInfo.element(slotU).field('arenaBase').toVar('arenaBase');
 
-        // section geometry (camera-relative, so f32-exact at any world position).
+        // section geometry, camera-relative (f32-exact at any world position).
         const half = f32(CHUNK_SIZE * 0.5);
         const cs = f32(CHUNK_SIZE);
         const rc = vc.field('relCenter');
         const relOrigin = vec3f(sub(rc.x, half), sub(rc.y, half), sub(rc.z, half)).toVar('relOrigin');
-        // per-section distance range = nearest/farthest AABB point to the camera
-        // (origin), used only by the WITHIN-cell refinement. near/far are LINEAR
-        // distances so resolution is uniform.
+        // [near, far] AABB distance range, for normalising the within-cell term.
         const maxCorner = relOrigin.add(vec3f(cs, cs, cs)).toVar('maxCorner');
         const nearC = clamp(vec3f(f32(0), f32(0), f32(0)), relOrigin, maxCorner).toVar('nearC');
         const nearDist = length(nearC).toVar('nearDist');
         const farC = max(abs(relOrigin), abs(maxCorner)).toVar('farC');
         const farDist = length(farC).toVar('farDist');
         const distSpan = max(sub(farDist, nearDist), f32(1e-4)).toVar('distSpan');
-        // the camera's cell in section-local coordinates (integer, possibly far
-        // outside [0,16)): the camera sits at −relOrigin in section-local space.
-        // Small camera-relative integers ⇒ f32-exact at MC world scale, and
-        // consistent across sections (all reconstruct the same world deltas).
+        // camera's cell in section-local coords (camera sits at −relOrigin);
+        // camera-relative integers ⇒ f32-exact at MC scale, consistent across
+        // sections.
         const camCellX = floor(sub(f32(0), relOrigin.x)).toVar('camCellX');
         const camCellY = floor(sub(f32(0), relOrigin.y)).toVar('camCellY');
         const camCellZ = floor(sub(f32(0), relOrigin.z)).toVar('camCellZ');
@@ -571,13 +544,10 @@ export function createTranslucentExpandCompute(): ComputeNode {
         const qi = localId.x.toVar('qi');
         While(qi.lessThan(dataCount), () => {
             const realQuadId = add(arenaBase, qi).toVar('realQuadId');
-            // quad word 3 carries both the oct16 normal (low 16) and the OWNER
-            // block's chunk-local cell (bits 16..27) — one load feeds the cellL1
-            // term and the facing bit.
+            // word 3 packs both the oct16 normal (low 16) and the owner block's
+            // chunk-local cell (bits 16..27) — one load feeds cellL1 and facing.
             const w3 = index(quads, add(realQuadId.mul(u32(QUAD_STRIDE_U32S)), u32(3))).toVar('w3');
-            // cellL1: Manhattan distance of the quad's OWNER CELL from the
-            // camera's cell — the exact cross-cell order (quads never escape
-            // their owner cell; along any ray, cell L1 strictly increases).
+            // cellL1 = |owner cell − camera cell|₁ (the exact cross-cell term).
             const ownDx = abs(w3.shiftRight(u32(16)).bitwiseAnd(u32(0xf)).toF32().sub(camCellX)).toVar('ownDx');
             const ownDy = abs(w3.shiftRight(u32(20)).bitwiseAnd(u32(0xf)).toF32().sub(camCellY)).toVar('ownDy');
             const ownDz = abs(w3.shiftRight(u32(24)).bitwiseAnd(u32(0xf)).toF32().sub(camCellZ)).toVar('ownDz');
@@ -585,22 +555,15 @@ export function createTranslucentExpandCompute(): ComputeNode {
                 .toU32()
                 .toVar('cellL1');
             const cellKey = sub(u32(TSORT_CELL_LEVELS - 1), cellL1).toVar('cellKey');
-            // intraDist (within-cell refinement): radial distance to the quad's
-            // CENTROID — exact for a convex cell's own faces (the back face's
-            // centre is farther than the front's wherever they overlap), sane
-            // for multi-quad models inside one cell, and it never manufactures
-            // shared-edge ties between the cell's perpendicular faces (a
-            // nearest-point basis clamps both onto the shared edge). Cross-cell
-            // pairs never reach this term (cellL1 decides them exactly).
+            // intraDist = normalised centroid distance (within-cell refinement).
             const centroidByte = decodeQuadCentroid(quads, realQuadId).toVar('cb');
             const camRel = relOrigin.add(centroidByte.mul(f32(CHUNK_SIZE / 255))).toVar('camRel');
             const dist = length(camRel).toVar('dist');
             const norm = clamp(div(sub(dist, nearDist), distSpan), f32(0), f32(1)).toVar('norm');
             const distLevel = min(floor(norm.mul(f32(TSORT_DIST_LEVELS))).toU32(), u32(TSORT_DIST_LEVELS - 1)).toVar('distLevel');
             const distKey = sub(u32(TSORT_DIST_LEVELS - 1), distLevel).toVar('distKey');
-            // facing (final same-cell near-tie split, e.g. crossed model quads):
-            // camera-facing ⇒ 1 ⇒ drawn last. camRel lies on the quad's plane
-            // for axis-aligned faces, so the sign is exact there.
+            // facing: camera-facing ⇒ drawn last (camRel is on the quad's plane
+            // for axis-aligned faces, so the sign is exact).
             const normal = decodeOct16(w3.bitwiseAnd(u32(0xffff))).toVar('nrm');
             const facing = select(u32(1), u32(0), dot(normal, camRel).greaterThanEqual(f32(0))).toVar('facing');
             const key = shiftLeft(cellKey, u32(21))
@@ -2184,4 +2147,291 @@ export function dispose(state: VoxelResources): void {
     if (state.meshDispatcher) disposeMeshDispatcher(state.meshDispatcher);
     state.pendingMeshResults.length = 0;
     state.pendingLostChunkKeys.length = 0;
+}
+
+// ── per-frame GPU frame graph ───────────────────────────────────────
+//
+// These drive the engine-global compute resources above each frame. They read
+// and mutate only `VoxelResources` (no per-room state), so they live here next
+// to the kernels + buffers they wire — a pipeline change touches one file.
+// The active room calls `updateCull` then `cullDispatches` each frame (see
+// voxel-visuals' per-room `update` for the remesh half).
+
+const _cullFrustum = frustum.create();
+
+/** Write the per-frame camera view (5 pre-shifted, camera-relative frustum
+ *  planes + camera chunk/frac) into `cullView`, and reset the GPU cull/emit
+ *  counters. The visibility test + slice emission run on the GPU via
+ *  `cullDispatches`; this just prepares their per-frame inputs. Must run before
+ *  those dispatches.
+ *
+ *  Planes are expressed camera-relative and the world coords go in as integer
+ *  chunk coords + sub-chunk frac, so the whole cull stays f32-exact at
+ *  Minecraft world scale. `viewChunkRadius` is read live from settings, so a
+ *  tier flip applies next frame. */
+export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
+    frustum.setFromViewProjectionMatrix(_cullFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    const cx = camera.position[0];
+    const cy = camera.position[1];
+    const cz = camera.position[2];
+    const camCx = Math.floor(cx / CHUNK_SIZE);
+    const camCy = Math.floor(cy / CHUNK_SIZE);
+    const camCz = Math.floor(cz / CHUNK_SIZE);
+
+    // 5 planes (drop the far plane, index 5 — the view-radius test bounds it),
+    // camera-relative with the section half-extent folded into `.w`:
+    //   dot(plane.xyz, relCenter) + plane.w >= 0  keeps the section.
+    const data = voxelResources.cullViewData;
+    const half = CHUNK_SIZE * 0.5;
+    for (let i = 0; i < 5; i++) {
+        const p = _cullFrustum[i]!;
+        const nx = p.normal[0];
+        const ny = p.normal[1];
+        const nz = p.normal[2];
+        // (n·cam + constant), folded with the box support along n; all in f64.
+        const w = plane3.distanceToPoint(p, camera.position) + half * (Math.abs(nx) + Math.abs(ny) + Math.abs(nz));
+        const base = i * 4;
+        data[base + 0] = nx;
+        data[base + 1] = ny;
+        data[base + 2] = nz;
+        data[base + 3] = w;
+    }
+    // camMeta = (camChunk.xyz, recordCount); camFrac = (fracXYZ, viewDist²).
+    const viewDist = viewChunkRadius * CHUNK_SIZE;
+    data[20] = camCx;
+    data[21] = camCy;
+    data[22] = camCz;
+    data[23] = voxelResources.arenas.packer.chunks.length;
+    data[24] = cx - camCx * CHUNK_SIZE;
+    data[25] = cy - camCy * CHUNK_SIZE;
+    data[26] = cz - camCz * CHUNK_SIZE;
+    data[27] = viewDist * viewDist;
+    voxelResources.cullView.addUpdateRange(0, data.length);
+    voxelResources.cullView.needsUpdate = true;
+
+    // reset the cull append counter (emitArgs[0]); [1]=7, [2]=1 stay.
+    voxelResources.emitArgsData[0] = 0;
+    voxelResources.emitArgs.addUpdateRange(0, voxelResources.emitArgsData.length);
+    voxelResources.emitArgs.needsUpdate = true;
+
+    // zero the per-bucket quad tallies for this frame's count pass (the CPU
+    // mirror stays all-zero; re-uploading it clears the GPU buffer). The draw
+    // instanceCounts are written by the finalize pass, not reset here.
+    voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
+    voxelResources.bucketQuads.needsUpdate = true;
+
+    // translucent sort gate: the radix output persists across frames and only
+    // re-runs when the back-to-front order can change. The owner-cell key is
+    // rotation-invariant, so orbiting in place needs no re-sort — but the visible
+    // SET changes on rotation, and a translucent arena mutation would leave the
+    // persisted `{slot, localIdx}` dangling. Gate = translation ∨ rotation ∨
+    // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
+    // count stand.
+    updateTranslucentSortGate(voxelResources, cx, cy, cz, _cullFrustum[4]!.normal);
+}
+
+// distance the camera must move before the translucent sort re-runs. Tight: a
+// small translation reorders near geometry (e.g. diving through a water surface),
+// and the whole sort is one cheap flat pass, so we only truly skip when static.
+const TSORT_MOVE_TRIGGER_SQ = 0.1 * 0.1; // 0.1 block
+// re-run once the camera forward turns past this (cos of the angle). The visible
+// set shifts on rotation, so newly-entered translucent sections must be sorted in.
+const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
+
+/** Decide whether the translucent radix sort re-runs this frame, and refresh the
+ *  gate baseline when it does. `fwd` is the camera-forward (near-plane inward
+ *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
+function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
+    const gate = voxelResources.tsortGate;
+    const packer = voxelResources.arenas.packer;
+    let run = !gate.valid || packer.translucentDirty;
+    if (!run) {
+        const mx = camX - gate.camX;
+        const my = camY - gate.camY;
+        const mz = camZ - gate.camZ;
+        run = mx * mx + my * my + mz * mz > TSORT_MOVE_TRIGGER_SQ;
+    }
+    if (!run) {
+        const dotFwd = fwd[0] * gate.fwdX + fwd[1] * gate.fwdY + fwd[2] * gate.fwdZ;
+        run = dotFwd < TSORT_ROTATE_TRIGGER_COS;
+    }
+    if (run) {
+        gate.camX = camX;
+        gate.camY = camY;
+        gate.camZ = camZ;
+        gate.fwdX = fwd[0];
+        gate.fwdY = fwd[1];
+        gate.fwdZ = fwd[2];
+        gate.valid = true;
+        packer.translucentDirty = false;
+    }
+    voxelResources.runTranslucentSort = run;
+}
+
+/** GPU cull + Level-A ordered emit + translucent radix dispatch chain. gpucat
+ *  runs each dispatch in its own compute pass, so the data dependencies hold.
+ *  Push into the renderer's dispatch list before `renderer.compute(...)`. Empty
+ *  when no chunks are resident.
+ *
+ *  1. cull: one thread per resident chunk; frustum-test, compact survivors into
+ *     `visibleChunks` (+ distance bucket), write the emit dispatch args, AND tally
+ *     each survivor's visible opaque/transparent facings into `bucketQuads`.
+ *  2. finalize: prefix-sum opaque/transparent buckets → instance bases + draw counts.
+ *  3. emit (opaque/transparent): back-face-cull facings, write `visibleQuads`
+ *     front-to-back at the bucket base.
+ *  4. translucent global stable radix sort (gated — see `runTranslucentSort`):
+ *     expand → prep → count₀ → 4 × (scan → scatter), producing the back-to-front
+ *     translucent `visibleQuads` permutation + its draw count. Skipped when the
+ *     camera is static and the arena unchanged; last frame's result persists. */
+export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
+    const packer = voxelResources.arenas.packer;
+    const recordCount = packer.chunks.length;
+    const out: ComputeDispatch[] = [];
+    if (recordCount === 0) return out;
+    const tables = voxelResources.arenas.tables;
+    const passRender = voxelResources.passRender;
+
+    out.push({
+        node: voxelResources.cull,
+        dispatch: [Math.ceil(recordCount / CULL_WG_SIZE), 1, 1],
+        buffers: {
+            cullRecords: packer.cullRecordsBuffer,
+            cullView: voxelResources.cullView,
+            visibleChunks: voxelResources.visibleChunks,
+            emitArgs: voxelResources.emitArgs,
+            // fused count (opaque/transparent only): per-pass meta + bucket tally.
+            opaqueMeta: tables.opaque.metaBuffer,
+            transparentMeta: tables.transparent.metaBuffer,
+            bucketQuads: voxelResources.bucketQuads,
+        },
+    });
+    out.push({
+        node: voxelResources.finalize,
+        dispatch: [1, 1, 1],
+        buffers: {
+            bucketQuads: voxelResources.bucketQuads,
+            bucketBase: voxelResources.bucketBase,
+            bucketCursor: voxelResources.bucketCursor,
+            drawOpaque: passRender.opaque.indirectBuffer,
+            drawTransparent: passRender.transparent.indirectBuffer,
+        },
+    });
+    // opaque/transparent per-facing emit (the translucent pass is sorted below).
+    for (const pass of PASSES) {
+        if (pass === 'translucent') continue;
+        out.push({
+            node: voxelResources.emit,
+            indirect: voxelResources.emitArgs,
+            buffers: {
+                visibleChunks: voxelResources.visibleChunks,
+                sectionMeta: tables[pass].metaBuffer,
+                visibleQuads: passRender[pass].visibleQuadsBuffer,
+                bucketBase: voxelResources.bucketBase,
+                bucketCursor: voxelResources.bucketCursor,
+                emitConfig: voxelResources.emitConfig[pass],
+            },
+        });
+    }
+
+    // translucent global stable radix sort (gated). Reads this frame's
+    // `visibleChunks` (cull, above); output persists when skipped.
+    // Chain: expand → prep → count₀ → 4 × (scan → scatter). The passes shuffle
+    // (key, index) pairs A→B→A→B; each non-last scatter also fused-counts the
+    // NEXT pass's digit into the other histogram (which the scan just zeroed),
+    // so only pass 0 needs the standalone count. The last scatter gathers
+    // `sortPayload[idx]` straight into the translucent `visibleQuads`.
+    // Histograms ping-pong hist[pass % 2] (counts) ↔ hist[(pass+1) % 2] (next).
+    if (voxelResources.runTranslucentSort) {
+        const quads = voxelResources.arenas.quadArena.buffers.quads;
+        const translucent = passRender.translucent;
+        const hists = [voxelResources.radixHist, voxelResources.radixHistAlt] as const;
+        out.push({
+            node: voxelResources.tsortExpand,
+            indirect: voxelResources.emitArgs,
+            buffers: {
+                visibleChunks: voxelResources.visibleChunks,
+                sectionMeta: tables.translucent.metaBuffer,
+                chunkInfo: tables.translucent.buffer,
+                quads,
+                sortKeys: voxelResources.sortKeys,
+                sortIdx: voxelResources.sortIdx,
+                sortPayload: voxelResources.sortPayload,
+                sortCount: voxelResources.sortCount,
+            },
+        });
+        out.push({
+            node: voxelResources.tsortPrep,
+            dispatch: [1, 1, 1],
+            buffers: {
+                sortCount: voxelResources.sortCount,
+                sortIndirectArgs: voxelResources.sortIndirectArgs,
+                drawTranslucent: translucent.indirectBuffer,
+            },
+        });
+        // pass-0 digit histogram (self-zeroing; later passes are fused).
+        out.push({
+            node: voxelResources.radixCount,
+            indirect: voxelResources.sortIndirectArgs,
+            buffers: {
+                sortIndirectArgs: voxelResources.sortIndirectArgs,
+                srcKeys: voxelResources.sortKeys,
+                radixHist: hists[0],
+            },
+        });
+        for (let pass = 0; pass < 4; pass++) {
+            const srcKeys = pass % 2 === 0 ? voxelResources.sortKeys : voxelResources.sortKeysAlt;
+            const srcIdx = pass % 2 === 0 ? voxelResources.sortIdx : voxelResources.sortIdxAlt;
+            const histCur = hists[pass % 2]!;
+            const histNext = hists[(pass + 1) % 2]!;
+            out.push({
+                node: voxelResources.radixScan,
+                dispatch: [1, 1, 1],
+                buffers: {
+                    sortIndirectArgs: voxelResources.sortIndirectArgs,
+                    radixHist: histCur,
+                    radixHistNext: histNext,
+                },
+            });
+            if (pass < 3) {
+                out.push({
+                    node: voxelResources.radixScatter,
+                    indirect: voxelResources.sortIndirectArgs,
+                    buffers: {
+                        sortIndirectArgs: voxelResources.sortIndirectArgs,
+                        srcKeys,
+                        srcIdx,
+                        radixHist: histCur,
+                        radixHistNext: histNext,
+                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
+                        dstKeys: pass % 2 === 0 ? voxelResources.sortKeysAlt : voxelResources.sortKeys,
+                        dstIdx: pass % 2 === 0 ? voxelResources.sortIdxAlt : voxelResources.sortIdx,
+                    },
+                });
+            } else {
+                out.push({
+                    node: voxelResources.radixScatterLast,
+                    indirect: voxelResources.sortIndirectArgs,
+                    buffers: {
+                        sortIndirectArgs: voxelResources.sortIndirectArgs,
+                        srcKeys,
+                        srcIdx,
+                        radixHist: histCur,
+                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
+                        sortPayload: voxelResources.sortPayload,
+                        visibleQuads: translucent.visibleQuadsBuffer,
+                    },
+                });
+            }
+        }
+    }
+    return out;
+}
+
+/** remove a specific chunk from the engine-global arena packer (e.g. when
+ *  the chunk is unloaded from `voxels`). */
+export function removeChunkMesh(voxelResources: VoxelResources, key: string): void {
+    const packer = voxelResources.arenas.packer;
+    if (packerHas(packer, key)) {
+        packerEvictChunk(packer, key);
+    }
 }

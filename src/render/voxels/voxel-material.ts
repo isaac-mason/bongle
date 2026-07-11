@@ -191,16 +191,12 @@ export const decodeOct16 = Fn(
         const ny = Var('octNy', v);
         const nz = Var('octNz', sub(sub(f32(1.0), abs(u)), abs(v)));
         If(nz.lessThan(f32(0.0)), () => {
-            // sign-not-zero, matching the mesher's encodeOct16 (`x >= 0 ? 1 : -1`):
-            // WGSL sign(0) is 0, which collapses fold-boundary normals to garbage.
+            // gotcha 1: sign-not-zero (`x >= 0 ? 1 : -1`), matching encodeOct16 —
+            // WGSL sign(0) is 0, which collapses cardinal-face normals to garbage.
             const snzU = select(f32(-1.0), f32(1.0), u.greaterThanEqual(f32(0.0)));
             const snzV = select(f32(-1.0), f32(1.0), v.greaterThanEqual(f32(0.0)));
-            // BOTH folds must read the PRE-fold values — .toVar() forces tx AND ty
-            // to be evaluated before either assign. Without it, `ty` is an inlined
-            // expression referencing the nx Var, and it reads the already-folded
-            // value: the −Z face normal decoded as (0, .707, −.707), flipping the
-            // translucent sort's facing bit with camera elevation (water drawn
-            // over glass at full-height coincident interfaces).
+            // gotcha 2: both folds read the PRE-fold nx/ny — the .toVar()s force
+            // that; inlined, ty would read the already-folded nx.
             const tx = mul(sub(f32(1.0), abs(ny)), snzU).toVar('octTx');
             const ty = mul(sub(f32(1.0), abs(nx)), snzV).toVar('octTy');
             nx.assign(tx);
@@ -366,13 +362,9 @@ export function decodeQuadCorner(quadBuf: Node<d.array<d.u32>>, realQuadId: Node
     return { u3, chunkLocalByte, uv, modelNormal };
 }
 
-/** average of the quad's 4 corner positions, in chunk-local byte units (0..255).
- *  Reads only the 3 position words. The translucent sort's WITHIN-cell distance
- *  refinement keys off this: exact for a convex cell's own faces (the back
- *  face's centre is always farther than the front's), sane for model quads, and
- *  it never manufactures shared-edge ties between a cell's perpendicular faces
- *  the way a nearest-point-on-AABB basis does. Cross-cell ordering never touches
- *  this — the owner-cell L1 term decides it exactly. */
+/** mean of the quad's 4 corner positions, chunk-local byte units (0..255).
+ *  Reads only the 3 position words. The translucent sort's within-cell distance
+ *  refinement keys off it (cross-cell order is the owner-cell L1 term). */
 export function decodeQuadCentroid(quadBuf: Node<d.array<d.u32>>, realQuadId: Node<d.u32>) {
     const base = mul(realQuadId, u32(QUAD_STRIDE_U32S)).toVar('centroidBase');
     const u0 = index(quadBuf, add(base, u32(0))).toVar('cu0');

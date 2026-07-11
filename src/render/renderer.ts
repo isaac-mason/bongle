@@ -31,8 +31,7 @@ import { getCameraTint } from '../core/voxels/camera-tint';
 import type { Voxels } from '../core/voxels/voxels';
 import * as Environment from './environment';
 import { elapsedTime } from './voxels/voxel-material';
-import type { VoxelResources } from './voxels/voxel-resources';
-import * as VoxelVisuals from './voxels/voxel-visuals';
+import * as VoxelResources from './voxels/voxel-resources';
 
 export type Renderer = {
     renderer: WebGPURenderer;
@@ -336,7 +335,7 @@ export function render(
     state: Renderer,
     room: ClientRoom,
     camera: Camera | null,
-    voxelResources: VoxelResources,
+    voxelResources: VoxelResources.VoxelResources,
     voxelViewChunkRadius: number,
 ): void {
     // canvas target, guard avoids redundant reconfigure on the gpu side.
@@ -355,7 +354,7 @@ export function render(
         // prepare the GPU cull: pre-shift the frustum planes camera-relative
         // and reset the per-frame cull/emit counters. The cull + per-facing
         // emit computes themselves are queued below via `cullDispatches`.
-        VoxelVisuals.updateCull(voxelResources, camera, voxelViewChunkRadius);
+        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius);
     }
 
     // point the engine-global pass at this room's scene before render,
@@ -367,7 +366,7 @@ export function render(
     // voxel GPU cull + per-facing emit: 1 cull dispatch + 3 indirect emit
     // dispatches (opaque/transparent/translucent) that write the per-quad
     // visibleQuads the VS reads. Empty when no chunks are resident.
-    for (const disp of VoxelVisuals.cullDispatches(voxelResources)) dispatches.push(disp);
+    for (const disp of VoxelResources.cullDispatches(voxelResources)) dispatches.push(disp);
 
     // drive the voxel animation clock, gpucat no longer ticks time itself.
     elapsedTime.value = performance.now() / 1000;

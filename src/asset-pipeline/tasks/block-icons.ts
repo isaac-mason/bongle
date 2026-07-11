@@ -21,7 +21,6 @@ import { createVoxels, ensureChunk, setBlock } from '../../core/voxels/voxels';
 import { applyConfig, flushActive } from '../../render/environment';
 import * as Renderer from '../../render/renderer';
 import * as VoxelResources from '../../render/voxels/voxel-resources';
-import * as VoxelVisuals from '../../render/voxels/voxel-visuals';
 import type { State } from '../engine';
 import { createRoom, disposeRoom } from '../rooms';
 import { beginSnapshotSession, captureTile, endSnapshotSession } from '../snapshot';
@@ -163,9 +162,9 @@ export async function runBlockIcons(state: State): Promise<BlockIconAtlasResult>
             // replace any prior icon's alloc under the same key.
             VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], result);
 
-            VoxelVisuals.updateCull(state.voxelResources, camera, Infinity);
+            VoxelResources.updateCull(state.voxelResources, camera, Infinity);
 
-            const dispatches: ComputeDispatch[] = VoxelVisuals.cullDispatches(state.voxelResources);
+            const dispatches: ComputeDispatch[] = VoxelResources.cullDispatches(state.voxelResources);
 
             iconRoom.scene.updateWorldMatrix();
             if (dispatches.length > 0) renderer.compute(dispatches);

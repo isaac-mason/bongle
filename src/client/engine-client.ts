@@ -394,9 +394,6 @@ export async function load(state: EngineClient) {
         state.viewport.domElement = useClient.getState().viewportElement;
         state.viewport.width = w;
         state.viewport.height = h;
-        // pointer-lock the stable viewport container, not a per-room canvas, so the
-        // lock survives room swaps (the canvas is display:none'd, this never is).
-        state.inputManager._lockEl = state.viewport.domElement ?? null;
 
         // resize all room canvas targets so they're ready when switched to.
         // camera aspect/projection is no longer event-driven, the renderer
@@ -999,7 +996,7 @@ function processVoxelChunkDel(state: EngineClient, message: Protocol.VoxelChunkD
     }
     room.voxels.chunks.delete(key);
     if (room === Rooms.getActiveRoom(state.rooms)) {
-        VoxelVisuals.removeChunkMesh(state.voxelResources, key);
+        VoxelResources.removeChunkMesh(state.voxelResources, key);
     }
 }
 

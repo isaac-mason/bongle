@@ -12,20 +12,21 @@
 // activation, the new active room's chunks are re-meshed into the
 // shared arena via the existing prioritised remesh path.
 //
-// frame (active room only):
-//   update(visuals, voxelRes, voxels, registry, cameraPos);    // remesh dirty chunks
-//   updateCull(voxelRes, camera, viewChunkRadius);             // per-frame cull view + sort gate
-//   const dispatches = cullDispatches(voxelRes);               // cull → emit → translucent sort
-//   renderer.compute(dispatches); renderer.render(...);        // 3 drawIndirect calls
+// this file is the per-room half of the frame; the engine-global GPU frame
+// graph — `updateCull` (per-frame cull view + sort gate), `cullDispatches`
+// (the cull → emit → translucent-sort dispatch list), and `removeChunkMesh` —
+// lives in `voxel-resources.ts` next to the kernels + buffers it drives:
+//   update(visuals, voxelRes, voxels, registry, cameraPos);    // remesh dirty chunks (here)
+//   VoxelResources.updateCull / cullDispatches(voxelRes);      // GPU frame graph (there)
 //
 // each frame is exactly 3 drawIndirect calls (one per pass), with
 // vertexCount=6 and instanceCount=visibleQuadCount. instance i pulls
 // `visibleQuads[i] = {slot, localIdx}`, looks up `chunkInfo[slot]` for
 // `{origin, arenaBase}`, and renders 1 quad at `arenaBase + localIdx`.
 
-import type { Camera, ComputeDispatch, Scene } from 'gpucat';
-import { frustum, Mesh } from 'gpucat';
-import { plane3, type Vec3 } from 'mathcat';
+import type { Scene } from 'gpucat';
+import { Mesh } from 'gpucat';
+import type { Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
@@ -33,7 +34,6 @@ import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk, chunkKey, NEIGHBOR_COUNT, type Vo
 import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {
-    CULL_WG_SIZE,
     PASSES,
     packerClearAll,
     packerEvictChunk,
@@ -331,287 +331,6 @@ function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chun
         return;
     }
     packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
-}
-
-// ── render-time CPU work ────────────────────────────────────────────
-
-const _cullFrustum = frustum.create();
-
-/** Write the per-frame camera view (5 pre-shifted, camera-relative frustum
- *  planes + camera chunk/frac) into `cullView`, and reset the GPU cull/emit
- *  counters. The visibility test + slice emission now run on the GPU via
- *  `cullDispatches`; this just prepares their per-frame inputs. Must run before
- *  those dispatches.
- *
- *  Planes are expressed camera-relative and the world coords go in as integer
- *  chunk coords + sub-chunk frac, so the whole cull stays f32-exact at
- *  Minecraft world scale. `viewChunkRadius` is read live from settings, so a
- *  tier flip applies next frame. */
-export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
-    frustum.setFromViewProjectionMatrix(_cullFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
-    const cx = camera.position[0];
-    const cy = camera.position[1];
-    const cz = camera.position[2];
-    const camCx = Math.floor(cx / CHUNK_SIZE);
-    const camCy = Math.floor(cy / CHUNK_SIZE);
-    const camCz = Math.floor(cz / CHUNK_SIZE);
-
-    // 5 planes (drop the far plane, index 5 — the view-radius test bounds it),
-    // camera-relative with the section half-extent folded into `.w`:
-    //   dot(plane.xyz, relCenter) + plane.w >= 0  keeps the section.
-    const data = voxelResources.cullViewData;
-    const half = CHUNK_SIZE * 0.5;
-    for (let i = 0; i < 5; i++) {
-        const p = _cullFrustum[i]!;
-        const nx = p.normal[0];
-        const ny = p.normal[1];
-        const nz = p.normal[2];
-        // (n·cam + constant), folded with the box support along n; all in f64.
-        const w = plane3.distanceToPoint(p, camera.position) + half * (Math.abs(nx) + Math.abs(ny) + Math.abs(nz));
-        const base = i * 4;
-        data[base + 0] = nx;
-        data[base + 1] = ny;
-        data[base + 2] = nz;
-        data[base + 3] = w;
-    }
-    // camMeta = (camChunk.xyz, recordCount); camFrac = (fracXYZ, viewDist²).
-    const viewDist = viewChunkRadius * CHUNK_SIZE;
-    data[20] = camCx;
-    data[21] = camCy;
-    data[22] = camCz;
-    data[23] = voxelResources.arenas.packer.chunks.length;
-    data[24] = cx - camCx * CHUNK_SIZE;
-    data[25] = cy - camCy * CHUNK_SIZE;
-    data[26] = cz - camCz * CHUNK_SIZE;
-    data[27] = viewDist * viewDist;
-    voxelResources.cullView.addUpdateRange(0, data.length);
-    voxelResources.cullView.needsUpdate = true;
-
-    // reset the cull append counter (emitArgs[0]); [1]=7, [2]=1 stay.
-    voxelResources.emitArgsData[0] = 0;
-    voxelResources.emitArgs.addUpdateRange(0, voxelResources.emitArgsData.length);
-    voxelResources.emitArgs.needsUpdate = true;
-
-    // zero the per-bucket quad tallies for this frame's count pass (the CPU
-    // mirror stays all-zero; re-uploading it clears the GPU buffer). The draw
-    // instanceCounts are written by the finalize pass, not reset here.
-    voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
-    voxelResources.bucketQuads.needsUpdate = true;
-
-    // translucent sort gate: the counting-sort output persists across frames and
-    // only re-runs when the back-to-front order can change. The key is rotation-
-    // invariant (radial distance), so orbiting in place needs no re-sort — but the
-    // visible SET changes on rotation, and a translucent arena mutation would leave
-    // the persisted `{slot, localIdx}` dangling. Gate = translation ∨ rotation ∨
-    // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
-    // count stand. Cheap enough (one flat O(N) sort) that any camera motion re-runs.
-    updateTranslucentSortGate(voxelResources, cx, cy, cz, _cullFrustum[4]!.normal);
-}
-
-// distance the camera must move before the translucent sort re-runs. Tight: a
-// small translation reorders near geometry (e.g. diving through a water surface),
-// and the whole sort is one cheap flat pass, so we only truly skip when static.
-const TSORT_MOVE_TRIGGER_SQ = 0.1 * 0.1; // 0.1 block
-// re-run once the camera forward turns past this (cos of the angle). The visible
-// set shifts on rotation, so newly-entered translucent sections must be sorted in.
-const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
-
-/** Decide whether the translucent counting sort re-runs this frame, and refresh
- *  the gate baseline when it does. `fwd` is the camera-forward (near-plane inward
- *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
-function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
-    const gate = voxelResources.tsortGate;
-    const packer = voxelResources.arenas.packer;
-    let run = !gate.valid || packer.translucentDirty;
-    if (!run) {
-        const mx = camX - gate.camX;
-        const my = camY - gate.camY;
-        const mz = camZ - gate.camZ;
-        run = mx * mx + my * my + mz * mz > TSORT_MOVE_TRIGGER_SQ;
-    }
-    if (!run) {
-        const dotFwd = fwd[0] * gate.fwdX + fwd[1] * gate.fwdY + fwd[2] * gate.fwdZ;
-        run = dotFwd < TSORT_ROTATE_TRIGGER_COS;
-    }
-    if (run) {
-        gate.camX = camX;
-        gate.camY = camY;
-        gate.camZ = camZ;
-        gate.fwdX = fwd[0];
-        gate.fwdY = fwd[1];
-        gate.fwdZ = fwd[2];
-        gate.valid = true;
-        packer.translucentDirty = false;
-    }
-    voxelResources.runTranslucentSort = run;
-}
-
-/** GPU cull + Level-A ordered emit dispatch chain. gpucat runs each dispatch in
- *  its own compute pass, so the `cull → finalize → emit` data dependencies hold.
- *  Push into the renderer's dispatch list before `renderer.compute(...)`. Empty
- *  when no chunks are resident.
- *
- *  1. cull: one thread per resident chunk; frustum-test, compact survivors into
- *     `visibleChunks` (+ distance bucket), write the emit dispatch args, AND tally
- *     each survivor's visible opaque/transparent facings into `bucketQuads`.
- *  2. finalize: prefix-sum opaque/transparent buckets → instance bases + draw counts.
- *  3. emit (opaque/transparent): back-face-cull facings, write `visibleQuads`
- *     front-to-back at the bucket base.
- *  4. translucent global counting sort (gated — see `runTranslucentSort`):
- *     expand → prep → hist → scan → scatter, producing the back-to-front
- *     translucent `visibleQuads` permutation + its draw count. Skipped when the
- *     camera is static and the arena unchanged; last frame's result persists. */
-export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
-    const packer = voxelResources.arenas.packer;
-    const recordCount = packer.chunks.length;
-    const out: ComputeDispatch[] = [];
-    if (recordCount === 0) return out;
-    const tables = voxelResources.arenas.tables;
-    const passRender = voxelResources.passRender;
-
-    out.push({
-        node: voxelResources.cull,
-        dispatch: [Math.ceil(recordCount / CULL_WG_SIZE), 1, 1],
-        buffers: {
-            cullRecords: packer.cullRecordsBuffer,
-            cullView: voxelResources.cullView,
-            visibleChunks: voxelResources.visibleChunks,
-            emitArgs: voxelResources.emitArgs,
-            // fused count (opaque/transparent only): per-pass meta + bucket tally.
-            opaqueMeta: tables.opaque.metaBuffer,
-            transparentMeta: tables.transparent.metaBuffer,
-            bucketQuads: voxelResources.bucketQuads,
-        },
-    });
-    out.push({
-        node: voxelResources.finalize,
-        dispatch: [1, 1, 1],
-        buffers: {
-            bucketQuads: voxelResources.bucketQuads,
-            bucketBase: voxelResources.bucketBase,
-            bucketCursor: voxelResources.bucketCursor,
-            drawOpaque: passRender.opaque.indirectBuffer,
-            drawTransparent: passRender.transparent.indirectBuffer,
-        },
-    });
-    // opaque/transparent per-facing emit (the translucent pass is sorted below).
-    for (const pass of PASSES) {
-        if (pass === 'translucent') continue;
-        out.push({
-            node: voxelResources.emit,
-            indirect: voxelResources.emitArgs,
-            buffers: {
-                visibleChunks: voxelResources.visibleChunks,
-                sectionMeta: tables[pass].metaBuffer,
-                visibleQuads: passRender[pass].visibleQuadsBuffer,
-                bucketBase: voxelResources.bucketBase,
-                bucketCursor: voxelResources.bucketCursor,
-                emitConfig: voxelResources.emitConfig[pass],
-            },
-        });
-    }
-
-    // translucent global stable radix sort (gated). Reads this frame's
-    // `visibleChunks` (cull, above); output persists when skipped.
-    // Chain: expand → prep → count₀ → 4 × (scan → scatter). The passes shuffle
-    // (key, index) pairs A→B→A→B; each non-last scatter also fused-counts the
-    // NEXT pass's digit into the other histogram (which the scan just zeroed),
-    // so only pass 0 needs the standalone count. The last scatter gathers
-    // `sortPayload[idx]` straight into the translucent `visibleQuads`.
-    // Histograms ping-pong hist[pass % 2] (counts) ↔ hist[(pass+1) % 2] (next).
-    if (voxelResources.runTranslucentSort) {
-        const quads = voxelResources.arenas.quadArena.buffers.quads;
-        const translucent = passRender.translucent;
-        const hists = [voxelResources.radixHist, voxelResources.radixHistAlt] as const;
-        out.push({
-            node: voxelResources.tsortExpand,
-            indirect: voxelResources.emitArgs,
-            buffers: {
-                visibleChunks: voxelResources.visibleChunks,
-                sectionMeta: tables.translucent.metaBuffer,
-                chunkInfo: tables.translucent.buffer,
-                quads,
-                sortKeys: voxelResources.sortKeys,
-                sortIdx: voxelResources.sortIdx,
-                sortPayload: voxelResources.sortPayload,
-                sortCount: voxelResources.sortCount,
-            },
-        });
-        out.push({
-            node: voxelResources.tsortPrep,
-            dispatch: [1, 1, 1],
-            buffers: {
-                sortCount: voxelResources.sortCount,
-                sortIndirectArgs: voxelResources.sortIndirectArgs,
-                drawTranslucent: translucent.indirectBuffer,
-            },
-        });
-        // pass-0 digit histogram (self-zeroing; later passes are fused).
-        out.push({
-            node: voxelResources.radixCount,
-            indirect: voxelResources.sortIndirectArgs,
-            buffers: {
-                sortIndirectArgs: voxelResources.sortIndirectArgs,
-                srcKeys: voxelResources.sortKeys,
-                radixHist: hists[0],
-            },
-        });
-        for (let pass = 0; pass < 4; pass++) {
-            const srcKeys = pass % 2 === 0 ? voxelResources.sortKeys : voxelResources.sortKeysAlt;
-            const srcIdx = pass % 2 === 0 ? voxelResources.sortIdx : voxelResources.sortIdxAlt;
-            const histCur = hists[pass % 2]!;
-            const histNext = hists[(pass + 1) % 2]!;
-            out.push({
-                node: voxelResources.radixScan,
-                dispatch: [1, 1, 1],
-                buffers: {
-                    sortIndirectArgs: voxelResources.sortIndirectArgs,
-                    radixHist: histCur,
-                    radixHistNext: histNext,
-                },
-            });
-            if (pass < 3) {
-                out.push({
-                    node: voxelResources.radixScatter,
-                    indirect: voxelResources.sortIndirectArgs,
-                    buffers: {
-                        sortIndirectArgs: voxelResources.sortIndirectArgs,
-                        srcKeys,
-                        srcIdx,
-                        radixHist: histCur,
-                        radixHistNext: histNext,
-                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
-                        dstKeys: pass % 2 === 0 ? voxelResources.sortKeysAlt : voxelResources.sortKeys,
-                        dstIdx: pass % 2 === 0 ? voxelResources.sortIdxAlt : voxelResources.sortIdx,
-                    },
-                });
-            } else {
-                out.push({
-                    node: voxelResources.radixScatterLast,
-                    indirect: voxelResources.sortIndirectArgs,
-                    buffers: {
-                        sortIndirectArgs: voxelResources.sortIndirectArgs,
-                        srcKeys,
-                        srcIdx,
-                        radixHist: histCur,
-                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
-                        sortPayload: voxelResources.sortPayload,
-                        visibleQuads: translucent.visibleQuadsBuffer,
-                    },
-                });
-            }
-        }
-    }
-    return out;
-}
-
-/** remove a specific chunk from the engine-global arena packer (e.g. when
- *  the chunk is unloaded from `voxels`). */
-export function removeChunkMesh(voxelResources: VoxelResources, key: string): void {
-    const packer = voxelResources.arenas.packer;
-    if (packerHas(packer, key)) {
-        packerEvictChunk(packer, key);
-    }
 }
 
 /** swap arena residency to a new active room. clears every chunk from

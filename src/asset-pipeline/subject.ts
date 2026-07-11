@@ -22,6 +22,7 @@ import { meshInfoIndexOf } from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
 import * as Renderer from '../render/renderer';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import * as VoxelResources from '../render/voxels/voxel-resources';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import { fitOrthoIsometric } from './camera-fit';
 import type { State } from './engine';
@@ -200,7 +201,7 @@ export async function renderPopulatedRoom(
     ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
 
     room.scene.updateWorldMatrix();
-    VoxelVisuals.updateCull(state.voxelResources, camera, Infinity);
+    VoxelResources.updateCull(state.voxelResources, camera, Infinity);
 
     // build a per-pass pipeline tied to the framing camera. offline icons
     // don't go through the engine-global pipeline (custom camera/framing +
@@ -209,7 +210,7 @@ export async function renderPopulatedRoom(
     try {
         const gpuRenderer = state.renderer.renderer;
         const dispatches: ComputeDispatch[] = [];
-        for (const d of VoxelVisuals.cullDispatches(state.voxelResources)) dispatches.push(d);
+        for (const d of VoxelResources.cullDispatches(state.voxelResources)) dispatches.push(d);
         gpuRenderer.compute(dispatches);
         pipeline.render();
         return await captureTile(session);
