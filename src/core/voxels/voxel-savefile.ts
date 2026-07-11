@@ -33,6 +33,7 @@ import {
     chunkKey,
     EMPTY_LIGHT_MASK,
     linkChunkNeighbors,
+    newNeighbors,
     rebuildColumns,
     repackChunkSnapshot,
     type Voxels,
@@ -263,7 +264,8 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRe
             compressedSnapshot: null,
             snapshotPalette: null,
             compressedLight: null,
-            neighbors: [null, null, null, null, null, null],
+            neighbors: newNeighbors(),
+            knownNeighbourCount: 0,
         };
 
         voxels.chunks.set(chunkKey(cx, cy, cz), chunk);

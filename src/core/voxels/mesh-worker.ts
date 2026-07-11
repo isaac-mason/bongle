@@ -37,8 +37,8 @@
 import type { BlockRegistry } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
 import { buildMeshInput, type ChunkMeshResult, type MeshOutput, meshChunk } from './chunk-mesher';
-import { type CachedChunk, unpackMeshTasks } from './mesh-tasks';
-import { chunkKey, type Voxels } from './voxels';
+import { unpackMeshTasks } from './mesh-tasks';
+import { chunkKey, createVoxels, loadChunk, removeChunk, type Voxels } from './voxels';
 
 export type MeshWorkerInMsg =
     | { cmd: 'initRegistry'; version: number; buf: ArrayBuffer }
@@ -71,18 +71,15 @@ export type MeshWorkerOutMsg =
 export type WorkerState = {
     registry: BlockRegistry | null;
     registryVersion: number;
-    /** persistent versioned chunk mirror, kept current by packet set/delete.
-     *  keyed by chunkKey; values stand in for `Chunk` (buildSlabs reads only
-     *  data/light/palette). main tracks a matching per-worker mirror. */
-    cache: Map<string, CachedChunk>;
-    /** `{ chunks: cache }` reused across tasks — the `Voxels`-shaped store the
-     *  mesher reads. cast because cache values are the mesh-relevant slice. */
-    store: Voxels;
+    /** persistent chunk mirror the mesher reads — a real `Voxels`, kept current by
+     *  packet set/delete (`loadChunk`/`removeChunk`). null until the first
+     *  `initRegistry` (createVoxels needs the registry). main tracks a matching
+     *  per-worker mirror. */
+    voxels: Voxels | null;
 };
 
 export function createWorkerState(): WorkerState {
-    const cache = new Map<string, CachedChunk>();
-    return { registry: null, registryVersion: -1, cache, store: { chunks: cache } as unknown as Voxels };
+    return { registry: null, registryVersion: -1, voxels: null };
 }
 
 /** main worker message handler. Returns the outbound message (or null
@@ -98,18 +95,21 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         // (physics, handles) are never accessed.
         state.registry = decoded as unknown as BlockRegistry;
         state.registryVersion = msg.version;
+        // the mirror is a real Voxels; createVoxels needs the registry, so it's
+        // built here on first init (kept across rebuilds so the cache survives).
+        if (state.voxels === null) state.voxels = createVoxels(state.registry);
         return { cmd: 'initRegistryAck', version: msg.version };
     }
     if (msg.cmd === 'meshTasks') {
         const recycle = { packetBuf: msg.packetBuf, outBufs: msg.outBufs };
         const mt = unpackMeshTasks(new Uint8Array(msg.packetBuf));
-        // apply the mirror deltas FIRST — always, even on the drop path below —
-        // so the worker cache never diverges from main's per-worker mirror.
-        for (const s of mt.set) {
-            state.cache.set(chunkKey(s.cx, s.cy, s.cz), { version: s.version, data: s.data, light: s.light, palette: s.palette });
-        }
-        for (const d of mt.delete) {
-            state.cache.delete(chunkKey(d.cx, d.cy, d.cz));
+        const voxels = state.voxels;
+        // apply the mirror deltas FIRST — always, even on the drop path below — so
+        // the worker mirror never diverges from main's per-worker mirror. loadChunk
+        // links new chunks / updates existing in place; removeChunk unlinks.
+        if (voxels !== null) {
+            for (const s of mt.set) loadChunk(voxels, s.cx, s.cy, s.cz, s.version, s.data, s.light, s.palette);
+            for (const d of mt.delete) removeChunk(voxels, d.cx, d.cy, d.cz);
         }
         const t0 = performance.now();
         const results: MeshWorkerResult[] = [];
@@ -119,15 +119,15 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
             // dispatcher should never send before ack, but if it does, drop
             // (null result) so the buffers still round-trip and the pool holds.
             let result: ChunkMeshResult | null = null;
-            if (state.registry !== null) {
+            if (state.registry !== null && voxels !== null) {
                 const out: MeshOutput = {
                     opaque: new Uint32Array(msg.outBufs[i * 3]!),
                     transparent: new Uint32Array(msg.outBufs[i * 3 + 1]!),
                     translucent: new Uint32Array(msg.outBufs[i * 3 + 2]!),
                 };
-                // build the 18³ slab from the worker's chunk cache (off the main
-                // thread) — the neighbourhood is already mirrored.
-                const input = buildMeshInput(state.store, task.cx, task.cy, task.cz);
+                // build the 18³ slab from the worker's mirror (off the main
+                // thread) — the neighbourhood is already loaded.
+                const input = buildMeshInput(voxels, task.cx, task.cy, task.cz);
                 result = meshChunk(out, input, state.registry);
             }
             results.push({

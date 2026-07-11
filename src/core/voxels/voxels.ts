@@ -188,13 +188,22 @@ export type Chunk = {
     compressedLight: { sky: Uint8Array; rgb: Uint8Array } | null;
 
     /**
-     * neighbor chunk refs for fast cross-chunk traversal.
-     * indexed by light.ts direction convention:
-     *   0=+X, 1=+Y, 2=+Z, 3=-Z, 4=-Y, 5=-X
-     * (opposites sum to 5)
-     * null if neighbor chunk is not loaded.
+     * neighbor chunk refs for fast cross-chunk traversal, 26 slots (the full
+     * 3×3×3 apron the mesher reads for AO + smooth light).
+     *   slots 0-5  = the 6 faces, in light.ts's direction convention
+     *                (0=+X, 1=+Y, 2=+Z, 3=-Z, 4=-Y, 5=-X; opposites sum to 5).
+     *                light propagation touches only these.
+     *   slots 6-25 = the 12 edges + 8 corners (see NEIGHBOR_D{X,Y,Z}).
+     * null if that neighbor chunk is not loaded.
      */
     neighbors: (Chunk | null)[];
+    /**
+     * count of non-null entries in `neighbors` (0-26). Maintained by
+     * link/unlinkChunkNeighbors. The streaming client defers meshing a chunk
+     * until this hits 26 (full apron present) so it meshes once with correct
+     * boundary AO/light instead of re-meshing as each neighbor arrives.
+     */
+    knownNeighbourCount: number;
 };
 
 /** create a new empty chunk (all air). */
@@ -222,8 +231,14 @@ export function createChunk(cx: number, cy: number, cz: number): Chunk {
         compressedSnapshot: null,
         snapshotPalette: null,
         compressedLight: null,
-        neighbors: [null, null, null, null, null, null],
+        neighbors: newNeighbors(),
+        knownNeighbourCount: 0,
     };
+}
+
+/** fresh 26-slot neighbor array, all null. */
+export function newNeighbors(): (Chunk | null)[] {
+    return new Array<Chunk | null>(NEIGHBOR_COUNT).fill(null);
 }
 
 /**
@@ -281,42 +296,130 @@ export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk {
         compressedSnapshot: null,
         snapshotPalette: null,
         compressedLight: null,
-        neighbors: [null, null, null, null, null, null],
+        neighbors: newNeighbors(),
+        knownNeighbourCount: 0,
     };
 }
 
 // ── neighbor chunk linkage ──────────────────────────────────────────
 //
-// direction convention (matches light.ts):
-//   0=+X, 1=+Y, 2=+Z, 3=-Z, 4=-Y, 5=-X
-// opposites sum to 5.
+// 26-slot neighbourhood (the mesher's 3×3×3 apron). slots 0-5 are the 6 faces
+// in light.ts's direction convention (0=+X, 1=+Y, 2=+Z, 3=-Z, 4=-Y, 5=-X;
+// opposites sum to 5) so light propagation keeps indexing them directly; slots
+// 6-25 are the 12 edges + 8 corners. NEIGHBOR_OPPOSITE[i] is the slot in the
+// neighbour that points back (its negated offset), for the bidirectional link.
 
-const NEIGHBOR_CX: readonly number[] = [1, 0, 0, 0, 0, -1];
-const NEIGHBOR_CY: readonly number[] = [0, 1, 0, 0, -1, 0];
-const NEIGHBOR_CZ: readonly number[] = [0, 0, 1, -1, 0, 0];
+const { NEIGHBOR_DX, NEIGHBOR_DY, NEIGHBOR_DZ, NEIGHBOR_OPPOSITE, NEIGHBOR_SLOT_OF } = /* @__PURE__ */ (() => {
+    // faces first, in the light.ts order, then every edge/corner (manhattan ≥ 2).
+    const off: [number, number, number][] = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+        [0, -1, 0],
+        [-1, 0, 0],
+    ];
+    for (let dz = -1; dz <= 1; dz++)
+        for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+                if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 2) continue; // skip center + the 6 faces
+                off.push([dx, dy, dz]);
+            }
+    // inverse: 3×3×3 offset (packed (dz+1)*9+(dy+1)*3+(dx+1)) → slot, -1 for the centre.
+    const slotOf = new Int8Array(27).fill(-1);
+    off.forEach(([x, y, z], i) => {
+        slotOf[(z + 1) * 9 + (y + 1) * 3 + (x + 1)] = i;
+    });
+    return {
+        NEIGHBOR_DX: off.map((o) => o[0]),
+        NEIGHBOR_DY: off.map((o) => o[1]),
+        NEIGHBOR_DZ: off.map((o) => o[2]),
+        NEIGHBOR_OPPOSITE: off.map(([x, y, z]) => off.findIndex(([a, b, c]) => a === -x && b === -y && c === -z)),
+        NEIGHBOR_SLOT_OF: slotOf,
+    };
+})();
 
-/** wire up bidirectional neighbor refs for a chunk that was just added to voxels.chunks. */
+/** number of neighbour slots on `Chunk.neighbors` (full 3×3×3 minus self). */
+export const NEIGHBOR_COUNT = NEIGHBOR_DX.length;
+
+/** slot index in `neighbors[]` for the neighbour at chunk-offset (dx,dy,dz),
+ *  each in [-1,1]. -1 for (0,0,0) / out of range. lets the mesher follow
+ *  neighbour pointers instead of rebuilding chunk keys. */
+export function neighbourSlot(dx: number, dy: number, dz: number): number {
+    return NEIGHBOR_SLOT_OF[(dz + 1) * 9 + (dy + 1) * 3 + (dx + 1)]!;
+}
+
+/** wire up bidirectional neighbor refs for a chunk that was just added to
+ *  voxels.chunks, and bump the `knownNeighbourCount` on both sides. */
 export function linkChunkNeighbors(voxels: Voxels, chunk: Chunk): void {
-    for (let dir = 0; dir < 6; dir++) {
-        const ncx = chunk.cx + NEIGHBOR_CX[dir]!;
-        const ncy = chunk.cy + NEIGHBOR_CY[dir]!;
-        const ncz = chunk.cz + NEIGHBOR_CZ[dir]!;
-        const neighbor = voxels.chunks.get(chunkKey(ncx, ncy, ncz));
+    for (let i = 0; i < NEIGHBOR_COUNT; i++) {
+        const neighbor = voxels.chunks.get(
+            chunkKey(chunk.cx + NEIGHBOR_DX[i]!, chunk.cy + NEIGHBOR_DY[i]!, chunk.cz + NEIGHBOR_DZ[i]!),
+        );
         if (neighbor) {
-            chunk.neighbors[dir] = neighbor;
-            neighbor.neighbors[5 - dir] = chunk;
+            chunk.neighbors[i] = neighbor;
+            neighbor.neighbors[NEIGHBOR_OPPOSITE[i]!] = chunk;
+            chunk.knownNeighbourCount++;
+            neighbor.knownNeighbourCount++;
         }
     }
 }
 
-/** null out neighbor refs when a chunk is about to be removed from voxels.chunks. */
+/** null out neighbor refs when a chunk is about to be removed from
+ *  voxels.chunks, decrementing each surviving neighbour's count. */
 export function unlinkChunkNeighbors(chunk: Chunk): void {
-    for (let dir = 0; dir < 6; dir++) {
-        const neighbor = chunk.neighbors[dir];
+    for (let i = 0; i < NEIGHBOR_COUNT; i++) {
+        const neighbor = chunk.neighbors[i];
         if (neighbor) {
-            neighbor.neighbors[5 - dir] = null;
-            chunk.neighbors[dir] = null;
+            neighbor.neighbors[NEIGHBOR_OPPOSITE[i]!] = null;
+            neighbor.knownNeighbourCount--;
+            chunk.neighbors[i] = null;
         }
+    }
+}
+
+/** insert (or update in place) a chunk from already-decoded parts — the mesh
+ *  worker's mirror uses this to load chunks from a packet. a new chunk aliases
+ *  the shared empty arrays then takes the given data/light/palette and links
+ *  into the neighbour graph; an existing chunk is updated in place so its links
+ *  survive. does NOT touch columns/dirty/light-seeding (this is a raw mirror
+ *  load, not an authored/streamed edit). */
+export function loadChunk(
+    voxels: Voxels,
+    cx: number,
+    cy: number,
+    cz: number,
+    version: number,
+    data: Uint16Array,
+    light: Uint16Array,
+    palette: number[],
+): Chunk {
+    const key = chunkKey(cx, cy, cz);
+    const existing = voxels.chunks.get(key);
+    if (existing) {
+        existing.version = version;
+        existing.data = data;
+        existing.light = light;
+        existing.palette = palette;
+        return existing;
+    }
+    const chunk = createEmptyChunk(cx, cy, cz);
+    chunk.version = version;
+    chunk.data = data;
+    chunk.light = light;
+    chunk.palette = palette;
+    voxels.chunks.set(key, chunk);
+    linkChunkNeighbors(voxels, chunk);
+    return chunk;
+}
+
+/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph. */
+export function removeChunk(voxels: Voxels, cx: number, cy: number, cz: number): void {
+    const key = chunkKey(cx, cy, cz);
+    const chunk = voxels.chunks.get(key);
+    if (chunk) {
+        unlinkChunkNeighbors(chunk);
+        voxels.chunks.delete(key);
     }
 }
 
@@ -931,7 +1034,8 @@ function cloneChunk(src: Chunk): Chunk {
         compressedSnapshot: null,
         snapshotPalette: null,
         compressedLight: null,
-        neighbors: [null, null, null, null, null, null],
+        neighbors: newNeighbors(),
+        knownNeighbourCount: 0,
     };
 }
 

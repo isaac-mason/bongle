@@ -170,7 +170,7 @@ export async function renderPopulatedRoom(
     }
 
     // refresh voxel chunk meshes for any stamped chunks.
-    VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, undefined);
+    VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, undefined, false);
 
     // compute scene AABB. needs to happen BEFORE the visuals updates so the
     // camera matches the camera those updates use for frustum culling.

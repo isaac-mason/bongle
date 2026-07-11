@@ -43,10 +43,6 @@ export type MeshTasks = ReturnType<typeof unpack>;
 /** one `set` entry (a full chunk snapshot). */
 export type MeshTaskSet = MeshTasks['set'][number];
 
-/** a worker cache entry — the mesh-relevant slice of a chunk. `buildSlabs`
- *  reads exactly `data`/`light`/`palette`, so cache values stand in for `Chunk`. */
-export type CachedChunk = { version: number; data: Uint16Array; light: Uint16Array; palette: number[] };
-
 /** scratch size for one packet. worst case is a cold neighbourhood (27 full
  *  chunks × ~16 KB); warm deltas are tiny. packInto returns ok:false on
  *  overflow and the caller leaves the chunk dirty to retry. */
