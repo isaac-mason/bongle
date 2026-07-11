@@ -30,6 +30,14 @@ import {
 } from 'gpucat';
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
+import {
+    type Crosshair,
+    type CrosshairConfig,
+    createCrosshair,
+    defaultCrosshairConfig,
+    disposeCrosshair,
+    updateCrosshair,
+} from '../api/crosshair';
 import { warn } from '../api/debug';
 import { env } from '../api/env';
 import {
@@ -117,39 +125,6 @@ export const PlayerControllerTouchIds = {
     crouchButton: 'crouch',
 } as const;
 
-export type CrosshairConfig = {
-    /** show the four-tick crosshair HUD. */
-    enabled: boolean;
-    /** distance from screen center to inner edge of each tick (CSS px). */
-    spread: number;
-    /** length of each tick (CSS px). */
-    length: number;
-    /** width of each tick (CSS px). */
-    thickness: number;
-    /** tick fill, straight rgba each in 0..1. */
-    color: [number, number, number, number];
-    /** how quickly the boxes lerp toward target geometry; higher = snappier. */
-    lerpSpeed: number;
-};
-
-/** rewrite the crosshair styles only when a lerped scalar drifts past this many
- *  CSS px, so a stable crosshair costs nothing per frame. */
-const CROSSHAIR_REWRITE_EPS = 0.25;
-
-/** rgba tuple (0..1) → CSS color string for a crosshair tick's background. */
-function cssRgba(c: [number, number, number, number]): string {
-    return `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
-}
-
-/** position + size one crosshair tick via transform (compositor) + width/height
- *  (crisp), relative to the 0×0 root anchored at screen center. */
-function applyCrosshairTick(el: HTMLDivElement, w: number, h: number, x: number, y: number, color: string): void {
-    el.style.width = `${w}px`;
-    el.style.height = `${h}px`;
-    el.style.transform = `translate(${x}px, ${y}px)`;
-    el.style.background = color;
-}
-
 // ── trait ─────────────────────────────────────────────────────────────
 
 // look direction lives on CharacterControllerTrait (`cc.input.look`) so it
@@ -217,19 +192,10 @@ export const PlayerControllerTrait = trait(
             lastTeleportId: 0,
         }),
 
-        // four ticks (top/bottom/left/right). `spread` = gap from center to
-        // inner edge of each tick; `length` = tick length; `thickness` =
-        // tick width. game code can mutate these at runtime (recoil-bloom,
-        // hit-marker pulses, focus tightening) and the boxes will smoothly
-        // animate to the new geometry via `lerpSpeed`.
-        crosshair: (): CrosshairConfig => ({
-            enabled: true,
-            spread: 0,
-            length: 6,
-            thickness: 2,
-            color: [1, 1, 1, 0.95],
-            lerpSpeed: 18,
-        }),
+        // four ticks (top/bottom/left/right). game code can mutate these at
+        // runtime (recoil-bloom, hit-marker pulses, focus tightening) and the
+        // boxes will smoothly animate to the new geometry via `lerpSpeed`.
+        crosshair: (): CrosshairConfig => defaultCrosshairConfig(),
 
         // controls (live; flip for pause menus / settings)
         controls: (): ControlsConfig => ({
@@ -795,65 +761,11 @@ script(
         };
 
         // ── crosshair (DOM overlay) ──
-        // four thin divs at screen center. it stays DOM (not the gpucat overlay
-        // pass) because it must paint above HtmlTrait world overlays, which are
-        // DOM, and a canvas-rendered layer can never sit above DOM. we lerp three
-        // source scalars (spread/length/thickness, CSS px) and only rewrite the
-        // tick styles when they drift past an epsilon, so a stable crosshair is
-        // free. animating transform/size on four tiny elements is far cheaper
-        // than the old full-viewport canvas clear+repaint.
-        let crosshairRoot: HTMLDivElement | null = null;
-        let crosshairTicks: HTMLDivElement[] = [];
-        let crosshairSpread = 0;
-        let crosshairLength = 0;
-        let crosshairThickness = 0;
-        let crosshairInit = false;
-        let crosshairLastSpread = -1;
-        let crosshairLastLength = -1;
-        let crosshairLastThickness = -1;
-        let crosshairLastColor = '';
-
-        const ensureCrosshair = (): boolean => {
-            const viewport = ctx.client?.viewport;
-            if (!viewport) return false;
-            if (crosshairRoot) return true;
-            // a 0×0 anchor at screen center; ticks position relative to its origin.
-            const root = document.createElement('div');
-            root.style.cssText = [
-                'position: absolute',
-                'left: 50%',
-                'top: 50%',
-                'width: 0',
-                'height: 0',
-                'pointer-events: none',
-                `z-index: ${UILayer.crosshair}`,
-            ].join('; ');
-            const ticks: HTMLDivElement[] = [];
-            for (let i = 0; i < 4; i++) {
-                const tick = document.createElement('div');
-                tick.style.cssText = 'position: absolute; left: 0; top: 0; will-change: transform';
-                root.appendChild(tick);
-                ticks.push(tick);
-            }
-            viewport.appendChild(root);
-            crosshairRoot = root;
-            crosshairTicks = ticks;
-            // force a rewrite on the first frame after (re)creation.
-            crosshairLastSpread = -1;
-            crosshairLastColor = '';
-            return true;
-        };
-
-        // remove the crosshair and reset the lerp so it snaps (rather than
-        // crawls) from config when it next becomes visible.
-        const hideCrosshair = (): void => {
-            if (crosshairRoot) {
-                crosshairRoot.remove();
-                crosshairRoot = null;
-                crosshairTicks = [];
-            }
-            crosshairInit = false;
-        };
+        // config lives on the trait (`pc.crosshair`); the DOM + lerp mechanism
+        // is the engine crosshair widget, created lazily on the first
+        // subject-held frame (onFrame is client-only, so the server-null
+        // factory never actually fires here).
+        let crosshair: Crosshair | null = null;
 
         /* ── mobile HUD (reactive) ── */
         // Each piece reconciles per-tick against (controls.enabled && isTouchPrimary(ctx)
@@ -964,56 +876,9 @@ script(
             setPointerLock(ctx, false);
             clearDebugHelpers(ctx.client?.scene, debugHelpers);
             removeDebugPanel();
-            hideCrosshair();
+            if (crosshair) disposeCrosshair(crosshair);
             disposeAllHud();
         });
-
-        // crosshair: lerp the three source scalars toward config, then rewrite
-        // the four tick divs only when they moved past the epsilon or the color
-        // changed (idle is free; animation stays smooth).
-        const updateCrosshair = (pc: PlayerControllerTrait, dt: number): void => {
-            const cfg = pc.crosshair;
-            if (!cfg.enabled) {
-                hideCrosshair();
-                return;
-            }
-            if (!ensureCrosshair()) return;
-
-            if (!crosshairInit) {
-                crosshairSpread = cfg.spread;
-                crosshairLength = cfg.length;
-                crosshairThickness = cfg.thickness;
-                crosshairInit = true;
-            } else {
-                const alpha = 1 - Math.exp(-cfg.lerpSpeed * dt);
-                crosshairSpread += (cfg.spread - crosshairSpread) * alpha;
-                crosshairLength += (cfg.length - crosshairLength) * alpha;
-                crosshairThickness += (cfg.thickness - crosshairThickness) * alpha;
-            }
-
-            const color = cssRgba(cfg.color);
-            const moved =
-                Math.abs(crosshairSpread - crosshairLastSpread) > CROSSHAIR_REWRITE_EPS ||
-                Math.abs(crosshairLength - crosshairLastLength) > CROSSHAIR_REWRITE_EPS ||
-                Math.abs(crosshairThickness - crosshairLastThickness) > CROSSHAIR_REWRITE_EPS;
-            if (!moved && color === crosshairLastColor) return;
-
-            // ticks in CSS px, positioned from the centered root: top, bottom,
-            // left, right. `spread` = gap from center to each tick's inner edge.
-            const s = crosshairSpread;
-            const len = crosshairLength;
-            const th = crosshairThickness;
-            const half = th / 2;
-            applyCrosshairTick(crosshairTicks[0]!, th, len, -half, -(s + len), color); // top
-            applyCrosshairTick(crosshairTicks[1]!, th, len, -half, s, color); // bottom
-            applyCrosshairTick(crosshairTicks[2]!, len, th, -(s + len), -half, color); // left
-            applyCrosshairTick(crosshairTicks[3]!, len, th, s, -half, color); // right
-
-            crosshairLastSpread = s;
-            crosshairLastLength = len;
-            crosshairLastThickness = th;
-            crosshairLastColor = color;
-        };
 
         onUpdate(ctx, ({ delta }) => {
             // input + camera writes gate on control: when the POV has been
@@ -1093,9 +958,10 @@ script(
                 const cameraTransform = getTrait(cameraNode, TransformTrait)!;
                 const cameraTrait = getTrait(cameraNode, CameraTrait)!;
                 updateCamera(pc, cc, transform, ctx.physics, cameraTransform, cameraTrait, delta);
-                updateCrosshair(pc, delta);
-            } else {
-                hideCrosshair();
+                crosshair ??= createCrosshair(ctx);
+                if (crosshair) updateCrosshair(crosshair, pc.crosshair, delta);
+            } else if (crosshair) {
+                disposeCrosshair(crosshair);
             }
 
             if (env.editor && ctx.mode === 'edit' && isOwner(ctx, ctx.node)) {

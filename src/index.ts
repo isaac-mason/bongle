@@ -16,6 +16,7 @@ export * from './api/blocks';
 export * as chat from './api/chat';
 export { client } from './api/client';
 export { clientToUser } from './api/clients';
+export * from './api/crosshair';
 export * from './api/debug';
 export { env } from './api/env';
 export * from './api/environment';
