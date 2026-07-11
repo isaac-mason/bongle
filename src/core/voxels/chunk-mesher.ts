@@ -58,7 +58,7 @@ import {
     SHAPE_IRREGULAR,
     SHAPE_NON_PARALLEL,
 } from './block-registry';
-import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
+import { CHUNK_BITS, CHUNK_SIZE, chunkKey, neighbourSlot, type Voxels, voxelIndex } from './voxels';
 
 const SLAB_SIZE = CHUNK_SIZE + 2; // 18
 const SLAB_SIZE_SQ = SLAB_SIZE * SLAB_SIZE; // 324
@@ -213,17 +213,7 @@ export type PassMesh = {
     quadCount: number;
     faceOffsets: [number, number, number, number, number, number, number];
     faceCounts: [number, number, number, number, number, number, number];
-    /** translucent quad-sort requirement, classified at mesh time (see
-     *  `classifyTranslucentSort`). Always `TRANSLUCENT_SORT_NONE` for the
-     *  opaque/transparent passes (they're never quad-sorted). */
-    sortType: number;
 };
-
-/** translucent quad-sort tiers (v1: no STATIC). NONE → no per-quad sort ever
- *  (identity order); DYNAMIC → gated back-to-front sort at runtime. Mirrors
- *  Sodium's SortType, collapsed to the two tiers we need. */
-export const TRANSLUCENT_SORT_NONE = 0;
-export const TRANSLUCENT_SORT_DYNAMIC = 1;
 
 export type ChunkMeshResult = {
     opaque: PassMesh | null;
@@ -980,7 +970,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     //
     // -X border (slab x=0 ← neighbor x=CHUNK_SIZE-1)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy, cz));
+        const neighbor = center.neighbors[neighbourSlot(-1, 0, 0)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++)
                 for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -993,7 +983,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X border (slab x=CHUNK_SIZE+1 ← neighbor x=0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy, cz));
+        const neighbor = center.neighbors[neighbourSlot(1, 0, 0)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++)
                 for (let z = 0; z < CHUNK_SIZE; z++) {
@@ -1006,7 +996,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -Y border (slab y=0 ← neighbor y=CHUNK_SIZE-1)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy - 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(0, -1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++)
                 for (let x = 0; x < CHUNK_SIZE; x++) {
@@ -1019,7 +1009,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +Y border (slab y=CHUNK_SIZE+1 ← neighbor y=0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy + 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(0, 1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++)
                 for (let x = 0; x < CHUNK_SIZE; x++) {
@@ -1032,7 +1022,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -Z border (slab z=0 ← neighbor z=CHUNK_SIZE-1)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(0, 0, -1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++)
                 for (let x = 0; x < CHUNK_SIZE; x++) {
@@ -1045,7 +1035,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +Z border (slab z=CHUNK_SIZE+1 ← neighbor z=0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(0, 0, 1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++)
                 for (let x = 0; x < CHUNK_SIZE; x++) {
@@ -1065,7 +1055,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     //
     // -X-Y edge (slab x=0, y=0, runs along z)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy - 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(-1, -1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const dstIdx = 0 * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + 0;
@@ -1077,7 +1067,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X-Y edge (slab x=17, y=0, runs along z)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy - 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(1, -1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const dstIdx = 0 * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
@@ -1089,7 +1079,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X+Y edge (slab x=0, y=17, runs along z)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy + 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(-1, 1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + 0;
@@ -1101,7 +1091,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X+Y edge (slab x=17, y=17, runs along z)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy + 1, cz));
+        const neighbor = center.neighbors[neighbourSlot(1, 1, 0)];
         if (neighbor) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (z + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
@@ -1113,7 +1103,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X-Z edge (slab x=0, z=0, runs along y)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, 0, -1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 const dstIdx = (y + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + 0;
@@ -1125,7 +1115,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X-Z edge (slab x=17, z=0, runs along y)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(1, 0, -1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 const dstIdx = (y + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (CHUNK_SIZE + 1);
@@ -1137,7 +1127,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X+Z edge (slab x=0, z=17, runs along y)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, 0, 1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 const dstIdx = (y + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + 0;
@@ -1149,7 +1139,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X+Z edge (slab x=17, z=17, runs along y)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(1, 0, 1)];
         if (neighbor) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 const dstIdx = (y + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
@@ -1161,7 +1151,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -Y-Z edge (slab y=0, z=0, runs along x)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy - 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(0, -1, -1)];
         if (neighbor) {
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const dstIdx = 0 * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (x + 1);
@@ -1173,7 +1163,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +Y-Z edge (slab y=17, z=0, runs along x)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy + 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(0, 1, -1)];
         if (neighbor) {
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (x + 1);
@@ -1185,7 +1175,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -Y+Z edge (slab y=0, z=17, runs along x)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy - 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(0, -1, 1)];
         if (neighbor) {
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const dstIdx = 0 * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (x + 1);
@@ -1197,7 +1187,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +Y+Z edge (slab y=17, z=17, runs along x)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx, cy + 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(0, 1, 1)];
         if (neighbor) {
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (x + 1);
@@ -1212,7 +1202,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     //
     // -X-Y-Z corner (slab 0,0,0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy - 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, -1, -1)];
         const dstIdx = 0 * SLAB_SIZE_SQ + 0 * SLAB_SIZE + 0;
         if (neighbor) {
             const srcIdx = voxelIndex(CHUNK_SIZE - 1, CHUNK_SIZE - 1, CHUNK_SIZE - 1);
@@ -1222,7 +1212,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X-Y-Z corner (slab 17,0,0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy - 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(1, -1, -1)];
         const dstIdx = 0 * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (CHUNK_SIZE + 1);
         if (neighbor) {
             const srcIdx = voxelIndex(0, CHUNK_SIZE - 1, CHUNK_SIZE - 1);
@@ -1232,7 +1222,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X+Y-Z corner (slab 0,17,0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy + 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, 1, -1)];
         const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + 0;
         if (neighbor) {
             const srcIdx = voxelIndex(CHUNK_SIZE - 1, 0, CHUNK_SIZE - 1);
@@ -1242,7 +1232,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X+Y-Z corner (slab 17,17,0)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy + 1, cz - 1));
+        const neighbor = center.neighbors[neighbourSlot(1, 1, -1)];
         const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + 0 * SLAB_SIZE + (CHUNK_SIZE + 1);
         if (neighbor) {
             const srcIdx = voxelIndex(0, 0, CHUNK_SIZE - 1);
@@ -1252,7 +1242,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X-Y+Z corner (slab 0,0,17)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy - 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, -1, 1)];
         const dstIdx = 0 * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + 0;
         if (neighbor) {
             const srcIdx = voxelIndex(CHUNK_SIZE - 1, CHUNK_SIZE - 1, 0);
@@ -1262,7 +1252,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X-Y+Z corner (slab 17,0,17)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy - 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(1, -1, 1)];
         const dstIdx = 0 * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
         if (neighbor) {
             const srcIdx = voxelIndex(0, CHUNK_SIZE - 1, 0);
@@ -1272,7 +1262,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // -X+Y+Z corner (slab 0,17,17)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx - 1, cy + 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(-1, 1, 1)];
         const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + 0;
         if (neighbor) {
             const srcIdx = voxelIndex(CHUNK_SIZE - 1, 0, 0);
@@ -1282,7 +1272,7 @@ function buildSlabs(voxels: Voxels, cx: number, cy: number, cz: number, slab: Ui
     }
     // +X+Y+Z corner (slab 17,17,17)
     {
-        const neighbor = voxels.chunks.get(chunkKey(cx + 1, cy + 1, cz + 1));
+        const neighbor = center.neighbors[neighbourSlot(1, 1, 1)];
         const dstIdx = (CHUNK_SIZE + 1) * SLAB_SIZE_SQ + (CHUNK_SIZE + 1) * SLAB_SIZE + (CHUNK_SIZE + 1);
         if (neighbor) {
             const srcIdx = voxelIndex(0, 0, 0);
@@ -1560,143 +1550,13 @@ function finishPassMesh(passBase: number, target: Uint32Array): PassMesh | null 
         quadCount: cursor,
         faceOffsets,
         faceCounts,
-        // opaque/transparent default NONE; the translucent pass is re-classified
-        // by `classifyTranslucentSort` in `meshChunk`.
-        sortType: TRANSLUCENT_SORT_NONE,
     };
-}
-
-// facing bitmap values for the three opposing cardinal pairs
-// (bit f: 0=+X,1=−X,2=+Y,3=−Y,4=+Z,5=−Z).
-const OPPOSING_PAIR_X = (1 << FACING_POS_X) | (1 << FACING_NEG_X);
-const OPPOSING_PAIR_Y = (1 << FACING_POS_Y) | (1 << FACING_NEG_Y);
-const OPPOSING_PAIR_Z = (1 << FACING_POS_Z) | (1 << FACING_NEG_Z);
-
-/**
- * Classify a translucent PassMesh's quad-sort requirement (Sodium's build-time
- * heuristic, collapsed to NONE vs DYNAMIC for v1). Conservative: never returns
- * NONE for geometry that could need sorting (a false DYNAMIC only costs a gated
- * sort; a false NONE renders wrong).
- *
- * NONE when the section can't self-occlude in a view-dependent way:
- *   - ≤1 quad;
- *   - a single aligned plane (one facing, one plane position) — flat water;
- *   - one opposing aligned pair, each single-plane — a glass pane;
- *   - a convex aligned box: every facing single-plane AND sitting exactly on
- *     the section AABB (no internal translucent faces) — a glass block.
- * Everything else (multiple planes per axis, unaligned/model quads, internal
- * faces) → DYNAMIC.
- *
- * Positions are decoded straight from the packed quad header (u8 per axis in
- * 1/16-voxel units); comparisons stay in those integer units.
- */
-export function classifyTranslucentSort(mesh: PassMesh): number {
-    if (mesh.quadCount <= 1) return TRANSLUCENT_SORT_NONE;
-    // Unaligned (model/liquid) quads can occlude from many angles; v1 sorts them.
-    if (mesh.faceCounts[FACING_UNASSIGNED] > 0) return TRANSLUCENT_SORT_DYNAMIC;
-
-    const quads = mesh.quads;
-    let bitmap = 0;
-    let minX = 255;
-    let minY = 255;
-    let minZ = 255;
-    let maxX = 0;
-    let maxY = 0;
-    let maxZ = 0;
-    // per-facing plane position along its axis, and a multi-plane flag.
-    const planePos = [0, 0, 0, 0, 0, 0];
-    let anyMultiPlane = false;
-
-    for (let f = 0; f < 6; f++) {
-        const count = mesh.faceCounts[f]!;
-        if (count === 0) continue;
-        bitmap |= 1 << f;
-        const axis = f >> 1; // 0=X (facings 0,1), 1=Y (2,3), 2=Z (4,5)
-        const start = mesh.faceOffsets[f]!;
-        let facePlane = -1;
-        for (let i = 0; i < count; i++) {
-            const off = (start + i) * QUAD_STRIDE_U32S;
-            const w0 = quads[off]!;
-            const w1 = quads[off + 1]!;
-            const w2 = quads[off + 2]!;
-            const cx0 = w0 & 0xff;
-            const cy0 = (w0 >> 8) & 0xff;
-            const cz0 = (w0 >> 16) & 0xff;
-            const cx1 = (w0 >> 24) & 0xff;
-            const cy1 = w1 & 0xff;
-            const cz1 = (w1 >> 8) & 0xff;
-            const cx2 = (w1 >> 16) & 0xff;
-            const cy2 = (w1 >> 24) & 0xff;
-            const cz2 = w2 & 0xff;
-            const cx3 = (w2 >> 8) & 0xff;
-            const cy3 = (w2 >> 16) & 0xff;
-            const cz3 = (w2 >> 24) & 0xff;
-            if (cx0 < minX) minX = cx0;
-            if (cx1 < minX) minX = cx1;
-            if (cx2 < minX) minX = cx2;
-            if (cx3 < minX) minX = cx3;
-            if (cx0 > maxX) maxX = cx0;
-            if (cx1 > maxX) maxX = cx1;
-            if (cx2 > maxX) maxX = cx2;
-            if (cx3 > maxX) maxX = cx3;
-            if (cy0 < minY) minY = cy0;
-            if (cy1 < minY) minY = cy1;
-            if (cy2 < minY) minY = cy2;
-            if (cy3 < minY) minY = cy3;
-            if (cy0 > maxY) maxY = cy0;
-            if (cy1 > maxY) maxY = cy1;
-            if (cy2 > maxY) maxY = cy2;
-            if (cy3 > maxY) maxY = cy3;
-            if (cz0 < minZ) minZ = cz0;
-            if (cz1 < minZ) minZ = cz1;
-            if (cz2 < minZ) minZ = cz2;
-            if (cz3 < minZ) minZ = cz3;
-            if (cz0 > maxZ) maxZ = cz0;
-            if (cz1 > maxZ) maxZ = cz1;
-            if (cz2 > maxZ) maxZ = cz2;
-            if (cz3 > maxZ) maxZ = cz3;
-            // axis-aligned quad → all 4 corners share the axis coordinate.
-            const plane = axis === 0 ? cx0 : axis === 1 ? cy0 : cz0;
-            if (facePlane === -1) facePlane = plane;
-            else if (plane !== facePlane) anyMultiPlane = true;
-        }
-        planePos[f] = facePlane;
-    }
-
-    // >1 plane along any axis → parallel translucent layers that reorder with
-    // the camera → must sort.
-    if (anyMultiPlane) return TRANSLUCENT_SORT_DYNAMIC;
-
-    // count present facings.
-    let facingCount = 0;
-    for (let f = 0; f < 6; f++) if (bitmap & (1 << f)) facingCount++;
-
-    // single plane → flat surface, can't self-occlude.
-    if (facingCount <= 1) return TRANSLUCENT_SORT_NONE;
-
-    // one opposing aligned pair → no line of sight through it.
-    if (facingCount === 2 && (bitmap === OPPOSING_PAIR_X || bitmap === OPPOSING_PAIR_Y || bitmap === OPPOSING_PAIR_Z)) {
-        return TRANSLUCENT_SORT_NONE;
-    }
-
-    // convex box: every present facing sits exactly on the section AABB, so
-    // there are no internal translucent faces to reorder.
-    let convex = true;
-    if (bitmap & (1 << FACING_POS_X) && planePos[FACING_POS_X] !== maxX) convex = false;
-    if (bitmap & (1 << FACING_NEG_X) && planePos[FACING_NEG_X] !== minX) convex = false;
-    if (bitmap & (1 << FACING_POS_Y) && planePos[FACING_POS_Y] !== maxY) convex = false;
-    if (bitmap & (1 << FACING_NEG_Y) && planePos[FACING_NEG_Y] !== minY) convex = false;
-    if (bitmap & (1 << FACING_POS_Z) && planePos[FACING_POS_Z] !== maxZ) convex = false;
-    if (bitmap & (1 << FACING_NEG_Z) && planePos[FACING_NEG_Z] !== minZ) convex = false;
-    if (convex) return TRANSLUCENT_SORT_NONE;
-
-    return TRANSLUCENT_SORT_DYNAMIC;
 }
 
 // ── normal/uv packing for quad headers ──────────────────────────────
 
 /** oct16 encode: arbitrary unit normal → low 16 bits of u32. */
-function encodeOct16(nx: number, ny: number, nz: number): number {
+export function encodeOct16(nx: number, ny: number, nz: number): number {
     const invL1 = 1 / (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) + 1e-30);
     let ox = nx * invL1;
     let oy = ny * invL1;
@@ -2639,8 +2499,6 @@ export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegi
     const opaque = finishPassMesh(PASS_OPAQUE_BASE, out.opaque);
     const transparent = finishPassMesh(PASS_TRANSPARENT_BASE, out.transparent);
     const translucent = finishPassMesh(PASS_TRANSLUCENT_BASE, out.translucent);
-    // tag the translucent pass with its quad-sort requirement (NONE/DYNAMIC).
-    if (translucent) translucent.sortType = classifyTranslucentSort(translucent);
 
     if (!opaque && !transparent && !translucent) return null;
 

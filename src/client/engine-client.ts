@@ -317,7 +317,7 @@ export async function load(state: EngineClient) {
         `[performance] tier=${state.performance.active} (auto=${state.performance.autoDetected}, source=${state.performance.source}) ` +
             `platform=${state.performance.platform} ` +
             `arch="${state.performance.adapterInfo.architecture}" ` +
-            `voxelArena=${(voxelBudget.quadArenaBytes / 1024 / 1024).toFixed(0)}MB+${(voxelBudget.quadOrderBytes / 1024 / 1024).toFixed(0)}MB sections=${voxelBudget.maxSections} ` +
+            `voxelArena=${(voxelBudget.quadArenaBytes / 1024 / 1024).toFixed(0)}MB sections=${voxelBudget.maxSections} ` +
             `viewRadius=${settings.voxelViewChunkRadius}ch`,
     );
     {
@@ -394,6 +394,9 @@ export async function load(state: EngineClient) {
         state.viewport.domElement = useClient.getState().viewportElement;
         state.viewport.width = w;
         state.viewport.height = h;
+        // pointer-lock the stable viewport container, not a per-room canvas, so the
+        // lock survives room swaps (the canvas is display:none'd, this never is).
+        state.inputManager._lockEl = state.viewport.domElement ?? null;
 
         // resize all room canvas targets so they're ready when switched to.
         // camera aspect/projection is no longer event-driven, the renderer
@@ -740,24 +743,17 @@ function processRoomList(state: EngineClient, message: Protocol.RoomList): void 
 // the mesher reads 1-voxel borders from neighbor chunks, so when data or
 // light changes at a chunk boundary, the neighbor must remesh too.
 
-// all 26 neighbours (6 faces + 12 edges + 8 corners). the mesher's slab
-// reads a 1-voxel apron from every diagonal neighbour for AO + smooth
-// light, so a whole-chunk data/light replacement must remesh all 26, not
-// just the 6 faces, or stale light lingers at chunk edges and corners
-// until a full /relight. (the per-cell light_delta path already dirties the
-// correct 3×3×3 subset; this is the full-chunk analog.)
-const NEIGHBOR_OFFSETS: readonly (readonly [number, number, number])[] = /* @__PURE__ */ (() => {
-    const offsets: [number, number, number][] = [];
-    for (let dz = -1; dz <= 1; dz++)
-        for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++) if (dx !== 0 || dy !== 0 || dz !== 0) offsets.push([dx, dy, dz]);
-    return offsets;
-})();
-
-function dirtyAllNeighborChunks(voxels: Voxels.Voxels, cx: number, cy: number, cz: number): void {
-    for (const [dx, dy, dz] of NEIGHBOR_OFFSETS) {
-        const c = voxels.chunks.get(Voxels.chunkKey(cx + dx, cy + dy, cz + dz));
-        if (c) Voxels.markChunkDirty(voxels, c);
+// mark all 26 neighbours (6 faces + 12 edges + 8 corners) dirty. the mesher's
+// slab reads a 1-voxel apron from every diagonal neighbour for AO + smooth
+// light, so a whole-chunk data/light replacement must remesh all 26, not just
+// the 6 faces, or stale light lingers at chunk edges and corners until a full
+// /relight. (the per-cell light_delta path already dirties the correct 3×3×3
+// subset; this is the full-chunk analog.) follows the chunk's neighbour pointers
+// — no chunkKey string builds — so `chunk` must already be linked.
+function dirtyAllNeighborChunks(voxels: Voxels.Voxels, chunk: Voxels.Chunk): void {
+    for (let i = 0; i < chunk.neighbors.length; i++) {
+        const n = chunk.neighbors[i];
+        if (n) Voxels.markChunkDirty(voxels, n);
     }
 }
 
@@ -788,7 +784,7 @@ function processVoxelChunkFull(state: EngineClient, message: Protocol.VoxelChunk
     Voxels.resolveChunk(chunk, room.voxels.registry);
     // createChunk + resolveChunk both seed dirty=true; mirror into the index.
     Voxels.markChunkDirty(room.voxels, chunk);
-    dirtyAllNeighborChunks(room.voxels, message.cx, message.cy, message.cz);
+    dirtyAllNeighborChunks(room.voxels, chunk);
 
     // ack: we paid the decode cost, free the server's in-flight slot. batched
     // into one voxel_ack per player at the end of processInbox.
@@ -933,7 +929,7 @@ function processVoxelChunkLight(state: EngineClient, message: Protocol.VoxelChun
     chunk.version++;
 
     Voxels.markChunkDirty(room.voxels, chunk);
-    dirtyAllNeighborChunks(room.voxels, message.cx, message.cy, message.cz);
+    dirtyAllNeighborChunks(room.voxels, chunk);
 }
 
 // scratch mask for the 3×3×3 neighbour cells around a chunk.
@@ -1290,7 +1286,17 @@ export function update(state: EngineClient, delta: number) {
         // the prioritised remesh path on the next activation.
         if (room === activeRoom) {
             Debug.begin(room.clientMetrics, 'mesh');
-            VoxelVisuals.update(room.voxelVisuals, state.voxelResources, room.voxels, room.voxels.registry, povCamera.position);
+            // streaming rooms defer meshing a chunk until its 26-neighbourhood has
+            // arrived (mesh once, correct AO/light); local rooms load all at once so
+            // there's no trickle to dedupe — mesh immediately.
+            VoxelVisuals.update(
+                room.voxelVisuals,
+                state.voxelResources,
+                room.voxels,
+                room.voxels.registry,
+                povCamera.position,
+                !room.local,
+            );
             Debug.end(room.clientMetrics, 'mesh');
 
             // arena occupancy + fragmentation, recorded post-update so the
@@ -1300,7 +1306,6 @@ export function update(state: EngineClient, delta: number) {
             // tracks node-pool headroom.
             if (room.clientMetrics.enabled) {
                 const quadR = VoxelResources.arenaReport(state.voxelResources.arenas.quadArena);
-                const orderR = VoxelResources.arenaReport(state.voxelResources.arenas.quadOrderArena);
                 Debug.record(room.clientMetrics, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
                 Debug.record(
                     room.clientMetrics,
@@ -1309,14 +1314,6 @@ export function update(state: EngineClient, delta: number) {
                     '%',
                 );
                 Debug.record(room.clientMetrics, 'voxels/arena/quad/allocs', quadR.allocs, 'count');
-                Debug.record(room.clientMetrics, 'voxels/arena/order/usedPct', (100 * orderR.used) / orderR.slotCount, '%');
-                Debug.record(
-                    room.clientMetrics,
-                    'voxels/arena/order/largestFreePct',
-                    (100 * orderR.largestFree) / orderR.slotCount,
-                    '%',
-                );
-                Debug.record(room.clientMetrics, 'voxels/arena/order/allocs', orderR.allocs, 'count');
             }
         }
 

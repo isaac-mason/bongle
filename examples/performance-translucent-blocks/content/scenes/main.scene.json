@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "nodes": {
+    "root": {
+      "realm": "shared",
+      "name": "Root",
+      "traits": [
+        {
+          "id": "ground"
+        },
+        {
+          "id": "monolith",
+          "controls": {
+            "size": 48
+          }
+        },
+        {
+          "id": "lattice",
+          "controls": {
+            "size": 48
+          }
+        },
+        {
+          "id": "ocean",
+          "controls": {
+            "half": 48,
+            "pillarPitch": 6
+          }
+        },
+        {
+          "id": "shells",
+          "controls": {
+            "count": 10
+          }
+        },
+        {
+          "id": "churn",
+          "controls": {
+            "swapsPerTick": 0
+          }
+        },
+        {
+          "id": "gameplay"
+        }
+      ],
+      "children": []
+    }
+  }
+}

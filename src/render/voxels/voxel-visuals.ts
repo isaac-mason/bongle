@@ -14,8 +14,8 @@
 //
 // frame (active room only):
 //   update(visuals, voxelRes, voxels, registry, cameraPos);    // remesh dirty chunks
-//   cullCPU(voxelRes, camera, viewChunkRadius);                // build visibleSlices + indirect
-//   const dispatches = expandDispatches(voxelRes);             // fan slices → visibleQuads
+//   updateCull(voxelRes, camera, viewChunkRadius);             // per-frame cull view + sort gate
+//   const dispatches = cullDispatches(voxelRes);               // cull → emit → translucent sort
 //   renderer.compute(dispatches); renderer.render(...);        // 3 drawIndirect calls
 //
 // each frame is exactly 3 drawIndirect calls (one per pass), with
@@ -24,12 +24,12 @@
 // `{origin, arenaBase}`, and renders 1 quad at `arenaBase + localIdx`.
 
 import type { Camera, ComputeDispatch, Scene } from 'gpucat';
-import { frustum, Mesh, packTo } from 'gpucat';
+import { frustum, Mesh } from 'gpucat';
 import { plane3, type Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
-import { buildMeshInput, type ChunkMeshResult, meshChunk, TRANSLUCENT_SORT_DYNAMIC } from '../../core/voxels/chunk-mesher';
-import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk, chunkKey, type Voxels } from '../../core/voxels/voxels';
+import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
+import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk, chunkKey, NEIGHBOR_COUNT, type Voxels } from '../../core/voxels/voxels';
 import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {
@@ -41,9 +41,6 @@ import {
     packerKeys,
     packerSetCameraPos,
     packerUpsertChunk,
-    SORT_CAP,
-    TRANSLUCENT_SORT_ENTRY_STRIDE,
-    TranslucentSortEntry,
     type VoxelResources,
 } from './voxel-resources';
 
@@ -95,6 +92,11 @@ const ROOM_SWAP_URGENT_BURST = 20;
 /** frames a chunk can sit dirty before starvation boost kicks in. */
 const STARVATION_GRACE_FRAMES = 30;
 const STARVATION_BOOST_PER_FRAME = (CHUNK_SIZE * CHUNK_SIZE) / 2;
+
+/** frames a streaming chunk waits for its full 26-neighbourhood to arrive before
+ *  meshing anyway. covers the view frontier (outer neighbours are beyond the
+ *  stream radius and never come) and slow streams. */
+const NEIGHBOURHOOD_GRACE_FRAMES = 20;
 
 /** chunks within this Chebyshev radius of the camera's chunk dispatch URGENT
  *  (jump the worker queue) — the block the player is editing in front of
@@ -151,6 +153,7 @@ export function update(
     voxels: Voxels,
     registry: BlockRegistry,
     cameraPos: Vec3 | undefined,
+    deferIncomplete: boolean,
 ): void {
     const arenas = voxelResources.arenas;
     state.frame++;
@@ -266,10 +269,21 @@ export function update(
                 roomSwapUrgentBurst--;
             }
 
+            const firstSeen = state.dirtyFirstSeen.get(key);
+
+            // streaming rooms: defer until the full 26-neighbourhood has arrived, so
+            // the chunk meshes once with correct boundary AO/light instead of
+            // re-meshing as each neighbour streams in. urgent chunks bypass; the view
+            // frontier (never completes) falls through after NEIGHBOURHOOD_GRACE_FRAMES.
+            // deferred chunks stay dirty and are re-evaluated next frame.
+            if (deferIncomplete && !urgent && chunk.knownNeighbourCount < NEIGHBOR_COUNT) {
+                const waited = firstSeen !== undefined && state.frame - firstSeen > NEIGHBOURHOOD_GRACE_FRAMES;
+                if (!waited) continue;
+            }
+
             // a starving normal-tier chunk spills off its (saturated) affinity
             // worker to any idle one instead of stalling. urgent bypasses the
             // queue gate, so it needs neither spill nor a `continue`-retry.
-            const firstSeen = state.dirtyFirstSeen.get(key);
             const starving = firstSeen !== undefined && state.frame - firstSeen > STARVATION_GRACE_FRAMES;
             const ok = queueMesh(dispatcher, voxels, chunk, chunk.meshGen, urgent ? { urgent: true } : { allowSpill: starving });
             if (!ok) continue;
@@ -291,51 +305,10 @@ export function update(
         }
     }
 
-    // drain this frame's dispatch instrumentation for the debug HUD / console.
+    // drain this frame's dispatch perf for the debug HUD.
     if (voxelResources.meshDispatcher !== null) {
-        const perf = readMeshPerf(voxelResources.meshDispatcher);
-        state.lastMeshPerf = perf;
-        logMeshPerf(perf);
+        state.lastMeshPerf = readMeshPerf(voxelResources.meshDispatcher);
     }
-}
-
-// ── dispatch perf logging (dev instrumentation) ─────────────────────
-// accumulates per-frame perf over a ~1s window and logs a one-liner when
-// there was dispatch activity. peakMainMs is the worst single-frame
-// main-thread cost (build + postMessage) — that's the hitch to watch.
-const _perfLog = { frames: 0, enqueues: 0, results: 0, buildMs: 0, postMs: 0, workUs: 0, peakMainMs: 0, peakEnq: 0 };
-
-function logMeshPerf(p: MeshPerf): void {
-    _perfLog.frames++;
-    _perfLog.enqueues += p.enqueues;
-    _perfLog.results += p.results;
-    _perfLog.buildMs += p.buildMs;
-    _perfLog.postMs += p.postMs;
-    _perfLog.workUs += p.workUs;
-    const mainMs = p.buildMs + p.postMs;
-    if (mainMs > _perfLog.peakMainMs) _perfLog.peakMainMs = mainMs;
-    if (p.enqueues > _perfLog.peakEnq) _perfLog.peakEnq = p.enqueues;
-
-    if (_perfLog.frames < 60) return;
-    const l = _perfLog;
-    if (l.enqueues > 0) {
-        const perPostBuild = ((l.buildMs / l.enqueues) * 1000).toFixed(1);
-        const perPostPost = ((l.postMs / l.enqueues) * 1000).toFixed(1);
-        console.log(
-            `[mesh] ${l.frames}f | posts→ ${l.enqueues} (peak ${l.peakEnq}/f) results← ${l.results} | ` +
-                `main: build ${l.buildMs.toFixed(1)}ms + post ${l.postMs.toFixed(1)}ms | ` +
-                `PEAK main/frame ${l.peakMainMs.toFixed(2)}ms | worker ${(l.workUs / 1000).toFixed(1)}ms | ` +
-                `per-post: build ${perPostBuild}µs post ${perPostPost}µs`,
-        );
-    }
-    _perfLog.frames = 0;
-    _perfLog.enqueues = 0;
-    _perfLog.results = 0;
-    _perfLog.buildMs = 0;
-    _perfLog.postMs = 0;
-    _perfLog.workUs = 0;
-    _perfLog.peakMainMs = 0;
-    _perfLog.peakEnq = 0;
 }
 
 /** main-thread remesh: run `meshChunk` against the room's shared
@@ -425,89 +398,69 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
     voxelResources.bucketQuads.needsUpdate = true;
 
-    buildTranslucentSortEntries(voxelResources, cx, cy, cz);
+    // translucent sort gate: the counting-sort output persists across frames and
+    // only re-runs when the back-to-front order can change. The key is rotation-
+    // invariant (radial distance), so orbiting in place needs no re-sort — but the
+    // visible SET changes on rotation, and a translucent arena mutation would leave
+    // the persisted `{slot, localIdx}` dangling. Gate = translation ∨ rotation ∨
+    // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
+    // count stand. Cheap enough (one flat O(N) sort) that any camera motion re-runs.
+    updateTranslucentSortGate(voxelResources, cx, cy, cz, _cullFrustum[4]!.normal);
 }
 
-// Level-B translucent quad-sort trigger. The sort key is ROTATION-INVARIANT
-// (distance to each quad's plane), so orbiting the camera in place never changes
-// the correct order — the only events that invalidate a persisted `quadOrder` are
-// camera TRANSLATIONS (crossing a quad plane / a parallel-pair midpoint). So the
-// gate is pure translation: re-sort a DYNAMIC section when the camera has moved
-// far enough since that section's last sort — a tight threshold up close (a small
-// move reorders near geometry, e.g. diving through a water surface), looser far
-// away. First-seen / re-meshed sections (sortValid=false) always sort.
-const SORT_NEAR_DIST_SQ = 32 * 32; // within ~2 chunks of the section center → "near"
-const SORT_MOVE_TRIGGER_NEAR_SQ = 0.25 * 0.25; // 0.25 block of translation, near
-const SORT_MOVE_TRIGGER_FAR_SQ = 1.0 * 1.0; // 1 block, far
-let warnedOversizedSort = false;
+// distance the camera must move before the translucent sort re-runs. Tight: a
+// small translation reorders near geometry (e.g. diving through a water surface),
+// and the whole sort is one cheap flat pass, so we only truly skip when static.
+const TSORT_MOVE_TRIGGER_SQ = 0.1 * 0.1; // 0.1 block
+// re-run once the camera forward turns past this (cos of the angle). The visible
+// set shifts on rotation, so newly-entered translucent sections must be sorted in.
+const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
 
-function buildTranslucentSortEntries(voxelResources: VoxelResources, camX: number, camY: number, camZ: number): void {
+/** Decide whether the translucent counting sort re-runs this frame, and refresh
+ *  the gate baseline when it does. `fwd` is the camera-forward (near-plane inward
+ *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
+function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
+    const gate = voxelResources.tsortGate;
     const packer = voxelResources.arenas.packer;
-    const entries = voxelResources.translucentSortEntriesData;
-    const half = CHUNK_SIZE * 0.5;
-    let count = 0;
-    for (const chunk of packer.chunks) {
-        const t = chunk.translucent;
-        if (!t || t.sortType !== TRANSLUCENT_SORT_DYNAMIC) continue;
-        if (t.dataCount > SORT_CAP) {
-            // one workgroup can't sort more than SORT_CAP quads; leave the section
-            // on its identity order (a large far-ish blob, rarely misorder-visible).
-            if (!warnedOversizedSort) {
-                warnedOversizedSort = true;
-                console.warn(`[voxel-sort] section has ${t.dataCount} translucent quads > SORT_CAP ${SORT_CAP}; left unsorted`);
-            }
-            continue;
-        }
-
-        // distance to the section center (picks the near vs far move threshold).
-        const dx = chunk.originX + half - camX;
-        const dy = chunk.originY + half - camY;
-        const dz = chunk.originZ + half - camZ;
-        const distSq = dx * dx + dy * dy + dz * dz;
-
-        let trigger = !t.sortValid;
-        if (!trigger) {
-            const mx = camX - t.sortCamX;
-            const my = camY - t.sortCamY;
-            const mz = camZ - t.sortCamZ;
-            const movedSq = mx * mx + my * my + mz * mz;
-            const threshold = distSq <= SORT_NEAR_DIST_SQ ? SORT_MOVE_TRIGGER_NEAR_SQ : SORT_MOVE_TRIGGER_FAR_SQ;
-            trigger = movedSq > threshold;
-        }
-        if (!trigger) continue;
-
-        packTo(TranslucentSortEntry, entries, count * TRANSLUCENT_SORT_ENTRY_STRIDE, {
-            relOrigin: [chunk.originX - camX, chunk.originY - camY, chunk.originZ - camZ],
-            arenaBase: t.dataStart,
-            quadOrderStart: t.quadOrderStart,
-            dataCount: t.dataCount,
-        });
-        t.sortCamX = camX;
-        t.sortCamY = camY;
-        t.sortCamZ = camZ;
-        t.sortValid = true;
-        count++;
+    let run = !gate.valid || packer.translucentDirty;
+    if (!run) {
+        const mx = camX - gate.camX;
+        const my = camY - gate.camY;
+        const mz = camZ - gate.camZ;
+        run = mx * mx + my * my + mz * mz > TSORT_MOVE_TRIGGER_SQ;
     }
-
-    voxelResources.translucentSortCount = count;
-    if (count > 0) {
-        voxelResources.translucentSortEntries.addUpdateRange(0, (count * TRANSLUCENT_SORT_ENTRY_STRIDE) / 4);
-        voxelResources.translucentSortEntries.needsUpdate = true;
+    if (!run) {
+        const dotFwd = fwd[0] * gate.fwdX + fwd[1] * gate.fwdY + fwd[2] * gate.fwdZ;
+        run = dotFwd < TSORT_ROTATE_TRIGGER_COS;
     }
+    if (run) {
+        gate.camX = camX;
+        gate.camY = camY;
+        gate.camZ = camZ;
+        gate.fwdX = fwd[0];
+        gate.fwdY = fwd[1];
+        gate.fwdZ = fwd[2];
+        gate.valid = true;
+        packer.translucentDirty = false;
+    }
+    voxelResources.runTranslucentSort = run;
 }
 
 /** GPU cull + Level-A ordered emit dispatch chain. gpucat runs each dispatch in
- *  its own compute pass, so the `cull → count → finalize → emit` data
- *  dependencies hold. Push into the renderer's dispatch list before
- *  `renderer.compute(...)`. Empty when no chunks are resident.
+ *  its own compute pass, so the `cull → finalize → emit` data dependencies hold.
+ *  Push into the renderer's dispatch list before `renderer.compute(...)`. Empty
+ *  when no chunks are resident.
  *
  *  1. cull: one thread per resident chunk; frustum-test, compact survivors into
- *     `visibleChunks` (+ distance bucket), write the emit dispatch args.
- *  2. count (per pass): tally each visible facing's quads into its distance bucket.
- *  3. finalize: prefix-sum buckets → instance bases + per-pass draw counts.
- *  4. emit (per pass): opaque/transparent back-face-cull facings and write
- *     `visibleQuads` front-to-back; translucent emits whole-section in
- *     `quadOrder` order at the reversed (back-to-front) bucket base. */
+ *     `visibleChunks` (+ distance bucket), write the emit dispatch args, AND tally
+ *     each survivor's visible opaque/transparent facings into `bucketQuads`.
+ *  2. finalize: prefix-sum opaque/transparent buckets → instance bases + draw counts.
+ *  3. emit (opaque/transparent): back-face-cull facings, write `visibleQuads`
+ *     front-to-back at the bucket base.
+ *  4. translucent global counting sort (gated — see `runTranslucentSort`):
+ *     expand → prep → hist → scan → scatter, producing the back-to-front
+ *     translucent `visibleQuads` permutation + its draw count. Skipped when the
+ *     camera is static and the arena unchanged; last frame's result persists. */
 export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
     const packer = voxelResources.arenas.packer;
     const recordCount = packer.chunks.length;
@@ -515,21 +468,6 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
     if (recordCount === 0) return out;
     const tables = voxelResources.arenas.tables;
     const passRender = voxelResources.passRender;
-
-    // Level-B: sort triggered DYNAMIC translucent sections first (writes their
-    // persisted `quadOrder`, which the translucent emit reads below). Separate
-    // pass → the write is visible to the emit. Skipped when nothing triggered.
-    if (voxelResources.translucentSortCount > 0) {
-        out.push({
-            node: voxelResources.translucentSort,
-            dispatch: [voxelResources.translucentSortCount, 1, 1],
-            buffers: {
-                sortEntries: voxelResources.translucentSortEntries,
-                quads: voxelResources.arenas.quadArena.buffers.quads,
-                quadOrder: voxelResources.arenas.quadOrderArena.buffers.quadOrder,
-            },
-        });
-    }
 
     out.push({
         node: voxelResources.cull,
@@ -539,20 +477,12 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
             cullView: voxelResources.cullView,
             visibleChunks: voxelResources.visibleChunks,
             emitArgs: voxelResources.emitArgs,
+            // fused count (opaque/transparent only): per-pass meta + bucket tally.
+            opaqueMeta: tables.opaque.metaBuffer,
+            transparentMeta: tables.transparent.metaBuffer,
+            bucketQuads: voxelResources.bucketQuads,
         },
     });
-    for (const pass of PASSES) {
-        out.push({
-            node: voxelResources.count,
-            indirect: voxelResources.emitArgs,
-            buffers: {
-                visibleChunks: voxelResources.visibleChunks,
-                sectionMeta: tables[pass].metaBuffer,
-                bucketQuads: voxelResources.bucketQuads,
-                emitConfig: voxelResources.emitConfig[pass],
-            },
-        });
-    }
     out.push({
         node: voxelResources.finalize,
         dispatch: [1, 1, 1],
@@ -562,27 +492,11 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
             bucketCursor: voxelResources.bucketCursor,
             drawOpaque: passRender.opaque.indirectBuffer,
             drawTransparent: passRender.transparent.indirectBuffer,
-            drawTranslucent: passRender.translucent.indirectBuffer,
         },
     });
+    // opaque/transparent per-facing emit (the translucent pass is sorted below).
     for (const pass of PASSES) {
-        // translucent emits whole-section in quadOrder order (back-to-front),
-        // opaque/transparent emit per-facing with back-face cull.
-        if (pass === 'translucent') {
-            out.push({
-                node: voxelResources.translucentEmit,
-                indirect: voxelResources.emitArgs,
-                buffers: {
-                    visibleChunks: voxelResources.visibleChunks,
-                    sectionMeta: tables[pass].metaBuffer,
-                    visibleQuads: passRender[pass].visibleQuadsBuffer,
-                    bucketBase: voxelResources.bucketBase,
-                    bucketCursor: voxelResources.bucketCursor,
-                    quadOrder: voxelResources.arenas.quadOrderArena.buffers.quadOrder,
-                },
-            });
-            continue;
-        }
+        if (pass === 'translucent') continue;
         out.push({
             node: voxelResources.emit,
             indirect: voxelResources.emitArgs,
@@ -595,6 +509,98 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
                 emitConfig: voxelResources.emitConfig[pass],
             },
         });
+    }
+
+    // translucent global stable radix sort (gated). Reads this frame's
+    // `visibleChunks` (cull, above); output persists when skipped.
+    // Chain: expand → prep → count₀ → 4 × (scan → scatter). The passes shuffle
+    // (key, index) pairs A→B→A→B; each non-last scatter also fused-counts the
+    // NEXT pass's digit into the other histogram (which the scan just zeroed),
+    // so only pass 0 needs the standalone count. The last scatter gathers
+    // `sortPayload[idx]` straight into the translucent `visibleQuads`.
+    // Histograms ping-pong hist[pass % 2] (counts) ↔ hist[(pass+1) % 2] (next).
+    if (voxelResources.runTranslucentSort) {
+        const quads = voxelResources.arenas.quadArena.buffers.quads;
+        const translucent = passRender.translucent;
+        const hists = [voxelResources.radixHist, voxelResources.radixHistAlt] as const;
+        out.push({
+            node: voxelResources.tsortExpand,
+            indirect: voxelResources.emitArgs,
+            buffers: {
+                visibleChunks: voxelResources.visibleChunks,
+                sectionMeta: tables.translucent.metaBuffer,
+                chunkInfo: tables.translucent.buffer,
+                quads,
+                sortKeys: voxelResources.sortKeys,
+                sortIdx: voxelResources.sortIdx,
+                sortPayload: voxelResources.sortPayload,
+                sortCount: voxelResources.sortCount,
+            },
+        });
+        out.push({
+            node: voxelResources.tsortPrep,
+            dispatch: [1, 1, 1],
+            buffers: {
+                sortCount: voxelResources.sortCount,
+                sortIndirectArgs: voxelResources.sortIndirectArgs,
+                drawTranslucent: translucent.indirectBuffer,
+            },
+        });
+        // pass-0 digit histogram (self-zeroing; later passes are fused).
+        out.push({
+            node: voxelResources.radixCount,
+            indirect: voxelResources.sortIndirectArgs,
+            buffers: {
+                sortIndirectArgs: voxelResources.sortIndirectArgs,
+                srcKeys: voxelResources.sortKeys,
+                radixHist: hists[0],
+            },
+        });
+        for (let pass = 0; pass < 4; pass++) {
+            const srcKeys = pass % 2 === 0 ? voxelResources.sortKeys : voxelResources.sortKeysAlt;
+            const srcIdx = pass % 2 === 0 ? voxelResources.sortIdx : voxelResources.sortIdxAlt;
+            const histCur = hists[pass % 2]!;
+            const histNext = hists[(pass + 1) % 2]!;
+            out.push({
+                node: voxelResources.radixScan,
+                dispatch: [1, 1, 1],
+                buffers: {
+                    sortIndirectArgs: voxelResources.sortIndirectArgs,
+                    radixHist: histCur,
+                    radixHistNext: histNext,
+                },
+            });
+            if (pass < 3) {
+                out.push({
+                    node: voxelResources.radixScatter,
+                    indirect: voxelResources.sortIndirectArgs,
+                    buffers: {
+                        sortIndirectArgs: voxelResources.sortIndirectArgs,
+                        srcKeys,
+                        srcIdx,
+                        radixHist: histCur,
+                        radixHistNext: histNext,
+                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
+                        dstKeys: pass % 2 === 0 ? voxelResources.sortKeysAlt : voxelResources.sortKeys,
+                        dstIdx: pass % 2 === 0 ? voxelResources.sortIdxAlt : voxelResources.sortIdx,
+                    },
+                });
+            } else {
+                out.push({
+                    node: voxelResources.radixScatterLast,
+                    indirect: voxelResources.sortIndirectArgs,
+                    buffers: {
+                        sortIndirectArgs: voxelResources.sortIndirectArgs,
+                        srcKeys,
+                        srcIdx,
+                        radixHist: histCur,
+                        radixPassConfig: voxelResources.radixPassConfig[pass]!,
+                        sortPayload: voxelResources.sortPayload,
+                        visibleQuads: translucent.visibleQuadsBuffer,
+                    },
+                });
+            }
+        }
     }
     return out;
 }
