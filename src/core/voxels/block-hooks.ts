@@ -23,7 +23,7 @@
 import { SetBlockFlags } from './block-flags';
 import { AIR } from './block-registry';
 import type { BlockChangeCtx, BlockStateChangeCtx } from './blocks';
-import { _registerBlockHooksDriver, getBlockState, setBlock, type VoxelBlockOp, type Voxels } from './voxels';
+import { getBlockState, setBlock, type VoxelBlockOp, type Voxels } from './voxels';
 
 // ── intrinsic hook bitmask ──────────────────────────────────────────
 
@@ -266,7 +266,3 @@ function fireBlockStateChange(
     const ctx: BlockStateChangeCtx = { voxels, worldX: wx, worldY: wy, worldZ: wz, stateId, oldStateId };
     for (const fn of entry.onBlockStateChange) fn(ctx);
 }
-
-// register the driver with voxels.ts so setBlock can drain inline without
-// importing this module directly (avoids an ESM value cycle).
-_registerBlockHooksDriver(runBlockHooks);

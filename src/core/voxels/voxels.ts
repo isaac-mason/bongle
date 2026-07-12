@@ -1,5 +1,7 @@
 import type { Vec3 } from 'mathcat';
 import { SetBlockFlags } from './block-flags';
+import { runBlockHooks } from './block-hooks';
+import type { BlockObserverEntry } from './block-hooks';
 import type { BlockRegistry } from './block-registry';
 import { AIR, MISSING, resolveKey } from './block-registry';
 import { CullType } from './blocks';
@@ -549,8 +551,8 @@ export function setChunkBlock(
     chunk.snapshotPalette = null;
 
     // inline-drain whichever hook passes the caller asked for. BULK (0) skips.
-    if (flags !== 0 && _runBlockHooks) {
-        _runBlockHooks(voxels, flags);
+    if (flags !== 0) {
+        runBlockHooks(voxels, flags);
     }
 }
 
@@ -790,13 +792,6 @@ export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.hookDrain.active = false;
 }
 
-/** registered by block-hooks.ts at module init to break the import cycle:
- *  block-hooks needs setBlock (for chained recomputes), and setBlock needs
- *  to drain hooks inline. avoids a true ESM value cycle. */
-let _runBlockHooks: ((voxels: Voxels, mask: number) => void) | null = null;
-export function _registerBlockHooksDriver(fn: (voxels: Voxels, mask: number) => void): void {
-    _runBlockHooks = fn;
-}
 
 /**
  * flood-fill light-propagation config. when `enabled` is false,
@@ -829,7 +824,7 @@ export type VoxelsAuthority = {
      * registration. null until any handler is registered. keyed by
      * block-type index. see block-hooks.ts for the entry shape.
      */
-    observers: Map<number, import('./block-hooks').BlockObserverEntry> | null;
+    observers: Map<number, BlockObserverEntry> | null;
     /** flood-fill light-propagation config. see type doc. */
     floodFillLighting: FloodFillLightingState;
 };
