@@ -594,7 +594,7 @@ export function propagateAllLight(voxels: Voxels): void {
     }
 
     if (voxels.chunks.size === 0) {
-        if (voxels.authority) voxels.authority.changes.lightEpoch++;
+        if (voxels.authority) voxels.authority.changes.light.epoch++;
         return;
     }
 
@@ -695,7 +695,7 @@ export function propagateAllLight(voxels: Voxels): void {
 
     // bump light epoch (full recompute, clients discard incremental ops)
     if (voxels.authority) {
-        voxels.authority.changes.lightEpoch++;
+        voxels.authority.changes.light.epoch++;
         // invalidate all snapshots
         for (const chunk of voxels.chunks.values()) {
             chunk.compressedSnapshot = null;
@@ -1312,23 +1312,23 @@ function computeNewLevel(
 
 // ── flushPendingLight ───────────────────────────────────────────────
 //
-// drains voxels.authority.changes.pendingNewChunks and pendingLight.
-// new chunks get sky light seeded first (so the incremental block-change
-// update sees correct sky state), then block changes are processed in
-// batch. called by the engine between tick and network flush.
+// drains the per-tick light-recompute queues in changes.light: new chunks
+// get sky light seeded first (so the incremental block-change update sees
+// correct sky state), then per-block incremental updates, then the scoped
+// whole-chunk relights. called by the engine between tick and network flush.
 
 export function flushPendingLight(voxels: Voxels): void {
     const auth = voxels.authority;
     if (!auth) return;
 
-    const changes = auth.changes;
-    const stale = changes.staleLightChunks;
+    const light = auth.changes.light;
+    const stale = light.chunks;
     // when flood-fill lighting is disabled, setChunkBlock / ensureChunk write
     // seed values inline and never enqueue. defensive: drop anything that
     // slipped through (e.g. if the toggle flipped mid-tick).
     if (!auth.floodFillLighting.enabled) {
-        changes.pendingNewChunks.length = 0;
-        changes.pendingLight.length = 0;
+        light.newChunks.length = 0;
+        light.blocks.length = 0;
         stale.clear();
         return;
     }
@@ -1337,7 +1337,7 @@ export function flushPendingLight(voxels: Voxels): void {
     // changes, so the incremental update operates on correct state. chunks
     // already scheduled for a bulk relight are skipped (relightChunks rebakes
     // them wholesale below).
-    const newChunks = changes.pendingNewChunks;
+    const newChunks = light.newChunks;
     for (let i = 0; i < newChunks.length; i++) {
         const c = newChunks[i]!;
         if (!stale.has(c)) seedNewChunkSky(voxels, c);
@@ -1348,7 +1348,7 @@ export function flushPendingLight(voxels: Voxels): void {
     // relit this tick. run before the bulk relight so it sees settled state;
     // entries in a stale chunk are redundant (the relight overwrites) and are
     // filtered out.
-    const pending = changes.pendingLight;
+    const pending = light.blocks;
     if (pending.length > 0) {
         if (stale.size === 0) {
             updateLightBatch(voxels, pending);

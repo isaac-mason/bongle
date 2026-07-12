@@ -1,7 +1,7 @@
 // ── BULK-flag light routing integration ─────────────────────────────
 //
 // setBlock(..., BULK) / setChunkBlock(..., BULK) and tier-1 invalidateChunk
-// route light to authority.changes.staleLightChunks, which flushPendingLight
+// route light to authority.changes.light.chunks, which flushPendingLight
 // drains via a scoped relightChunks. The end state must match the per-block
 // incremental (DEFAULT) path baked with propagateAllLight.
 
@@ -83,9 +83,9 @@ describe('BULK light routing', () => {
         // subject: BULK writes, light settled only by flushPendingLight.
         const v = makeVoxels(reg);
         build((x, y, z, key) => setBlock(v, x, y, z, key, SetBlockFlags.BULK));
-        expect(v.authority!.changes.staleLightChunks.size).toBeGreaterThan(0);
+        expect(v.authority!.changes.light.chunks.size).toBeGreaterThan(0);
         flushPendingLight(v);
-        expect(v.authority!.changes.staleLightChunks.size).toBe(0); // drained
+        expect(v.authority!.changes.light.chunks.size).toBe(0); // drained
 
         expectEqual(v, reference);
     });

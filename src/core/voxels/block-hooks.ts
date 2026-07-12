@@ -8,7 +8,7 @@
 // or in bulk from runNeighbourRecompute / runBlockEventHooks (editor command
 // drain, server end-of-tick drain). per-pass cursors make every pass
 // idempotent, re-running picks up only ops past the last drain cursor.
-// `voxels.authority.changes._draining` short-circuits re-entrant calls
+// `voxels.authority.changes.hookDrain.active` short-circuits re-entrant calls
 // (e.g. a hook issues setBlock with DEFAULT flags) so the outer while-loop
 // picks up the appended op naturally.
 //
@@ -105,8 +105,8 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
     // re-entrant call (a hook handler issued setBlock with default flags
     // and that setBlock tried to drain inline). the outer call's
     // while-loop will pick up the appended op, just return.
-    if (changes._draining) return;
-    changes._draining = true;
+    if (changes.hookDrain.active) return;
+    changes.hookDrain.active = true;
     try {
         const ops = changes.ops;
         const wantNeighbours = (mask & SetBlockFlags.NOTIFY_NEIGHBOURS) !== 0;
@@ -118,8 +118,8 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
             // start each pass from its own cursor, they advance
             // independently (editor pre-drains neighbours but leaves
             // events for end-of-tick).
-            const nStart = wantNeighbours ? changes.notifyNeighboursCursor : end;
-            const eStart = wantEvents ? changes.fireEventsCursor : end;
+            const nStart = wantNeighbours ? changes.hookDrain.neighboursCursor : end;
+            const eStart = wantEvents ? changes.hookDrain.eventsCursor : end;
             if (nStart >= end && eStart >= end) break;
 
             if (depth++ > MAX_HOOK_DEPTH) {
@@ -139,7 +139,7 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
                         recomputeAt(voxels, blockOp.wx + dx, blockOp.wy + dy, blockOp.wz + dz);
                     }
                 }
-                changes.notifyNeighboursCursor = end;
+                changes.hookDrain.neighboursCursor = end;
             }
 
             // event pass. may append ops past `end`.
@@ -149,11 +149,11 @@ export function runBlockHooks(voxels: Voxels, mask: number): void {
                     if (op.kind !== 0) continue;
                     fireEventsForOp(voxels, op as VoxelBlockOp);
                 }
-                changes.fireEventsCursor = end;
+                changes.hookDrain.eventsCursor = end;
             }
         }
     } finally {
-        changes._draining = false;
+        changes.hookDrain.active = false;
     }
 }
 

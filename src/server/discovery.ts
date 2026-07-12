@@ -1745,12 +1745,12 @@ function flushVoxelsForPlayer(
     //    knowledge. clear the discovery queue too: pendingFull holds chunks
     //    that would otherwise ship against the stale epoch; the cursor rewind
     //    re-discovers them with fresh light.
-    if (knowledge.knownLightEpoch < changes.lightEpoch) {
+    if (knowledge.knownLightEpoch < changes.light.epoch) {
         knowledge.knownChunks.clear();
         knowledge.knownEmptyChunks.clear();
         knowledge.pendingFull.clear();
         knowledge.inFlightFull.clear();
-        knowledge.knownLightEpoch = changes.lightEpoch;
+        knowledge.knownLightEpoch = changes.light.epoch;
         knowledge.cursor = 0;
     }
 

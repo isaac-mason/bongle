@@ -1538,7 +1538,7 @@ describe('perf: 5x5 ceiling removal', () => {
             }
 
         // drain pending light so updateLightBatch sees the changes
-        voxels.authority!.changes.pendingLight.length = 0;
+        voxels.authority!.changes.light.blocks.length = 0;
 
         const t0 = performance.now();
         updateLightBatch(voxels, changes);
@@ -1599,7 +1599,7 @@ describe('perf: 5x5 ceiling removal', () => {
                 changes.push({ wx, wy: ceilingY, wz, oldStateId });
             }
 
-        voxels.authority!.changes.pendingLight.length = 0;
+        voxels.authority!.changes.light.blocks.length = 0;
 
         const t0 = performance.now();
         updateLightBatch(voxels, changes);
@@ -2364,7 +2364,7 @@ describe('bottom chunk sky light', () => {
             }
         }
         // clear block change ops from setChunkBlock (we just want to test sky seeding)
-        voxels.authority!.changes.pendingLight.length = 0;
+        voxels.authority!.changes.light.blocks.length = 0;
 
         // step 3: flush, seeds sky for both new chunks, then processes block changes
         flushPendingLight(voxels);
@@ -2403,7 +2403,7 @@ describe('bottom chunk sky light', () => {
                 }
             }
         }
-        voxels.authority!.changes.pendingLight.length = 0;
+        voxels.authority!.changes.light.blocks.length = 0;
 
         flushPendingLight(voxels);
 

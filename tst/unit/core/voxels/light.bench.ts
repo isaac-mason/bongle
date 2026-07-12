@@ -310,7 +310,7 @@ describe('updateLightBatch — direct (no setBlock)', () => {
         const v = prelitWorld();
         // place the block directly via raw setBlock with no change tracking,
         // then hand-craft the LightChange so updateLightBatch is what we measure
-        v.authority!.changes.pendingLight.length = 0;
+        v.authority!.changes.light.blocks.length = 0;
         // overwrite voxel in-place
         const cx = 0,
             cy = 0,
@@ -321,7 +321,7 @@ describe('updateLightBatch — direct (no setBlock)', () => {
             lz = 8;
         const oldStateId = chunk.palette[chunk.data[lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE]!]!;
         setBlock(v, 8, 8, 8, 'stone', SetBlockFlags.BULK);
-        v.authority!.changes.pendingLight.length = 0;
+        v.authority!.changes.light.blocks.length = 0;
         updateLightBatch(v, [{ wx: 8, wy: 8, wz: 8, oldStateId }]);
     });
 
@@ -334,7 +334,7 @@ describe('updateLightBatch — direct (no setBlock)', () => {
             setBlock(v, i, 8, 8, 'stone', SetBlockFlags.BULK);
             changes.push({ wx: i, wy: 8, wz: 8, oldStateId });
         }
-        v.authority!.changes.pendingLight.length = 0;
+        v.authority!.changes.light.blocks.length = 0;
         updateLightBatch(v, changes);
     });
 });

@@ -532,9 +532,9 @@ export function setChunkBlock(
 
     if (flags === SetBlockFlags.BULK) {
         // whole-chunk relight at tick end (scoped bake over the touched set).
-        auth.changes.staleLightChunks.add(chunk);
+        auth.changes.light.chunks.add(chunk);
     } else if (auth.floodFillLighting.enabled) {
-        auth.changes.pendingLight.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
+        auth.changes.light.blocks.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
     } else {
         // flood-fill disabled: inline flat sky-seed + block emission.
         const emission = registry.lightEmission[newStateId] ?? 0;
@@ -581,7 +581,7 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
 
     const auth = voxels.authority;
     if (!auth) return;
-    auth.changes.staleLightChunks.add(chunk);
+    auth.changes.light.chunks.add(chunk);
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
 }
@@ -706,58 +706,73 @@ export type VoxelDeleteOp = { kind: 2; cx: number; cy: number; cz: number };
 
 export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
 
+/**
+ * per-tick accumulator of authoritative voxel mutations, grouped by the
+ * end-of-tick consumer that drains each part:
+ *   - `ops`         → block-hooks (drain) + discovery (network)
+ *   - `addedChunks` → discovery (streaming)
+ *   - `light`       → flushPendingLight (relight)
+ *   - `hookDrain`   → block-hooks (drain progress; not change data)
+ */
 export type VoxelChanges = {
+    /** append-only log of block ops this tick. hooks drain it (tracked by
+     *  `hookDrain`), discovery ships it to clients. */
     ops: VoxelOp[];
-    lightEpoch: number; // bumped by propagateAllLight, monotonically increasing
-    /** blocks changed this tick that need light recomputed. drained by flushPendingLight. */
-    pendingLight: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
-    /** chunks created this tick that need sky light seeded. drained by flushPendingLight. */
-    pendingNewChunks: Chunk[];
-    /** chunks bulk-edited this tick (via BULK writes / invalidateChunk) that need a
-     *  scoped whole-chunk relight. drained by flushPendingLight via relightChunks
-     *  instead of the per-block incremental path. */
-    staleLightChunks: Set<Chunk>;
-    /** chunks created this tick. drained by discovery, lets each player's
-     *  cursor rewind so newly-existing chunks get streamed without
-     *  re-walking the whole view sphere each tick. holds the Chunk ref so
+    /** chunks created this tick, for streaming. drained by discovery, which
+     *  rewinds each player's cursor so newly-existing chunks get streamed
+     *  without re-walking the whole view sphere. holds the Chunk ref so
      *  consumers don't have to re-lookup. */
     addedChunks: Set<Chunk>;
-    /** index of the next op the NOTIFY_NEIGHBOURS pass should consider.
-     *  runBlockHooks() advances this past every op it processes, so subsequent
-     *  drains skip the already-fired prefix, keeps the inline-drain path
-     *  O(n) total across n setBlock calls instead of O(n²). */
-    notifyNeighboursCursor: number;
-    /** same as above, for the FIRE_EVENTS pass. tracked separately because
-     *  runNeighbourRecompute (editor) only advances the neighbours cursor;
-     *  end-of-tick runBlockEventHooks needs to fire events from index 0. */
-    fireEventsCursor: number;
-    /** re-entrancy guard for runBlockHooks. set while it runs so a chained
-     *  setBlock from inside a hook just appends and lets the outer
-     *  while-loop pick it up. */
-    _draining: boolean;
+    /** light-recompute work queued this tick, drained by flushPendingLight. */
+    light: {
+        /** blocks changed by DEFAULT writes → per-block incremental relight. */
+        blocks: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
+        /** chunks changed by BULK writes / invalidateChunk → scoped whole-chunk
+         *  relight (relightChunks) instead of the per-block path. */
+        chunks: Set<Chunk>;
+        /** new chunks needing sky light seeded before incremental updates run. */
+        newChunks: Chunk[];
+        /** monotonically increasing; bumped by propagateAllLight (a full
+         *  recompute), so clients discard buffered incremental ops. NOT
+         *  per-tick — it outlives a tick. */
+        epoch: number;
+    };
+    /** drain progress of the two block-hook passes over `ops`. NOT change
+     *  data — this is bookkeeping for the incremental drain. `ops` grows all
+     *  tick; DEFAULT setBlock drains it inline after every write, so each pass
+     *  keeps a high-water cursor to process each op exactly once (O(n) total
+     *  across n writes, not O(n²)). two cursors because the passes can advance
+     *  independently: the editor's runNeighbourRecompute moves only
+     *  `neighboursCursor`, deferring observer events to end-of-tick. `active`
+     *  guards re-entry, so a setBlock issued from inside a hook just appends
+     *  and lets the outer drain loop pick it up. */
+    hookDrain: {
+        neighboursCursor: number;
+        eventsCursor: number;
+        active: boolean;
+    };
 };
 
 export function createVoxelChanges(): VoxelChanges {
     return {
         ops: [],
-        lightEpoch: 0,
-        pendingLight: [],
-        pendingNewChunks: [],
-        staleLightChunks: new Set(),
         addedChunks: new Set(),
-        notifyNeighboursCursor: 0,
-        fireEventsCursor: 0,
-        _draining: false,
+        light: { blocks: [], chunks: new Set(), newChunks: [], epoch: 0 },
+        hookDrain: { neighboursCursor: 0, eventsCursor: 0, active: false },
     };
 }
 
-/** clear ops after flush. lightEpoch is NOT cleared, it's monotonic. */
+/**
+ * clear the network/hook per-tick state after end-of-tick dispatch. the
+ * `light` queues are cleared by their own consumer (flushPendingLight, which
+ * runs earlier in the tick); `light.epoch` is monotonic and never cleared.
+ */
 export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.ops.length = 0;
     changes.addedChunks.clear();
-    changes.staleLightChunks.clear();
-    changes.notifyNeighboursCursor = 0;
-    changes.fireEventsCursor = 0;
+    changes.hookDrain.neighboursCursor = 0;
+    changes.hookDrain.eventsCursor = 0;
+    changes.hookDrain.active = false;
 }
 
 /** registered by block-hooks.ts at module init to break the import cycle:
@@ -926,7 +941,7 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
 
         if (authority) {
             if (authority.floodFillLighting.enabled) {
-                authority.changes.pendingNewChunks.push(chunk);
+                authority.changes.light.newChunks.push(chunk);
             } else {
                 const sky = authority.floodFillLighting.minLevel & 0xf;
                 chunk.light.fill(sky << 12);

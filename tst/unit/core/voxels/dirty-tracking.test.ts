@@ -247,13 +247,13 @@ describe('light epoch', () => {
 
     it('propagateAllLight bumps lightEpoch', () => {
         const voxels = makeServerVoxels(registry);
-        expect(voxels.authority!.changes.lightEpoch).toBe(0);
+        expect(voxels.authority!.changes.light.epoch).toBe(0);
 
         propagateAllLight(voxels);
-        expect(voxels.authority!.changes.lightEpoch).toBe(1);
+        expect(voxels.authority!.changes.light.epoch).toBe(1);
 
         propagateAllLight(voxels);
-        expect(voxels.authority!.changes.lightEpoch).toBe(2);
+        expect(voxels.authority!.changes.light.epoch).toBe(2);
     });
 
     it('propagateAllLight does NOT push per-voxel ops', () => {
@@ -275,15 +275,15 @@ describe('light epoch', () => {
 
         // should have zero ops, epoch bump handles full recompute
         expect(voxels.authority!.changes.ops).toHaveLength(0);
-        expect(voxels.authority!.changes.lightEpoch).toBe(1);
+        expect(voxels.authority!.changes.light.epoch).toBe(1);
     });
 
     it('propagateAllLight bumps epoch even with empty chunks', () => {
         const voxels = makeServerVoxels(registry);
-        expect(voxels.authority!.changes.lightEpoch).toBe(0);
+        expect(voxels.authority!.changes.light.epoch).toBe(0);
 
         propagateAllLight(voxels);
-        expect(voxels.authority!.changes.lightEpoch).toBe(1);
+        expect(voxels.authority!.changes.light.epoch).toBe(1);
     });
 
     it('propagateAllLight invalidates all snapshots', () => {
@@ -320,12 +320,12 @@ describe('clearVoxelChanges', () => {
             oldStateId: 0,
             newStateId: 1,
         });
-        changes.lightEpoch = 5;
+        changes.light.epoch = 5;
 
         clearVoxelChanges(changes);
 
         expect(changes.ops).toHaveLength(0);
-        expect(changes.lightEpoch).toBe(5);
+        expect(changes.light.epoch).toBe(5);
     });
 });
 
@@ -577,10 +577,10 @@ describe('flushPendingLight (batched)', () => {
         ensureChunk(voxels, 0, 0, 0);
 
         setBlock(voxels, 0, 0, 0, 'stone');
-        expect(voxels.authority!.changes.pendingLight.length).toBe(1);
+        expect(voxels.authority!.changes.light.blocks.length).toBe(1);
 
         flushPendingLight(voxels);
-        expect(voxels.authority!.changes.pendingLight.length).toBe(0);
+        expect(voxels.authority!.changes.light.blocks.length).toBe(0);
     });
 
     it('flushPendingLight is a noop when no pending changes', () => {
