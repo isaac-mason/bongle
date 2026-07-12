@@ -17,11 +17,14 @@
  *                 `enabled`.
  *   `envSky`, 4-stop sky LUT (12 vec3s: zenith/horizon/nadir × 4 stops).
  *
- * the sky material reads both and renders:
+ * the sky sphere material paints only the cheap, full-screen part:
  *   - LUT-driven vertical sky gradient (zenith→horizon→nadir, interp by time)
- *   - sun and moon discs via dot(viewDir, sun/moonDir) threshold
- *   - procedural stars hashed from quantized view dir
- *   - horizon tint near the sun direction (orange sunrise/sunset)
+ *   - a single-term horizon sun-wash (orange sunrise/sunset)
+ * all uniform-only math lives in the vertex stage as flat varyings, so the
+ * per-pixel cost is a gradient + one pow. the discrete elements are drawn
+ * as instanced billboards that only shade the pixels they cover:
+ *   - sun + moon: 2 camera-facing square billboards on the far sphere
+ *   - stars: baked round-dot billboards, twinkle/night-fade/density in-shader
  *
  * voxel + model + cloud materials bind the same `envConfig`, `skyBrightness`
  * and `sunDirection` derive from `cfg.time` in their fragment shaders, so
@@ -68,6 +71,10 @@ export type Environment = {
 
     /** per-room sky sphere (added to room.scene). */
     skyMesh: gpu.Mesh;
+    /** per-room sun + moon billboard pair (2 instances). */
+    sunMoonMesh: gpu.Mesh;
+    /** per-room star-field billboards (`STAR_COUNT` instances). */
+    starMesh: gpu.Mesh;
 
     /** per-room scene anchor for the engine-global cloud system. just a
      *  Mesh + Scene pair, all heavy state (material, geometry, buffers)
@@ -94,6 +101,10 @@ export type Environment = {
      *  Held here so `updateForCamera` can drive the CPU cull without
      *  threading cloudResources through every per-frame call site. */
     _cloudResources: CloudResources.CloudResources;
+    /** per-room static instance buffers for the sun/moon + star billboards.
+     *  baked once at init; held only so `dispose` can release them. */
+    _skyBodyBuffer: gpu.GpuBuffer;
+    _starBuffer: gpu.GpuBuffer;
 };
 
 /* ── GPU struct layout ────────────────────────────────────────────── */
@@ -144,15 +155,47 @@ const FOG_SUN_TINT: Vec3 = srgbBytesToLinear(244, 125, 29); // #f47d1d
 // deeper red that the sun tint blends toward as the sun approaches the
 // horizon. drives the dramatic flare at sunrise / sunset peak.
 const SUNSET_DEEP_TINT: Vec3 = srgbBytesToLinear(255, 70, 30); // #ff461e
-const FOG_MOON_TINT: Vec3 = srgbBytesToLinear(127, 153, 204); // #7f99cc
-// sun + moon are squares (blocky aesthetic). HALF_SIZE is the half-extent
-// in the sun-local tangent plane (≈ sin of angular half-width). FEATHER
-// is the smoothstep band, narrow so edges read as crisp, wide enough to
-// avoid shader aliasing without MSAA on the sky.
+
+// sun + moon are camera-facing square billboards on the far sphere.
+// HALF_SIZE is the angular half-extent (≈ chord on the unit sphere).
+// EDGE_FEATHER is the smoothstep band that keeps the square edges crisp
+// without MSAA aliasing.
 const SUN_HALF_SIZE = 0.05;
-const SUN_FEATHER = 0.005;
 const MOON_HALF_SIZE = 0.045;
-const MOON_FEATHER = 0.004;
+const BODY_EDGE_FEATHER = 0.12;
+
+// stars are camera-facing round-dot billboards on the far sphere, baked
+// once. STAR_COUNT is the pool size; the live `starsDensity` config gates
+// what fraction is visible (per-star `gate` vs density in the shader).
+const STAR_COUNT = 2000;
+const STAR_TWINKLE_SPEED = 2.2;
+const STAR_MIN_SIZE = 0.0035;
+const STAR_SIZE_SPREAD = 0.0035;
+const STAR_DOT_RADIUS = 0.8;
+const STAR_DOT_FEATHER = 0.35;
+
+/* ── sky-body instance layouts (sun/moon + stars) ─────────────────── */
+
+/** one per celestial body (2 instances: sun, moon). `kind` 0=sun, 1=moon
+ *  selects direction/enable/fade in the shader; direction itself is
+ *  derived from `EnvConfig.time`, so this buffer is baked once. */
+export const SkyBodyInstance = gpu.struct('SkyBodyInstance', {
+    color: gpu.d.vec3f,
+    kind: gpu.d.f32,
+    halfSize: gpu.d.f32,
+});
+
+/** one per star. all fields static; twinkle/night-fade/density read
+ *  `EnvConfig` in the shader, so the buffer is baked once and never
+ *  updated. `gate` is a uniform random in [0,1) compared against
+ *  `starsDensity`; `phase` in [0,1) offsets the twinkle sine. */
+export const StarInstance = gpu.struct('StarInstance', {
+    dir: gpu.d.vec3f,
+    size: gpu.d.f32,
+    brightness: gpu.d.f32,
+    phase: gpu.d.f32,
+    gate: gpu.d.f32,
+});
 
 /* ── pack helpers ─────────────────────────────────────────────────── */
 
@@ -230,6 +273,7 @@ export function disposeResources(res: EnvironmentResources): void {
 const {
     f32,
     u32,
+    vec2f,
     vec3f,
     vec4f,
     mix,
@@ -242,7 +286,6 @@ const {
     abs,
     pow,
     floor,
-    fract,
     sqrt,
     clamp,
     smoothstep,
@@ -250,6 +293,7 @@ const {
     max,
     normalize,
     attribute,
+    instanceIndex,
     storage,
     varying,
     cameraProjectionMatrix,
@@ -257,17 +301,29 @@ const {
     d,
 } = gpu;
 
-/**
- * david hoskins' "hash without sine", float-bit-mixing in [0,1) with no
- * visible banding for smoothly-varying inputs (unlike fract(sin(dot(...))*K)).
- * 3D → 1D channel.
- */
-function hoskinsHash(p: gpu.Node<typeof gpu.d.vec3f>): gpu.Node<typeof gpu.d.f32> {
-    const a = fract(mul(p, f32(0.1031))).toVar('hoskA');
-    const yzx = vec3f(a.y, a.z, a.x);
-    const dotSum = dot(a, add(yzx, vec3f(f32(33.33), f32(33.33), f32(33.33))));
-    const b = add(a, vec3f(dotSum, dotSum, dotSum));
-    return fract(mul(add(b.x, b.y), b.z));
+/** far-plane billboard basis: expand a unit direction `dir` by the quad's
+ *  local plane offset (`aPos` in [-0.5,0.5]) along the camera's world
+ *  right/up, transform as a direction (w=0, camera-locked like the sky
+ *  sphere), and pin z=w so the body sits on the far plane. `fullSize` is
+ *  the full angular extent (2× the half-size). */
+function billboardFarPlaneVertex(
+    dir: gpu.Node<typeof gpu.d.vec3f>,
+    aPos: gpu.Node<typeof gpu.d.vec3f>,
+    fullSize: gpu.Node<typeof gpu.d.f32>,
+): gpu.Node<typeof gpu.d.vec4f> {
+    const view = cameraViewMatrix;
+    const col0 = view.element(u32(0)).toVar('bbCol0');
+    const col1 = view.element(u32(1)).toVar('bbCol1');
+    const col2 = view.element(u32(2)).toVar('bbCol2');
+    const right = vec3f(col0.x, col1.x, col2.x).toVar('bbRight');
+    const up = vec3f(col0.y, col1.y, col2.y).toVar('bbUp');
+
+    const offX = mul(aPos.x, fullSize).toVar('bbOffX');
+    const offY = mul(aPos.y, fullSize).toVar('bbOffY');
+    const cornerDir = add(dir, add(mul(right, offX), mul(up, offY))).toVar('bbCornerDir');
+    const viewDir = mul(cameraViewMatrix, vec4f(cornerDir, f32(0))).toVar('bbViewDir');
+    const clip = mul(cameraProjectionMatrix, vec4f(viewDir.xyz, f32(1))).toVar('bbClip');
+    return vec4f(clip.x, clip.y, clip.w, clip.w);
 }
 
 /**
@@ -286,9 +342,12 @@ function getSkyMaterial(): gpu.Material {
     const cfg = storage('env', EnvConfig, 'read').fields();
     const skyArr = storage('envSky', gpu.d.sizedArray(gpu.d.vec3f, SKY_VEC3_COUNT), 'read');
     const tNode = cfg.time;
-    const wallT = cfg.wallTime;
 
-    // -- vertex: pin sphere to far plane (background.ts trick) --
+    // ── vertex ──
+    // pin the sphere to the far plane (background trick), and compute every
+    // uniform-only sky scalar here (per-vertex, ~1k verts) so the fragment
+    // (millions of pixels) does none of it. sun/moon/stars are separate
+    // billboards now — this shader only paints the gradient + horizon wash.
     const pos = attribute('position', d.vec3f);
     const viewPos = mul(cameraViewMatrix, vec4f(pos, f32(0))).toVar('viewPos');
     const clipPos = mul(cameraProjectionMatrix, vec4f(viewPos.xyz, f32(1))).toVar('clipPos');
@@ -296,7 +355,8 @@ function getSkyMaterial(): gpu.Material {
 
     const dir = varying(normalize(pos), 'vDir');
 
-    // -- LUT sample (inline; see sampleSkyLut note) --
+    // LUT interp by time-of-day → current zenith/horizon/nadir colours.
+    // depends only on `time`, so it's flat across the sphere.
     const scaled = mul(tNode, f32(4)).toVar('lutScaled');
     const segF = floor(scaled).toVar('lutSegF');
     const fracT = sub(scaled, segF).toVar('lutFracT');
@@ -304,13 +364,39 @@ function getSkyMaterial(): gpu.Material {
     const segB = add(segA, u32(1)).mod(u32(SKY_STOPS)).toVar('lutSegB');
     const aBase = mul(segA, u32(SKY_VEC3_PER_STOP)).toVar('lutABase');
     const bBase = mul(segB, u32(SKY_VEC3_PER_STOP)).toVar('lutBBase');
+    const zenith = varying(mix(skyArr.element(aBase), skyArr.element(bBase), fracT), 'vZenith').setInterpolation('flat');
+    const horizon = varying(
+        mix(skyArr.element(add(aBase, u32(1))), skyArr.element(add(bBase, u32(1))), fracT),
+        'vHorizon',
+    ).setInterpolation('flat');
+    const nadir = varying(
+        mix(skyArr.element(add(aBase, u32(2))), skyArr.element(add(bBase, u32(2))), fracT),
+        'vNadir',
+    ).setInterpolation('flat');
 
-    const zenith = mix(skyArr.element(aBase), skyArr.element(bBase), fracT).toVar('zenith');
-    const horizon = mix(skyArr.element(add(aBase, u32(1))), skyArr.element(add(bBase, u32(1))), fracT).toVar('horizon');
-    const nadir = mix(skyArr.element(add(aBase, u32(2))), skyArr.element(add(bBase, u32(2))), fracT).toVar('nadir');
+    // sun direction (t=0.25 sunrise east, 0.5 noon up) + sunset atmospherics.
+    const TAU = f32(Math.PI * 2);
+    const sunAngle = mul(sub(tNode, f32(0.25)), TAU).toVar('sunAngle');
+    const sunDir = vec3f(cos(sunAngle), sin(sunAngle), f32(0)).toVar('sunDir');
+    const sunDirV = varying(sunDir, 'vSunDir').setInterpolation('flat');
 
-    // -- vertical gradient --
-    // y in [-1,1]; above horizon blend horizon→zenith, below blend horizon→nadir.
+    // sunset peaks when the sun sits right at the horizon; drives a redder,
+    // stronger, wider horizon wash and a dimmer rest-of-sky.
+    const sunsetNear = sub(f32(1), clamp(mul(abs(sunDir.y), f32(3.5)), f32(0), f32(1))).toVar('sunsetNear');
+    const sunAboveGate = smoothstep(f32(-0.12), f32(0.08), sunDir.y).toVar('sunAboveGate');
+    const sunsetFactor = mul(sunsetNear, sunAboveGate).toVar('sunsetFactor');
+
+    // single-term wash: tight warm halo around the sun that widens at dusk.
+    const glowPowV = varying(mix(f32(8), f32(5), sunsetFactor), 'vGlowPow').setInterpolation('flat');
+    const glowStrengthV = varying(mix(f32(0.4), f32(0.95), sunsetFactor), 'vGlowStrength').setInterpolation('flat');
+    const skyDimV = varying(sub(f32(1), mul(sunsetFactor, f32(0.35))), 'vSkyDim').setInterpolation('flat');
+    const sunTintBase = vec3f(f32(FOG_SUN_TINT[0]), f32(FOG_SUN_TINT[1]), f32(FOG_SUN_TINT[2]));
+    const sunTintDeep = vec3f(f32(SUNSET_DEEP_TINT[0]), f32(SUNSET_DEEP_TINT[1]), f32(SUNSET_DEEP_TINT[2]));
+    const sunTintV = varying(mix(sunTintBase, sunTintDeep, sunsetFactor), 'vSunTint').setInterpolation('flat');
+    const sunEnabledV = varying(cfg.sunEnabled.toF32(), 'vSunEnabled').setInterpolation('flat');
+    const enabledMaskV = varying(cfg.enabled.toF32(), 'vEnabledMask').setInterpolation('flat');
+
+    // ── fragment: vertical gradient + a single-term horizon sun-wash ──
     const y = dir.y;
     const above = step(f32(0), y).toVar('above');
     const tUp = smoothstep(f32(0), f32(1), clamp(abs(y), f32(0), f32(1))).toVar('tUp');
@@ -318,166 +404,14 @@ function getSkyMaterial(): gpu.Material {
     const skyBelow = mix(horizon, nadir, tUp).toVar('skyBelow');
     const baseSky = mix(skyBelow, skyAbove, above).toVar('baseSky');
 
-    // -- sun + moon directions (from envTime) --
-    // sunAngle = (t - 0.25) * 2π → t=0.25 sunrise east, t=0.5 noon up.
-    const TAU = f32(Math.PI * 2);
-    const sunAngle = mul(sub(tNode, f32(0.25)), TAU).toVar('sunAngle');
-    const sunDir = vec3f(cos(sunAngle), sin(sunAngle), f32(0)).toVar('sunDir');
-    const moonDir = vec3f(sub(f32(0), sunDir.x), sub(f32(0), sunDir.y), f32(0)).toVar('moonDir');
-
-    const cdotSun = dot(dir, sunDir).toVar('cdotSun');
-    const cdotMoon = dot(dir, moonDir).toVar('cdotMoon');
-
-    // -- night factor: how dark the sky is (sun below horizon) --
-    // sunDir.y = sin(sunAngle). > 0 when sun above horizon.
-    const nightFactor = clamp(mul(sub(f32(0.3), sunDir.y), f32(2)), f32(0), f32(1)).toVar('nightFactor');
-
-    // -- sun + moon as squares (L∞ test in the sun-local tangent plane) --
-    // sun orbits in the XY plane. tangent-along-orbit = perpendicular to
-    // sunDir in that plane: (-sin, cos, 0). cross-axis is world Z. project
-    // viewDir onto both axes, then test max(|u|,|v|) < HALF_SIZE.
-    // hemisphere mask (step on cdot) keeps the antipodal point from also
-    // lighting up, without it, dir=-sunDir would project to (0,0).
-    const sunTangent = vec3f(sub(f32(0), sin(sunAngle)), cos(sunAngle), f32(0)).toVar('sunTangent');
-    const worldZ = vec3f(f32(0), f32(0), f32(1));
-
-    const uSun = dot(dir, sunTangent).toVar('uSun');
-    const vSun = dot(dir, worldZ).toVar('vSun');
-    const dSun = max(abs(uSun), abs(vSun)).toVar('dSun');
-    const inFrontSun = step(f32(0), cdotSun).toVar('inFrontSun');
-    const sunDisc = mul(
-        sub(f32(1), smoothstep(f32(SUN_HALF_SIZE - SUN_FEATHER), f32(SUN_HALF_SIZE + SUN_FEATHER), dSun)),
-        inFrontSun,
-    ).toVar('sunDisc');
-    const sunColorNode = vec3f(f32(SUN_COLOR[0]), f32(SUN_COLOR[1]), f32(SUN_COLOR[2]));
-    const sunEnabled = cfg.sunEnabled.toF32().toVar('sunEnabled');
-    const sunContrib = mul(mul(sunColorNode, sunDisc), sunEnabled).toVar('sunContrib');
-
-    // moon-local axes: tangent flips sign because moonDir = -sunDir.
-    const moonTangent = vec3f(sin(sunAngle), sub(f32(0), cos(sunAngle)), f32(0)).toVar('moonTangent');
-    const uMoon = dot(dir, moonTangent).toVar('uMoon');
-    const vMoon = dot(dir, worldZ).toVar('vMoon');
-    const dMoon = max(abs(uMoon), abs(vMoon)).toVar('dMoon');
-    const inFrontMoon = step(f32(0), cdotMoon).toVar('inFrontMoon');
-    const moonDisc = mul(
-        sub(f32(1), smoothstep(f32(MOON_HALF_SIZE - MOON_FEATHER), f32(MOON_HALF_SIZE + MOON_FEATHER), dMoon)),
-        inFrontMoon,
-    ).toVar('moonDisc');
-    const moonColorNode = vec3f(f32(MOON_COLOR[0]), f32(MOON_COLOR[1]), f32(MOON_COLOR[2]));
-    const moonEnabled = cfg.moonEnabled.toF32().toVar('moonEnabled');
-    const moonContrib = mul(mul(mul(moonColorNode, moonDisc), nightFactor), moonEnabled).toVar('moonContrib');
-
-    // -- sunset dramatics --
-    // peaks when the sun is right at the horizon (sunrise / sunset); 0
-    // when sun is high or well below. drives a widened, redder warm tint
-    // and a dimmer rest-of-sky so the horizon glow stands out.
-    const sunsetNear = sub(f32(1), clamp(mul(abs(sunDir.y), f32(3.5)), f32(0), f32(1))).toVar('sunsetNear');
-    const sunAboveGate = smoothstep(f32(-0.12), f32(0.08), sunDir.y).toVar('sunAboveGate');
-    const sunsetFactor = mul(sunsetNear, sunAboveGate).toVar('sunsetFactor');
-
-    // -- horizon sun/moon tint (luanti's fog_sun_tint / fog_moon_tint) --
-    // mix toward tint where dir is near sun/moon and near horizon. during
-    // sunset the angular falloff widens (lower pow exponent) and the
-    // strength rises, so more of the sun-facing sky catches fire.
+    const cdotSun = clamp(dot(dir, sunDirV), f32(0), f32(1)).toVar('cdotSun');
     const horizonBand = sub(f32(1), clamp(mul(abs(y), f32(2.5)), f32(0), f32(1))).toVar('horizonBand');
-    // two-term angular falloff (standard real-time atmospheric trick):
-    //   - core: tight halo right around the sun (high pow exponent),
-    //           always present, brightens at dusk.
-    //   - wash: broad warm band reaching ~90-120° off the sun direction
-    //           (near-linear falloff), only fires during sunset.
-    // sum, clamped, gives a hot disc-adjacent glow blended into a
-    // wider rosy spread, instead of a single point-sourced gradient.
-    const cdotSunC = clamp(cdotSun, f32(0), f32(1)).toVar('cdotSunC');
-    const sunCorePow = mix(f32(8), f32(5), sunsetFactor).toVar('sunCorePow');
-    const sunWashPow = mix(f32(2), f32(0.9), sunsetFactor).toVar('sunWashPow');
-    const sunCoreStrength = mix(f32(0.45), f32(0.95), sunsetFactor).toVar('sunCoreStrength');
-    const sunWashStrength = mul(sunsetFactor, f32(0.45)).toVar('sunWashStrength');
-    const sunCore = mul(pow(cdotSunC, sunCorePow), sunCoreStrength).toVar('sunCore');
-    const sunWash = mul(pow(cdotSunC, sunWashPow), sunWashStrength).toVar('sunWash');
-    const sunFalloff = clamp(add(sunCore, sunWash), f32(0), f32(1)).toVar('sunFalloff');
-    const sunTintW = mul(mul(sunFalloff, horizonBand), sunEnabled).toVar('sunTintW');
-    const moonTintW = mul(
-        mul(mul(mul(pow(clamp(cdotMoon, f32(0), f32(1)), f32(3)), horizonBand), nightFactor), f32(0.25)),
-        moonEnabled,
-    ).toVar('moonTintW');
+    const glow = clamp(mul(mul(mul(pow(cdotSun, glowPowV), glowStrengthV), horizonBand), sunEnabledV), f32(0), f32(1)).toVar(
+        'sunGlow',
+    );
 
-    // warm tint shifts orange → deep red as the sun nears the horizon.
-    const sunTintBase = vec3f(f32(FOG_SUN_TINT[0]), f32(FOG_SUN_TINT[1]), f32(FOG_SUN_TINT[2]));
-    const sunTintDeep = vec3f(f32(SUNSET_DEEP_TINT[0]), f32(SUNSET_DEEP_TINT[1]), f32(SUNSET_DEEP_TINT[2]));
-    const sunTint = mix(sunTintBase, sunTintDeep, sunsetFactor).toVar('sunTint');
-    const moonTint = vec3f(f32(FOG_MOON_TINT[0]), f32(FOG_MOON_TINT[1]), f32(FOG_MOON_TINT[2]));
-
-    // darken the ambient sky during sunset. multiplying baseSky before
-    // the tint mix preserves full-brightness orange where sunTintW≈1, so
-    // only the un-tinted directions go dim, exactly the contrast we want.
-    const skyDim = sub(f32(1), mul(sunsetFactor, f32(0.35))).toVar('skyDim');
-    const baseSkyDimmed = mul(baseSky, skyDim).toVar('baseSkyDimmed');
-
-    const tintedSky = mix(mix(baseSkyDimmed, sunTint, sunTintW), moonTint, moonTintW).toVar('tintedSky');
-
-    // -- stars: round dots scattered in 3D dir space --
-    // quantize `dir` into cells, then test the fragment's distance to its
-    // cell center (in cell-unit space). this gives uniformly round dots
-    // independent of how the sphere chord cuts the cube, the earlier
-    // "cell membership" test produced irregular blob shapes because the
-    // sphere intersected each cube in a different-shaped patch.
-    const STAR_CELLS = f32(160);
-    const starScaled = mul(dir, STAR_CELLS).toVar('starScaled');
-    const starCell = floor(starScaled).toVar('starCell');
-    const cellOffset = sub(starScaled, add(starCell, vec3f(f32(0.5), f32(0.5), f32(0.5)))).toVar('cellOffset');
-
-    const SALT_B = vec3f(f32(11.7), f32(3.21), f32(0.91));
-    const SALT_C = vec3f(f32(5.37), f32(17.91), f32(2.13));
-    const SALT_J = vec3f(f32(2.71), f32(9.18), f32(4.66));
-    const h1 = hoskinsHash(starCell).toVar('h1');
-    const h5 = hoskinsHash(add(starCell, SALT_B)).toVar('h5');
-    const hPhase = hoskinsHash(add(starCell, SALT_C)).toVar('hPhase');
-    const hSize = hoskinsHash(add(starCell, SALT_J)).toVar('hSize');
-
-    // gate by cell hash + density.
-    const starThreshold = sub(f32(1), cfg.starsDensity).toVar('starThreshold');
-    const starOn = step(starThreshold, h1).toVar('starOn');
-
-    // small per-star radius variation so the field has size diversity.
-    const starRadius = add(f32(0.18), mul(hSize, f32(0.18))).toVar('starRadius'); // [0.18, 0.36] cell-units
-    const distToCenter = sqrt(dot(cellOffset, cellOffset)).toVar('distToCenter');
-    const onStar = sub(f32(1), smoothstep(sub(starRadius, f32(0.05)), starRadius, distToCenter)).toVar('onStar');
-
-    // per-star magnitude spread so the field doesn't look uniform.
-    const starBrightness = add(f32(0.5), mul(h5, f32(0.5))).toVar('starBrightness');
-
-    // brightness pulse, per-star phase, ~3 sec full cycle. wide band
-    // (0.25-1.0) so the rise/fall reads at a glance.
-    const TAU2 = f32(Math.PI * 2);
-    const twinkleSpeed = f32(2.2);
-    const twinklePhase = mul(hPhase, TAU2).toVar('twinklePhase');
-    const twinkle = add(f32(0.625), mul(f32(0.375), sin(add(mul(wallT, twinkleSpeed), twinklePhase)))).toVar('twinkle');
-
-    // mask stars behind the sun and moon discs so the celestial bodies
-    // read as solid. sunDisc/moonDisc are smoothstepped, so this also
-    // gives clean anti-aliased silhouettes.
-    const occlusion = mul(sub(f32(1), sunDisc), sub(f32(1), moonDisc)).toVar('occlusion');
-
-    const starsEnabled = cfg.starsEnabled.toF32().toVar('starsEnabled');
-    // hide stars below the horizon, they read as bugs poking through the
-    // ground plane when the camera tilts down. narrow smoothstep band
-    // around y=0 keeps the cutoff from aliasing along the horizon line.
-    const aboveHorizon = smoothstep(f32(0), f32(0.04), y).toVar('starAboveHorizon');
-    const starIntensity = mul(
-        mul(mul(mul(mul(mul(mul(starOn, onStar), starBrightness), twinkle), nightFactor), occlusion), starsEnabled),
-        aboveHorizon,
-    ).toVar('starIntensity');
-    const starColorNode = vec3f(f32(STAR_COLOR[0]), f32(STAR_COLOR[1]), f32(STAR_COLOR[2]));
-    const stars = mul(starColorNode, starIntensity).toVar('stars');
-
-    const colorWithCelestials = add(add(add(tintedSky, sunContrib), moonContrib), stars).toVar('colorWithCelestials');
-
-    // -- master enabled gate: when disabled, drop to black so a dedicated
-    // clear color shows through (set pipeline-side). cheaper than tearing
-    // the mesh out of the scene.
-    const enabledMask = cfg.enabled.toF32().toVar('enabledMask');
-    const final = mul(colorWithCelestials, enabledMask).toVar('finalRgb');
-
+    const tintedSky = mix(mul(baseSky, skyDimV), sunTintV, glow).toVar('tintedSky');
+    const final = mul(tintedSky, enabledMaskV).toVar('finalRgb');
     const fragment = vec4f(final, f32(1)).toVar('fragment');
 
     _skyMaterial = new gpu.Material({
@@ -489,6 +423,209 @@ function getSkyMaterial(): gpu.Material {
         depthWrite: false,
     });
     return _skyMaterial;
+}
+
+/* ── sun + moon (instanced billboards) ────────────────────────────── */
+
+/**
+ * engine-global sun/moon material: 2 camera-facing square billboards on
+ * the far sphere. `kind` (0 sun, 1 moon) selects direction, enable and
+ * day/night fade — all derived from `EnvConfig.time` in-shader, so the
+ * instance buffer is static. lazy-cached like `getSkyMaterial`.
+ */
+let _skyBodyMaterial: gpu.Material | null = null;
+
+function getSkyBodyMaterial(): gpu.Material {
+    if (_skyBodyMaterial) return _skyBodyMaterial;
+
+    const cfg = storage('env', EnvConfig, 'read').fields();
+    const bodies = storage('skyBody', d.array(SkyBodyInstance), 'read');
+    const inst = bodies.element(instanceIndex);
+    const color = inst.field('color').toVar('sbColor');
+    const kind = inst.field('kind').toVar('sbKind'); // 0 sun, 1 moon
+    const halfSize = inst.field('halfSize').toVar('sbHalf');
+
+    // sun/moon directions from time; select by kind (0/1) via mix.
+    const TAU = f32(Math.PI * 2);
+    const sunAngle = mul(sub(cfg.time, f32(0.25)), TAU).toVar('sbSunAngle');
+    const sunDir = vec3f(cos(sunAngle), sin(sunAngle), f32(0)).toVar('sbSunDir');
+    const dir = mix(sunDir, mul(sunDir, f32(-1)), kind).toVar('sbDir');
+
+    // day/night fade: sun visible while up, moon while the sky is dark.
+    const nightFactor = clamp(mul(sub(f32(0.3), sunDir.y), f32(2)), f32(0), f32(1)).toVar('sbNight');
+    const aboveHorizon = smoothstep(f32(-0.05), f32(0.05), dir.y).toVar('sbAbove');
+    const sunAlpha = aboveHorizon.toVar('sbSunAlpha');
+    const moonAlpha = mul(aboveHorizon, nightFactor).toVar('sbMoonAlpha');
+    const enabledF = mix(cfg.sunEnabled.toF32(), cfg.moonEnabled.toF32(), kind).toVar('sbEnabled');
+    const alpha = mul(mul(mix(sunAlpha, moonAlpha, kind), enabledF), cfg.enabled.toF32()).toVar('sbAlpha');
+
+    const aPos = attribute('position', d.vec3f);
+    const vertex = billboardFarPlaneVertex(dir, aPos, mul(halfSize, f32(2)));
+
+    const vColor = varying(color, 'sbColorV').setInterpolation('flat');
+    const vAlpha = varying(alpha, 'sbAlphaV').setInterpolation('flat');
+    const vUv = varying(attribute('uv', d.vec2f), 'sbUv');
+
+    // feathered square: L∞ distance from centre in [-1,1] quad space.
+    const c = sub(mul(vUv, f32(2)), vec2f(f32(1), f32(1))).toVar('sbC');
+    const dSquare = max(abs(c.x), abs(c.y)).toVar('sbDSquare');
+    const edge = sub(f32(1), smoothstep(sub(f32(1), f32(BODY_EDGE_FEATHER)), f32(1), dSquare)).toVar('sbEdge');
+    const fragment = vec4f(vColor, mul(edge, vAlpha)).toVar('sbFragment');
+
+    _skyBodyMaterial = new gpu.Material({
+        name: 'sky-body',
+        vertex,
+        fragment,
+        cullMode: 'none',
+        // pinned to the far plane (depth 1.0); `less-equal` lets it draw
+        // against the cleared sky while nearer terrain still occludes it.
+        depthTest: true,
+        depthCompare: 'less-equal',
+        depthWrite: false,
+        transparent: true,
+    });
+    return _skyBodyMaterial;
+}
+
+/** 2-instance sun/moon buffer, baked once (colour + angular size per body).
+ *  direction/fade are derived in-shader from time. */
+function bakeSkyBodyInstances(): Float32Array {
+    const stride = gpu.layoutStrideOf(SkyBodyInstance) / 4;
+    const out = new Float32Array(2 * stride);
+    gpu.packTo(SkyBodyInstance, out, 0, { color: SUN_COLOR, kind: 0, halfSize: SUN_HALF_SIZE });
+    gpu.packTo(SkyBodyInstance, out, gpu.layoutStrideOf(SkyBodyInstance), {
+        color: MOON_COLOR,
+        kind: 1,
+        halfSize: MOON_HALF_SIZE,
+    });
+    return out;
+}
+
+function createSkyBodyMesh(res: EnvironmentResources): { mesh: gpu.Mesh; buffer: gpu.GpuBuffer } {
+    const geometry = gpu.createPlaneGeometry(1, 1);
+    const buffer = new gpu.GpuBuffer(d.array(SkyBodyInstance), { data: bakeSkyBodyInstances(), usage: 'storage' });
+    geometry.setBuffer('skyBody', buffer);
+    geometry.setBuffer('env', res.envConfigBuffer);
+
+    const mesh = new gpu.Mesh(geometry, getSkyBodyMaterial());
+    mesh.name = 'sky-bodies';
+    mesh.frustumCulled = false;
+    mesh.count = 2;
+    mesh.renderOrder = -998;
+    return { mesh, buffer };
+}
+
+/* ── stars (instanced billboards) ─────────────────────────────────── */
+
+/**
+ * engine-global star material: `STAR_COUNT` camera-facing round-dot
+ * billboards on the far sphere. per-star data (dir/size/brightness/phase/
+ * gate) is static; twinkle, night fade and the live density gate read
+ * `EnvConfig` in-shader, and invisible stars collapse to zero size so
+ * daytime costs no fragments. lazy-cached like the others.
+ */
+let _starMaterial: gpu.Material | null = null;
+
+function getStarMaterial(): gpu.Material {
+    if (_starMaterial) return _starMaterial;
+
+    const cfg = storage('env', EnvConfig, 'read').fields();
+    const stars = storage('star', d.array(StarInstance), 'read');
+    const inst = stars.element(instanceIndex);
+    const dir = inst.field('dir').toVar('stDir');
+    const baseSize = inst.field('size').toVar('stSize');
+    const brightness = inst.field('brightness').toVar('stBright');
+    const phase = inst.field('phase').toVar('stPhase');
+    const gate = inst.field('gate').toVar('stGate');
+
+    const TAU = f32(Math.PI * 2);
+    const sunAngle = mul(sub(cfg.time, f32(0.25)), TAU).toVar('stSunAngle');
+    const sunY = sin(sunAngle).toVar('stSunY');
+    const nightFactor = clamp(mul(sub(f32(0.3), sunY), f32(2)), f32(0), f32(1)).toVar('stNight');
+    const aboveHorizon = smoothstep(f32(0), f32(0.04), dir.y).toVar('stAbove');
+    // live density: a star shows when its baked gate falls under the config.
+    const densityVis = step(gate, cfg.starsDensity).toVar('stDensity');
+    const starsOn = mul(cfg.starsEnabled.toF32(), cfg.enabled.toF32()).toVar('stOn');
+    const vis = mul(mul(mul(nightFactor, aboveHorizon), densityVis), starsOn).toVar('stVis');
+
+    const twinkle = add(f32(0.625), mul(f32(0.375), sin(add(mul(cfg.wallTime, f32(STAR_TWINKLE_SPEED)), mul(phase, TAU))))).toVar(
+        'stTwinkle',
+    );
+    const brightnessOut = mul(mul(brightness, twinkle), vis).toVar('stBrightOut');
+
+    // collapse invisible stars to a degenerate quad → zero fragments.
+    const effSize = mul(baseSize, step(f32(0.001), vis)).toVar('stEffSize');
+
+    const aPos = attribute('position', d.vec3f);
+    const vertex = billboardFarPlaneVertex(dir, aPos, mul(effSize, f32(2)));
+
+    const vBright = varying(brightnessOut, 'stBrightV').setInterpolation('flat');
+    const vUv = varying(attribute('uv', d.vec2f), 'stUv');
+
+    // round dot: radial falloff from the quad centre.
+    const c = sub(mul(vUv, f32(2)), vec2f(f32(1), f32(1))).toVar('stC');
+    const r = sqrt(dot(c, c)).toVar('stR');
+    const dot2 = sub(f32(1), smoothstep(sub(f32(STAR_DOT_RADIUS), f32(STAR_DOT_FEATHER)), f32(STAR_DOT_RADIUS), r)).toVar(
+        'stDot',
+    );
+    const starColor = vec3f(f32(STAR_COLOR[0]), f32(STAR_COLOR[1]), f32(STAR_COLOR[2]));
+    const fragment = vec4f(starColor, mul(dot2, vBright)).toVar('stFragment');
+
+    _starMaterial = new gpu.Material({
+        name: 'star-field',
+        vertex,
+        fragment,
+        cullMode: 'none',
+        // far-plane pinned; `less-equal` draws against the cleared sky and
+        // lets terrain occlude stars near the horizon.
+        depthTest: true,
+        depthCompare: 'less-equal',
+        depthWrite: false,
+        transparent: true,
+    });
+    return _starMaterial;
+}
+
+/** deterministic hash in [0,1) from an integer index + salt. */
+function starHash(i: number, salt: number): number {
+    let h = (Math.imul(i + 1, 374761393) + Math.imul(salt, 668265263)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177) | 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** bake `STAR_COUNT` stars: Fibonacci-sphere directions for even spread,
+ *  hashed size/brightness/phase/gate. baked once, identical every room. */
+function bakeStarInstances(): Float32Array {
+    const stride = gpu.layoutStrideOf(StarInstance);
+    const out = new Float32Array((STAR_COUNT * stride) / 4);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < STAR_COUNT; i++) {
+        const yUp = 1 - ((i + 0.5) / STAR_COUNT) * 2; // [-1, 1]
+        const radius = Math.sqrt(Math.max(0, 1 - yUp * yUp));
+        const theta = i * golden;
+        gpu.packTo(StarInstance, out, i * stride, {
+            dir: [Math.cos(theta) * radius, yUp, Math.sin(theta) * radius],
+            size: STAR_MIN_SIZE + starHash(i, 11) * STAR_SIZE_SPREAD,
+            brightness: 0.5 + starHash(i, 23) * 0.5,
+            phase: starHash(i, 37),
+            gate: starHash(i, 53),
+        });
+    }
+    return out;
+}
+
+function createStarMesh(res: EnvironmentResources): { mesh: gpu.Mesh; buffer: gpu.GpuBuffer } {
+    const geometry = gpu.createPlaneGeometry(1, 1);
+    const buffer = new gpu.GpuBuffer(d.array(StarInstance), { data: bakeStarInstances(), usage: 'storage' });
+    geometry.setBuffer('star', buffer);
+    geometry.setBuffer('env', res.envConfigBuffer);
+
+    const mesh = new gpu.Mesh(geometry, getStarMaterial());
+    mesh.name = 'stars';
+    mesh.frustumCulled = false;
+    mesh.count = STAR_COUNT;
+    mesh.renderOrder = -999;
+    return { mesh, buffer };
 }
 
 /**
@@ -518,6 +655,10 @@ export function init(
 ): Environment {
     const skyMesh = createSkyMesh(resources);
     scene.add(skyMesh);
+    const stars = createStarMesh(resources);
+    scene.add(stars.mesh);
+    const sunMoon = createSkyBodyMesh(resources);
+    scene.add(sunMoon.mesh);
     const clouds = CloudVisuals.init(scene, cloudResources);
 
     // per-room CPU shadow, every script-driven mutation lands here.
@@ -531,6 +672,8 @@ export function init(
         time,
         config: cloneConfig(initial),
         skyMesh,
+        sunMoonMesh: sunMoon.mesh,
+        starMesh: stars.mesh,
         clouds,
         _packed,
         _skyPacked,
@@ -540,13 +683,20 @@ export function init(
         _skyDirty: true,
         _resources: resources,
         _cloudResources: cloudResources,
+        _skyBodyBuffer: sunMoon.buffer,
+        _starBuffer: stars.buffer,
     };
 }
 
 export function dispose(env: Environment): void {
     env.skyMesh.removeFromParent();
-    // sky material is engine-global (cached), do NOT dispose; geometry
-    // is per-room and disposed transitively when the mesh drops.
+    env.sunMoonMesh.removeFromParent();
+    env.starMesh.removeFromParent();
+    // sky/body/star materials are engine-global (cached), do NOT dispose;
+    // geometry is per-room and drops with the mesh, but the instance
+    // buffers are held explicitly, so release them here.
+    env._skyBodyBuffer.dispose();
+    env._starBuffer.dispose();
     CloudVisuals.dispose(env.clouds);
     // resources are engine-global; not disposed here.
 }
@@ -635,6 +785,8 @@ export function applyConfig(env: Environment, input: EnvironmentConfig, presets:
     // from the buffer too. mesh visibility is per-room state on the
     // per-room sky/cloud meshes, so it's safe to flip immediately.
     env.skyMesh.visible = cfg.enabled;
+    env.sunMoonMesh.visible = cfg.enabled;
+    env.starMesh.visible = cfg.enabled;
     env.clouds.mesh.visible = cfg.enabled;
 
     // preserve current time + wallTime through the repack, they live in
