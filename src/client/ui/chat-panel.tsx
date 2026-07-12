@@ -104,6 +104,16 @@ function useChatLines(chat: ChatClient | null): ChatLine[] {
     return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+/** whether chat is enabled for the active room (`chat.setEnabled(ctx, …)`).
+ *  `ClientChat.setEnabled` notifies the same subscribers the line buffer uses,
+ *  so this re-renders on toggle. Shared by `ChatPanel` and the play-ui openers. */
+export function useChatEnabled(): boolean {
+    const chat = useRoom((r) => r.chat);
+    const subscribe = useCallback((cb: () => void) => (chat ? ClientChat.subscribe(chat, cb) : () => {}), [chat]);
+    const getSnapshot = useCallback(() => chat?.enabled ?? true, [chat]);
+    return useSyncExternalStore(subscribe, getSnapshot, () => true);
+}
+
 function lineColor(kind: ChatLine['kind']): string {
     if (kind === 'error') return 'text-red-300';
     if (kind === 'system') return 'text-yellow-200';
@@ -216,6 +226,7 @@ export function ChatPanel() {
     const playMode = useRoom((r) => r.playerMode) === 'play';
     const touchUi = useIsTouch() && playMode;
     const keyboardInset = useKeyboardInset(touchUi && isOpen);
+    const enabled = useChatEnabled();
 
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -430,6 +441,9 @@ export function ChatPanel() {
         : isOpen
           ? { position: 'fixed', left: 0, right: 0, bottom: keyboardInset, padding: '0 8px 8px', zIndex: 450 }
           : {};
+
+    // chat disabled for this room — render nothing (no log, no touch button).
+    if (!enabled) return null;
 
     return (
         <>

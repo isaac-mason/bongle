@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ChatPanel, useChatPanel } from './chat-panel';
+import { ChatPanel, useChatEnabled, useChatPanel } from './chat-panel';
 import { useClient } from './client-store';
 import { Viewport } from './viewport';
 
@@ -19,6 +19,9 @@ function isInputFocused(): boolean {
 function PlayUI() {
     const debugOpen = useClient((s) => s.debugOpen);
     const debugTab = useClient((s) => s.debugTab);
+    // apps embedding the engine as a display surface (avatar-card/viewer) call
+    // `chat.setEnabled(ctx, false)`; drop the panel and its keyboard openers.
+    const chatEnabled = useChatEnabled();
 
     // `t` / `Enter` open chat (no seed); `/` opens chat seeded with a slash so
     // the user can immediately type a command. mirrors the edit-ui handler but
@@ -33,19 +36,19 @@ function PlayUI() {
                 useClient.getState().toggleDebugOpen();
                 return;
             }
-            if ((e.key === '/' || e.key === 't' || e.key === 'Enter') && !useChatPanel.getState().isOpen) {
+            if (chatEnabled && (e.key === '/' || e.key === 't' || e.key === 'Enter') && !useChatPanel.getState().isOpen) {
                 e.preventDefault();
                 useChatPanel.getState().open({ seed: e.key === '/' ? '/' : '' });
             }
         }
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, []);
+    }, [chatEnabled]);
 
     return (
         <div className="fixed inset-0 flex flex-col">
             <Viewport />
-            <ChatPanel />
+            {chatEnabled && <ChatPanel />}
             {debugOpen && (
                 <Suspense fallback={null}>
                     <DebugPanel tab={debugTab} />

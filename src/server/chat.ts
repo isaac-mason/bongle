@@ -39,17 +39,29 @@ export type ChatInputEntry = {
 };
 
 export type ChatServer = {
+    /** slash-command specs + their local listeners for this room. */
     commands: ChatCommands.ChatCommands;
+    /** false silences this room: `tick` discards both queues unparsed, so no
+     *  input is handled and nothing is broadcast. toggled by `setEnabled`. */
+    enabled: boolean;
+    /** inbound `chat_input` lines queued by the network layer; drained by `tick`. */
     inbox: ChatInputEntry[];
+    /** lines staged for broadcast; drained by `tick` into `chat_broadcast`. */
     outbox: ChatBroadcastMsg[];
 };
 
 export function init(): ChatServer {
     return {
         commands: ChatCommands.init(),
+        enabled: true,
         inbox: [],
         outbox: [],
     };
+}
+
+/** enable or disable chat for this room. */
+export function setEnabled(chat: ChatServer, enabled: boolean): void {
+    chat.enabled = enabled;
 }
 
 /** queue an inbound `chat_input` line for processing on the next tick. */
@@ -73,6 +85,14 @@ export function broadcast(chat: ChatServer, msg: ChatBroadcastMsg): void {
  * called once per server frame per room from the room tick loop.
  */
 export function tick(chat: ChatServer, net: ServerNet, rooms: Rooms, room: Room, clients: Clients): void {
+    // silenced room: discard both queues unprocessed, so nothing broadcasts
+    // and neither grows without bound.
+    if (!chat.enabled) {
+        chat.inbox.length = 0;
+        chat.outbox.length = 0;
+        return;
+    }
+
     for (let i = 0; i < chat.inbox.length; i++) {
         const entry = chat.inbox[i]!;
         processInputEntry(chat, entry, clients);

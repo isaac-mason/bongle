@@ -31,9 +31,18 @@ export type MessageHandler = (msg: ChatBroadcastMsg) => void;
 const MAX_LINES = 100;
 
 export type ChatClient = {
+    /** false hides this room's chat panel; the line buffer and transport keep
+     *  running, so only the UI is gated. toggled by `setEnabled`. */
+    enabled: boolean;
+    /** slash-command specs + their local listeners for this room. */
     commands: ChatCommands.ChatCommands;
+    /** displayable line buffer, capped at `MAX_LINES`. replaced (never mutated
+     *  in place) on append so `useSyncExternalStore` sees a fresh snapshot. */
     lines: ChatLine[];
+    /** UI re-render callbacks, fired on any change to `lines`, `enabled`, or
+     *  the command list. */
     subscribers: Set<() => void>;
+    /** script listeners for inbound plain chat (`chat.onMessage`). */
     messageListeners: Set<MessageHandler>;
     /** inbound `chat_broadcast` payloads queued by the network layer;
      *  drained by `tick` into `lines` + `messageListeners`. */
@@ -46,6 +55,7 @@ export type ChatClient = {
 export function init(): ChatClient {
     const chat: ChatClient = {
         commands: ChatCommands.init(),
+        enabled: true,
         lines: [],
         subscribers: new Set(),
         messageListeners: new Set(),
@@ -80,6 +90,14 @@ function registerBuiltins(chat: ChatClient): void {
 export function subscribe(chat: ChatClient, fn: () => void): () => void {
     chat.subscribers.add(fn);
     return () => chat.subscribers.delete(fn);
+}
+
+/** show or hide this room's chat panel. notifies subscribers so the panel
+ *  re-renders — they snapshot `enabled` alongside `lines`. */
+export function setEnabled(chat: ChatClient, enabled: boolean): void {
+    if (chat.enabled === enabled) return;
+    chat.enabled = enabled;
+    notify(chat);
 }
 
 function notify(chat: ChatClient): void {

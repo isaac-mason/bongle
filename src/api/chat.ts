@@ -140,6 +140,19 @@ export function message(ctx: ScriptContext, text: string): void {
     }
 }
 
+/**
+ * enable or disable chat for the calling script's room. state lives on the
+ * room's chat (per-room, not global), so call it from a script with ctx. on the
+ * client it hides the chat UI; on the server it stops chat propagation (inbound
+ * lines and outbound broadcasts are dropped). a shared script hits both sides.
+ * default is enabled; apps that embed the engine as a pure display surface
+ * (avatar-card/viewer) call `chat.setEnabled(ctx, false)`.
+ */
+export function setEnabled(ctx: ScriptContext, enabled: boolean): void {
+    if (env.client && ctx.client?.room) ClientChat.setEnabled(ctx.client.room.chat, enabled);
+    if (env.server && ctx.server?.room) ServerChat.setEnabled(ctx.server.room.chat, enabled);
+}
+
 /** define a reusable arg type (e.g. an `item` resolver). */
 export function argType<T>(t: ArgType<T>): ArgType<T> {
     return ChatCommands.defineArgType(t);
