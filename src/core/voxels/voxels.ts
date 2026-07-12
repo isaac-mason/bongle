@@ -530,17 +530,19 @@ export function setChunkBlock(
         newStateId,
     });
 
-    if (flags === SetBlockFlags.BULK) {
-        // whole-chunk relight at tick end (scoped bake over the touched set).
-        auth.changes.light.chunks.add(chunk);
-    } else if (auth.floodFillLighting.enabled) {
-        auth.changes.light.blocks.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
-    } else {
-        // flood-fill disabled: inline flat sky-seed + block emission.
+    if (!auth.floodFillLighting.enabled) {
+        // flood-fill disabled (flat / fullbright): inline sky-seed + block
+        // emission, no propagation — for BULK and DEFAULT alike. must NOT queue
+        // a relight; flushPendingLight does no propagation in this mode.
         const emission = registry.lightEmission[newStateId] ?? 0;
         const sky = auth.floodFillLighting.minLevel & 0xf;
         setLight(chunk, idx, (sky << 12) | (emission & 0xfff));
         markChunkLightDirty(voxels, chunk);
+    } else if (flags === SetBlockFlags.BULK) {
+        // whole-chunk relight at tick end (scoped bake over the touched set).
+        auth.changes.light.chunks.add(chunk);
+    } else {
+        auth.changes.light.blocks.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
     }
 
     chunk.compressedSnapshot = null;
@@ -555,9 +557,9 @@ export function setChunkBlock(
 /**
  * reconcile a chunk after tier-1 raw writes into `chunkData(chunk)`: rescans
  * nonAir/solid counts from the data + palette, marks the chunk mesh-dirty and
- * schedules a whole-chunk relight (staleLightChunks). No ops, no hooks — the
- * raw-write path trades those away for speed. no-op past the rescan when
- * `voxels.authority` is null.
+ * schedules its light (a tick-end whole-chunk relight, or an inline flat seed
+ * when flood-fill is disabled). No ops, no hooks — the raw-write path trades
+ * those away for speed. no-op past the rescan when `voxels.authority` is null.
  */
 export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
     const registry = voxels.registry;
@@ -581,7 +583,20 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
 
     const auth = voxels.authority;
     if (!auth) return;
-    auth.changes.light.chunks.add(chunk);
+    if (auth.floodFillLighting.enabled) {
+        auth.changes.light.chunks.add(chunk);
+    } else {
+        // flood-fill disabled (flat / fullbright): the raw writes bypassed inline
+        // seeding, so flat-seed the chunk here (sky base + per-cell emission).
+        const skyPacked = (auth.floodFillLighting.minLevel & 0xf) << 12;
+        chunk.light.fill(skyPacked);
+        const emissionTable = registry.lightEmission;
+        for (let i = 0; i < data.length; i++) {
+            const emission = emissionTable[palette[data[i]!]!] ?? 0;
+            if (emission > 0) setLight(chunk, i, skyPacked | (emission & 0xfff));
+        }
+        markChunkLightDirty(voxels, chunk);
+    }
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
 }

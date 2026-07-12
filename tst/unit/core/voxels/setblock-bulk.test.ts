@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
 import { CullType, MaterialType } from '../../../../src/core/voxels/blocks';
-import { flushPendingLight, propagateAllLight } from '../../../../src/core/voxels/light';
+import { flushPendingLight, getBlue, getGreen, getRed, getSky, propagateAllLight } from '../../../../src/core/voxels/light';
 import { buildTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
 import type { Voxels } from '../../../../src/core/voxels/voxels';
 import {
@@ -110,5 +110,44 @@ describe('BULK light routing', () => {
         flushPendingLight(v);
 
         expectEqual(v, reference);
+    });
+});
+
+// with flood-fill disabled (flat / fullbright mode), no propagation runs —
+// flushPendingLight drops the relight queues. BULK writes and tier-1
+// invalidateChunk must therefore inline-seed (sky + emission), NOT queue a
+// relight that gets dropped (which would leave emitters dark).
+describe('BULK / tier-1 light with flood-fill disabled', () => {
+    it('BULK write inline-seeds sky + emission instead of queueing a dropped relight', () => {
+        const reg = makeRegistry();
+        const v = makeVoxels(reg);
+        v.authority!.floodFillLighting.enabled = false; // flat mode, minLevel 15
+
+        setBlock(v, 5, 5, 5, 'lamp', SetBlockFlags.BULK);
+        expect(v.authority!.changes.light.chunks.size).toBe(0); // NOT queued
+        flushPendingLight(v);
+
+        const packed = v.chunks.get('0,0,0')!.light[voxelIndex(5, 5, 5)]!;
+        expect(getSky(packed)).toBe(15); // flat sky
+        expect([getRed(packed), getGreen(packed), getBlue(packed)]).toEqual([15, 10, 4]); // lamp emission
+    });
+
+    it('tier-1 invalidateChunk flat-seeds the chunk (sky + emitter emission)', () => {
+        const reg = makeRegistry();
+        const v = makeVoxels(reg);
+        v.authority!.floodFillLighting.enabled = false;
+
+        const chunk = ensureChunk(v, 0, 0, 0);
+        const lamp = ensureChunkPaletteSlot(chunk, 'lamp', v.registry);
+        const stone = ensureChunkPaletteSlot(chunk, 'stone', v.registry);
+        chunkData(chunk)[voxelIndex(3, 3, 3)] = lamp;
+        chunkData(chunk)[voxelIndex(1, 1, 1)] = stone;
+        invalidateChunk(v, chunk);
+
+        expect(v.authority!.changes.light.chunks.size).toBe(0); // not queued
+        const lampCell = chunk.light[voxelIndex(3, 3, 3)]!;
+        expect([getSky(lampCell), getRed(lampCell)]).toEqual([15, 15]); // sky + emission
+        const stoneCell = chunk.light[voxelIndex(1, 1, 1)]!;
+        expect([getSky(stoneCell), getRed(stoneCell)]).toEqual([15, 0]); // flat sky, no emission
     });
 });
