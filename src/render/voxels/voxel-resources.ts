@@ -2287,7 +2287,13 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
     const packer = voxelResources.arenas.packer;
     const recordCount = packer.chunks.length;
     const out: ComputeDispatch[] = [];
-    if (recordCount === 0) return out;
+    // The full chain runs even when the arena is empty (recordCount 0, e.g. right
+    // after a room swap cleared it). The record-scaled dispatches (cull, emit,
+    // sort expand) become zero-workgroup no-ops, but `finalize` and the gated
+    // sort's `prep` still run and write the draw instanceCounts to 0 — so the
+    // previous room's counts + visibleQuads can't keep drawing stale quads. The
+    // draw counts are thus written fresh every frame by construction; "render
+    // nothing" costs only a few single-thread dispatches.
     const tables = voxelResources.arenas.tables;
     const passRender = voxelResources.passRender;
 
