@@ -56,7 +56,7 @@ function placeCubes(axis: EdgeAxis, mask: number): { voxels: Voxels; registry: R
             y = edge.gy + b;
             z = edge.gz;
         }
-        setChunkBlock(chunk, x, y, z, 'stone', registry);
+        setChunkBlock(voxels, chunk, x, y, z, 'stone');
     }
 
     return { voxels, registry };
@@ -132,10 +132,10 @@ describe('isCubeEdgeActive — non-cube neighbours', () => {
 
         // axis=2 (edge along Z) at corner (4, 4, 4); cells in XY plane.
         // c11 = (4, 4, 4) → cube. c00, c01, c10 → slabs.
-        setChunkBlock(chunk, 4, 4, 4, 'stone', registry);
-        setChunkBlock(chunk, 3, 3, 4, 'slab', registry);
-        setChunkBlock(chunk, 3, 4, 4, 'slab', registry);
-        setChunkBlock(chunk, 4, 3, 4, 'slab', registry);
+        setChunkBlock(voxels, chunk, 4, 4, 4, 'stone');
+        setChunkBlock(voxels, chunk, 3, 3, 4, 'slab');
+        setChunkBlock(voxels, chunk, 3, 4, 4, 'slab');
+        setChunkBlock(voxels, chunk, 4, 3, 4, 'slab');
 
         expect(isCubeEdgeActive(voxels, registry, 2, 4, 4, 4)).toBe(true);
     });
@@ -151,8 +151,8 @@ describe('isCubeEdgeActive — non-cube neighbours', () => {
 
         // two solid cubes face-shared (would be inactive); replace one with glass.
         // count drops to 1 → active.
-        setChunkBlock(chunk, 4, 4, 4, 'stone', registry); // c11
-        setChunkBlock(chunk, 3, 4, 4, 'glass', registry); // c01 (axis=2)
+        setChunkBlock(voxels, chunk, 4, 4, 4, 'stone'); // c11
+        setChunkBlock(voxels, chunk, 3, 4, 4, 'glass'); // c01 (axis=2)
 
         expect(isCubeEdgeActive(voxels, registry, 2, 4, 4, 4)).toBe(true);
     });

@@ -108,7 +108,7 @@ function makeChunkWithOneBlock(reg: ReturnType<typeof buildSmallRegistry>) {
     const voxels = createVoxels(reg);
     const chunk = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', chunk);
-    setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
+    setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
     return { voxels, chunk };
 }
 
@@ -191,7 +191,7 @@ describe('mesh-dispatcher', () => {
 
             // 3. mutate (version bumps) → set re-sends the chunk; the new mesh
             //    reflects the added block (two non-adjacent blocks → 12 faces).
-            setChunkBlock(chunk, 5, 7, 5, 'stone', reg);
+            setChunkBlock(voxels, chunk, 5, 7, 5, 'stone');
             results.length = 0;
             expect(queueMesh(d, voxels, chunk, 3)).toBe(true);
             cycle(d, voxels, [tw]);
@@ -225,7 +225,7 @@ describe('mesh-dispatcher', () => {
                 for (let cx = 0; cx < 8; cx++) {
                     const c = createChunk(cx, cy, 0);
                     voxels.chunks.set(`${cx},${cy},0`, c);
-                    setChunkBlock(c, 5, 5, 5, 'stone', reg);
+                    setChunkBlock(voxels, c, 5, 5, 5, 'stone');
                 }
             }
             for (let cy = 0; cy < 5; cy++) {
@@ -285,7 +285,7 @@ describe('mesh-dispatcher', () => {
             for (let cx = 0; cx < 3; cx++) {
                 const c = createChunk(cx, 0, 0);
                 voxels.chunks.set(`${cx},0,0`, c);
-                setChunkBlock(c, 5, 5, 5, 'stone', reg);
+                setChunkBlock(voxels, c, 5, 5, 5, 'stone');
                 expect(queueMesh(d, voxels, c, 1)).toBe(true);
             }
 
@@ -319,7 +319,7 @@ describe('mesh-dispatcher', () => {
             const mk = (cx: number) => {
                 const c = createChunk(cx, 0, 0);
                 voxels.chunks.set(`${cx},0,0`, c);
-                setChunkBlock(c, 5, 5, 5, 'stone', reg);
+                setChunkBlock(voxels, c, 5, 5, 5, 'stone');
                 return c;
             };
 
@@ -367,7 +367,6 @@ describe('mesh-dispatcher', () => {
         }
 
         function addChunk(
-            reg: ReturnType<typeof buildSmallRegistry>,
             voxels: ReturnType<typeof createVoxels>,
             cx: number,
             cy: number,
@@ -375,18 +374,18 @@ describe('mesh-dispatcher', () => {
         ) {
             const chunk = createChunk(cx, cy, cz);
             voxels.chunks.set(`${cx},${cy},${cz}`, chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
             return chunk;
         }
 
         it('routes by region affinity — same-region chunks co-locate on one worker', () => {
-            const { reg, d, voxels } = bootstrap(2, 4);
+            const { d, voxels } = bootstrap(2, 4);
 
             // cx 0..2 share region 0 (cx >> 3), so all route to the same
             // affinity worker — its cache accumulates the neighbourhood.
-            const c0 = addChunk(reg, voxels, 0, 0, 0);
-            const c1 = addChunk(reg, voxels, 1, 0, 0);
-            const c2 = addChunk(reg, voxels, 2, 0, 0);
+            const c0 = addChunk(voxels, 0, 0, 0);
+            const c1 = addChunk(voxels, 1, 0, 0);
+            const c2 = addChunk(voxels, 2, 0, 0);
 
             expect(queueMesh(d, voxels, c0, 1)).toBe(true);
             expect(queueMesh(d, voxels, c1, 1)).toBe(true);
@@ -401,11 +400,11 @@ describe('mesh-dispatcher', () => {
         });
 
         it('refuses dispatch when every slot is saturated at queueDepth', () => {
-            const { reg, d, voxels } = bootstrap(1, 2);
+            const { d, voxels } = bootstrap(1, 2);
 
-            const c0 = addChunk(reg, voxels, 0, 0, 0);
-            const c1 = addChunk(reg, voxels, 1, 0, 0);
-            const c2 = addChunk(reg, voxels, 2, 0, 0);
+            const c0 = addChunk(voxels, 0, 0, 0);
+            const c1 = addChunk(voxels, 1, 0, 0);
+            const c2 = addChunk(voxels, 2, 0, 0);
 
             expect(queueMesh(d, voxels, c0, 1)).toBe(true);
             expect(queueMesh(d, voxels, c1, 1)).toBe(true);
@@ -415,18 +414,18 @@ describe('mesh-dispatcher', () => {
         });
 
         it('spill: a starving chunk offloads to another worker when its affinity worker is full', () => {
-            const { reg, d, voxels } = bootstrap(2, 2);
+            const { d, voxels } = bootstrap(2, 2);
 
             // cx 0..2 share region 0 → same affinity worker; fill it to depth 2.
-            const c0 = addChunk(reg, voxels, 0, 0, 0);
-            const c1 = addChunk(reg, voxels, 1, 0, 0);
+            const c0 = addChunk(voxels, 0, 0, 0);
+            const c1 = addChunk(voxels, 1, 0, 0);
             expect(queueMesh(d, voxels, c0, 1)).toBe(true);
             expect(queueMesh(d, voxels, c1, 1)).toBe(true);
             const busySlot = meshQueueStats(d).perSlot.findIndex((p) => p.pending === 2);
             expect(busySlot).toBeGreaterThanOrEqual(0);
 
             // a 3rd same-region chunk: rejected without spill (affinity worker full)...
-            const c2 = addChunk(reg, voxels, 2, 0, 0);
+            const c2 = addChunk(voxels, 2, 0, 0);
             expect(queueMesh(d, voxels, c2, 1, { allowSpill: false })).toBe(false);
             // ...but with spill it lands on the other (idle) worker.
             expect(queueMesh(d, voxels, c2, 1, { allowSpill: true })).toBe(true);
@@ -437,14 +436,14 @@ describe('mesh-dispatcher', () => {
         });
 
         it('urgent bypasses a full queue and leads the batch packet', () => {
-            const { reg, d, voxels } = bootstrap(1, 2);
+            const { d, voxels } = bootstrap(1, 2);
 
             // fill the single worker's normal queue to depth (both rejected further).
-            const c0 = addChunk(reg, voxels, 0, 0, 0);
-            const c1 = addChunk(reg, voxels, 1, 0, 0);
+            const c0 = addChunk(voxels, 0, 0, 0);
+            const c1 = addChunk(voxels, 1, 0, 0);
             expect(queueMesh(d, voxels, c0, 1)).toBe(true);
             expect(queueMesh(d, voxels, c1, 1)).toBe(true);
-            const c2 = addChunk(reg, voxels, 2, 0, 0);
+            const c2 = addChunk(voxels, 2, 0, 0);
             expect(queueMesh(d, voxels, c2, 1)).toBe(false); // normal: queue full
 
             // urgent for the same chunk bypasses the queueDepth gate.
@@ -476,7 +475,7 @@ describe('mesh-dispatcher', () => {
             const mk = (cx: number) => {
                 const c = createChunk(cx, 0, 0);
                 voxels.chunks.set(`${cx},0,0`, c);
-                setChunkBlock(c, 5, 5, 5, 'stone', reg);
+                setChunkBlock(voxels, c, 5, 5, 5, 'stone');
                 return c;
             };
             // two normal, then one urgent — urgent must lead the packet's tasks.
@@ -523,7 +522,7 @@ describe('mesh-dispatcher', () => {
             for (let i = 0; i < 4; i++) {
                 const chunk = createChunk(i, 0, 0);
                 voxels.chunks.set(`${i},0,0`, chunk);
-                setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
+                setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
                 expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
             }
             expect(meshQueueStats(d).poolSize).toBe(initialPool);
@@ -564,10 +563,10 @@ describe('mesh-dispatcher', () => {
             const voxels = createVoxels(reg);
             const c0 = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', c0);
-            setChunkBlock(c0, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, c0, 5, 5, 5, 'stone');
             const c1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', c1);
-            setChunkBlock(c1, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, c1, 5, 5, 5, 'stone');
             expect(queueMesh(d, voxels, c0, 7)).toBe(true);
             expect(queueMesh(d, voxels, c1, 7)).toBe(true);
             flushMeshQueue(d, voxels);
@@ -609,10 +608,10 @@ describe('mesh-dispatcher', () => {
             const voxels = createVoxels(reg);
             const c0 = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', c0);
-            setChunkBlock(c0, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, c0, 5, 5, 5, 'stone');
             const c1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', c1);
-            setChunkBlock(c1, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, c1, 5, 5, 5, 'stone');
 
             expect(queueMesh(d, voxels, c0, 1)).toBe(true);
             // queue full (1 pending of depth 1) → false

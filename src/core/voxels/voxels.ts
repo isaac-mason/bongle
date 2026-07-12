@@ -441,44 +441,149 @@ export function getChunkBlockKey(chunk: Chunk, x: number, y: number, z: number):
     return chunk.paletteKeys[chunk.data[voxelIndex(x, y, z)]!]!;
 }
 
-/**
- * set a block at a local position within a chunk using a string key.
- * the registry is used to resolve the key to a runtime numeric id.
- * no bounds checking, caller must ensure 0 <= x,y,z < CHUNK_SIZE.
- */
-export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key: string, registry: BlockRegistry): void {
-    let paletteIdx = chunk.paletteMap.get(key);
-    if (paletteIdx === undefined) {
-        paletteIdx = chunk.paletteKeys.length;
+/** get-or-allocate the chunk-local palette index for a block key. tier-1
+ *  callers grab a slot once, then write `chunkData(chunk)[idx] = slot` directly. */
+export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: BlockRegistry): number {
+    let slot = chunk.paletteMap.get(key);
+    if (slot === undefined) {
+        slot = chunk.paletteKeys.length;
         chunk.paletteKeys.push(key);
         chunk.palette.push(resolveKey(registry, key));
-        chunk.paletteMap.set(key, paletteIdx);
+        chunk.paletteMap.set(key, slot);
     }
+    return slot;
+}
 
-    // COW out of the shared empty-stub singletons before mutating.
+/** the chunk's writable voxel-data array, COWing out of the shared EMPTY_DATA
+ *  stub first so a direct write can't corrupt the singleton. for tier-1 raw
+ *  fills: grab this, write/`.fill()` slots into it, then call invalidateChunk. */
+export function chunkData(chunk: Chunk): Uint16Array {
     if (chunk.data === EMPTY_DATA) chunk.data = new Uint16Array(EMPTY_DATA);
+    return chunk.data;
+}
+
+/**
+ * set a block at a chunk-local position — the meat of a voxel write. resolves
+ * the palette slot, writes the cell, maintains nonAir/solid counts + mesh gen,
+ * registers the chunk mesh-dirty, and (when `voxels` is authoritative) records
+ * the op and routes lighting by flag:
+ *   DEFAULT → per-block incremental (pendingLight) + inline hook drain
+ *   BULK    → whole-chunk relight (staleLightChunks) + skip inline hooks
+ * All authority-side work no-ops when `voxels.authority` is null (client mirror,
+ * bare test fixtures) — those get just the data + palette + counts.
+ *
+ * `setBlock` is a thin wrapper over this that resolves world coords → chunk.
+ * no bounds checking, caller ensures 0 <= x,y,z < CHUNK_SIZE.
+ */
+export function setChunkBlock(
+    voxels: Voxels,
+    chunk: Chunk,
+    x: number,
+    y: number,
+    z: number,
+    key: string,
+    flags: number = SetBlockFlags.DEFAULT,
+): void {
+    const registry = voxels.registry;
+    const slot = ensureChunkPaletteSlot(chunk, key, registry);
+    const data = chunkData(chunk);
 
     const idx = voxelIndex(x, y, z);
-    const oldPaletteIdx = chunk.data[idx]!;
-    chunk.data[idx] = paletteIdx;
+    const oldStateId = chunk.palette[data[idx]!]!;
+    data[idx] = slot;
+    const newStateId = chunk.palette[slot]!;
 
-    // update nonAirCount count
-    const wasAir = chunk.palette[oldPaletteIdx] === AIR || chunk.palette[oldPaletteIdx] === MISSING;
-    const isAir = chunk.palette[paletteIdx] === AIR || chunk.palette[paletteIdx] === MISSING;
+    // nonAir count delta
+    const wasAir = oldStateId === AIR || oldStateId === MISSING;
+    const isAir = newStateId === AIR || newStateId === MISSING;
     if (wasAir && !isAir) chunk.nonAirCount++;
     else if (!wasAir && isAir) chunk.nonAirCount--;
 
-    // update fully-occluding count (air/missing are CullType.NONE, so a
-    // SOLID check naturally excludes them). deltas are safe because any
-    // registry change routes through resolveChunk, which recomputes.
-    const wasSolid = registry.cull[chunk.palette[oldPaletteIdx]!] === CullType.SOLID;
-    const isSolid = registry.cull[chunk.palette[paletteIdx]!] === CullType.SOLID;
+    // fully-occluding (SOLID) count delta (air/missing are CullType.NONE)
+    const wasSolid = registry.cull[oldStateId] === CullType.SOLID;
+    const isSolid = registry.cull[newStateId] === CullType.SOLID;
     if (!wasSolid && isSolid) chunk.solidCount++;
     else if (wasSolid && !isSolid) chunk.solidCount--;
 
     chunk.dirty = true;
     chunk.meshGen++;
     chunk.version++;
+    voxels.dirty.blocks.add(chunk);
+
+    // boundary edits affect AO + smooth lighting in up to 7 neighbour chunks.
+    markBoundaryNeighborsDirty(voxels, chunk.cx, chunk.cy, chunk.cz, x, y, z);
+
+    const auth = voxels.authority;
+    if (!auth) return;
+
+    auth.changes.ops.push({
+        kind: 0,
+        cx: chunk.cx,
+        cy: chunk.cy,
+        cz: chunk.cz,
+        index: idx,
+        data: slot,
+        wx: chunk.wx + x,
+        wy: chunk.wy + y,
+        wz: chunk.wz + z,
+        oldStateId,
+        newStateId,
+    });
+
+    if (flags === SetBlockFlags.BULK) {
+        // whole-chunk relight at tick end (scoped bake over the touched set).
+        auth.changes.staleLightChunks.add(chunk);
+    } else if (auth.floodFillLighting.enabled) {
+        auth.changes.pendingLight.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
+    } else {
+        // flood-fill disabled: inline flat sky-seed + block emission.
+        const emission = registry.lightEmission[newStateId] ?? 0;
+        const sky = auth.floodFillLighting.minLevel & 0xf;
+        setLight(chunk, idx, (sky << 12) | (emission & 0xfff));
+        markChunkLightDirty(voxels, chunk);
+    }
+
+    chunk.compressedSnapshot = null;
+    chunk.snapshotPalette = null;
+
+    // inline-drain whichever hook passes the caller asked for. BULK (0) skips.
+    if (flags !== 0 && _runBlockHooks) {
+        _runBlockHooks(voxels, flags);
+    }
+}
+
+/**
+ * reconcile a chunk after tier-1 raw writes into `chunkData(chunk)`: rescans
+ * nonAir/solid counts from the data + palette, marks the chunk mesh-dirty and
+ * schedules a whole-chunk relight (staleLightChunks). No ops, no hooks — the
+ * raw-write path trades those away for speed. no-op past the rescan when
+ * `voxels.authority` is null.
+ */
+export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
+    const registry = voxels.registry;
+    const data = chunk.data;
+    const palette = chunk.palette;
+    const cull = registry.cull;
+    let nonAir = 0;
+    let solid = 0;
+    for (let i = 0; i < data.length; i++) {
+        const state = palette[data[i]!]!;
+        if (state === AIR || state === MISSING) continue;
+        nonAir++;
+        if (cull[state] === CullType.SOLID) solid++;
+    }
+    chunk.nonAirCount = nonAir;
+    chunk.solidCount = solid;
+    chunk.dirty = true;
+    chunk.meshGen++;
+    chunk.version++;
+    voxels.dirty.blocks.add(chunk);
+
+    const auth = voxels.authority;
+    if (!auth) return;
+    auth.changes.staleLightChunks.add(chunk);
+    chunk.compressedSnapshot = null;
+    chunk.snapshotPalette = null;
 }
 
 /**
@@ -608,6 +713,10 @@ export type VoxelChanges = {
     pendingLight: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
     /** chunks created this tick that need sky light seeded. drained by flushPendingLight. */
     pendingNewChunks: Chunk[];
+    /** chunks bulk-edited this tick (via BULK writes / invalidateChunk) that need a
+     *  scoped whole-chunk relight. drained by flushPendingLight via relightChunks
+     *  instead of the per-block incremental path. */
+    staleLightChunks: Set<Chunk>;
     /** chunks created this tick. drained by discovery, lets each player's
      *  cursor rewind so newly-existing chunks get streamed without
      *  re-walking the whole view sphere each tick. holds the Chunk ref so
@@ -634,6 +743,7 @@ export function createVoxelChanges(): VoxelChanges {
         lightEpoch: 0,
         pendingLight: [],
         pendingNewChunks: [],
+        staleLightChunks: new Set(),
         addedChunks: new Set(),
         notifyNeighboursCursor: 0,
         fireEventsCursor: 0,
@@ -645,6 +755,7 @@ export function createVoxelChanges(): VoxelChanges {
 export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.ops.length = 0;
     changes.addedChunks.clear();
+    changes.staleLightChunks.clear();
     changes.notifyNeighboursCursor = 0;
     changes.fireEventsCursor = 0;
 }
@@ -937,64 +1048,10 @@ export function setBlock(
     key: string,
     flags: number = SetBlockFlags.DEFAULT,
 ): void {
-    const cx = toChunkCoord(wx);
-    const cy = toChunkCoord(wy);
-    const cz = toChunkCoord(wz);
-    const chunk = ensureChunk(voxels, cx, cy, cz);
-    const lx = toLocalCoord(wx);
-    const ly = toLocalCoord(wy);
-    const lz = toLocalCoord(wz);
-
-    // capture old state id before overwrite (for light batching + hooks)
-    const index = voxelIndex(lx, ly, lz);
-    const oldStateId = chunk.palette[chunk.data[index]!]!;
-
-    setChunkBlock(chunk, lx, ly, lz, key, voxels.registry);
-    // setChunkBlock sets the bool; mirror into the renderer index.
-    voxels.dirty.blocks.add(chunk);
-
-    // boundary edits affect AO + smooth lighting in neighbor chunks: the mesher
-    // builds an 18^3 slab that samples face, edge, and corner neighbors. mark
-    // up to 7 surrounding chunks dirty so their meshes rebuild.
-    markBoundaryNeighborsDirty(voxels, cx, cy, cz, lx, ly, lz);
-
-    const auth = voxels.authority;
-    if (auth) {
-        const newStateId = chunk.palette[chunk.data[index]!]!;
-        auth.changes.ops.push({
-            kind: 0,
-            cx,
-            cy,
-            cz,
-            index,
-            data: chunk.data[index]!,
-            wx,
-            wy,
-            wz,
-            oldStateId,
-            newStateId,
-        });
-        if (auth.floodFillLighting.enabled) {
-            auth.changes.pendingLight.push({ wx, wy, wz, oldStateId });
-        } else {
-            // flood-fill disabled: inline-seed light from block emission +
-            // the configured minLevel sky channel. matches the bit layout in
-            // light.ts packLight (sky<<12 | r<<8 | g<<4 | b).
-            const emission = voxels.registry.lightEmission[newStateId] ?? 0;
-            const sky = auth.floodFillLighting.minLevel & 0xf;
-            setLight(chunk, index, (sky << 12) | (emission & 0xfff));
-            markChunkLightDirty(voxels, chunk);
-        }
-        chunk.compressedSnapshot = null;
-        chunk.snapshotPalette = null;
-
-        // inline-drain whichever hook passes the caller asked for. bulk paths
-        // pass SetBlockFlags.BULK (0) and skip this entirely; the re-entrancy
-        // guard in runBlockHooks makes chained-from-hook calls a no-op.
-        if (flags !== 0 && _runBlockHooks) {
-            _runBlockHooks(voxels, flags);
-        }
-    }
+    // thin convenience wrapper: resolve world coords → chunk, then delegate the
+    // whole write (palette, counts, dirty, op, light, hooks) to setChunkBlock.
+    const chunk = ensureChunk(voxels, toChunkCoord(wx), toChunkCoord(wy), toChunkCoord(wz));
+    setChunkBlock(voxels, chunk, toLocalCoord(wx), toLocalCoord(wy), toLocalCoord(wz), key, flags);
 }
 
 /**
@@ -1069,15 +1126,18 @@ export function cloneVoxels(src: Voxels): Voxels {
 export function copyVoxels(out: Voxels, src: Voxels): void {
     for (const chunk of src.chunks.values()) {
         if (chunk.nonAirCount === 0) continue;
+        // resolve the destination chunk once per source chunk (source coords are
+        // preserved), then fill via setChunkBlock — skips the per-cell chunk-key
+        // lookup. BULK: bulk copy is a transport primitive, not a place-action;
+        // light settles as a scoped relight when the destination is drained.
+        const dest = ensureChunk(out, chunk.cx, chunk.cy, chunk.cz);
         for (let ly = 0; ly < CHUNK_SIZE; ly++) {
             for (let lz = 0; lz < CHUNK_SIZE; lz++) {
                 for (let lx = 0; lx < CHUNK_SIZE; lx++) {
                     const paletteIdx = chunk.data[voxelIndex(lx, ly, lz)]!;
                     const key = chunk.paletteKeys[paletteIdx];
                     if (!key || key === BLOCK_AIR) continue;
-                    // BULK, bulk copy is a transport primitive, not a place-action.
-                    // caller drains if the destination has change tracking enabled.
-                    setBlock(out, chunk.wx + lx, chunk.wy + ly, chunk.wz + lz, key, SetBlockFlags.BULK);
+                    setChunkBlock(out, dest, lx, ly, lz, key, SetBlockFlags.BULK);
                 }
             }
         }

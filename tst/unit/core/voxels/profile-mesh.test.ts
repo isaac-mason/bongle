@@ -115,7 +115,7 @@ function makeTerrainChunk(registry: ReturnType<typeof buildBenchRegistry>): Voxe
         for (let z = 0; z < CHUNK_SIZE; z++)
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 const key = y < 6 ? 'stone' : y < 7 ? 'dirt' : 'grass';
-                setChunkBlock(chunk, x, y, z, key, registry);
+                setChunkBlock(voxels, chunk, x, y, z, key);
             }
     chunk.dirty = true;
     return voxels;
@@ -127,15 +127,15 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
     voxels.chunks.set('0,0,0', chunk);
     for (let z = 0; z < CHUNK_SIZE; z++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
-            setChunkBlock(chunk, x, 0, z, 'stone', registry);
-            setChunkBlock(chunk, x, 1, z, 'stone', registry);
-            setChunkBlock(chunk, x, 2, z, 'cobblestone', registry);
-            setChunkBlock(chunk, x, 3, z, 'dirt', registry);
-            setChunkBlock(chunk, x, 4, z, ((x + z) & 3) === 0 ? 'mossy_cobblestone' : 'grass', registry);
-            if (z === 8) setChunkBlock(chunk, x, 5, z, 'gravel', registry);
+            setChunkBlock(voxels, chunk, x, 0, z, 'stone');
+            setChunkBlock(voxels, chunk, x, 1, z, 'stone');
+            setChunkBlock(voxels, chunk, x, 2, z, 'cobblestone');
+            setChunkBlock(voxels, chunk, x, 3, z, 'dirt');
+            setChunkBlock(voxels, chunk, x, 4, z, ((x + z) & 3) === 0 ? 'mossy_cobblestone' : 'grass');
+            if (z === 8) setChunkBlock(voxels, chunk, x, 5, z, 'gravel');
             if (x < 5 && z < 5) {
-                setChunkBlock(chunk, x, 4, z, 'sand', registry);
-                if (x < 3 && z < 3) setChunkBlock(chunk, x, 4, z, 'water', registry);
+                setChunkBlock(voxels, chunk, x, 4, z, 'sand');
+                if (x < 3 && z < 3) setChunkBlock(voxels, chunk, x, 4, z, 'water');
             }
         }
     }
@@ -143,37 +143,37 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
         hz0 = 2,
         hx1 = 13,
         hz1 = 9;
-    for (let z = hz0; z <= hz1; z++) for (let x = hx0; x <= hx1; x++) setChunkBlock(chunk, x, 5, z, 'oak_planks', registry);
+    for (let z = hz0; z <= hz1; z++) for (let x = hx0; x <= hx1; x++) setChunkBlock(voxels, chunk, x, 5, z, 'oak_planks');
     for (let y = 6; y < 9; y++) {
         for (let x = hx0; x <= hx1; x++) {
             const corner = x === hx0 || x === hx1;
             const window = !corner && y === 7 && (x & 1) === 0;
-            setChunkBlock(chunk, x, y, hz0, corner ? 'oak_log' : window ? 'glass' : 'bricks', registry);
-            setChunkBlock(chunk, x, y, hz1, corner ? 'oak_log' : window ? 'glass' : 'bricks', registry);
+            setChunkBlock(voxels, chunk, x, y, hz0, corner ? 'oak_log' : window ? 'glass' : 'bricks');
+            setChunkBlock(voxels, chunk, x, y, hz1, corner ? 'oak_log' : window ? 'glass' : 'bricks');
         }
         for (let z = hz0 + 1; z < hz1; z++) {
             const wallW = y === 7 && (z & 1) === 0 ? 'glass' : 'bricks';
             const wallE = y === 7 && ((z + 1) & 1) === 0 ? 'glass' : 'bricks';
-            setChunkBlock(chunk, hx0, y, z, wallW, registry);
-            setChunkBlock(chunk, hx1, y, z, wallE, registry);
+            setChunkBlock(voxels, chunk, hx0, y, z, wallW);
+            setChunkBlock(voxels, chunk, hx1, y, z, wallE);
         }
     }
     for (let x = hx0; x <= hx1; x++) {
-        setChunkBlock(chunk, x, 9, hz0, 'oak_stairs', registry);
-        setChunkBlock(chunk, x, 9, hz1, 'oak_stairs', registry);
+        setChunkBlock(voxels, chunk, x, 9, hz0, 'oak_stairs');
+        setChunkBlock(voxels, chunk, x, 9, hz1, 'oak_stairs');
     }
     for (let z = hz0 + 1; z < hz1; z++) {
-        setChunkBlock(chunk, hx0, 9, z, 'oak_stairs', registry);
-        setChunkBlock(chunk, hx1, 9, z, 'oak_stairs', registry);
-        for (let x = hx0 + 1; x < hx1; x++) setChunkBlock(chunk, x, 9, z, 'oak_slab', registry);
+        setChunkBlock(voxels, chunk, hx0, 9, z, 'oak_stairs');
+        setChunkBlock(voxels, chunk, hx1, 9, z, 'oak_stairs');
+        for (let x = hx0 + 1; x < hx1; x++) setChunkBlock(voxels, chunk, x, 9, z, 'oak_slab');
     }
-    setChunkBlock(chunk, hx0 + 3, 9, hz0 + 3, 'wool_white', registry);
-    setChunkBlock(chunk, hx0 + 4, 8, hz0 + 4, 'glowstone', registry);
-    setChunkBlock(chunk, hx0 + 1, 7, hz0 + 1, 'torch', registry);
-    setChunkBlock(chunk, hx1 - 1, 7, hz1 - 1, 'torch', registry);
+    setChunkBlock(voxels, chunk, hx0 + 3, 9, hz0 + 3, 'wool_white');
+    setChunkBlock(voxels, chunk, hx0 + 4, 8, hz0 + 4, 'glowstone');
+    setChunkBlock(voxels, chunk, hx0 + 1, 7, hz0 + 1, 'torch');
+    setChunkBlock(voxels, chunk, hx1 - 1, 7, hz1 - 1, 'torch');
     const tx = 2,
         tz = 12;
-    for (let y = 5; y < 9; y++) setChunkBlock(chunk, tx, y, tz, 'oak_log', registry);
+    for (let y = 5; y < 9; y++) setChunkBlock(voxels, chunk, tx, y, tz, 'oak_log');
     for (let dy = 0; dy < 3; dy++) {
         const radius = dy === 2 ? 1 : 2;
         for (let dz = -radius; dz <= radius; dz++)
@@ -183,13 +183,13 @@ function makeVillage(registry: ReturnType<typeof buildBenchRegistry>): Voxels {
                     ly = 8 + dy,
                     lz = tz + dz;
                 if (lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE)
-                    setChunkBlock(chunk, lx, ly, lz, 'leaves', registry);
+                    setChunkBlock(voxels, chunk, lx, ly, lz, 'leaves');
             }
     }
     for (let z = 13; z < CHUNK_SIZE; z++)
         for (let x = 13; x < CHUNK_SIZE; x++) {
-            setChunkBlock(chunk, x, 5, z, 'ice', registry);
-            setChunkBlock(chunk, x, 6, z, 'snow', registry);
+            setChunkBlock(voxels, chunk, x, 5, z, 'ice');
+            setChunkBlock(voxels, chunk, x, 6, z, 'snow');
         }
     chunk.dirty = true;
     return voxels;
@@ -200,14 +200,14 @@ function makeModelDispatch(registry: ReturnType<typeof buildBenchRegistry>): Vox
     const chunk = createChunk(0, 0, 0);
     voxels.chunks.set('0,0,0', chunk);
     for (let z = 0; z < CHUNK_SIZE; z++)
-        for (let x = 0; x < CHUNK_SIZE; x++) for (let y = 0; y < 4; y++) setChunkBlock(chunk, x, y, z, 'stone', registry);
+        for (let x = 0; x < CHUNK_SIZE; x++) for (let y = 0; y < 4; y++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
     for (let z = 0; z < CHUNK_SIZE; z++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             const k = (x + z * 3) % 5;
             const id = k < 2 ? 'slab_b' : k < 4 ? 'stair_b' : 'fence_b';
-            setChunkBlock(chunk, x, 4, z, id, registry);
-            if ((x ^ z) % 4 === 0) setChunkBlock(chunk, x, 5, z, 'stair_b', registry);
-            if ((x + z) % 7 === 0) setChunkBlock(chunk, x, 6, z, 'fence_b', registry);
+            setChunkBlock(voxels, chunk, x, 4, z, id);
+            if ((x ^ z) % 4 === 0) setChunkBlock(voxels, chunk, x, 5, z, 'stair_b');
+            if ((x + z) % 7 === 0) setChunkBlock(voxels, chunk, x, 6, z, 'fence_b');
         }
     }
     chunk.dirty = true;

@@ -13,6 +13,10 @@ export { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
 
 export type { AABB, BlockShape, BlockShapeAabbs, BlockShapeCube } from '../core/voxels/block-collider';
 export * as blockShape from '../core/voxels/block-collider';
+// bulk write flag: setBlock(..., SetBlockFlags.BULK) / setChunkBlock(..., BULK) defer
+// lighting to a scoped whole-chunk relight + skip inline hooks. for worldgen, paste,
+// prefab stamping. plain setBlock (DEFAULT) stays per-block incremental.
+export { SetBlockFlags } from '../core/voxels/block-flags';
 export * as blockModel from '../core/voxels/block-model';
 // directional placement utils, for user-defined directional blocks' `place`.
 export * as blockPlace from '../core/voxels/block-place';
@@ -50,7 +54,7 @@ export type {
     TextureRef,
 } from '../core/voxels/blocks';
 export { block, blockTexture, CullType, MaterialType, resolveTextureRef, VertexAnimation } from '../core/voxels/blocks';
-export { propagateAllLight } from '../core/voxels/light';
+export { propagateAllLight, relightChunks } from '../core/voxels/light';
 export type { VoxelSweepHit } from '../core/voxels/voxel-aabb-sweep';
 export { createVoxelSweepHit, sweepAabbVsVoxels } from '../core/voxels/voxel-aabb-sweep';
 export type { VoxelRaycastResult } from '../core/voxels/voxel-raycast';

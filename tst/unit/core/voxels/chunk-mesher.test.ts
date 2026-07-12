@@ -75,7 +75,7 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'water', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             expect(countCubeFaces(result, 'translucent')).toBe(6);
@@ -90,8 +90,8 @@ describe('meshChunk', () => {
             voxels.chunks.set('0,0,0', chunk);
 
             // two water blocks adjacent on X axis
-            setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-            setChunkBlock(chunk, 6, 5, 5, 'water', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'water');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // 2 blocks × 6 faces = 12, minus 2 shared faces = 10
@@ -108,7 +108,7 @@ describe('meshChunk', () => {
 
             // four water blocks in a row on X axis
             for (let i = 0; i < 4; i++) {
-                setChunkBlock(chunk, 5 + i, 5, 5, 'water', registry);
+                setChunkBlock(voxels, chunk, 5 + i, 5, 5, 'water');
             }
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
@@ -126,8 +126,8 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'glass', registry);
-            setChunkBlock(chunk, 6, 5, 5, 'glass', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'glass');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'glass');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // self-cull by block id: 2 blocks × 6 faces = 12, minus 2 shared = 10
@@ -142,8 +142,8 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
-            setChunkBlock(chunk, 6, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // 2 blocks × 6 faces = 12, minus 2 shared = 10
@@ -161,8 +161,8 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
-            setChunkBlock(chunk, 6, 5, 5, 'water', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'water');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             // stone: 6 - 1 (face toward water culled by... wait, solid doesn't cull toward translucent_self)
@@ -186,7 +186,7 @@ describe('meshChunk', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'lamp', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'lamp');
 
             const result = meshAndLight(voxels, chunk, registry);
             expect(result).not.toBeNull();
@@ -207,7 +207,7 @@ describe('meshChunk', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const result = meshAndLight(voxels, chunk, registry);
             expect(result).not.toBeNull();
@@ -242,9 +242,9 @@ describe('meshChunk', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
             // asymmetric corner occluder → non-uniform AO on the +Y face.
-            setChunkBlock(chunk, 4, 6, 4, 'stone', registry);
+            setChunkBlock(voxels, chunk, 4, 6, 4, 'stone');
 
             const a = meshAndLight(voxels, chunk, registry)!;
             const b = meshAndLight(voxels, chunk, registry)!;
@@ -309,7 +309,7 @@ describe('meshChunk', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
@@ -329,7 +329,7 @@ describe('meshChunk', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            for (let i = 0; i < 4; i++) setChunkBlock(chunk, 5 + i, 5, 5, 'water', registry);
+            for (let i = 0; i < 4; i++) setChunkBlock(voxels, chunk, 5 + i, 5, 5, 'water');
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
@@ -361,9 +361,9 @@ describe('meshChunk', () => {
             // Wall edges (relative to +X face): (6,4,5) and (6,5,4), both stone.
             // Diagonal: (6,4,4), air with bright sky=15 (the "lit room behind
             // the wall corner"). Face cell (6,5,5) is dark air.
-            setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
-            setChunkBlock(chunk, 6, 4, 5, 'stone', reg); // -Y edge of +X face
-            setChunkBlock(chunk, 6, 5, 4, 'stone', reg); // -Z edge of +X face
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+            setChunkBlock(voxels, chunk, 6, 4, 5, 'stone'); // -Y edge of +X face
+            setChunkBlock(voxels, chunk, 6, 5, 4, 'stone'); // -Z edge of +X face
             // Default chunk.light is zero everywhere. Inject bright sky into
             // the diagonal-behind-corner cell only.
             chunk.light[voxelIndex(6, 4, 4)] = 15 << 12; // sky=15
@@ -411,7 +411,7 @@ describe('meshChunk', () => {
             const voxels = createVoxels(reg);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
             for (let i = 0; i < chunk.light.length; i++) chunk.light[i] = 15 << 12;
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
@@ -448,10 +448,10 @@ describe('meshChunk', () => {
             // an opaque corner that drives non-uniform AO on the stair's
             // adjacent face. without occluders, every vert would have the
             // same AO and the gradient check below would be vacuous.
-            setChunkBlock(chunk, 5, 5, 5, 'stair', reg);
-            setChunkBlock(chunk, 4, 5, 5, 'block', reg);
-            setChunkBlock(chunk, 4, 4, 5, 'block', reg);
-            setChunkBlock(chunk, 5, 4, 5, 'block', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stair');
+            setChunkBlock(voxels, chunk, 4, 5, 5, 'block');
+            setChunkBlock(voxels, chunk, 4, 4, 5, 'block');
+            setChunkBlock(voxels, chunk, 5, 4, 5, 'block');
 
             const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             expect(result).not.toBeNull();
@@ -496,7 +496,7 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'stair', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stair');
             // seed sky=15 everywhere (matches a fully sky-exposed column);
             // packSmoothLight averages the face cell with 3 neighbours, so
             // singling out (5,6,5) only would still get diluted by dark
@@ -535,11 +535,11 @@ describe('meshChunk', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
 
-            setChunkBlock(chunk, 5, 5, 5, 'stair', reg);
-            setChunkBlock(chunk, 4, 5, 5, 'block', reg);
-            setChunkBlock(chunk, 4, 4, 5, 'block', reg);
-            setChunkBlock(chunk, 5, 4, 5, 'block', reg);
-            setChunkBlock(chunk, 6, 5, 5, 'block', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stair');
+            setChunkBlock(voxels, chunk, 4, 5, 5, 'block');
+            setChunkBlock(voxels, chunk, 4, 4, 5, 'block');
+            setChunkBlock(voxels, chunk, 5, 4, 5, 'block');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'block');
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);

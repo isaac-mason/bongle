@@ -102,7 +102,7 @@ describe('MODEL_LIQUID mesher', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         expect(countLiquidFaces(result, 'translucent')).toBe(6);
@@ -123,13 +123,13 @@ describe('MODEL_LIQUID mesher', () => {
         voxels.chunks.set('0,0,0', chunk);
 
         // single water cell, stone in all 6 neighbours
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 4, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 6, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 4, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 6, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 5, 4, 'stone', registry);
-        setChunkBlock(chunk, 5, 5, 6, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 4, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 4, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 6, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 4, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 6, 'stone');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         expect(countLiquidFaces(result, 'translucent')).toBe(0);
@@ -144,12 +144,12 @@ describe('MODEL_LIQUID mesher', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
 
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 4, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 6, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 4, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 5, 4, 'stone', registry);
-        setChunkBlock(chunk, 5, 5, 6, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 4, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 4, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 4, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 6, 'stone');
         // y+1 left as air
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
@@ -167,8 +167,8 @@ describe('MODEL_LIQUID mesher', () => {
         voxels.chunks.set('0,0,0', chunk);
 
         // 2-tall water column in open air
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 5, 6, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 5, 6, 5, 'water');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // top vertex Y must be the top of the upper cell (6 + 0.875 = 6.875),
@@ -184,8 +184,8 @@ describe('MODEL_LIQUID mesher', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
 
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 5, 6, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 5, 6, 5, 'water');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // no vertex should sit at the seam (y=5.875): the lower cell merges
@@ -206,8 +206,8 @@ describe('MODEL_LIQUID mesher', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
 
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 6, 5, 5, 'lava', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'lava');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // lava (opaque liquid) → model.opaque; water (translucent liquid) → model.translucent
@@ -228,8 +228,8 @@ describe('MODEL_LIQUID mesher', () => {
         voxels.chunks.set('0,0,0', chunk);
 
         // stone floor with water on top
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 5, 6, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 6, 5, 'water');
 
         const result = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry)!;
         // stone (cube path) emits all 6 faces (its top is NOT culled by liquid above)

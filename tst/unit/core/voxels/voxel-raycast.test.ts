@@ -27,7 +27,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             // ray from z=10, aimed at block center, going -z
@@ -49,7 +49,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 0, 5.5, 5.5, 1, 0, 0, 20, 0);
@@ -68,7 +68,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
             const out = createVoxelRaycastResult();
 
             // from +x looking -x → enters through east(+x) face → index 0
@@ -95,7 +95,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             // ray going +x but block is at (5,5,5) and ray is at y=0, misses
@@ -109,7 +109,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 10, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 10, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             // block is at x=10 but maxDistance=5, ray starts at x=0
@@ -123,8 +123,8 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 3, 5, 5, 'stone', registry);
-            setChunkBlock(chunk, 7, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 3, 5, 5, 'stone');
+            setChunkBlock(voxels, chunk, 7, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 0, 5.5, 5.5, 1, 0, 0, 20, 0);
@@ -143,7 +143,7 @@ describe('raycastVoxels', () => {
             createChunk(0, 0, 0); // empty chunk (not even added, tests missing chunk skip)
             const chunk1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', chunk1);
-            setChunkBlock(chunk1, 2, 5, 5, 'stone', registry); // world x=18
+            setChunkBlock(voxels, chunk1, 2, 5, 5, 'stone'); // world x=18
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 0, 5.5, 5.5, 1, 0, 0, 30, 0);
@@ -162,7 +162,7 @@ describe('raycastVoxels', () => {
 
             const chunk1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', chunk1);
-            setChunkBlock(chunk1, 0, 5, 5, 'stone', registry); // world x=16
+            setChunkBlock(voxels, chunk1, 0, 5, 5, 'stone'); // world x=16
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 0, 5.5, 5.5, 1, 0, 0, 30, 0);
@@ -182,7 +182,7 @@ describe('raycastVoxels', () => {
             // voxel at world (15, 5, 5) in chunk (0,0,0); empty chunk (1,0,0)
             const chunk0 = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk0);
-            setChunkBlock(chunk0, 15, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk0, 15, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             // ray from (20, 5.5, 5.5) going -x, passes through empty chunk
@@ -215,7 +215,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'custom_box', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'custom_box');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, 0);
@@ -243,7 +243,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
             const out = createVoxelRaycastResult();
             // ray aimed at y=5.75 (above visual slab top at y=5.5)
@@ -273,7 +273,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
             const out = createVoxelRaycastResult();
             // ray aimed at y=5.75 (above slab top at y=5.5)
@@ -298,7 +298,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
             const out = createVoxelRaycastResult();
             // ray aimed at y=5.25 (within the slab)
@@ -327,8 +327,8 @@ describe('raycastVoxels', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
             // slab at z=5, stone wall at z=3
-            setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
-            setChunkBlock(chunk, 5, 5, 3, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
+            setChunkBlock(voxels, chunk, 5, 5, 3, 'stone');
 
             const out = createVoxelRaycastResult();
             // ray aimed above visual slab (y=5.75), but unit box collider catches it
@@ -356,8 +356,8 @@ describe('raycastVoxels', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
             // slab at z=5, stone wall at z=3
-            setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
-            setChunkBlock(chunk, 5, 5, 3, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
+            setChunkBlock(voxels, chunk, 5, 5, 3, 'stone');
 
             const out = createVoxelRaycastResult();
             // ray aimed above slab (y=5.75), passes through slab gap, hits stone behind
@@ -374,7 +374,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             // origin at center of the block
@@ -393,7 +393,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'dirt', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'dirt');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, 0);
@@ -421,7 +421,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, BLOCK_FLAG_SELECTION);
@@ -434,7 +434,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, 0);
@@ -447,7 +447,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, BLOCK_FLAG_COLLISION);
@@ -460,7 +460,7 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, BLOCK_FLAG_SELECTION);
@@ -476,8 +476,8 @@ describe('raycastVoxels', () => {
             const voxels = createVoxels(registry);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 6, 'glass', registry);
-            setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+            setChunkBlock(voxels, chunk, 5, 5, 6, 'glass');
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
             const out = createVoxelRaycastResult();
             raycastVoxels(out, voxels, registry, 5.5, 5.5, 10, 0, 0, -1, 20, BLOCK_FLAG_SELECTION);

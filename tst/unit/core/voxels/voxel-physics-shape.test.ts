@@ -69,7 +69,7 @@ describe('voxelPhysicsShape castRay', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -113,7 +113,7 @@ describe('voxelPhysicsShape castRay', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -165,7 +165,7 @@ describe('voxelPhysicsShape castRay', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -219,7 +219,7 @@ describe('voxelPhysicsShape castRay', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -273,7 +273,7 @@ describe('voxelPhysicsShape castRay', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -321,7 +321,7 @@ describe('voxelPhysicsShape collision:false', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -361,7 +361,7 @@ describe('voxelPhysicsShape collision:false', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -397,7 +397,7 @@ describe('voxelPhysicsShape collision:false', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -445,7 +445,7 @@ describe('voxelPhysicsShape collision:false', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
         // sweep AABB expands by one cell, without these the +Z/-Z
         // neighbor chunks would be CONTENT_IGNORE and produce spurious hits.
         voxels.chunks.set('0,0,-1', createChunk(0, 0, -1));
@@ -505,7 +505,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -542,7 +542,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -589,7 +589,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -637,7 +637,7 @@ describe('voxelPhysicsShape collidePoint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const shape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -680,7 +680,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -735,7 +735,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -785,7 +785,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -835,7 +835,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -895,7 +895,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -956,7 +956,7 @@ describe('voxelPhysicsShape collideShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'slab', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'slab');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -1010,7 +1010,7 @@ describe('voxelPhysicsShape castShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -1068,7 +1068,7 @@ describe('voxelPhysicsShape castShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -1121,7 +1121,7 @@ describe('voxelPhysicsShape castShape', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
@@ -1182,8 +1182,8 @@ describe('voxelPhysicsShape multi-block', () => {
         voxels.chunks.set('0,0,0', chunk);
 
         // two adjacent blocks
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
-        setChunkBlock(chunk, 6, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);

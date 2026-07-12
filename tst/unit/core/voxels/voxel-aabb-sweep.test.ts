@@ -39,7 +39,7 @@ function place(voxels: ReturnType<typeof makeVoxels>['voxels'], wx: number, wy: 
         chunk = createChunk(cx, cy, cz);
         voxels.chunks.set(k, chunk);
     }
-    setChunkBlock(chunk, wx & 15, wy & 15, wz & 15, key, voxels.registry);
+    setChunkBlock(voxels, chunk, wx & 15, wy & 15, wz & 15, key);
 }
 
 // stub a range of chunk coords with empty-singleton chunks so the sweep

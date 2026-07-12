@@ -36,7 +36,7 @@ function setupFloor(voxels: ReturnType<typeof createVoxels>, key: string) {
                 voxels.chunks.set(k, chunk);
                 dirtyChunks.add(k);
             }
-            setChunkBlock(chunk, x & 15, 0, z & 15, key, voxels.registry);
+            setChunkBlock(voxels, chunk, x & 15, 0, z & 15, key);
         }
     }
     for (const k of dirtyChunks) linkChunkNeighbors(voxels, voxels.chunks.get(k)!);

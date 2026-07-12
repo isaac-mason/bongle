@@ -12,18 +12,26 @@
 // applied on room restart.
 
 import {
+    CHUNK_SIZE,
+    chunkData,
     control,
+    ensureChunk,
+    ensureChunkPaletteSlot,
     env,
     getTrait,
+    invalidateChunk,
     matchmaking,
     onInit,
     onJoin,
     prop,
+    SetBlockFlags,
     script,
     setBlock,
     setPosition,
     TransformTrait,
     trait,
+    type Voxels,
+    voxelIndex,
 } from 'bongle';
 import { blocks } from 'bongle/starter';
 
@@ -72,13 +80,16 @@ function terrainHeight(x: number, z: number): number {
     return Math.max(2, Math.min(60, Math.floor(h)));
 }
 
-type Voxels = Parameters<typeof setBlock>[0];
+// features (trees, buildings) cross chunk boundaries, so they author by world
+// coordinate through setBlock with the BULK flag: skips inline hooks and defers
+// light to the same scoped relight the terrain fill schedules.
+const BULK = SetBlockFlags.BULK;
 
 /** a tree: log trunk + a rounded leaf canopy, bounds-guarded at the map edge. */
 function placeTree(voxels: Voxels, x: number, z: number, groundY: number, lo: number, hi: number): void {
     const trunk = 4 + Math.floor(hash2(x * 7, z * 13) * 3); // 4..6
     const topY = groundY + trunk;
-    for (let y = groundY + 1; y <= topY; y++) setBlock(voxels, x, y, z, log);
+    for (let y = groundY + 1; y <= topY; y++) setBlock(voxels, x, y, z, log, BULK);
     // canopy: 5×5 lower rings tapering to a 3×3 cap.
     for (let dy = -2; dy <= 1; dy++) {
         const r = dy >= 0 ? 1 : 2;
@@ -89,11 +100,11 @@ function placeTree(voxels: Voxels, x: number, z: number, groundY: number, lo: nu
                 const cx = x + dx;
                 const cz = z + dz;
                 if (cx < lo || cx > hi || cz < lo || cz > hi) continue;
-                setBlock(voxels, cx, topY + dy, cz, leaves);
+                setBlock(voxels, cx, topY + dy, cz, leaves, BULK);
             }
         }
     }
-    setBlock(voxels, x, topY + 1, z, leaves);
+    setBlock(voxels, x, topY + 1, z, leaves, BULK);
 }
 
 /** a small building: walls of one material with glass windows, corner logs, a
@@ -110,19 +121,19 @@ function placeBuilding(voxels: Voxels, cx: number, cz: number, floorY: number, s
             const z = cz + dz;
             const edge = Math.abs(dx) === half || Math.abs(dz) === half;
             const corner = Math.abs(dx) === half && Math.abs(dz) === half;
-            setBlock(voxels, x, floorY, z, planks); // floor
+            setBlock(voxels, x, floorY, z, planks, BULK); // floor
             if (!edge) continue;
             for (let y = 1; y <= wallH; y++) {
                 if (dz === -half && dx === 0 && y <= 2) continue; // doorway in the −Z wall
                 const isWindow = !corner && y % 4 === 2 && (dx + dz) % 2 === 0;
-                setBlock(voxels, x, floorY + y, z, corner ? log : isWindow ? glass : wallMat);
+                setBlock(voxels, x, floorY + y, z, corner ? log : isWindow ? glass : wallMat, BULK);
             }
         }
     }
     // flat roof one block proud of the walls.
     for (let dx = -half - 1; dx <= half + 1; dx++) {
         for (let dz = -half - 1; dz <= half + 1; dz++) {
-            setBlock(voxels, cx + dx, floorY + wallH + 1, cz + dz, seed % 2 === 0 ? mossy : planks);
+            setBlock(voxels, cx + dx, floorY + wallH + 1, cz + dz, seed % 2 === 0 ? mossy : planks, BULK);
         }
     }
 }
@@ -163,32 +174,83 @@ control(TerrainTrait, 'buildingPercent', {
 
 script(TerrainTrait, 'generate', (ctx) => {
     if (!env.server) return;
-    const voxels = ctx.voxels;
 
     onInit(ctx, () => {
+        const voxels = ctx.voxels;
         const size = ctx.trait.size;
         const lo = -(size >> 1);
         const hi = lo + size - 1;
         const treeChance = ctx.trait.treePerMille / 1000;
 
-        // ── terrain columns + water + trees ──
-        for (let x = lo; x <= hi; x++) {
-            for (let z = lo; z <= hi; z++) {
+        // ── terrain + water: per-chunk tier-1 fill ──
+        //
+        // resolve each chunk once, grab its palette slots once, and write voxel
+        // data straight into the chunk's typed array; `invalidateChunk` then
+        // reconciles counts + schedules the scoped relight. this skips the
+        // per-block chunk-key lookup + op + light-queue work entirely — the
+        // meat of the speedup.
+        const ccLo = lo >> 4;
+        const ccHi = hi >> 4;
+        for (let cx = ccLo; cx <= ccHi; cx++) {
+            for (let cz = ccLo; cz <= ccHi; cz++) {
+                // precompute this chunk column's 16×16 heights + surface once.
+                const heights = new Int16Array(CHUNK_SIZE * CHUNK_SIZE);
+                const surface = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE); // 0 grass, 1 snow, 2 gravel
+                let columnTop = WATER_LEVEL;
+                for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+                        const wx = (cx << 4) + lx;
+                        const wz = (cz << 4) + lz;
+                        if (wx < lo || wx > hi || wz < lo || wz > hi) {
+                            heights[lz * CHUNK_SIZE + lx] = -1; // outside the map → air column
+                            continue;
+                        }
+                        const h = terrainHeight(wx, wz);
+                        heights[lz * CHUNK_SIZE + lx] = h;
+                        surface[lz * CHUNK_SIZE + lx] = h >= SNOW_LINE ? 1 : h <= WATER_LEVEL + 1 ? 2 : 0;
+                        if (h > columnTop) columnTop = h;
+                    }
+                }
+
+                for (let cy = 0; cy <= columnTop >> 4; cy++) {
+                    const chunk = ensureChunk(voxels, cx, cy, cz);
+                    const data = chunkData(chunk);
+                    const sStone = ensureChunkPaletteSlot(chunk, stone, voxels.registry);
+                    const sDirt = ensureChunkPaletteSlot(chunk, dirt, voxels.registry);
+                    const sGrass = ensureChunkPaletteSlot(chunk, grass, voxels.registry);
+                    const sSnow = ensureChunkPaletteSlot(chunk, snow, voxels.registry);
+                    const sGravel = ensureChunkPaletteSlot(chunk, gravel, voxels.registry);
+                    const sWater = ensureChunkPaletteSlot(chunk, water, voxels.registry);
+                    const baseY = cy << 4;
+                    for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+                            const col = lz * CHUNK_SIZE + lx;
+                            const h = heights[col]!;
+                            if (h < 0) continue;
+                            const snowy = surface[col] === 1;
+                            const beach = surface[col] === 2;
+                            const topSlot = snowy ? sSnow : beach ? sGravel : sGrass;
+                            for (let ly = 0; ly < CHUNK_SIZE; ly++) {
+                                const wy = baseY + ly;
+                                let slot = -1;
+                                if (wy < h) slot = wy >= h - 3 && !beach && !snowy ? sDirt : sStone;
+                                else if (wy === h) slot = topSlot;
+                                else if (h < WATER_LEVEL && wy <= WATER_LEVEL) slot = sWater;
+                                if (slot >= 0) data[voxelIndex(lx, ly, lz)] = slot;
+                            }
+                        }
+                    }
+                    invalidateChunk(voxels, chunk);
+                }
+            }
+        }
+
+        // ── trees on exposed grass (canopies cross chunk boundaries) ──
+        for (let x = lo + 3; x < hi - 2; x++) {
+            for (let z = lo + 3; z < hi - 2; z++) {
                 const h = terrainHeight(x, z);
-                const beach = h <= WATER_LEVEL + 1;
-                const snowy = h >= SNOW_LINE;
-                const top = snowy ? snow : beach ? gravel : grass;
-                for (let y = 0; y <= h; y++) {
-                    const key = y === h ? top : y >= h - 3 && !beach && !snowy ? dirt : stone;
-                    setBlock(voxels, x, y, z, key);
-                }
-                if (h < WATER_LEVEL) {
-                    for (let y = h + 1; y <= WATER_LEVEL; y++) setBlock(voxels, x, y, z, water);
-                }
-                // trees on exposed grass, kept clear of the map edge for canopy.
-                if (top === grass && x > lo + 2 && x < hi - 2 && z > lo + 2 && z < hi - 2 && hash2(x * 3, z * 5) < treeChance) {
-                    placeTree(voxels, x, z, h, lo, hi);
-                }
+                const exposed = h < SNOW_LINE && h > WATER_LEVEL + 1; // grass surface
+                if (exposed && hash2(x * 3, z * 5) < treeChance) placeTree(voxels, x, z, h, lo, hi);
             }
         }
 

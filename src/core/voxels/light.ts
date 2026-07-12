@@ -705,6 +705,170 @@ export function propagateAllLight(voxels: Voxels): void {
     }
 }
 
+// ── relightChunks (scoped recompute over a chunk set) ───────────────
+//
+// the middle granularity between updateLightBatch (per-node incremental)
+// and propagateAllLight (whole world). recomputes light for exactly the
+// given chunks — plus a one-ring neighbour margin so light that darkened
+// out of the set is re-derived — reading every chunk OUTSIDE the working
+// set as a fixed boundary condition. untouched chunks (including
+// disk-cached ones) keep their light. this is the N-chunk generalisation
+// of seedNewChunkSky combined with propagateAllLight's emitter seeding,
+// plus boundary in-flow from lit neighbours. driven by the batch-edit
+// commit path: bulk-authored chunks relight in one scoped pass instead of
+// 4-channel incremental BFS per changed block.
+
+/** seed sky columns of one chunk top-down into _spreadQueue, reading the
+ *  above-neighbour (in the set or retained) as the sky boundary. the seed
+ *  half of seedNewChunkSky, without the trailing spread. */
+function seedChunkSkyColumns(voxels: Voxels, chunk: Chunk): void {
+    const { lightOpacity } = voxels.registry;
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+            let aboveIsSky: boolean;
+            const aboveChunk = chunk.neighbors[DIR_UP];
+            if (aboveChunk) {
+                const aboveIdx = voxelIndex(lx, 0, lz);
+                const aboveSky = chGet(aboveChunk.light[aboveIdx]!, CH_SKY);
+                const aboveState = aboveChunk.palette[aboveChunk.data[aboveIdx]!]!;
+                aboveIsSky = aboveSky === 15 && lightOpacity[aboveState]! === 0;
+            } else {
+                aboveIsSky = true; // no chunk above → the void is the sky
+            }
+            for (let ly = CHUNK_SIZE - 1; ly >= 0; ly--) {
+                if (!aboveIsSky) break;
+                const idx = voxelIndex(lx, ly, lz);
+                const state = chunk.palette[chunk.data[idx]!]!;
+                if (lightOpacity[state]! > 0) break;
+                setLight(chunk, idx, setSky(chunk.light[idx]!, 15));
+                bqPush(_spreadQueue, 15, chunk, idx, DIR_NONE);
+            }
+        }
+    }
+}
+
+/** seed one boundary face's lit neighbour cells as spread sources, so light
+ *  from chunks outside the working set flows back into the zeroed set. */
+function seedBoundaryInflowFace(chunk: Chunk, dir: number, shift: number): void {
+    const S = CHUNK_SIZE;
+    if (dir === 0 || dir === 5) {
+        const lx = dir === 0 ? S - 1 : 0;
+        for (let ly = 0; ly < S; ly++) for (let lz = 0; lz < S; lz++) inflowCell(chunk, lx, ly, lz, dir, shift);
+    } else if (dir === 1 || dir === 4) {
+        const ly = dir === 1 ? S - 1 : 0;
+        for (let lx = 0; lx < S; lx++) for (let lz = 0; lz < S; lz++) inflowCell(chunk, lx, ly, lz, dir, shift);
+    } else {
+        const lz = dir === 2 ? S - 1 : 0;
+        for (let lx = 0; lx < S; lx++) for (let ly = 0; ly < S; ly++) inflowCell(chunk, lx, ly, lz, dir, shift);
+    }
+}
+
+function inflowCell(chunk: Chunk, lx: number, ly: number, lz: number, dir: number, shift: number): void {
+    resolveNeighbor(chunk, lx, ly, lz, dir);
+    if (!_nchunk) return;
+    const level = (_nchunk.light[_nindex]! >> shift) & 0xf;
+    if (level > 0) bqPush(_spreadQueue, level, _nchunk, _nindex, DIR_NONE);
+}
+
+export function relightChunks(voxels: Voxels, dirty: Set<Chunk>): void {
+    if (dirty.size === 0) return;
+    const registry = voxels.registry;
+    const { lightEmission } = registry;
+
+    // working set: dirty + 6-face neighbours. the margin catches darkening
+    // that used to flow out of `dirty` into a neighbour (that neighbour is
+    // zeroed + rebuilt from ITS untouched neighbours). additive edits leave
+    // the margin unchanged apart from the scan.
+    const working = new Set<Chunk>(dirty);
+    for (const c of dirty) {
+        for (let dir = 0; dir < 6; dir++) {
+            const n = c.neighbors[dir];
+            if (n) working.add(n);
+        }
+    }
+
+    // zero light in the working set only (preserves every other chunk).
+    for (const c of working) {
+        c.light.fill(0);
+        if (c.lightDirtyMask !== EMPTY_LIGHT_MASK) c.lightDirtyMask.fill(0);
+        c.lightDirtyCount = 0;
+    }
+
+    // removal queue stays empty throughout (we zero + re-seed, never unspread);
+    // clear once so unspreadChannel is a proven no-op.
+    bqClear(_removalQueue);
+    bqClear(_relightQueue);
+
+    // ── sky channel: seed columns top-down + boundary in-flow → spread ──
+    bqClear(_spreadQueue);
+    // descending cy so a working chunk above is seeded before the one below
+    // reads its floor as the "sky above" boundary (mirrors propagateAllLight).
+    const sorted = [...working].sort((a, b) => b.cy - a.cy);
+    for (const c of sorted) seedChunkSkyColumns(voxels, c);
+    seedBoundaryInflow(working, CH_SKY);
+    unspreadChannel(voxels, registry, CH_SKY, _removalQueue, _relightQueue);
+    spreadChannel(voxels, registry, CH_SKY, _spreadQueue);
+
+    // ── rgb channels: seed emitters + boundary in-flow → spread ─────────
+    for (const ch of [CH_RED, CH_GREEN, CH_BLUE]) {
+        bqClear(_spreadQueue);
+        const shift = CHANNEL_SHIFT[ch]!;
+        const mask = CHANNEL_MASK[ch]!;
+        for (const c of working) {
+            const palette = c.palette;
+            let hasEmitter = false;
+            for (let p = 0; p < palette.length; p++) {
+                if (chGetEmission(lightEmission[palette[p]!]!, ch) > 0) {
+                    hasEmitter = true;
+                    break;
+                }
+            }
+            if (!hasEmitter) continue;
+            const data = c.data;
+            const light = c.light;
+            for (let idx = 0; idx < data.length; idx++) {
+                const emission = chGetEmission(lightEmission[palette[data[idx]!]!]!, ch);
+                if (emission <= 0) continue;
+                const cur = light[idx]!;
+                if (emission > ((cur >> shift) & 0xf)) {
+                    setLight(c, idx, (cur & mask) | (emission << shift));
+                    bqPush(_spreadQueue, emission, c, idx, DIR_NONE);
+                }
+            }
+        }
+        seedBoundaryInflow(working, ch);
+        unspreadChannel(voxels, registry, ch, _removalQueue, _relightQueue);
+        spreadChannel(voxels, registry, ch, _spreadQueue);
+    }
+
+    // mark working chunks mesh + light dirty for network; bump version;
+    // invalidate snapshots. NO global lightEpoch bump (per-chunk suffices).
+    for (const c of working) {
+        c.dirty = true;
+        c.lightDirty = true;
+        c.meshGen++;
+        c.version++;
+        voxels.dirty.blocks.add(c);
+        voxels.dirty.light.add(c);
+        c.compressedSnapshot = null;
+        c.snapshotPalette = null;
+        c.compressedLight = null;
+    }
+}
+
+/** seed lit cells from chunks bordering the working set (outside it) so their
+ *  light re-flows inward during spread. */
+function seedBoundaryInflow(working: Set<Chunk>, ch: number): void {
+    const shift = CHANNEL_SHIFT[ch]!;
+    for (const c of working) {
+        for (let dir = 0; dir < 6; dir++) {
+            const n = c.neighbors[dir];
+            if (!n || working.has(n)) continue;
+            seedBoundaryInflowFace(c, dir, shift);
+        }
+    }
+}
+
 // ── seedNewChunkSky (internal) ──────────────────────────────────────
 //
 // seeds sky light into a newly-created chunk. called by flushPendingLight
@@ -1158,27 +1322,52 @@ export function flushPendingLight(voxels: Voxels): void {
     if (!auth) return;
 
     const changes = auth.changes;
-    // when flood-fill lighting is disabled, setBlock / ensureChunk write
+    const stale = changes.staleLightChunks;
+    // when flood-fill lighting is disabled, setChunkBlock / ensureChunk write
     // seed values inline and never enqueue. defensive: drop anything that
     // slipped through (e.g. if the toggle flipped mid-tick).
     if (!auth.floodFillLighting.enabled) {
         changes.pendingNewChunks.length = 0;
         changes.pendingLight.length = 0;
+        stale.clear();
         return;
     }
 
-    // seed sky light into any newly-created chunks before processing
-    // block changes, so the incremental update operates on correct state.
+    // seed sky light into any newly-created chunks before processing block
+    // changes, so the incremental update operates on correct state. chunks
+    // already scheduled for a bulk relight are skipped (relightChunks rebakes
+    // them wholesale below).
     const newChunks = changes.pendingNewChunks;
     for (let i = 0; i < newChunks.length; i++) {
-        seedNewChunkSky(voxels, newChunks[i]!);
+        const c = newChunks[i]!;
+        if (!stale.has(c)) seedNewChunkSky(voxels, c);
     }
     newChunks.length = 0;
 
+    // incremental (DEFAULT) light for blocks whose chunk isn't being fully
+    // relit this tick. run before the bulk relight so it sees settled state;
+    // entries in a stale chunk are redundant (the relight overwrites) and are
+    // filtered out.
     const pending = changes.pendingLight;
-    if (pending.length === 0) return;
-    updateLightBatch(voxels, pending);
-    pending.length = 0;
+    if (pending.length > 0) {
+        if (stale.size === 0) {
+            updateLightBatch(voxels, pending);
+        } else {
+            const filtered = pending.filter((p) => {
+                const c = resolveWorldPos(voxels, p.wx, p.wy, p.wz);
+                return !c || !stale.has(c);
+            });
+            if (filtered.length > 0) updateLightBatch(voxels, filtered);
+        }
+        pending.length = 0;
+    }
+
+    // bulk (BULK) light: one scoped whole-chunk relight over the touched set,
+    // reading untouched (incl. disk-cached) neighbours as boundary conditions.
+    if (stale.size > 0) {
+        relightChunks(voxels, stale);
+        stale.clear();
+    }
 }
 
 // ── updateLightOnBlockChange (single-block wrapper) ─────────────────

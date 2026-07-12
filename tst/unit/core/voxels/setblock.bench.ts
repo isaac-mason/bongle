@@ -99,32 +99,35 @@ function withoutFloodFill(voxels: Voxels): Voxels {
 
 describe('setChunkBlock', () => {
     bench('linear fill — 4096 single-key writes', () => {
+        const voxels = createVoxels(baseRegistry);
         const chunk = createChunk(0, 0, 0);
         for (let y = 0; y < CHUNK_SIZE; y++)
             for (let z = 0; z < CHUNK_SIZE; z++)
-                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(chunk, x, y, z, 'stone', baseRegistry);
+                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
     });
 
     bench('palette growth — 4096 writes, 64 distinct keys', () => {
+        const voxels = createVoxels(manyKeyRegistry);
         const chunk = createChunk(0, 0, 0);
         let i = 0;
         for (let y = 0; y < CHUNK_SIZE; y++)
             for (let z = 0; z < CHUNK_SIZE; z++)
                 for (let x = 0; x < CHUNK_SIZE; x++) {
-                    setChunkBlock(chunk, x, y, z, manyKeys[i++ & 63]!, manyKeyRegistry);
+                    setChunkBlock(voxels, chunk, x, y, z, manyKeys[i++ & 63]!);
                 }
     });
 
     bench('overwrite same key — 4096 writes, palette stable', () => {
+        const voxels = createVoxels(baseRegistry);
         const chunk = createChunk(0, 0, 0);
         // pre-fill so the writes are pure overwrites (no nonAirCount / palette changes)
         for (let y = 0; y < CHUNK_SIZE; y++)
             for (let z = 0; z < CHUNK_SIZE; z++)
-                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(chunk, x, y, z, 'stone', baseRegistry);
+                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
 
         for (let y = 0; y < CHUNK_SIZE; y++)
             for (let z = 0; z < CHUNK_SIZE; z++)
-                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(chunk, x, y, z, 'stone', baseRegistry);
+                for (let x = 0; x < CHUNK_SIZE; x++) setChunkBlock(voxels, chunk, x, y, z, 'stone');
     });
 });
 

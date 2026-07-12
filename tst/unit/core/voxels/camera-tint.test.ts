@@ -31,7 +31,7 @@ describe('getCameraTint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'stone', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
 
         const out: [number, number, number, number] = [0, 0, 0, 0];
         expect(getCameraTint(out, voxels, 5.5, 5.5, 5.5)).toBe(false);
@@ -50,7 +50,7 @@ describe('getCameraTint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'fog', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'fog');
 
         const out: [number, number, number, number] = [0, 0, 0, 0];
         expect(getCameraTint(out, voxels, 5.5, 5.5, 5.5)).toBe(true);
@@ -81,8 +81,8 @@ describe('getCameraTint', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
         // two stacked water cells at y=5 and y=6
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
-        setChunkBlock(chunk, 5, 6, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
+        setChunkBlock(voxels, chunk, 5, 6, 5, 'water');
 
         const out: [number, number, number, number] = [0, 0, 0, 0];
         // eye in the 1/16 air gap at the top of the lower cell, the
@@ -106,7 +106,7 @@ describe('getCameraTint', () => {
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-        setChunkBlock(chunk, 5, 5, 5, 'water', registry);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'water');
 
         const out: [number, number, number, number] = [0, 0, 0, 0];
         // eye inside the bottom half of the cell → tint applies

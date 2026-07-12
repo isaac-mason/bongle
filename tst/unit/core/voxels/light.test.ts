@@ -252,7 +252,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // solid block at (8, 8, 8)
-            setChunkBlock(chunk, 8, 8, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'stone');
 
             propagateAllLight(voxels);
 
@@ -282,7 +282,7 @@ describe('propagateAllLight', () => {
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
                     if (x === 8 && z === 8) continue;
-                    setChunkBlock(chunk, x, 15, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 15, z, 'stone');
                 }
             }
 
@@ -311,7 +311,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // glass at y=10
-            setChunkBlock(chunk, 8, 10, 8, 'glass', registry);
+            setChunkBlock(voxels, chunk, 8, 10, 8, 'glass');
 
             propagateAllLight(voxels);
 
@@ -332,7 +332,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // place emitter at center
-            setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
 
             propagateAllLight(voxels);
 
@@ -360,7 +360,7 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 8, 8, 8, 'greenlight', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'greenlight');
             propagateAllLight(voxels);
 
             expect(readLight(chunk, 8, 8, 8).g).toBe(10);
@@ -381,10 +381,10 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // emitter at (8,8,8), solid wall at x=10 (full YZ plane)
-            setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunk, 10, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, 10, y, z, 'stone');
                 }
             }
 
@@ -412,8 +412,8 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // red at (4,8,8), blue at (12,8,8)
-            setChunkBlock(chunk, 4, 8, 8, 'redlight', registry);
-            setChunkBlock(chunk, 12, 8, 8, 'bluelight', registry);
+            setChunkBlock(voxels, chunk, 4, 8, 8, 'redlight');
+            setChunkBlock(voxels, chunk, 12, 8, 8, 'bluelight');
 
             propagateAllLight(voxels);
 
@@ -442,8 +442,8 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // emitter at (8,8,8), glass at (9,8,8)
-            setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
-            setChunkBlock(chunk, 9, 8, 8, 'glass', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
+            setChunkBlock(voxels, chunk, 9, 8, 8, 'glass');
 
             propagateAllLight(voxels);
 
@@ -464,8 +464,8 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // emitter at (8,8,8), leaves at (9,8,8)
-            setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
-            setChunkBlock(chunk, 9, 8, 8, 'leaves', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
+            setChunkBlock(voxels, chunk, 9, 8, 8, 'leaves');
 
             propagateAllLight(voxels);
 
@@ -491,7 +491,7 @@ describe('propagateAllLight', () => {
             linkChunkNeighbors(voxels, chunk1);
 
             // emitter at local (15,8,8) in chunk0, right at the boundary
-            setChunkBlock(chunk0, 15, 8, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk0, 15, 8, 8, 'redlight');
 
             propagateAllLight(voxels);
 
@@ -556,7 +556,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // place a stone block, sky light should illuminate from above
-            setChunkBlock(chunk, 8, 8, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'stone');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -584,7 +584,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // stone block with only sky light, no block emitters
-            setChunkBlock(chunk, 8, 8, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'stone');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -617,8 +617,8 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // place a stone block with a red emitter next to it
-            setChunkBlock(chunk, 8, 4, 8, 'stone', registry);
-            setChunkBlock(chunk, 9, 4, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 8, 4, 8, 'stone');
+            setChunkBlock(voxels, chunk, 9, 4, 8, 'redlight');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -660,8 +660,8 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 8, 4, 8, 'stone', registry);
-            setChunkBlock(chunk, 10, 4, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 8, 4, 8, 'stone');
+            setChunkBlock(voxels, chunk, 10, 4, 8, 'redlight');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -721,12 +721,12 @@ describe('propagateAllLight', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 8, 4, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 4, 8, 'stone');
             // emitter at the corner position for v2
-            setChunkBlock(chunk, 9, 5, 9, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 9, 5, 9, 'redlight');
             // block both edge neighbors of v2 to trigger obstruction
-            setChunkBlock(chunk, 9, 5, 8, 'stone', registry); // +X edge
-            setChunkBlock(chunk, 8, 5, 9, 'stone', registry); // +Z edge
+            setChunkBlock(voxels, chunk, 9, 5, 8, 'stone'); // +X edge
+            setChunkBlock(voxels, chunk, 8, 5, 9, 'stone'); // +Z edge
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -784,7 +784,7 @@ describe('propagateAllLight', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // place a partial block, sky light should reach it
-            setChunkBlock(chunk, 8, 8, 8, 'stairs', registry);
+            setChunkBlock(voxels, chunk, 8, 8, 8, 'stairs');
             propagateAllLight(voxels);
 
             // the partial block itself should have sky=15 (opacity=0, sky passes through)
@@ -814,8 +814,8 @@ describe('propagateAllLight', () => {
             // fill y=0 layer in both chunks
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 for (let x = 0; x < CHUNK_SIZE; x++) {
-                    setChunkBlock(chunk0, x, 0, z, 'stone', registry);
-                    setChunkBlock(chunkM1, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk0, x, 0, z, 'stone');
+                    setChunkBlock(voxels, chunkM1, x, 0, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -870,7 +870,7 @@ describe('updateLightOnBlockChange', () => {
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
         // place emitter at (4,8,8)
-        setChunkBlock(chunk, 4, 8, 8, 'redlight', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'redlight');
         propagateAllLight(voxels);
 
         // light at (7,8,8) should be 12 (3 steps from emitter)
@@ -878,7 +878,7 @@ describe('updateLightOnBlockChange', () => {
 
         // place opaque stone at (6,8,8), between emitter and sample point
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk, 6, 8, 8, 'stone', registry);
+        setChunkBlock(voxels, chunk, 6, 8, 8, 'stone');
         updateLightOnBlockChange(voxels, 6, 8, 8, oldState);
 
         // light at (7,8,8) should now be much lower, the direct path is blocked.
@@ -900,8 +900,8 @@ describe('updateLightOnBlockChange', () => {
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
         // place emitter and stone wall
-        setChunkBlock(chunk, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(chunk, 6, 8, 8, 'stone', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'redlight');
+        setChunkBlock(voxels, chunk, 6, 8, 8, 'stone');
         propagateAllLight(voxels);
 
         // light beyond the wall should be low
@@ -910,7 +910,7 @@ describe('updateLightOnBlockChange', () => {
 
         // remove the stone
         const oldState = stateIdForKey('stone', registry);
-        setChunkBlock(chunk, 6, 8, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 6, 8, 8, 'air');
         updateLightOnBlockChange(voxels, 6, 8, 8, oldState);
 
         // light should be restored: 15 - 3 = 12
@@ -932,7 +932,7 @@ describe('updateLightOnBlockChange', () => {
 
         // place emitter
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk, 8, 8, 8, 'greenlight', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'greenlight');
         updateLightOnBlockChange(voxels, 8, 8, 8, oldState);
 
         // emitter should have g=10
@@ -958,7 +958,7 @@ describe('updateLightOnBlockChange', () => {
 
         // place glowstone incrementally
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk, 8, 8, 8, 'glowstone', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'glowstone');
         updateLightOnBlockChange(voxels, 8, 8, 8, oldState);
 
         // neighbors should be lit (emission propagates from opaque emitter)
@@ -979,12 +979,12 @@ describe('updateLightOnBlockChange', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-        setChunkBlock(chunk, 8, 8, 8, 'glowstone', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'glowstone');
         propagateAllLight(voxels);
         expect(readLight(chunk, 9, 8, 8).r).toBe(14);
 
         const oldState = stateIdForKey('glowstone', registry);
-        setChunkBlock(chunk, 8, 8, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'air');
         updateLightOnBlockChange(voxels, 8, 8, 8, oldState);
 
         // all emitted light should be gone
@@ -1002,13 +1002,13 @@ describe('updateLightOnBlockChange', () => {
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
         // place and propagate
-        setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
         propagateAllLight(voxels);
         expect(readLight(chunk, 9, 8, 8).r).toBe(14);
 
         // remove emitter
         const oldState = stateIdForKey('redlight', registry);
-        setChunkBlock(chunk, 8, 8, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'air');
         updateLightOnBlockChange(voxels, 8, 8, 8, oldState);
 
         // all red light should be gone (no other red sources)
@@ -1030,7 +1030,7 @@ describe('updateLightOnBlockChange', () => {
 
         // place stone at y=10
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk, 8, 10, 8, 'stone', registry);
+        setChunkBlock(voxels, chunk, 8, 10, 8, 'stone');
         updateLightOnBlockChange(voxels, 8, 10, 8, oldState);
 
         // above stone: still sky=15
@@ -1048,14 +1048,14 @@ describe('updateLightOnBlockChange', () => {
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
         // start with stone at y=10
-        setChunkBlock(chunk, 8, 10, 8, 'stone', registry);
+        setChunkBlock(voxels, chunk, 8, 10, 8, 'stone');
         propagateAllLight(voxels);
 
         expect(readLight(chunk, 8, 9, 8).sky).toBeLessThan(15);
 
         // remove the stone
         const oldState = stateIdForKey('stone', registry);
-        setChunkBlock(chunk, 8, 10, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 8, 10, 8, 'air');
         updateLightOnBlockChange(voxels, 8, 10, 8, oldState);
 
         // sky column should be restored
@@ -1080,7 +1080,7 @@ describe('updateLightOnBlockChange', () => {
 
         // place emitter at (15,8,8) in chunk0, right at the boundary
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk0, 15, 8, 8, 'redlight', registry);
+        setChunkBlock(voxels, chunk0, 15, 8, 8, 'redlight');
         updateLightOnBlockChange(voxels, 15, 8, 8, oldState);
 
         // at the emitter: r=15
@@ -1105,14 +1105,14 @@ describe('updateLightOnBlockChange', () => {
         propagateAllLight(voxelsInc);
 
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunkInc, 8, 8, 8, 'redlight', registry);
+        setChunkBlock(voxelsInc, chunkInc, 8, 8, 8, 'redlight');
         updateLightOnBlockChange(voxelsInc, 8, 8, 8, oldState);
 
         // scenario 2: full recompute
         const voxelsFull = createVoxels(registry);
         const chunkFull = createChunk(0, 0, 0);
         voxelsFull.chunks.set(chunkKey(0, 0, 0), chunkFull);
-        setChunkBlock(chunkFull, 8, 8, 8, 'redlight', registry);
+        setChunkBlock(voxelsFull, chunkFull, 8, 8, 8, 'redlight');
         propagateAllLight(voxelsFull);
 
         // compare all light values
@@ -1130,11 +1130,11 @@ describe('updateLightOnBlockChange', () => {
         const voxelsInc = createVoxels(registry);
         const chunkInc = createChunk(0, 0, 0);
         voxelsInc.chunks.set(chunkKey(0, 0, 0), chunkInc);
-        setChunkBlock(chunkInc, 8, 8, 8, 'redlight', registry);
+        setChunkBlock(voxelsInc, chunkInc, 8, 8, 8, 'redlight');
         propagateAllLight(voxelsInc);
 
         const oldState = stateIdForKey('redlight', registry);
-        setChunkBlock(chunkInc, 8, 8, 8, 'air', registry);
+        setChunkBlock(voxelsInc, chunkInc, 8, 8, 8, 'air');
         updateLightOnBlockChange(voxelsInc, 8, 8, 8, oldState);
 
         // full recompute: just air, no emitter
@@ -1158,19 +1158,19 @@ describe('updateLightOnBlockChange', () => {
         const voxelsInc = createVoxels(registry);
         const chunkInc = createChunk(0, 0, 0);
         voxelsInc.chunks.set(chunkKey(0, 0, 0), chunkInc);
-        setChunkBlock(chunkInc, 4, 8, 8, 'redlight', registry);
+        setChunkBlock(voxelsInc, chunkInc, 4, 8, 8, 'redlight');
         propagateAllLight(voxelsInc);
 
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunkInc, 6, 8, 8, 'stone', registry);
+        setChunkBlock(voxelsInc, chunkInc, 6, 8, 8, 'stone');
         updateLightOnBlockChange(voxelsInc, 6, 8, 8, oldState);
 
         // full recompute: emitter + wall from the start
         const voxelsFull = createVoxels(registry);
         const chunkFull = createChunk(0, 0, 0);
         voxelsFull.chunks.set(chunkKey(0, 0, 0), chunkFull);
-        setChunkBlock(chunkFull, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(chunkFull, 6, 8, 8, 'stone', registry);
+        setChunkBlock(voxelsFull, chunkFull, 4, 8, 8, 'redlight');
+        setChunkBlock(voxelsFull, chunkFull, 6, 8, 8, 'stone');
         propagateAllLight(voxelsFull);
 
         for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; i++) {
@@ -1193,19 +1193,19 @@ describe('updateLightOnBlockChange', () => {
         const voxelsInc = createVoxels(registry);
         const chunkInc = createChunk(0, 0, 0);
         voxelsInc.chunks.set(chunkKey(0, 0, 0), chunkInc);
-        setChunkBlock(chunkInc, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(chunkInc, 6, 8, 8, 'stone', registry);
+        setChunkBlock(voxelsInc, chunkInc, 4, 8, 8, 'redlight');
+        setChunkBlock(voxelsInc, chunkInc, 6, 8, 8, 'stone');
         propagateAllLight(voxelsInc);
 
         const oldState = stateIdForKey('stone', registry);
-        setChunkBlock(chunkInc, 6, 8, 8, 'air', registry);
+        setChunkBlock(voxelsInc, chunkInc, 6, 8, 8, 'air');
         updateLightOnBlockChange(voxelsInc, 6, 8, 8, oldState);
 
         // full recompute: just emitter, no wall
         const voxelsFull = createVoxels(registry);
         const chunkFull = createChunk(0, 0, 0);
         voxelsFull.chunks.set(chunkKey(0, 0, 0), chunkFull);
-        setChunkBlock(chunkFull, 4, 8, 8, 'redlight', registry);
+        setChunkBlock(voxelsFull, chunkFull, 4, 8, 8, 'redlight');
         propagateAllLight(voxelsFull);
 
         for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; i++) {
@@ -1227,8 +1227,8 @@ describe('updateLightOnBlockChange', () => {
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-        setChunkBlock(chunk, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(chunk, 12, 8, 8, 'bluelight', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'redlight');
+        setChunkBlock(voxels, chunk, 12, 8, 8, 'bluelight');
         propagateAllLight(voxels);
 
         // midpoint should have both colors
@@ -1237,7 +1237,7 @@ describe('updateLightOnBlockChange', () => {
 
         // remove red emitter
         const oldState = stateIdForKey('redlight', registry);
-        setChunkBlock(chunk, 4, 8, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'air');
         updateLightOnBlockChange(voxels, 4, 8, 8, oldState);
 
         // red should be gone everywhere
@@ -1262,7 +1262,7 @@ describe('updateLightOnBlockChange', () => {
         chunk.dirty = false;
 
         const oldState = stateIdForKey('air', registry);
-        setChunkBlock(chunk, 8, 8, 8, 'redlight', registry);
+        setChunkBlock(voxels, chunk, 8, 8, 8, 'redlight');
         updateLightOnBlockChange(voxels, 8, 8, 8, oldState);
 
         expect(chunk.dirty).toBe(true);
@@ -1283,8 +1283,8 @@ describe('updateLightOnBlockChange', () => {
         voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
         // place both emitters
-        setChunkBlock(chunk, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(chunk, 6, 8, 8, 'glowstone', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'redlight');
+        setChunkBlock(voxels, chunk, 6, 8, 8, 'glowstone');
         propagateAllLight(voxels);
 
         // before removal: (5,8,8) has light from both sources
@@ -1301,7 +1301,7 @@ describe('updateLightOnBlockChange', () => {
 
         // remove the transparent emitter
         const oldState = stateIdForKey('redlight', registry);
-        setChunkBlock(chunk, 4, 8, 8, 'air', registry);
+        setChunkBlock(voxels, chunk, 4, 8, 8, 'air');
         updateLightOnBlockChange(voxels, 4, 8, 8, oldState);
 
         // (5,8,8) should still be lit from the glowstone, the opaque emitter's
@@ -1316,7 +1316,7 @@ describe('updateLightOnBlockChange', () => {
         const voxelsFull = createVoxels(registry);
         const chunkFull = createChunk(0, 0, 0);
         voxelsFull.chunks.set(chunkKey(0, 0, 0), chunkFull);
-        setChunkBlock(chunkFull, 6, 8, 8, 'glowstone', registry);
+        setChunkBlock(voxelsFull, chunkFull, 6, 8, 8, 'glowstone');
         propagateAllLight(voxelsFull);
 
         for (let i = 0; i < CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; i++) {
@@ -1355,24 +1355,24 @@ describe('min_safe_light batch correctness', () => {
         const vSeq = createVoxels(registry);
         const cSeq = createChunk(0, 0, 0);
         vSeq.chunks.set(chunkKey(0, 0, 0), cSeq);
-        setChunkBlock(cSeq, 4, 8, 8, 'redlight', registry);
+        setChunkBlock(vSeq, cSeq, 4, 8, 8, 'redlight');
         propagateAllLight(vSeq);
 
         const airState = stateIdForKey('air', registry);
-        setChunkBlock(cSeq, 6, 8, 8, 'stone', registry);
+        setChunkBlock(vSeq, cSeq, 6, 8, 8, 'stone');
         updateLightOnBlockChange(vSeq, 6, 8, 8, airState);
-        setChunkBlock(cSeq, 7, 8, 8, 'stone', registry);
+        setChunkBlock(vSeq, cSeq, 7, 8, 8, 'stone');
         updateLightOnBlockChange(vSeq, 7, 8, 8, airState);
 
         // --- batched path ---
         const vBatch = createVoxels(registry);
         const cBatch = createChunk(0, 0, 0);
         vBatch.chunks.set(chunkKey(0, 0, 0), cBatch);
-        setChunkBlock(cBatch, 4, 8, 8, 'redlight', registry);
+        setChunkBlock(vBatch, cBatch, 4, 8, 8, 'redlight');
         propagateAllLight(vBatch);
 
-        setChunkBlock(cBatch, 6, 8, 8, 'stone', registry);
-        setChunkBlock(cBatch, 7, 8, 8, 'stone', registry);
+        setChunkBlock(vBatch, cBatch, 6, 8, 8, 'stone');
+        setChunkBlock(vBatch, cBatch, 7, 8, 8, 'stone');
         updateLightBatch(vBatch, [
             { wx: 6, wy: 8, wz: 8, oldStateId: airState },
             { wx: 7, wy: 8, wz: 8, oldStateId: airState },
@@ -1399,28 +1399,28 @@ describe('min_safe_light batch correctness', () => {
         const vSeq = createVoxels(registry);
         const cSeq = createChunk(0, 0, 0);
         vSeq.chunks.set(chunkKey(0, 0, 0), cSeq);
-        setChunkBlock(cSeq, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(cSeq, 6, 8, 8, 'stone', registry);
-        setChunkBlock(cSeq, 7, 8, 8, 'stone', registry);
+        setChunkBlock(vSeq, cSeq, 4, 8, 8, 'redlight');
+        setChunkBlock(vSeq, cSeq, 6, 8, 8, 'stone');
+        setChunkBlock(vSeq, cSeq, 7, 8, 8, 'stone');
         propagateAllLight(vSeq);
 
         const stoneState = stateIdForKey('stone', registry);
-        setChunkBlock(cSeq, 6, 8, 8, 'air', registry);
+        setChunkBlock(vSeq, cSeq, 6, 8, 8, 'air');
         updateLightOnBlockChange(vSeq, 6, 8, 8, stoneState);
-        setChunkBlock(cSeq, 7, 8, 8, 'air', registry);
+        setChunkBlock(vSeq, cSeq, 7, 8, 8, 'air');
         updateLightOnBlockChange(vSeq, 7, 8, 8, stoneState);
 
         // --- batched path ---
         const vBatch = createVoxels(registry);
         const cBatch = createChunk(0, 0, 0);
         vBatch.chunks.set(chunkKey(0, 0, 0), cBatch);
-        setChunkBlock(cBatch, 4, 8, 8, 'redlight', registry);
-        setChunkBlock(cBatch, 6, 8, 8, 'stone', registry);
-        setChunkBlock(cBatch, 7, 8, 8, 'stone', registry);
+        setChunkBlock(vBatch, cBatch, 4, 8, 8, 'redlight');
+        setChunkBlock(vBatch, cBatch, 6, 8, 8, 'stone');
+        setChunkBlock(vBatch, cBatch, 7, 8, 8, 'stone');
         propagateAllLight(vBatch);
 
-        setChunkBlock(cBatch, 6, 8, 8, 'air', registry);
-        setChunkBlock(cBatch, 7, 8, 8, 'air', registry);
+        setChunkBlock(vBatch, cBatch, 6, 8, 8, 'air');
+        setChunkBlock(vBatch, cBatch, 7, 8, 8, 'air');
         updateLightBatch(vBatch, [
             { wx: 6, wy: 8, wz: 8, oldStateId: stoneState },
             { wx: 7, wy: 8, wz: 8, oldStateId: stoneState },
@@ -1448,13 +1448,13 @@ describe('min_safe_light batch correctness', () => {
         const vSeq = createVoxels(registry);
         const cSeq = createChunk(0, 0, 0);
         vSeq.chunks.set(chunkKey(0, 0, 0), cSeq);
-        setChunkBlock(cSeq, 4, 8, 8, 'redlight', registry);
-        for (let x = 6; x <= 10; x++) setChunkBlock(cSeq, x, 8, 8, 'stone', registry);
+        setChunkBlock(vSeq, cSeq, 4, 8, 8, 'redlight');
+        for (let x = 6; x <= 10; x++) setChunkBlock(vSeq, cSeq, x, 8, 8, 'stone');
         propagateAllLight(vSeq);
 
         const stoneState = stateIdForKey('stone', registry);
         for (let x = 6; x <= 10; x++) {
-            setChunkBlock(cSeq, x, 8, 8, 'air', registry);
+            setChunkBlock(vSeq, cSeq, x, 8, 8, 'air');
             updateLightOnBlockChange(vSeq, x, 8, 8, stoneState);
         }
 
@@ -1462,13 +1462,13 @@ describe('min_safe_light batch correctness', () => {
         const vBatch = createVoxels(registry);
         const cBatch = createChunk(0, 0, 0);
         vBatch.chunks.set(chunkKey(0, 0, 0), cBatch);
-        setChunkBlock(cBatch, 4, 8, 8, 'redlight', registry);
-        for (let x = 6; x <= 10; x++) setChunkBlock(cBatch, x, 8, 8, 'stone', registry);
+        setChunkBlock(vBatch, cBatch, 4, 8, 8, 'redlight');
+        for (let x = 6; x <= 10; x++) setChunkBlock(vBatch, cBatch, x, 8, 8, 'stone');
         propagateAllLight(vBatch);
 
         const changes = [];
         for (let x = 6; x <= 10; x++) {
-            setChunkBlock(cBatch, x, 8, 8, 'air', registry);
+            setChunkBlock(vBatch, cBatch, x, 8, 8, 'air');
             changes.push({ wx: x, wy: 8, wz: 8, oldStateId: stoneState });
         }
         updateLightBatch(vBatch, changes);
@@ -1633,7 +1633,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // stone floor at y=0
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunk, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 0, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -1672,7 +1672,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // stone floor at y=0
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunk, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 0, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -1707,7 +1707,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // stone floor at y=0
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunk, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 0, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -1746,8 +1746,8 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // single stone block at (8, 0, 8) with a red emitter next to it
-            setChunkBlock(chunk, 8, 0, 8, 'stone', registry);
-            setChunkBlock(chunk, 8, 1, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 8, 0, 8, 'stone');
+            setChunkBlock(voxels, chunk, 8, 1, 8, 'redlight');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -1787,8 +1787,8 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
             // two isolated columns at x=8, y=0, at z=0 and z=8
-            setChunkBlock(chunk, 8, 0, 0, 'stone', registry);
-            setChunkBlock(chunk, 8, 0, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 0, 0, 'stone');
+            setChunkBlock(voxels, chunk, 8, 0, 8, 'stone');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -1831,7 +1831,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 8, 15, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 15, 8, 'stone');
             propagateAllLight(voxels);
 
             const result = meshAndLight(voxels, chunk, registry);
@@ -1867,7 +1867,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // fill y=15 with stone
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunk, x, 15, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 15, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -1910,9 +1910,9 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             // stone floor at y=0, leaves from y=12 to y=15 (4 layers)
             for (let x = 4; x < 12; x++) {
                 for (let z = 4; z < 12; z++) {
-                    setChunkBlock(chunk, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunk, x, 0, z, 'stone');
                     for (let y = 12; y < CHUNK_SIZE; y++) {
-                        setChunkBlock(chunk, x, y, z, 'leaves', registry);
+                        setChunkBlock(voxels, chunk, x, y, z, 'leaves');
                     }
                 }
             }
@@ -1985,7 +1985,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 0, 8, 8, 'redlight', registry);
+            setChunkBlock(voxels, chunk, 0, 8, 8, 'redlight');
             propagateAllLight(voxels);
 
             expect(readLight(chunk, 0, 8, 8).r).toBe(15);
@@ -2004,7 +2004,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set(chunkKey(0, 0, 0), chunk);
 
-            setChunkBlock(chunk, 8, 15, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 15, 8, 'stone');
             propagateAllLight(voxels);
 
             // stone at top blocks sky, air below should not have sky=15 in this column
@@ -2012,7 +2012,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
 
             // remove the stone
             const oldStateId = chunk.palette[chunk.data[voxelIndex(8, 15, 8)]!]!;
-            setChunkBlock(chunk, 8, 15, 8, 'air', registry);
+            setChunkBlock(voxels, chunk, 8, 15, 8, 'air');
             updateLightOnBlockChange(voxels, 8, 15, 8, oldStateId);
 
             // now the column is unobstructed, sky=15 should reach all the way down
@@ -2035,7 +2035,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
             voxels.chunks.set(chunkKey(0, 0, 0), chunkBot);
             for (let x = 0; x < CHUNK_SIZE; x++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkBot, x, 0, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkBot, x, 0, z, 'stone');
                 }
             }
             propagateAllLight(voxels);
@@ -2071,7 +2071,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
 
             // place stone at y=15
             const oldAir = chunk.palette[chunk.data[voxelIndex(8, 15, 8)]!]!;
-            setChunkBlock(chunk, 8, 15, 8, 'stone', registry);
+            setChunkBlock(voxels, chunk, 8, 15, 8, 'stone');
             updateLightOnBlockChange(voxels, 8, 15, 8, oldAir);
 
             // stone blocks sky
@@ -2079,7 +2079,7 @@ describe('chunk boundary lighting (no neighbor chunks)', () => {
 
             // remove stone
             const oldStone = chunk.palette[chunk.data[voxelIndex(8, 15, 8)]!]!;
-            setChunkBlock(chunk, 8, 15, 8, 'air', registry);
+            setChunkBlock(voxels, chunk, 8, 15, 8, 'air');
             updateLightOnBlockChange(voxels, 8, 15, 8, oldStone);
 
             // sky should be restored, the void above acts as sky=15
@@ -2115,7 +2115,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2149,7 +2149,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2183,7 +2183,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkHi, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkHi, x, y, z, 'stone');
                 }
             }
         }
@@ -2222,7 +2222,7 @@ describe('bottom chunk sky light', () => {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
                     if (x === 8 && z === 8) continue;
-                    setChunkBlock(chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2265,7 +2265,7 @@ describe('bottom chunk sky light', () => {
         const airState = chunkTop.palette[chunkTop.data[voxelIndex(0, 0, 0)]!]!;
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
-                setChunkBlock(chunkTop, x, 0, z, 'stone', registry);
+                setChunkBlock(voxels, chunkTop, x, 0, z, 'stone');
                 changes.push({ wx: x, wy: 16, wz: z, oldStateId: airState });
             }
         }
@@ -2302,7 +2302,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let z = 0; z < CHUNK_SIZE; z++) {
                 for (let y = 0; y < CHUNK_SIZE; y++) {
-                    setChunkBlock(inc.chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(inc.voxels, inc.chunkTop, x, y, z, 'stone');
                 }
                 // only the bottom layer changes are needed for incremental to process,
                 // but we batch all changes since we placed all of chunkTop at once.
@@ -2319,7 +2319,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(full.chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(full.voxels, full.chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2359,7 +2359,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2399,7 +2399,7 @@ describe('bottom chunk sky light', () => {
         for (let x = 0; x < CHUNK_SIZE; x++) {
             for (let y = 0; y < CHUNK_SIZE; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
-                    setChunkBlock(chunkTop, x, y, z, 'stone', registry);
+                    setChunkBlock(voxels, chunkTop, x, y, z, 'stone');
                 }
             }
         }
@@ -2448,7 +2448,7 @@ describe('multi-chunk sealed cave', () => {
             const cz = (wz / CHUNK_SIZE) | 0;
             const lx = wx & (CHUNK_SIZE - 1);
             const lz = wz & (CHUNK_SIZE - 1);
-            setChunkBlock(chunks[cx]![cz]!, lx, wy, lz, key, registry);
+            setChunkBlock(voxels, chunks[cx]![cz]!, lx, wy, lz, key);
         };
 
         const W = GRID * CHUNK_SIZE;
@@ -2533,7 +2533,7 @@ describe('multi-chunk sealed cave', () => {
                 for (let x = 0; x < CHUNK_SIZE; x++) {
                     for (let y = 0; y < CHUNK_SIZE; y++) {
                         for (let z = 0; z < CHUNK_SIZE; z++) {
-                            setChunkBlock(c, x, y, z, 'stone', registry);
+                            setChunkBlock(src, c, x, y, z, 'stone');
                         }
                     }
                 }
@@ -2550,7 +2550,7 @@ describe('multi-chunk sealed cave', () => {
             const lx = wx & (CHUNK_SIZE - 1);
             const ly = wy - -CHUNK_SIZE; // wy is in [-16,-1] → ly in [0,15]
             const lz = wz & (CHUNK_SIZE - 1);
-            setChunkBlock(caveChunks[cx]![cz]!, lx, ly, lz, key, registry);
+            setChunkBlock(src, caveChunks[cx]![cz]!, lx, ly, lz, key);
         };
 
         // fill the entire cave layer with stone, then carve the interior.

@@ -169,10 +169,10 @@ describe('block-registry-serde', () => {
             const voxels = createVoxels(reg);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 4, 5, 5, 'block', reg);
-            setChunkBlock(chunk, 5, 5, 5, 'block', reg);
-            setChunkBlock(chunk, 6, 5, 5, 'glass', reg);
-            setChunkBlock(chunk, 5, 6, 5, 'lamp', reg);
+            setChunkBlock(voxels, chunk, 4, 5, 5, 'block');
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'block');
+            setChunkBlock(voxels, chunk, 6, 5, 5, 'glass');
+            setChunkBlock(voxels, chunk, 5, 6, 5, 'lamp');
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), decoded);
@@ -186,10 +186,10 @@ describe('block-registry-serde', () => {
             const voxels = createVoxels(reg);
             const chunk = createChunk(0, 0, 0);
             voxels.chunks.set('0,0,0', chunk);
-            setChunkBlock(chunk, 5, 5, 5, 'stair', reg);
-            setChunkBlock(chunk, 4, 5, 5, 'block', reg);
-            setChunkBlock(chunk, 4, 4, 5, 'block', reg);
-            setChunkBlock(chunk, 5, 4, 5, 'block', reg);
+            setChunkBlock(voxels, chunk, 5, 5, 5, 'stair');
+            setChunkBlock(voxels, chunk, 4, 5, 5, 'block');
+            setChunkBlock(voxels, chunk, 4, 4, 5, 'block');
+            setChunkBlock(voxels, chunk, 5, 4, 5, 'block');
 
             const a = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
             const b = meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), decoded);
