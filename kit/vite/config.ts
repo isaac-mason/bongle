@@ -124,6 +124,18 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
         server: {
             port,
             host: '127.0.0.1',
+            // Cross-origin isolation, ON by default in dev (opt out with `COI=0 ./dev.sh`).
+            // Chrome quantizes WebGPU timestamp-query results unless `crossOriginIsolated`,
+            // making the inspector's GPU timings coarse/untrustworthy; this flips it on.
+            // `credentialless` COEP keeps cross-origin (R2/CDN) assets + CORS fetches working.
+            // Dev-server only — prod (server.mjs / static host) is unaffected. Only takes
+            // effect when the embedding website is ALSO COI (see its vite config). Opt out
+            // if a cross-origin POPUP flow (COOP severs window.opener) or a credentialed
+            // cross-origin subresource breaks locally.
+            headers:
+                process.env.COI !== '0'
+                    ? { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' }
+                    : {},
             fs: {
                 // workspace root for engine sources + hoisted node_modules;
                 // projectDir so content/* and resources/* are reachable.
