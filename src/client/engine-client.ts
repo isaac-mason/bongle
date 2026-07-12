@@ -399,8 +399,9 @@ export async function load(state: EngineClient) {
         // camera aspect/projection is no longer event-driven, the renderer
         // pulls viewport size from canvasTarget each frame in `bindRenderCamera`
         // and writes aspect into the active POV camera.
+        const pixelRatio = Performance.cappedPixelRatio(state.performance);
         for (const room of state.rooms.rooms.values()) {
-            room.canvasTarget.setPixelRatio(window.devicePixelRatio);
+            room.canvasTarget.setPixelRatio(pixelRatio);
             room.canvasTarget.setSize(w, h);
         }
 
@@ -652,7 +653,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         inboundTraitWireIndex: state.inboundTraitWireIndex,
     });
 
-    Rooms.mountRoomViewport(room);
+    Rooms.mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
 
     // populate ctx.client.state and ctx.client.room now that both exist,
     // then fire onInit hooks, order matters: hooks may access client.room

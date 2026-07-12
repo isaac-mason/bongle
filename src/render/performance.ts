@@ -26,6 +26,13 @@ export type Tier = (typeof TIER_ORDER)[number];
 // codebase for `profile.active`.
 
 export type Settings = {
+    /** upper bound on the device pixel ratio the scene renders at. a
+     *  high-DPI display (2×+ Retina) otherwise shades 4× the fragments,
+     *  and the scene pass is fill/bandwidth-bound, so this is a direct
+     *  lever independent of shader cost. 1 = native resolution (no
+     *  super-sampling); higher trades sharpness for fill. UI renders in a
+     *  separate full-res overlay pass, so text stays crisp regardless. */
+    maxPixelRatio: number;
     /** how far from the camera (in chunks) voxel chunks remain visible.
      *  cullCPU drops chunks past this, meshing/eviction is unaffected. */
     voxelViewChunkRadius: number;
@@ -60,6 +67,7 @@ export type Settings = {
 
 const SETTINGS_BY_TIER: Record<Tier, Settings> = {
     low: {
+        maxPixelRatio: 1,
         voxelViewChunkRadius: 6,
         voxelArenaDesiredMB: 64,
         voxelMaxSections: 1024,
@@ -70,6 +78,7 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
         voxelWorkerQueueDepth: 3,
     },
     standard: {
+        maxPixelRatio: 1.5,
         voxelViewChunkRadius: 12,
         voxelArenaDesiredMB: 96,
         voxelMaxSections: 2048,
@@ -84,6 +93,15 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
 
 export function settingsForTier(profile: Profile): Settings {
     return SETTINGS_BY_TIER[profile.active];
+}
+
+/** the effective device pixel ratio for the active tier: the display's own
+ *  ratio, clamped by the tier's `maxPixelRatio`. every `canvasTarget
+ *  .setPixelRatio` call routes through here so high-DPI displays never pay
+ *  for more fragments than the tier allows. */
+export function cappedPixelRatio(profile: Profile): number {
+    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
+    return Math.min(dpr, settingsForTier(profile).maxPixelRatio);
 }
 
 export type Source = 'auto' | 'user';

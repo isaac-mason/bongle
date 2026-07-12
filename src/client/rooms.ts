@@ -28,6 +28,7 @@ import * as ModelVisuals from '../render/models/model-visuals';
 import type * as ParticleResourcesNs from '../render/particles/particle-resources';
 import * as ParticleVisuals from '../render/particles/particle-visuals';
 import * as Particles from '../render/particles/particles';
+import * as Performance from '../render/performance';
 import * as Renderer from '../render/renderer';
 import type * as ShadowResourcesNs from '../render/shadows/shadow-resources';
 import * as ShadowVisuals from '../render/shadows/shadow-visuals';
@@ -872,14 +873,14 @@ export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
  * for wiring `room.scriptRuntime.client.state`/`.room` and calling
  * `SceneTree.initSceneTree(room.nodes)` after mount.
  */
-export function mountRoomViewport(room: ClientRoom): void {
+export function mountRoomViewport(room: ClientRoom, pixelRatio: number): void {
     const viewport = useClient.getState().viewportElement;
     if (!viewport) return;
     viewport.prepend(room.viewport);
     const w = viewport.clientWidth;
     const h = viewport.clientHeight;
     if (w > 0 && h > 0) {
-        room.canvasTarget.setPixelRatio(window.devicePixelRatio);
+        room.canvasTarget.setPixelRatio(pixelRatio);
         room.canvasTarget.setSize(w, h);
     }
 }
@@ -983,7 +984,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         playerNode,
     });
 
-    mountRoomViewport(room);
+    mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
     if (room.scriptRuntime.client) {
         room.scriptRuntime.client.state = state;
         room.scriptRuntime.client.room = room;
