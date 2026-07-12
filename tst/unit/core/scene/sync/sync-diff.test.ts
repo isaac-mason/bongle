@@ -3,7 +3,7 @@ import type { TraitSyncState } from '../../../../../src/core/scene/traits';
 import { captureValue, diffSync } from '../../../../../src/core/scene/sync/sync-diff';
 import { syncMetric } from '../../../../../src/core/scene/sync/sync-rate';
 
-// minimal stubs, diffSync only touches codec.{pack,packInto} + syncDef.{rate,pack}
+// minimal stubs, diffSync only touches codec.{pack,packInto} + syncDef.{dirty,pack}
 // + the per-instance sync state, so we avoid pulling real packcat codecs (and their
 // runtime env needs) into the test. packInto mirrors pack: write the slice's bytes into
 // the scratch, return the length.
@@ -15,7 +15,7 @@ const codec = {
         return inst.bytes.length;
     },
 } as never;
-const def = (rate: unknown, pack: (inst: never) => unknown) => ({ rate, pack, authority: 'server' }) as never;
+const def = (dirty: unknown, pack: (inst: never) => unknown) => ({ dirty, pack, authority: 'server' }) as never;
 const syncState = (): TraitSyncState => ({
     dirty: new Uint32Array(1),
     bytes: [],
@@ -56,25 +56,25 @@ describe('captureValue', () => {
 });
 
 describe('diffSync — byte-diff', () => {
-    const realtime = () => def('realtime', (inst: { value: number }) => inst.value);
+    const onChange = () => def('onChange', (inst: { value: number }) => inst.value);
 
     it('server seeds a first-seen slice silently; client emits it', () => {
         const inst = { bytes: new Uint8Array([1]), value: 1 };
         const s = syncState();
-        expect(diffSync(realtime(), codec, inst as never, node, 0, s, false)).toBe(false);
+        expect(diffSync(onChange(), codec, inst as never, node, 0, s, false)).toBe(false);
         expect(s.bytes[0]).toBeDefined(); // seeded for next compare
 
         const c = syncState();
-        expect(diffSync(realtime(), codec, inst as never, node, 0, c, true)).toBe(true);
+        expect(diffSync(onChange(), codec, inst as never, node, 0, c, true)).toBe(true);
     });
 
     it('emits on byte change, stays silent when unchanged', () => {
         const inst = { bytes: new Uint8Array([1]), value: 1 };
         const s = syncState();
-        diffSync(realtime(), codec, inst as never, node, 0, s, false); // seed
-        expect(diffSync(realtime(), codec, inst as never, node, 0, s, false)).toBe(false);
+        diffSync(onChange(), codec, inst as never, node, 0, s, false); // seed
+        expect(diffSync(onChange(), codec, inst as never, node, 0, s, false)).toBe(false);
         inst.bytes = new Uint8Array([2]);
-        expect(diffSync(realtime(), codec, inst as never, node, 0, s, false)).toBe(true);
+        expect(diffSync(onChange(), codec, inst as never, node, 0, s, false)).toBe(true);
     });
 });
 

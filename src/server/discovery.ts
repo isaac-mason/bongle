@@ -906,8 +906,13 @@ function readChangedFields(
         // handoff. everyone else gets the { hz } throttle.
         const ownerHandoff = syncDef.authority === 'owner' && node.owner === playerId;
         const hz = typeof syncDef.rate === 'object' ? syncDef.rate.hz : null;
-        if (hz !== null && !ownerHandoff) {
-            const lastSent = known.lastSentTicks[i] ?? 0;
+        // lastSentTick is 0 until the field first ships (the never-sent sentinel used
+        // throughout this file). the first delivery of a dirty value is never rate-
+        // gated: the { hz } cap limits the cadence BETWEEN repeated sends, not the
+        // initial one — and at low ticks (room start) `currentTick - 0 >= ticksPerSend`
+        // would otherwise stall that first send until tick >= ticksPerSend.
+        const lastSent = known.lastSentTicks[i] ?? 0;
+        if (hz !== null && !ownerHandoff && lastSent !== 0) {
             if (!SyncRate.shouldSendThisTick(hz, lastSent, currentTick, 60)) {
                 continue;
             }

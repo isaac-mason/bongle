@@ -165,29 +165,41 @@ describe('Clock adaptive transform interp margin', () => {
         for (let i = 0; i < 300; i++) Clock.transformRenderTime(clock, 1 / 60);
     }
 
-    it('stays at 0 when jitter fits inside the fixed 50ms buffer', () => {
+    it('stays at 0 when reserve + jitter fits inside the fixed 50ms buffer', () => {
         const clock = Clock.init(0);
-        // 20ms spread — under SERVER_CLOCK_INTERP_DELAY, so no extra margin needed.
+        // 0 spread — reserve (0.05) alone equals the fixed buffer, so no extra margin.
+        feed(
+            clock,
+            Array.from({ length: 16 }, () => 1.0),
+        );
+        expect(clock.sync.latencyJitter).toBeCloseTo(0, 6);
+        settleMargin(clock);
+        expect(clock.sync.interpMargin).toBeCloseTo(0, 4);
+    });
+
+    it('widens to cover reserve + jitter spread beyond the fixed buffer', () => {
+        const clock = Clock.init(0);
+        // 20ms spread. target = reserve + spread − fixed buffer = 0.05 + 0.02 − 0.05.
         feed(
             clock,
             Array.from({ length: 16 }, (_, i) => 1.0 + (i % 2) * 0.02),
         );
         expect(clock.sync.latencyJitter).toBeCloseTo(0.02, 6);
         settleMargin(clock);
-        expect(clock.sync.interpMargin).toBeCloseTo(0, 4);
+        expect(clock.sync.interpMargin).toBeCloseTo(0.02, 3);
     });
 
-    it('widens to cover the jitter spread beyond the fixed buffer', () => {
+    it('clamps the margin to the max render-behind on a very jittery link', () => {
         const clock = Clock.init(0);
-        // half fast (offset 1.0), half slow (0.7): 300ms spread.
+        // half fast (offset 1.0), half slow (0.7): 300ms spread. reserve + spread −
+        // buffer = 0.30 exceeds MAX_INTERP_MARGIN (0.2), so it clamps.
         feed(
             clock,
             Array.from({ length: 16 }, (_, i) => (i < 8 ? 1.0 : 0.7)),
         );
         expect(clock.sync.latencyJitter).toBeCloseTo(0.3, 6);
         settleMargin(clock);
-        // target = spread − fixed buffer = 0.30 − 0.05.
-        expect(clock.sync.interpMargin).toBeCloseTo(0.25, 3);
+        expect(clock.sync.interpMargin).toBeCloseTo(0.2, 3);
     });
 
     it('trims a lone outlier from the spread (percentile, not raw max)', () => {
