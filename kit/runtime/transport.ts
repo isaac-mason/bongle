@@ -20,10 +20,10 @@
  * external WS framework.
  */
 
-import type { IncomingMessage, Server as HttpServer } from 'node:http';
+import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import { URL } from 'node:url';
-import type { Client, JsonValue, ServerApp, User } from 'bongle/interface';
-import { WebSocketServer, type WebSocket } from 'ws';
+import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from 'bongle/interface';
+import { type WebSocket, WebSocketServer } from 'ws';
 
 export type AttachGameTransportOptions<S> = {
     /** Vite dev server's `httpServer` (createServer with `server: { ... }`). */
@@ -32,6 +32,12 @@ export type AttachGameTransportOptions<S> = {
     state: S;
     /** URL pathname to claim. Defaults to `/game`. */
     path?: string;
+    /** Resolve the avatar a joining client gets. This transport is dev-only
+     *  (deploy has its own), so it's always the kit's local policy: a random
+     *  sample avatar (see `createSampleAvatarPicker`), mirroring the deployed
+     *  matchmaker path. Returns undefined only when the sample pool is empty,
+     *  in which case the engine uses the builtin. */
+    resolveAvatar: () => ResolvedAvatar | undefined;
 };
 
 export type GameTransport = {
@@ -43,7 +49,7 @@ export type GameTransport = {
 };
 
 export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): GameTransport {
-    const { httpServer, app, state, path = '/game' } = opts;
+    const { httpServer, app, state, path = '/game', resolveAvatar } = opts;
 
     const wss = new WebSocketServer({ noServer: true });
     const sockets = new Map<Client, WebSocket>();
@@ -72,7 +78,7 @@ export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): Gam
             }
 
             try {
-                app.onClientJoin(state, clientId, user, joinData);
+                app.onClientJoin(state, clientId, user, joinData, resolveAvatar());
             } catch (err) {
                 console.error(`[game-transport] onClientJoin threw for ${clientId}:`, err);
                 ws.close(1011, 'join failed');
@@ -140,7 +146,9 @@ export function attachGameTransport<S>(opts: AttachGameTransportOptions<S>): Gam
         close() {
             httpServer.off('upgrade', onUpgrade);
             for (const ws of sockets.values()) {
-                try { ws.close(1001, 'server shutting down'); } catch {}
+                try {
+                    ws.close(1001, 'server shutting down');
+                } catch {}
             }
             sockets.clear();
             wss.close();

@@ -29,6 +29,7 @@ import path from 'node:path';
 import { env } from 'bongle';
 import { createFallbackAvatarsDriver, createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { __kit } from 'bongle/internal';
+import { createSampleAvatarPicker } from 'bongle/kit/runtime/sample-avatars';
 import { attachGameTransport } from 'bongle/kit/runtime/transport';
 
 export type StartOptions = {
@@ -55,6 +56,7 @@ export async function start(opts: StartOptions) {
 
     await userEntry();
 
+    const avatars = createFallbackAvatarsDriver();
     const state = EngineServer.init({
         mode: 'edit',
         contentDir,
@@ -62,7 +64,7 @@ export async function start(opts: StartOptions) {
         options: {},
         driver: {
             storage: createInMemoryStorageDriver(),
-            avatars: createFallbackAvatarsDriver(),
+            avatars,
         },
     });
 
@@ -95,8 +97,8 @@ export async function start(opts: StartOptions) {
             clearInterval(timer);
             EngineServer.dispose(s);
         },
-        onClientJoin: (s: typeof state, c: number, u: unknown, j: unknown) =>
-            EngineServer.onClientJoin(s, c as never, u as never, j as never),
+        onClientJoin: (s: typeof state, c: number, u: unknown, j: unknown, avatar?: unknown) =>
+            EngineServer.onClientJoin(s, c as never, u as never, j as never, avatar as never),
         onClientLeave: (s: typeof state, c: number) => EngineServer.onClientLeave(s, c as never),
         getInbox: (s: typeof state) => s.net.inbox,
         getOutbox: (s: typeof state) => s.net.outbox,
@@ -105,7 +107,8 @@ export async function start(opts: StartOptions) {
         },
     };
 
-    const transport = attachGameTransport({ httpServer, app, state });
+    const resolveAvatar = await createSampleAvatarPicker(avatars);
+    const transport = attachGameTransport({ httpServer, app, state, resolveAvatar });
 
     const TICK_MS = 1000 / 60;
     let last = performance.now();

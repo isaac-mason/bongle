@@ -11,17 +11,14 @@
  * same in-memory drivers as edit-mode dev.
  */
 
-import { createReadStream, statSync, existsSync } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createFallbackAvatarsDriver, createInMemoryStorageDriver, resolveSampleAvatarFile } from 'bongle/engine-server';
 import type { ServerApp } from 'bongle/interface';
-import {
-    createFallbackAvatarsDriver,
-    createInMemoryStorageDriver,
-    resolveSampleAvatarFile,
-} from 'bongle/engine-server';
+import { createSampleAvatarPicker } from 'bongle/kit/runtime/sample-avatars';
 import { attachGameTransport, type GameTransport } from 'bongle/kit/runtime/transport';
 
 export type StartHostOptions = {
@@ -60,13 +57,15 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
-    const adapter = ((await import(/* @vite-ignore */ pathToFileURL(opts.serverEntry).href)) as { default: ServerApp<unknown> }).default;
+    const adapter = ((await import(/* @vite-ignore */ pathToFileURL(opts.serverEntry).href)) as { default: ServerApp<unknown> })
+        .default;
 
+    const avatars = createFallbackAvatarsDriver();
     const state = adapter.init({
         options: {},
         driver: {
             storage: createInMemoryStorageDriver(),
-            avatars: createFallbackAvatarsDriver(),
+            avatars,
         },
     });
     await adapter.load(state);
@@ -76,11 +75,16 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     const httpServer = createHttpServer((req, res) => serveStatic(opts.distClient, req, res));
     await new Promise<void>((resolve, reject) => {
         httpServer.once('error', reject);
-        httpServer.listen(port, '127.0.0.1', () => { httpServer.off('error', reject); resolve(); });
+        httpServer.listen(port, '127.0.0.1', () => {
+            httpServer.off('error', reject);
+            resolve();
+        });
     });
 
-    // Reuse the dev transport — identical contract.
-    const transport: GameTransport = attachGameTransport({ httpServer, app: adapter, state });
+    // Reuse the dev transport — identical contract. Local players join with a
+    // random sample avatar (mirrors the deployed matchmaker path).
+    const resolveAvatar = await createSampleAvatarPicker(avatars);
+    const transport: GameTransport = attachGameTransport({ httpServer, app: adapter, state, resolveAvatar });
 
     const TICK_MS = 1000 / 60;
     let last = performance.now();
@@ -99,8 +103,14 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
             if (closed) return;
             closed = true;
             clearInterval(timer);
-            try { transport.close(); } catch {}
-            try { adapter.dispose?.(state); } catch (err) { console.warn('[start-host] adapter.dispose failed:', err); }
+            try {
+                transport.close();
+            } catch {}
+            try {
+                adapter.dispose?.(state);
+            } catch (err) {
+                console.warn('[start-host] adapter.dispose failed:', err);
+            }
             await new Promise<void>((r) => httpServer.close(() => r()));
         },
     };
@@ -172,16 +182,22 @@ requestAnimationFrame(frame)
     // Reject anything that climbs out of clientDir.
     const resolved = path.resolve(clientDir, '.' + pathname);
     if (!resolved.startsWith(clientDir + path.sep) && resolved !== clientDir) {
-        res.writeHead(403); res.end('forbidden'); return;
+        res.writeHead(403);
+        res.end('forbidden');
+        return;
     }
 
     if (!existsSync(resolved)) {
-        res.writeHead(404); res.end('not found'); return;
+        res.writeHead(404);
+        res.end('not found');
+        return;
     }
 
     const stat = statSync(resolved);
     if (stat.isDirectory()) {
-        res.writeHead(404); res.end('not found'); return;
+        res.writeHead(404);
+        res.end('not found');
+        return;
     }
 
     const ext = path.extname(resolved).toLowerCase();
@@ -204,7 +220,9 @@ function pickPort(preferred: number): Promise<number> {
                     const port = typeof addr === 'object' && addr ? addr.port : 0;
                     srv.close(() => resolve(port));
                 });
-            } else { reject(err); }
+            } else {
+                reject(err);
+            }
         });
         srv.listen(preferred, () => {
             const addr = srv.address();
