@@ -15,6 +15,7 @@ import {
     CHUNK_SIZE,
     chunkData,
     control,
+    ENVIRONMENT_OVERWORLD,
     ensureChunk,
     ensureChunkPaletteSlot,
     env,
@@ -27,6 +28,7 @@ import {
     SetBlockFlags,
     script,
     setBlock,
+    setEnvironment,
     setPosition,
     TransformTrait,
     trait,
@@ -279,10 +281,15 @@ script(TerrainTrait, 'generate', (ctx) => {
 const GameplayTrait = trait('gameplay');
 
 script(GameplayTrait, 'session', (ctx) => {
-    if (!env.server) return;
-    onJoin(ctx, ({ playerNode }) => {
-        const transform = getTrait(playerNode, TransformTrait)!;
-        // high central vantage over the whole map (peaks reach ~60).
-        setPosition(transform, [0, 72, 0]);
-    });
+    if (env.client) {
+        // overworld sky: LUT gradient + sun/moon/star billboards + drifting clouds.
+        setEnvironment(ctx, ENVIRONMENT_OVERWORLD);
+    }
+    if (env.server) {
+        onJoin(ctx, ({ playerNode }) => {
+            const transform = getTrait(playerNode, TransformTrait)!;
+            // high central vantage over the whole map (peaks reach ~60).
+            setPosition(transform, [0, 72, 0]);
+        });
+    }
 });
