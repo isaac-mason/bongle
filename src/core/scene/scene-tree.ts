@@ -590,6 +590,15 @@ export type TraitProps<T extends TraitBase> = Partial<Omit<T, 'node' | '_def' | 
 export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>, props?: TraitProps<T>): T {
     const traitSlot = handle._slot;
 
+    // Re-adding a trait that's already present is a REPLACE: tear the old
+    // instance down first (dispose its scripts → onExit fires — e.g. a
+    // CharacterTrait unmounts its rig), so nothing it set up is orphaned.
+    // Without this, a re-add silently overwrites the old instance and leaks
+    // its scripts and any side effects (mounted nodes, listeners, ...).
+    if (bitset.has(node._bitset, traitSlot)) {
+        removeTrait(node, handle);
+    }
+
     // build plain instance from field defs, apply prop overrides
     const instance = buildTraitInstance(handle._def, props as Record<string, unknown> | undefined) as T;
     attachTraitInstance(node, traitSlot, instance);
@@ -1780,7 +1789,10 @@ function buildConditionBitsets(conditions: ConditionArgs[]): {
     return { parsedConditions, withBitset, withoutBitset, withTraits };
 }
 
-export function query<const Args extends ConditionArgs[]>(sceneTree: SceneTree, conditions: Args): Query<ConditionArgsToConditions<Args>> {
+export function query<const Args extends ConditionArgs[]>(
+    sceneTree: SceneTree,
+    conditions: Args,
+): Query<ConditionArgsToConditions<Args>> {
     const { parsedConditions, withBitset, withoutBitset, withTraits } = buildConditionBitsets(conditions);
 
     // hash conditions (order matters, do not sort)

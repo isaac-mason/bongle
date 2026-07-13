@@ -120,15 +120,15 @@ import {
     isLocalNode,
     type Node,
 } from '../api/scene-tree';
-import { isOwner, onFrame, query, script } from '../api/scripts';
+import { isOwner, onDispose, onFrame, onInit, query, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { dirty, sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setPosition, setQuaternion, setTransform } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
 import type { ModelHandle } from '../core/models/handle';
 import { BUILTIN_BASE_AVATAR_ID, baseAvatar } from '../core/player/base-avatar';
-import type { TraitProps } from '../core/scene/scene-tree';
 import { pack } from '../core/scene/pack';
+import type { TraitProps } from '../core/scene/scene-tree';
 import type { ScriptContext } from '../core/scene/scripts';
 import { BLOCK_FLAG_LIQUID } from '../core/voxels/block-registry';
 import type { BlockParticleConfig, BlockSoundConfig } from '../core/voxels/blocks';
@@ -627,6 +627,19 @@ export function ensureCharacterRig(node: Node): void {
     t.state.modelId = BUILTIN_BASE_AVATAR_ID;
     t.state.modelHandle = baseAvatar;
 }
+
+// Per-node rig lifecycle: the rig's existence is bound to the trait's. `onInit`
+// fires synchronously on trait add, so the bones are up the same tick for join
+// hooks; `onDispose` fires when the trait/script is torn down — on `removeTrait`
+// (including the remove-then-add `addTrait` does on a re-add) and node destroy,
+// but NOT on reparent — so a re-created trait can never leave the previous rig's
+// meshes orphaned, and moving a character in the tree doesn't drop its rig. The
+// WorldTrait reconciler still owns the placeholder→real swap and animation.
+script(CharacterTrait, 'rig', (ctx) => {
+    const node = ctx.node;
+    onInit(ctx, () => ensureCharacterRig(node));
+    onDispose(ctx, () => unmountRig(node));
+});
 
 /**
  * Add `CharacterTrait` to `node` and mount its rig immediately, so the bones
