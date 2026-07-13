@@ -1,7 +1,7 @@
 import type { Vec3 } from 'mathcat';
 import { SetBlockFlags } from './block-flags';
-import { runBlockHooks } from './block-hooks';
 import type { BlockObserverEntry } from './block-hooks';
+import { runBlockEvents, runBlockHooks } from './block-hooks';
 import type { BlockRegistry } from './block-registry';
 import { AIR, MISSING, resolveKey } from './block-registry';
 import { CullType } from './blocks';
@@ -550,10 +550,14 @@ export function setChunkBlock(
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
 
-    // inline-drain whichever hook passes the caller asked for. BULK (0) skips.
-    if (flags !== 0) {
-        runBlockHooks(voxels, flags);
-    }
+    // settle this write's hooks inline. BLOCK_HOOKS → block-def recompute (fences
+    // join, chains recurse); BLOCK_EVENTS → script observers, after the recompute
+    // so they see settled state. BULK sets the former, not the latter.
+    const wwx = chunk.wx + x;
+    const wwy = chunk.wy + y;
+    const wwz = chunk.wz + z;
+    if (flags & SetBlockFlags.BLOCK_HOOKS) runBlockHooks(voxels, wwx, wwy, wwz);
+    if (flags & SetBlockFlags.BLOCK_EVENTS) runBlockEvents(voxels, wwx, wwy, wwz, oldStateId, newStateId);
 }
 
 /**
@@ -725,15 +729,14 @@ export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
 
 /**
  * per-tick accumulator of authoritative voxel mutations, grouped by the
- * end-of-tick consumer that drains each part:
- *   - `ops`         → block-hooks (drain) + discovery (network)
+ * consumer that drains each part:
+ *   - `ops`         → block-hooks (settle, inline per write) + discovery (network)
  *   - `addedChunks` → discovery (streaming)
  *   - `light`       → flushPendingLight (relight)
- *   - `hookDrain`   → block-hooks (drain progress; not change data)
  */
 export type VoxelChanges = {
-    /** append-only log of block ops this tick. hooks drain it (tracked by
-     *  `hookDrain`), discovery ships it to clients. */
+    /** append-only log of block ops this tick. block-hooks settles each op's
+     *  hooks inline as it's written; discovery ships the log to clients. */
     ops: VoxelOp[];
     /** chunks created this tick, for streaming. drained by discovery, which
      *  rewinds each player's cursor so newly-existing chunks get streamed
@@ -754,20 +757,6 @@ export type VoxelChanges = {
          *  per-tick — it outlives a tick. */
         epoch: number;
     };
-    /** drain progress of the two block-hook passes over `ops`. NOT change
-     *  data — this is bookkeeping for the incremental drain. `ops` grows all
-     *  tick; DEFAULT setBlock drains it inline after every write, so each pass
-     *  keeps a high-water cursor to process each op exactly once (O(n) total
-     *  across n writes, not O(n²)). two cursors because the passes can advance
-     *  independently: the editor's runNeighbourRecompute moves only
-     *  `neighboursCursor`, deferring observer events to end-of-tick. `active`
-     *  guards re-entry, so a setBlock issued from inside a hook just appends
-     *  and lets the outer drain loop pick it up. */
-    hookDrain: {
-        neighboursCursor: number;
-        eventsCursor: number;
-        active: boolean;
-    };
 };
 
 export function createVoxelChanges(): VoxelChanges {
@@ -775,23 +764,18 @@ export function createVoxelChanges(): VoxelChanges {
         ops: [],
         addedChunks: new Set(),
         light: { blocks: [], chunks: new Set(), newChunks: [], epoch: 0 },
-        hookDrain: { neighboursCursor: 0, eventsCursor: 0, active: false },
     };
 }
 
 /**
- * clear the network/hook per-tick state after end-of-tick dispatch. the
- * `light` queues are cleared by their own consumer (flushPendingLight, which
- * runs earlier in the tick); `light.epoch` is monotonic and never cleared.
+ * clear the network per-tick state after end-of-tick dispatch. the `light`
+ * queues are cleared by their own consumer (flushPendingLight, which runs
+ * earlier in the tick); `light.epoch` is monotonic and never cleared.
  */
 export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.ops.length = 0;
     changes.addedChunks.clear();
-    changes.hookDrain.neighboursCursor = 0;
-    changes.hookDrain.eventsCursor = 0;
-    changes.hookDrain.active = false;
 }
-
 
 /**
  * flood-fill light-propagation config. when `enabled` is false,
@@ -827,6 +811,9 @@ export type VoxelsAuthority = {
     observers: Map<number, BlockObserverEntry> | null;
     /** flood-fill light-propagation config. see type doc. */
     floodFillLighting: FloodFillLightingState;
+    /** current block-hook recursion depth. a hook that issues a chained setBlock
+     *  recurses through runBlockHooks; this bounds a runaway cascade. */
+    hookDepth: number;
 };
 
 export function createVoxelsAuthority(): VoxelsAuthority {
@@ -834,6 +821,7 @@ export function createVoxelsAuthority(): VoxelsAuthority {
         changes: createVoxelChanges(),
         observers: null,
         floodFillLighting: { enabled: true, minLevel: 15 },
+        hookDepth: 0,
     };
 }
 
@@ -1057,13 +1045,11 @@ function markBoundaryNeighborsDirty(
 /**
  * set a block at a world position. creates the chunk if it doesn't exist.
  *
- * `flags` controls which hook passes fire inline before this call returns,
- * default is gameplay-coherent (`SetBlockFlags.DEFAULT` = NOTIFY_NEIGHBOURS
- * + FIRE_EVENTS), so a place-then-read sees settled state. bulk paths
- * (editor command drain, worldgen, prefab paste) should pass
- * `SetBlockFlags.BULK` and drain explicitly via runNeighbourRecompute or
- * runBlockEventHooks once at the end. inline drains from inside a hook
- * handler are guarded against re-entry, see block-hooks.runBlockHooks.
+ * every write settles its block-def hooks (onNeighbourUpdate/onNeighbourChanged)
+ * inline before returning, so a place-then-read sees settled state. `flags`
+ * only controls script observers: `DEFAULT` fires them, `BULK` (worldgen, paste,
+ * editor brush) does not. chained setBlocks from inside a hook are guarded
+ * against re-entry, see block-hooks.runBlockHooks.
  */
 export function setBlock(
     voxels: Voxels,

@@ -7,7 +7,6 @@
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
-import { runNeighbourRecompute } from '../../../../src/core/voxels/block-hooks';
 import { cube, fence, pane } from '../../../../src/core/voxels/block-presets';
 import { AIR, buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import type { BlockDef, BlockHandle, BlockTextureDef } from '../../../../src/core/voxels/blocks';
@@ -92,7 +91,6 @@ describe('pane neighbour update', () => {
         const voxels = makeVoxels();
 
         setBlock(voxels, 8, 8, 8, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 8, 8, 8)).toMatchObject({
             id: paneHandle.id,
@@ -108,7 +106,6 @@ describe('pane neighbour update', () => {
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 1, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: true, west: false, north: false, south: false });
         expect(decodeAt(voxels, 1, 0, 0)).toMatchObject({ east: false, west: true, north: false, south: false });
@@ -119,7 +116,6 @@ describe('pane neighbour update', () => {
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 0, 0, -1, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ north: true, south: false, east: false, west: false });
         expect(decodeAt(voxels, 0, 0, -1)).toMatchObject({ south: true, north: false, east: false, west: false });
@@ -131,7 +127,6 @@ describe('pane neighbour update', () => {
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 1, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 2, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: true, west: false });
         expect(decodeAt(voxels, 1, 0, 0)).toMatchObject({ east: true, west: true });
@@ -143,7 +138,6 @@ describe('pane neighbour update', () => {
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 1, 0, 0, stoneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: true, west: false, north: false, south: false });
     });
@@ -153,13 +147,11 @@ describe('pane neighbour update', () => {
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 2, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: false, west: false });
         expect(decodeAt(voxels, 2, 0, 0)).toMatchObject({ east: false, west: false });
 
         setBlock(voxels, 1, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: true, west: false });
         expect(decodeAt(voxels, 1, 0, 0)).toMatchObject({ east: true, west: true });
@@ -171,7 +163,6 @@ describe('pane neighbour update', () => {
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 1, 0, 0, fenceHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: false });
         expect(decodeAt(voxels, 1, 0, 0)).toMatchObject({ west: false });
@@ -183,7 +174,6 @@ describe('pane neighbour update', () => {
         // chunk size = 16. x=15 and x=16 land in different chunks.
         setBlock(voxels, 15, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
         setBlock(voxels, 16, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 15, 0, 0)).toMatchObject({ east: true });
         expect(decodeAt(voxels, 16, 0, 0)).toMatchObject({ west: true });
@@ -195,13 +185,10 @@ describe('pane neighbour update', () => {
         const voxels = makeVoxels();
 
         setBlock(voxels, 0, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         setBlock(voxels, 1, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         setBlock(voxels, 2, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
 
         expect(decodeAt(voxels, 0, 0, 0)).toMatchObject({ east: true, west: false });
         expect(decodeAt(voxels, 1, 0, 0)).toMatchObject({ east: true, west: true });
@@ -217,7 +204,6 @@ describe('pane neighbour update', () => {
 
         for (let i = 0; i < 5; i++) {
             setBlock(voxels, i, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-            runNeighbourRecompute(voxels);
             clearVoxelChanges(voxels.authority!.changes);
         }
 
@@ -240,7 +226,6 @@ describe('pane neighbour update', () => {
 
         for (let i = 0; i < 5; i++) {
             setBlock(voxels, i, 0, 0, paneHandle.defaultKey(), SetBlockFlags.BULK);
-            runNeighbourRecompute(voxels);
 
             // collect per-position last-state-key from this tick's ops
             const lastByPos = new Map<string, string>();

@@ -1,36 +1,17 @@
-// block hook dispatch, see plan-block-hooks.md for the design.
-//
-// one combined driver, parameterised by a SetBlockFlags mask:
-//   runBlockHooks(voxels, NOTIFY_NEIGHBOURS)               // editor + recompute only
-//   runBlockHooks(voxels, NOTIFY_NEIGHBOURS | FIRE_EVENTS) // server tick, recompute + observers + onNeighbourChanged
-//
-// runBlockHooks may be invoked inline from setBlock (per-op gameplay default)
-// or in bulk from runNeighbourRecompute / runBlockEventHooks (editor command
-// drain, server end-of-tick drain). per-pass cursors make every pass
-// idempotent, re-running picks up only ops past the last drain cursor.
-// `voxels.authority.changes.hookDrain.active` short-circuits re-entrant calls
-// (e.g. a hook issues setBlock with DEFAULT flags) so the outer while-loop
-// picks up the appended op naturally.
-//
-// the driver is depth-bounded so handler-issued setBlock chains can't
-// run away. observer-issued setBlocks produce ops that the next outer
-// iteration will pick up, so onBlockBuild fires for blocks placed by
-// other handlers, not just by user code.
-//
-// the bitmask on BlockHandle._hooks tracks intrinsic hooks only.
-// observer presence is tracked per-room via voxels.authority.observers.
+// block hook dispatch. setChunkBlock settles a write inline via two functions,
+// one per flag bit:
+//   runBlockHooks  (BLOCK_HOOKS)  — block-def onNeighbourUpdate/onNeighbourChanged
+//   runBlockEvents (BLOCK_EVENTS) — script observers (onBlockBuild/Break/StateChange)
+// a recompute that changes a block chains a setBlock(BULK) that recurses back
+// into runBlockHooks; auth.hookDepth bounds the cascade.
 
 import { SetBlockFlags } from './block-flags';
 import { AIR } from './block-registry';
 import type { BlockChangeCtx, BlockStateChangeCtx } from './blocks';
-import { getBlockState, setBlock, type VoxelBlockOp, type Voxels } from './voxels';
-
-// ── intrinsic hook bitmask ──────────────────────────────────────────
+import { getBlockState, setBlock, type Voxels } from './voxels';
 
 export const HOOK_ON_NEIGHBOUR_UPDATE = 1 << 0;
 export const HOOK_ON_NEIGHBOUR_CHANGED = 1 << 1;
-
-// ── per-room observer registry ──────────────────────────────────────
 
 export type BlockObserverEntry = {
     onBlockBuild?: Set<(ev: BlockChangeCtx) => void>;
@@ -38,16 +19,14 @@ export type BlockObserverEntry = {
     onBlockStateChange?: Set<(ev: BlockStateChangeCtx) => void>;
 };
 
-/** lazy-init observer map on first registration. caller must hold an
- *  authoritative Voxels, observers don't fire on read-only mirrors. */
+/** lazy-init the per-room observer map. observers only exist on an authoritative
+ *  Voxels, never a read-only mirror. */
 export function ensureBlockObservers(voxels: Voxels): Map<number, BlockObserverEntry> {
     const auth = voxels.authority;
     if (!auth) throw new Error('[bongle] ensureBlockObservers: voxels has no authority bundle');
-    if (!auth.observers) auth.observers = new Map();
+    auth.observers ??= new Map();
     return auth.observers;
 }
-
-// ── neighbour iteration ─────────────────────────────────────────────
 
 const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
     [1, 0, 0],
@@ -60,209 +39,90 @@ const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
 
 const MAX_HOOK_DEPTH = 512;
 
-// ── public API ──────────────────────────────────────────────────────
-
-/**
- * editor / pure-recompute path. fires onNeighbourUpdate on the changed
- * cell and each of its 6 neighbours, depth-bounded. safe to call from
- * the editor edit-action path, no observers, no side-effect hooks.
- */
-export function runNeighbourRecompute(voxels: Voxels): void {
-    runBlockHooks(voxels, SetBlockFlags.NOTIFY_NEIGHBOURS);
-}
-
-/**
- * server tick path. runs recompute interleaved with onBlockBuild /
- * onBlockBreak / onBlockStateChange observers and intrinsic
- * onNeighbourChanged. handler-issued setBlocks produce more ops that
- * get processed in the same call (depth-bounded), so observer reactions
- * chain like neighbour-recompute reactions do.
- */
-export function runBlockEventHooks(voxels: Voxels): void {
-    runBlockHooks(voxels, SetBlockFlags.NOTIFY_NEIGHBOURS | SetBlockFlags.FIRE_EVENTS);
-}
-
-// ── driver ──────────────────────────────────────────────────────────
-
-/**
- * fire the passes named in `mask` over `voxels.authority.changes.ops`,
- * starting from per-pass cursors that track which ops the previous call
- * already handled. inline drains from setBlock advance the cursors;
- * end-of-tick drain picks up only the tail. keeps total work O(n) across
- * n setBlock calls, never re-scans a fully-drained prefix.
- *
- * passes interleave per window so observer reactions see fully-recomputed
- * neighbour state for ops in the same batch. ops appended by hook
- * handlers extend the window and are processed in the next outer
- * iteration, depth-bounded.
- */
-export function runBlockHooks(voxels: Voxels, mask: number): void {
+/** BLOCK_HOOKS: recompute this cell + its 6 neighbours (onNeighbourUpdate), then
+ *  fire their onNeighbourChanged. runs for DEFAULT and BULK — bulk-authored
+ *  fences still join. */
+export function runBlockHooks(voxels: Voxels, wx: number, wy: number, wz: number): void {
     const auth = voxels.authority;
     if (!auth) return;
-    if (mask === 0) return;
-
-    const changes = auth.changes;
-    // re-entrant call (a hook handler issued setBlock with default flags
-    // and that setBlock tried to drain inline). the outer call's
-    // while-loop will pick up the appended op, just return.
-    if (changes.hookDrain.active) return;
-    changes.hookDrain.active = true;
-    try {
-        const ops = changes.ops;
-        const wantNeighbours = (mask & SetBlockFlags.NOTIFY_NEIGHBOURS) !== 0;
-        const wantEvents = (mask & SetBlockFlags.FIRE_EVENTS) !== 0;
-
-        let depth = 0;
-        while (true) {
-            const end = ops.length;
-            // start each pass from its own cursor, they advance
-            // independently (editor pre-drains neighbours but leaves
-            // events for end-of-tick).
-            const nStart = wantNeighbours ? changes.hookDrain.neighboursCursor : end;
-            const eStart = wantEvents ? changes.hookDrain.eventsCursor : end;
-            if (nStart >= end && eStart >= end) break;
-
-            if (depth++ > MAX_HOOK_DEPTH) {
-                console.warn('[block-hooks] depth exceeded MAX_HOOK_DEPTH; bailing');
-                break;
-            }
-
-            // recompute pass. may append ops past `end`.
-            if (wantNeighbours && nStart < end) {
-                for (let i = nStart; i < end; i++) {
-                    const op = ops[i]!;
-                    if (op.kind !== 0) continue;
-                    const blockOp = op as VoxelBlockOp;
-                    recomputeAt(voxels, blockOp.wx, blockOp.wy, blockOp.wz);
-                    for (let n = 0; n < 6; n++) {
-                        const [dx, dy, dz] = NEIGHBOUR_OFFSETS[n]!;
-                        recomputeAt(voxels, blockOp.wx + dx, blockOp.wy + dy, blockOp.wz + dz);
-                    }
-                }
-                changes.hookDrain.neighboursCursor = end;
-            }
-
-            // event pass. may append ops past `end`.
-            if (wantEvents && eStart < end) {
-                for (let i = eStart; i < end; i++) {
-                    const op = ops[i]!;
-                    if (op.kind !== 0) continue;
-                    fireEventsForOp(voxels, op as VoxelBlockOp);
-                }
-                changes.hookDrain.eventsCursor = end;
-            }
-        }
-    } finally {
-        changes.hookDrain.active = false;
+    if (auth.hookDepth >= MAX_HOOK_DEPTH) {
+        console.warn('[block-hooks] MAX_HOOK_DEPTH exceeded; bailing');
+        return;
     }
+    auth.hookDepth++;
+    try {
+        recomputeAt(voxels, wx, wy, wz);
+        for (let n = 0; n < 6; n++) {
+            const [dx, dy, dz] = NEIGHBOUR_OFFSETS[n]!;
+            recomputeAt(voxels, wx + dx, wy + dy, wz + dz);
+        }
+        fireNeighbourChanged(voxels, wx, wy, wz);
+    } finally {
+        auth.hookDepth--;
+    }
+}
+
+/** BLOCK_EVENTS: fire this write's script observers. DEFAULT-only; call after
+ *  runBlockHooks so observers see settled state. */
+export function runBlockEvents(
+    voxels: Voxels,
+    wx: number,
+    wy: number,
+    wz: number,
+    oldStateId: number,
+    newStateId: number,
+): void {
+    const observers = voxels.authority?.observers;
+    if (!observers) return;
+    const { stateToBlockIndex } = voxels.registry;
+    const oldBlock = stateToBlockIndex[oldStateId]!;
+    const newBlock = stateToBlockIndex[newStateId]!;
+    const wasAir = oldStateId === AIR;
+    const isAir = newStateId === AIR;
+    const at = { voxels, worldX: wx, worldY: wy, worldZ: wz };
+
+    if (wasAir && !isAir) {
+        emit(observers.get(newBlock)?.onBlockBuild, { ...at, stateId: newStateId });
+    } else if (!wasAir && isAir) {
+        emit(observers.get(oldBlock)?.onBlockBreak, { ...at, stateId: oldStateId });
+    } else if (oldBlock !== newBlock) {
+        emit(observers.get(oldBlock)?.onBlockBreak, { ...at, stateId: oldStateId });
+        emit(observers.get(newBlock)?.onBlockBuild, { ...at, stateId: newStateId });
+    } else if (oldStateId !== newStateId) {
+        emit(observers.get(newBlock)?.onBlockStateChange, { ...at, stateId: newStateId, oldStateId });
+    }
+}
+
+function emit<T>(fns: Set<(ev: T) => void> | undefined, ev: T): void {
+    if (fns) for (const fn of fns) fn(ev);
 }
 
 function recomputeAt(voxels: Voxels, wx: number, wy: number, wz: number): void {
     const stateId = getBlockState(voxels, wx, wy, wz);
     if (stateId === AIR) return;
-    const registry = voxels.registry;
-    const blockIdx = registry.stateToBlockIndex[stateId]!;
-    const handle = registry.handles[blockIdx]!;
+    const { stateToBlockIndex, handles, stateToKey } = voxels.registry;
+    const handle = handles[stateToBlockIndex[stateId]!]!;
     if ((handle._hooks & HOOK_ON_NEIGHBOUR_UPDATE) === 0) return;
-    const def = handle._def;
-    if (!def.onNeighbourUpdate) return;
-    const newId = def.onNeighbourUpdate({ voxels, worldX: wx, worldY: wy, worldZ: wz, stateId });
-    if (newId === stateId) return;
-    const newKey = registry.stateToKey[newId];
+    const newId = handle._def.onNeighbourUpdate?.({ voxels, worldX: wx, worldY: wy, worldZ: wz, stateId });
+    if (newId === undefined || newId === stateId) return;
+    const newKey = stateToKey[newId];
     if (!newKey) return;
-    // BULK, outer runBlockHooks while-loop picks up the appended op; no
-    // point paying the inline-drain re-entry-guard round-trip.
+    // structural change, not a gameplay action → BULK; recurses to settle its own
+    // neighbourhood.
     setBlock(voxels, wx, wy, wz, newKey, SetBlockFlags.BULK);
 }
 
-function fireEventsForOp(voxels: Voxels, op: VoxelBlockOp): void {
-    const registry = voxels.registry;
-    const observers = voxels.authority?.observers ?? null;
-
-    // observer dispatch (build / break / state change)
-    if (observers) {
-        const oldId = op.oldStateId;
-        const newId = op.newStateId;
-        const oldBlockIdx = registry.stateToBlockIndex[oldId]!;
-        const newBlockIdx = registry.stateToBlockIndex[newId]!;
-        const isAirOld = oldId === AIR;
-        const isAirNew = newId === AIR;
-
-        if (isAirOld && !isAirNew) {
-            fireBlockBuild(observers, newBlockIdx, voxels, op.wx, op.wy, op.wz, newId);
-        } else if (!isAirOld && isAirNew) {
-            fireBlockBreak(observers, oldBlockIdx, voxels, op.wx, op.wy, op.wz, oldId);
-        } else if (!isAirOld && !isAirNew) {
-            if (oldBlockIdx === newBlockIdx) {
-                if (oldId !== newId) {
-                    fireBlockStateChange(observers, newBlockIdx, voxels, op.wx, op.wy, op.wz, newId, oldId);
-                }
-            } else {
-                fireBlockBreak(observers, oldBlockIdx, voxels, op.wx, op.wy, op.wz, oldId);
-                fireBlockBuild(observers, newBlockIdx, voxels, op.wx, op.wy, op.wz, newId);
-            }
-        }
-    }
-
-    // intrinsic onNeighbourChanged on the 6 neighbours
+function fireNeighbourChanged(voxels: Voxels, wx: number, wy: number, wz: number): void {
+    const { stateToBlockIndex, handles } = voxels.registry;
     for (let n = 0; n < 6; n++) {
         const [dx, dy, dz] = NEIGHBOUR_OFFSETS[n]!;
-        const nwx = op.wx + dx;
-        const nwy = op.wy + dy;
-        const nwz = op.wz + dz;
-        const neighbourId = getBlockState(voxels, nwx, nwy, nwz);
-        if (neighbourId === AIR) continue;
-        const neighbourBlockIdx = registry.stateToBlockIndex[neighbourId]!;
-        const neighbourHandle = registry.handles[neighbourBlockIdx]!;
-        if ((neighbourHandle._hooks & HOOK_ON_NEIGHBOUR_CHANGED) === 0) continue;
-        const def = neighbourHandle._def;
-        if (!def.onNeighbourChanged) continue;
-        def.onNeighbourChanged({ voxels, worldX: nwx, worldY: nwy, worldZ: nwz, stateId: neighbourId });
+        const nwx = wx + dx;
+        const nwy = wy + dy;
+        const nwz = wz + dz;
+        const stateId = getBlockState(voxels, nwx, nwy, nwz);
+        if (stateId === AIR) continue;
+        const handle = handles[stateToBlockIndex[stateId]!]!;
+        if ((handle._hooks & HOOK_ON_NEIGHBOUR_CHANGED) === 0) continue;
+        handle._def.onNeighbourChanged?.({ voxels, worldX: nwx, worldY: nwy, worldZ: nwz, stateId });
     }
-}
-
-function fireBlockBuild(
-    observers: Map<number, BlockObserverEntry>,
-    blockIdx: number,
-    voxels: Voxels,
-    wx: number,
-    wy: number,
-    wz: number,
-    stateId: number,
-): void {
-    const entry = observers.get(blockIdx);
-    if (!entry?.onBlockBuild) return;
-    const ctx: BlockChangeCtx = { voxels, worldX: wx, worldY: wy, worldZ: wz, stateId };
-    for (const fn of entry.onBlockBuild) fn(ctx);
-}
-
-function fireBlockBreak(
-    observers: Map<number, BlockObserverEntry>,
-    blockIdx: number,
-    voxels: Voxels,
-    wx: number,
-    wy: number,
-    wz: number,
-    stateId: number,
-): void {
-    const entry = observers.get(blockIdx);
-    if (!entry?.onBlockBreak) return;
-    const ctx: BlockChangeCtx = { voxels, worldX: wx, worldY: wy, worldZ: wz, stateId };
-    for (const fn of entry.onBlockBreak) fn(ctx);
-}
-
-function fireBlockStateChange(
-    observers: Map<number, BlockObserverEntry>,
-    blockIdx: number,
-    voxels: Voxels,
-    wx: number,
-    wy: number,
-    wz: number,
-    stateId: number,
-    oldStateId: number,
-): void {
-    const entry = observers.get(blockIdx);
-    if (!entry?.onBlockStateChange) return;
-    const ctx: BlockStateChangeCtx = { voxels, worldX: wx, worldY: wy, worldZ: wz, stateId, oldStateId };
-    for (const fn of entry.onBlockStateChange) fn(ctx);
 }

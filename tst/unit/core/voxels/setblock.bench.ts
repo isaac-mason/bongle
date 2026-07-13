@@ -15,7 +15,6 @@
 import { bench, describe } from 'vitest';
 import { registry } from '../../../../src/core/registry';
 import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
-import { runNeighbourRecompute } from '../../../../src/core/voxels/block-hooks';
 import { BLOCK_FLAG_FENCE, buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import * as bs from '../../../../src/core/voxels/block-state';
 import { type BlockDef, type BlockTextureDef, block, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
@@ -303,7 +302,6 @@ describe('setBlock + onNeighbourUpdate (fence state recompute)', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
         for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, 8, FENCE_KEY, SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
     });
 
     bench('place 16 fences in a line, DEFAULT (inline drain per op)', () => {
@@ -316,7 +314,6 @@ describe('setBlock + onNeighbourUpdate (fence state recompute)', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
         for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
     });
 
     bench('place 16x16 grid, DEFAULT (inline drain per op)', () => {
@@ -329,7 +326,6 @@ describe('setBlock + onNeighbourUpdate (fence state recompute)', () => {
         const voxels = createVoxels(fenceRegistry);
         voxels.authority = createVoxelsAuthority();
         for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) setBlock(voxels, x, 8, z, FENCE_KEY, SetBlockFlags.BULK);
-        runNeighbourRecompute(voxels);
         voxels.authority!.changes.ops.length = 0;
 
         // remove the centre fence, DEFAULT drains inline so the 4

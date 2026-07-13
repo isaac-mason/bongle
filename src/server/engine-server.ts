@@ -16,7 +16,6 @@ import * as Prefab from '../core/scene/prefab';
 import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
-import { runBlockEventHooks } from '../core/voxels/block-hooks';
 import * as Light from '../core/voxels/light';
 import type * as EditorModule from '../editor/index';
 import * as Avatars from './avatars';
@@ -713,13 +712,8 @@ export function update(state: EngineServer, delta: number) {
         physics.postStep(room.physics, room.nodes, null);
         Debug.end(room.metrics, 'physics/post');
 
-        // run block hooks (recompute + observer events + onNeighbourChanged)
-        // before light flush so lighting sees settled block state.
-        Debug.begin(room.metrics, 'block-hooks');
-        runBlockEventHooks(room.voxels);
-        Debug.end(room.metrics, 'block-hooks');
-
-        // batch light update for all blocks changed during this tick
+        // block hooks settle inline per write (see block-hooks.ts); nothing to
+        // drain here. flush the tick's accumulated light recompute.
         Debug.begin(room.metrics, 'lighting');
         Light.flushPendingLight(room.voxels);
         Debug.end(room.metrics, 'lighting');

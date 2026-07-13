@@ -57,7 +57,6 @@ import {
 } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import { SetBlockFlags } from '../core/voxels/block-flags';
-import { runNeighbourRecompute } from '../core/voxels/block-hooks';
 import { propagateAllLight } from '../core/voxels/light';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { setBlock } from '../core/voxels/voxels';
@@ -194,13 +193,12 @@ script(
             ctx,
             VoxelEditCommand,
             editMutate(({ ops }) => {
-                // batched edit, append all ops first, drain once at the end.
-                // per-op inline drain would be catastrophic on large brushes
-                // (87000× worse on a dense 16×16 fence grid; see setblock.bench).
+                // BULK: authoring edits settle their block-def hooks inline (each
+                // write drains only its own op + chained recomputes) but fire no
+                // script observers. no explicit end-of-brush drain needed.
                 for (const op of ops) {
                     setBlock(ctx.voxels, op.wx, op.wy, op.wz, op.key, SetBlockFlags.BULK);
                 }
-                runNeighbourRecompute(ctx.voxels);
                 return true;
             }),
         );

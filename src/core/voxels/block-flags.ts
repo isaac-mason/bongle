@@ -1,20 +1,20 @@
-// flags for setBlock, control which hook passes fire inline before the
-// call returns. modelled after Minecraft's Constants.BlockFlags.
-//
-// gameplay defaults to settling the op inline (NOTIFY_NEIGHBOURS | FIRE_EVENTS)
-// so a place-then-read sees coherent state. bulk paths (editor commands,
-// worldgen, prefab paste) pass BULK and drain explicitly at the end.
+// flags for setBlock / setChunkBlock. every write settles its block-def hooks
+// (onNeighbourUpdate + onNeighbourChanged — fence joins, stair shapes, etc.)
+// inline; the flag only controls whether the write also fires SCRIPT observers
+// (onBlockBuild/Break/StateChange).
 
 export const SetBlockFlags = {
-    /** fire onNeighbourUpdate on the cell + its 6 neighbours, inline. */
-    NOTIFY_NEIGHBOURS: 1 << 0,
-    /** fire onBlockBuild/Break/StateChange observers and intrinsic
-     *  onNeighbourChanged on the 6 neighbours, inline. */
-    FIRE_EVENTS: 1 << 1,
+    /** block-def hooks: onNeighbourUpdate + onNeighbourChanged (and future
+     *  def-level hooks) — settle the block's own state from its neighbourhood,
+     *  e.g. fences joining, stairs shaping. */
+    BLOCK_HOOKS: 1 << 0,
+    /** script events: onBlockBuild / onBlockBreak / onBlockStateChange observers
+     *  registered per-room by game scripts. */
+    BLOCK_EVENTS: 1 << 1,
 
-    /** gameplay default, settle this op inline. */
+    /** gameplay write: run block-def hooks AND fire script events. */
     DEFAULT: (1 << 0) | (1 << 1),
-    /** bulk default, append-only; caller drains via
-     *  runNeighbourRecompute / runBlockEventHooks. */
-    BULK: 0,
+    /** bulk-authoring write (worldgen, paste, editor brush): run block-def hooks
+     *  so structure settles (fences join), but fire NO script events. */
+    BULK: 1 << 0,
 } as const;

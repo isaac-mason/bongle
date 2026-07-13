@@ -241,8 +241,8 @@ export function reconcilePrefabNode(sceneTree: SceneTree, node: Node, runtime: S
                         const paletteIdx = chunk.data[(ly << (CHUNK_BITS + CHUNK_BITS)) | (lz << CHUNK_BITS) | lx]!;
                         const key = chunk.paletteKeys[paletteIdx];
                         if (!key || key === BLOCK_AIR) continue;
-                        // BULK, prefab paste writes potentially thousands of cells;
-                        // server end-of-tick runBlockEventHooks drains them in one pass.
+                        // BULK: prefab paste settles block-def hooks inline (so
+                        // structure joins) but fires no script events per cell.
                         setBlock(
                             worldVoxels,
                             chunk.wx + lx + ox,
