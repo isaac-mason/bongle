@@ -666,16 +666,23 @@ export function createInputManager(touch: boolean): InputManager {
             // would grab pointer-lock as soon as the cursor moved. mousemove
             // and mouseup stay on window so a drag that started on the canvas
             // still completes if released elsewhere.
-            if (!(e.target instanceof HTMLCanvasElement)) return;
+            // while pointer-locked the event targets the lock element (the root
+            // `_lockEl`), not the canvas — those clicks ARE game input by
+            // definition (no cursor to land on UI), so let them through, same as
+            // the wheel handler does.
+            const onCanvas = e.target instanceof HTMLCanvasElement;
+            if (!onCanvas && !document.pointerLockElement) return;
             // a click on the canvas should defocus any active text input so
             // shortcuts like cmd+z route to the editor instead of the input's
             // native undo history. the canvas itself isn't focusable, so
             // without this the previously-focused input keeps focus.
             if (isTextInputFocused()) (document.activeElement as HTMLElement).blur();
             // this is a real user gesture on the game surface — the only place
-            // the browser lets us ACQUIRE pointer lock. remember the element so
-            // `releasePointer().restore()` can re-lock later, then try now.
-            m._lockTargetEl = e.target;
+            // the browser lets us ACQUIRE pointer lock. remember the canvas so
+            // `releasePointer().restore()` can re-lock later, then try now. (only
+            // a canvas press sets the fallback target; a locked-state press already
+            // has the lock, and its target is the root, not a canvas.)
+            if (onCanvas) m._lockTargetEl = e.target;
             tryAcquirePointerLock(m);
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
