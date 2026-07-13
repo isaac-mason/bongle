@@ -31,9 +31,12 @@ export {
     isMouseDown,
     isMouseDragStart,
     isMouseJustDown,
+    isMouseJustLocked,
     isMouseJustUp,
+    isMouseLocked,
     isMouseTap,
     isTouchButtonDown,
     isTouchButtonJustDown,
     isTouchButtonJustUp,
+    wasMouseLocked,
 } from '../client/input';

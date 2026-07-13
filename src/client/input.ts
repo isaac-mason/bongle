@@ -95,6 +95,10 @@ export type MouseKeyboardInput = {
     _wheelDeltaY: number;
     /** per-button drag-vs-tap discrimination, see MouseButtonGesture */
     _gestures: { left: MouseButtonGesture; middle: MouseButtonGesture; right: MouseButtonGesture };
+    /** pointer-lock state, snapshotted once per frame so `is/was/just` agree
+     *  within a frame (raw `document.pointerLockElement` can flip mid-frame). */
+    _locked: boolean;
+    _prevLocked: boolean;
 };
 
 export function createMouseKeyboardInput(): MouseKeyboardInput {
@@ -110,6 +114,8 @@ export function createMouseKeyboardInput(): MouseKeyboardInput {
         _prevButtons: { left: false, right: false, middle: false },
         _wheelDeltaY: 0,
         _gestures: { left: createGesture(), middle: createGesture(), right: createGesture() },
+        _locked: false,
+        _prevLocked: false,
     };
 }
 
@@ -131,6 +137,10 @@ export function resetMouseKeyboardInput(mouseKeyboard: MouseKeyboardInput): void
     mouseKeyboard._prevButtons.left = mouseKeyboard._buttons.left;
     mouseKeyboard._prevButtons.middle = mouseKeyboard._buttons.middle;
     mouseKeyboard._prevButtons.right = mouseKeyboard._buttons.right;
+
+    // snapshot pointer-lock state into prev, then re-read it for this frame
+    mouseKeyboard._prevLocked = mouseKeyboard._locked;
+    mouseKeyboard._locked = typeof document !== 'undefined' && !!document.pointerLockElement;
 
     // clear per-frame accumulators
     mouseKeyboard._keyJustPressed.clear();
@@ -199,6 +209,21 @@ export function isMouseDragStart(mouseKeyboard: MouseKeyboardInput, button: Mous
  */
 export function isMouseTap(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean {
     return mouseKeyboard._gestures[button].tapped;
+}
+
+/** Is the pointer locked this frame? (mouse-look / cursor captured.) */
+export function isMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._locked;
+}
+
+/** Was the pointer locked last frame? Pair with `isMouseLocked` for edge logic. */
+export function wasMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._prevLocked;
+}
+
+/** Fires for one frame the moment the pointer becomes locked (unlocked → locked). */
+export function isMouseJustLocked(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._locked && !mouseKeyboard._prevLocked;
 }
 
 /* ── touch input ──────────────────────────────────────────────────── */
@@ -683,10 +708,18 @@ export function createInputManager(touch: boolean): InputManager {
             // a canvas press sets the fallback target; a locked-state press already
             // has the lock, and its target is the root, not a canvas.)
             if (onCanvas) m._lockTargetEl = e.target;
+            // the press that RE-acquires the lock (room wants it, not held yet) is
+            // spent on recapturing the cursor — swallow it so it never registers as a
+            // button-down, and no gameplay reads it as a click (fire, place, tap). the
+            // next press, made while already locked, is the first real action. testing
+            // the lock BEFORE tryAcquire (below) is the reliable read: acquisition is
+            // async, so a frame loop can't tell this press from a real one once the
+            // lock lands mid-hold.
+            const acquiresLock = computeShouldBeLocked(m) && !document.pointerLockElement;
             tryAcquirePointerLock(m);
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
-            if (!name) return;
+            if (!name || acquiresLock) return;
             mouseKeyboard._buttons[name] = true;
             const g = mouseKeyboard._gestures[name];
             g.downX = e.clientX;
@@ -702,6 +735,10 @@ export function createInputManager(touch: boolean): InputManager {
             const name: MouseButton | null =
                 e.button === 0 ? 'left' : e.button === 1 ? 'middle' : e.button === 2 ? 'right' : null;
             if (!name) return;
+            // no matching registered press → nothing to release. covers the swallowed
+            // lock-acquire click (its down never registered) and presses begun off the
+            // game surface, so neither emits a spurious tap.
+            if (!mouseKeyboard._buttons[name]) return;
             mouseKeyboard._buttons[name] = false;
             const g = mouseKeyboard._gestures[name];
             // a release that never crossed the drag threshold is a tap.
