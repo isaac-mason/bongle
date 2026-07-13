@@ -71,6 +71,12 @@ export const mossyCobblestone = block('starter:mossy_cobblestone', {
     sounds: soundPreset.stone,
 });
 
+export const gravel = block('starter:gravel', {
+    name: 'Gravel',
+    model: () => ({ type: 'cube', textures: { all: { texture: tex.gravel } } }),
+    sounds: soundPreset.gravel,
+});
+
 export const oakPlanks = block('starter:oak_planks', {
     name: 'Oak Planks',
     model: () => ({ type: 'cube', textures: { all: { texture: tex.oakPlanks } } }),

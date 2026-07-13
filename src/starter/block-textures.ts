@@ -88,6 +88,9 @@ export const oakLogSide = blockTexture('starter:oak_log_side', {
 export const cobblestone = blockTexture('starter:cobblestone', {
     src: new URL('./assets/textures/cobblestone.png', import.meta.url),
 });
+export const gravel = blockTexture('starter:gravel', {
+    src: new URL('./assets/textures/gravel.png', import.meta.url),
+});
 export const mossyCobblestone = blockTexture('starter:mossy_cobblestone', {
     src: new URL('./assets/textures/mossy_cobblestone.png', import.meta.url),
 });
