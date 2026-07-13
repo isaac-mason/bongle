@@ -334,16 +334,13 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
 
     state.rooms.set(id, room);
 
-    // WorldTrait, always-attached scene-scoped script host. lives on
-    // root so script(WorldTrait, …) factories fire exactly once per room.
-    attachWorldTrait(room.nodes.root);
-
-    // server-side editor concerns are always-attached on the room root in
-    // dev builds. no-op when env.editor is false (the editor module never
-    // registers the trait). per-player client activation lives on player
-    // nodes, see createPlayerNode for edit rooms.
-    attachEditorServerTrait(room);
-
+    // NOTE: the WorldTrait (system host) + editor trait are attached in
+    // initializeRoom, NOT here. Attaching them here fires their scripts' onInit
+    // while scriptRuntime.server is still undefined (it's wired at the top of
+    // initializeRoom) — a system's onInit reaching for ctx.server would blow up.
+    // Every createRoom caller runs initializeRoom immediately after, so nothing
+    // observes the root without these traits. Attaching once there — after the
+    // server is wired and after loadSceneTree — makes onInit fire exactly once.
     return room;
 }
 
@@ -733,9 +730,10 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const physMs = performance.now() - physT0;
     room.scriptRuntime.physics = room.physics;
 
-    // re-attach after loadSceneTree: it clears root._traits and re-populates
-    // from persisted data, which never includes these traits (persist: false).
-    // idempotent, no-op when createRoom already attached and load was skipped.
+    // Attach the WorldTrait (system host) + editor trait HERE — the single point,
+    // reached after scriptRuntime.server is wired (top of this fn) and after
+    // loadSceneTree. So each system's factory + onInit fires exactly once, with
+    // ctx.server live. (loadSceneTree wouldn't carry these anyway: persist: false.)
     attachWorldTrait(room.nodes.root);
     attachEditorServerTrait(room);
 

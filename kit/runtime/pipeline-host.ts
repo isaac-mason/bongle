@@ -14,8 +14,13 @@
  *
  * Flow (symmetric with runtime/edit-server.ts):
  *  1. Set env flags BEFORE awaiting user-entry (top-level user declarations may
- *     branch on env). Mirrors the server env: client=false, server=true,
- *     editor=true.
+ *     branch on env). The pipeline is an offline BAKER, not a server or client:
+ *     server=false + client=false so instantiating a scene to render an icon does
+ *     NOT run any gameplay system's factory/onInit (a server system reaching for
+ *     ctx.server — e.g. rooms.create — would throw; there's no live room here).
+ *     Asset declarations (blocks/models/sprites/prefabs/systems) register
+ *     unconditionally, so the registry is complete regardless. editor=true keeps
+ *     edit-mode authoring content.
  *  2. Await `userEntry()` so registries populate before AssetPipeline reads them.
  *  3. `AssetPipeline.init` (captures registry refs; no GPU yet).
  *  4. Register the `__kit` flush handler — every settled HMR cascade in this
@@ -57,7 +62,7 @@ export async function start(opts: StartOptions): Promise<{ shutdown: () => Promi
     const { control, projectDir, userEntry } = opts;
 
     env.client = false;
-    env.server = true;
+    env.server = false;
     env.editor = true;
 
     await userEntry();

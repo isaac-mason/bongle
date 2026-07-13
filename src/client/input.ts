@@ -563,8 +563,14 @@ export type InputManager = {
     _touch: boolean;
     /** UI / ad / host surfaces holding the cursor free while shown. */
     _lockReleases: Set<string>;
-    /** element to pointer-lock; captured from the last canvas mousedown. */
+    /** element to pointer-lock; captured from the last canvas mousedown. fallback
+     *  only — prefer `_lockEl` when set. */
     _lockTargetEl: HTMLElement | null;
+    /** stable element to pointer-lock (`document.documentElement`), instead of a
+     *  per-room canvas. the canvas gets display:none'd (and its room disposed) on a
+     *  room swap, which drops a lock bound to it; the root element never does. mouse
+     *  deltas are global while locked, so look still works. */
+    _lockEl: HTMLElement | null;
     /** tracked from window focus/blur — don't poll document.hasFocus() (unreliable
      *  in the embed iframe, would flicker the lock). */
     _focused: boolean;
@@ -586,6 +592,7 @@ export function createInputManager(touch: boolean): InputManager {
         _touch: touch,
         _lockReleases: new Set(),
         _lockTargetEl: null,
+        _lockEl: typeof document === 'undefined' ? null : document.documentElement,
         _focused: typeof document === 'undefined' ? true : document.hasFocus(),
         _handlers: null as any,
     };
@@ -760,9 +767,16 @@ export function createInputManager(touch: boolean): InputManager {
 }
 
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
+    // carry mouse-look intent across a room swap: the destination room's controller
+    // hasn't run onInit yet, so its `_lockWanted` is still false — without this the
+    // reconcile below would release the lock in the gap before the new room re-declares
+    // it. the new room's controller corrects this on its next tick (a no-lock room
+    // sets it false and the following reconcile releases, as it should).
+    if (target && target !== m.target && m.target?._lockWanted) target._lockWanted = true;
     m.target = target;
-    // a room swap changes whose `_lockWanted` we read — re-derive. If the new
-    // target doesn't want the lock, this releases it; acquiring waits for a click.
+    // a room swap changes whose `_lockWanted` we read — re-derive. With the intent
+    // carried above and the lock held on the stable `_lockEl` (not the swapped-out
+    // canvas), the lock rides through the swap untouched.
     reconcilePointerLock(m);
 }
 
@@ -801,7 +815,9 @@ export function reconcilePointerLock(m: InputManager): void {
  *  and always swallow the post-Esc cooldown's rejection. */
 export function tryAcquirePointerLock(m: InputManager): void {
     if (!computeShouldBeLocked(m) || document.pointerLockElement) return;
-    const el = m._lockTargetEl;
+    // prefer the stable container so the lock survives room swaps; fall back to
+    // the last-clicked canvas if the container isn't wired yet.
+    const el = m._lockEl ?? m._lockTargetEl;
     if (!el) return;
     const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
         unadjustedMovement: true,

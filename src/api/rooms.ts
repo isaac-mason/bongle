@@ -31,15 +31,24 @@ function assertSameNamespace(callerNs: string, targetNs: string, roomId: string)
 
 /* ── lifecycle ───────────────────────────────────────────────────── */
 
+// synthetic, never-content-backed scene ids for empty rooms. unique per process
+// so two empty rooms never alias; never collide with a real `ns:name` scene id.
+let emptyRoomCounter = 0;
+
 /**
- * Create a new room from a scene id.
+ * Create a new room.
  *
- * Server: allocates a server room in the caller's namespace. Returns the
- * new roomId.
+ * With `o.sceneId`: boots from that scene's content. Without it: boots EMPTY —
+ * just the root node + empty voxels, no content file — for the caller to author
+ * itself, e.g. a procedurally generated world written via `setBlock`.
  *
- * Client: creates a local-only ClientRoom from a scene() handle (Phase 8).
+ * Server: allocates a server room in the caller's namespace. Returns the new
+ * roomId. Client: creates a local-only ClientRoom.
  */
-export function create(ctx: ScriptContext, sceneId: string, o?: { mode?: PlayerMode; sourceRoomId?: string }): string {
+export function create(ctx: ScriptContext, o?: { sceneId?: string; mode?: PlayerMode; sourceRoomId?: string }): string {
+    // no sceneId → a synthetic id resolving to no content, so the room boots
+    // blank. unique per empty room so instances never alias on save/disk paths.
+    const sceneId = o?.sceneId ?? `__empty:${emptyRoomCounter++}`;
     if (env.server && ctx.server) {
         const ns = callerNamespace(ctx);
         const room = ServerRooms.createRoomInNamespace(ctx.server.state, sceneId, o?.mode ?? 'play', ns, o?.sourceRoomId);
@@ -324,7 +333,17 @@ export function swap(ctx: ScriptContext, client: Client, toRoomId: string, o?: {
     const fromRoomId = o?.fromRoomId ?? ServerRooms.getActivePlayer(state.rooms, client)?.roomId;
     const mode = o?.mode ?? target.mode;
 
-    if (fromRoomId) {
+    // Join + activate the destination BEFORE leaving the origin. Tearing the
+    // origin down while it's still the active view runs its controllers'
+    // onDispose against the live input — e.g. PlayerController's onDispose
+    // releases pointer lock, which would drop the cursor mid-swap. Activating
+    // the destination first means that release lands on a now-inactive room and
+    // the incoming (lock-wanting) room keeps the lock. The client sees
+    // activate_room before room_left, so the active view never blanks.
+    const player = ServerRooms.addClientToRoom(state, client, target, mode);
+    Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
+
+    if (fromRoomId && fromRoomId !== target.id) {
         const from = ServerRooms.getRoom(state.rooms, fromRoomId);
         if (from) {
             assertSameNamespace(callerNs, from.namespace, fromRoomId);
@@ -332,9 +351,6 @@ export function swap(ctx: ScriptContext, client: Client, toRoomId: string, o?: {
             if (fromPlayer) ServerRooms.leaveClientFromRoom(state, fromPlayer.id);
         }
     }
-
-    const player = ServerRooms.addClientToRoom(state, client, target, mode);
-    Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
 }
 
 /* ── client-only observation ─────────────────────────────────────── */
