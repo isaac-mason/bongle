@@ -1016,11 +1016,14 @@ function processVoxelChunkEmpty(state: EngineClient, message: Protocol.VoxelChun
 
 function processRoomMetrics(state: EngineClient, message: Protocol.RoomMetrics): void {
     // protocol ships value-only; infer the unit from the id so the panel
-    // labels server-pushed kb/s metrics correctly. extend the prefix table
-    // if the server starts emitting non-ms / non-net metrics.
+    // labels server-pushed metrics correctly. extend the prefix table if the
+    // server starts emitting further non-ms metrics.
     for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
         for (const [id, value] of Object.entries(message.values)) {
-            const unit = id.startsWith('net/') ? 'kb/s' : 'ms';
+            let unit = 'ms';
+            if (id === 'proc/cpu') unit = '%';
+            else if (id.startsWith('proc/')) unit = 'mb';
+            else if (id.startsWith('net/')) unit = 'kb/s';
             Debug.record(room.serverMetrics, id, value as number, unit);
         }
     }

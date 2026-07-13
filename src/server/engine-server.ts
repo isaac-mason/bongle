@@ -290,6 +290,44 @@ function recordNetStats(metrics: Debug.Metrics, stats: Net.NetStats, delta: numb
     Debug.record(metrics, 'net/out/total', stats.bytesOut / 1024 / delta / roomCount);
 }
 
+// ── process CPU / memory sampling (server-only) ─────────────────────
+// One server process per game-room container in prod, so process-level CPU and
+// RSS *are* that room's utilization. The engine carries no node types
+// (@types/node isn't a dep; tsconfig lib is ES2024+DOM), so shim the two
+// `process` calls we read and no-op when it's absent (e.g. a browser-hosted
+// server in tests).
+type ProcessStats = {
+    cpuUsage(previous?: { user: number; system: number }): { user: number; system: number };
+    memoryUsage(): { rss: number; heapUsed: number };
+};
+const _process = (globalThis as { process?: ProcessStats }).process;
+
+// last absolute cpuUsage snapshot + wall-ms accumulated since the last sample.
+// CPU% needs a wall-clock window to divide by, so we sample on an interval
+// rather than every tick — a per-tick % over a ~16ms window is mostly noise.
+let _lastCpuUsage: { user: number; system: number } | null = _process ? _process.cpuUsage() : null;
+let _procSampleAccumMs = 0;
+const PROC_SAMPLE_INTERVAL_MS = 1000; // 1Hz — the 600-sample ring then holds ~10min of trend
+
+// record process CPU% (of one core) + memory (RSS/heap, MB) onto the global
+// metrics bag, so they ride the existing room_metrics push to the debug panel
+// alongside `tick`. `delta` is the tick delta in seconds; throttled to ~1Hz.
+function recordProcessStats(metrics: Debug.Metrics, delta: number): void {
+    if (!_process || _lastCpuUsage === null) return;
+    _procSampleAccumMs += delta * 1000;
+    if (_procSampleAccumMs < PROC_SAMPLE_INTERVAL_MS) return;
+    const windowMs = _procSampleAccumMs;
+    _procSampleAccumMs = 0;
+
+    const used = _process.cpuUsage(_lastCpuUsage); // microseconds of CPU since the last sample
+    _lastCpuUsage = _process.cpuUsage();
+    Debug.record(metrics, 'proc/cpu', ((used.user + used.system) / 1000 / windowMs) * 100, '%'); // µs→ms over the wall window
+
+    const mem = _process.memoryUsage();
+    Debug.record(metrics, 'proc/rss', mem.rss / 1024 / 1024, 'mb');
+    Debug.record(metrics, 'proc/heap', mem.heapUsed / 1024 / 1024, 'mb');
+}
+
 /* ── sync_update handling ── */
 // per-sync sync_update handling is inline in the processInbox switch case.
 // authority:'owner' checks use def.syncDefs[syncIdx].authority.
@@ -460,6 +498,9 @@ export function processInbox(state: EngineServer) {
                             ...Debug.getLatestValues(room.metrics),
                             tick: global.tick ?? 0,
                             inbox: global.inbox ?? 0,
+                            'proc/cpu': global['proc/cpu'] ?? 0,
+                            'proc/rss': global['proc/rss'] ?? 0,
+                            'proc/heap': global['proc/heap'] ?? 0,
                         };
                         Net.send(state.net, client, { type: 'room_metrics', roomId: room.id, values });
                         break;
@@ -818,6 +859,10 @@ export function update(state: EngineServer, delta: number) {
     for (const room of state.rooms.rooms.values()) {
         recordNetStats(room.metrics, netStats, delta, roomCount);
     }
+
+    // process-level CPU% + memory → global metrics bag → debug panel. one
+    // process per room container in prod, so this is the room's own footprint.
+    recordProcessStats(state.metrics, delta);
 
     Debug.end(state.metrics, 'tick');
 
