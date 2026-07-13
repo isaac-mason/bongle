@@ -11,7 +11,6 @@
 // Rate-limit / cap codes are unreachable here, there's no I/O to
 // bound and no shared quota to enforce.
 
-import { randomUUID } from 'node:crypto';
 import type {
     JsonValue,
     ServerDriver,
@@ -66,7 +65,7 @@ export function createInMemoryStorageDriver(): ServerDriver['storage'] {
         if (ifVersion !== undefined && (!existing || existing.version !== ifVersion)) {
             return { ok: false, code: 'version_conflict' };
         }
-        const version = randomUUID();
+        const version = crypto.randomUUID();
         map.set(key, { value, version });
         return { ok: true, version };
     }

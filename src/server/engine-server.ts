@@ -1,5 +1,3 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { env } from 'bongle';
 import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
@@ -18,9 +16,9 @@ import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
 import * as Light from '../core/voxels/light';
 import type * as EditorModule from '../editor/index';
+import type { ChunkCompressor } from '../core/voxels/chunk-codec';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
-import { compressChunkZstd } from './chunk-encode';
 import * as Clients from './clients';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
@@ -43,17 +41,28 @@ let _editor: typeof EditorModule | undefined;
 export type InitOptions = {
     mode: 'edit' | 'play';
     /**
-     * Absolute path to the project's `content/` root. Wrapper bakes this
-     * via `import.meta.url`-relative resolution so engine code never
-     * resolves authored content against process cwd.
+     * Authored content (scenes) for ContentManager: `scenes` seeds the store
+     * (sceneId → raw JSON, read by the host from the project fs), `persist`
+     * writes changes back. Host-provided so the engine stays node-free.
      */
-    contentDir: string;
+    content?: { scenes?: Record<string, string>; persist?: ContentManager.ContentPersistence };
     /**
-     * Absolute path to the project's `resources/server/` root. Same
-     * baking story as `contentDir`. Model bins live under
-     * `<resourcesDir>/models/<id>.<hash>.server.bin`.
+     * Path prefix for server model bins (`<resourcesDir>/models/<id>...`);
+     * `loadResource` interprets the resolved path.
      */
     resourcesDir: string;
+    /**
+     * Load a resolved local resource path (a model bin under resourcesDir) to
+     * bytes. Host-provided (node fs, or the browser editor's Filesystem); http
+     * urls are handled by the engine directly.
+     */
+    loadResource: (path: string) => Promise<Uint8Array>;
+    /**
+     * Chunk compressor for the voxel wire codec. Host-provided so the engine
+     * never hard-depends on a node zlib: node game-room passes the native zstd
+     * (server/chunk-encode), the browser editor passes zstd-wasm.
+     */
+    compressChunk: ChunkCompressor;
     /**
      * Matchmaker grouping key for this server's `main` namespace. Stamped at
      * init so scripts can read it via `ctx.server.gameOptions`.
@@ -75,7 +84,7 @@ export function init(opts: InitOptions) {
     if (opts.options && Object.keys(opts.options).length > 0) {
         Rooms.setNamespaceGameOptions(rooms, 'main', opts.options);
     }
-    const contentManager = ContentManager.init({ contentDir: opts.contentDir });
+    const contentManager = ContentManager.init(opts.content);
     const resourceManager = ResourceManager.init({ resourcesDir: opts.resourcesDir });
     const content = Content.init();
     // model bins: ModelHandle.bin.server stores a path relative to
@@ -94,13 +103,12 @@ export function init(opts: InitOptions) {
                         return new Uint8Array(await r.arrayBuffer());
                     });
                 }
-                if (path.isAbsolute(url)) return fs.readFile(url);
-                return fs.readFile(ResourceManager.resolveModelBin(resourceManager, url));
+                return opts.loadResource(ResourceManager.resolveModelBin(resourceManager, url));
             },
         },
         'server',
     );
-    const discovery = Discovery.init(compressChunkZstd);
+    const discovery = Discovery.init(opts.compressChunk);
 
     // server-side rpc. driver constructed by ./rpc; listener registry +
     // dispatch live in core/rpc. one shared instance across all rooms;

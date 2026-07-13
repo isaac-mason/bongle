@@ -8,8 +8,5 @@
     },
     "dependencies": {
         "bongle": "workspace:*"
-    },
-    "devDependencies": {
-        "webgpu": "0.4.0"
     }
 }

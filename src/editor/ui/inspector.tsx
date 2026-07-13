@@ -10,7 +10,7 @@ import { type EnumOption, enumLabel, enumValue } from '../../core/scene/prop/pro
 import * as Selection from '../../core/scene/selection';
 import type { ControlDef, TraitDef } from '../../core/scene/traits';
 import { formatKey } from '../../core/voxels/block-registry';
-import { assetUrl } from '../../render/asset-url';
+import { PrefabThumb } from './prefab-thumb';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 
@@ -530,17 +530,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
             const def = prefabDefs.get(id)?.payload;
             const name = def?.name ?? id;
             const leading = (
-                <div
-                    key={id}
-                    className="rounded-sm overflow-hidden shrink-0"
-                    style={{
-                        width: thumbSize,
-                        height: thumbSize,
-                        backgroundImage: `url(${assetUrl(`prefabs/${id}.icon.png`)})`,
-                        backgroundSize: `${thumbSize}px ${thumbSize}px`,
-                        backgroundRepeat: 'no-repeat',
-                    }}
-                />
+                <PrefabThumb key={id} prefabId={id} size={thumbSize} className="rounded-sm overflow-hidden shrink-0" />
             );
             return { id, label: name, sublabel: name === id ? undefined : id, leading };
         }),
@@ -900,17 +890,7 @@ function AddPrefabAction({ node }: { node: Node }) {
     const thumbSize = 24;
     const items: SearchableSelectItem<string>[] = prefabIds.map((id) => {
         const leading = (
-            <div
-                key={id}
-                className="rounded-sm overflow-hidden shrink-0"
-                style={{
-                    width: thumbSize,
-                    height: thumbSize,
-                    backgroundImage: `url(${assetUrl(`prefabs/${id}.icon.png`)})`,
-                    backgroundSize: `${thumbSize}px ${thumbSize}px`,
-                    backgroundRepeat: 'no-repeat',
-                }}
-            />
+            <PrefabThumb key={id} prefabId={id} size={thumbSize} className="rounded-sm overflow-hidden shrink-0" />
         );
         return { id, label: id, leading };
     });

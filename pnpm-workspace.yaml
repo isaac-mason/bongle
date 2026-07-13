@@ -9,6 +9,7 @@ minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - '@bongle/*'
   - vite
+  - '@rolldown/*'
 
 onlyBuiltDependencies:
   - '@ffmpeg-installer/*'

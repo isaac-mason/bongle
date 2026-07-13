@@ -1,12 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
-import { AssetPipeline, excludeEditorIcons, resolveEngineRoot } from 'bongle/engine-asset-pipeline';
 import { build as viteBuild } from 'vite';
 import { captureImportPlugin } from './capture-import-plugin';
 import { envPlugin } from './env-plugin';
 import { checkContent } from './migrations';
-import { ensureGeneratedStubs, resetGeneratedBarrels } from './user-entry';
+import { ensureGeneratedStubs } from './user-entry';
 
 // Static build = single HTML+JS bundle the browser can serve as-is from
 // any static host (CDN, http-server, website public dir). Same asset
@@ -83,15 +82,6 @@ requestAnimationFrame(loop)
     return { entryHtml, entryTs };
 }
 
-async function runAssetPipelineInProcess(opts: { projectDir: string; bongleDir: string; engineRoot: string }): Promise<void> {
-    await import(/* @vite-ignore */ path.join(opts.engineRoot, 'src/core/physics/physics.ts'));
-    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
-    await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
-    const pipeline = AssetPipeline.init({ projectDir: opts.projectDir, mode: 'play', cache: false, renderIcons: false });
-    await AssetPipeline.run(pipeline);
-    AssetPipeline.dispose(pipeline);
-}
-
 export async function buildStatic(projectDir: string, opts?: { sceneId?: string }) {
     // Production semantics for the build (see build.ts): the CLI bootstraps through a
     // Vite SSR dev server that sets NODE_ENV='development', and Vite derives
@@ -122,16 +112,10 @@ export async function buildStatic(projectDir: string, opts?: { sceneId?: string 
     console.log(`[bongle] building static ${resolvedProjectDir}`);
     const start = performance.now();
 
-    const engineRoot = resolveEngineRoot(resolvedProjectDir);
+    // NO node bake (browser-native clean break): bundles against whatever
+    // baked outputs already exist under resources/ — the browser editor is
+    // the thing that bakes.
     ensureGeneratedStubs(resolvedProjectDir);
-    resetGeneratedBarrels(resolvedProjectDir);
-
-    console.log('[bongle] running asset pipeline...');
-    await runAssetPipelineInProcess({
-        projectDir: resolvedProjectDir,
-        bongleDir,
-        engineRoot,
-    });
 
     const { entryHtml } = writeBootstrap(bongleDir, sceneId);
 
@@ -182,12 +166,7 @@ export async function buildStatic(projectDir: string, opts?: { sceneId?: string 
     // and other browser-side runtime assets the engine fetches via assetUrl().
     const projectResourcesClientDir = path.join(resolvedProjectDir, 'resources', 'client');
     if (fs.existsSync(projectResourcesClientDir)) {
-        // exclude editor-only per-id icon dirs (scenes/, prefabs/); keep the
-        // block-icon atlas + all real runtime assets.
-        fs.cpSync(projectResourcesClientDir, outDir, {
-            recursive: true,
-            filter: excludeEditorIcons(projectResourcesClientDir),
-        });
+        fs.cpSync(projectResourcesClientDir, outDir, { recursive: true });
     }
 
     const elapsed = (performance.now() - start).toFixed(0);

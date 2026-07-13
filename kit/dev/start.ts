@@ -3,10 +3,10 @@
  *
  * Composition:
  *   1. `createServer(defineBongleConfig(...))` builds a Vite dev server with
- *      three named envs (`client`, `server`, `pipeline`) and the `bongle()`
- *      plugin across them. The `pipeline` env's ModuleRunner runs in a
- *      worker_thread (see vite/pipeline-env.ts) — the asset pipeline lives
- *      there, off the editor's main thread.
+ *      two named envs (`client`, `server`) and the `bongle()` plugin across
+ *      them. NO pipeline env: the asset pipeline is editor-resident and
+ *      browser-only (clean break 2026-07-13); kit dev serves whatever baked
+ *      outputs already exist under resources/.
  *   2. `server.listen()` brings up Vite's http server on the configured
  *      port. Listen first so `server.httpServer` is bound when the
  *      transport hooks `upgrade`.
@@ -15,8 +15,6 @@
  *      The virtual's `boot()` calls into `runtime/edit-server.start()` which
  *      attaches `/game` upgrades to `server.httpServer`. Loading populates
  *      the server-local registries.
- *   4. `pipelineWorker.sendBoot()` kicks the pipeline worker now that its env
- *      is initialized; its first pass resolves the `firstPipelineRun` gate.
  *
  * Returns a handle whose `.close()` shuts everything down — closes the
  * Vite server (which closes the http server, which closes the WS via the
@@ -27,7 +25,6 @@
 import { createServer, type RunnableDevEnvironment, type ViteDevServer } from 'vite';
 import { defineBongleConfig } from '../vite/config';
 import type { EngineRebootRef } from '../vite/plugin';
-import { getPipelineWorkerHandle } from '../vite/pipeline-env';
 import { type GameEnvBootResult, initGameEnv } from './game-env';
 
 export type StartDevOptions = {
@@ -44,11 +41,6 @@ export type DevHandle = {
      *  free-port probe and `listen()` — callers must log/tunnel this, not the
      *  requested value. */
     port: number;
-    /** Resolves once the pipeline worker's first pass has settled on cold start
-     *  (bake + first icon render done, worker warm). The CLI awaits this before
-     *  its ready banner. Resolves even on a pipeline fault, so it never wedges
-     *  startup. */
-    firstPipelineRun: Promise<void>;
     /** Tear down the server env + the vite server. Idempotent. */
     close(): Promise<void>;
 };
@@ -59,7 +51,7 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
     // Set below once the envs have booted; the bongle:engine-reboot plugin calls
     // the matching `request*` on an engine-source change (a file outside
     // projectDir), per env.
-    const rebootRef: EngineRebootRef = { requestServer: null, requestPipeline: null };
+    const rebootRef: EngineRebootRef = { requestServer: null };
 
     const server = await createServer(defineBongleConfig({ projectDir, bongleDir, port, engineReboot: rebootRef }));
     await server.listen();
@@ -124,52 +116,10 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
         rebootDebounce = setTimeout(() => void rebootGameEnv(), 60);
     };
 
-    // Boot the asset-pipeline worker now that the server is listening (so the
-    // pipeline env is initialized before the worker's first fetchModule). The
-    // worker imports the user entry through its own runner and self-drives off
-    // HMR; results flow back via the bongle:pipeline plugin's control listener,
-    // which opens the editor-load gate. Independent of the engine server above.
-    const pipelineWorker = getPipelineWorkerHandle();
-    pipelineWorker?.sendBoot();
-
-    // Respawn the pipeline worker on a pipeline-engine-source change (it runs
-    // engine bake/render code). A fresh worker fetches the new code; the old
-    // worker's pinned Dawn instance dies with its isolate, so we sidestep the
-    // clearCache-would-GC-the-instance segfault. Coalesced like the server reboot.
-    let pipelineRebooting = false;
-    let pipelineRebootQueued = false;
-    async function rebootPipeline(): Promise<void> {
-        if (!pipelineWorker) return;
-        if (pipelineRebooting) {
-            pipelineRebootQueued = true;
-            return;
-        }
-        pipelineRebooting = true;
-        try {
-            do {
-                pipelineRebootQueued = false;
-                await pipelineWorker.reboot();
-                console.log('[dev/start] engine-source changed — pipeline worker respawned');
-            } while (pipelineRebootQueued);
-        } catch (err) {
-            console.error('[dev/start] pipeline reboot failed:', err);
-        } finally {
-            pipelineRebooting = false;
-        }
-    }
-    let pipelineRebootDebounce: ReturnType<typeof setTimeout> | undefined;
-    rebootRef.requestPipeline = () => {
-        clearTimeout(pipelineRebootDebounce);
-        pipelineRebootDebounce = setTimeout(() => void rebootPipeline(), 60);
-    };
-
     let closed = false;
     async function close(): Promise<void> {
         if (closed) return;
         closed = true;
-        // Await the worker's clean self-exit before tearing down the rest —
-        // a forced exit while Dawn's pump is live napi-FATALs the process.
-        await pipelineWorker?.close();
         try {
             game.transport.close();
         } catch (err) {
@@ -194,7 +144,6 @@ export async function startDevServer(opts: StartDevOptions): Promise<DevHandle> 
             return game;
         },
         port: boundPort,
-        firstPipelineRun: pipelineWorker?.firstRun ?? Promise.resolve(),
         close,
     };
 }

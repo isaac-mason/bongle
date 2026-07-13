@@ -9,10 +9,8 @@
 // touch cwd. `ModelHandle.bin.server` stores a path relative to
 // `resourcesDir`, and `resolveModelBin` joins them.
 
-import path from 'node:path';
-
 export type ResourceManager = {
-    /** absolute path to the project's `resources/server/` root, baked at init. */
+    /** the project's `resources/server/` root, baked at init. */
     resourcesDir: string;
 };
 
@@ -21,9 +19,11 @@ export function init(opts: { resourcesDir: string }): ResourceManager {
 }
 
 /**
- * resolve a model bin's relative path (as stored in
- * `ModelHandle.bin.server`) to an absolute filesystem path.
+ * resolve a model bin's relative path (as stored in `ModelHandle.bin.server`)
+ * to a full path under `resourcesDir`. POSIX join (no node:path) so the browser
+ * server bundle stays node-free; the injected loadBytes driver interprets it.
  */
 export function resolveModelBin(state: ResourceManager, relPath: string): string {
-    return path.join(state.resourcesDir, relPath);
+    const base = state.resourcesDir.replace(/\/+$/, '');
+    return `${base}/${relPath.replace(/^\/+/, '')}`;
 }

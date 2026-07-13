@@ -135,20 +135,15 @@ import MagicString from 'magic-string';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
 import { extractConsumerDeps, resolveLocalName, type SymbolTableRegistry } from './dep-resolve';
-import { getPipelineWorkerHandle, type PipelineWorkerOutbound } from './pipeline-env';
 import { virtualEntriesPlugin } from './virtual-entries';
 
 /** Mutable handle the dev orchestrator (`kit/dev/start.ts`) sets once the envs
  *  have booted. The `hotUpdate` hook calls the matching `request*` on an
  *  engine-source change (per env). Null until boot completes — early changes are
- *  ignored, the fresh boot already has them. Server + pipeline are separate so a
- *  server-only change (e.g. `core/net.ts`) doesn't respawn the pipeline worker,
- *  and vice versa. */
+ *  ignored, the fresh boot already has them. */
 export type EngineRebootRef = {
     /** reboot the server env (game runtime + wire format). */
     requestServer: (() => void) | null;
-    /** respawn the pipeline worker (asset bake + icon render). */
-    requestPipeline: (() => void) | null;
 };
 
 export interface BongleOptions {
@@ -173,12 +168,6 @@ export function bongle(opts: BongleOptions): Plugin[] {
     // delete linger until the next dev-session restart.
     const symbolTables: SymbolTableRegistry = new Map<string, SymbolTable>();
 
-    // Cross-plugin wake hook: the scene watcher calls this on any
-    // .scene.json change; the pipeline plugin assigns it once the pipeline is
-    // inited. Default no-op so early scene events before that are dropped
-    // silently — the pipeline's first run walks the corpus from disk anyway.
-    let notifyPipelineOfSceneChange: () => void = () => {};
-
     return [
         virtualEntriesPlugin({ projectDir }),
         {
@@ -202,13 +191,6 @@ export function bongle(opts: BongleOptions): Plugin[] {
                     console.log(`[bongle:engine-reboot] server ← ${rel}`);
                     opts.engineReboot?.requestServer?.();
                     return []; // suppress the no-op server "full reload"
-                }
-                if (this.environment.name === 'pipeline') {
-                    // the pipeline worker runs engine code too (AssetPipeline
-                    // bake/render); respawn it so it re-fetches the new code.
-                    console.log(`[bongle:engine-reboot] pipeline ← ${rel}`);
-                    opts.engineReboot?.requestPipeline?.();
-                    return [];
                 }
                 if (this.environment.name === 'client') {
                     // suppress the auto page-reload so it can't beat the async
@@ -456,7 +438,6 @@ if (import.meta.hot) {
                             serverHot?.send('bongle:scene-clear', { id });
                         }
                         if (currentSet.has(id)) recomputeSceneList();
-                        notifyPipelineOfSceneChange();
                         return;
                     }
 
@@ -472,8 +453,6 @@ if (import.meta.hot) {
                         clientHot?.send('bongle:scene-update', event);
                         serverHot?.send('bongle:scene-update', event);
                     }
-
-                    notifyPipelineOfSceneChange();
                 };
 
                 const schedule = (id: string) => {
@@ -539,95 +518,20 @@ if (import.meta.hot) {
         },
 
         {
-            // Asset pipeline — the dev driver for the one `AssetPipeline`.
+            // NO pipeline here: the asset pipeline is editor-resident and
+            // browser-only (clean break 2026-07-13). Kit dev serves whatever
+            // baked outputs already exist under resources/ via
+            // bongle:serve-resources below. This plugin keeps only the dev
+            // sample-avatar route that used to ride along with the pipeline
+            // driver.
             //
-            // `AssetPipeline` (the engine, behind `engine-asset-pipeline`) runs
-            // inside the server env runner — the same graph as EngineServer,
-            // sharing the registries. This plugin owns the dev wiring: it inits
-            // the pipeline once, runs it on each settled HMR flush and on
-            // scene/asset file changes (under a coalescing lock), and forwards
-            // the `RunResult` to the live editor client. Reachable only on the
-            // edit path — play bundles never import it, so sharp/skia/gltf/Dawn
-            // stay out.
-            //
-            // After a run: atlas/sprite-atlas changes → the client refreshes in
-            // place (refreshBlockResources / SpriteResources.refresh); written
-            // icons → the editor re-fetches the thumbnails.
-            name: 'bongle:pipeline',
-            async configureServer(server) {
-                // The pipeline itself runs in the worker-hosted `pipeline` env
-                // (see vite/pipeline-env.ts + runtime/pipeline-host.ts). This
-                // plugin owns only the main-thread side: forwarding settled
-                // passes to the browser, the editor-load gate, and relaying
-                // scene/asset file changes to the worker.
-                const pipelineWorker = getPipelineWorkerHandle();
-                if (!pipelineWorker) {
-                    console.warn('[bongle:pipeline] pipeline worker env missing; skipping pipeline wiring');
-                    return;
-                }
-
-                // Project-rooted source paths the pipeline reads (gltf/png/ogg).
-                // Refreshed after every run so freshly-declared model()/sound()
-                // entries enter the watch set; the watcher below forces a pass
-                // when one of these files changes (registry revs don't move).
-                let assetSrcs: Set<string> = new Set();
-
-                // Forward a settled run's outputs to the browser env: atlas/sprite
-                // refreshes and per-icon thumbnail re-fetches. No client env (e.g.
-                // headless) → nothing to do.
-                type PipelineResult = Extract<PipelineWorkerOutbound, { type: 'result' }>['result'];
-                const forwardToClient = (result: PipelineResult) => {
-                    const clientHot = server.environments.client?.hot;
-                    if (!clientHot) return;
-                    // Atlas moved → client refreshBlockResources + remesh.
-                    if (result.atlasChanged) clientHot.send('bongle:block-texture-atlas-updated', { hash: result.atlasHash });
-                    // Sprite atlas → SpriteResources.refresh on the client.
-                    if (result.spriteAtlasChanged)
-                        clientHot.send('bongle:sprite-atlas-updated', { hash: result.spriteAtlasHash });
-                    // Audio manifest/atlas → Audio.refreshResources on the client.
-                    if (result.audioAtlasChanged) clientHot.send('bongle:audio-atlas-updated', { hash: result.audioAtlasHash });
-                    // Each written icon → editor re-fetches the thumbnail.
-                    for (const icon of result.iconsWritten)
-                        clientHot.send('bongle:icons-ready', { kind: icon.kind, id: icon.id });
-                };
-
-                // The worker self-drives per-edit runs (HMR re-evals user code in
-                // its own isolate). On this side we react only to 'result' — forward
-                // the settled pass's outputs to the browser and refresh the asset
-                // watch-set. Lifecycle ('warm'/'gate'/'error') and the first-run
-                // gate are owned by the worker handle (see vite/pipeline-env.ts).
-                pipelineWorker.onControl((msg: PipelineWorkerOutbound) => {
-                    if (msg.type !== 'result') return;
-                    // New declarations are now in scope; removed ones drop out.
-                    assetSrcs = new Set(msg.assetSources);
-                    forwardToClient(msg.result);
-                });
-
-                // Scene-watcher wake → force a worker pass.
-                notifyPipelineOfSceneChange = () => {
-                    pipelineWorker.triggerRun(false);
-                };
-
-                // GET /__bongle/ready — editor client polls this before
-                // EngineClient.load(). `ready` flips true only once the first
-                // full pipeline run is done (bake + first icon render), so the
-                // editor loads into a warm pipeline. Always returns 200.
-                server.middlewares.use('/__bongle/ready', (req, res) => {
-                    if (req.method !== 'GET') {
-                        res.statusCode = 405;
-                        res.end();
-                        return;
-                    }
-                    res.setHeader('Content-Type', 'application/json');
-                    res.setHeader('Cache-Control', 'no-cache');
-                    res.end(JSON.stringify({ ready: pipelineWorker.ready, status: pipelineWorker.status }));
-                });
-
-                // GET /__bongle/avatars/<slug>.glb — the dev fallback avatars
-                // driver (sampleAvatars) serves the engine's example .glb off
-                // disk, same-origin, so the client rides the runtime-avatar
-                // fetch path with no extra port. (connect strips the mount
-                // prefix from req.url, so rebuild the full path for the resolver.)
+            // GET /__bongle/avatars/<slug>.glb — the dev fallback avatars
+            // driver (sampleAvatars) serves the engine's example .glb off
+            // disk, same-origin, so the client rides the runtime-avatar
+            // fetch path with no extra port. (connect strips the mount
+            // prefix from req.url, so rebuild the full path for the resolver.)
+            name: 'bongle:sample-avatars',
+            configureServer(server) {
                 server.middlewares.use(SAMPLE_AVATAR_ROUTE_PREFIX, (req, res, next) => {
                     if (req.method !== 'GET') return next();
                     const tail = (req.url ?? '/').split('?')[0]!.replace(/^\//, '');
@@ -643,29 +547,6 @@ if (import.meta.hot) {
                         next();
                     }
                 });
-
-                // External-asset watcher. Registry revisions only move on
-                // user-source HMR — replacing a .gltf / .png / .ogg on
-                // disk leaves them untouched, so without this the pipeline
-                // never re-runs and stale cached bins keep serving. We
-                // piggyback on Vite's existing chokidar (already covers
-                // projectDir minus node_modules + the `server.watch.ignored`
-                // dirs) and filter to the set of paths the pipeline is
-                // actually reading. The filter is reset after every pass
-                // so freshly-declared srcs enter immediately.
-                const ASSET_DEBOUNCE_MS = 50;
-                let assetDebounce: ReturnType<typeof setTimeout> | null = null;
-                const onAssetChange = (file: string) => {
-                    if (!assetSrcs.has(file)) return;
-                    if (assetDebounce) clearTimeout(assetDebounce);
-                    assetDebounce = setTimeout(() => {
-                        assetDebounce = null;
-                        pipelineWorker.triggerRun(true);
-                    }, ASSET_DEBOUNCE_MS);
-                };
-                server.watcher.on('change', onAssetChange);
-                server.watcher.on('add', onAssetChange);
-                server.watcher.on('unlink', onAssetChange);
             },
         },
 

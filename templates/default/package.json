@@ -14,8 +14,7 @@
     "pnpm": {
         "onlyBuiltDependencies": [
             "sharp",
-            "skia-canvas",
-            "webgpu"
+            "skia-canvas"
         ]
     }
 }

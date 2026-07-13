@@ -95,27 +95,9 @@ export async function start(opts: StartOptions) {
     // clearPendingChanges sweep.
     await EngineEditor.setup(state);
 
-    // Editor-dev pipeline gate. Wait for the first Node-side asset
-    // pipeline pass before calling load() — otherwise voxels-atlas.json
-    // may not exist yet and load() fails.
-    {
-        const loader = document.createElement('div');
-        loader.style.cssText = 'position:fixed;inset:0;background:#fff;display:flex;align-items:center;justify-content:center;font-family:system-ui;font-size:13px;color:#000;z-index:99999';
-        loader.innerHTML = '<div style="border:1px solid #000;padding:0.75rem 1rem"><div data-status>Starting…</div></div>';
-        document.body.appendChild(loader);
-        const statusEl = loader.querySelector('[data-status]');
-        while (true) {
-            try {
-                const r = await fetch('/__bongle/ready');
-                const j = await r.json() as { ready: boolean; status: string | null };
-                if (j.ready) break;
-                if (statusEl && j.status) statusEl.textContent = j.status;
-            } catch {}
-            await new Promise((r) => setTimeout(r, 200));
-        }
-        loader.remove();
-    }
-
+    // NO pipeline gate: the asset pipeline is editor-resident and
+    // browser-only (clean break 2026-07-13); kit dev loads against whatever
+    // baked outputs already exist under resources/.
     await EngineClient.load(state);
 
     __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));

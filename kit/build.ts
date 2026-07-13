@@ -4,14 +4,14 @@ import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import archiver from 'archiver';
 import type { Plugin } from 'vite';
-import { AssetPipeline, excludeEditorIcons, resolveEngineRoot } from 'bongle/engine-asset-pipeline';
+import { registry } from 'bongle/internal';
 import { INTERFACE_VERSION } from 'bongle/interface';
 import { build as viteBuild } from 'vite';
 import { captureImportPlugin } from './capture-import-plugin';
 import { envPlugin } from './env-plugin';
 import { buildManifest } from './manifest';
 import { checkContent } from './migrations';
-import { ensureGeneratedStubs, resetGeneratedBarrels } from './user-entry';
+import { ensureGeneratedStubs } from './user-entry';
 import { virtualEntriesPlugin } from './vite/virtual-entries';
 
 type Target = 'client' | 'server';
@@ -143,18 +143,14 @@ async function runBuild(projectDir: string, target: Target): Promise<void> {
 }
 
 /**
- * Prod-build adapter for `AssetPipeline`. Imports the user module in-process
- * (bun's native TS loader handles `.ts` directly) so its declarative APIs
- * upsert into the typed registries, then runs the same pipeline the dev plugin
- * drives — `renderIcons: false`, so it bakes (atlas/models/scenes/audio/
- * sprites) without booting a GPU device.
- *
- * Returns the matchmaking config seen during evaluation — used by the
- * caller to seed the bundle manifest.
+ * DEAD: node bake removed (browser-native clean break, 2026-07-13). The
+ * pipeline is editor-resident and browser-only; publish builds bake in the
+ * browser editor. This build path now bundles against whatever baked
+ * outputs already exist under resources/, and reads matchmaking off the
+ * registries evaluated in-process.
  */
-async function runAssetPipelineInProcess(opts: {
+async function evaluateUserModule(opts: {
     projectDir: string;
-    bongleDir: string;
     engineRoot: string;
 }): Promise<{ matchmaking: { maxPlayers: number } }> {
     // Physics module's evaluation registers built-in physics resources;
@@ -168,10 +164,17 @@ async function runAssetPipelineInProcess(opts: {
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'generated', 'index.ts'));
     await import(/* @vite-ignore */ path.join(opts.projectDir, 'src', 'index.ts'));
 
-    const pipeline = AssetPipeline.init({ projectDir: opts.projectDir, mode: 'play', cache: false, renderIcons: false });
-    const result = await AssetPipeline.run(pipeline);
-    AssetPipeline.dispose(pipeline);
-    return { matchmaking: result.matchmakingConfig ?? { maxPlayers: 10 } };
+    // Singleton id 'main' matches MATCHMAKING_ID in core/matchmaking.ts;
+    // default mirrors DEFAULT_MATCHMAKING_CONFIG for the un-declared case.
+    // Same read the pipeline pass does off the registry.
+    return { matchmaking: registry.matchmaking.byId.get('main')?.payload ?? { maxPlayers: 10 } };
+}
+
+/** Resolve the absolute `bongle` package root from a project dir (follows
+ *  the node_modules/bongle symlink). Used to hand the in-process user-module
+ *  evaluation an absolute physics.ts path that resolves regardless of cwd. */
+function resolveEngineRoot(projectDir: string): string {
+    return fs.realpathSync(path.join(projectDir, 'node_modules', 'bongle'));
 }
 
 /** Read a package's resolved version from its `package.json`. Resolved
@@ -238,25 +241,15 @@ export async function build(projectDir: string) {
 
     const start = performance.now();
 
-    // Asset pipeline runs in-process before the final bundle. Bun's native
-    // TS loader evaluates the user's src/generated + src/index directly;
-    // `block()`/`model()`/`matchmaking()` calls upsert into the typed
-    // registries exposed via `bongle/internal`. We then read those
-    // registries directly to build the partial ProjectModule view atlas
-    // + models need. Same shape as the bongle:pipeline plugin handler
-    // the dev server runs (kit/vite/plugin.ts), minus the env-runner —
-    // we're already in the same process as the registries here.
+    // NO node bake (browser-native clean break): the bundle is built
+    // against whatever baked outputs already exist under resources/ (the
+    // browser editor is the thing that bakes). User module still evaluates
+    // in-process so the manifest can read matchmaking off the registries.
     const engineRoot = resolveEngineRoot(resolvedProjectDir);
     ensureGeneratedStubs(resolvedProjectDir);
-    // Same chicken-and-egg as dev: a stale sub-barrel from a previous
-    // run could reference a removed kit api and fail the import before
-    // the pipeline gets a chance to regenerate it.
-    resetGeneratedBarrels(resolvedProjectDir);
 
-    console.log('[bongle] running asset pipeline...');
-    const { matchmaking } = await runAssetPipelineInProcess({
+    const { matchmaking } = await evaluateUserModule({
         projectDir: resolvedProjectDir,
-        bongleDir,
         engineRoot,
     });
 
@@ -279,12 +272,7 @@ export async function build(projectDir: string) {
         fs.cpSync(projectResourcesServerDir, path.join(distDir, 'server', 'resources'), { recursive: true });
     }
     if (fs.existsSync(projectResourcesClientDir)) {
-        // exclude editor-only per-id icon dirs (scenes/, prefabs/); keep the
-        // block-icon atlas + all real runtime assets.
-        fs.cpSync(projectResourcesClientDir, path.join(distDir, 'client'), {
-            recursive: true,
-            filter: excludeEditorIcons(projectResourcesClientDir),
-        });
+        fs.cpSync(projectResourcesClientDir, path.join(distDir, 'client'), { recursive: true });
     }
 
     // Full bundle manifest — written AFTER both targets emit so we can
@@ -296,10 +284,10 @@ export async function build(projectDir: string) {
     // sibling. Server has no CSS path; client may not either.
     const clientStylesPath = path.join(distDir, 'client', 'index.css');
 
-    // matchmaking is observed during runAssetPipelineInProcess above
-    // (the only step that imports user code, and so can see a
-    // matchmaking() call). Defaults to DEFAULT_MATCHMAKING_CONFIG when
-    // the user didn't declare one. Threaded through the call's return value.
+    // matchmaking is observed during evaluateUserModule above (the only
+    // step that imports user code, and so can see a matchmaking() call).
+    // Defaults to DEFAULT_MATCHMAKING_CONFIG when the user didn't declare
+    // one. Threaded through the call's return value.
     const manifest = buildManifest({
         clientEntry: path.join(distDir, 'client', 'index.js'),
         clientStyles: fs.existsSync(clientStylesPath) ? clientStylesPath : undefined,

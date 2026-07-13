@@ -197,6 +197,10 @@ export const ChunkCullRecord = /* @__PURE__ */ struct('VoxelChunkCullRecord', {
     opaqueSlot: d.i32,
     transparentSlot: d.i32,
     translucentSlot: d.i32,
+    /** local render-room index this chunk belongs to (world = 0). the cull
+     *  compute keeps only records whose room matches the active `roomSel.x`,
+     *  so many rooms' chunks coexist in the one shared arena. */
+    room: d.u32,
 });
 
 export const CHUNK_CULL_RECORD_STRIDE = /* @__PURE__ */ layoutStrideOf(ChunkCullRecord);
@@ -249,11 +253,19 @@ export const CullView = /* @__PURE__ */ struct('VoxelCullView', {
     plane4: d.vec4f,
     camMeta: d.vec4f,
     camFrac: d.vec4f,
+    /** active render room: `.x` = the room index this pass draws (world = 0),
+     *  stored as f32 (exact for small ints, like `camMeta`'s chunk coords).
+     *  The cull keeps only records whose `room` matches. `.yzw` reserved. */
+    roomSel: d.vec4f,
 });
 
 export const CULL_VIEW_STRIDE = /* @__PURE__ */ layoutStrideOf(CullView);
 
 export const CULL_WG_SIZE = 64;
+
+/** The world / primary room's local index. Reserved and never torn down; every
+ *  secondary room (portal, icon subject) gets a distinct index above it. */
+export const WORLD_ROOM = 0;
 
 // one thread per resident ChunkCullRecord; frustum + distance test once per
 // chunk, compact survivors into `visibleChunks`. Uses workgroup-local
@@ -307,22 +319,28 @@ function createCullCompute(): ComputeNode {
         // barriers below. `i >= recordCount` tail threads fail `inRange`; their
         // out-of-bounds record read is clamped-safe (WebGPU robustness) and
         // discarded by the AND.
+        // active render room: keep only records tagged with `roomSel.x`, so many
+        // rooms' chunks share the arena but each pass draws exactly one room.
+        const inRoom = rec.field('room').toF32().equal(vw.field('roomSel').x);
         const distSq = dot(rel, rel).toVar('distSq');
         const survive = and(
             and(
                 and(
                     and(
                         and(
-                            and(i.toF32().lessThan(camMeta.w), dot(p0.xyz, rel).add(p0.w).greaterThanEqual(f32(0))),
-                            dot(p1.xyz, rel).add(p1.w).greaterThanEqual(f32(0)),
+                            and(
+                                and(i.toF32().lessThan(camMeta.w), dot(p0.xyz, rel).add(p0.w).greaterThanEqual(f32(0))),
+                                dot(p1.xyz, rel).add(p1.w).greaterThanEqual(f32(0)),
+                            ),
+                            dot(p2.xyz, rel).add(p2.w).greaterThanEqual(f32(0)),
                         ),
-                        dot(p2.xyz, rel).add(p2.w).greaterThanEqual(f32(0)),
+                        dot(p3.xyz, rel).add(p3.w).greaterThanEqual(f32(0)),
                     ),
-                    dot(p3.xyz, rel).add(p3.w).greaterThanEqual(f32(0)),
+                    dot(p4.xyz, rel).add(p4.w).greaterThanEqual(f32(0)),
                 ),
-                dot(p4.xyz, rel).add(p4.w).greaterThanEqual(f32(0)),
+                distSq.lessThanEqual(camFrac.w),
             ),
-            distSq.lessThanEqual(camFrac.w),
+            inRoom,
         ).toVar('survive');
 
         // workgroup-local slot for survivors.
@@ -1281,6 +1299,12 @@ export type ChunkAlloc = {
     translucent: PassAlloc | null;
     /** chunk-level AABB, shared across all 3 passes. */
     aabb: Box3;
+    /** local render-room index this chunk belongs to (world = 0). mirrored into
+     *  the cull record so the GPU cull filters by active room. */
+    room: number;
+    /** bare chunk coord key (unnamespaced), kept so eviction can drop this
+     *  chunk from `packer.roomIndex[room]` without re-deriving it. */
+    key: string;
     /** this alloc's index in `packer.chunks` (== its cull-record index).
      *  Maintained across push/swap-pop so record updates + eviction are O(1).
      *  -1 until first push. */
@@ -1290,21 +1314,32 @@ export type ChunkAlloc = {
 export type ArenaPacker = {
     quadArena: QuadArena;
     tables: Record<VoxelPass, SectionTable>;
+    /** keyed by the room-namespaced key (`nsKey(room, chunkKey)`) so many
+     *  rooms' chunks coexist in the one shared arena without coord collision. */
     allocs: Map<string, ChunkAlloc>;
+    /** per-room set of bare chunk keys, so the caller's reconcile + clearAll
+     *  scope to one room in O(that room), not O(whole arena). */
+    roomIndex: Map<number, Set<string>>;
     /** dense list of currently-held ChunkAllocs, in insertion order.
      *  cullCPU iterates this for the frustum + back-face pass.
      *  swap-pop on evict, push on first upsert. */
     chunks: ChunkAlloc[];
     /** per-chunk origin (worldspace min corner). populated on upsertChunk;
-     *  consumed by OOM eviction policy (farthest-from-camera). */
+     *  consumed by OOM eviction policy (farthest-from-that-room's-camera). */
     origins: Map<string, [number, number, number]>;
-    cameraPos: Vec3 | null;
-    /** set whenever a translucent PassAlloc is created/freed/moved (upsert,
-     *  evict, clearAll). The translucent counting-sort persists its output
-     *  between gated re-runs, so a mutation here must force a re-sort — else the
-     *  persisted `{slot, localIdx}` dangle onto reallocated/zeroed arena data.
-     *  Read + cleared by `updateCull`'s gate. */
-    translucentDirty: boolean;
+    /** each resident room's camera position, so eviction measures distance in
+     *  the room's own coordinate space (a portal room's chunks are far from the
+     *  world camera in raw numbers, near their own). */
+    cameraByRoom: Map<number, Vec3>;
+    /** rooms whose translucent geometry mutated since their sort last ran. The
+     *  translucent counting-sort persists its output between gated re-runs, so a
+     *  mutation must force that room's re-sort — else the persisted
+     *  `{slot, localIdx}` dangle onto reallocated/zeroed arena data. Read +
+     *  cleared per room by `updateCull`'s gate. */
+    translucentDirtyRooms: Set<number>;
+    /** bare chunk keys evicted under memory pressure this frame, per room, so
+     *  the owning room re-dirties them (self-heal) instead of leaving a hole. */
+    evictedByRoom: Map<number, Set<string>>;
     /** GPU cull input, one `ChunkCullRecord` per resident chunk, kept in
      *  lockstep with `chunks` by array index (push/swap-pop mirror below).
      *  Dispatched over `chunks.length` by the cull compute. */
@@ -1328,13 +1363,30 @@ export function createArenaPacker(opts: { quadArena: QuadArena; tables: Record<V
         quadArena: opts.quadArena,
         tables: opts.tables,
         allocs: new Map(),
+        roomIndex: new Map(),
         chunks: [],
         origins: new Map(),
-        cameraPos: null,
-        translucentDirty: false,
+        cameraByRoom: new Map(),
+        translucentDirtyRooms: new Set(),
+        evictedByRoom: new Map(),
         cullRecordsBuffer,
         cullRecordsU32,
     };
+}
+
+/** Room-namespaced arena key. The `\x00` separator never appears in a chunk
+ *  coord key (`"x,y,z"`), so `${room}` and `${chunkKey}` can't alias. */
+function nsKey(room: number, chunkKey: string): string {
+    return `${room}\x00${chunkKey}`;
+}
+
+function roomSet(packer: ArenaPacker, room: number): Set<string> {
+    let s = packer.roomIndex.get(room);
+    if (!s) {
+        s = new Set();
+        packer.roomIndex.set(room, s);
+    }
+    return s;
 }
 
 /** Write the cull record for the chunk currently at `index` in `packer.chunks`
@@ -1350,6 +1402,7 @@ function writeChunkCullRecord(packer: ArenaPacker, index: number, origin: [numbe
     u[base + 3] = alloc.opaque ? alloc.opaque.sectionSlot : -1;
     u[base + 4] = alloc.transparent ? alloc.transparent.sectionSlot : -1;
     u[base + 5] = alloc.translucent ? alloc.translucent.sectionSlot : -1;
+    u[base + 6] = alloc.room;
     packer.cullRecordsBuffer.addUpdateRange(base, CHUNK_CULL_RECORD_U32S);
 }
 
@@ -1362,9 +1415,9 @@ function moveChunkCullRecord(packer: ArenaPacker, from: number, to: number): voi
     packer.cullRecordsBuffer.addUpdateRange(toBase, CHUNK_CULL_RECORD_U32S);
 }
 
-function packerFreePass(packer: ArenaPacker, pass: VoxelPass, a: PassAlloc): void {
+function packerFreePass(packer: ArenaPacker, pass: VoxelPass, a: PassAlloc, room: number): void {
     arenaFree(packer.quadArena, a.dataStart);
-    if (pass === 'translucent') packer.translucentDirty = true;
+    if (pass === 'translucent') packer.translucentDirtyRooms.add(room);
     packer.tables[pass].freeSlot(a.sectionSlot);
 }
 
@@ -1373,8 +1426,10 @@ export function packerUpsertChunk(
     chunkKey: string,
     origin: [number, number, number],
     mesh: ChunkMeshResult,
+    room: number,
 ): void {
-    const prev = packer.allocs.get(chunkKey);
+    const nsk = nsKey(room, chunkKey);
+    const prev = packer.allocs.get(nsk);
     // reuse the prev alloc object (and its slot in packer.chunks) on
     // re-upsert; aabb is overwritten below from mesh.aabb.
     const next: ChunkAlloc = prev ?? {
@@ -1382,6 +1437,8 @@ export function packerUpsertChunk(
         transparent: null,
         translucent: null,
         aabb: [0, 0, 0, 0, 0, 0],
+        room,
+        key: chunkKey,
         chunkIndex: -1,
     };
     const meshAabb = mesh.aabb;
@@ -1407,7 +1464,7 @@ export function packerUpsertChunk(
 
         if (!passMesh || passMesh.quadCount === 0) {
             if (cur) {
-                packerFreePass(packer, pass, cur);
+                packerFreePass(packer, pass, cur, room);
                 next[pass] = null;
             }
             continue;
@@ -1415,12 +1472,33 @@ export function packerUpsertChunk(
 
         const needQuads = passMesh.quadCount;
 
+        // free cur's prior quad range up front (re-upsert reallocates it below).
         if (cur) arenaFree(packer.quadArena, cur.dataStart);
-        const dataStart = packerAllocWithEviction(packer, chunkKey, needQuads);
+        const dataStart = packerAllocWithEviction(packer, nsk, room, needQuads);
+        // graceful degrade: arena full and nothing evictable at this room's
+        // priority (a lower/equal tier). drop this pass rather than throw or
+        // evict a higher tier. world (top priority) can evict anything, so it
+        // only lands here if a single chunk exceeds the whole arena. cur's quad
+        // range is already freed above; release its section slot too.
+        if (dataStart < 0) {
+            if (cur) {
+                packer.tables[pass].freeSlot(cur.sectionSlot);
+                if (pass === 'translucent') packer.translucentDirtyRooms.add(room);
+            }
+            next[pass] = null;
+            continue;
+        }
         arenaWrite(packer.quadArena, 'quads', dataStart, needQuads, passMesh.quads);
 
         const table = packer.tables[pass];
-        const sectionSlot = cur?.sectionSlot ?? packerAllocSlotWithEviction(packer, chunkKey, pass);
+        // cur (re-upsert) reuses its section slot; only a fresh chunk allocates,
+        // so a -1 here implies cur was null — just release the quad range.
+        const sectionSlot = cur?.sectionSlot ?? packerAllocSlotWithEviction(packer, nsk, room, pass);
+        if (sectionSlot < 0) {
+            arenaFree(packer.quadArena, dataStart);
+            next[pass] = null;
+            continue;
+        }
 
         table.writeEntry(sectionSlot, {
             originX: origin[0],
@@ -1435,15 +1513,16 @@ export function packerUpsertChunk(
 
         // a fresh translucent mesh reallocates arena data → the persisted sort
         // permutation is stale; flag it so the gate forces a re-sort.
-        if (pass === 'translucent') packer.translucentDirty = true;
+        if (pass === 'translucent') packer.translucentDirtyRooms.add(room);
         next[pass] = { sectionSlot, dataStart, dataCount: needQuads };
     }
 
     const empty = !next.opaque && !next.transparent && !next.translucent;
     if (empty) {
         if (prev) removeChunkAt(packer, prev.chunkIndex);
-        packer.allocs.delete(chunkKey);
-        packer.origins.delete(chunkKey);
+        packer.allocs.delete(nsk);
+        packer.origins.delete(nsk);
+        roomSet(packer, room).delete(chunkKey);
     } else {
         if (!prev) {
             next.chunkIndex = packer.chunks.length;
@@ -1451,8 +1530,9 @@ export function packerUpsertChunk(
         }
         // (re)write the record: a re-upsert may have moved section slots.
         writeChunkCullRecord(packer, next.chunkIndex, origin, next);
-        packer.allocs.set(chunkKey, next);
-        packer.origins.set(chunkKey, origin);
+        packer.allocs.set(nsk, next);
+        packer.origins.set(nsk, origin);
+        roomSet(packer, room).add(chunkKey);
     }
 }
 
@@ -1470,72 +1550,110 @@ function removeChunkAt(packer: ArenaPacker, idx: number): void {
     }
 }
 
-/** drop every chunk from the packer. frees per-pass arena ranges + section
- *  slots, then empties the bookkeeping maps. used on room activation to
- *  hand the engine-global arena over to the new active room without
- *  reallocating any GpuBuffers. */
-export function packerClearAll(packer: ArenaPacker): void {
+const EMPTY_STRING_SET: Set<string> = /* @__PURE__ */ new Set();
+
+/** drop every chunk from the packer, or (when `room` is given) only that
+ *  room's chunks. frees per-pass arena ranges + section slots, then empties
+ *  the bookkeeping. room-scoped clear is what a room swap uses so other
+ *  resident rooms (portals, icon subjects) survive; no GpuBuffers realloc. */
+export function packerClearAll(packer: ArenaPacker, room?: number): void {
+    if (room !== undefined) {
+        const s = packer.roomIndex.get(room);
+        if (s) for (const key of Array.from(s)) evictNsKey(packer, nsKey(room, key));
+        return;
+    }
     for (const alloc of packer.allocs.values()) {
         for (const pass of PASSES) {
             const a = alloc[pass];
-            if (a) packerFreePass(packer, pass, a);
+            if (a) packerFreePass(packer, pass, a, alloc.room);
         }
     }
     packer.allocs.clear();
     packer.origins.clear();
+    packer.roomIndex.clear();
     packer.chunks.length = 0;
-    // a room swap invalidates any persisted translucent sort permutation.
-    packer.translucentDirty = true;
+    // hard reset: nothing resident, so no room has a live sort or a pending
+    // self-heal (per-room translucent dirty re-sets as chunks come back).
+    packer.translucentDirtyRooms.clear();
+    packer.evictedByRoom.clear();
 }
 
-export function packerEvictChunk(packer: ArenaPacker, chunkKey: string): void {
-    const cur = packer.allocs.get(chunkKey);
+/** Evict by the internal room-namespaced key (the form `evictionVictim` and
+ *  `packer.allocs` speak). Public callers use `packerEvictChunk`. */
+function evictNsKey(packer: ArenaPacker, nsk: string): void {
+    const cur = packer.allocs.get(nsk);
     if (!cur) return;
     for (const pass of PASSES) {
         const a = cur[pass];
-        if (a) packerFreePass(packer, pass, a);
+        if (a) packerFreePass(packer, pass, a, cur.room);
     }
     removeChunkAt(packer, cur.chunkIndex);
-    packer.allocs.delete(chunkKey);
-    packer.origins.delete(chunkKey);
+    packer.allocs.delete(nsk);
+    packer.origins.delete(nsk);
+    packer.roomIndex.get(cur.room)?.delete(cur.key);
 }
 
-export function packerHas(packer: ArenaPacker, chunkKey: string): boolean {
-    return packer.allocs.has(chunkKey);
+export function packerEvictChunk(packer: ArenaPacker, chunkKey: string, room: number): void {
+    evictNsKey(packer, nsKey(room, chunkKey));
 }
 
-export function packerKeys(packer: ArenaPacker): IterableIterator<string> {
-    return packer.allocs.keys();
+export function packerHas(packer: ArenaPacker, chunkKey: string, room: number): boolean {
+    return packer.allocs.has(nsKey(room, chunkKey));
 }
 
-export function packerSetCameraPos(packer: ArenaPacker, pos: Vec3 | null): void {
-    packer.cameraPos = pos;
+/** Bare chunk keys resident in `room` (world = 0). The caller's reconcile
+ *  checks each against its own `voxels.chunks`, so keys stay unnamespaced. */
+export function packerKeys(packer: ArenaPacker, room: number): IterableIterator<string> {
+    return (packer.roomIndex.get(room) ?? EMPTY_STRING_SET).values();
+}
+
+export function packerSetCameraPos(packer: ArenaPacker, room: number, pos: Vec3 | null): void {
+    if (pos) packer.cameraByRoom.set(room, pos);
+    else packer.cameraByRoom.delete(room);
 }
 
 // ── OOM eviction ────────────────────────────────────────────────────
 //
-// when one of the underlying arenas / section tables runs out of room,
-// evict the chunk farthest from the current camera (excluding the one
-// being upserted) and retry. without a camera reference, evict an
-// arbitrary chunk (offline path, should never OOM in practice).
+// when an arena / section table runs out of room, evict to make space, then
+// retry. two rules keep a shared arena stable:
+//   - PRIORITY: a room can only evict chunks of equal-or-lower priority, so a
+//     secondary room (portal / icon subject) can NEVER evict a world chunk.
+//     the world (top priority) can evict secondary chunks to stay resident.
+//   - GRACEFUL: if nothing evictable exists at the room's tier, allocation
+//     returns -1 (the caller drops that pass) rather than throwing. secondary
+//     views shrink under pressure; the world never hitches.
+// evicted chunks are queued in `evictedByRoom` so the owning room re-dirties
+// them (self-heal) rather than leaving a permanent hole.
 
-function farthestChunkKey(packer: ArenaPacker, excludeKey: string): string | null {
+/** higher = more pinned. world (room 0) sits above every secondary room, so
+ *  nothing below it can evict it. secondary rooms share one lower tier. */
+function roomPriority(room: number): number {
+    return room === 0 ? 1 : 0;
+}
+
+/** Pick the best chunk `upsertRoom` is allowed to evict: lowest priority first
+ *  (sacrifice secondary views before the world), then farthest from that
+ *  room's own camera. Returns null when nothing at/below the room's tier is
+ *  evictable → the caller degrades gracefully. */
+function evictionVictim(packer: ArenaPacker, upsertRoom: number, excludeKey: string): string | null {
+    const ceiling = roomPriority(upsertRoom);
     let bestKey: string | null = null;
-    const cam = packer.cameraPos;
-    if (!cam) {
-        for (const key of packer.allocs.keys()) {
-            if (key !== excludeKey) return key;
-        }
-        return null;
-    }
+    let bestPriority = Number.POSITIVE_INFINITY;
     let bestDistSq = -1;
     for (const [key, origin] of packer.origins) {
         if (key === excludeKey) continue;
-        const dx = origin[0] + CHUNK_SIZE * 0.5 - cam[0];
-        const dy = origin[1] + CHUNK_SIZE * 0.5 - cam[1];
-        const dz = origin[2] + CHUNK_SIZE * 0.5 - cam[2];
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq > bestDistSq) {
+        const alloc = packer.allocs.get(key);
+        if (!alloc) continue;
+        const pr = roomPriority(alloc.room);
+        if (pr > ceiling) continue; // never evict a higher tier (e.g. the world)
+        const cam = packer.cameraByRoom.get(alloc.room);
+        const distSq = cam
+            ? (origin[0] + CHUNK_SIZE * 0.5 - cam[0]) ** 2 +
+              (origin[1] + CHUNK_SIZE * 0.5 - cam[1]) ** 2 +
+              (origin[2] + CHUNK_SIZE * 0.5 - cam[2]) ** 2
+            : Number.POSITIVE_INFINITY; // no camera (offline) → evict-first
+        if (pr < bestPriority || (pr === bestPriority && distSq > bestDistSq)) {
+            bestPriority = pr;
             bestDistSq = distSq;
             bestKey = key;
         }
@@ -1543,29 +1661,57 @@ function farthestChunkKey(packer: ArenaPacker, excludeKey: string): string | nul
     return bestKey;
 }
 
-function packerAllocWithEviction(packer: ArenaPacker, upsertKey: string, slots: number): number {
+/** Queue a pressure-evicted chunk for its room to re-mesh next frame. Only the
+ *  forced-eviction path records here; deliberate evicts (reconcile, clearAll)
+ *  are correct removals and must NOT self-heal. */
+function recordEviction(packer: ArenaPacker, nsk: string): void {
+    const a = packer.allocs.get(nsk);
+    if (!a) return;
+    let s = packer.evictedByRoom.get(a.room);
+    if (!s) {
+        s = new Set();
+        packer.evictedByRoom.set(a.room, s);
+    }
+    s.add(a.key);
+}
+
+function packerAllocWithEviction(packer: ArenaPacker, upsertKey: string, upsertRoom: number, slots: number): number {
     for (;;) {
         try {
             return arenaAlloc(packer.quadArena, slots);
-        } catch (e) {
-            const victim = farthestChunkKey(packer, upsertKey);
-            if (!victim) throw e;
-            packerEvictChunk(packer, victim);
+        } catch {
+            const victim = evictionVictim(packer, upsertRoom, upsertKey);
+            if (!victim) return -1;
+            recordEviction(packer, victim);
+            evictNsKey(packer, victim);
         }
     }
 }
 
-function packerAllocSlotWithEviction(packer: ArenaPacker, upsertKey: string, pass: VoxelPass): number {
+function packerAllocSlotWithEviction(packer: ArenaPacker, upsertKey: string, upsertRoom: number, pass: VoxelPass): number {
     for (;;) {
         try {
             return packer.tables[pass].allocSlot();
-        } catch (e) {
-            const victim = farthestChunkKey(packer, upsertKey);
-            if (!victim) throw e;
-            packerEvictChunk(packer, victim);
+        } catch {
+            const victim = evictionVictim(packer, upsertRoom, upsertKey);
+            if (!victim) return -1;
+            recordEviction(packer, victim);
+            evictNsKey(packer, victim);
         }
     }
 }
+
+/** Drain and return the chunk keys evicted from `room` under pressure since the
+ *  last drain, so the caller can re-dirty them (self-heal). */
+export function packerDrainEvicted(packer: ArenaPacker, room: number): string[] {
+    const s = packer.evictedByRoom.get(room);
+    if (!s || s.size === 0) return EMPTY_KEYS_ARRAY;
+    const out = Array.from(s);
+    s.clear();
+    return out;
+}
+
+const EMPTY_KEYS_ARRAY: string[] = /* @__PURE__ */ [];
 
 // ── arena tier sizing ───────────────────────────────────────────────
 
@@ -1715,10 +1861,18 @@ export type VoxelResources = {
     /** translucent sort re-run gate: the sort output persists across frames and
      *  only re-runs when the order could change (translation / rotation / arena
      *  mutation / room activation). `valid` false forces the first run. */
-    tsortGate: { valid: boolean; camX: number; camY: number; camZ: number; fwdX: number; fwdY: number; fwdZ: number };
+    /** per-room translucent sort gate: each room reuses its own persisted
+     *  permutation while its own camera holds still, so alternating views don't
+     *  force each other to re-sort and never draw a foreign permutation. */
+    tsortGate: Map<number, { valid: boolean; camX: number; camY: number; camZ: number; fwdX: number; fwdY: number; fwdZ: number }>;
     /** set by `updateCull` each frame; read by `cullDispatches` to enqueue the
      *  translucent sort chain (or skip it and reuse last frame's permutation). */
     runTranslucentSort: boolean;
+    /** room whose translucent permutation currently sits in the single shared
+     *  `translucent.visibleQuadsBuffer`. A room may only skip its sort (reuse the
+     *  buffer) if it was the last to write it; otherwise the gate forces a
+     *  re-sort so it never draws another room's order. -1 = none yet. */
+    lastSortRoom: number;
     /** per-bucket quad tallies `[pass*BUCKET_COUNT + b]` (atomic); CPU-zeroed
      *  each frame, written by the cull's fused count, read by `finalize`. */
     bucketQuads: GpuBuffer;
@@ -1911,8 +2065,9 @@ export function init(registry: BlockRegistry, env: EnvironmentResources, budget:
         radixPassConfig,
         sortCount,
         sortIndirectArgs,
-        tsortGate: { valid: false, camX: 0, camY: 0, camZ: 0, fwdX: 0, fwdY: 0, fwdZ: 0 },
+        tsortGate: new Map(),
         runTranslucentSort: false,
+        lastSortRoom: -1,
         bucketQuads,
         bucketQuadsData,
         bucketBase,
@@ -2159,6 +2314,24 @@ export function dispose(state: VoxelResources): void {
 
 const _cullFrustum = frustum.create();
 
+/** Unmount a room from the shared arena: free its resident chunks and drop every
+ *  per-room entry it left behind (camera, sort gate, dirty/evicted queues, key
+ *  index), so a deactivated / closed / finished room leaks nothing. Its voxel
+ *  DATA is untouched (`voxels.chunks`), so re-mounting simply remeshes it. Call
+ *  when a room deactivates without `stayRenderable`, or is destroyed. */
+export function forgetRoom(voxelResources: VoxelResources, room: number): void {
+    const packer = voxelResources.arenas.packer;
+    packerClearAll(packer, room); // frees + removes this room's resident chunks
+    packer.cameraByRoom.delete(room);
+    packer.translucentDirtyRooms.delete(room);
+    packer.evictedByRoom.delete(room);
+    packer.roomIndex.delete(room);
+    voxelResources.tsortGate.delete(room);
+    // the shared translucent buffer may hold this room's now-freed permutation;
+    // force the next room to re-sort rather than trust it.
+    if (voxelResources.lastSortRoom === room) voxelResources.lastSortRoom = -1;
+}
+
 /** Write the per-frame camera view (5 pre-shifted, camera-relative frustum
  *  planes + camera chunk/frac) into `cullView`, and reset the GPU cull/emit
  *  counters. The visibility test + slice emission run on the GPU via
@@ -2169,7 +2342,7 @@ const _cullFrustum = frustum.create();
  *  chunk coords + sub-chunk frac, so the whole cull stays f32-exact at
  *  Minecraft world scale. `viewChunkRadius` is read live from settings, so a
  *  tier flip applies next frame. */
-export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number): void {
+export function updateCull(voxelResources: VoxelResources, camera: Camera, viewChunkRadius: number, room: number): void {
     frustum.setFromViewProjectionMatrix(_cullFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
     const cx = camera.position[0];
     const cy = camera.position[1];
@@ -2206,6 +2379,9 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     data[25] = cy - camCy * CHUNK_SIZE;
     data[26] = cz - camCz * CHUNK_SIZE;
     data[27] = viewDist * viewDist;
+    // roomSel.x = active render room (world = 0); the cull keeps only records
+    // tagged with this room. .yzw reserved.
+    data[28] = room;
     voxelResources.cullView.addUpdateRange(0, data.length);
     voxelResources.cullView.needsUpdate = true;
 
@@ -2240,7 +2416,7 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     // persisted `{slot, localIdx}` dangling. Gate = translation ∨ rotation ∨
     // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
     // count stand.
-    updateTranslucentSortGate(voxelResources, cx, cy, cz, _cullFrustum[4]!.normal);
+    updateTranslucentSortGate(voxelResources, room, cx, cy, cz, _cullFrustum[4]!.normal);
 }
 
 // distance the camera must move before the translucent sort re-runs. Tight: a
@@ -2254,10 +2430,24 @@ const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
 /** Decide whether the translucent radix sort re-runs this frame, and refresh the
  *  gate baseline when it does. `fwd` is the camera-forward (near-plane inward
  *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
-function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
-    const gate = voxelResources.tsortGate;
+function updateTranslucentSortGate(
+    voxelResources: VoxelResources,
+    room: number,
+    camX: number,
+    camY: number,
+    camZ: number,
+    fwd: Vec3,
+): void {
     const packer = voxelResources.arenas.packer;
-    let run = !gate.valid || packer.translucentDirty;
+    let gate = voxelResources.tsortGate.get(room);
+    if (!gate) {
+        gate = { valid: false, camX: 0, camY: 0, camZ: 0, fwdX: 0, fwdY: 0, fwdZ: 0 };
+        voxelResources.tsortGate.set(room, gate);
+    }
+    // force a re-sort if another room's permutation is currently in the shared
+    // buffer — the per-room camera gate alone would wrongly reuse it. no-op for a
+    // lone world (always the last writer), so its static-camera skip is kept.
+    let run = !gate.valid || packer.translucentDirtyRooms.has(room) || voxelResources.lastSortRoom !== room;
     if (!run) {
         const mx = camX - gate.camX;
         const my = camY - gate.camY;
@@ -2276,7 +2466,9 @@ function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number,
         gate.fwdY = fwd[1];
         gate.fwdZ = fwd[2];
         gate.valid = true;
-        packer.translucentDirty = false;
+        packer.translucentDirtyRooms.delete(room);
+        // this room's sort will (re)write the shared buffer.
+        voxelResources.lastSortRoom = room;
     }
     voxelResources.runTranslucentSort = run;
 }
@@ -2447,9 +2639,9 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
 
 /** remove a specific chunk from the engine-global arena packer (e.g. when
  *  the chunk is unloaded from `voxels`). */
-export function removeChunkMesh(voxelResources: VoxelResources, key: string): void {
+export function removeChunkMesh(voxelResources: VoxelResources, key: string, room: number): void {
     const packer = voxelResources.arenas.packer;
-    if (packerHas(packer, key)) {
-        packerEvictChunk(packer, key);
+    if (packerHas(packer, key, room)) {
+        packerEvictChunk(packer, key, room);
     }
 }

@@ -7,9 +7,9 @@
  */
 
 import { memo } from 'react';
-import { assetUrl } from '../../render/asset-url';
 import { useEditor } from '../editor-store';
 import type { InventoryItem } from '../inventory';
+import { PrefabThumb } from './prefab-thumb';
 
 type Props = {
     item: InventoryItem;
@@ -43,42 +43,13 @@ export const InventoryItemIcon = memo(function InventoryItemIcon({ item, size }:
             );
         }
         case 'prefab': {
-            // per-prefab PNG written by the asset-pipeline prefab-icon task.
-            // missing-file (cold start, hash gate) renders as a broken img;
-            // ok for now, the placeholder fallback only fires when the
-            // prefabId itself is empty.
+            // rendered in-browser on demand (see PrefabThumb / ensurePrefabIcon).
             if (!item.prefabId) return <Placeholder size={size} />;
-            return (
-                <div
-                    style={{
-                        width: size,
-                        height: size,
-                        backgroundImage: `url(${assetUrl(`prefabs/${item.prefabId}.icon.png`)})`,
-                        backgroundSize: `${size}px ${size}px`,
-                        backgroundRepeat: 'no-repeat',
-                        imageRendering: 'auto',
-                    }}
-                />
-            );
+            return <PrefabThumb prefabId={item.prefabId} size={size} />;
         }
         case 'blueprint': {
-            // per-scene PNG written by the asset-pipeline scene-icon task.
-            // missing-file (cold start, hash gate) renders as a broken img;
-            // ok for now, the placeholder fallback only fires when the
-            // sceneId itself is empty.
-            if (!item.sceneId) return <Placeholder size={size} />;
-            return (
-                <div
-                    style={{
-                        width: size,
-                        height: size,
-                        backgroundImage: `url(${assetUrl(`scenes/${item.sceneId}.icon.png`)})`,
-                        backgroundSize: `${size}px ${size}px`,
-                        backgroundRepeat: 'no-repeat',
-                        imageRendering: 'auto',
-                    }}
-                />
-            );
+            // scene (blueprint) icons are not rendered — placeholder only.
+            return <Placeholder size={size} />;
         }
         default:
             return <Placeholder size={size} />;

@@ -55,11 +55,8 @@ export function saveBlueprint(state: ContentManager.ContentManager, name: string
     }
     const sceneId = BLUEPRINT_PREFIX + name;
     const overwritten = existingBlueprintIds(state).has(name);
+    // saveScene adds the scene to the in-memory store, so a follow-up
+    // allocateBlueprintName sees it via listScenes.
     ContentManager.saveScene(state, sceneId, payload);
-    if (!overwritten) {
-        // saveScene doesn't update the in-memory entries list, push the new
-        // id so a follow-up allocateBlueprintName sees it without rescanning.
-        state.entries.push({ sceneId });
-    }
     return { ok: true, sceneId, overwritten };
 }

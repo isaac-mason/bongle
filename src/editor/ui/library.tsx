@@ -18,7 +18,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
-import { assetUrl } from '../../render/asset-url';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
@@ -452,17 +451,8 @@ function SceneTile({
                 title={sceneId}
                 style={{ height: SCENE_THUMB_SIZE }}
             >
-                <div
-                    style={{
-                        width: '100%',
-                        height: '100%',
-                        backgroundImage: `url(${assetUrl(`scenes/${sceneId}.icon.png`)})`,
-                        backgroundSize: 'contain',
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'center',
-                        imageRendering: 'auto',
-                    }}
-                />
+                {/* scene (blueprint) icons are not rendered — neutral placeholder. */}
+                <div className="bg-neutral-200" style={{ width: '100%', height: '100%' }} />
             </button>
 
             {/* label / rename */}

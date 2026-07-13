@@ -33,8 +33,16 @@
             "default": "./src/engine-editor.ts"
         },
         "./engine-asset-pipeline": {
-            "import": "./src/engine-asset-pipeline.ts",
-            "default": "./src/engine-asset-pipeline.ts"
+            "import": "./editor/asset-pipeline/index.ts",
+            "default": "./editor/asset-pipeline/index.ts"
+        },
+        "./editor/fs": {
+            "import": "./editor/fs.ts",
+            "default": "./editor/fs.ts"
+        },
+        "./editor/fs-opfs": {
+            "import": "./editor/fs-opfs.ts",
+            "default": "./editor/fs-opfs.ts"
         },
         "./internal": {
             "import": "./src/internal.ts",
@@ -94,15 +102,15 @@
     },
     "dependencies": {
         "@base-ui/react": "^1.5.0",
+        "@breezystack/lamejs": "^1.2.7",
         "@dnd-kit/abstract": "^0.3.2",
         "@dnd-kit/dom": "^0.3.2",
         "@dnd-kit/helpers": "^0.3.2",
         "@dnd-kit/react": "^0.3.2",
         "@dnd-kit/state": "^0.3.2",
-        "@ffmpeg-installer/ffmpeg": "^1.1.0",
-        "@ffprobe-installer/ffprobe": "^2.1.2",
         "@gltf-transform/core": "^4.3.0",
         "@gltf-transform/functions": "^4.3.0",
+        "@rolldown/browser": "^1.1.5",
         "@tailwindcss/vite": "^4.2.2",
         "@tanstack/react-virtual": "^3.13.24",
         "archiver": "^7.0.1",
@@ -114,13 +122,14 @@
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
         "meshoptimizer": "^0.25.0",
+        "monaco-editor": "^0.55.1",
         "packcat": "github:isaac-mason/packcat#dev",
         "react": "^19.2.4",
+        "react-colorful": "^5.7.0",
         "react-dom": "^19.2.4",
         "sharp": "^0.34.5",
         "skia-canvas": "^3.0.0",
         "vite": "^8.1.0",
-        "webgpu": "^0.4.0",
         "ws": "^8.18.0",
         "zustand": "^5.0.12"
     },
@@ -129,6 +138,7 @@
         "@tailwindcss/vite": "^4.2.2",
         "@types/archiver": "^6.0.3",
         "@types/estree": "^1.0.8",
+        "@types/node": "^25.5.0",
         "@types/react": "^19.2.14",
         "@types/react-dom": "^19.2.3",
         "@types/ws": "^8.5.13",
@@ -141,10 +151,6 @@
     },
     "packageManager": "pnpm@10.30.3",
     "onlyBuiltDependencies": [
-        "@ffmpeg-installer/*",
-        "@ffmpeg-installer/darwin-arm64",
-        "@ffprobe-installer/*",
-        "@ffprobe-installer/darwin-arm64",
         "canvas",
         "esbuild",
         "sharp",

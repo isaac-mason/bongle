@@ -263,6 +263,13 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     }
 
     bumpVersion(registry);
+
+    // broad "registry flush settled" signal for browser consumers. the editor
+    // invalidates cached prefab icons on this (they depend on blocks, models,
+    // and prefab defs); block icons ride the narrower `block-resources-changed`.
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('bongle:registry-changed'));
+    }
 }
 
 function idListsEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -332,12 +339,21 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
         }
     }
 
-    // re-seat the active room into the freshly-built engine-global arena
-    // (refresh blew away the previous arena contents; the new packer is
-    // empty). marks every chunk dirty so the prioritised remesh path
-    // refills the arena over the next few frames.
-    if (voxelResourcesChanged && activeRoom) {
-        VoxelVisuals.activateRoom(state.voxelResources, activeRoom.voxelVisuals, activeRoom.voxels);
+    // the refresh blew away the previous arena (the new packer is empty), so
+    // re-mount every resident room — the active one plus any pinned resident
+    // rooms — marking their chunks dirty so the prioritised remesh path refills
+    // the arena over the next few frames.
+    if (voxelResourcesChanged) {
+        for (const r of state.rooms.rooms.values()) {
+            if (r === activeRoom || r.stayRenderable) VoxelVisuals.mountRoom(r.voxelVisuals, r.voxels);
+        }
+    }
+
+    // notify browser-side consumers that the block registry / texture atlas
+    // changed, so they can rebuild — e.g. the editor's in-browser block-icon
+    // atlas re-renders. runtime signal, independent of any dev-plugin event.
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('bongle:block-resources-changed'));
     }
 }
 
@@ -374,7 +390,7 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
 }
 
 /**
- * Re-fetch `audio-manifest.json` + `audio-atlas.mp3` into the engine-global
+ * Re-fetch `audio-manifest.json` + `audio-atlas.flac` into the engine-global
  * `AudioResources`, rebuilding the decoded clip buffers in place. Called from
  * the `bongle:audio-atlas-updated` HMR listener in the boot template, a sound
  * source-file edit has no registry change to ride, so this is the only path

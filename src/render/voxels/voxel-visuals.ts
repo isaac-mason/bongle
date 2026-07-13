@@ -30,12 +30,21 @@ import type { Vec3 } from 'mathcat';
 
 import type { BlockRegistry } from '../../core/voxels/block-registry';
 import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
-import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk, chunkKey, NEIGHBOR_COUNT, type Voxels } from '../../core/voxels/voxels';
+import {
+    CHUNK_SIZE,
+    CHUNK_VOLUME,
+    type Chunk,
+    chunkKey,
+    markChunkDirty,
+    NEIGHBOR_COUNT,
+    type Voxels,
+} from '../../core/voxels/voxels';
 import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {
+    forgetRoom,
     PASSES,
-    packerClearAll,
+    packerDrainEvicted,
     packerEvictChunk,
     packerHas,
     packerKeys,
@@ -54,9 +63,9 @@ export type VoxelVisuals = {
     /** chunk key → frame at which it was first observed dirty (remesh). cleared on remesh. */
     dirtyFirstSeen: Map<string, number>;
     /** one-shot count of closest dirty chunks to dispatch URGENT on the next
-     *  `update()`. set by `activateRoom` so the post-swap frame fills a chunk halo
-     *  around the camera immediately (urgent jumps the worker queue) instead of
-     *  trickling in over normal-tier streaming. Zeroed after being consumed. */
+     *  `update()`. set by `mountRoom` so a freshly-mounted room fills a
+     *  chunk halo around the camera immediately (urgent jumps the worker queue)
+     *  instead of trickling in over normal-tier streaming. Zeroed after consumed. */
     roomSwapUrgentBurst: number;
     /** last frame's mesh-dispatch perf (main-thread build vs postMessage split,
      *  posts/frame, worker time). drained from the dispatcher each update; read
@@ -82,9 +91,9 @@ export function initRoomMeshes(scene: Scene, voxelResources: VoxelResources): Vo
     };
 }
 
-/** closest dirty chunks dispatched urgently on the first frame after
- *  `activateRoom`, so the scene fills in immediately instead of trickling in
- *  behind normal-tier streaming. */
+/** closest dirty chunks dispatched urgently on the first frame after a room is
+ *  mounted (`mountRoom`), so the scene fills in immediately instead of
+ *  trickling in behind normal-tier streaming. */
 const ROOM_SWAP_URGENT_BURST = 20;
 
 // ── update ──────────────────────────────────────────────────────────
@@ -151,6 +160,7 @@ export function update(
     state: VoxelVisuals,
     voxelResources: VoxelResources,
     voxels: Voxels,
+    room: number,
     registry: BlockRegistry,
     cameraPos: Vec3 | undefined,
     deferIncomplete: boolean,
@@ -158,10 +168,9 @@ export function update(
     const arenas = voxelResources.arenas;
     state.frame++;
 
-    // give the packer this frame's camera so its OOM eviction policy
-    // (farthest-from-camera) has a reference point. null in the offline
-    // path, packer falls back to evicting an arbitrary chunk.
-    packerSetCameraPos(arenas.packer, cameraPos ?? null);
+    // give the packer this room's camera so eviction measures distance in this
+    // room's coordinate space. null in the offline path (no camera → evict-first).
+    packerSetCameraPos(arenas.packer, room, cameraPos ?? null);
 
     // drain worker results from last frame. each result carries the
     // meshGen we dispatched at; chunk.meshGen has only stayed equal if
@@ -174,7 +183,7 @@ export function update(
             const chunk = voxels.chunks.get(r.chunkKey);
             if (!chunk) continue;
             if (chunk.meshGen !== r.gen) continue;
-            writeChunkMesh(voxelResources, r.chunkKey, chunk, r);
+            writeChunkMesh(voxelResources, r.chunkKey, chunk, r, room);
         }
         pending.length = 0;
     }
@@ -203,7 +212,7 @@ export function update(
             const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
             chunk.dirty = false;
             state.dirtyFirstSeen.delete(key);
-            remeshChunk(voxelResources, voxels, registry, key, chunk);
+            remeshChunk(voxelResources, voxels, registry, key, chunk, room);
         }
         voxels.dirty.blocks.clear();
     } else {
@@ -256,7 +265,7 @@ export function update(
                 chunk.dirty = false;
                 voxels.dirty.blocks.delete(chunk);
                 state.dirtyFirstSeen.delete(key);
-                writeChunkMesh(voxelResources, key, chunk, null);
+                writeChunkMesh(voxelResources, key, chunk, null, room);
                 continue;
             }
 
@@ -299,10 +308,18 @@ export function update(
 
     // evict any arena-held chunk the server has dropped from voxels.chunks.
     // (server discovery owns chunk membership; we just mirror it.)
-    for (const key of packerKeys(arenas.packer)) {
+    for (const key of packerKeys(arenas.packer, room)) {
         if (!voxels.chunks.has(key)) {
-            packerEvictChunk(arenas.packer, key);
+            packerEvictChunk(arenas.packer, key, room);
         }
+    }
+
+    // self-heal: re-dirty any chunk this room lost to memory pressure (a higher
+    // tier evicted it to stay resident), so it re-meshes instead of leaving a
+    // hole. still-present chunks only; ones genuinely gone stay gone.
+    for (const key of packerDrainEvicted(arenas.packer, room)) {
+        const chunk = voxels.chunks.get(key);
+        if (chunk) markChunkDirty(voxels, chunk);
     }
 
     // drain this frame's dispatch perf for the debug HUD.
@@ -313,36 +330,49 @@ export function update(
 
 /** main-thread remesh: run `meshChunk` against the room's shared
  *  `meshOutput`, then install the result via `writeChunkMesh`. */
-function remeshChunk(voxelResources: VoxelResources, voxels: Voxels, registry: BlockRegistry, key: string, chunk: Chunk): void {
+function remeshChunk(
+    voxelResources: VoxelResources,
+    voxels: Voxels,
+    registry: BlockRegistry,
+    key: string,
+    chunk: Chunk,
+    room: number,
+): void {
     const mesh =
         chunk.nonAirCount === 0 || hasNoVisibleSurface(chunk)
             ? null
             : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
-    writeChunkMesh(voxelResources, key, chunk, mesh);
+    writeChunkMesh(voxelResources, key, chunk, mesh, room);
 }
 
 /** upsert a mesh result into the engine-global arena packer (or evict
  *  if the chunk is all-air / has no geometry). Shared between the main-
  *  thread `remeshChunk` path and the worker drain path. */
-function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
+function writeChunkMesh(
+    voxelResources: VoxelResources,
+    key: string,
+    chunk: Chunk,
+    mesh: ChunkMeshResult | null,
+    room: number,
+): void {
     const packer = voxelResources.arenas.packer;
     if (mesh === null || chunk.nonAirCount === 0 || mesh.aabb === null) {
-        if (packerHas(packer, key)) packerEvictChunk(packer, key);
+        if (packerHas(packer, key, room)) packerEvictChunk(packer, key, room);
         return;
     }
-    packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
+    packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh, room);
 }
 
-/** swap arena residency to a new active room. clears every chunk from
- *  the engine-global packer and marks every chunk in `voxels` dirty so
- *  the next `update()` cycles them back in via the prioritised remesh
- *  path. resets the new room's first-seen tracking too. */
-export function activateRoom(voxelResources: VoxelResources, state: VoxelVisuals, voxels: Voxels): void {
-    packerClearAll(voxelResources.arenas.packer);
-    // skip nonAirCount=0 chunks, those are sparse "discovered empty" stubs
-    // pushed by `voxel_chunk_empty`. they have no blocks to mesh and would
-    // otherwise pollute `remeshCandidates` (sort cost) and waste budget on
-    // applyRemesh early-returns.
+/** Mount a room into the shared arena: mark every non-empty chunk dirty so the
+ *  prioritised remesh path meshes it in over the next few frames. Per-room and
+ *  additive — does NOT touch any other room's residency (no arena-wide clear).
+ *  Call when a room becomes active or is pinned resident (see `stayRenderable`),
+ *  or after an arena rebuild. Pairs with `unmountRoom`.
+ *
+ *  (Skips nonAirCount=0 chunks — sparse "discovered empty" stubs pushed by
+ *  `voxel_chunk_empty` that have no blocks to mesh and would only pollute
+ *  `remeshCandidates`.) */
+export function mountRoom(state: VoxelVisuals, voxels: Voxels): void {
     for (const chunk of voxels.chunks.values()) {
         if (chunk.nonAirCount === 0) continue;
         chunk.dirty = true;
@@ -350,6 +380,15 @@ export function activateRoom(voxelResources: VoxelResources, state: VoxelVisuals
     }
     state.dirtyFirstSeen.clear();
     state.roomSwapUrgentBurst = ROOM_SWAP_URGENT_BURST;
+}
+
+/** Unmount a room from the shared arena: evict its chunks and drop its per-room
+ *  arena state. The room's voxel DATA survives (`voxels.chunks`), so a later
+ *  `mountRoom` simply remeshes it. Pairs with `mountRoom` — both live here
+ *  because visuals owns the per-room render lifecycle — and delegates the
+ *  engine-global arena teardown to `forgetRoom`, which owns that state. */
+export function unmountRoom(voxelResources: VoxelResources, room: number): void {
+    forgetRoom(voxelResources, room);
 }
 
 export function dispose(state: VoxelVisuals, scene: Scene): void {

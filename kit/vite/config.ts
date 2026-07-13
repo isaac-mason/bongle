@@ -51,7 +51,6 @@ const BONGLE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const toGlob = (p: string) => p.replace(/\\/g, '/');
 
 import { envPlugin } from '../env-plugin';
-import { createPipelineEnvironment } from './pipeline-env';
 import { bongle, type EngineRebootRef } from './plugin';
 
 export type BongleConfigOptions = {
@@ -115,10 +114,6 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
             // substitution set to its own env's module graph.
             envPlugin({ client: true, server: false, editor: true }, 'client'),
             envPlugin({ client: false, server: true, editor: true }, 'server'),
-            // the asset pipeline runs in its own worker-hosted env; it mirrors
-            // the server env's compile-time env so engine + user code evaluate
-            // the same branches there (client=false, server=true, editor=true).
-            envPlugin({ client: false, server: true, editor: true }, 'pipeline'),
             ...bongle({ projectDir, engineReboot }),
         ],
         server: {
@@ -234,20 +229,6 @@ export function defineBongleConfig(opts: BongleConfigOptions): UserConfig {
                         return createRunnableDevEnvironment(name, config, {
                             runnerOptions: { hmr: { logger: false } },
                         });
-                    },
-                },
-            },
-            // the asset pipeline: same bundling story as `server` (one module
-            // instance across engine + user code via noExternal), but its
-            // ModuleRunner runs in a worker_thread — see vite/pipeline-env.ts.
-            pipeline: {
-                resolve: {
-                    conditions: ['node'],
-                    noExternal: ['bongle', /^@bongle\//, 'gpucat', 'mathcat', 'packcat', 'crashcat'],
-                },
-                dev: {
-                    createEnvironment(name, config) {
-                        return createPipelineEnvironment(name, config, { projectDir, bongleDir });
                     },
                 },
             },

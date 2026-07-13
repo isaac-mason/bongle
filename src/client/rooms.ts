@@ -84,6 +84,18 @@ export type ClientRoom = {
      */
     local: boolean;
 
+    /** this room's local render index — the tag under which its chunks live in
+     *  the engine-global voxel arena. The primary/world room is `WORLD_ROOM` (0);
+     *  a room kept resident while inactive (see `stayRenderable`) must be given a
+     *  distinct index by whoever opts it in. */
+    roomLocalIndex: number;
+
+    /** keep this room's visuals resident in the shared arena even when it is NOT
+     *  the active room. Default false: only the active room is meshed, and a room
+     *  releases its arena chunks on deactivation. Opt in for a portal destination
+     *  or an offline render subject; opt out (→ `unmountRoom`) when done. */
+    stayRenderable: boolean;
+
     /** scene graph */
     nodes: SceneTree.SceneTree;
 
@@ -301,6 +313,11 @@ export type Rooms = {
     activePlayerId: PlayerId | null;
     /** monotonic counter for synthesizing local-room ids and player ids */
     nextLocalId: number;
+    /** monotonic allocator for secondary room render indices. `WORLD_ROOM` (0)
+     *  is reserved for the active/primary room, so this starts at 1. A pinned
+     *  room (portal, icon subject) draws a distinct index so its chunks coexist
+     *  with the world's in the shared arena instead of colliding at 0. */
+    nextRoomIndex: number;
 };
 
 export function init(): Rooms {
@@ -308,7 +325,114 @@ export function init(): Rooms {
         rooms: new Map(),
         activePlayerId: null,
         nextLocalId: 0,
+        nextRoomIndex: 1,
     };
+}
+
+/** Allocate a distinct render index for a secondary (pinned) room. */
+export function allocRoomIndex(state: Rooms): number {
+    return state.nextRoomIndex++;
+}
+
+/** Keep a room's visuals resident in the shared arena even while it isn't the
+ *  active room. Idempotent: gives the room a distinct render index the first
+ *  time so its chunks don't collide with the world's, and marks it pinned.
+ *  Bring its chunks in with `VoxelVisuals.mountRoom`. */
+export function pinRoom(state: Rooms, room: ClientRoom): void {
+    if (room.stayRenderable) return;
+    room.roomLocalIndex = allocRoomIndex(state);
+    room.stayRenderable = true;
+}
+
+/** Opt a room back out of staying resident: unmount its chunks from the shared
+ *  arena and return it to the default (world) index. Idempotent. (Indices are
+ *  allocated monotonically, so there's nothing to return to a free list.) */
+export function unpinRoom(voxelResources: VoxelResourcesNs.VoxelResources, room: ClientRoom): void {
+    if (!room.stayRenderable) return;
+    VoxelVisuals.unmountRoom(voxelResources, room.roomLocalIndex);
+    room.stayRenderable = false;
+    room.roomLocalIndex = VoxelResourcesNs.WORLD_ROOM;
+}
+
+/* ── headless render room ───────────────────────────────────────── */
+
+/** synthetic player id for a headless render room. interpolation needs one, but
+ *  no node is owned by it, so every node interpolates uniformly — fine for a
+ *  static offscreen frame. */
+const RENDER_ROOM_PLAYER_ID = -1 as PlayerId;
+
+/**
+ * A client-only room with the simulation core (`newRoomCore`) + render visuals
+ * but NO presentation — no canvas, viewport, input, dom-ui, audio, or camera
+ * node. It exists only to be rendered offscreen into a `RenderTarget` at its own
+ * arena index (its chunks coexist with the world's). Both block and prefab icon
+ * renders build one, populate it, `Renderer.renderRoomToTarget`, then
+ * `disposeRenderRoom`. Not registered in `state.rooms` — it never ticks with the
+ * live rooms.
+ */
+export type RenderRoom = {
+    nodes: SceneTree.SceneTree;
+    voxels: Voxels.Voxels;
+    physics: Physics.Physics;
+    clock: Clock.Clock;
+    scriptRuntime: SceneTreeContext;
+    scene: Scene;
+    voxelVisuals: VoxelVisuals.VoxelVisuals;
+    voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
+    modelVisuals: ModelVisuals.ModelVisuals;
+    visibility: Visibility.Visibility;
+    interpolation: Interpolation.Interpolation;
+    environment: Environment.Environment;
+    /** this room's arena tag; its chunks coexist with the world's (index 0). */
+    roomLocalIndex: number;
+};
+
+export function createRenderRoom(state: EngineClient): RenderRoom {
+    const { nodes, voxels, physics, clock, scriptRuntime } = newRoomCore({
+        resources: state.resources,
+        rpc: state.rpc,
+        roomId: `${LOCAL_ROOM_PREFIX}render`,
+        playerMode: 'play',
+        roomMode: 'play',
+    });
+    nodes.runtime = scriptRuntime;
+
+    const scene = new Scene();
+    const envResources = state.renderer.environmentResources;
+    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, state.voxelResources);
+    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, state.voxelMeshResources, envResources);
+    const modelVisuals = ModelVisuals.init(scene, nodes, state.modelResources, envResources);
+    const visibility = Visibility.init();
+    const interpolation = Interpolation.init(nodes, RENDER_ROOM_PLAYER_ID);
+    const environment = Environment.init(scene, envResources, ENVIRONMENT_DEFAULT, state.cloudResources);
+
+    // host trait at the root; its env onInit no-ops with no live scene init.
+    attachWorldTrait(nodes.root);
+
+    return {
+        nodes,
+        voxels,
+        physics,
+        clock,
+        scriptRuntime,
+        scene,
+        voxelVisuals,
+        voxelMeshVisuals,
+        modelVisuals,
+        visibility,
+        interpolation,
+        environment,
+        roomLocalIndex: allocRoomIndex(state.rooms),
+    };
+}
+
+export function disposeRenderRoom(state: EngineClient, room: RenderRoom): void {
+    VoxelVisuals.unmountRoom(state.voxelResources, room.roomLocalIndex);
+    Physics.dispose(room.physics);
+    VoxelVisuals.dispose(room.voxelVisuals, room.scene);
+    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
+    ModelVisuals.dispose(room.modelVisuals, room.visibility);
+    Environment.dispose(room.environment);
 }
 
 /** prefix used for synthetic local-room ids, server roomIds never collide with this. */
@@ -746,6 +870,10 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         roomMode,
         namespace,
         local,
+        // primary/world room by default; a stayRenderable secondary room is
+        // assigned a distinct index by whoever opts it in.
+        roomLocalIndex: VoxelResourcesNs.WORLD_ROOM,
+        stayRenderable: false,
         nodes,
         scene,
         overlayScene,
@@ -1048,6 +1176,10 @@ export function findRoomByRoomId(state: Rooms, roomId: string): ClientRoom | und
 export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
+    // release this room's chunks from the shared arena + its per-room state.
+    // no-op for the world room (WORLD_ROOM is never forgotten); frees the slab
+    // held by a stayRenderable secondary room (portal / render subject).
+    VoxelVisuals.unmountRoom(state.voxelResources, room.roomLocalIndex);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
     ModelVisuals.dispose(room.modelVisuals, room.visibility);
     DomUi.dispose(room.domUi);
@@ -1079,6 +1211,7 @@ export function setActivePlayer(
     voxelResources: VoxelResourcesNs.VoxelResources,
     playerId: PlayerId,
 ): void {
+    const prevRoom = state.activePlayerId !== null ? (state.rooms.get(state.activePlayerId) ?? null) : null;
     state.activePlayerId = playerId;
     useClient.getState().setActivePlayerId(playerId);
     const room = state.rooms.get(playerId);
@@ -1091,12 +1224,14 @@ export function setActivePlayer(
     // first frame finishes ticking).
     Environment.flushActive(room.environment);
 
-    // engine-global voxel arenas hold one room's chunks at a time. drop
-    // the previous occupant and mark every chunk in this room dirty so
-    // the prioritised remesh path cycles them back in over the next few
-    // frames (closest chunks dispatched urgently, the rest via the worker
-    // pool's normal tier).
-    VoxelVisuals.activateRoom(voxelResources, room.voxelVisuals, room.voxels);
+    // per-room arena residency: unmount the room we're leaving (unless it's
+    // pinned resident) and mount the new active room, which marks its chunks
+    // dirty so the prioritised remesh path cycles them in over the next few
+    // frames. no arena-wide clear, no preserve-list — rooms are independent.
+    if (prevRoom && prevRoom !== room && !prevRoom.stayRenderable) {
+        VoxelVisuals.unmountRoom(voxelResources, prevRoom.roomLocalIndex);
+    }
+    VoxelVisuals.mountRoom(room.voxelVisuals, room.voxels);
 
     // toggle viewport visibility, only the active room's viewport (and
     // therefore its canvas + script overlays) is shown.
@@ -1136,7 +1271,7 @@ export function setActivePlayer(
 export function clearRoomVoxels(room: ClientRoom, voxelResources: VoxelResourcesNs.VoxelResources): void {
     for (const [key, chunk] of room.voxels.chunks) {
         Voxels.unlinkChunkNeighbors(chunk);
-        VoxelResourcesNs.removeChunkMesh(voxelResources, key);
+        VoxelResourcesNs.removeChunkMesh(voxelResources, key, room.roomLocalIndex);
     }
     room.voxels.chunks.clear();
 }

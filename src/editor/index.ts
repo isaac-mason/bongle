@@ -60,7 +60,8 @@ import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { setBlock } from '../core/voxels/voxels';
-import { assetUrl } from '../render/asset-url';
+import * as BlockIcons from '../client/block-icons';
+import * as PrefabIcons from '../client/prefab-icons';
 import * as Blueprints from '../server/blueprints';
 import type { EngineServer } from '../server/engine-server';
 import { setTraitProps } from './actions';
@@ -1280,57 +1281,111 @@ export async function registerServer(_state: EngineServer): Promise<void> {
  * prefab icons are per-file PNGs the UI loads by direct URL, so they need no
  * store state and no refetch.
  */
-let iconsReadyWired = false;
+let blockChangeWired = false;
+let registryChangeWired = false;
+let editorClient: EngineClient | null = null;
+let currentBlockIconUrl: string | null = null;
+let blockIconRenderInFlight = false;
+const prefabIconInFlight = new Set<string>();
 
 function loadEditorAssets(): void {
-    // Cold-start race: the editor's boot-time fetch can beat the kit's first
-    // block-icon render, in which case the artifact isn't on disk yet and
-    // Vite's SPA fallback returns `index.html`. `bongle:icons-ready` (sent by
-    // kit/vite/plugin.ts after each icon write) triggers a retry, but only
-    // for the block atlas. Per-id scene/prefab icon events load by direct URL
-    // and would just cause a pointless atlas refetch, so they're ignored here.
-    if (import.meta.hot && !iconsReadyWired) {
-        iconsReadyWired = true;
-        import.meta.hot.on('bongle:icons-ready', (data: { kind?: string } | undefined) => {
-            if (!data || data.kind === 'block-icons') loadEditorAssets();
-        });
+    // Render the block-icon atlas in-browser (no baked artifact) and re-render
+    // whenever the block/texture registry changes, via the client's runtime
+    // `bongle:block-resources-changed` event (fired from registry-dispatch after
+    // a block/atlas rebuild). Coalesced by the in-flight guard.
+    if (!blockChangeWired) {
+        blockChangeWired = true;
+        window.addEventListener('bongle:block-resources-changed', () => void renderBlockIconsInBrowser());
     }
+    // prefab icons render lazily per-id (see ensurePrefabIcon); a registry flush
+    // invalidates the cache so visible prefabs re-render on next display.
+    if (!registryChangeWired) {
+        registryChangeWired = true;
+        window.addEventListener('bongle:registry-changed', () => invalidatePrefabIcons());
+    }
+    void renderBlockIconsInBrowser();
+}
 
-    fetch(assetUrl('voxels-icons.json'))
-        // not-ok = the artifact isn't on disk yet (cold start wipes it; the
-        // pipeline regenerates it shortly). Skip quietly, the `bongle:icons-
-        // ready` retry above re-runs this once block-icons finishes writing.
-        // Parsing a 404 body would throw "Unexpected end of JSON input".
-        .then((r) => (r.ok ? r.json() : null))
-        .then(
-            (
-                json: {
-                    hash?: string;
-                    iconPx: number;
-                    cols: number;
-                    rows: number;
-                    states: Record<string, [number, number]>;
-                } | null,
-            ) => {
-                if (!json) return;
-                // cache-bust the atlas PNG by content hash. A texture-only edit
-                // keeps the same coords + url, so without this the browser keeps
-                // the already-painted (stale) CSS background-image on HMR.
-                const bust = json.hash ? `?v=${json.hash}` : '';
-                useEditor.setState({
-                    blockIconAtlasUrl: assetUrl('voxels-icons.png') + bust,
-                    blockIconCoords: json.states,
-                    blockIconPx: json.iconPx,
-                    blockIconCols: json.cols,
-                    blockIconRows: json.rows,
-                });
-                console.log('[bongle] block icon atlas loaded from static artifacts');
-            },
-        )
-        .catch((e) => console.warn('[bongle] failed to load block icon artifacts:', e));
+/**
+ * Render every block icon into an atlas on the live device (transient icon room,
+ * torn down after), convert it to an object URL, and publish it to the editor
+ * store for the inventory + inspector. No-op until the engine + block registry
+ * are ready; safe to call repeatedly (coalesced by an in-flight guard).
+ */
+async function renderBlockIconsInBrowser(): Promise<void> {
+    const state = editorClient;
+    if (!state || !state.voxelResources || blockIconRenderInFlight) return;
+    blockIconRenderInFlight = true;
+    try {
+        const atlas = await BlockIcons.renderBlockIconAtlas(state);
+        if (atlas.cols === 0) return; // no renderable blocks yet
+        const url = await pixelsToObjectUrl(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
+        if (currentBlockIconUrl) URL.revokeObjectURL(currentBlockIconUrl);
+        currentBlockIconUrl = url;
+        useEditor.setState({
+            blockIconAtlasUrl: url,
+            blockIconCoords: atlas.coords,
+            blockIconPx: atlas.iconPx,
+            blockIconCols: atlas.cols,
+            blockIconRows: atlas.rows,
+        });
+    } catch (e) {
+        console.warn('[bongle] in-browser block icon render failed:', e);
+    } finally {
+        blockIconRenderInFlight = false;
+    }
+}
+
+/**
+ * Lazily render one prefab's icon in-browser and publish its object URL to the
+ * store. Called by the inventory icon on first display; cached until a registry
+ * change invalidates it. No-op if already rendered, in flight, or engine not
+ * ready. Deduped per id.
+ */
+export async function ensurePrefabIcon(prefabId: string): Promise<void> {
+    const state = editorClient;
+    if (!state || !state.voxelResources || !prefabId) return;
+    if (useEditor.getState().prefabIconUrls[prefabId] || prefabIconInFlight.has(prefabId)) return;
+    prefabIconInFlight.add(prefabId);
+    try {
+        const icon = await PrefabIcons.renderPrefabIcon(state, prefabId);
+        if (!icon) return;
+        const url = await pixelsToObjectUrl(icon.pixels, icon.pxSize, icon.pxSize);
+        useEditor.setState((s) => ({ prefabIconUrls: { ...s.prefabIconUrls, [prefabId]: url } }));
+    } catch (e) {
+        console.warn(`[bongle] in-browser prefab icon render failed (${prefabId}):`, e);
+    } finally {
+        prefabIconInFlight.delete(prefabId);
+    }
+}
+
+/** Drop + revoke all cached prefab icons so visible ones re-render on next
+ *  display. Called on a registry flush (prefabs depend on blocks/models/defs). */
+function invalidatePrefabIcons(): void {
+    const urls = useEditor.getState().prefabIconUrls;
+    for (const id in urls) URL.revokeObjectURL(urls[id]!);
+    prefabIconInFlight.clear();
+    useEditor.setState({ prefabIconUrls: {} });
+}
+
+/** RGBA8 pixels (width×height) → PNG object URL (used as a CSS background-image). */
+async function pixelsToObjectUrl(pixels: Uint8Array, width: number, height: number): Promise<string> {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d canvas context');
+    // copy into a fresh ArrayBuffer-backed clamped array (ImageData rejects a
+    // view over a potentially-shared buffer).
+    const clamped = new Uint8ClampedArray(pixels);
+    ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('canvas.toBlob returned null');
+    return URL.createObjectURL(blob);
 }
 
 export function registerClient(state: EngineClient): void {
+    editorClient = state;
     loadEditorAssets();
     installEditorClientListeners();
 

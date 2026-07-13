@@ -8,7 +8,7 @@
  * `null` on the server side, so this file is only reached on the client.
  *
  * Resource model (the contract):
- *   - atlas: eager at boot. `loadResources()` fetches `audio-atlas.mp3` +
+ *   - atlas: eager at boot. `loadResources()` fetches `audio-atlas.flac` +
  *     `audio-manifest.json` and runs one `decodeAudioData`. Every atlas
  *     clip is playable with zero latency from the first frame onward.
  *   - long clips: lazy at first play. The manifest entry is known at
@@ -141,7 +141,7 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
     // view into the same shared buffer.
     if (manifest.atlas.length > 0) {
         try {
-            const atlasRes = await fetch(assetUrl('audio-atlas.mp3'), { cache: 'no-store' });
+            const atlasRes = await fetch(assetUrl('audio-atlas.flac'), { cache: 'no-store' });
             if (!atlasRes.ok) throw new Error(`atlas HTTP ${atlasRes.status}`);
             const bytes = await atlasRes.arrayBuffer();
             // decodeAudioData *detaches* its input ArrayBuffer; pass a fresh

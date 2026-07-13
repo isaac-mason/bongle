@@ -14,6 +14,7 @@ import {
     PerspectiveCamera,
     pass,
     RenderPipeline,
+    RenderTarget,
     renderOutput,
     Scene,
     sub,
@@ -60,27 +61,6 @@ export function init(): Renderer {
     const renderer = new WebGPURenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
-    const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
-    const pipeline = createRenderPipeline(renderer);
-    return { renderer, environmentResources, pipeline };
-}
-
-/**
- * Headless construction for the asset pipeline (`src/asset-pipeline`). Renders
- * into an offscreen RenderTarget against a caller-supplied Dawn device +
- * adapter, no canvas swapchain, no window dimension reads. The env GPU buffers
- * + render pipeline build identically to the browser `init()`; this just swaps
- * the surface. There is no `setSize`: the asset pipeline sizes per-pass
- * RenderTargets itself (see offline snapshot sessions).
- */
-export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): Renderer {
-    const renderer = new WebGPURenderer({
-        antialias: true,
-        headless: true,
-        device: gpu.device,
-        adapter: gpu.adapter,
-        format: 'rgba8unorm',
-    });
     const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
     const pipeline = createRenderPipeline(renderer);
     return { renderer, environmentResources, pipeline };
@@ -302,6 +282,43 @@ export function createOfflinePipeline(state: Renderer, scene: Scene, camera: Cam
     return new RenderPipeline(state.renderer, outputNode);
 }
 
+/**
+ * Render one room's scene into an offscreen `RenderTarget`, filtering the shared
+ * voxel arena to that room's `roomLocalIndex`. This is the reusable core behind
+ * every offscreen room render — a portal view sampled by another room, or an
+ * icon/thumbnail subject read back to pixels.
+ *
+ * The room's chunks must already be resident (mounted). `pipeline` is built once
+ * per target via `createOfflinePipeline(state, scene, camera)` and reused; the
+ * caller owns its lifetime. The renderer's prior render target is restored on
+ * exit, so this composes cleanly before/after the main canvas pass.
+ */
+export function renderRoomToTarget(
+    state: Renderer,
+    voxelResources: VoxelResources.VoxelResources,
+    scene: Scene,
+    camera: Camera,
+    room: number,
+    target: RenderTarget,
+    pipeline: RenderPipeline,
+    voxelViewChunkRadius: number,
+): void {
+    const savedTarget = state.renderer.renderTarget;
+    state.renderer.renderTarget = target;
+    try {
+        // cull the shared arena to this room, run the voxel computes, render.
+        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius, room);
+        const dispatches: ComputeDispatch[] = [];
+        for (const disp of VoxelResources.cullDispatches(voxelResources)) dispatches.push(disp);
+        scene.updateWorldMatrix();
+        elapsedTime.value = performance.now() / 1000;
+        if (dispatches.length > 0) state.renderer.compute(dispatches);
+        pipeline.render();
+    } finally {
+        state.renderer.renderTarget = savedTarget;
+    }
+}
+
 const _tintScratch: [number, number, number, number] = [0, 0, 0, 0];
 
 /**
@@ -354,7 +371,7 @@ export function render(
         // prepare the GPU cull: pre-shift the frustum planes camera-relative
         // and reset the per-frame cull/emit counters. The cull + per-facing
         // emit computes themselves are queued below via `cullDispatches`.
-        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius);
+        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius, room.roomLocalIndex);
     }
 
     // point the engine-global pass at this room's scene before render,

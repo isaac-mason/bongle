@@ -67,7 +67,7 @@ const INDEX_HTML = `<!doctype html>
 const PREFIX = 'virtual:bongle/';
 const RESOLVED_PREFIX = '\0' + PREFIX;
 
-const NAMES = new Set(['edit-client', 'edit-server', 'pipeline-host', 'build-client', 'build-server', 'user-src']);
+const NAMES = new Set(['edit-client', 'edit-server', 'build-client', 'build-server', 'user-src']);
 
 export interface VirtualEntriesOptions {
     projectDir: string;
@@ -101,18 +101,6 @@ import { start } from 'bongle/kit/runtime/edit-server';
 export function boot(ctx) {
     return start({
         httpServer: ctx.httpServer,
-        projectDir: ctx.projectDir,
-        bongleDir: ctx.bongleDir,
-        userEntry: () => import('virtual:bongle/user-src'),
-    });
-}
-`;
-                case 'pipeline-host':
-                    return /* js */ `
-import { start } from 'bongle/kit/runtime/pipeline-host';
-export function boot(ctx) {
-    return start({
-        control: ctx.control,
         projectDir: ctx.projectDir,
         bongleDir: ctx.bongleDir,
         userEntry: () => import('virtual:bongle/user-src'),
