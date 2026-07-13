@@ -1,0 +1,12 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": false,
+        "emitDeclarationOnly": true,
+        "declaration": true,
+        "declarationDir": "./dist/types/node_modules/bongle",
+        "rootDir": "./"
+    },
+    "include": ["./src", "./interface", "./build-ambient.d.ts"],
+    "exclude": ["./dist", "./kit", "./editor", "./tst", "**/*.bench.ts", "**/*-bench.ts"]
+}

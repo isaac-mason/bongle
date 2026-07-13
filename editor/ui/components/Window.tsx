@@ -42,11 +42,13 @@ export function Window({
     id,
     title,
     children,
+    dirty,
     onClose,
 }: {
     id: string;
     title: string;
     children: ReactNode;
+    dirty?: boolean;
     onClose?: () => void;
 }) {
     const g = useWindows((s) => s.geom[id]);
@@ -98,6 +100,11 @@ export function Window({
                 }}
             >
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                {dirty && (
+                    <span title="unsaved changes" style={{ marginRight: 2, fontSize: 10 }}>
+                        ●
+                    </span>
+                )}
                 <button
                     type="button"
                     title="minimize"

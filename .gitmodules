@@ -1,3 +1,6 @@
 [submodule "new-bongle"]
 	path = new-bongle
 	url = https://github.com/isaac-mason/new-bongle.git
+[submodule "bongle-blockbench/blockbench"]
+	path = bongle-blockbench/blockbench
+	url = https://github.com/JannisX11/blockbench.git

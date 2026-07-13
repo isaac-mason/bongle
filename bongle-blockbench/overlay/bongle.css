@@ -1,0 +1,61 @@
+/*
+ * Bongle branding overlay for the hosted Blockbench build.
+ * Loaded after Blockbench's own stylesheets (injected before </head>).
+ * Additive only: it never hides Blockbench's branding.
+ * Style: square, tight, black border, white background.
+ */
+
+/* Hide Blockbench's promotional start-screen art and the desktop-app download
+ * button. Additive: the editor and the New/formats list are untouched. */
+#start_screen #splash_screen {
+	display: none !important;
+}
+#web_download_button {
+	display: none !important;
+}
+
+/* Single-document embed. The editor owns "which file" — one Blockbench window
+ * per .bbmodel, seeded over the bridge — so Blockbench's own project tab bar
+ * (tabs + the "+" new-tab button) is redundant and confusing. Hide it; the
+ * editor window title already names the open file. */
+#tab_bar {
+	display: none !important;
+}
+/* The home button (menu bar) opens a fresh tab / start screen — same story. */
+#title_bar_home_button {
+	display: none !important;
+}
+
+/* GitHub icon inside the Bongle start-screen link buttons. */
+#start_screen .start_screen_section[section_id='bongle'] button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+#start_screen .start_screen_section[section_id='bongle'] button p {
+	margin: 0;
+}
+.bongle-gh-icon {
+	display: inline-flex;
+	flex-shrink: 0;
+}
+
+#bongle_badge {
+	display: inline-flex;
+	align-items: center;
+	align-self: center;
+	height: 18px;
+	margin-left: 8px;
+	padding: 0 7px;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: #000;
+	background: #fff;
+	border: 1px solid #000;
+	border-radius: 0;
+	cursor: default;
+	user-select: none;
+	flex-shrink: 0;
+}

@@ -25,6 +25,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     }, [windows, register]);
 
     const launched = useLaunched((s) => s.windows);
+    const dirty = useLaunched((s) => s.dirty);
     const closeLaunched = useLaunched((s) => s.close);
 
     const items: TaskbarItem[] = [
@@ -43,8 +44,8 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 const app = appById(w.appId);
                 if (!app) return null;
                 return (
-                    <Window key={w.id} id={w.id} title={w.title} onClose={() => closeLaunched(w.id)}>
-                        {app.render(fs, w.path)}
+                    <Window key={w.id} id={w.id} title={w.title} dirty={dirty[w.id]} onClose={() => closeLaunched(w.id)}>
+                        {app.render(fs, w.path, w.id)}
                     </Window>
                 );
             })}

@@ -1,0 +1,8 @@
+{
+    "name": "@bongle/blockbench",
+    "private": true,
+    "description": "Blockbench bundle for the bongle editor: upstream Blockbench (pinned submodule) + the merged bongle plugin (generic window.Bongle API + editor postMessage bridge), assembled into lib/editor/public/static/blockbench and embedded by the editor's 'blockbench' app.",
+    "scripts": {
+        "build": "./build.sh"
+    }
+}

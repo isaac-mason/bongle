@@ -4,13 +4,14 @@
 // falling back to a code-editor tab. Launching is dynamic (one window per
 // file) — see the launched store.
 
-import { Image, Music, Paintbrush } from 'lucide-react';
+import { Blocks, Image, Music, Paintbrush } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
 import { useLaunched } from '../stores/launched';
 import { useOpenFile } from '../stores/open-file';
 import { AUDIO_EXTS } from './audio-mime';
 import { AudioPlayer } from './components/AudioPlayer';
+import { Blockbench } from './components/Blockbench';
 import { ImageEditor } from './components/ImageEditor';
 import { ImageViewer } from './components/ImageViewer';
 
@@ -25,8 +26,9 @@ export type AppDef = {
     handles: string[];
     /** initial window size when launched. */
     initial: { w: number; h: number };
-    /** the window body for a given file. */
-    render: (fs: Filesystem, path: string) => ReactNode;
+    /** the window body for a given file; `windowId` lets an app report state
+     *  (e.g. unsaved) back to its window chrome. */
+    render: (fs: Filesystem, path: string, windowId: string) => ReactNode;
 };
 
 export const imageViewerApp: AppDef = {
@@ -43,8 +45,8 @@ export const imageEditorApp: AppDef = {
     title: 'paint',
     glyph: <Paintbrush size={18} />,
     handles: [], // launched from the viewer's "edit" button, not opened from the tree.
-    initial: { w: 540, h: 620 },
-    render: (fs, path) => <ImageEditor fs={fs} path={path} />,
+    initial: { w: 660, h: 560 },
+    render: (fs, path, windowId) => <ImageEditor fs={fs} path={path} windowId={windowId} />,
 };
 
 export const audioPlayerApp: AppDef = {
@@ -56,7 +58,16 @@ export const audioPlayerApp: AppDef = {
     render: (fs, path) => <AudioPlayer fs={fs} path={path} />,
 };
 
-export const APPS: AppDef[] = [imageViewerApp, imageEditorApp, audioPlayerApp];
+export const blockbenchApp: AppDef = {
+    id: 'blockbench',
+    title: 'blockbench',
+    glyph: <Blocks size={18} />,
+    handles: ['bbmodel'],
+    initial: { w: 960, h: 640 },
+    render: (fs, path) => <Blockbench fs={fs} path={path} />,
+};
+
+export const APPS: AppDef[] = [imageViewerApp, imageEditorApp, audioPlayerApp, blockbenchApp];
 
 /** the app that opens this extension, or null → the code editor. */
 export function appForFile(path: string): AppDef | null {

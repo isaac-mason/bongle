@@ -2,12 +2,23 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <title>bongle editor</title>
         <style>
             * { box-sizing: border-box; }
-            html, body { margin: 0; height: 100%; font: 13px/1.4 ui-monospace, monospace; color: #000; background: #fff; }
+            html, body { margin: 0; height: 100%; font: 13px/1.4 ui-monospace, monospace; color: #000; background: #fff; overscroll-behavior: none; }
             #root { height: 100%; }
+
+            /* react-colorful, squared to the bongle look (see ColorPicker).
+               Scoped under .bongle-picker so these beat react-colorful's own
+               runtime-injected styles (which land later in <head>) on
+               specificity, not source order. Pointers sit half-outside the
+               strips at the extremes, so the ColorPicker panel keeps a
+               horizontal gutter wide enough for them. */
+            .bongle-picker .react-colorful { width: 100%; height: 160px; border-radius: 0; gap: 6px; }
+            .bongle-picker .react-colorful__saturation { border-radius: 0; }
+            .bongle-picker .react-colorful__hue, .bongle-picker .react-colorful__alpha { height: 16px; border-radius: 0; }
+            .bongle-picker .react-colorful__pointer { width: 14px; height: 14px; border-radius: 0; border: 2px solid #fff; box-shadow: 0 0 0 1px #000; }
         </style>
     </head>
     <body>

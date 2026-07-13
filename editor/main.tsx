@@ -4,6 +4,7 @@
 
 import { Boxes, Code, Files, MonitorPlay, Server } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
+import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
 import * as bongle from '../src/index';
 import * as bongleInternal from '../src/internal';
 import * as bongleStarter from '../src/starter/index';
@@ -77,6 +78,8 @@ solid('dev:blue', 70, 110, 230);
 async function boot(): Promise<void> {
     await editor.fs.write('manifest.json', JSON.stringify({ name: 'dev-sample', engineVersion: '0.0.0' }, null, 2));
     await editor.fs.write('src/index.ts', SAMPLE_INDEX);
+    // a starter avatar source, openable in the blockbench app from the file tree.
+    await editor.fs.write('character.bbmodel', starterBbmodel);
     useOpenFile.getState().open('src/index.ts'); // open it in the code window
     log('sample project written; starting bundler…');
     await startBundler({ fs: editor.fs, externals, entry: 'src/index.ts' });
@@ -139,6 +142,21 @@ const windows: WindowDef[] = [
         content: <div style={{ padding: 12, color: '#888' }}>client — arrives with #3 (server + client in the tab).</div>,
     },
 ];
+
+// keep the browser from zooming the whole page — the desktop is a fixed-scale
+// surface, and apps (e.g. the paint canvas) own their own zoom. Blocks trackpad
+// pinch / ctrl+wheel, Safari gesture zoom, and ⌘/ctrl +/-/0.
+window.addEventListener(
+    'wheel',
+    (e) => {
+        if (e.ctrlKey || e.metaKey) e.preventDefault();
+    },
+    { passive: false },
+);
+window.addEventListener('gesturestart', (e) => e.preventDefault());
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
+});
 
 createRoot(document.getElementById('root')!).render(<Desktop windows={windows} fs={editor.fs} />);
 void boot();

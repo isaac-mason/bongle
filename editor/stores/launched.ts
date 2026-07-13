@@ -14,14 +14,19 @@ let launchCount = 0;
 
 type LaunchStore = {
     windows: LaunchedWindow[];
+    /** per-window unsaved flag, keyed by window id; an app publishes its own. */
+    dirty: Record<string, boolean>;
     /** open (or focus) a window running `app` on `path`. */
     launch: (app: AppDef, path: string) => void;
     /** close a launched window (its geometry is kept for a later re-open). */
     close: (id: string) => void;
+    /** an app reporting its unsaved state (shown as a title-bar dot). */
+    setDirty: (id: string, dirty: boolean) => void;
 };
 
 export const useLaunched = create<LaunchStore>((set, get) => ({
     windows: [],
+    dirty: {},
     launch: (app, path) => {
         const id = `${app.id}:${path}`;
         if (!get().windows.some((w) => w.id === id)) {
@@ -34,5 +39,10 @@ export const useLaunched = create<LaunchStore>((set, get) => ({
         }
         useWindows.getState().focus(id);
     },
-    close: (id) => set((s) => ({ windows: s.windows.filter((w) => w.id !== id) })),
+    close: (id) =>
+        set((s) => {
+            const { [id]: _drop, ...dirty } = s.dirty;
+            return { windows: s.windows.filter((w) => w.id !== id), dirty };
+        }),
+    setDirty: (id, dirty) => set((s) => (s.dirty[id] === dirty ? s : { dirty: { ...s.dirty, [id]: dirty } })),
 }));

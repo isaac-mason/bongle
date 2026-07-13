@@ -7,6 +7,7 @@
 import { Eraser, Grid3x3, type LucideIcon, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
+import { useLaunched } from '../../stores/launched';
 import { imageMime } from '../image-mime';
 import { ColorPicker, TRANSPARENT } from './ColorPicker';
 
@@ -19,9 +20,10 @@ const TOOLS: { id: Tool; Icon: LucideIcon; title: string }[] = [
     { id: 'bucket', Icon: PaintBucket, title: 'fill' },
 ];
 
-export function ImageEditor({ fs, path }: { fs: Filesystem; path: string }) {
+export function ImageEditor({ fs, path, windowId }: { fs: Filesystem; path: string; windowId: string }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
+    const stageRef = useRef<HTMLDivElement>(null);
     const [size, setSize] = useState<{ w: number; h: number } | null>(null);
     const [scale, setScale] = useState(16);
     const [tool, setTool] = useState<Tool>('pencil');
@@ -68,6 +70,29 @@ export function ImageEditor({ fs, path }: { fs: Filesystem; path: string }) {
             alive = false;
         };
     }, [fs, path]);
+
+    // ⌘/ctrl + wheel (and trackpad pinch, which the browser reports as
+    // ctrl+wheel) zooms; a plain wheel scrolls/pans the stage as normal. Native
+    // listener so preventDefault sticks (React's onWheel is passive).
+    useEffect(() => {
+        const el = stageRef.current;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            if (!(e.ctrlKey || e.metaKey)) return; // plain wheel scrolls
+            e.preventDefault();
+            setScale((s) => {
+                const next = e.deltaY < 0 ? Math.ceil(s * 1.2) : Math.floor(s / 1.2);
+                return Math.max(1, Math.min(64, next === s ? s + (e.deltaY < 0 ? 1 : -1) : next));
+            });
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, []);
+
+    // publish unsaved state to the window chrome (title-bar dot).
+    useEffect(() => {
+        useLaunched.getState().setDirty(windowId, dirty);
+    }, [dirty, windowId]);
 
     const ctxOf = () => canvasRef.current?.getContext('2d') ?? null;
 
@@ -228,7 +253,7 @@ export function ImageEditor({ fs, path }: { fs: Filesystem; path: string }) {
                     <ZoomOut size={15} />
                 </button>
                 <span style={{ color: '#888', minWidth: 30, textAlign: 'center' }}>{scale}×</span>
-                <button type="button" title="zoom in" style={btn(false)} onClick={() => setScale((v) => Math.min(48, v + 2))}>
+                <button type="button" title="zoom in" style={btn(false)} onClick={() => setScale((v) => Math.min(64, v + 2))}>
                     <ZoomIn size={15} />
                 </button>
                 <button type="button" title="toggle grid" style={btn(grid)} onClick={() => setGrid((g) => !g)}>
@@ -236,50 +261,48 @@ export function ImageEditor({ fs, path }: { fs: Filesystem; path: string }) {
                 </button>
                 <span style={{ flex: 1 }} />
                 <span style={{ color: '#888' }}>{size ? `${size.w}×${size.h}` : ''}</span>
-                <button
-                    type="button"
-                    title="save (⌘/ctrl+S)"
-                    style={{ ...btn(false), gap: 5, width: 'auto', padding: '0 8px', fontWeight: dirty ? 700 : 400 }}
-                    onClick={save}
-                >
-                    <Save size={15} /> {dirty ? '●' : ''}
+                <button type="button" title="save (⌘/ctrl+S)" style={btn(false)} onClick={save}>
+                    <Save size={15} />
                 </button>
             </div>
 
-            <ColorPicker value={color} onChange={setColor} />
-
-            <div style={stage}>
-                <div style={{ position: 'relative', width: dispW, height: dispH, boxShadow: '0 0 0 1px #000' }}>
-                    <div style={{ position: 'absolute', inset: 0, background: CHECKER }} />
-                    <canvas
-                        ref={canvasRef}
-                        onPointerDown={onDown}
-                        onPointerMove={onMove}
-                        onPointerUp={() => {
-                            painting.current = false;
-                        }}
-                        style={{
-                            position: 'absolute',
-                            inset: 0,
-                            width: '100%',
-                            height: '100%',
-                            imageRendering: 'pixelated',
-                            touchAction: 'none',
-                            cursor: 'crosshair',
-                        }}
-                    />
-                    {grid && scale >= 6 && (
-                        <div
+            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+                <div style={sidebar}>
+                    <ColorPicker value={color} onChange={setColor} />
+                </div>
+                <div ref={stageRef} style={stage}>
+                    <div style={{ position: 'relative', width: dispW, height: dispH, boxShadow: '0 0 0 1px #000' }}>
+                        <div style={{ position: 'absolute', inset: 0, background: CHECKER }} />
+                        <canvas
+                            ref={canvasRef}
+                            onPointerDown={onDown}
+                            onPointerMove={onMove}
+                            onPointerUp={() => {
+                                painting.current = false;
+                            }}
                             style={{
                                 position: 'absolute',
                                 inset: 0,
-                                pointerEvents: 'none',
-                                backgroundSize: `${scale}px ${scale}px`,
-                                backgroundImage:
-                                    'linear-gradient(to right, rgba(0,0,0,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.15) 1px, transparent 1px)',
+                                width: '100%',
+                                height: '100%',
+                                imageRendering: 'pixelated',
+                                touchAction: 'none',
+                                cursor: 'crosshair',
                             }}
                         />
-                    )}
+                        {grid && scale >= 6 && (
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    pointerEvents: 'none',
+                                    backgroundSize: `${scale}px ${scale}px`,
+                                    backgroundImage:
+                                        'linear-gradient(to right, rgba(0,0,0,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.15) 1px, transparent 1px)',
+                                }}
+                            />
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
@@ -294,6 +317,14 @@ function hexToRgba(hex: string): [number, number, number, number] {
 }
 
 const CHECKER = 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px';
+
+const sidebar: CSSProperties = {
+    width: 200,
+    flexShrink: 0,
+    borderRight: '1px solid #000',
+    overflow: 'auto',
+    background: '#fff',
+};
 
 const toolbar: CSSProperties = {
     display: 'flex',
