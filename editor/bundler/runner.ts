@@ -7,11 +7,6 @@
 
 import { ESModulesEvaluator, ModuleRunner, type ModuleRunnerOptions, type ModuleRunnerTransport } from 'vite/module-runner';
 
-/** engine module map: specifier (e.g. 'bongle', 'bongle/internal') → the
- *  already-loaded module namespace. In dev this is the workspace engine the
- *  host imported; in prod, the pinned engine dist. */
-export type Externals = Map<string, unknown>;
-
 /** the runner's link to the dev server. */
 export type RunnerBridge = {
     /** request/response for fetchModule (+ getBuiltins). */
@@ -22,20 +17,19 @@ export type RunnerBridge = {
     send: (payload: unknown) => void;
 };
 
-/** ESModulesEvaluator that resolves externalized specifiers from a map first,
- *  falling back to native import for anything not provided. */
-class ExternalsEvaluator extends ESModulesEvaluator {
-    constructor(private externals: Externals) {
-        super();
-    }
+/** ESModulesEvaluator for the browser realms. The engine (`bongle*`) is NOT
+ *  external — it's bundled from the vfs dist through the graph, so per-env
+ *  envPlugin applies to it. Only node builtins (stubbed — the engine's node-only
+ *  paths are DCE'd/unused in browser realms) and real npm deps (native import in
+ *  the realm's own context) stay external. */
+class BrowserEvaluator extends ESModulesEvaluator {
     async runExternalModule(filepath: string): Promise<unknown> {
-        const hit = this.externals.get(filepath);
-        if (hit !== undefined) return hit;
+        if (filepath.startsWith('node:')) return {};
         return super.runExternalModule(filepath);
     }
 }
 
-export function makeRunner(bridge: RunnerBridge, externals: Externals): ModuleRunner {
+export function makeRunner(bridge: RunnerBridge): ModuleRunner {
     // biome-ignore lint/suspicious/noExplicitAny: transport onMessage payload is loosely typed.
     let onMessageCb: ((p: any) => void) | undefined;
     bridge.onMessage((p) => onMessageCb?.(p));
@@ -67,5 +61,5 @@ export function makeRunner(bridge: RunnerBridge, externals: Externals): ModuleRu
             }) as any,
     };
 
-    return new ModuleRunner(options, new ExternalsEvaluator(externals));
+    return new ModuleRunner(options, new BrowserEvaluator());
 }

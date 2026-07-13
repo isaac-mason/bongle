@@ -17,9 +17,9 @@
 // by `draw-textures.ts` and threaded in via `bakedDraws` as OffscreenCanvases;
 // the composite loop draws them directly.
 
-import type { ResourceLoader } from '../../../src/core/resource-loader';
-import type { DrawSource, ModuleVersion } from '../../../src/internal';
-import type { Filesystem } from '../../fs';
+import type { ResourceLoader } from '../../core/resource-loader';
+import type { DrawSource, ModuleVersion } from '../../internal';
+import type { Filesystem } from '../filesystem';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import { canvasPixels, decodeBitmap, encodePng, makeCanvas, scaleTo, sha256HexParts } from './raster';

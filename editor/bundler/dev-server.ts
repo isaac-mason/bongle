@@ -11,7 +11,16 @@
 // standalone-fns, matching the engine convention.
 
 import type { Filesystem } from '../fs';
-import { type TransformResult, transformUserModule } from './transform';
+import type { EnvValues } from './env-replace';
+import { type TransformResult, transformModule } from './transform';
+
+// env-id → env values. Realms use env-ids `client:<n>` / `server` / `pipeline`;
+// client realms are client-env, server + pipeline are server-env.
+function envValuesFor(env: string): EnvValues {
+    return env.startsWith('client')
+        ? { client: true, server: false, editor: true }
+        : { client: false, server: true, editor: true };
+}
 
 /** a HotPayload subset the runner accepts. */
 export type HotPayload = { type: 'update' | 'custom' | 'full-reload' | 'connected'; [k: string]: unknown };
@@ -41,8 +50,9 @@ export type DevServerState = {
     isExternal: (spec: string) => boolean;
     /** per-env module graphs, created lazily as envs register. */
     graphs: Map<string, Map<string, ModNode>>;
-    /** transform cache keyed by module id → { version, result }. */
-    transformCache: Map<string, { version: number; result: TransformResult }>;
+    /** transform cache: module id → env → { version, result }. Per-env because
+     *  the same module transforms differently per realm (envPlugin literals). */
+    transformCache: Map<string, Map<string, { version: number; result: TransformResult }>>;
     /** bumped on every edit; drives cache-bust + invalidate. */
     version: number;
     /** HMR push channels registered by each env's transport. */
@@ -69,6 +79,12 @@ function resolve(state: DevServerState, spec: string, importer: string | undefin
         const base = importer ? normalize(importer) : '';
         const dir = base.slice(0, base.lastIndexOf('/'));
         return withExt(state, posixJoin(dir, spec));
+    }
+    // engine imports resolve to the prebundled dist seeded in the vfs (bundled
+    // in, NOT external): `bongle` → dist/index.js, `bongle/X` → dist/X.js.
+    if (spec === 'bongle' || spec.startsWith('bongle/')) {
+        const sub = spec === 'bongle' ? 'index' : spec.slice('bongle/'.length);
+        return `node_modules/bongle/dist/${sub}.js`;
     }
     // root-relative fs path ('src/index.ts' or '/src/index.ts').
     return withExt(state, normalize(spec));
@@ -134,15 +150,25 @@ export async function fetchModule(
 
     const node = ensureNode(state, env, id);
 
-    const cached = state.transformCache.get(id);
+    // per-env transform cache (id → env → entry). withExt only needs the outer
+    // key, so extension resolution still works.
+    let byEnv = state.transformCache.get(id);
+    if (!byEnv) {
+        byEnv = new Map();
+        state.transformCache.set(id, byEnv);
+    }
+    const cached = byEnv.get(env);
     let result: TransformResult;
     if (cached && cached.version === state.version) {
         result = cached.result;
     } else {
-        result = await transformUserModule(id, source);
-        state.transformCache.set(id, { version: state.version, result });
+        // prebundled lib chunks (node_modules/bongle) are NOT user code — no
+        // capture wrapper; user project modules get it.
+        const capture = !id.startsWith('node_modules/');
+        result = await transformModule(id, source, { env: envValuesFor(env), capture });
+        byEnv.set(env, { version: state.version, result });
     }
-    node.selfAccepts = true; // the bongle postlude always self-accepts
+    node.selfAccepts = !id.startsWith('node_modules/'); // user modules self-accept (postlude); lib chunks don't
 
     // refresh this env's import edges.
     node.imports.clear();

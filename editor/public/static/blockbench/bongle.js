@@ -151,6 +151,9 @@
     return out;
   }
   function postProcessGlb(buffer, sceneName) {
+    if (ArrayBuffer.isView(buffer)) {
+      buffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
     const view = new DataView(buffer);
     if (view.getUint32(0, true) !== GLB_MAGIC) {
       console.warn("[bongle] export is not a .glb, skipping post-process");
@@ -503,60 +506,58 @@
     const IS_EMBEDDED = typeof window !== "undefined" && window.parent && window.parent !== window;
     if (!IS_EMBEDDED) return;
     const ORIGIN = window.location.origin;
-    const DRAFT_KEY = "bongle:editor-draft";
-    let currentOrigin = null;
-    function bongle() {
-      return typeof window !== "undefined" ? window.Bongle : void 0;
+    const post = (msg, transfer) => window.parent.postMessage(msg, ORIGIN, transfer);
+    const api = () => typeof window !== "undefined" ? window.Bongle : void 0;
+    const projects = () => typeof ModelProject !== "undefined" ? ModelProject.all : [];
+    function projectForPath(path) {
+      return projects().find((p) => p.bongle_fs_path === path);
     }
-    function post(msg, transfer) {
-      window.parent.postMessage(msg, ORIGIN, transfer);
+    function projectByUuid(uuid) {
+      return projects().find((p) => p.uuid === uuid);
     }
-    function readDraft() {
+    async function saveActive() {
+      const project = typeof Project !== "undefined" ? Project : null;
+      if (!project) return;
+      const B = api();
+      let glb = null;
+      let bbmodel;
+      let name;
+      let warnings = [];
       try {
-        return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-      } catch {
-        return null;
+        const art = await B.compileArtifacts();
+        glb = art.glb;
+        bbmodel = art.bbmodel;
+        name = art.name;
+        warnings = art.warnings || [];
+      } catch (err) {
+        bbmodel = B.serializeBbmodel();
+        name = project.name || "model";
+        warnings = [`glb export skipped: ${String(err && err.message || err)}`];
+      }
+      const path = project.bongle_fs_path;
+      const transfer = glb ? [glb] : [];
+      if (path) {
+        post({ type: "bongle:save", path, glb, bbmodel, name, warnings }, transfer);
+        project.saved = true;
+      } else {
+        post({ type: "bongle:save-as", uuid: project.uuid, glb, bbmodel, name, warnings }, transfer);
       }
     }
-    function writeDraft(bbmodel) {
-      if (!currentOrigin || !bbmodel) return;
-      try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify({ origin: currentOrigin, bbmodel, ts: Date.now() }));
-      } catch {
-      }
-    }
-    function clearDraft() {
-      try {
-        localStorage.removeItem(DRAFT_KEY);
-      } catch {
-      }
-    }
-    let saveTimer = null;
-    function scheduleAutosave() {
-      const B = bongle();
-      if (!B) return;
-      if (saveTimer) clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        try {
-          writeDraft(B.serializeBbmodel());
-        } catch {
-        }
-      }, 1200);
-    }
-    function openProject(origin, seedBbmodel, name) {
-      const B = bongle();
-      if (!B) return;
-      currentOrigin = origin;
-      const draft = readDraft();
-      if (draft && draft.origin === origin && draft.bbmodel) {
-        B.loadBbmodel(draft.bbmodel, name);
+    function openFile(path, bbmodel) {
+      const existing = projectForPath(path);
+      if (existing) {
+        existing.select();
         return;
       }
-      clearDraft();
-      if (seedBbmodel) B.loadBbmodel(seedBbmodel, name);
-      else B.newCharacter();
+      const name = path.split("/").pop();
+      api().loadBbmodel(bbmodel, name);
+      if (typeof Project !== "undefined" && Project) {
+        Project.bongle_fs_path = path;
+        Project.name = name;
+        Project.saved = true;
+      }
     }
-    async function handle(event) {
+    function handle(event) {
       if (event.source !== window.parent || event.origin !== ORIGIN) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
@@ -564,69 +565,57 @@
         announceWhenReady();
         return;
       }
-      const B = bongle();
+      const B = api();
       if (!B || !B.ready) return;
       switch (data.type) {
-        case "bongle:load":
+        case "bongle:open":
           try {
-            openProject(data.origin || "scratch", data.bbmodel, data.name);
+            openFile(data.path, data.bbmodel);
           } catch (err) {
-            post({ type: "bongle:load-failed", error: String(err && err.message || err) });
+            post({ type: "bongle:open-failed", path: data.path, error: String(err && err.message || err) });
           }
           return;
-        case "bongle:new":
-          try {
-            openProject(data.origin || "scratch", null, data.name);
-          } catch (err) {
-            post({ type: "bongle:load-failed", error: String(err && err.message || err) });
-          }
+        case "bongle:save-active":
+          void saveActive();
           return;
-        case "bongle:clear-draft":
-          clearDraft();
-          return;
-        case "bongle:save-request": {
-          if (B.isCharacterFormat()) {
-            const result = B.validateRig();
-            if (!result.ok) {
-              post({ type: "bongle:save-failed", errors: result.errors });
-              return;
-            }
-          }
-          try {
-            const { glb, bbmodel, name, warnings } = await B.compileArtifacts();
-            post({ type: "bongle:saved", glb, bbmodel, name, warnings }, [glb]);
-          } catch (err) {
-            post({ type: "bongle:save-failed", errors: [String(err && err.message || err)] });
+        case "bongle:assign-path": {
+          const p = projectByUuid(data.uuid);
+          if (p) {
+            p.bongle_fs_path = data.path;
+            p.name = data.path.split("/").pop();
+            p.saved = true;
           }
           return;
         }
       }
     }
-    let wiredOnReady = false;
-    function announceWhenReady() {
-      const B = bongle();
-      if (B && B.ready) {
-        if (!wiredOnReady) {
-          if (typeof Blockbench !== "undefined" && Blockbench.on) {
-            Blockbench.on("finish_edit", scheduleAutosave);
-          }
-          if (typeof BarItems !== "undefined" && BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) {
-            BarItems.bongle_export_gltf.delete();
-          }
-          wiredOnReady = true;
+    let wired = false;
+    function wire() {
+      if (wired) return;
+      if (typeof BarItems !== "undefined") {
+        for (const id of ["export_over", "save_project"]) {
+          if (BarItems[id]) BarItems[id].click = () => void saveActive();
         }
+        if (BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) BarItems.bongle_export_gltf.delete();
+      }
+      if (typeof Blockbench !== "undefined" && Blockbench.on) {
+        Blockbench.on("saved_state_changed", ({ project, saved }) => {
+          if (project && project.bongle_fs_path) post({ type: "bongle:dirty", path: project.bongle_fs_path, saved });
+        });
+      }
+      wired = true;
+    }
+    function announceWhenReady() {
+      const B = api();
+      if (B && B.ready) {
+        wire();
         post({ type: "bongle:ready" });
         return;
       }
       setTimeout(announceWhenReady, 60);
     }
-    window.addEventListener("message", (event) => {
-      handle(event);
-    });
-    if (document.readyState === "loading") {
-      window.addEventListener("DOMContentLoaded", announceWhenReady);
-    } else {
-      announceWhenReady();
-    }
+    window.addEventListener("message", handle);
+    if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", announceWhenReady);
+    else announceWhenReady();
   })();
 })();

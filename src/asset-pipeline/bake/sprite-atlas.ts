@@ -12,10 +12,10 @@
 // DrawSource frames are baked upstream by `draw-textures.ts` and threaded in
 // via `bakedDraws` as OffscreenCanvases; the composite draws them directly.
 
-import type { ResourceLoader } from '../../../src/core/resource-loader';
-import type { DrawSource, KindStore, NormalizedImageSource, Region, SpriteHandle } from '../../../src/internal';
-import { addSkylineLevel, emptySkyline, findBestFit } from '../../../src/internal';
-import type { Filesystem } from '../../fs';
+import type { ResourceLoader } from '../../core/resource-loader';
+import type { DrawSource, KindStore, NormalizedImageSource, Region, SpriteHandle } from '../../internal';
+import { addSkylineLevel, emptySkyline, findBestFit } from '../../internal';
+import type { Filesystem } from '../filesystem';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import { canvasPixels, decodeBitmap, encodePng, makeCanvas, sha256HexParts } from './raster';

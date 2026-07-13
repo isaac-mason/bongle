@@ -6,8 +6,8 @@
 // This is the `{ loader }` the pipeline reads bake inputs through in the
 // browser worker (the node/disk loader is gone — browser-native only).
 
-import type { ResourceLoader } from '../../src/core/resource-loader';
-import type { Filesystem } from '../fs';
+import type { ResourceLoader } from '../core/resource-loader';
+import type { Filesystem } from './filesystem';
 
 export function createBakeLoader(fs: Filesystem): ResourceLoader {
     return {

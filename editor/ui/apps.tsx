@@ -7,6 +7,7 @@
 import { Blocks, Image, Music, Paintbrush } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
+import { useBlockbench } from '../stores/blockbench';
 import { useLaunched } from '../stores/launched';
 import { useOpenFile } from '../stores/open-file';
 import { AUDIO_EXTS } from './audio-mime';
@@ -26,6 +27,10 @@ export type AppDef = {
     handles: string[];
     /** initial window size when launched. */
     initial: { w: number; h: number };
+    /** singleton apps get ONE window (keyed by app id) and manage multiple files
+     *  themselves — e.g. Blockbench with its own tabs. Opening a file focuses the
+     *  single window; the app receives the path out-of-band (see `openPath`). */
+    singleton?: boolean;
     /** the window body for a given file; `windowId` lets an app report state
      *  (e.g. unsaved) back to its window chrome. */
     render: (fs: Filesystem, path: string, windowId: string) => ReactNode;
@@ -64,7 +69,8 @@ export const blockbenchApp: AppDef = {
     glyph: <Blocks size={18} />,
     handles: ['bbmodel'],
     initial: { w: 960, h: 640 },
-    render: (fs, path) => <Blockbench fs={fs} path={path} />,
+    singleton: true,
+    render: (fs, _path, windowId) => <Blockbench fs={fs} windowId={windowId} />,
 };
 
 export const APPS: AppDef[] = [imageViewerApp, imageEditorApp, audioPlayerApp, blockbenchApp];
@@ -85,6 +91,9 @@ export function openPath(path: string): void {
     const app = appForFile(path);
     if (app) {
         useLaunched.getState().launch(app, path);
+        // singleton apps manage their own files; hand the path over out-of-band
+        // (only Blockbench is singleton today, so route to its store).
+        if (app.singleton) useBlockbench.getState().open(path);
         return;
     }
     useOpenFile.getState().open(path);

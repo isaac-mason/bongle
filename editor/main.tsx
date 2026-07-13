@@ -2,16 +2,15 @@
 // wires the project session: engine externals (workspace source here; a CDN
 // dist in the deployed website), the bundler, and flush→bake.
 
-import { Boxes, Code, Files, MonitorPlay, Server } from 'lucide-react';
+import { Boxes, Code, Files, Server } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
-import * as bongle from '../src/index';
-import * as bongleInternal from '../src/internal';
-import * as bongleStarter from '../src/starter/index';
-import { startBundler } from './bundler/bundler';
-import type { Externals } from './bundler/runner';
-import { initEditor, runPipeline } from './entry';
-import { startEditorServer } from './server';
+import { createBundlerHost } from './bundler/host';
+import { createClientHost } from './client-host';
+import { seedEngineDist } from './engine-dist';
+import { initEditor, initPipeline, runPipeline } from './entry';
+import { spawnServerWorker } from './server-host';
+import { useClients } from './stores/clients';
 import { logger } from './stores/logs';
 import { useOpenFile } from './stores/open-file';
 import { usePipeline } from './stores/pipeline';
@@ -21,35 +20,8 @@ import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
 
-const { __kit } = bongleInternal;
-const externals: Externals = new Map<string, unknown>([
-    ['bongle', bongle],
-    ['bongle/internal', bongleInternal],
-    ['bongle/starter', bongleStarter],
-]);
-
 const editor = initEditor();
 const log = logger('pipeline');
-
-// declarations settle → bake → refresh the atlas view. Registered on the
-// shared engine __kit, so any user module's flush() runs this.
-let baking = false;
-__kit.registerFlush(() => {
-    if (baking) return;
-    baking = true;
-    void (async () => {
-        try {
-            const t0 = performance.now();
-            const r = await runPipeline(editor);
-            log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-            usePipeline.getState().baked();
-        } catch (err) {
-            log(`bake error: ${(err as Error).message}`);
-        } finally {
-            baking = false;
-        }
-    })();
-});
 
 const SAMPLE_INDEX = `import { block, blockTexture, draw } from 'bongle';
 
@@ -80,22 +52,83 @@ async function boot(): Promise<void> {
     await editor.fs.write('src/index.ts', SAMPLE_INDEX);
     // a starter avatar source, openable in the blockbench app from the file tree.
     await editor.fs.write('character.bbmodel', starterBbmodel);
+    // baked pipeline outputs aren't source; the tree grays gitignored entries.
+    await editor.fs.write('.gitignore', 'resources/\n');
     useOpenFile.getState().open('src/index.ts'); // open it in the code window
-    log('sample project written; starting bundler…');
-    await startBundler({ fs: editor.fs, externals, entry: 'src/index.ts' });
+
+    // seed the prebundled engine dist into the vfs so the bundler resolves
+    // `bongle*` from there (bundled in, not external).
+    await seedEngineDist(editor.fs);
+
+    // the ONE dev server. Every realm's user-code transform + HMR flow from it;
+    // realms only evaluate. The pipeline lives in this document → a local
+    // runner; the server worker + client iframes attach over bundler ports.
+    const host = createBundlerHost(editor.fs);
+
+    log('evaluating project (pipeline realm)…');
+    const pipeline = host.createLocalRunner('pipeline');
+    await pipeline.import('src/index.ts'); // user declarations register into the pipeline realm's engine
+    // __kit from the SAME runner instance the declarations registered into.
+    const { __kit } = await pipeline.import('bongle/internal');
+    // the baker, ALSO from this runner, so it reads the registry the user
+    // declarations just populated (a native AssetPipeline would read a different,
+    // empty one).
+    const AssetPipeline = await pipeline.import('bongle/engine-asset-pipeline');
+    initPipeline(editor, AssetPipeline);
     log('bundler running — edit src/index.ts then ⌘/ctrl+S to hot-reload.');
 
-    // boot the server in this (main, server-env) realm — declarations are
-    // registered now. Logs to the server window.
-    const serverLog = logger('server');
-    try {
-        await startEditorServer({ fs: editor.fs, log: serverLog });
-    } catch (err) {
-        serverLog(`server boot failed: ${(err as Error).message}`);
-        console.error(err);
-    }
+    // declarations settle → bake → refresh the atlas view. Registered on the
+    // pipeline realm's __kit, so its flush runs the bake.
+    let baking = false;
+    __kit.registerFlush(() => {
+        if (baking) return;
+        baking = true;
+        void (async () => {
+            try {
+                const t0 = performance.now();
+                const r = await runPipeline(editor);
+                log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
+                usePipeline.getState().baked();
+            } catch (err) {
+                log(`bake error: ${(err as Error).message}`);
+            } finally {
+                baking = false;
+            }
+        })();
+    });
 
-    __kit.flush(); // initial bake + registry apply (server flush handler is now registered).
+    // the server, off-thread in its own realm (own registry), fed by the host.
+    const serverLog = logger('server');
+    const serverHost = spawnServerWorker({ fs: editor.fs, host, log: serverLog });
+
+    // client iframes: each its own realm, connected to the server worker; the
+    // "+ client" button opens more (multiplayer-in-a-tab).
+    const clientLog = logger('client');
+    const clientHost = createClientHost({ serverHost, host, fs: editor.fs, log: (id, m) => clientLog(`[${id}] ${m}`) });
+    useClients.getState().setHost(clientHost);
+
+    // fs edits fan out: the host re-transforms + pushes HMR to every realm, and
+    // each worker/iframe fs mirror is updated so its resource/scene reads see
+    // the change (baked outputs, scenes).
+    editor.fs.watch((changes) => {
+        host.onFsChange(changes);
+        for (const c of changes) {
+            if (c.type === 'deleted') continue;
+            void editor.fs
+                .read(c.path)
+                .then((bytes) => {
+                    serverHost.relayFsChange(c.path, bytes);
+                    clientHost.relayFsChange(c.path, bytes);
+                })
+                .catch(() => {});
+        }
+    });
+
+    __kit.flush(); // initial bake + registry apply (pipeline realm).
+
+    // open the first client once the server is live (join before the sim exists
+    // would be dropped); the "+ client" button opens further windows.
+    void serverHost.ready.then(() => useClients.getState().open());
 }
 
 const windows: WindowDef[] = [
@@ -134,13 +167,8 @@ const windows: WindowDef[] = [
         initial: { x: 320, y: 484, w: 470, h: 190 },
         content: <LogView stream="server" />,
     },
-    {
-        id: 'client',
-        title: 'client',
-        glyph: <MonitorPlay size={18} />,
-        initial: { x: 810, y: 514, w: 320, h: 160 },
-        content: <div style={{ padding: 12, color: '#888' }}>client — arrives with #3 (server + client in the tab).</div>,
-    },
+    // client windows are dynamic (opened by the "+ client" button, one iframe
+    // realm each) — see stores/clients + Desktop.
 ];
 
 // keep the browser from zooming the whole page — the desktop is a fixed-scale

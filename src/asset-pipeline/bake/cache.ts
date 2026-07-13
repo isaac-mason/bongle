@@ -6,7 +6,7 @@
 // computedHash`. The artifact JSON IS the cache marker, no separate
 // cache file. Cold-start wipes simply delete the artifact files.
 
-import type { Filesystem } from '../../fs';
+import type { Filesystem } from '../filesystem';
 
 /** Read the `hash` field from an artifact's sidecar JSON (project-relative
  *  path). Returns null if the file is missing, unreadable, or has no

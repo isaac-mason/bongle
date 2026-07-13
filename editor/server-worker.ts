@@ -1,31 +1,22 @@
 // editor/server-worker.ts — the SERVER realm, in a web worker.
 //
-// Self-contained: vite bundles the engine (server-env, via worker.plugins) +
-// the bundler + startEditorServer into this worker. It gets a snapshot of the
-// project fs from the host at init, evaluates the user code in ITS realm (own
-// registry — per-realm eval, the multiplayer-design contract), boots
-// EngineServer, and owns the 60Hz sim loop OFF the main thread.
+// The engine is vite-bundled (server-env, via worker.plugins) into this worker,
+// but the user-code TRANSFORM is NOT here: this realm is a ModuleRunner that
+// pulls transformed modules + HMR from the ONE host DevServer over a bundler
+// MessagePort (createPortBridge). It evaluates the user code in ITS realm (own
+// registry — per-realm eval), boots EngineServer, and owns the 60Hz sim loop
+// OFF the main thread. The fs it holds is only for the server's own resource /
+// scene reads (loadResource, scene seeding), kept fresh via `fs-change`.
 //
 // Client iframes connect through MessagePorts the main document brokers: a
 // `client-join` message carries a transferred port + synthesized identity;
-// the in-tab transport (transport-server.ts) pumps that port's frames. Source
-// edits arrive as `fs-change` messages → the bundler's watcher HMRs them.
+// the in-tab transport (transport-server.ts) pumps that port's frames.
 
-import * as bongle from '../src/index';
-import * as bongleInternal from '../src/internal';
-import * as bongleStarter from '../src/starter/index';
-import { startBundler } from './bundler/bundler';
-import type { Externals } from './bundler/runner';
+import { makeRunner } from './bundler/runner';
+import { createPortBridge } from './bundler/port-bridge';
 import { createMemoryFilesystem, type Filesystem } from './fs';
 import { type EditorServer, startEditorServer } from './server';
 import { type ClientMeta, createPortTransport, type PortTransport } from './transport-server';
-
-const { __kit } = bongleInternal;
-const externals: Externals = new Map<string, unknown>([
-    ['bongle', bongle],
-    ['bongle/internal', bongleInternal],
-    ['bongle/starter', bongleStarter],
-]);
 
 const log = (msg: string) => self.postMessage({ type: 'log', msg });
 
@@ -55,8 +46,19 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
     try {
         if (msg.type === 'init') {
             fs = createMemoryFilesystem(msg.files);
-            await startBundler({ fs, externals, entry: 'src/index.ts' });
-            server = await startEditorServer({ fs, log });
+            // the bundler port rides on e.ports[0]; run the user entry through a
+            // ModuleRunner bridged to the host DevServer (host does the
+            // transform, this realm evaluates → populates the server registry).
+            const bundlerPort = e.ports[0];
+            if (!bundlerPort) throw new Error('init without a bundler port');
+            const runner = makeRunner(createPortBridge(bundlerPort));
+            await runner.import('src/index.ts');
+            // the engine the server drives comes from the SAME runner instance
+            // (the one the user code registered into), NOT a native import.
+            const EngineServer = await runner.import('bongle/engine-server');
+            const { __kit } = await runner.import('bongle/internal');
+
+            server = await startEditorServer({ fs, log, EngineServer, __kit });
             __kit.flush(); // initial registry apply.
 
             transport = createPortTransport(server.app, server.state, server.resolveAvatar);

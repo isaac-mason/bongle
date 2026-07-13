@@ -48,15 +48,9 @@ rsync -a \
 	--exclude '/js' \
 	"$BB/" "$OUT/"
 
-echo "==> Bundling merged bongle plugin (generic + bridge)"
-# Reuse the esbuild the Blockbench build just installed — deterministic, no extra
-# network fetch (works the same locally and in the Docker asset-builder). The
-# starter .bbmodel is inlined at build time via the json loader.
-"$BB/node_modules/.bin/esbuild" "$ROOT/plugin/src/index.js" \
-	--bundle --format=iife --loader:.bbmodel=json --outfile="$OUT/bongle.js"
-
-echo "==> Overlaying branding + injecting"
-[ -d "$ROOT/overlay" ] && cp -R "$ROOT/overlay/." "$OUT/"
-node "$ROOT/scripts/inject.mjs" "$OUT/index.html"
+# Bundle the plugin + branding + inject — shared with the fast, plugin-only
+# rebuild (build-plugin.sh). Reuses the esbuild the Blockbench build just
+# installed, so no extra network fetch here or in the Docker asset-builder.
+"$ROOT/build-plugin.sh"
 
 echo "==> Done. Static Blockbench in $OUT"

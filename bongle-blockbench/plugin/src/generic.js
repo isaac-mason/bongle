@@ -250,6 +250,13 @@ function padTo4(bytes, padValue) {
  * cheap, lossless container edit, not a re-export.
  */
 function postProcessGlb(buffer, sceneName) {
+	// THREE's GLTFExporter hands back an ArrayBuffer for binary, but coerce a
+	// typed-array view defensively. Anything else (e.g. an empty export that
+	// yields no binary) can't be post-processed — let the DataView throw so the
+	// caller can fall back (still saving the .bbmodel source).
+	if (ArrayBuffer.isView(buffer)) {
+		buffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+	}
 	const view = new DataView(buffer);
 	if (view.getUint32(0, true) !== GLB_MAGIC) {
 		console.warn('[bongle] export is not a .glb, skipping post-process');

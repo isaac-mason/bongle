@@ -14,18 +14,6 @@
 	display: none !important;
 }
 
-/* Single-document embed. The editor owns "which file" — one Blockbench window
- * per .bbmodel, seeded over the bridge — so Blockbench's own project tab bar
- * (tabs + the "+" new-tab button) is redundant and confusing. Hide it; the
- * editor window title already names the open file. */
-#tab_bar {
-	display: none !important;
-}
-/* The home button (menu bar) opens a fresh tab / start screen — same story. */
-#title_bar_home_button {
-	display: none !important;
-}
-
 /* GitHub icon inside the Bongle start-screen link buttons. */
 #start_screen .start_screen_section[section_id='bongle'] button {
 	display: inline-flex;

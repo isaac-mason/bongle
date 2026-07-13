@@ -16,21 +16,9 @@
 // watcher HMRs source, and resource writes trigger the matching engine refresh.
 
 import type { ClientDriver } from '../../interface/index';
-import * as EngineClient from '../../src/client/engine-client';
-import * as EngineEditor from '../../src/engine-editor';
-import * as bongle from '../../src/index';
-import * as bongleInternal from '../../src/internal';
-import * as bongleStarter from '../../src/starter/index';
-import { startBundler } from '../bundler/bundler';
-import type { Externals } from '../bundler/runner';
+import { makeRunner } from '../bundler/runner';
+import { createPortBridge } from '../bundler/port-bridge';
 import { createMemoryFilesystem, type Filesystem } from '../fs';
-
-const { __kit } = bongleInternal;
-const externals: Externals = new Map<string, unknown>([
-    ['bongle', bongle],
-    ['bongle/internal', bongleInternal],
-    ['bongle/starter', bongleStarter],
-]);
 
 // no host portal in the editor: matchmake is a no-op, platform verbs inert.
 const driver: ClientDriver = {
@@ -60,12 +48,18 @@ function clientResourceLoader(fs: Filesystem) {
     };
 }
 
-async function boot(msg: InitMessage, port: MessagePort): Promise<void> {
+async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: MessagePort): Promise<void> {
     const fs = createMemoryFilesystem(msg.files);
 
-    // evaluate the user code in this realm — populates the client registry
-    // (blocks/models/client scripts) the renderer reads.
-    await startBundler({ fs, externals, entry: msg.entry ?? 'src/index.ts' });
+    // evaluate the user code via a ModuleRunner bridged to the ONE host
+    // DevServer (host transforms; this realm evaluates → its own client
+    // registry, which the renderer reads).
+    const runner = makeRunner(createPortBridge(bundlerPort));
+    await runner.import(msg.entry ?? 'src/index.ts');
+    // engine from the SAME runner instance the user code registered into.
+    const EngineClient = await runner.import('bongle/engine-client');
+    const EngineEditor = await runner.import('bongle/engine-editor');
+    const { __kit } = await runner.import('bongle/internal');
 
     const state = EngineClient.init({
         mode: 'edit',
@@ -82,19 +76,19 @@ async function boot(msg: InitMessage, port: MessagePort): Promise<void> {
     __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
     __kit.flush();
 
-    // transport: inbound frames from the server worker → engine inbox.
-    port.onmessage = (e: MessageEvent) => {
+    // game transport: inbound frames from the server worker → engine inbox.
+    gamePort.onmessage = (e: MessageEvent) => {
         const data = e.data;
         state.net.inbox.push(data instanceof ArrayBuffer ? new Uint8Array(data) : (data as Uint8Array));
     };
 
-    // frame loop: advance, then drain the outbox onto the port.
+    // frame loop: advance, then drain the outbox onto the game port.
     let last = performance.now();
     const frame = (now: number) => {
         const dt = (now - last) / 1000;
         last = now;
         EngineClient.update(state, dt);
-        for (const bytes of state.net.outbox) port.postMessage(bytes);
+        for (const bytes of state.net.outbox) gamePort.postMessage(bytes);
         state.net.outbox.length = 0;
         requestAnimationFrame(frame);
     };
@@ -119,9 +113,11 @@ self.addEventListener('message', (e: MessageEvent) => {
     const msg = e.data as InitMessage;
     if (msg?.type !== 'client-init' || booted) return;
     booted = true;
-    const port = e.ports[0];
-    if (!port) throw new Error('client-init without a transferred port');
-    void boot(msg, port).catch((err) => {
+    // e.ports[0] = game transport (to the server worker), e.ports[1] = bundler
+    // transport (to the host DevServer).
+    const [gamePort, bundlerPort] = e.ports;
+    if (!gamePort || !bundlerPort) throw new Error('client-init needs game + bundler ports');
+    void boot(msg, gamePort, bundlerPort).catch((err) => {
         // surface boot failures to the parent for the client window's log.
         window.parent.postMessage({ type: 'client-error', message: (err as Error).message }, '*');
         console.error(err);

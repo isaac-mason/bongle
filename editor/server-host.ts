@@ -6,6 +6,7 @@
 // pumps that client. The main document owns connection identity (connectionId);
 // the worker maps it to an engine `Client`.
 
+import type { BundlerHost } from './bundler/host';
 import type { Filesystem } from './fs';
 import { snapshotFiles } from './session-files';
 import type { ClientMeta } from './transport-server';
@@ -22,11 +23,14 @@ export type ServerHost = {
 
 export type SpawnServerWorkerOptions = {
     fs: Filesystem;
+    /** the shared dev server — the worker's user-code transform + HMR come from
+     *  here over a dedicated bundler port (env 'server'). */
+    host: BundlerHost;
     log?: (msg: string) => void;
 };
 
 export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
-    const { fs, log = () => {} } = opts;
+    const { fs, host, log = () => {} } = opts;
 
     const worker = new Worker(new URL('./server-worker.ts', import.meta.url), { type: 'module' });
 
@@ -42,9 +46,14 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
     };
     worker.onerror = (e) => log(`worker crashed: ${e.message}`);
 
+    // dedicated bundler conduit: the worker's ModuleRunner ↔ the host DevServer
+    // (env 'server'). Its port rides on the init message's transfer list.
+    const bundler = new MessageChannel();
+    host.connectRealm('server', bundler.port1);
+
     void (async () => {
         const files = await snapshotFiles(fs);
-        worker.postMessage({ type: 'init', files });
+        worker.postMessage({ type: 'init', files }, [bundler.port2]);
     })();
 
     return {

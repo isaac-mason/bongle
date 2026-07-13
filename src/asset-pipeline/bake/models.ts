@@ -30,7 +30,7 @@ import { type Document, type Node as GltfNode, Logger, type Texture, WebIO } fro
 import { dedup, reorder, weld } from '@gltf-transform/functions';
 import { type Box3, mat4 } from 'mathcat';
 import { MeshoptEncoder } from 'meshoptimizer';
-import type { ResourceLoader } from '../../../src/core/resource-loader';
+import type { ResourceLoader } from '../../core/resource-loader';
 import {
     type ModelBinChannel,
     type ModelBinClip,
@@ -38,8 +38,8 @@ import {
     type ModelBinMesh,
     type ModuleVersion,
     packModelBin,
-} from '../../../src/internal';
-import type { Filesystem } from '../../fs';
+} from '../../internal';
+import type { Filesystem } from '../filesystem';
 import { sha256Hex } from './raster';
 
 // ── paths ──────────────────────────────────────────────────────────

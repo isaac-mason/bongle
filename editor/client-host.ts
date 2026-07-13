@@ -9,6 +9,7 @@
 // Opening several clients just calls createClient() again — N iframes, N
 // connections, N players on the one server worker.
 
+import type { BundlerHost } from './bundler/host';
 import type { Filesystem } from './fs';
 import type { ServerHost } from './server-host';
 import { snapshotFiles } from './session-files';
@@ -31,15 +32,22 @@ export type ClientHost = {
 
 export type CreateClientHostOptions = {
     serverHost: ServerHost;
+    /** the shared dev server — each iframe's user-code transform + HMR come from
+     *  here over a bundler port (env `client:<connectionId>`). */
+    host: BundlerHost;
     fs: Filesystem;
-    /** Origin the client vite serves from (client/vite.config.ts → :5174). */
-    clientOrigin?: string;
+    /** Same-origin path the main vite serves the client document from
+     *  (editor/client/index.html). The client is a same-origin iframe now — env
+     *  is per-realm in the browser bundler, and it runs a runner (no transform →
+     *  no SAB), so no separate origin/vite is needed. */
+    clientPath?: string;
     entry?: string;
     log?: (connectionId: number, msg: string) => void;
 };
 
 export function createClientHost(opts: CreateClientHostOptions): ClientHost {
-    const { serverHost, fs, clientOrigin = 'http://localhost:5174', entry = 'src/index.ts', log = () => {} } = opts;
+    const { serverHost, host, fs, clientPath = '/client/index.html', entry = 'src/index.ts', log = () => {} } = opts;
+    const targetOrigin = window.location.origin;
 
     const live = new Set<ClientConnection>();
     let nextConnectionId = 1;
@@ -49,24 +57,25 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
             const connectionId = nextConnectionId++;
 
             const iframe = document.createElement('iframe');
-            iframe.src = clientOrigin;
+            iframe.src = clientPath;
             iframe.style.cssText = 'border:0;width:100%;height:100%;display:block;background:#000';
-            // let the cross-origin document become cross-origin isolated (its
-            // bundler uses SharedArrayBuffer).
-            iframe.allow = 'cross-origin-isolated';
 
             const onMessage = async (e: MessageEvent) => {
-                if (e.origin !== clientOrigin || e.source !== iframe.contentWindow) return;
+                if (e.origin !== targetOrigin || e.source !== iframe.contentWindow) return;
                 const msg = e.data as { type?: string; message?: string };
                 if (msg.type === 'client-ready') {
                     const files = await snapshotFiles(fs);
-                    const channel = new MessageChannel();
+                    // two channels: the game transport (→ server worker) and the
+                    // bundler transport (→ host DevServer, this iframe's realm).
+                    const game = new MessageChannel();
+                    const bundler = new MessageChannel();
                     const meta: ClientMeta = {
                         user: { id: `dev-${connectionId}`, username: `guest-${connectionId}` },
                         joinData: {},
                     };
-                    serverHost.joinClient(connectionId, channel.port1, meta);
-                    iframe.contentWindow?.postMessage({ type: 'client-init', files, entry }, clientOrigin, [channel.port2]);
+                    serverHost.joinClient(connectionId, game.port1, meta);
+                    host.connectRealm(`client:${connectionId}`, bundler.port1);
+                    iframe.contentWindow?.postMessage({ type: 'client-init', files, entry }, targetOrigin, [game.port2, bundler.port2]);
                     log(connectionId, 'connected');
                 } else if (msg.type === 'client-error') {
                     log(connectionId, `error: ${msg.message}`);
@@ -90,7 +99,7 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
 
         relayFsChange(path, bytes) {
             for (const c of live) {
-                c.iframe.contentWindow?.postMessage({ type: 'fs-change', path, bytes }, clientOrigin);
+                c.iframe.contentWindow?.postMessage({ type: 'fs-change', path, bytes }, targetOrigin);
             }
         },
 

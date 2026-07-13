@@ -11,8 +11,10 @@
 // entry — the entry re-exports the node-only avatars-fallback (node:fs), which
 // would break the browser bundle.
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../interface/index';
-import { __kit } from '../src/internal';
-import * as EngineServer from '../src/server/engine-server';
+import type * as InternalNS from '../src/internal';
+// type-only: the RUNTIME EngineServer + __kit come from the runner (the realm's
+// bundled engine instance the user code registered into), passed in via opts.
+import type * as EngineServerNS from '../src/server/engine-server';
 import { createInMemoryStorageDriver } from '../src/server/storage-in-memory';
 import { initZstd, zstdCompress } from '../zstd-wasm';
 import { createEditorAvatarsDriver } from './avatars';
@@ -21,7 +23,9 @@ import type { Filesystem } from './fs';
 const SCENES_DIR = 'content/scenes';
 const SCENE_EXT = '.scene.json';
 
-type ServerState = ReturnType<typeof EngineServer.init>;
+type EngineServerApi = typeof EngineServerNS;
+type Kit = typeof InternalNS.__kit;
+type ServerState = ReturnType<EngineServerApi['init']>;
 
 export type EditorServer = {
     state: ServerState;
@@ -37,11 +41,15 @@ export type EditorServer = {
 
 export type StartEditorServerOptions = {
     fs: Filesystem;
+    /** the realm's bundled engine + __kit, from `runner.import` — the SAME
+     *  instance the user code registered its declarations into. */
+    EngineServer: EngineServerApi;
+    __kit: Kit;
     log?: (msg: string) => void;
 };
 
 export async function startEditorServer(opts: StartEditorServerOptions): Promise<EditorServer> {
-    const { fs, log = () => {} } = opts;
+    const { fs, EngineServer, __kit, log = () => {} } = opts;
 
     // zstd compressor for the voxel wire codec (client decodes with fzstd).
     await initZstd();

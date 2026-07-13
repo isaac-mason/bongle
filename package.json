@@ -33,8 +33,8 @@
             "default": "./src/engine-editor.ts"
         },
         "./engine-asset-pipeline": {
-            "import": "./editor/asset-pipeline/index.ts",
-            "default": "./editor/asset-pipeline/index.ts"
+            "import": "./src/asset-pipeline/index.ts",
+            "default": "./src/asset-pipeline/index.ts"
         },
         "./editor/fs": {
             "import": "./editor/fs.ts",
@@ -100,7 +100,8 @@
         "typecheck": "tsgo -p tsconfig.json",
         "lint": "biome check src tst",
         "lint:fix": "biome check --write src tst",
-        "blockbench:build": "bongle-blockbench/build.sh"
+        "blockbench:build": "bongle-blockbench/build.sh",
+        "blockbench:plugin": "bongle-blockbench/build-plugin.sh"
     },
     "dependencies": {
         "@base-ui/react": "^1.5.0",

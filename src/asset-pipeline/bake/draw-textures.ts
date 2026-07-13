@@ -13,9 +13,9 @@
 // Output type `BakedDraws = Map<DrawSource, OffscreenCanvas>` is opaque to
 // callers; both atlas builders draw the canvas directly.
 
-import type { ResourceLoader } from '../../../src/core/resource-loader';
-import { normalizeImageSource } from '../../../src/core/sprites/draw';
-import type { BlockTextureDef, DrawSource, KindStore, NormalizedImageSource, SpriteHandle } from '../../../src/internal';
+import type { ResourceLoader } from '../../core/resource-loader';
+import { normalizeImageSource } from '../../core/sprites/draw';
+import type { BlockTextureDef, DrawSource, KindStore, NormalizedImageSource, SpriteHandle } from '../../internal';
 import { makeCanvas } from './raster';
 
 export type BakedDraws = Map<DrawSource, OffscreenCanvas>;

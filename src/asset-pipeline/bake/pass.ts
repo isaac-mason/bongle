@@ -17,7 +17,7 @@
  * `build.ts` caller reads it directly off pipeline state after the pass.
  */
 
-import type { ResourceLoader } from '../../../src/core/resource-loader';
+import type { ResourceLoader } from '../../core/resource-loader';
 import type {
     BlockDef,
     BlockHandle,
@@ -27,8 +27,8 @@ import type {
     ModuleVersion,
     Registry,
     SceneHandle,
-} from '../../../src/internal';
-import type { Filesystem } from '../../fs';
+} from '../../internal';
+import type { Filesystem } from '../filesystem';
 import { buildAudio } from './audio';
 import { buildBlockTextureAtlas } from './block-texture-atlas';
 import type { DecodeAudio } from './decode-audio';

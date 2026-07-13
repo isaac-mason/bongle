@@ -28,13 +28,16 @@ export const useLaunched = create<LaunchStore>((set, get) => ({
     windows: [],
     dirty: {},
     launch: (app, path) => {
-        const id = `${app.id}:${path}`;
+        // singleton apps (e.g. Blockbench, which owns its own tabs) get ONE window
+        // keyed by app id; per-file apps get one window per (app, path).
+        const id = app.singleton ? app.id : `${app.id}:${path}`;
         if (!get().windows.some((w) => w.id === id)) {
             const off = (launchCount++ % 6) * 26;
             useWindows.getState().register(id, { x: 150 + off, y: 60 + off, w: app.initial.w, h: app.initial.h });
             const name = path.split('/').pop() ?? path;
+            const title = app.singleton ? app.title : `${app.title} — ${name}`;
             set((s) => ({
-                windows: [...s.windows, { id, appId: app.id, path, title: `${app.title} — ${name}` }],
+                windows: [...s.windows, { id, appId: app.id, path: app.singleton ? '' : path, title }],
             }));
         }
         useWindows.getState().focus(id);

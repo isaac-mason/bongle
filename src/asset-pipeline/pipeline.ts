@@ -10,9 +10,9 @@
  * `dispose(state)`. One `run` is the whole job: one revision-gated bake pass.
  */
 
-import type { ResourceLoader } from '../../src/core/resource-loader';
-import { buildBlockRegistry, registry } from '../../src/internal';
-import type { Filesystem } from '../fs';
+import type { ResourceLoader } from '../core/resource-loader';
+import { buildBlockRegistry, registry } from '../internal';
+import type { Filesystem } from './filesystem';
 import { readArtifactHash } from './bake/cache';
 import type { DecodeAudio } from './bake/decode-audio';
 import {

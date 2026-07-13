@@ -10,6 +10,11 @@ export type SessionFiles = Record<string, Uint8Array>;
 export async function snapshotFiles(fs: Filesystem): Promise<SessionFiles> {
     const snap = await fs.snapshot();
     const files: SessionFiles = {};
-    for (const path of snap.list()) files[path] = snap.read(path);
+    for (const path of snap.list()) {
+        // node_modules (the seeded engine dist) stays host-side — realms get
+        // transformed modules from the host bundler, not the lib source.
+        if (path.startsWith('node_modules/')) continue;
+        files[path] = snap.read(path);
+    }
     return files;
 }

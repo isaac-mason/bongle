@@ -43,9 +43,9 @@
 //   - standalone: MP3 via lamejs (bake/mp3.ts). long clips play from offset 0
 //     so encoder delay is irrelevant, and they need lossy compression.
 
-import type { ResourceLoader } from '../../../src/core/resource-loader';
-import type { KindStore, SoundHandle } from '../../../src/internal';
-import type { Filesystem } from '../../fs';
+import type { ResourceLoader } from '../../core/resource-loader';
+import type { KindStore, SoundHandle } from '../../internal';
+import type { Filesystem } from '../filesystem';
 import type { DecodeAudio } from './decode-audio';
 import { encodeFlacMono } from './flac';
 import { encodeMp3 } from './mp3';

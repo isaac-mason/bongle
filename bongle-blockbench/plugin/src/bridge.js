@@ -2,195 +2,160 @@
  * Bongle editor bridge — bundled into bongle.js next to the generic plugin.
  *
  * The bongle editor serves this Blockbench build same-origin at
- * /static/blockbench and embeds it as an <iframe> (its "blockbench" app). This
- * bridge wraps the generic plugin's `window.Bongle` API in a postMessage bridge
- * so the editor (this iframe's parent) can seed/open a project and pull authored
- * artefacts (glb + bbmodel) back out. Blockbench only computes bytes; the editor
- * owns the fs and, further out, the host owns session + upload.
+ * /static/blockbench and embeds it as ONE <iframe> (its "blockbench" app).
+ * Blockbench keeps its native multi-project tabs + File menu; this bridge syncs
+ * those projects with the editor's filesystem, which is the source of truth.
  *
- * The bridge talks ONLY to its immediate parent (the editor). It is inert when
- * not framed, so the same bundle is still a standalone authoring tool.
+ * Each open project is tagged with the editor-fs path it maps to
+ * (`project.bongle_fs_path`). Saving (Ctrl+S / File > Save, both intercepted)
+ * compiles the artefacts and hands them to the editor to write; an untitled
+ * project asks the editor for a path first. The bridge talks ONLY to its
+ * immediate parent (the editor), and is inert when not framed.
  *
  * Protocol (parent = the embedding bongle editor, this = iframe):
- *   iframe → shell: { type: 'bongle:ready' }                        editor API live
- *   shell  → iframe: { type: 'bongle:hello' }                       re-request ready
- *   shell  → iframe: { type: 'bongle:load', bbmodel, name?, origin } open a seed
- *   shell  → iframe: { type: 'bongle:new', origin }                 fresh default character
- *   shell  → iframe: { type: 'bongle:save-request' }                ask for artefacts
- *   shell  → iframe: { type: 'bongle:clear-draft' }                 drop the autosave
- *   iframe → shell: { type: 'bongle:saved', glb, bbmodel, name, warnings }
- *   iframe → shell: { type: 'bongle:save-failed', errors }
- *   iframe → shell: { type: 'bongle:load-failed', error }
- *
- * Local persistence: the working project is autosaved to localStorage on every
- * edit (debounced), tagged with its "origin" (the seed slug, or 'scratch'). On
- * open, a matching-origin draft is restored — so a refresh keeps your work —
- * otherwise the seed / a new default character is opened. The draft is cleared
- * after a successful save-to-bongle.
+ *   iframe -> editor: { type: 'bongle:ready' }
+ *   editor -> iframe: { type: 'bongle:hello' }                            re-request ready
+ *   editor -> iframe: { type: 'bongle:open', path, bbmodel }             open (or focus) a file
+ *   editor -> iframe: { type: 'bongle:save-active' }                     trigger a save of the active project
+ *   editor -> iframe: { type: 'bongle:assign-path', uuid, path }         resolve a save-as
+ *   iframe -> editor: { type: 'bongle:save', path, glb, bbmodel, name, warnings }
+ *   iframe -> editor: { type: 'bongle:save-as', uuid, glb, bbmodel, name, warnings }
+ *   iframe -> editor: { type: 'bongle:save-failed', errors }
+ *   iframe -> editor: { type: 'bongle:dirty', path, saved }
+ *   iframe -> editor: { type: 'bongle:open-failed', path, error }
  */
 (() => {
 	const IS_EMBEDDED = typeof window !== 'undefined' && window.parent && window.parent !== window;
 	if (!IS_EMBEDDED) return;
 
-	// Served same-origin from bongle.io, so the shell and this iframe share an
-	// origin; scope every message to it in both directions.
 	const ORIGIN = window.location.origin;
-	const DRAFT_KEY = 'bongle:editor-draft';
+	const post = (msg, transfer) => window.parent.postMessage(msg, ORIGIN, transfer);
+	const api = () => (typeof window !== 'undefined' ? window.Bongle : undefined);
+	const projects = () => (typeof ModelProject !== 'undefined' ? ModelProject.all : []);
 
-	// The origin (seed slug or 'scratch') of the currently-open project, set when
-	// we open one. Autosaves are tagged with it so a refresh restores the
-	// matching draft rather than a stale one from a different avatar.
-	let currentOrigin = null;
-
-	function bongle() {
-		return typeof window !== 'undefined' ? window.Bongle : undefined;
+	function projectForPath(path) {
+		return projects().find((p) => p.bongle_fs_path === path);
+	}
+	function projectByUuid(uuid) {
+		return projects().find((p) => p.uuid === uuid);
 	}
 
-	function post(msg, transfer) {
-		window.parent.postMessage(msg, ORIGIN, transfer);
-	}
-
-	// ── draft persistence ──────────────────────────────────────────────────
-	function readDraft() {
+	// compile the ACTIVE project -> { glb, bbmodel, name, warnings } or { errors }.
+	// save the ACTIVE project: to its mapped path, or ask the editor for one.
+	// The .bbmodel source is the source of truth and ALWAYS saves; the glb is a
+	// best-effort derived artefact (an empty/WIP model can't export one, and that
+	// must not block saving the source).
+	async function saveActive() {
+		const project = typeof Project !== 'undefined' ? Project : null;
+		if (!project) return;
+		const B = api();
+		let glb = null;
+		let bbmodel;
+		let name;
+		let warnings = [];
 		try {
-			return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-		} catch {
-			return null;
+			const art = await B.compileArtifacts(); // { glb, bbmodel, name, warnings }
+			glb = art.glb;
+			bbmodel = art.bbmodel;
+			name = art.name;
+			warnings = art.warnings || [];
+		} catch (err) {
+			// glb export failed (e.g. no geometry yet) — save the source anyway.
+			bbmodel = B.serializeBbmodel();
+			name = project.name || 'model';
+			warnings = [`glb export skipped: ${String((err && err.message) || err)}`];
+		}
+		const path = project.bongle_fs_path;
+		const transfer = glb ? [glb] : [];
+		if (path) {
+			post({ type: 'bongle:save', path, glb, bbmodel, name, warnings }, transfer);
+			project.saved = true; // optimistic — the editor's OPFS write is reliable
+		} else {
+			// untitled: the editor picks a path, then replies bongle:assign-path.
+			post({ type: 'bongle:save-as', uuid: project.uuid, glb, bbmodel, name, warnings }, transfer);
 		}
 	}
-	function writeDraft(bbmodel) {
-		if (!currentOrigin || !bbmodel) return;
-		try {
-			localStorage.setItem(DRAFT_KEY, JSON.stringify({ origin: currentOrigin, bbmodel, ts: Date.now() }));
-		} catch {
-			/* quota / private mode — best effort */
-		}
-	}
-	function clearDraft() {
-		try {
-			localStorage.removeItem(DRAFT_KEY);
-		} catch {
-			/* ignore */
-		}
-	}
 
-	let saveTimer = null;
-	function scheduleAutosave() {
-		const B = bongle();
-		if (!B) return;
-		if (saveTimer) clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => {
-			try {
-				writeDraft(B.serializeBbmodel());
-			} catch {
-				/* ignore transient serialize errors mid-edit */
-			}
-		}, 1200);
-	}
-
-	// ── open logic (matching draft > seed > new default) ────────────────────
-	function openProject(origin, seedBbmodel, name) {
-		const B = bongle();
-		if (!B) return;
-		currentOrigin = origin;
-		const draft = readDraft();
-		if (draft && draft.origin === origin && draft.bbmodel) {
-			// Restore in-progress work for this origin (the refresh case).
-			B.loadBbmodel(draft.bbmodel, name);
+	function openFile(path, bbmodel) {
+		const existing = projectForPath(path);
+		if (existing) {
+			existing.select();
 			return;
 		}
-		// Fresh open — drop any stale draft (a different avatar) and start clean.
-		clearDraft();
-		if (seedBbmodel) B.loadBbmodel(seedBbmodel, name);
-		else B.newCharacter();
+		const name = path.split('/').pop();
+		api().loadBbmodel(bbmodel, name); // creates + selects a new project (tab)
+		if (typeof Project !== 'undefined' && Project) {
+			Project.bongle_fs_path = path;
+			Project.name = name;
+			Project.saved = true;
+		}
 	}
 
-	// ── message handling ────────────────────────────────────────────────────
-	async function handle(event) {
+	function handle(event) {
 		if (event.source !== window.parent || event.origin !== ORIGIN) return;
 		const data = event.data;
 		if (!data || typeof data !== 'object') return;
-
 		if (data.type === 'bongle:hello') {
 			announceWhenReady();
 			return;
 		}
-
-		const B = bongle();
-		// The shell only sends the commands below after 'bongle:ready', so a
-		// not-ready state here is a race we simply ignore.
-		if (!B || !B.ready) return;
-
+		const B = api();
+		if (!B || !B.ready) return; // pre-ready commands are a race we ignore
 		switch (data.type) {
-			case 'bongle:load':
+			case 'bongle:open':
 				try {
-					openProject(data.origin || 'scratch', data.bbmodel, data.name);
+					openFile(data.path, data.bbmodel);
 				} catch (err) {
-					post({ type: 'bongle:load-failed', error: String((err && err.message) || err) });
+					post({ type: 'bongle:open-failed', path: data.path, error: String((err && err.message) || err) });
 				}
 				return;
-			case 'bongle:new':
-				try {
-					openProject(data.origin || 'scratch', null, data.name);
-				} catch (err) {
-					post({ type: 'bongle:load-failed', error: String((err && err.message) || err) });
-				}
+			case 'bongle:save-active':
+				void saveActive();
 				return;
-			case 'bongle:clear-draft':
-				clearDraft();
-				return;
-			case 'bongle:save-request': {
-				// Characters must pass the rig gate before we hand bytes back;
-				// models carry no canonical rig, so they're a straight compile.
-				if (B.isCharacterFormat()) {
-					const result = B.validateRig();
-					if (!result.ok) {
-						post({ type: 'bongle:save-failed', errors: result.errors });
-						return;
-					}
-				}
-				try {
-					const { glb, bbmodel, name, warnings } = await B.compileArtifacts();
-					post({ type: 'bongle:saved', glb, bbmodel, name, warnings }, [glb]);
-				} catch (err) {
-					post({ type: 'bongle:save-failed', errors: [String((err && err.message) || err)] });
+			case 'bongle:assign-path': {
+				const p = projectByUuid(data.uuid);
+				if (p) {
+					p.bongle_fs_path = data.path;
+					p.name = data.path.split('/').pop();
+					p.saved = true;
 				}
 				return;
 			}
 		}
 	}
 
-	// ── readiness + wiring ──────────────────────────────────────────────────
-	let wiredOnReady = false;
-	function announceWhenReady() {
-		const B = bongle();
-		if (B && B.ready) {
-			if (!wiredOnReady) {
-				if (typeof Blockbench !== 'undefined' && Blockbench.on) {
-					Blockbench.on('finish_edit', scheduleAutosave);
-				}
-				// Hide the standalone "Export Bongle glTF" (a file download). In
-				// the embed, saving goes through the host, so a second export path
-				// is just confusing — the generic plugin registers it under this id.
-				if (typeof BarItems !== 'undefined' && BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) {
-					BarItems.bongle_export_gltf.delete();
-				}
-				wiredOnReady = true;
+	// ── save interception + dirty tracking ──────────────────────────────────
+	let wired = false;
+	function wire() {
+		if (wired) return;
+		// Ctrl+S (export_over) and File > Save (save_project) both route to us.
+		if (typeof BarItems !== 'undefined') {
+			for (const id of ['export_over', 'save_project']) {
+				if (BarItems[id]) BarItems[id].click = () => void saveActive();
 			}
+			// The standalone "Export Bongle glTF" file-download is confusing in the
+			// embed (saving goes through the editor) — the generic plugin adds it.
+			if (BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) BarItems.bongle_export_gltf.delete();
+		}
+		if (typeof Blockbench !== 'undefined' && Blockbench.on) {
+			Blockbench.on('saved_state_changed', ({ project, saved }) => {
+				if (project && project.bongle_fs_path) post({ type: 'bongle:dirty', path: project.bongle_fs_path, saved });
+			});
+		}
+		wired = true;
+	}
+
+	function announceWhenReady() {
+		const B = api();
+		if (B && B.ready) {
+			wire();
 			post({ type: 'bongle:ready' });
 			return;
 		}
-		// window.Bongle not live yet — poll briefly.
-		setTimeout(announceWhenReady, 60);
+		setTimeout(announceWhenReady, 60); // window.Bongle not live yet — poll briefly
 	}
 
-	window.addEventListener('message', (event) => {
-		handle(event);
-	});
-
-	if (document.readyState === 'loading') {
-		window.addEventListener('DOMContentLoaded', announceWhenReady);
-	} else {
-		announceWhenReady();
-	}
+	window.addEventListener('message', handle);
+	if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', announceWhenReady);
+	else announceWhenReady();
 })();
