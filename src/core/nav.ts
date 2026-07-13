@@ -524,26 +524,56 @@ export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut 
 // path-reachable, handy for picking a provably-reachable target (e.g. NPC wander)
 // without a path query that can fail.
 
+// ── flood-fill scratch (module; floodFill is non-re-entrant like search()) ──
+// the BFS frontier IS the result, so pooling its Vec3 cells makes a warmed-up flood
+// allocate nothing per call (mirrors the A* node pool): cells are rewritten in place
+// and the pool only ever grows. the old impl churned one `[x,y,z]` per discovered cell
+// plus a queue array + a closure every call — the dominant per-flood garbage.
+const fillPool: Vec3[] = [];
+const fillView: Vec3[] = []; // right-sized alias handed back (slots reference fillPool cells)
+let fillTail = 0; // cells discovered this flood == write cursor into fillPool
+
+function fillPush(x: number, y: number, z: number): void {
+    const cell = fillPool[fillTail];
+    if (cell === undefined) fillPool[fillTail] = [x, y, z];
+    else {
+        cell[0] = x;
+        cell[1] = y;
+        cell[2] = z;
+    }
+    fillTail++;
+}
+
+// the successor sink handed to `actions`: append each first-touch neighbour to the
+// pooled frontier. shared across calls, so there's no per-flood closure allocation.
+const fillStep: StepFn = (x, y, z) => {
+    htSlot(x, y, z);
+    if (htInserted) fillPush(x, y, z);
+};
+
 /** breadth-first expansion of every cell reachable from `start` under the successor
  *  `actions`. `start` is included; order is roughly nearest-first. flood-fill is
  *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
- *  `findPath` takes); the result includes the frontier discovered up to that bound. */
+ *  `findPath` takes); the result includes the frontier discovered up to that bound.
+ *
+ *  the returned array ALIASES a reused pool — it (and its cells) are valid only until
+ *  the next `floodFill` call. read or copy what you need out before then; clone any
+ *  cell you intend to retain (`[c[0], c[1], c[2]]`). */
 export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[] {
     htReset(); // the visited table doubles as the "seen" set (htInserted = first touch)
-    const queue: Vec3[] = [start];
-    htSlot(start[0], start[1], start[2]);
+    fillTail = 0;
+    htSlot(start[0], start[1], start[2]); // mark the start visited...
+    fillPush(start[0], start[1], start[2]); // ...and make it result[0] (start first)
     let head = 0;
-    // one closure per floodFill call (cold path), not per cell. the returned cells
-    // must escape, so the Vec3s here are genuine output, not churn.
-    const enqueue: StepFn = (x, y, z) => {
-        htSlot(x, y, z);
-        if (htInserted) queue.push([x, y, z]);
-    };
-    while (head < queue.length && head < maxIterations) {
-        const cell = queue[head++]!;
-        actions(voxels, cell[0], cell[1], cell[2], enqueue);
+    while (head < fillTail && head < maxIterations) {
+        const cell = fillPool[head++]!;
+        actions(voxels, cell[0], cell[1], cell[2], fillStep);
     }
-    return queue;
+    // hand back a right-sized view WITHOUT truncating fillPool itself, so its cells
+    // survive to be reused next call. copying references allocates no Vec3s.
+    fillView.length = fillTail;
+    for (let i = 0; i < fillTail; i++) fillView[i] = fillPool[i]!;
+    return fillView;
 }
 
 // ── swept-box voxel trace (skishore/wave) ───────────────────────────
