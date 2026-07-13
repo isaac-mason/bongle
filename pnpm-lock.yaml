@@ -47,9 +47,6 @@ importers:
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
-      bongle:
-        specifier: 'link:'
-        version: 'link:'
       canvas:
         specifier: ^3.2.3
         version: 3.2.3
