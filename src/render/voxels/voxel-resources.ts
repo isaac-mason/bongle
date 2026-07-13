@@ -2215,10 +2215,23 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     voxelResources.emitArgs.needsUpdate = true;
 
     // zero the per-bucket quad tallies for this frame's count pass (the CPU
-    // mirror stays all-zero; re-uploading it clears the GPU buffer). The draw
-    // instanceCounts are written by the finalize pass, not reset here.
+    // mirror stays all-zero; re-uploading it clears the GPU buffer). On a normal
+    // frame the draw instanceCounts are (re)written by the finalize/prep passes.
     voxelResources.bucketQuads.addUpdateRange(0, voxelResources.bucketQuadsData.length);
     voxelResources.bucketQuads.needsUpdate = true;
+
+    // Empty arena (recordCount 0, e.g. right after a room swap cleared it):
+    // `cullDispatches` returns no dispatches, so finalize/prep never run and the
+    // previous room's draw instanceCounts + visibleQuads would keep drawing
+    // stale quads. Zero the per-pass draw instanceCounts on the CPU so the
+    // indirect draws render nothing until the arena refills.
+    if (voxelResources.arenas.packer.chunks.length === 0) {
+        for (const pass of PASSES) {
+            const pr = voxelResources.passRender[pass];
+            pr.indirectData[1] = 0; // DrawIndirect: [vertexCount, instanceCount, ...]
+            pr.indirectBuffer.needsUpdate = true;
+        }
+    }
 
     // translucent sort gate: the radix output persists across frames and only
     // re-runs when the back-to-front order can change. The owner-cell key is
@@ -2287,13 +2300,12 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
     const packer = voxelResources.arenas.packer;
     const recordCount = packer.chunks.length;
     const out: ComputeDispatch[] = [];
-    // The full chain runs even when the arena is empty (recordCount 0, e.g. right
-    // after a room swap cleared it). The record-scaled dispatches (cull, emit,
-    // sort expand) become zero-workgroup no-ops, but `finalize` and the gated
-    // sort's `prep` still run and write the draw instanceCounts to 0 — so the
-    // previous room's counts + visibleQuads can't keep drawing stale quads. The
-    // draw counts are thus written fresh every frame by construction; "render
-    // nothing" costs only a few single-thread dispatches.
+    // Empty arena (recordCount 0, e.g. right after a room swap cleared it): skip
+    // the whole chain. Dispatching it would only produce record-scaled
+    // zero-workgroup no-ops (which Dawn warns about), and `updateCull` has
+    // already CPU-zeroed the per-pass draw instanceCounts so the indirect draws
+    // render nothing this frame.
+    if (recordCount === 0) return out;
     const tables = voxelResources.arenas.tables;
     const passRender = voxelResources.passRender;
 
