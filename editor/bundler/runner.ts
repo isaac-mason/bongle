@@ -24,12 +24,42 @@ export type RunnerBridge = {
  *  the realm's own context) stay external. */
 class BrowserEvaluator extends ESModulesEvaluator {
     async runExternalModule(filepath: string): Promise<unknown> {
-        if (filepath.startsWith('node:')) return {};
+        // Browser realms must carry NO Node builtins: node-only server bits live
+        // in bongle/engine-server-node, which the editor never imports. A node:
+        // import reaching here is a composition leak — fail loudly rather than
+        // stub it (which would mask the leak).
+        if (filepath.startsWith('node:')) {
+            throw new Error(
+                `[editor] node builtin '${filepath}' entered a browser realm — it belongs behind a node-only entry (see bongle/engine-server-node)`,
+            );
+        }
         return super.runExternalModule(filepath);
     }
 }
 
+/** npm deps bundled into the engine dist reference `process` — mostly
+ *  `process.env.NODE_ENV` (the prebundle also build-defines this to a literal),
+ *  plus a few runtime probes (emit/cpuUsage/memoryUsage). The browser realm has
+ *  no `process`, so install a minimal shim before any engine chunk evaluates. */
+function ensureProcessShim(): void {
+    // biome-ignore lint/suspicious/noExplicitAny: patching the realm global.
+    const g = globalThis as any;
+    g.process ??= {
+        env: { NODE_ENV: 'production' },
+        emit: () => false,
+        cpuUsage: () => ({ user: 0, system: 0 }),
+        memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),
+        platform: 'browser',
+        argv: [],
+        version: '',
+        versions: {},
+        nextTick: (fn: (...a: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => fn(...args)),
+    };
+}
+
 export function makeRunner(bridge: RunnerBridge): ModuleRunner {
+    ensureProcessShim();
+
     // biome-ignore lint/suspicious/noExplicitAny: transport onMessage payload is loosely typed.
     let onMessageCb: ((p: any) => void) | undefined;
     bridge.onMessage((p) => onMessageCb?.(p));
@@ -50,12 +80,15 @@ export function makeRunner(bridge: RunnerBridge): ModuleRunner {
         transport,
         hmr: true,
         sourcemapInterceptor: false,
-        // We own import.meta: url = the clean module id, STABLE across re-evals
-        // (the __kit capture keys module snapshots by it). The runner injects
+        // We own import.meta. url must be a VALID absolute URL — bundled engine
+        // chunks do `new URL(x, import.meta.url)` (worker/wasm loaders), which
+        // throws on a bare-path base. A `file://` href off the clean module id
+        // keeps it stable + unique across re-evals (the __kit capture keys module
+        // snapshots by it) while being a legal base. The runner injects
         // import.meta.hot itself.
         createImportMeta: async (modulePath: string) =>
             ({
-                url: modulePath,
+                url: `file:///${modulePath.replace(/^\/+/, '')}`,
                 filename: modulePath,
                 // biome-ignore lint/suspicious/noExplicitAny: import.meta shape is loose.
             }) as any,

@@ -2,26 +2,32 @@
 // wires the project session: engine externals (workspace source here; a CDN
 // dist in the deployed website), the bundler, and flush→bake.
 
-import { Boxes, Code, Files, Server } from 'lucide-react';
+import { Code, Files, Hammer, MonitorPlay, Server } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
+import './editor.css';
 import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
-import { createBundlerHost } from './bundler/host';
-import { createClientHost } from './client-host';
+import { createClientHost } from './client/client-host';
 import { seedEngineDist } from './engine-dist';
-import { initEditor, initPipeline, runPipeline } from './entry';
-import { spawnServerWorker } from './server-host';
+import { initEditor } from './entry';
+import { openOpfsFilesystem } from './fs-opfs';
+import { spawnPipelineWorker } from './pipeline/pipeline-host';
+import { spawnServerWorker } from './server/server-host';
 import { useClients } from './stores/clients';
 import { logger } from './stores/logs';
 import { useOpenFile } from './stores/open-file';
-import { usePipeline } from './stores/pipeline';
-import { AtlasView } from './ui/components/AtlasView';
 import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
 
-const editor = initEditor();
-const log = logger('pipeline');
+// the working copy is OPFS — shared across the main doc, server worker, and
+// client iframes (same origin), so realms open it directly instead of syncing a
+// snapshot. Top-level await: the whole editor waits on the fs.
+const PROJECT = 'project';
+const fs = await openOpfsFilesystem(PROJECT);
+const editor = initEditor({ fs });
+// the 'build' log window shows both bundler (transform) errors and bake output.
+const log = logger('build');
 
 const SAMPLE_INDEX = `import { block, blockTexture, draw } from 'bongle';
 
@@ -52,84 +58,91 @@ async function boot(): Promise<void> {
     await editor.fs.write('src/index.ts', SAMPLE_INDEX);
     // a starter avatar source, openable in the blockbench app from the file tree.
     await editor.fs.write('character.bbmodel', starterBbmodel);
-    // baked pipeline outputs aren't source; the tree grays gitignored entries.
-    await editor.fs.write('.gitignore', 'resources/\n');
+    // generated / non-source dirs; the tree grays (and collapses) gitignored entries.
+    await editor.fs.write('.gitignore', 'node_modules/\ndist/\nresources/\n');
     useOpenFile.getState().open('src/index.ts'); // open it in the code window
 
-    // seed the prebundled engine dist into the vfs so the bundler resolves
-    // `bongle*` from there (bundled in, not external).
+    // seed the engine + first-party libs into the vfs so every realm's bundler
+    // resolves `bongle` / `mathcat` / … from there.
+    console.log('[main] seeding engine dist…');
     await seedEngineDist(editor.fs);
+    console.log('[main] seed done; spawning workers');
 
-    // the ONE dev server. Every realm's user-code transform + HMR flow from it;
-    // realms only evaluate. The pipeline lives in this document → a local
-    // runner; the server worker + client iframes attach over bundler ports.
-    const host = createBundlerHost(editor.fs);
+    // the ONE dev server — DevServer + @rolldown transform — runs OFF the main
+    // thread in the bundler worker (its WASM arena reaches multiple GB under
+    // load). Every realm connects to it over a transferred MessagePort; the main
+    // doc only brokers the connection + relays fs edits.
+    const bundlerWorker = new Worker(new URL('./bundler/bundler-worker.ts', import.meta.url), { type: 'module' });
+    bundlerWorker.onerror = (e) => console.error('[bundler-worker] load error', e.message);
+    // messages posted to the worker before it's live get lost in vite's dep-
+    // optimize/reload window, so we handshake: init on `worker-ready`, and queue
+    // realm connections until `host-ready`, then flush them.
+    let bundlerReady = false;
+    const pendingConnects: Array<{ env: string; port: MessagePort }> = [];
+    const connectRealm = (env: string, port: MessagePort) => {
+        if (bundlerReady) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
+        else pendingConnects.push({ env, port });
+    };
+    bundlerWorker.onmessage = (e: MessageEvent) => {
+        const d = e.data as { __buildlog?: string; type?: string };
+        if (d?.type === 'worker-ready') bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
+        else if (d?.type === 'host-ready') {
+            bundlerReady = true;
+            for (const { env, port } of pendingConnects) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
+            pendingConnects.length = 0;
+        }
+        // the worker reports transform / resolution failures back here → build log.
+        else if (d?.__buildlog) log(d.__buildlog);
+    };
 
-    log('evaluating project (pipeline realm)…');
-    const pipeline = host.createLocalRunner('pipeline');
-    await pipeline.import('src/index.ts'); // user declarations register into the pipeline realm's engine
-    // __kit from the SAME runner instance the declarations registered into.
-    const { __kit } = await pipeline.import('bongle/internal');
-    // the baker, ALSO from this runner, so it reads the registry the user
-    // declarations just populated (a native AssetPipeline would read a different,
-    // empty one).
-    const AssetPipeline = await pipeline.import('bongle/engine-asset-pipeline');
-    initPipeline(editor, AssetPipeline);
-    log('bundler running — edit src/index.ts then ⌘/ctrl+S to hot-reload.');
-
-    // declarations settle → bake → refresh the atlas view. Registered on the
-    // pipeline realm's __kit, so its flush runs the bake.
-    let baking = false;
-    __kit.registerFlush(() => {
-        if (baking) return;
-        baking = true;
-        void (async () => {
-            try {
-                const t0 = performance.now();
-                const r = await runPipeline(editor);
-                log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-                usePipeline.getState().baked();
-            } catch (err) {
-                log(`bake error: ${(err as Error).message}`);
-            } finally {
-                baking = false;
-            }
-        })();
+    // pipeline realm — its own worker (bakes stay off the UI thread). Baked
+    // outputs land in the shared OPFS for the client renderer; its log joins the
+    // build stream.
+    const pipelineHost = spawnPipelineWorker({
+        connectRealm,
+        projectName: PROJECT,
+        log,
     });
+    void pipelineHost;
 
-    // the server, off-thread in its own realm (own registry), fed by the host.
+    // the server, off-thread in its own realm (own registry). It opens the SAME
+    // OPFS project directly — no snapshot.
     const serverLog = logger('server');
-    const serverHost = spawnServerWorker({ fs: editor.fs, host, log: serverLog });
+    const serverHost = spawnServerWorker({ connectRealm, projectName: PROJECT, log: serverLog });
 
     // client iframes: each its own realm, connected to the server worker; the
-    // "+ client" button opens more (multiplayer-in-a-tab).
+    // "+ client" button opens more (multiplayer-in-a-tab). They open OPFS too.
     const clientLog = logger('client');
-    const clientHost = createClientHost({ serverHost, host, fs: editor.fs, log: (id, m) => clientLog(`[${id}] ${m}`) });
+    const clientHost = createClientHost({
+        serverHost,
+        connectRealm,
+        projectName: PROJECT,
+        log: (id, m) => clientLog(`[${id}] ${m}`),
+    });
     useClients.getState().setHost(clientHost);
+    log('realms booting — edit src/index.ts then ⌘/ctrl+S to hot-reload.');
 
-    // fs edits fan out: the host re-transforms + pushes HMR to every realm, and
-    // each worker/iframe fs mirror is updated so its resource/scene reads see
-    // the change (baked outputs, scenes).
+    // fs edits fan out: the bundler worker re-transforms + pushes HMR to every
+    // realm. The realms read OPFS directly, so they just need the changed PATH
+    // (no bytes) to re-read + refresh (baked outputs, scenes).
     editor.fs.watch((changes) => {
-        host.onFsChange(changes);
+        bundlerWorker.postMessage({ type: 'fs-change', changes });
         for (const c of changes) {
             if (c.type === 'deleted') continue;
-            void editor.fs
-                .read(c.path)
-                .then((bytes) => {
-                    serverHost.relayFsChange(c.path, bytes);
-                    clientHost.relayFsChange(c.path, bytes);
-                })
-                .catch(() => {});
+            serverHost.relayFsChange(c.path);
+            clientHost.relayFsChange(c.path);
         }
     });
-
-    __kit.flush(); // initial bake + registry apply (pipeline realm).
 
     // open the first client once the server is live (join before the sim exists
     // would be dropped); the "+ client" button opens further windows.
     void serverHost.ready.then(() => useClients.getState().open());
 }
+
+// the bottom log-window row (build + server), anchored to the viewport bottom
+// with a small gap; falls back to y=24 on a very short viewport.
+const BOTTOM_ROW_H = 190;
+const BOTTOM_ROW_Y = Math.max(24, window.innerHeight - BOTTOM_ROW_H - 12);
 
 const windows: WindowDef[] = [
     {
@@ -146,26 +159,30 @@ const windows: WindowDef[] = [
         initial: { x: 300, y: 24, w: 620, h: 460 },
         content: <CodePane fs={editor.fs} />,
     },
+    // build + server + client are matching log windows, sat next to each other
+    // in a row along the bottom-left (build flush to the left edge, under the
+    // file tree). The row is anchored to the viewport bottom so it lands on-screen
+    // at any height.
     {
-        id: 'pipeline',
-        title: 'pipeline',
-        glyph: <Boxes size={18} />,
-        initial: { x: 810, y: 24, w: 320, h: 470 },
-        content: (
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                <AtlasView fs={editor.fs} />
-                <div style={{ borderTop: '1px solid #000', flex: 1, minHeight: 0 }}>
-                    <LogView stream="pipeline" />
-                </div>
-            </div>
-        ),
+        id: 'build',
+        title: 'build logs',
+        glyph: <Hammer size={18} />,
+        initial: { x: 60, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+        content: <LogView stream="build" />,
     },
     {
         id: 'server',
-        title: 'server',
+        title: 'server logs',
         glyph: <Server size={18} />,
-        initial: { x: 320, y: 484, w: 470, h: 190 },
+        initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
         content: <LogView stream="server" />,
+    },
+    {
+        id: 'client',
+        title: 'client logs',
+        glyph: <MonitorPlay size={18} />,
+        initial: { x: 700, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+        content: <LogView stream="client" />,
     },
     // client windows are dynamic (opened by the "+ client" button, one iframe
     // realm each) — see stores/clients + Desktop.

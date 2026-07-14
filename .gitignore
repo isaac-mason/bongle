@@ -6,6 +6,8 @@ AGENTS.md
 tmp
 generated
 resources
+vendor
+editor-node-modules.zip
 
 .DS_Store
 **/.DS_Store

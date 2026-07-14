@@ -105,16 +105,28 @@ class OpfsFilesystem implements Filesystem {
         const walk = async (handle: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
             for await (const [name, child] of handle.entries() as AsyncIterable<[string, FileSystemHandle]>) {
                 const path = prefix ? `${prefix}/${name}` : name;
-                if (child.kind === 'directory') {
-                    out.push({ path, kind: 'dir', size: 0, mtime: 0 });
-                    if (opts?.recursive) await walk(child as FileSystemDirectoryHandle, path);
-                } else {
-                    const file = await (child as FileSystemFileHandle).getFile();
-                    out.push({ path, kind: 'file', size: file.size, mtime: file.lastModified });
+                try {
+                    if (child.kind === 'directory') {
+                        out.push({ path, kind: 'dir', size: 0, mtime: 0 });
+                        if (opts?.recursive) await walk(child as FileSystemDirectoryHandle, path);
+                    } else {
+                        const file = await (child as FileSystemFileHandle).getFile();
+                        out.push({ path, kind: 'file', size: file.size, mtime: file.lastModified });
+                    }
+                } catch {
+                    // entry vanished mid-walk (a concurrent write/remove/move) — skip
+                    // it; the caller re-lists on the next change. Listing must never
+                    // hard-fail because the tree moved under it.
                 }
             }
         };
-        await walk(dirHandle, base);
+        // the iterator itself can throw if `dirHandle` is removed mid-walk; return
+        // whatever was gathered rather than rejecting.
+        try {
+            await walk(dirHandle, base);
+        } catch {
+            /* dir removed mid-walk — return the partial list */
+        }
         out.sort((a, b) => a.path.localeCompare(b.path));
         return out;
     }

@@ -14,17 +14,8 @@ export function LogView({ stream }: { stream: LogStream }) {
     }, [lines]);
 
     return (
-        <div
-            ref={ref}
-            style={{
-                height: '100%',
-                overflow: 'auto',
-                padding: 8,
-                whiteSpace: 'pre-wrap',
-                font: '12px/1.5 ui-monospace, monospace',
-            }}
-        >
-            {lines.length === 0 ? <span style={{ color: '#888' }}>(no output)</span> : lines.join('\n')}
+        <div ref={ref} className="h-full overflow-auto whitespace-pre-wrap p-2 font-mono text-xs leading-normal text-fg">
+            {lines.length === 0 ? <span className="text-fg-muted">(no output)</span> : lines.join('\n')}
         </div>
     );
 }

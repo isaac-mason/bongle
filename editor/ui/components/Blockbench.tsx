@@ -1,15 +1,16 @@
 // editor/ui/components/Blockbench.tsx — the "blockbench" app: ONE window that
 // embeds the static Blockbench build (served same-origin at /static/blockbench)
-// and lets it keep its native multi-project tabs. The editor fs is the source of
-// truth; this bridges the two:
+// and lets it keep its native multi-project tabs + File menu. The editor fs is
+// the source of truth; this bridges the two:
 //   - the file tree asks (via the blockbench store) to open an fs path -> we tell
 //     Blockbench to open it as a tab (or focus it if already open);
 //   - Blockbench's own Save (Ctrl+S / File > Save, intercepted by the plugin)
 //     hands artefacts back -> we write the .bbmodel + compiled .glb to the fs
 //     (untitled projects prompt for a path first).
+// Saving is Blockbench-native, so there's no editor chrome here — just the iframe.
 // The iframe side is lib/bongle-blockbench's merged plugin.
 
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useBlockbench } from '../../stores/blockbench';
 import { useLaunched } from '../../stores/launched';
@@ -24,12 +25,6 @@ type Incoming =
     | { type: 'bongle:save-failed'; errors: string[] }
     | { type: 'bongle:open-failed'; path: string; error: string };
 
-/** a short status line for a completed save. */
-function savedNote(path: string, warnings: string[]): string {
-    const base = path.split('/').pop();
-    return warnings.length ? `saved ${base} (${warnings.length} warning${warnings.length > 1 ? 's' : ''})` : `saved ${base}`;
-}
-
 /** the compiled .glb sits beside the source (character.bbmodel -> character.glb). */
 function glbPathFor(bbmodelPath: string): string {
     return bbmodelPath.replace(/\.bbmodel$/i, '.glb');
@@ -38,7 +33,6 @@ function glbPathFor(bbmodelPath: string): string {
 export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string }) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const [ready, setReady] = useState(false);
-    const [note, setNote] = useState<string | null>(null);
     const openReq = useBlockbench((s) => s.openReq);
     const dirtyMap = useBlockbench((s) => s.dirty);
     const lastSeq = useRef(-1);
@@ -63,7 +57,6 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                         await fs.write(data.path, data.bbmodel);
                         if (data.glb) await fs.write(glbPathFor(data.path), new Uint8Array(data.glb));
                         useBlockbench.getState().setDirty(data.path, false);
-                        setNote(savedNote(data.path, data.warnings));
                         break;
                     case 'bongle:save-as': {
                         const chosen = window.prompt('Save as (path in project):', `${data.name || 'untitled'}.bbmodel`);
@@ -73,17 +66,16 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                         if (data.glb) await fs.write(glbPathFor(path), new Uint8Array(data.glb));
                         post({ type: 'bongle:assign-path', uuid: data.uuid, path });
                         useBlockbench.getState().setDirty(path, false);
-                        setNote(savedNote(path, data.warnings));
                         break;
                     }
                     case 'bongle:dirty':
                         useBlockbench.getState().setDirty(data.path, !data.saved);
                         break;
                     case 'bongle:save-failed':
-                        setNote(data.errors.join('; ') || 'save failed');
+                        console.warn('[blockbench] save failed:', data.errors.join('; '));
                         break;
                     case 'bongle:open-failed':
-                        setNote(`open failed: ${data.error}`);
+                        console.warn('[blockbench] open failed:', data.path, data.error);
                         break;
                 }
             })();
@@ -110,45 +102,13 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
         })();
     }, [ready, openReq, fs]);
 
-    const save = () => {
-        setNote(null);
-        iframeRef.current?.contentWindow?.postMessage({ type: 'bongle:save-active' }, window.location.origin);
-    };
-
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={toolbar}>
-                <button type="button" style={btn} onClick={save} disabled={!ready}>
-                    save
-                </button>
-                <span style={{ flex: 1 }} />
-                <span style={{ color: '#888' }}>{note ?? (ready ? 'ready' : 'loading…')}</span>
-            </div>
-            <iframe
-                ref={iframeRef}
-                src={BLOCKBENCH_SRC}
-                title="Blockbench"
-                allow="clipboard-read; clipboard-write; fullscreen"
-                style={{ flex: 1, minHeight: 0, border: 'none', width: '100%' }}
-            />
-        </div>
+        <iframe
+            ref={iframeRef}
+            src={BLOCKBENCH_SRC}
+            title="Blockbench"
+            allow="clipboard-read; clipboard-write; fullscreen"
+            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+        />
     );
 }
-
-const toolbar: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '4px 6px',
-    borderBottom: '1px solid #000',
-    font: '12px/1 ui-monospace, monospace',
-    flexShrink: 0,
-};
-
-const btn: CSSProperties = {
-    border: '1px solid #000',
-    background: '#fff',
-    cursor: 'pointer',
-    font: '12px/1 ui-monospace, monospace',
-    padding: '3px 10px',
-};

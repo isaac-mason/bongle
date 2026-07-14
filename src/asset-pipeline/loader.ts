@@ -17,6 +17,10 @@ export function createBakeLoader(fs: Filesystem): ResourceLoader {
                 if (!res.ok) throw new Error(`[bake-loader] fetch ${src}: ${res.status}`);
                 return new Uint8Array(await res.arrayBuffer());
             }
+            // builtin engine assets: `new URL(asset, import.meta.url)` resolves to
+            // file:///node_modules/bongle/dist/assets/… in the realm → read the
+            // seeded vfs file (its pathname, minus the leading slash).
+            if (src.startsWith('file:')) return fs.read(new URL(src).pathname.replace(/^\/+/, ''));
             // project-relative (strip a leading ./ or /).
             return fs.read(src.replace(/^\.?\//, ''));
         },

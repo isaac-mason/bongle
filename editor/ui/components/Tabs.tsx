@@ -8,33 +8,25 @@ export function Tabs() {
     const dirty = useOpenFile((s) => s.dirty);
     const { activate, close } = useOpenFile.getState();
 
-    if (tabs.length === 0) return <div style={{ height: 26, borderBottom: '1px solid #000', flexShrink: 0 }} />;
+    if (tabs.length === 0) return <div className="h-[26px] shrink-0 border-b border-border" />;
 
     return (
-        <div style={{ display: 'flex', height: 26, borderBottom: '1px solid #000', overflow: 'auto', flexShrink: 0 }}>
+        <div className="flex h-[26px] shrink-0 overflow-auto border-b border-border">
             {tabs.map((path) => {
                 const on = path === active;
                 const name = path.split('/').pop() ?? path;
                 return (
+                    // biome-ignore lint/a11y/useKeyWithClickEvents: tab row is pointer chrome.
                     <div
                         key={path}
                         onClick={() => activate(path)}
                         title={path}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '0 8px',
-                            borderRight: '1px solid #000',
-                            background: on ? '#000' : '#fff',
-                            color: on ? '#fff' : '#000',
-                            cursor: 'pointer',
-                            whiteSpace: 'nowrap',
-                            font: '12px/1 ui-monospace, monospace',
-                        }}
+                        className={`flex cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-border px-2 font-mono text-xs leading-none ${
+                            on ? 'bg-accent text-on-accent' : 'bg-surface text-fg'
+                        }`}
                     >
                         <span>{name}</span>
-                        <span style={{ width: 8, textAlign: 'center' }}>{dirty[path] ? '●' : ''}</span>
+                        <span className="w-2 text-center">{dirty[path] ? '●' : ''}</span>
                         <button
                             type="button"
                             title="close"
@@ -42,14 +34,7 @@ export function Tabs() {
                                 e.stopPropagation();
                                 close(path);
                             }}
-                            style={{
-                                border: 'none',
-                                background: 'transparent',
-                                color: 'inherit',
-                                cursor: 'pointer',
-                                font: '13px/1 ui-monospace, monospace',
-                                padding: 0,
-                            }}
+                            className="cursor-pointer border-none bg-transparent p-0 font-mono text-[13px] leading-none text-inherit"
                         >
                             ×
                         </button>

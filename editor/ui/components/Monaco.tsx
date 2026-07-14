@@ -4,7 +4,7 @@
 // to the shared open-file store so the tree can show it VSCode-style.
 
 import * as monaco from 'monaco-editor';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Filesystem } from '../../fs';
 import { useOpenFile } from '../../stores/open-file';
 import './monaco-env'; // side-effect: bundle + register the language workers.
@@ -28,6 +28,12 @@ monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
 const models = new Map<string, monaco.editor.ITextModel>();
 const savedText = new Map<string, string>();
 
+/** the live editor buffer for a path (incl. unsaved edits), or null if not open.
+ *  Lets the .md preview reflect what's currently in the editor. */
+export function getBufferText(path: string): string | null {
+    return models.get(path)?.getValue() ?? null;
+}
+
 function langOf(path: string): string {
     if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'typescript';
     if (path.endsWith('.json')) return 'json';
@@ -36,8 +42,17 @@ function langOf(path: string): string {
 
 export function Monaco({ fs }: { fs: Filesystem }) {
     const active = useOpenFile((s) => s.active);
+    const reveal = useOpenFile((s) => s.reveal);
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+
+    const revealLine = useCallback((line: number) => {
+        const ed = editorRef.current;
+        if (!ed) return;
+        ed.revealLineInCenter(line);
+        ed.setPosition({ lineNumber: line, column: 1 });
+        ed.focus();
+    }, []);
 
     // create the editor once.
     useEffect(() => {
@@ -49,6 +64,7 @@ export function Monaco({ fs }: { fs: Filesystem }) {
             fontSize: 12,
             scrollBeyondLastLine: false,
             tabSize: 4,
+            theme: 'vs-dark', // match the dark editor chrome
         });
         editorRef.current = ed;
         ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -86,12 +102,24 @@ export function Monaco({ fs }: { fs: Filesystem }) {
                     useOpenFile.getState().setDirty(active, model!.getValue() !== (savedText.get(active) ?? ''));
                 });
             }
-            if (!cancelled) ed.setModel(model);
+            if (cancelled) return;
+            ed.setModel(model);
+            // if a search hit asked to jump here, do it now the model is loaded.
+            const r = useOpenFile.getState().reveal;
+            if (r && r.path === active) revealLine(r.line);
         })();
         return () => {
             cancelled = true;
         };
-    }, [active, fs]);
+    }, [active, fs, revealLine]);
+
+    // reveal a line when the request changes and the model is already loaded
+    // (jumping to another hit in the file that's already open).
+    useEffect(() => {
+        if (!reveal) return;
+        const model = editorRef.current?.getModel();
+        if (model && model.uri.path.replace(/^\/+/, '') === reveal.path) revealLine(reveal.line);
+    }, [reveal, revealLine]);
 
     return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
 }

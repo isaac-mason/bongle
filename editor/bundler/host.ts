@@ -17,30 +17,24 @@
 import type { Filesystem, FsChange } from '../fs';
 import { applyEdit, fetchModule, handleRunnerMessage, initDevServer, registerPusher } from './dev-server';
 import type { BundlerFrame } from './port-bridge';
-import { makeRunner, type RunnerBridge } from './runner';
-
-type Runner = ReturnType<typeof makeRunner>;
-
-const isBare = (spec: string) => !spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('\0');
-
-// external iff a bare specifier that ISN'T the engine: node builtins (stubbed by
-// the runner's evaluator) + real npm deps (native import in the realm). `bongle*`
-// is NOT external — it resolves to the prebundled dist in the vfs and is bundled
-// through the graph (so the per-env envPlugin applies to it).
-const isExternal = (spec: string) => isBare(spec) && !(spec === 'bongle' || spec.startsWith('bongle/'));
 
 export type BundlerHost = {
-    /** attach a realm that lives in THIS document (the pipeline). */
-    createLocalRunner(env: string): Runner;
-    /** attach a realm reached over a MessagePort (server worker / client iframe).
-     *  The remote side builds its runner with createPortBridge(port). */
+    /** attach a realm reached over a MessagePort (pipeline runner / server worker
+     *  / client iframe). The remote side builds its runner with
+     *  createPortBridge(port). */
     connectRealm(env: string, port: MessagePort): void;
     /** batched fs edits → recompute + push HMR to every realm holding the file. */
     onFsChange(changes: FsChange[]): void;
 };
 
-export function createBundlerHost(fs: Filesystem): BundlerHost {
-    const devServer = initDevServer(fs, isExternal);
+/** format an unknown throw for the build log. */
+function describe(err: unknown): string {
+    if (err instanceof Error) return err.stack ?? err.message;
+    return String(err);
+}
+
+export function createBundlerHost(fs: Filesystem, reportError?: (msg: string) => void): BundlerHost {
+    const devServer = initDevServer(fs);
 
     // the module-runner request handler (fetchModule / getBuiltins), shared by
     // local + port-connected realms.
@@ -48,33 +42,34 @@ export function createBundlerHost(fs: Filesystem): BundlerHost {
         const call = (payload as { data?: { name?: string; data?: unknown[] } }).data;
         if (call?.name === 'fetchModule') {
             const [id, importer, options] = call.data ?? [];
-            return fetchModule(devServer, env, id as string, importer as string | undefined, (options as { cached?: boolean }) ?? {});
+            return fetchModule(
+                devServer,
+                env,
+                id as string,
+                importer as string | undefined,
+                (options as { cached?: boolean }) ?? {},
+            );
         }
         if (call?.name === 'getBuiltins') return [];
         return undefined;
     };
 
     return {
-        createLocalRunner(env) {
-            let pushToRunner: ((p: unknown) => void) | undefined;
-            const bridge: RunnerBridge = {
-                invoke: async (payload) => ({ result: await invoke(env, payload) }),
-                onMessage: (cb) => {
-                    pushToRunner = cb;
-                },
-                send: (payload) => handleRunnerMessage(devServer, env, payload),
-            };
-            registerPusher(devServer, env, (p) => pushToRunner?.(p));
-            return makeRunner(bridge);
-        },
-
         connectRealm(env, port) {
             registerPusher(devServer, env, (p) => port.postMessage({ __bundler: 'push', payload: p } satisfies BundlerFrame));
             port.onmessage = (e: MessageEvent<BundlerFrame>) => {
                 const msg = e.data;
                 if (msg.__bundler === 'invoke') {
-                    void invoke(env, msg.payload).then((result) =>
-                        port.postMessage({ __bundler: 'result', id: msg.id, result } satisfies BundlerFrame),
+                    void invoke(env, msg.payload).then(
+                        (result) => port.postMessage({ __bundler: 'result', id: msg.id, result } satisfies BundlerFrame),
+                        (err: unknown) => {
+                            // a transform / resolution failure — surface it to the build
+                            // window, and hand the realm an error so its load rejects
+                            // (rather than hanging) at the import site.
+                            reportError?.(describe(err));
+                            const error = { message: err instanceof Error ? err.message : String(err) };
+                            port.postMessage({ __bundler: 'result', id: msg.id, error } satisfies BundlerFrame);
+                        },
                     );
                 } else if (msg.__bundler === 'send') {
                     handleRunnerMessage(devServer, env, msg.payload);
@@ -86,7 +81,7 @@ export function createBundlerHost(fs: Filesystem): BundlerHost {
             for (const c of changes) {
                 if (c.type === 'deleted') continue;
                 if (!/^src\/.*\.tsx?$/.test(c.path)) continue;
-                void applyEdit(devServer, c.path);
+                void applyEdit(devServer, c.path).catch((err: unknown) => reportError?.(describe(err)));
             }
         },
     };

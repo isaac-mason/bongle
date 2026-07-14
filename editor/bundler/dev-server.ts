@@ -41,13 +41,9 @@ type ModNode = {
 };
 
 export type DevServerState = {
-    /** project working copy — user module source lives here. */
+    /** project working copy — user module source + the seeded engine dist
+     *  (node_modules/bongle/dist) live here. */
     fs: Filesystem;
-    /** true for a specifier that externalizes to the host engine (e.g.
-     *  `bongle`, `bongle/internal`) rather than being served from the fs.
-     *  Explicit predicate, NOT a leading-char heuristic — `src/index.ts` is a
-     *  user module even though it lacks a `./` prefix. */
-    isExternal: (spec: string) => boolean;
     /** per-env module graphs, created lazily as envs register. */
     graphs: Map<string, Map<string, ModNode>>;
     /** transform cache: module id → env → { version, result }. Per-env because
@@ -57,11 +53,27 @@ export type DevServerState = {
     version: number;
     /** HMR push channels registered by each env's transport. */
     pushers: Map<string, (p: HotPayload) => void>;
+    /** node_modules package.json cache (pkg name → parsed json | null miss). */
+    pkgCache: Map<string, PackageJson | null>;
 };
 
-export function initDevServer(fs: Filesystem, isExternal: (spec: string) => boolean): DevServerState {
-    return { fs, isExternal, graphs: new Map(), transformCache: new Map(), version: 0, pushers: new Map() };
+/** the package.json fields node_modules resolution reads. */
+type PackageJson = { main?: string; module?: string; exports?: unknown };
+
+export function initDevServer(fs: Filesystem): DevServerState {
+    return { fs, graphs: new Map(), transformCache: new Map(), version: 0, pushers: new Map(), pkgCache: new Map() };
 }
+
+const isBare = (spec: string) => !spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('\0');
+const isEngine = (spec: string) => spec === 'bongle' || spec.startsWith('bongle/');
+
+// A DEP that externalizes = a node builtin only. Everything else a transformed
+// module imports resolves in the vfs: relative + root-relative from fs, `bongle*`
+// from the prebundled dist, and bare first-party libs (mathcat/gpucat/…) from
+// their seeded node_modules package. Third-party npm is bundled INTO bongle, so
+// it never appears as a bare dep here. A residual bare miss still externalizes
+// via fetchModule's read-failure path.
+const isExternalDep = (spec: string) => spec.startsWith('node:');
 
 export function registerPusher(state: DevServerState, env: string, push: (p: HotPayload) => void): void {
     state.pushers.set(env, push);
@@ -74,7 +86,7 @@ function normalize(id: string): string {
 }
 
 /** resolve a user specifier relative to its importer to an fs-relative id. */
-function resolve(state: DevServerState, spec: string, importer: string | undefined): string {
+async function resolve(state: DevServerState, spec: string, importer: string | undefined): Promise<string> {
     if (spec.startsWith('.')) {
         const base = importer ? normalize(importer) : '';
         const dir = base.slice(0, base.lastIndexOf('/'));
@@ -86,8 +98,69 @@ function resolve(state: DevServerState, spec: string, importer: string | undefin
         const sub = spec === 'bongle' ? 'index' : spec.slice('bongle/'.length);
         return `node_modules/bongle/dist/${sub}.js`;
     }
+    // bare specifier → a seeded node_modules package (first-party mathcat/gpucat/
+    // crashcat/packcat), resolved through its package.json exports/main.
+    if (isBare(spec)) {
+        const pkg = await resolvePackage(state, spec);
+        if (pkg) return pkg;
+    }
+    // a root-absolute path emitted INSIDE a prebundled package (a code-split
+    // worker chunk like `/chunks/mesh-worker-spawn-x.js`) resolves against that
+    // package's dist root, not the vfs root.
+    if (spec.startsWith('/') && importer) {
+        const pkgDist = /^(node_modules\/(?:@[^/]+\/)?[^/]+\/dist)\//.exec(normalize(importer));
+        if (pkgDist) return withExt(state, `${pkgDist[1]}${spec}`);
+    }
     // root-relative fs path ('src/index.ts' or '/src/index.ts').
     return withExt(state, normalize(spec));
+}
+
+/** node_modules resolution for a bare specifier via package.json. Returns the
+ *  fs-relative module id, or null if no such package is seeded (caller falls
+ *  through to an fs path / externalizes). */
+async function resolvePackage(state: DevServerState, spec: string): Promise<string | null> {
+    const scoped = spec.startsWith('@');
+    const parts = spec.split('/');
+    const pkg = scoped ? `${parts[0]}/${parts[1]}` : parts[0];
+    const subParts = scoped ? parts.slice(2) : parts.slice(1);
+    const sub = subParts.length ? `./${subParts.join('/')}` : '.';
+
+    let json = state.pkgCache.get(pkg);
+    if (json === undefined) {
+        try {
+            json = JSON.parse(await state.fs.readText(`node_modules/${pkg}/package.json`)) as PackageJson;
+        } catch {
+            json = null;
+        }
+        state.pkgCache.set(pkg, json);
+    }
+    if (!json) return null;
+
+    const target = resolveEntry(json, sub);
+    if (!target) return null;
+    return `node_modules/${pkg}/${target.replace(/^\.\//, '')}`;
+}
+
+/** pick the module target for a subpath from a package.json (exports map first,
+ *  then main/module). Only the fields our seeded packages use. */
+function resolveEntry(json: PackageJson, sub: string): string | null {
+    const pick = (cond: unknown): string | null => {
+        if (typeof cond === 'string') return cond;
+        if (cond && typeof cond === 'object') {
+            const c = cond as Record<string, unknown>;
+            return (c.import ?? c.default ?? c.module ?? c.require ?? null) as string | null;
+        }
+        return null;
+    };
+    if (json.exports && typeof json.exports === 'object') {
+        const map = json.exports as Record<string, unknown>;
+        // exports may be a bare conditions object (sub '.') or a subpath map.
+        const entry = sub in map ? map[sub] : sub === '.' ? map : undefined;
+        return entry === undefined ? null : pick(entry);
+    }
+    if (json.exports) return sub === '.' ? (json.exports as string) : null;
+    if (sub === '.') return json.module ?? json.main ?? './index.js';
+    return sub; // no exports map → subpath is a literal file path
 }
 
 function withExt(state: DevServerState, id: string): string {
@@ -138,13 +211,17 @@ export async function fetchModule(
     importer: string | undefined,
     opts: { cached?: boolean },
 ): Promise<FetchResult> {
-    if (state.isExternal(rawId)) return { externalize: rawId, type: 'module' };
+    // node builtins externalize up front (stubbed by the runner's evaluator).
+    if (rawId.startsWith('node:')) return { externalize: rawId, type: 'module' };
 
-    const id = resolve(state, rawId, importer);
+    const id = await resolve(state, rawId, importer);
     let source: string;
     try {
         source = await state.fs.readText(id);
     } catch {
+        // not a user/engine module in the vfs → a bare npm dep the realm
+        // native-imports. relative/absolute misses are real errors.
+        if (isBare(rawId) && !isEngine(rawId)) return { externalize: rawId, type: 'module' };
         throw new Error(`[dev-server:${env}] module not found: ${rawId} (resolved ${id}) from ${importer}`);
     }
 
@@ -173,8 +250,8 @@ export async function fetchModule(
     // refresh this env's import edges.
     node.imports.clear();
     for (const dep of result.deps) {
-        if (state.isExternal(dep)) continue; // externals aren't graph nodes
-        const depId = resolve(state, dep, id);
+        if (isExternalDep(dep)) continue; // externals aren't graph nodes
+        const depId = await resolve(state, dep, id);
         node.imports.add(depId);
         ensureNode(state, env, depId).importers.add(id);
     }

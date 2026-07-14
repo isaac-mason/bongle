@@ -27,7 +27,8 @@
 import type { Server as HttpServer } from 'node:http';
 import path from 'node:path';
 import { env } from 'bongle';
-import { createFallbackAvatarsDriver, createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
+import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
+import { createFallbackAvatarsDriver } from 'bongle/engine-server-node';
 import { __kit } from 'bongle/internal';
 import { createSampleAvatarPicker } from 'bongle/kit/runtime/sample-avatars';
 import { attachGameTransport } from 'bongle/kit/runtime/transport';

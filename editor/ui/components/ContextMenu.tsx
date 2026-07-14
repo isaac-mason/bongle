@@ -24,18 +24,8 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
 
     return (
         <div
-            style={{
-                position: 'fixed',
-                left: x,
-                top: y,
-                zIndex: 2_000_000,
-                minWidth: 130,
-                background: '#fff',
-                border: '1px solid #000',
-                boxShadow: '2px 2px 0 rgba(0,0,0,0.2)',
-                padding: '2px 0',
-                font: '11px/1 ui-monospace, monospace',
-            }}
+            className="fixed z-[2000000] min-w-[130px] border border-border bg-surface py-0.5 font-mono text-[11px] leading-none text-fg shadow-[2px_2px_0_rgba(0,0,0,0.5)]"
+            style={{ left: x, top: y }}
         >
             {items.map((it) => (
                 <button
@@ -46,24 +36,7 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
                         onClose();
                         it.onClick();
                     }}
-                    style={{
-                        display: 'block',
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '4px 10px',
-                        border: 0,
-                        background: '#fff',
-                        cursor: 'pointer',
-                        font: 'inherit',
-                    }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.background = '#000';
-                        e.currentTarget.style.color = '#fff';
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.background = '#fff';
-                        e.currentTarget.style.color = '#000';
-                    }}
+                    className="block w-full cursor-pointer border-0 bg-transparent px-2.5 py-1 text-left font-mono text-[11px] leading-none hover:bg-accent hover:text-on-accent"
                 >
                     {it.label}
                 </button>

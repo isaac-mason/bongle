@@ -11,21 +11,23 @@ import type { RunnerBridge } from './runner';
 /** frames on the bundler conduit (a dedicated MessagePort per remote realm). */
 export type BundlerFrame =
     | { __bundler: 'invoke'; id: number; payload: unknown }
-    | { __bundler: 'result'; id: number; result: unknown }
+    | { __bundler: 'result'; id: number; result?: unknown; error?: unknown }
     | { __bundler: 'send'; payload: unknown }
     | { __bundler: 'push'; payload: unknown };
+
+type ResultFrame = Extract<BundlerFrame, { __bundler: 'result' }>;
 
 /** the remote realm's RunnerBridge over its bundler MessagePort — the mirror of
  *  host.ts's connectRealm. */
 export function createPortBridge(port: MessagePort): RunnerBridge {
     let onMsg: ((p: unknown) => void) | undefined;
-    const pending = new Map<number, (result: unknown) => void>();
+    const pending = new Map<number, (frame: ResultFrame) => void>();
     let nextId = 0;
 
     port.onmessage = (e: MessageEvent<BundlerFrame>) => {
         const msg = e.data;
         if (msg.__bundler === 'result') {
-            pending.get(msg.id)?.(msg.result);
+            pending.get(msg.id)?.(msg);
             pending.delete(msg.id);
         } else if (msg.__bundler === 'push') {
             onMsg?.(msg.payload);
@@ -34,9 +36,12 @@ export function createPortBridge(port: MessagePort): RunnerBridge {
 
     return {
         invoke: (payload) =>
-            new Promise<{ result: unknown }>((resolve) => {
+            new Promise<{ result: unknown } | { error: unknown }>((resolve) => {
                 const id = nextId++;
-                pending.set(id, (result) => resolve({ result }));
+                // a build failure comes back as { error } → the ModuleRunner throws it.
+                pending.set(id, (frame) =>
+                    resolve(frame.error !== undefined ? { error: frame.error } : { result: frame.result }),
+                );
                 port.postMessage({ __bundler: 'invoke', id, payload } satisfies BundlerFrame);
             }),
         onMessage: (cb) => {

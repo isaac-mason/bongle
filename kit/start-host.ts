@@ -16,7 +16,8 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createFallbackAvatarsDriver, createInMemoryStorageDriver, resolveSampleAvatarFile } from 'bongle/engine-server';
+import { createInMemoryStorageDriver } from 'bongle/engine-server';
+import { createFallbackAvatarsDriver, resolveSampleAvatarFile } from 'bongle/engine-server-node';
 import type { ServerApp } from 'bongle/interface';
 import { createSampleAvatarPicker } from 'bongle/kit/runtime/sample-avatars';
 import { attachGameTransport, type GameTransport } from 'bongle/kit/runtime/transport';

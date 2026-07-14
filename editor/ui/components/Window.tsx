@@ -72,6 +72,7 @@ export function Window({
 
     return (
         <div
+            data-window-id={id}
             style={{
                 ...frame,
                 display: 'flex',

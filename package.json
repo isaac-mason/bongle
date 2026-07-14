@@ -28,6 +28,10 @@
             "import": "./src/engine-server.ts",
             "default": "./src/engine-server.ts"
         },
+        "./engine-server-node": {
+            "import": "./src/engine-server-node.ts",
+            "default": "./src/engine-server-node.ts"
+        },
         "./engine-editor": {
             "import": "./src/engine-editor.ts",
             "default": "./src/engine-editor.ts"
@@ -94,7 +98,7 @@
     ],
     "scripts": {
         "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
-        "build": "rm -rf dist && vite build --config vite.lib.config.ts && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs",
+        "build": "rm -rf dist vendor && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/pack-vfs.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs",
         "test": "vitest run",
         "bench": "vitest bench --run",
         "typecheck": "tsgo -p tsconfig.json",

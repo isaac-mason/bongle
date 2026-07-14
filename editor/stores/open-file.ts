@@ -11,8 +11,12 @@ type OpenFileStore = {
     active: string | null;
     /** unsaved flag per path. */
     dirty: Record<string, boolean>;
+    /** a request to reveal a line in `path`; Monaco jumps there (search result). */
+    reveal: { path: string; line: number; seq: number } | null;
     /** open a file: add a tab if new, then focus it. */
     open: (path: string) => void;
+    /** open a file and jump to a line (e.g. a search hit). */
+    openAt: (path: string, line: number) => void;
     /** focus an already-open tab. */
     activate: (path: string) => void;
     /** close a tab; focus a neighbor if it was active. */
@@ -24,10 +28,17 @@ export const useOpenFile = create<OpenFileStore>((set) => ({
     tabs: [],
     active: null,
     dirty: {},
+    reveal: null,
     open: (path) =>
         set((s) => ({
             tabs: s.tabs.includes(path) ? s.tabs : [...s.tabs, path],
             active: path,
+        })),
+    openAt: (path, line) =>
+        set((s) => ({
+            tabs: s.tabs.includes(path) ? s.tabs : [...s.tabs, path],
+            active: path,
+            reveal: { path, line, seq: (s.reveal?.seq ?? 0) + 1 },
         })),
     activate: (path) => set({ active: path }),
     close: (path) =>

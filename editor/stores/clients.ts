@@ -4,7 +4,7 @@
 // spawns a fresh client, `close` disposes it (dropping its server connection).
 
 import { create } from 'zustand';
-import type { ClientConnection, ClientHost } from '../client-host';
+import type { ClientConnection, ClientHost } from '../client/client-host';
 import { useWindows } from './windows';
 
 export type ClientWindow = { id: string; title: string; connection: ClientConnection };

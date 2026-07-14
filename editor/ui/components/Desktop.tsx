@@ -10,7 +10,7 @@ import { useLaunched } from '../../stores/launched';
 import { useWindows } from '../../stores/windows';
 import { appById } from '../apps';
 import { ClientView } from './ClientView';
-import { type TaskbarAction, Taskbar, type TaskbarItem } from './Taskbar';
+import { Taskbar, type TaskbarAction, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
 
 export type WindowDef = {
@@ -26,6 +26,29 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     useEffect(() => {
         for (const w of windows) register(w.id, w.initial);
     }, [windows, register]);
+
+    // rescue windows that a viewport shrink would push offscreen — re-clamp each
+    // into the new bounds so its title bar stays reachable.
+    useEffect(() => {
+        const onResize = () => useWindows.getState().rescueAll();
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
+
+    // clicks inside an iframe don't bubble out, so a Window's pointerdown focus
+    // never fires for iframe apps (blockbench, game client). When focus enters an
+    // iframe the page blurs and it becomes document.activeElement — bring its
+    // window to the front.
+    useEffect(() => {
+        const onBlur = () => {
+            const el = document.activeElement;
+            if (el?.tagName !== 'IFRAME') return;
+            const id = el.closest('[data-window-id]')?.getAttribute('data-window-id');
+            if (id) useWindows.getState().focus(id);
+        };
+        window.addEventListener('blur', onBlur);
+        return () => window.removeEventListener('blur', onBlur);
+    }, []);
 
     const launched = useLaunched((s) => s.windows);
     const dirty = useLaunched((s) => s.dirty);

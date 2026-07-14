@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { envPlugin } from './bundler/env-plugin';
@@ -13,7 +14,8 @@ const SERVER_ENV = { client: false, server: true, editor: true };
 
 export default defineConfig({
     root: fileURLToPath(new URL('.', import.meta.url)),
-    plugins: [envPlugin(SERVER_ENV)],
+    // tailwind only needs the main document build; workers render no CSS.
+    plugins: [tailwindcss(), envPlugin(SERVER_ENV)],
     // worker.plugins is BLANKET (applies to every worker bundle — vite has no
     // per-worker granularity). Safe here because EVERY worker is server-env:
     // the server worker, and later the pipeline worker (server:true,
@@ -35,5 +37,10 @@ export default defineConfig({
     // registry user code writes to is the same one the pipeline reads.
     optimizeDeps: {
         exclude: ['bongle', 'gpucat', 'mathcat', 'packcat', 'crashcat'],
+        // @rolldown/browser is imported ONLY from the bundler worker now. Without
+        // pre-bundling, the worker resolves its `default` (node) export, which
+        // imports `node:url` and dies silently on load. Force pre-bundling so the
+        // worker gets the `browser` build.
+        include: ['@rolldown/browser/experimental'],
     },
 });

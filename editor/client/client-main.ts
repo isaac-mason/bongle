@@ -16,9 +16,10 @@
 // watcher HMRs source, and resource writes trigger the matching engine refresh.
 
 import type { ClientDriver } from '../../interface/index';
-import { makeRunner } from '../bundler/runner';
 import { createPortBridge } from '../bundler/port-bridge';
-import { createMemoryFilesystem, type Filesystem } from '../fs';
+import { makeRunner } from '../bundler/runner';
+import type { Filesystem } from '../fs';
+import { openOpfsFilesystem } from '../fs-opfs';
 
 // no host portal in the editor: matchmake is a no-op, platform verbs inert.
 const driver: ClientDriver = {
@@ -26,8 +27,8 @@ const driver: ClientDriver = {
     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
 };
 
-type InitMessage = { type: 'client-init'; files: Record<string, Uint8Array>; entry?: string };
-type FsChangeMessage = { type: 'fs-change'; path: string; bytes: Uint8Array };
+type InitMessage = { type: 'client-init'; projectName: string; entry?: string };
+type FsChangeMessage = { type: 'fs-change'; path: string };
 
 let booted = false;
 
@@ -43,13 +44,18 @@ function clientResourceLoader(fs: Filesystem) {
                 if (!r.ok) throw new Error(`fetch ${url}: ${r.status}`);
                 return new Uint8Array(await r.arrayBuffer());
             }
+            // builtin engine assets (sample-avatar glbs etc.) resolve to
+            // file:///node_modules/bongle/dist/assets/… — read the seeded vfs file.
+            if (url.startsWith('file:')) return fs.read(new URL(url).pathname.replace(/^\/+/, ''));
             return fs.read(`resources/client/${url.replace(/^\//, '')}`);
         },
     };
 }
 
 async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: MessagePort): Promise<void> {
-    const fs = createMemoryFilesystem(msg.files);
+    // open the SAME OPFS project the main doc uses (same origin) — baked
+    // resources the pipeline wrote are visible directly; no snapshot.
+    const fs = await openOpfsFilesystem(msg.projectName);
 
     // evaluate the user code via a ModuleRunner bridged to the ONE host
     // DevServer (host transforms; this realm evaluates → its own client
@@ -57,7 +63,9 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     const runner = makeRunner(createPortBridge(bundlerPort));
     await runner.import(msg.entry ?? 'src/index.ts');
     // engine from the SAME runner instance the user code registered into.
-    const EngineClient = await runner.import('bongle/engine-client');
+    // engine-client wraps its api under `export * as EngineClient`; engine-editor
+    // exports its api flat, so its module namespace IS the api.
+    const { EngineClient } = await runner.import('bongle/engine-client');
     const EngineEditor = await runner.import('bongle/engine-editor');
     const { __kit } = await runner.import('bongle/internal');
 
@@ -98,14 +106,13 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     self.addEventListener('message', (e: MessageEvent) => {
         const m = e.data as FsChangeMessage;
         if (m?.type !== 'fs-change') return;
-        void fs.write(m.path, m.bytes).then(() => {
-            if (!m.path.startsWith('resources/client/')) return;
-            // a baked-asset write carries no registry change, so the flush
-            // path won't propagate it — refresh the matching resource directly.
-            if (m.path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
-            else if (m.path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
-            else EngineClient.refreshBlockResources(state).catch(console.error);
-        });
+        // OPFS is shared — the new bytes are already here. A baked-asset write
+        // carries no registry change, so the flush path won't propagate it;
+        // refresh the matching resource directly (re-reads OPFS).
+        if (!m.path.startsWith('resources/client/')) return;
+        if (m.path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
+        else if (m.path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
+        else EngineClient.refreshBlockResources(state).catch(console.error);
     });
 }
 

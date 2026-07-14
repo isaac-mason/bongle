@@ -130,7 +130,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from 'bongle/engine-server';
+import { resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from 'bongle/engine-server-node';
 import MagicString from 'magic-string';
 import type { Plugin, RunnableDevEnvironment } from 'vite';
 import { buildSymbolTable, type SymbolTable } from './dep-ast';
