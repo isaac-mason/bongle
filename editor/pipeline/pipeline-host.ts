@@ -21,13 +21,16 @@ export type SpawnPipelineWorkerOptions = {
     log?: (msg: string) => void;
     /** a bake completed (atlas written to the shared OPFS for the client renderer). */
     onBaked?: (atlasChanged: boolean) => void;
+    /** the realm's current matchmaking.maxPlayers, reported after each bake — the
+     *  prod build reads it (it can't evaluate user code to see the registry). */
+    onMatchmaking?: (maxPlayers: number) => void;
     /** the worker's bake writes (OPFS has no cross-context events) — the main doc
      *  HMRs the generated barrel + refreshes baked resources in the other realms. */
     onFsChanged?: (changes: FsChange[]) => void;
 };
 
 export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineHost {
-    const { connectRealm, projectName, log = () => {}, onBaked, onFsChanged } = opts;
+    const { connectRealm, projectName, log = () => {}, onBaked, onMatchmaking, onFsChanged } = opts;
 
     const worker = new Worker(new URL('./pipeline-worker.ts', import.meta.url), { type: 'module' });
 
@@ -37,10 +40,12 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
     });
 
     worker.onmessage = (e: MessageEvent) => {
-        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; changes?: FsChange[] };
+        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; maxPlayers?: number; changes?: FsChange[] };
         if (msg.type === 'log') log(msg.msg ?? '');
-        else if (msg.type === 'baked') onBaked?.(!!msg.atlasChanged);
-        else if (msg.type === 'fs-changed') onFsChanged?.(msg.changes ?? []);
+        else if (msg.type === 'baked') {
+            onBaked?.(!!msg.atlasChanged);
+            if (typeof msg.maxPlayers === 'number') onMatchmaking?.(msg.maxPlayers);
+        } else if (msg.type === 'fs-changed') onFsChanged?.(msg.changes ?? []);
         else if (msg.type === 'ready') resolveReady();
     };
     worker.onerror = (e) => log(`pipeline worker crashed: ${e.message}`);

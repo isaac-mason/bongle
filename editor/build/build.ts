@@ -16,6 +16,7 @@ import { type Plugin, rolldown } from '@rolldown/browser';
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
 import { type EnvValues, replaceEnv } from '../bundler/env-replace';
+import { ensureProcessShim } from '../bundler/runner';
 import type { Filesystem } from '../fs';
 
 type Target = 'client' | 'server';
@@ -78,6 +79,13 @@ export default server({
     clearOutbox: (state) => { state.net.outbox.clear(); },
 });
 `;
+
+// `new URL('./x.{ogg,glb,…}', import.meta.url)` for already-baked binary assets:
+// in a bundle these inline as base64 (~1.5MB of starter audio/models alone),
+// though the runtime only ever loads them from the atlases/bins. Strip to "" —
+// sound()/model() ignore an empty src, keeping registration intact (mirrors
+// kit's stripBinaryAssetUrlsPlugin). Client only; server has no asset URLs.
+const BINARY_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf)['"]\s*,\s*import\.meta\.url\)/g;
 
 /** the per-target entry: side-effect-import every existing generated barrel +
  *  user src (registries populate), then the play-* adapter as default. */
@@ -184,6 +192,7 @@ function vfsPlugin(fs: Filesystem, target: Target, entry: string): Plugin {
         transform(code, id) {
             if (id === ENTRY_ID) return null;
             let out = replaceEnv(code, env);
+            if (target === 'client') out = out.replace(BINARY_URL, '""');
             // user src (incl. generated barrels) needs `__kit` as a free var — the
             // barrels call __kit.registerScene/… (mirrors kit's capture-import).
             if (id.startsWith('src/') && /\.tsx?$/.test(id)) out = `import { __kit } from 'bongle/internal';\n${out}`;
@@ -195,6 +204,7 @@ function vfsPlugin(fs: Filesystem, target: Target, entry: string): Plugin {
 // ── build a single target → { fileName: bytes } ─────────────────────────────
 
 async function buildTarget(fs: Filesystem, target: Target): Promise<Record<string, Uint8Array>> {
+    ensureProcessShim(); // @rolldown/browser reads `process` in bindingifyInputOptions
     const entry = await entrySource(fs, target);
     const bundle = await rolldown({
         input: { index: ENTRY_ID },
@@ -203,6 +213,12 @@ async function buildTarget(fs: Filesystem, target: Target): Promise<Record<strin
         // NODE_ENV is already build-defined into the prebundled engine dist (where
         // React lives); user + play-shell code don't read process.env, so no define.
         platform: target === 'server' ? 'node' : 'browser',
+        // bongle/index is both statically (our entry) + dynamically (engine-server)
+        // imported — an expected, harmless chunking note; drop it, surface the rest.
+        onLog: (level, log, handler) => {
+            if (log.code === 'INEFFECTIVE_DYNAMIC_IMPORT') return;
+            handler(level, log);
+        },
     });
     const { output } = await bundle.generate({
         format: 'es',
@@ -248,8 +264,19 @@ async function copyTree(fs: Filesystem, srcDir: string, zip: Record<string, Uint
     }
 }
 
+export type BuildOptions = {
+    /** matchmaking.maxPlayers for the manifest. The build can't evaluate user
+     *  code to read the registry, so the caller supplies it (the pipeline realm
+     *  reports it — see stores/build-meta). */
+    maxPlayers: number;
+    /** phase label callback for the progress UI. */
+    onProgress?: (label: string) => void;
+};
+
 /** build the whole bundle → zip bytes (client/ + server/ + bongle.json). */
-export async function buildBundle(fs: Filesystem): Promise<Uint8Array> {
+export async function buildBundle(fs: Filesystem, opts: BuildOptions): Promise<Uint8Array> {
+    const progress = opts.onProgress ?? (() => {});
+    progress('Bundling client + server');
     const [clientFiles, serverFiles] = await Promise.all([buildTarget(fs, 'client'), buildTarget(fs, 'server')]);
 
     const zip: Record<string, Uint8Array> = {};
@@ -267,11 +294,15 @@ export async function buildBundle(fs: Filesystem): Promise<Uint8Array> {
         /* no engine css seeded */
     }
 
-    // baked outputs (the pipeline already produced these) + authored content.
+    // baked outputs (the pipeline already produced these) + authored content +
+    // the project's static public/ dir (kit's copyPublicDir → client root).
+    progress('Copying baked resources');
     await copyTree(fs, 'resources/client', zip, 'client');
     await copyTree(fs, 'resources/server', zip, 'server/resources');
     await copyTree(fs, 'content', zip, 'server/content');
+    await copyTree(fs, 'public', zip, 'client');
 
+    progress('Writing manifest');
     const version = await bongleVersion(fs);
     const client: Record<string, unknown> = { entry: 'client/index.js', integrity: await sri(zip['client/index.js']) };
     if (clientCss) client.styles = { entry: 'client/index.css', integrity: await sri(clientCss) };
@@ -282,22 +313,22 @@ export async function buildBundle(fs: Filesystem): Promise<Uint8Array> {
         server: { entry: 'server/index.js', integrity: await sri(zip['server/index.js']) },
         assets: { publicDir: 'public' },
         build: { id: crypto.randomUUID(), createdAt: new Date().toISOString(), tool: `bongle-editor@${version}` },
-        // TODO(build): harvest from the running realm's registry.matchmaking; the
-        // build bundles but doesn't evaluate user code, so default for now.
-        matchmaking: { maxPlayers: 10 },
+        matchmaking: { maxPlayers: opts.maxPlayers },
     };
     zip['bongle.json'] = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
 
+    progress('Zipping');
     return zipSync(zip);
 }
 
-/** build + trigger a browser download of bundle.zip. */
-export async function downloadBundle(fs: Filesystem): Promise<void> {
-    const zip = await buildBundle(fs);
+/** build + trigger a browser download of bundle.zip. Returns the zip size in bytes. */
+export async function downloadBundle(fs: Filesystem, opts: BuildOptions): Promise<number> {
+    const zip = await buildBundle(fs, opts);
     const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = 'bundle.zip';
     a.click();
     URL.revokeObjectURL(url);
+    return zip.length;
 }

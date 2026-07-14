@@ -2,10 +2,14 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { Code, Download, FolderSync, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
+import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo } from 'react';
+import { downloadBundle } from '../../build/build';
 import type { Filesystem } from '../../fs';
 import { downloadGameSave, pickAndImportGameSave } from '../../game-save';
+import { useBuildMeta } from '../../stores/build-meta';
+import { useBuildProgress } from '../../stores/build-progress';
+import { logger } from '../../stores/logs';
 import { useClients } from '../../stores/clients';
 import { useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
@@ -17,6 +21,7 @@ import { disconnect, syncSupported } from '../../sync/folder-sync';
 import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
+import { BuildModal } from './BuildModal';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
@@ -139,6 +144,28 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
           ]
         : [];
 
+    // prod build: bundle client + server + resources into a downloadable
+    // bundle.zip (the same artifact shape the platform ingests). Progress shows in
+    // the BuildModal; a summary line also lands in the build log for the record.
+    const runBuild = async () => {
+        const progress = useBuildProgress.getState();
+        const log = logger('build');
+        progress.begin();
+        try {
+            const t0 = performance.now();
+            const size = await downloadBundle(fs, {
+                maxPlayers: useBuildMeta.getState().maxPlayers,
+                onProgress: (label) => useBuildProgress.getState().step(label),
+            });
+            progress.finish(size);
+            log(`bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, downloaded`);
+        } catch (err) {
+            progress.fail((err as Error).message);
+            log(`build failed: ${(err as Error).message}`);
+            console.error(err);
+        }
+    };
+
     // game saves: download the source set as a zip / load one back over the
     // project. A handy dev tool (also the source shape the platform will persist).
     const saveFooter: TaskbarItem[] = [
@@ -157,6 +184,14 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             running: false,
             onClick: () => pickAndImportGameSave(fs),
             menu: [{ label: 'Load game save (.zip)…', onClick: () => pickAndImportGameSave(fs) }],
+        },
+        {
+            id: 'build',
+            title: 'build prod bundle (.zip)',
+            glyph: <Hammer size={18} />,
+            running: false,
+            onClick: () => void runBuild(),
+            menu: [{ label: 'Build prod bundle (.zip)', onClick: () => void runBuild() }],
         },
     ];
 
@@ -335,6 +370,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} />
             <SyncChooser fs={fs} />
             <SyncPanel />
+            <BuildModal />
         </div>
     );
 }

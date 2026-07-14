@@ -13,6 +13,7 @@ import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
 import { spawnPipelineWorker } from './pipeline/pipeline-host';
 import { spawnServerWorker } from './server/server-host';
+import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
 import { logger } from './stores/logs';
@@ -22,6 +23,7 @@ import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
+import { loadEngineTypes } from './ui/components/Monaco';
 
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
@@ -84,6 +86,11 @@ async function boot(): Promise<void> {
     // resolves `bongle` / `mathcat` / … from there.
     await seedEngineDist(editor.fs);
 
+    // feed the seeded .d.ts into Monaco's TS worker (types/intellisense for user
+    // code). Fire-and-forget — the code window may not be open yet, but the
+    // typescript defaults are global, so it applies whenever an editor mounts.
+    void loadEngineTypes(editor.fs);
+
     // the ONE dev server — DevServer + @rolldown transform — runs OFF the main
     // thread in the bundler worker (its WASM arena reaches multiple GB under
     // load). Every realm connects to it over a transferred MessagePort; the main
@@ -124,6 +131,8 @@ async function boot(): Promise<void> {
         projectName: PROJECT,
         log,
         onFsChanged: (changes) => relayBakeChange(changes),
+        // the prod build reads maxPlayers here (it can't evaluate user code itself).
+        onMatchmaking: (maxPlayers) => useBuildMeta.getState().setMaxPlayers(maxPlayers),
     });
     // bake-then-run (mirrors the kit): wait for the first bake so every realm
     // fresh-imports the REAL generated barrel (baked model bin paths) at boot,

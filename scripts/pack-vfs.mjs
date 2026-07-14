@@ -41,11 +41,12 @@ if (existsSync(join(ROOT, 'docs'))) {
     addTree('bongle/docs', join(ROOT, 'docs'), (abs) => abs.endsWith('.md') && !abs.includes(`${sep}template${sep}`));
 }
 
-// bongle + vendor lib type declarations (emitted by tsgo, gathered by
-// gather-lib-types.mjs). Overwrites bongle's package.json with a types-aware
-// exports map so Monaco resolves bare specifiers to .d.ts.
+// bongle + first-party lib type declarations + @webgpu/types ambient globals
+// (emitted by tsgo, gathered by gather-lib-types.mjs). The bongle package.json is
+// a types-aware exports map so Monaco resolves bare specifiers to .d.ts; the libs
+// resolve as their own node_modules packages (user code imports them directly).
 const typesRoot = join(ROOT, 'dist/types/node_modules');
-for (const pkg of ['bongle', ...VENDOR_LIBS]) {
+for (const pkg of ['bongle', ...VENDOR_LIBS, '@webgpu/types']) {
     const dir = join(typesRoot, pkg);
     if (existsSync(dir)) addTree(pkg, dir);
 }

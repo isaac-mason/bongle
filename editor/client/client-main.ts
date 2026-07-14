@@ -151,9 +151,11 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     self.addEventListener('message', (e: MessageEvent) => {
         const m = e.data as FsChangeMessage;
         if (m?.type !== 'fs-change') return;
-        // a blueprint scene file changed on disk → re-read the scene list.
+        // a scene file changed on disk → re-list (handles added/removed
+        // blueprints) and re-read the specific scene (handles edits to one).
         if (m.path.startsWith('content/scenes/')) {
             EngineEditor.refreshBlueprints();
+            EngineEditor.reloadBlueprint(m.path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
             return;
         }
         // OPFS is shared — the new bytes are already here. A baked-asset write

@@ -18,12 +18,39 @@ monaco.typescript.typescriptDefaults.setCompilerOptions({
     strict: true,
     allowNonTsExtensions: true,
 });
-// no "cannot find module 'bongle'" squiggles until we feed the engine .d.ts
-// (the tsgo per-file emit artifact) — that's the next Monaco upgrade.
+// semantic checking stays OFF until the engine .d.ts are loaded (else every
+// `import … from 'bongle'` is a red squiggle). loadEngineTypes flips it on.
 monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
     noSemanticValidation: true,
     noSyntaxValidation: false,
 });
+
+let engineTypesLoaded = false;
+
+/** feed the seeded engine + first-party lib `.d.ts` (+ @webgpu/types ambient
+ *  globals) into Monaco's TS worker so user code gets real `bongle` / `mathcat` /
+ *  `gpucat` / GPU* types. Reads node_modules/**.d.ts + package.json from the
+ *  project fs — call once, after seedEngineDist has populated it. */
+export async function loadEngineTypes(fs: Filesystem): Promise<void> {
+    if (engineTypesLoaded) return;
+    engineTypesLoaded = true;
+    try {
+        // only the type-bearing files: the .d.ts trees + each package's package.json
+        // (Monaco's NodeJs resolution reads `types`/`main` + walks the file layout).
+        const files = (await fs.list('node_modules', { recursive: true })).filter(
+            (e) => e.kind === 'file' && (e.path.endsWith('.d.ts') || e.path.endsWith('package.json')),
+        );
+        const libs = await Promise.all(
+            files.map(async (e) => ({ content: await fs.readText(e.path), filePath: `file:///${e.path}` })),
+        );
+        monaco.typescript.typescriptDefaults.setExtraLibs(libs);
+        // packages now resolve → turn semantic checking on.
+        monaco.typescript.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false });
+    } catch (err) {
+        console.warn('[monaco] failed to load engine types', err);
+        engineTypesLoaded = false; // let a later call retry
+    }
+}
 
 // models + last-saved text persist across file switches + groups (shared buffers).
 const models = new Map<string, monaco.editor.ITextModel>();

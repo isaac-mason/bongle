@@ -5,9 +5,9 @@
  *   - inventory: catalog of blocks, prefabs, blueprints. click an item to
  *     pick it up (minecraft-style carry), then click a hotbar slot to bind
  *     it. while an item is hovered, 1-9 binds it directly to that slot.
- *   - scenes:    thumbnail grid of every scene on disk. click to open
- *     (switches to an existing edit room if one's already open). row hover
- *     surfaces rename + delete; a "create new" input is pinned at the
+ *   - scenes:    list of every scene on disk (scenes have no icon). click to
+ *     open (switches to an existing edit room if one's already open). row
+ *     hover surfaces rename + delete; a "create new" input is pinned at the
  *     bottom.
  *
  * esc or E again closes.
@@ -28,8 +28,6 @@ type Filter = 'all' | 'bongle' | 'prefabs' | 'blueprints';
 
 const ITEM_SIZE = 56;
 const ICON_SIZE = 40;
-const SCENE_TILE_SIZE = 96;
-const SCENE_THUMB_SIZE = 72;
 
 export function LibraryOverlay() {
     const open = useEditRoom((s) => s.libraryOpen);
@@ -339,17 +337,14 @@ function ScenesTab() {
 
     return (
         <>
-            {/* tile grid */}
-            <div className="overflow-y-auto p-2 flex-1">
+            {/* scene list */}
+            <div className="overflow-y-auto py-1 flex-1">
                 {sortedScenes.length === 0 ? (
                     <div className="text-[12px] font-mono text-neutral-400 px-2 py-4 text-center">no scenes</div>
                 ) : (
-                    <div
-                        className="grid gap-2"
-                        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${SCENE_TILE_SIZE}px, 1fr))` }}
-                    >
+                    <div className="flex flex-col gap-px">
                         {sortedScenes.map((sceneId) => (
-                            <SceneTile
+                            <SceneRow
                                 key={sceneId}
                                 sceneId={sceneId}
                                 isActive={sceneId === activeSceneId}
@@ -391,7 +386,7 @@ function ScenesTab() {
     );
 }
 
-function SceneTile({
+function SceneRow({
     sceneId,
     isActive,
     isPrefabSource,
@@ -439,23 +434,11 @@ function SceneTile({
 
     return (
         <div
-            className={`group relative flex flex-col items-stretch p-1 cursor-pointer transition-colors ${
-                isActive ? 'bg-neutral-800' : 'bg-neutral-50 hover:bg-neutral-100 hover:ring-1 hover:ring-neutral-300'
+            className={`group relative flex items-center gap-1 h-7 px-2 cursor-pointer transition-colors ${
+                isActive ? 'bg-neutral-800' : 'bg-neutral-50 hover:bg-neutral-100'
             }`}
         >
-            {/* thumbnail */}
-            <button
-                type="button"
-                onClick={() => onOpen(sceneId)}
-                className="block w-full cursor-pointer"
-                title={sceneId}
-                style={{ height: SCENE_THUMB_SIZE }}
-            >
-                {/* scene (blueprint) icons are not rendered — neutral placeholder. */}
-                <div className="bg-neutral-200" style={{ width: '100%', height: '100%' }} />
-            </button>
-
-            {/* label / rename */}
+            {/* name / rename (scenes have no icon — plain row) */}
             {editing ? (
                 <input
                     ref={inputRef}
@@ -469,13 +452,13 @@ function SceneTile({
                             setEditing(false);
                         }
                     }}
-                    className="mt-1 w-full px-1 py-0.5 text-[10px] font-mono text-neutral-800 bg-white border border-blue-400 outline-none"
+                    className="flex-1 min-w-0 px-1 py-0.5 text-[11px] font-mono text-neutral-800 bg-white border border-blue-400 outline-none"
                 />
             ) : (
                 <button
                     type="button"
                     onClick={() => onOpen(sceneId)}
-                    className={`mt-1 text-[10px] font-mono text-left truncate cursor-pointer ${
+                    className={`flex-1 min-w-0 text-[11px] font-mono text-left truncate cursor-pointer ${
                         isActive ? 'text-white' : 'text-neutral-700'
                     }`}
                     title={sceneId}
@@ -484,9 +467,9 @@ function SceneTile({
                 </button>
             )}
 
-            {/* hover-only action chips, top-right */}
+            {/* hover-only action chips, trailing */}
             {!editing && (
-                <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
                     {isPrefabSource && (
                         <span
                             className={`inline-flex items-center px-1 py-0.5 text-[9px] font-mono ${

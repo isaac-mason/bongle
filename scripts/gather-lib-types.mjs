@@ -2,26 +2,30 @@
 // types tree, run after `tsgo -p tsconfig.build.json` emits bongle's own d.ts
 // into dist/types/node_modules/bongle/.
 //
-// bongle's d.ts references our github libs by bare specifier (`export * from
-// 'mathcat'`, `RigidBody` from 'crashcat', …). Those aren't on npm, so Monaco
-// can't fetch them via ATA — we copy their prebuilt dist d.ts in beside bongle.
-// The set is closed at these four: mathcat/packcat have no deps, gpucat→mathcat,
-// crashcat→mathcat (+ `three`, which IS npm → left to ATA). Real npm packages
-// (three/react/zustand/lucide/@webgpu) are ATA's job, not copied here.
+// bongle's d.ts references our first-party libs by bare specifier (`RigidBody`
+// from 'crashcat', vecs from 'mathcat', …). Those aren't on npm, so we copy their
+// prebuilt dist d.ts in as real node_modules packages — user code imports
+// mathcat/gpucat/crashcat/packcat DIRECTLY (there's no `bongle/<lib>` re-export).
+// We also gather @webgpu/types for the ambient GPU* globals the engine uses.
+// `three` (crashcat's optional peer dep) and editor-only npm (react/zustand/
+// lucide) are intentionally left out.
 //
-// Also writes bongle's package.json with a types-only exports map (the real
-// one points at .ts source) so `bongle`, `bongle/interface`, `bongle/mathcat`,
-// … resolve to the emitted .d.ts.
+// Also writes bongle's package.json with a types-only exports map (the real one
+// points at .ts source) so `bongle`, `bongle/interface`, … resolve to the
+// emitted .d.ts.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NM = join(ROOT, 'dist/types/node_modules');
 const BONGLE = join(NM, 'bongle');
 
-// closed set of first-party github libs bongle's d.ts references.
+// closed set of first-party libs bongle's d.ts references (all ship built d.ts).
 const LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat'];
 
 /** package root dir for a bare name — walk up from its resolved main entry to
@@ -64,6 +68,11 @@ for (const lib of LIBS) {
     copyTypes(resolvePkgDir(lib), join(NM, lib));
     console.log(`gathered types: ${lib}`);
 }
+
+// @webgpu/types — ambient GPU* globals. Types-only (no runtime entry for
+// import.meta.resolve), so resolve via its package.json.
+copyTypes(dirname(require.resolve('@webgpu/types/package.json')), join(NM, '@webgpu', 'types'));
+console.log('gathered types: @webgpu/types');
 
 // bongle types-package.json: rewrite the real exports' .ts targets to .d.ts,
 // keeping only subpaths whose declaration was emitted.

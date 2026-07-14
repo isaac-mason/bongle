@@ -43,8 +43,8 @@ export function Taskbar({ items, footer }: { items: TaskbarItem[]; footer?: Task
             <button
                 key={it.id}
                 type="button"
-                title={it.title}
-                className={`relative grid h-8 w-8 cursor-pointer place-items-center border border-border font-mono text-[15px] leading-none ${
+                aria-label={it.title}
+                className={`group relative grid h-8 w-8 cursor-pointer place-items-center border border-border font-mono text-[15px] leading-none ${
                     active ? 'taskbar-active' : 'bg-surface text-fg'
                 } ${minimized ? 'opacity-50' : ''}`}
                 onClick={() => (toggleMinimize ? setMode(it.id, 'minimized') : (it.onClick ?? (() => focus(it.id)))())}
@@ -57,6 +57,10 @@ export function Taskbar({ items, footer }: { items: TaskbarItem[]; footer?: Task
                 {/* macOS-style running indicator, just left of the icon. */}
                 {running && <span className="absolute top-1/2 -left-1.5 h-3 w-[3px] -translate-y-1/2 bg-fg" />}
                 {it.glyph}
+                {/* hover label popover, to the right of the taskbar (CSS-only). */}
+                <span className="pointer-events-none absolute top-1/2 left-full z-[1] ml-2 hidden -translate-y-1/2 whitespace-nowrap border border-border bg-surface px-2 py-1 font-mono text-xs text-fg shadow-[2px_2px_0_rgba(0,0,0,0.4)] group-hover:block">
+                    {it.title}
+                </span>
             </button>
         );
     };

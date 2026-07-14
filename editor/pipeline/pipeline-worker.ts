@@ -39,7 +39,9 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     env.server = true;
     env.editor = true;
     await runner.import('src/index.ts'); // user declarations register into this realm's engine
-    const { __kit } = await runner.import('bongle/internal');
+    // registry is populated by the import above — the prod build reads matchmaking
+    // off it (see below), since the build itself never evaluates user code.
+    const { __kit, registry } = await runner.import('bongle/internal');
     // engine-asset-pipeline exposes the data baker (`AssetPipeline`) and the
     // post-bake icon render step (`Icons`). Both run in THIS realm, so they see
     // the registry the user declarations populated (a static worker import would
@@ -127,7 +129,10 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
                 const t0 = performance.now();
                 const r = await AssetPipeline.run(pipeline, {});
                 log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-                post({ type: 'baked', atlasChanged: r.atlasChanged });
+                // report matchmaking (singleton id 'main') so the prod build has a
+                // current maxPlayers without evaluating user code itself.
+                const maxPlayers = registry.matchmaking.byId.get('main')?.payload?.maxPlayers;
+                post({ type: 'baked', atlasChanged: r.atlasChanged, maxPlayers });
             } catch (err) {
                 log(`bake error: ${(err as Error).message}`);
             } finally {

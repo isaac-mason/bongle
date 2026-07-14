@@ -8,8 +8,9 @@ import { Image, Music, Paintbrush } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
 import { useBlockbench } from '../stores/blockbench';
-import { useEditor } from '../stores/editor';
+import { MAIN_PANE, useEditor } from '../stores/editor';
 import { useLaunched } from '../stores/launched';
+import { useSystemWindows } from '../stores/system-windows';
 import { AUDIO_EXTS } from './audio-mime';
 import { AudioPlayer } from './components/AudioPlayer';
 import { Blockbench } from './components/Blockbench';
@@ -99,4 +100,8 @@ export function openPath(path: string, pane: string): void {
         return;
     }
     useEditor.getState().open(pane, path);
+    // the main pane lives in the closable 'code' system window; opening a file
+    // while it's closed would drop the tab into an invisible window, so reopen
+    // (+ raise) it. Torn-off panes render their own always-visible windows.
+    if (pane === MAIN_PANE) useSystemWindows.getState().open('code');
 }

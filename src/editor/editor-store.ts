@@ -74,21 +74,19 @@ export type EditorStore = {
     resources: Resources | null;
 
     /* ── blueprints (editor-only) ──
-     * Payloads pulled in by `blueprints.ts` off the kit's
-     * `bongle:scene-update` HMR channel (edit-mode dev only). Keyed by scene
-     * id (always `blueprints/...`); read by the inventory + placement tool
-     * to look up node trees without consulting the runtime scene registry. */
+     * Payloads pulled in by `blueprints.ts` from the injected scene source
+     * (the browser editor's OPFS). Keyed by scene id (always `blueprints/...`);
+     * read by the inventory + placement tool to look up node trees without
+     * consulting the runtime scene registry. */
     blueprints: Map<string, ScenePayload>;
     setBlueprint: (id: string, payload: ScenePayload) => void;
     removeBlueprint: (id: string) => void;
 
     /* ── scene list (editor-only) ──
-     * Mirror of the kit plugin's authoritative scene set, pulled in by
-     * `blueprints.ts` off the `bongle:scene-list` HMR channel +
-     * an initial `/__bongle/scenes` cold-fetch. Includes every
-     * `scene()`-declared id and (in edit mode) every `blueprints/...`
-     * file on disk. Read by the scenes drawer, inventory, and the
-     * blueprint sync loop itself. */
+     * The authoritative scene set, listed by `blueprints.ts` from the injected
+     * scene source. Includes every `scene()`-declared id and (in edit mode)
+     * every `blueprints/...` file on disk. Read by the scenes drawer, inventory,
+     * and the blueprint sync loop itself. */
     sceneList: string[];
     setSceneList: (sceneList: string[]) => void;
 

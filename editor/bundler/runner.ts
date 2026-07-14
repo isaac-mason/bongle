@@ -39,13 +39,15 @@ class BrowserEvaluator extends ESModulesEvaluator {
 
 /** npm deps bundled into the engine dist reference `process` — mostly
  *  `process.env.NODE_ENV` (the prebundle also build-defines this to a literal),
- *  plus a few runtime probes (emit/cpuUsage/memoryUsage). The browser realm has
- *  no `process`, so install a minimal shim before any engine chunk evaluates. */
-function ensureProcessShim(): void {
+ *  plus a few runtime probes (emit/cpuUsage/memoryUsage). @rolldown/browser's
+ *  bundler (main-thread prod build) also reads `process` in bindingifyInputOptions.
+ *  The browser has no `process`, so install a minimal shim before either runs. */
+export function ensureProcessShim(): void {
     // biome-ignore lint/suspicious/noExplicitAny: patching the realm global.
     const g = globalThis as any;
     g.process ??= {
         env: { NODE_ENV: 'production' },
+        cwd: () => '/',
         emit: () => false,
         cpuUsage: () => ({ user: 0, system: 0 }),
         memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),

@@ -37,10 +37,11 @@ export default defineConfig({
     // registry user code writes to is the same one the pipeline reads.
     optimizeDeps: {
         exclude: ['bongle', 'gpucat', 'mathcat', 'packcat', 'crashcat'],
-        // @rolldown/browser is imported ONLY from the bundler worker now. Without
-        // pre-bundling, the worker resolves its `default` (node) export, which
-        // imports `node:url` and dies silently on load. Force pre-bundling so the
-        // worker gets the `browser` build.
-        include: ['@rolldown/browser/experimental'],
+        // @rolldown/browser: the bundler worker uses `/experimental` (transform +
+        // module-runner rewrite); the main-thread prod build (editor/build) uses
+        // the `.` export (full `rolldown` bundler). Both must be pre-bundled or
+        // vite resolves their `default` (node) export, which imports `node:url`
+        // and dies silently on load — force the `browser` build for each.
+        include: ['@rolldown/browser/experimental', '@rolldown/browser'],
     },
 });

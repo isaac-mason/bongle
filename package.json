@@ -52,18 +52,6 @@
             "import": "./src/internal.ts",
             "default": "./src/internal.ts"
         },
-        "./mathcat": {
-            "import": "./src/libs/mathcat.ts",
-            "default": "./src/libs/mathcat.ts"
-        },
-        "./crashcat": {
-            "import": "./src/libs/crashcat.ts",
-            "default": "./src/libs/crashcat.ts"
-        },
-        "./gpucat": {
-            "import": "./src/libs/gpucat.ts",
-            "default": "./src/libs/gpucat.ts"
-        },
         "./interface": {
             "import": "./interface/index.ts",
             "default": "./interface/index.ts"
