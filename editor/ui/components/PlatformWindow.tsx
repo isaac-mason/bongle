@@ -5,8 +5,9 @@
 // initiated — the buttons run the shared platform actions and hand payloads to
 // the platform over the bridge. A taskbar entry keeps it reachable if minimized.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
+import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../game-save';
 import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/actions';
 import { useMultiplayer } from '../../stores/multiplayer';
 import { usePlatform } from '../../stores/platform';
@@ -50,7 +51,11 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
         <Window id={PLATFORM_WINDOW_ID} title={`editing ${label}`}>
             <div className="flex flex-col gap-1.5 p-2">
                 {intent.kind === 'avatar' ? (
-                    <button type="button" className={BTN} onClick={() => void saveAvatar(fs, intent.name ?? 'avatar', intent.canEdit)}>
+                    <button
+                        type="button"
+                        className={BTN}
+                        onClick={() => void saveAvatar(fs, intent.name ?? 'avatar', intent.canEdit)}
+                    >
                         Save avatar to bongle
                     </button>
                 ) : (
@@ -61,6 +66,7 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                         <button type="button" className={BTN} onClick={() => void runSave(fs)}>
                             Save source
                         </button>
+                        <SaveSizeIndicator fs={fs} />
                         <MultiplayerControl />
                     </>
                 )}
@@ -70,6 +76,38 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                 </button>
             </div>
         </Window>
+    );
+}
+
+/** Live estimate of the current save size, amber past the warn threshold and red
+ *  over the hard cap (a save over the cap is refused). Recomputes only on
+ *  SOURCE-file changes (not derived bake writes), so it stays cheap + event-driven. */
+function SaveSizeIndicator({ fs }: { fs: Filesystem }) {
+    const [bytes, setBytes] = useState<number | null>(null);
+    useEffect(() => {
+        let live = true;
+        const recompute = () =>
+            void saveSizeBytes(fs).then((b) => {
+                if (live) setBytes(b);
+            });
+        recompute();
+        const handle = fs.watch((changes) => {
+            if (changes.some((c) => isSourcePath(c.path))) recompute();
+        });
+        return () => {
+            live = false;
+            handle.close();
+        };
+    }, [fs]);
+
+    if (bytes === null) return null;
+    const capMb = SAVE_MAX_BYTES / (1024 * 1024);
+    const mb = bytes / (1024 * 1024);
+    const color = bytes > SAVE_MAX_BYTES ? 'text-red-500' : bytes > SAVE_WARN_BYTES ? 'text-amber-500' : 'text-fg-muted';
+    return (
+        <span className={`text-[10px] ${color}`}>
+            save size: {mb.toFixed(1)} MB / {capMb} MB{bytes > SAVE_MAX_BYTES ? ' — over limit, trim assets/' : ''}
+        </span>
     );
 }
 

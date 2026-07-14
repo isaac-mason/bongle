@@ -5,7 +5,7 @@
 
 import { buildBundle, downloadBundle } from '../build/build';
 import type { Filesystem } from '../fs';
-import { downloadGameSave, exportGameSave } from '../game-save';
+import { downloadGameSave, exportGameSave, SAVE_MAX_BYTES, saveSizeBytes } from '../game-save';
 import { useBuildMeta } from '../stores/build-meta';
 import { useBuildProgress } from '../stores/build-progress';
 import { logger } from '../stores/logs';
@@ -20,17 +20,25 @@ export async function runBuild(fs: Filesystem): Promise<void> {
     progress.begin();
     try {
         const t0 = performance.now();
-        const opts = { maxPlayers: useBuildMeta.getState().maxPlayers, onProgress: (l: string) => useBuildProgress.getState().step(l) };
+        const opts = {
+            maxPlayers: useBuildMeta.getState().maxPlayers,
+            onProgress: (l: string) => useBuildProgress.getState().step(l),
+        };
         let size: number;
         if (embedded) {
             const zip = await buildBundle(fs, opts);
-            usePlatform.getState().send({ type: 'bongle:build', payload: zip });
+            // ship the source alongside the built bundle so the platform can
+            // snapshot it as a game_version + record the build's provenance.
+            const source = await exportGameSave(fs);
+            usePlatform.getState().send({ type: 'bongle:build', payload: zip, source });
             size = zip.length;
         } else {
             size = await downloadBundle(fs, opts);
         }
         progress.finish(size);
-        log(`bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`);
+        log(
+            `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
+        );
     } catch (err) {
         progress.fail((err as Error).message);
         log(`build failed: ${(err as Error).message}`);
@@ -38,8 +46,17 @@ export async function runBuild(fs: Filesystem): Promise<void> {
     }
 }
 
-/** save the game source. Embedded → hand to the platform; standalone → download. */
+/** save the game source. Embedded → hand to the platform; standalone → download.
+ *  Refuses over the size cap (the server enforces the same; this saves a
+ *  round-trip + gives a clear, actionable message). */
 export async function runSave(fs: Filesystem): Promise<void> {
+    const size = await saveSizeBytes(fs);
+    if (size > SAVE_MAX_BYTES) {
+        const mb = (size / (1024 * 1024)).toFixed(1);
+        const cap = Math.round(SAVE_MAX_BYTES / (1024 * 1024));
+        alert(`Save is ${mb} MB, over the ${cap} MB limit. Trim assets under assets/ and try again.`);
+        return;
+    }
     if (usePlatform.getState().embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportGameSave(fs) });
     else await downloadGameSave(fs);
 }

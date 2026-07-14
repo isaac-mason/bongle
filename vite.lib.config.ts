@@ -112,6 +112,10 @@ export default defineConfig({
                 'engine-asset-pipeline': 'src/asset-pipeline/index.ts',
                 starter: 'src/starter/index.ts',
                 interface: 'interface/index.ts',
+                // exports-map subpath imported by game projects (the 6bone rig);
+                // must be emitted here or `bongle/avatar/rig` resolves to a missing
+                // dist/avatar/rig.js in the editor's seeded node_modules.
+                'avatar/rig': 'src/core/avatar/rig.ts',
             },
             external(id: string) {
                 if (id.startsWith('node:')) return true;

@@ -23,3 +23,7 @@ export type {
     User,
 } from './server';
 export { server } from './server';
+
+// editor⇄platform boundary (the editor mounted in an iframe by the platform).
+export { EDITOR_INTERFACE_VERSION } from './editor';
+export type { EditorMessage, PlatformIntent, PlatformMessage, PlatformResult } from './editor';

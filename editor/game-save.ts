@@ -26,6 +26,25 @@ export function isSourcePath(path: FsPath): boolean {
     return !isDerived(path);
 }
 
+/** Server-enforced per-save cap (mirrors the game_version.size_bytes CHECK). */
+export const SAVE_MAX_BYTES = 20 * 1024 * 1024;
+/** Warn threshold (~80% of the cap) — surfaced before the hard limit. */
+export const SAVE_WARN_BYTES = 16 * 1024 * 1024;
+
+/** Estimate a save's zip size WITHOUT zipping. Saves use STORE (level 0), so the
+ *  zip is ≈ Σ(source-file bytes) + minor per-entry overhead — summing the
+ *  source-set file sizes off the fs listing (no reads) is a good-enough gauge for
+ *  the size indicator + the on-save guard. */
+export async function saveSizeBytes(fs: Filesystem): Promise<number> {
+    const files = await fs.list('', { recursive: true });
+    let total = 0;
+    for (const f of files) {
+        if (f.kind !== 'file' || isDerived(f.path)) continue;
+        total += f.size;
+    }
+    return total;
+}
+
 /** zip the project's source set (derived trees excluded). */
 export async function exportGameSave(fs: Filesystem): Promise<Uint8Array> {
     const files = await fs.list('', { recursive: true });

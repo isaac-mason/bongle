@@ -6,6 +6,7 @@
 // falls back to the default sample project. After init, the editor hands finished
 // payloads back (save/build/avatar-export) and receives result acks.
 
+import { EDITOR_INTERFACE_VERSION, editorInterfaceCompatible } from './contract';
 import type { EditorMessage, PlatformIntent, PlatformMessage, PlatformResult } from './contract';
 
 /** how long to wait for the platform's init before assuming we're standalone.
@@ -49,6 +50,11 @@ export function createPlatformBridge(): PlatformBridge {
             if (!m || typeof m.type !== 'string' || !m.type.startsWith('bongle:')) return;
             if (m.type === 'bongle:init') {
                 if (settled) return;
+                if (!editorInterfaceCompatible(m.version, EDITOR_INTERFACE_VERSION)) {
+                    console.warn(
+                        `[bongle] editor⇄platform interface mismatch: platform ${m.version}, editor ${EDITOR_INTERFACE_VERSION}`,
+                    );
+                }
                 settled = true;
                 embedded = true;
                 resolve(m.intent);
@@ -67,7 +73,7 @@ export function createPlatformBridge(): PlatformBridge {
         // iframe's JS runs (cached/fast reload) — the classic iframe-handshake
         // race that makes the "editing X" window flicker in and out across
         // reboots. Bounded: give up to standalone after INIT_TIMEOUT_MS.
-        send({ type: 'bongle:ready' });
+        send({ type: 'bongle:ready', version: EDITOR_INTERFACE_VERSION });
         const started = performance.now();
         const beat = setInterval(() => {
             if (settled) {
@@ -80,7 +86,7 @@ export function createPlatformBridge(): PlatformBridge {
                 resolve(null); // no platform answered → standalone
                 return;
             }
-            send({ type: 'bongle:ready' }); // parent may only now be listening
+            send({ type: 'bongle:ready', version: EDITOR_INTERFACE_VERSION }); // parent may only now be listening
         }, 150);
     });
 
