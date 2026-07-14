@@ -8,6 +8,7 @@ generated
 resources
 vendor
 editor-node-modules.zip
+.tsbuild-cache
 
 .DS_Store
 **/.DS_Store

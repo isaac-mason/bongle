@@ -18,6 +18,11 @@ export const PLATFORM_WINDOW_ID = 'platform';
 
 const BTN = 'w-full cursor-pointer border border-border bg-surface px-2 py-1.5 text-left text-xs hover:bg-hover';
 
+// bigger footprint now that the window carries build/save + the multiplayer
+// control (which grows a share-link block when a session is open).
+const PLATFORM_W = 300;
+const PLATFORM_H = 220;
+
 export function PlatformWindow({ fs }: { fs: Filesystem }) {
     const intent = usePlatform((s) => s.intent);
     const embedded = usePlatform((s) => s.embedded);
@@ -25,24 +30,17 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
 
     useEffect(() => {
         if (!embedded) return;
-        // avatar mode gives Blockbench the center, so dock the widget top-right;
-        // other intents keep it top-left (just right of the taskbar).
-        const avatar = intent?.kind === 'avatar';
-        register(PLATFORM_WINDOW_ID, {
-            x: avatar ? Math.max(TASKBAR_W + 12, window.innerWidth - 252) : TASKBAR_W + 12,
-            y: 12,
-            w: 240,
-            h: 132,
-        });
-        if (!avatar) return;
-        // `register` is idempotent (a prior top-left placement, e.g. across HMR,
-        // would stick) and may run before the embedded iframe has its final width.
-        // `move` overrides, so re-pin top-right now and on every resize.
-        const pin = () => useWindows.getState().move(PLATFORM_WINDOW_ID, window.innerWidth - 252, 12);
+        // dock top-right for BOTH game + avatar — keeps the canvas center clear.
+        // `register` is idempotent (a stale placement across HMR would stick) and
+        // may run before the iframe has its final width, so re-pin the x now + on
+        // every resize.
+        const topRightX = () => Math.max(TASKBAR_W + 12, window.innerWidth - PLATFORM_W - 12);
+        register(PLATFORM_WINDOW_ID, { x: topRightX(), y: 12, w: PLATFORM_W, h: PLATFORM_H });
+        const pin = () => useWindows.getState().move(PLATFORM_WINDOW_ID, topRightX(), 12);
         pin();
         window.addEventListener('resize', pin);
         return () => window.removeEventListener('resize', pin);
-    }, [embedded, intent, register]);
+    }, [embedded, register]);
 
     if (!embedded || !intent) return null;
     const label = intent.kind === 'avatar' ? (intent.name ?? 'avatar') : 'game';
@@ -52,7 +50,7 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
         <Window id={PLATFORM_WINDOW_ID} title={`editing ${label}`}>
             <div className="flex flex-col gap-1.5 p-2">
                 {intent.kind === 'avatar' ? (
-                    <button type="button" className={BTN} onClick={() => void saveAvatar(fs, intent.name ?? 'avatar')}>
+                    <button type="button" className={BTN} onClick={() => void saveAvatar(fs, intent.name ?? 'avatar', intent.canEdit)}>
                         Save avatar to bongle
                     </button>
                 ) : (

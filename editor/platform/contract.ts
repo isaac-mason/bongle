@@ -26,6 +26,12 @@ export type PlatformIntent =
           bbmodel?: string;
           /** display name / id for the avatar being edited. */
           name?: string;
+          /** the user may edit this existing avatar (save a new version of it): the
+           *  platform resolved `?edit=<slug>` AND confirmed the user is on its team
+           *  (the editor can't check team membership — it's platform auth). When
+           *  set, Save prompts for a version name prefilled "new version of <name>".
+           *  Absent for a brand-new avatar or a non-member. */
+          canEdit?: boolean;
       }
     | {
           /** join someone else's live edit session as a guest. The platform
@@ -40,7 +46,7 @@ export type EditorMessage =
     | { type: 'bongle:ready' }
     /** hand back the game-save source zip for the platform to persist. */
     | { type: 'bongle:save'; payload: Uint8Array }
-    /** hand back the built game-version bundle.zip for the platform to upload. */
+    /** hand back the built game-build bundle.zip for the platform to upload. */
     | { type: 'bongle:build'; payload: Uint8Array }
     /** hand back the exported avatar (compiled .glb + .bbmodel source) for the
      *  platform to upload (editor-initiated from the "editing X" window). */

@@ -2253,9 +2253,17 @@ export async function refresh(
         if (prev.meshDispatcher) setMeshRegistry(prev.meshDispatcher, registry);
         return { resources: prev, changed: false };
     }
-    if (prev) dispose(prev);
+    // Build + load the replacement BEFORE disposing `prev`. The caller keeps
+    // rendering `prev` (via `state.voxelResources` + each room's voxelVisuals)
+    // across `load`'s async gap; disposing `prev` up front would destroy the GPU
+    // buffers those in-flight RAF frames still submit against ("Buffer used in
+    // submit while destroyed"). `prev` and `built` coexist for the load window —
+    // a transient VRAM cost for a safe swap. The caller re-points every reference
+    // synchronously once we return, so there's no render frame between this
+    // dispose and the swap.
     const built = init(registry, env, budget);
     await load(built, registry, workerCount, workerQueueDepth, resources, renderer, meta);
+    if (prev) dispose(prev);
     return { resources: built, changed: true };
 }
 

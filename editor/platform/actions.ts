@@ -47,7 +47,7 @@ export async function runSave(fs: Filesystem): Promise<void> {
 /** hand the edited avatar (Blockbench-compiled glb + bbmodel source) to the
  *  platform. Blockbench writes both to the fs on save (Ctrl+S); if it hasn't yet,
  *  the compiled glb is missing — tell the user locally rather than the platform. */
-export async function saveAvatar(fs: Filesystem, name: string): Promise<void> {
+export async function saveAvatar(fs: Filesystem, name: string, canEdit = false): Promise<void> {
     let glb: Uint8Array;
     let bbmodel: string;
     try {
@@ -57,7 +57,15 @@ export async function saveAvatar(fs: Filesystem, name: string): Promise<void> {
         alert('Save your model in Blockbench first (Ctrl+S), then Save avatar to bongle.');
         return;
     }
-    usePlatform.getState().send({ type: 'bongle:avatar-export', glb, bbmodel, name });
+    // editing an existing team avatar → save as a new version, prefilling a name
+    // the user can tweak. `canEdit` is the platform's team-membership verdict.
+    let outName = name;
+    if (canEdit) {
+        const v = window.prompt('Name this version', `new version of ${name}`);
+        if (v === null) return; // cancelled
+        outName = v.trim() || name;
+    }
+    usePlatform.getState().send({ type: 'bongle:avatar-export', glb, bbmodel, name: outName });
 }
 
 /** ask the platform to navigate back to bongle.io. The editor never navigates

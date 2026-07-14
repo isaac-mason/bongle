@@ -95,6 +95,18 @@ export async function wrapModuleDeps(
 
     // Inject `__kit.deps(...)` around eligible prefab()/script() calls.
     const rewritten = wrapConsumerCalls(code, table, registry);
+
+    // Drop the consumer AST nodes now the wrap is done — they are the ONLY
+    // field that holds rolldown parse nodes. Those nodes carry lazy-accessor
+    // functions (e.g. `() => ({ moduleReference, ... })`) that are NOT
+    // structured-cloneable, and they pin the parse buffer alive. This table
+    // lives on in the long-lived `symbolTables` registry (for cross-module
+    // resolution, which only reads bindings/exports/resolvedSources), so
+    // leaving the nodes in would leak the parse buffer across the whole module
+    // graph and risk a non-cloneable node escaping over a worker boundary.
+    // After this, every retained table is pure plain data.
+    table.consumers = [];
+
     return rewritten ?? code;
 }
 

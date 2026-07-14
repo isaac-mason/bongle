@@ -62,14 +62,26 @@ export function createPlatformBridge(): PlatformBridge {
                 multiplayerPending = null;
             }
         });
+        // Re-announce `ready` until the parent acks with `init`. A single ping
+        // can be lost when the parent's message listener attaches AFTER the
+        // iframe's JS runs (cached/fast reload) — the classic iframe-handshake
+        // race that makes the "editing X" window flicker in and out across
+        // reboots. Bounded: give up to standalone after INIT_TIMEOUT_MS.
         send({ type: 'bongle:ready' });
-        // no init within the window → treat as standalone.
-        setTimeout(() => {
-            if (!settled) {
-                settled = true;
-                resolve(null);
+        const started = performance.now();
+        const beat = setInterval(() => {
+            if (settled) {
+                clearInterval(beat);
+                return;
             }
-        }, INIT_TIMEOUT_MS);
+            if (performance.now() - started >= INIT_TIMEOUT_MS) {
+                clearInterval(beat);
+                settled = true;
+                resolve(null); // no platform answered → standalone
+                return;
+            }
+            send({ type: 'bongle:ready' }); // parent may only now be listening
+        }, 150);
     });
 
     return {
