@@ -1,12 +1,13 @@
-// editor/ui/components/Monaco.tsx — the code editor (Monaco), one editor
-// instance sharing a per-path model cache with the file tree. Ctrl/Cmd+S writes
-// to the project fs (→ bundler watcher → HMR re-bake); dirty state is published
-// to the shared open-file store so the tree can show it VSCode-style.
+// editor/ui/components/Monaco.tsx — a code editor instance, one per editor group.
+// Every instance shares the module-level per-path model cache, so the same file
+// open in two groups is the SAME buffer (edits + dirty mirror). Ctrl/Cmd+S writes
+// to the project fs (→ bundler watcher → HMR re-bake); dirty state is published to
+// the editor store (path-keyed) so tabs + the tree can show it VSCode-style.
 
 import * as monaco from 'monaco-editor';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Filesystem } from '../../fs';
-import { useOpenFile } from '../../stores/open-file';
+import { useEditor } from '../../stores/editor';
 import './monaco-env'; // side-effect: bundle + register the language workers.
 
 monaco.typescript.typescriptDefaults.setCompilerOptions({
@@ -24,7 +25,7 @@ monaco.typescript.typescriptDefaults.setDiagnosticsOptions({
     noSyntaxValidation: false,
 });
 
-// models + last-saved text persist across file switches (buffers survive).
+// models + last-saved text persist across file switches + groups (shared buffers).
 const models = new Map<string, monaco.editor.ITextModel>();
 const savedText = new Map<string, string>();
 
@@ -40,9 +41,32 @@ function langOf(path: string): string {
     return 'plaintext';
 }
 
-export function Monaco({ fs }: { fs: Filesystem }) {
-    const active = useOpenFile((s) => s.active);
-    const reveal = useOpenFile((s) => s.reveal);
+/** get (or lazily create) the shared model for a path. The dirty listener is
+ *  attached once, here, so N group editors showing the file don't double-count. */
+async function getOrCreateModel(fs: Filesystem, path: string): Promise<monaco.editor.ITextModel> {
+    const cached = models.get(path);
+    if (cached) return cached;
+    let text = '';
+    try {
+        text = await fs.readText(path);
+    } catch {
+        /* new/empty file */
+    }
+    const raced = models.get(path); // another instance may have created it during the await
+    if (raced) return raced;
+    const uri = monaco.Uri.parse(`file:///${path}`);
+    const model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, langOf(path), uri);
+    models.set(path, model);
+    savedText.set(path, text);
+    model.onDidChangeContent(() => {
+        useEditor.getState().setDirty(path, model.getValue() !== (savedText.get(path) ?? ''));
+    });
+    return model;
+}
+
+export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
+    const active = useEditor((s) => s.groups[group]?.active ?? null);
+    const reveal = useEditor((s) => s.reveal);
     const containerRef = useRef<HTMLDivElement>(null);
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
@@ -67,6 +91,8 @@ export function Monaco({ fs }: { fs: Filesystem }) {
             theme: 'vs-dark', // match the dark editor chrome
         });
         editorRef.current = ed;
+        // focusing this editor makes its group the pane's active target.
+        ed.onDidFocusEditorText(() => useEditor.getState().focusGroup(group));
         ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
             const model = ed.getModel();
             if (!model) return;
@@ -74,52 +100,41 @@ export function Monaco({ fs }: { fs: Filesystem }) {
             const value = model.getValue();
             void fs.write(path, value);
             savedText.set(path, value);
-            useOpenFile.getState().setDirty(path, false);
+            useEditor.getState().setDirty(path, false);
         });
         return () => ed.dispose();
-    }, [fs]);
+    }, [fs, group]);
 
-    // swap the model when the active file changes (load lazily, cache).
+    // swap the model when this group's active file changes (load lazily, cache).
     useEffect(() => {
         const ed = editorRef.current;
-        if (!ed || !active) return;
+        if (!ed) return;
+        // no active tab (e.g. "close all") → detach the model so the editor clears.
+        if (!active) {
+            ed.setModel(null);
+            return;
+        }
         let cancelled = false;
         void (async () => {
-            let model = models.get(active);
-            if (!model) {
-                let text = '';
-                try {
-                    text = await fs.readText(active);
-                } catch {
-                    /* new/empty file */
-                }
-                if (cancelled) return;
-                const uri = monaco.Uri.parse(`file:///${active}`);
-                model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(text, langOf(active), uri);
-                models.set(active, model);
-                savedText.set(active, text);
-                model.onDidChangeContent(() => {
-                    useOpenFile.getState().setDirty(active, model!.getValue() !== (savedText.get(active) ?? ''));
-                });
-            }
+            const model = await getOrCreateModel(fs, active);
             if (cancelled) return;
             ed.setModel(model);
             // if a search hit asked to jump here, do it now the model is loaded.
-            const r = useOpenFile.getState().reveal;
-            if (r && r.path === active) revealLine(r.line);
+            const r = useEditor.getState().reveal;
+            if (r && r.group === group && r.path === active) revealLine(r.line);
         })();
         return () => {
             cancelled = true;
         };
-    }, [active, fs, revealLine]);
+    }, [active, fs, group, revealLine]);
 
     // reveal a line when the request changes and the model is already loaded
-    // (jumping to another hit in the file that's already open).
+    // (jumping to another hit in the file that's already open in this group).
     useEffect(() => {
-        if (!reveal) return;
+        if (!reveal || reveal.group !== group) return;
         const model = editorRef.current?.getModel();
         if (model && model.uri.path.replace(/^\/+/, '') === reveal.path) revealLine(reveal.line);
-    }, [reveal, revealLine]);
+    }, [reveal, group, revealLine]);
 
-    return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
+    return <div ref={containerRef} className="h-full w-full" />;
 }

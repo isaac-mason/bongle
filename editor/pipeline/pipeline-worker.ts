@@ -22,9 +22,19 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // doc's atlas view to re-read; no snapshot.
     const fs = await openOpfsFilesystem(projectName);
 
+    // the bake writes through THIS fs handle; OPFS has no cross-context change
+    // events, so relay those writes to the main doc, which HMRs the generated
+    // barrel (bin paths → server/client) + refreshes baked resources.
+    fs.watch((changes) => post({ type: 'fs-changed', changes }));
+
     // evaluate user code via a ModuleRunner bridged to the bundler worker (it
     // transforms; this realm evaluates → its own engine registry).
     const runner = makeRunner(createPortBridge(bundlerPort));
+    // runtime env flags before user/engine eval (mirrors the kit entry).
+    const { env } = await runner.import('bongle/env');
+    env.client = false;
+    env.server = true;
+    env.editor = true;
     console.log('[pipeline-worker] importing src/index.ts…');
     await runner.import('src/index.ts'); // user declarations register into this realm's engine
     console.log('[pipeline-worker] src/index.ts done');

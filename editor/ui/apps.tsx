@@ -4,12 +4,12 @@
 // falling back to a code-editor tab. Launching is dynamic (one window per
 // file) — see the launched store.
 
-import { Blocks, Image, Music, Paintbrush } from 'lucide-react';
+import { Image, Music, Paintbrush } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
 import { useBlockbench } from '../stores/blockbench';
+import { useEditor } from '../stores/editor';
 import { useLaunched } from '../stores/launched';
-import { useOpenFile } from '../stores/open-file';
 import { AUDIO_EXTS } from './audio-mime';
 import { AudioPlayer } from './components/AudioPlayer';
 import { Blockbench } from './components/Blockbench';
@@ -66,7 +66,8 @@ export const audioPlayerApp: AppDef = {
 export const blockbenchApp: AppDef = {
     id: 'blockbench',
     title: 'blockbench',
-    glyph: <Blocks size={18} />,
+    // the real Blockbench logo from the embedded static build.
+    glyph: <img src="/static/blockbench/favicon.png" alt="" className="h-[18px] w-[18px]" />,
     handles: ['bbmodel'],
     initial: { w: 960, h: 640 },
     singleton: true,
@@ -86,8 +87,9 @@ export function appById(id: string): AppDef | undefined {
     return APPS.find((a) => a.id === id);
 }
 
-/** open a file from the tree: hand it to its app, or a code-editor tab. */
-export function openPath(path: string): void {
+/** open a file from a pane's tree: hand it to its app (own window), or open a
+ *  code-editor tab in that pane's active group. */
+export function openPath(path: string, pane: string): void {
     const app = appForFile(path);
     if (app) {
         useLaunched.getState().launch(app, path);
@@ -96,5 +98,5 @@ export function openPath(path: string): void {
         if (app.singleton) useBlockbench.getState().open(path);
         return;
     }
-    useOpenFile.getState().open(path);
+    useEditor.getState().open(pane, path);
 }

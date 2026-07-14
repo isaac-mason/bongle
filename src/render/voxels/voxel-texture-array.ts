@@ -15,7 +15,7 @@
 // blending to kill minification aliasing at distance. all layers are TILE_SIZE².
 
 import { ArrayTexture } from 'gpucat';
-import { assetUrl } from '../asset-url';
+import type { ResourceLoader } from '../../core/resource-loader';
 import { buildVoxelMipPyramid } from './voxel-mip-pyramid';
 
 // ── constants ───────────────────────────────────────────────────────
@@ -41,21 +41,6 @@ export type BlockTextureAtlasMetadata = {
     /** content hash from the kit asset pipeline (sources + tile size). */
     hash: string;
 };
-
-/** Fetch + parse voxels-atlas.json. Returns null on any failure (404,
- *  parse error, or content-type mismatch, Vite's SPA fallback returns
- *  index.html for missing files, so we explicitly check the type). */
-export async function fetchBlockTextureAtlasMetadata(): Promise<BlockTextureAtlasMetadata | null> {
-    try {
-        const resp = await fetch(assetUrl('voxels-atlas.json'), { cache: 'no-store' });
-        if (!resp.ok) return null;
-        const ct = resp.headers.get('content-type') ?? '';
-        if (!ct.includes('json')) return null;
-        return (await resp.json()) as BlockTextureAtlasMetadata;
-    } catch {
-        return null;
-    }
-}
 
 // ── create the array texture (sync, white placeholder) ──────────────
 
@@ -110,12 +95,16 @@ export async function loadBlockTextureAtlasIntoTextureArray(
     textureNames: string[],
     meta: BlockTextureAtlasMetadata,
     textureCutout: Uint8Array,
+    loader: ResourceLoader,
 ): Promise<void> {
     // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
     if (meta.textures.length === 0) return;
     let img: HTMLImageElement;
     try {
-        img = await loadImage(assetUrl('voxels-atlas.png'));
+        // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs),
+        // then a blob url — an <img> can't take a bare vfs/file path.
+        const bytes = await loader.loadBytes('voxels-atlas.png');
+        img = await loadImageFromBytes(bytes);
     } catch {
         return;
     }
@@ -217,13 +206,20 @@ export function writeBlockTextureAtlasIntoTextureArray(
 
 // ── helpers ─────────────────────────────────────────────────────────
 
-/** load an image from a URL, returns a promise that resolves when loaded */
-function loadImage(url: string): Promise<HTMLImageElement> {
+/** decode encoded image bytes → <img> via a transient object url (the loader
+ *  gives us bytes; an <img> can't source a bare vfs/file path). */
+function loadImageFromBytes(bytes: Uint8Array): Promise<HTMLImageElement> {
+    const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
     return new Promise((resolve, reject) => {
         const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(img);
+        };
+        img.onerror = (e) => {
+            URL.revokeObjectURL(url);
+            reject(e);
+        };
         img.src = url;
     });
 }

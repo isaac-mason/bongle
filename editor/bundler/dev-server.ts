@@ -104,12 +104,23 @@ async function resolve(state: DevServerState, spec: string, importer: string | u
         const pkg = await resolvePackage(state, spec);
         if (pkg) return pkg;
     }
-    // a root-absolute path emitted INSIDE a prebundled package (a code-split
-    // worker chunk like `/chunks/mesh-worker-spawn-x.js`) resolves against that
-    // package's dist root, not the vfs root.
+    // a root-absolute path FROM a prebundled package chunk. Two sources:
+    //   - a code-split ref emitted with a root path (`/chunks/mesh-worker.js`).
+    //   - a relative DYNAMIC import (`import('./chunks/x')`) the runner pre-
+    //     resolves against the module's bare-specifier base rather than its
+    //     resolved path, so `bongle/engine-server` + `./chunks/x` → `/bongle/chunks/x`.
+    // Resolve against the importer's package dist, stripping the runner's spurious
+    // `/<pkg>/` base prefix when present.
     if (spec.startsWith('/') && importer) {
-        const pkgDist = /^(node_modules\/(?:@[^/]+\/)?[^/]+\/dist)\//.exec(normalize(importer));
-        if (pkgDist) return withExt(state, `${pkgDist[1]}${spec}`);
+        const stripped = spec.replace(/^\/+/, '');
+        if (stripped.startsWith('node_modules/')) return withExt(state, stripped); // already a full vfs path
+        const imp = normalize(importer);
+        const distMatch = /^(node_modules\/(?:@[^/]+\/)?[^/]+\/dist)\//.exec(imp);
+        if (distMatch) {
+            const pkg = /^node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(imp)?.[1];
+            const tail = pkg && stripped.startsWith(`${pkg}/`) ? stripped.slice(pkg.length + 1) : stripped;
+            return withExt(state, `${distMatch[1]}/${tail}`);
+        }
     }
     // root-relative fs path ('src/index.ts' or '/src/index.ts').
     return withExt(state, normalize(spec));
@@ -268,10 +279,12 @@ export async function applyEdit(state: DevServerState, path: string): Promise<vo
     state.version++;
     state.transformCache.delete(id);
 
+    console.log(`[dev-server] applyEdit ${id} — envs with it:`, [...state.graphs].filter(([, g]) => g.has(id)).map(([e]) => e));
     for (const [env, g] of state.graphs) {
         if (!g.has(id)) continue; // this env never loaded the module
         const boundaries = computeBoundaries(g, id);
         const push = state.pushers.get(env);
+        console.log(`[dev-server] applyEdit ${id} env=${env} boundaries=`, boundaries, 'pusher=', !!push);
         if (boundaries === 'full-reload') {
             push?.({ type: 'full-reload', triggeredBy: id });
             continue;

@@ -35,8 +35,7 @@ export function MarkdownView({ fs, path }: { fs: Filesystem; path: string }) {
 
     return (
         <div
-            className="bongle-md"
-            style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#fff' }}
+            className="bongle-md absolute inset-0 overflow-auto bg-surface"
             // biome-ignore lint/security/noDangerouslySetInnerHtml: rendered Markdown (incl. raw HTML) from a local, user-authored file.
             dangerouslySetInnerHTML={{ __html: html }}
         />

@@ -568,10 +568,21 @@ export type Input = {
      *  death→respawn churn — with no relock dance. Default false; the player
      *  controller sets it true in `onInit`, fly/orbit set it false. */
     _lockWanted: boolean;
+    /** has this room's controller declared its lock intent at least once (any
+     *  `setPointerLock` call)? Distinguishes a freshly-mounted room whose
+     *  `_lockWanted=false` is merely the un-run default (intent still pending)
+     *  from a live room whose `false` is authoritative. `reconcilePointerLock`
+     *  holds a lock through a room swap only while intent is still pending. */
+    _lockDeclared: boolean;
 };
 
 export function createInput(): Input {
-    return { mouseKeyboard: createMouseKeyboardInput(), touch: createTouchInput(), _lockWanted: false };
+    return {
+        mouseKeyboard: createMouseKeyboardInput(),
+        touch: createTouchInput(),
+        _lockWanted: false,
+        _lockDeclared: false,
+    };
 }
 
 export function resetInput(input: Input): void {
@@ -811,16 +822,14 @@ export function createInputManager(touch: boolean): InputManager {
 }
 
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
-    // carry mouse-look intent across a room swap: the destination room's controller
-    // hasn't run onInit yet, so its `_lockWanted` is still false — without this the
-    // reconcile below would release the lock in the gap before the new room re-declares
-    // it. the new room's controller corrects this on its next tick (a no-lock room
-    // sets it false and the following reconcile releases, as it should).
-    if (target && target !== m.target && m.target?._lockWanted) target._lockWanted = true;
     m.target = target;
-    // a room swap changes whose `_lockWanted` we read — re-derive. With the intent
-    // carried above and the lock held on the stable `_lockEl` (not the swapped-out
-    // canvas), the lock rides through the swap untouched.
+    // a room swap changes whose intent we read — re-derive. Usually the new room
+    // already declared its intent (onInit fires at join, before this activation),
+    // so reconcile settles it now: keep the lock for a room that wants it, release
+    // for one that doesn't. If the new room is mounted but hasn't declared yet,
+    // reconcile HOLDS the held lock (on the stable `_lockEl`, not the swapped-out
+    // canvas) until its controller runs — releasing needs a user gesture to undo,
+    // so a premature release in that gap would strand the cursor.
     reconcilePointerLock(m);
 }
 
@@ -851,7 +860,16 @@ export function computeShouldBeLocked(m: InputManager): boolean {
 
 /** RELEASE-only. Runs end-of-frame, on target swap/blur, and on release add. */
 export function reconcilePointerLock(m: InputManager): void {
-    if (!computeShouldBeLocked(m) && document.pointerLockElement) document.exitPointerLock();
+    if (computeShouldBeLocked(m) || !document.pointerLockElement) return;
+    // the active room doesn't want the lock right now — but if it's freshly
+    // mounted and hasn't declared its intent yet (controller onInit pending after
+    // a room swap), that `false` is the un-run default, not an authoritative "no".
+    // hold the held lock until the controller runs (it declares next tick, then a
+    // following reconcile keeps or releases as it truly wants). only hold when the
+    // sole blocker IS the pending intent — a UI release, blur, or touch genuinely
+    // wants the cursor free, so those fall through to release.
+    if (m.target && !m.target._lockDeclared && m._lockReleases.size === 0 && m._focused && !m._touch) return;
+    document.exitPointerLock();
 }
 
 /** ACQUIRE — call only from a real user gesture. `unadjustedMovement` gives raw,

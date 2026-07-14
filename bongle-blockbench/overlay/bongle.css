@@ -14,18 +14,37 @@
 	display: none !important;
 }
 
-/* GitHub icon inside the Bongle start-screen link buttons. */
-#start_screen .start_screen_section[section_id='bongle'] button {
+/* The Bongle "new project" card that takes over the top of the start screen. */
+#start_screen .start_screen_section[section_id='bongle'] h1 {
+	margin: 0 0 4px;
+}
+#start_screen .start_screen_section[section_id='bongle'] > .start_screen_right {
+	padding: 22px 24px;
+}
+/* Big, clear "New Bongle Character / Model" calls to action. */
+#start_screen .start_screen_section[section_id='bongle'] .bongle-new-button {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
+	margin: 12px 10px 0 0;
+	padding: 11px 18px;
+	font-size: 15px;
+	font-weight: 700;
+	color: #fff;
+	background: rgba(0, 0, 0, 0.18);
+	border: 2px solid #fff;
+	border-radius: 6px;
+	cursor: pointer;
 }
-#start_screen .start_screen_section[section_id='bongle'] button p {
+#start_screen .start_screen_section[section_id='bongle'] .bongle-new-button:hover {
+	color: var(--color-accent);
+	background: #fff;
+}
+#start_screen .start_screen_section[section_id='bongle'] .bongle-new-button p {
 	margin: 0;
 }
-.bongle-gh-icon {
-	display: inline-flex;
-	flex-shrink: 0;
+#start_screen .start_screen_section[section_id='bongle'] .bongle-new-button .material-icons {
+	font-size: 20px;
 }
 
 #bongle_badge {

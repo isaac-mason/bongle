@@ -11,5 +11,5 @@ export function ClientView({ connection }: { connection: ClientConnection }) {
         const el = ref.current;
         if (el && connection.iframe.parentElement !== el) el.appendChild(connection.iframe);
     }, [connection]);
-    return <div ref={ref} style={{ width: '100%', height: '100%', background: '#000' }} />;
+    return <div ref={ref} className="h-full w-full bg-black" />;
 }

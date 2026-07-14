@@ -67,9 +67,11 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
         const key = registry.stateToKey[sid];
         if (key) renderable.push(key);
     }
+    console.log('[icon-debug] renderBlockIconAtlas: %d renderable blocks', renderable.length);
     if (renderable.length === 0) return EMPTY_ATLAS;
 
     await voxelResources.atlasReady;
+    console.log('[icon-debug] atlasReady resolved');
 
     const cols = Math.ceil(Math.sqrt(renderable.length));
     const rows = Math.ceil(renderable.length / cols);
@@ -79,6 +81,7 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
     const coords: Record<string, [number, number]> = {};
 
     const room = createRenderRoom(state);
+    console.log('[icon-debug] render room roomLocalIndex=%d', room.roomLocalIndex);
     // flat + full-bright: disable the env so an overhead sun doesn't crush the
     // side faces and the sky/cloud meshes don't bleed in — the classic
     // inventory-icon look (per-face directional factor still gives the 3D read).
@@ -126,6 +129,12 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
             chunk.light.fill(0xf000);
 
             const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, 0, 0, 0), registry);
+            if (i === 0) {
+                const quads = mesh
+                    ? (mesh.opaque?.quadCount ?? 0) + (mesh.transparent?.quadCount ?? 0) + (mesh.translucent?.quadCount ?? 0)
+                    : 0;
+                console.log('[icon-debug] block[0] "%s": mesh=%o quads=%d', key, !!mesh, quads);
+            }
             if (!mesh) {
                 // all-air after culling (shouldn't happen for a solid block): drop
                 // any prior slot so the tile renders empty, then skip.
@@ -153,6 +162,16 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
         target.dispose();
         disposeRenderRoom(state, room);
     }
+
+    let nonBlank = 0;
+    for (let p = 3; p < atlasPixels.length; p += 4) if (atlasPixels[p] !== 0) nonBlank++;
+    console.log(
+        '[icon-debug] atlas %dx%d done; non-transparent px=%d / %d (0 ⇒ render drew nothing)',
+        atlasWidth,
+        atlasHeight,
+        nonBlank,
+        atlasWidth * atlasHeight,
+    );
 
     return { pixels: atlasPixels, atlasWidth, atlasHeight, coords, iconPx: ICON_PX, cols, rows };
 }

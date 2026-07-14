@@ -5,7 +5,7 @@
 // design: one canvas is the source of truth, undo is a bounded ImageData stack.
 
 import { Eraser, Grid3x3, type LucideIcon, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
+import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useLaunched } from '../../stores/launched';
 import { imageMime } from '../image-mime';
@@ -234,45 +234,45 @@ export function ImageEditor({ fs, path, windowId }: { fs: Filesystem; path: stri
             // biome-ignore lint/a11y/noNoninteractiveTabindex: must be focusable to receive ⌘/ctrl+Z / +S.
             tabIndex={0}
             onKeyDown={onKeyDown}
-            style={{ display: 'flex', flexDirection: 'column', height: '100%', outline: 'none' }}
+            className="flex h-full flex-col outline-none"
         >
-            <div style={toolbar}>
+            <div className={toolbarClass}>
                 {TOOLS.map((t) => (
-                    <button key={t.id} type="button" title={t.title} style={btn(tool === t.id)} onClick={() => setTool(t.id)}>
+                    <button key={t.id} type="button" title={t.title} className={btn(tool === t.id)} onClick={() => setTool(t.id)}>
                         <t.Icon size={15} />
                     </button>
                 ))}
-                <span style={{ flex: 1 }} />
-                <button type="button" title="undo (⌘/ctrl+Z)" style={btn(false)} onClick={doUndo}>
+                <span className="flex-1" />
+                <button type="button" title="undo (⌘/ctrl+Z)" className={btn(false)} onClick={doUndo}>
                     <Undo2 size={15} />
                 </button>
             </div>
 
-            <div style={toolbar}>
-                <button type="button" title="zoom out" style={btn(false)} onClick={() => setScale((v) => Math.max(1, v - 2))}>
+            <div className={toolbarClass}>
+                <button type="button" title="zoom out" className={btn(false)} onClick={() => setScale((v) => Math.max(1, v - 2))}>
                     <ZoomOut size={15} />
                 </button>
-                <span style={{ color: '#888', minWidth: 30, textAlign: 'center' }}>{scale}×</span>
-                <button type="button" title="zoom in" style={btn(false)} onClick={() => setScale((v) => Math.min(64, v + 2))}>
+                <span className="min-w-[30px] text-center text-fg-muted">{scale}×</span>
+                <button type="button" title="zoom in" className={btn(false)} onClick={() => setScale((v) => Math.min(64, v + 2))}>
                     <ZoomIn size={15} />
                 </button>
-                <button type="button" title="toggle grid" style={btn(grid)} onClick={() => setGrid((g) => !g)}>
+                <button type="button" title="toggle grid" className={btn(grid)} onClick={() => setGrid((g) => !g)}>
                     <Grid3x3 size={15} />
                 </button>
-                <span style={{ flex: 1 }} />
-                <span style={{ color: '#888' }}>{size ? `${size.w}×${size.h}` : ''}</span>
-                <button type="button" title="save (⌘/ctrl+S)" style={btn(false)} onClick={save}>
+                <span className="flex-1" />
+                <span className="text-fg-muted">{size ? `${size.w}×${size.h}` : ''}</span>
+                <button type="button" title="save (⌘/ctrl+S)" className={btn(false)} onClick={save}>
                     <Save size={15} />
                 </button>
             </div>
 
-            <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-                <div style={sidebar}>
+            <div className="flex min-h-0 flex-1">
+                <div className="w-[200px] shrink-0 overflow-auto border-r border-border bg-surface">
                     <ColorPicker value={color} onChange={setColor} />
                 </div>
-                <div ref={stageRef} style={stage}>
-                    <div style={{ position: 'relative', width: dispW, height: dispH, boxShadow: '0 0 0 1px #000' }}>
-                        <div style={{ position: 'absolute', inset: 0, background: CHECKER }} />
+                <div ref={stageRef} className="grid min-h-0 flex-1 place-items-center overflow-auto bg-desktop p-4">
+                    <div className="relative shadow-[0_0_0_1px_var(--color-border)]" style={{ width: dispW, height: dispH }}>
+                        <div className="absolute inset-0" style={{ background: CHECKER }} />
                         <canvas
                             ref={canvasRef}
                             onPointerDown={onDown}
@@ -280,25 +280,16 @@ export function ImageEditor({ fs, path, windowId }: { fs: Filesystem; path: stri
                             onPointerUp={() => {
                                 painting.current = false;
                             }}
-                            style={{
-                                position: 'absolute',
-                                inset: 0,
-                                width: '100%',
-                                height: '100%',
-                                imageRendering: 'pixelated',
-                                touchAction: 'none',
-                                cursor: 'crosshair',
-                            }}
+                            className="absolute inset-0 h-full w-full cursor-crosshair touch-none [image-rendering:pixelated]"
                         />
                         {grid && scale >= 6 && (
+                            // pixel grid overlay; light hairlines read on the dark canvas.
                             <div
+                                className="pointer-events-none absolute inset-0"
                                 style={{
-                                    position: 'absolute',
-                                    inset: 0,
-                                    pointerEvents: 'none',
                                     backgroundSize: `${scale}px ${scale}px`,
                                     backgroundImage:
-                                        'linear-gradient(to right, rgba(0,0,0,0.15) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.15) 1px, transparent 1px)',
+                                        'linear-gradient(to right, rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.12) 1px, transparent 1px)',
                                 }}
                             />
                         )}
@@ -316,48 +307,13 @@ function hexToRgba(hex: string): [number, number, number, number] {
     return [n(h.slice(0, 2)), n(h.slice(2, 4)), n(h.slice(4, 6)), 255];
 }
 
-const CHECKER = 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px';
+// transparency checkerboard, tinted to the dark surface.
+const CHECKER = 'repeating-conic-gradient(#2a2e35 0% 25%, #202329 0% 50%) 50% / 16px 16px';
 
-const sidebar: CSSProperties = {
-    width: 200,
-    flexShrink: 0,
-    borderRight: '1px solid #000',
-    overflow: 'auto',
-    background: '#fff',
-};
+const toolbarClass = 'flex shrink-0 flex-wrap items-center gap-[5px] border-b border-border px-1.5 py-1 font-mono text-xs';
 
-const toolbar: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
-    padding: '4px 6px',
-    borderBottom: '1px solid #000',
-    font: '12px/1 ui-monospace, monospace',
-    flexShrink: 0,
-    flexWrap: 'wrap',
-};
-
-function btn(active: boolean): CSSProperties {
-    return {
-        display: 'grid',
-        placeItems: 'center',
-        minWidth: 26,
-        height: 24,
-        border: '1px solid #000',
-        background: active ? '#000' : '#fff',
-        color: active ? '#fff' : '#000',
-        cursor: 'pointer',
-        font: '12px/1 ui-monospace, monospace',
-        padding: '0 5px',
-    };
+function btn(active: boolean): string {
+    return `grid h-[24px] min-w-[26px] cursor-pointer place-items-center border border-border px-[5px] font-mono text-xs ${
+        active ? 'bg-accent text-on-accent' : 'bg-surface text-fg'
+    }`;
 }
-
-const stage: CSSProperties = {
-    flex: 1,
-    minHeight: 0,
-    display: 'grid',
-    placeItems: 'center',
-    overflow: 'auto',
-    padding: 16,
-    background: '#e9e9e9',
-};

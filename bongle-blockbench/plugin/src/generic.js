@@ -543,17 +543,28 @@ function registerValidator() {
 
 const BADGE_ID = 'bongle_badge';
 let startScreenSection = null;
+let startScreenObserver = null;
 
-// GitHub mark (octicon), inlined so the start-screen buttons can show it.
-const GITHUB_SVG =
-	'<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>';
+// Start a new project of one of the Bongle formats — what the top start-screen
+// buttons do. The character format loads the canonical 6-bone rig starter.
+function newBongleProject(formatId) {
+	const format = typeof Formats !== 'undefined' ? Formats[formatId] : null;
+	if (format && typeof format.new === 'function') format.new();
+}
 
-function openExternal(url) {
-	if (typeof Blockbench !== 'undefined' && typeof Blockbench.openLink === 'function') {
-		Blockbench.openLink(url);
-	} else {
-		window.open(url, '_blank', 'noopener');
-	}
+// The start screen can boot scrolled down; keep it pinned to the top whenever
+// it's shown (its wrapper toggles the `start_screen` class).
+function scrollStartScreenTop() {
+	const el = document.getElementById('start_screen');
+	if (el) el.scrollTop = 0;
+}
+function watchStartScreen() {
+	const wrapper = document.getElementById('page_wrapper');
+	if (!wrapper || startScreenObserver) return;
+	startScreenObserver = new MutationObserver(() => {
+		if (wrapper.classList.contains('start_screen')) scrollStartScreenTop();
+	});
+	startScreenObserver.observe(wrapper, { attributes: true, attributeFilter: ['class'] });
 }
 
 function addHeaderBadge() {
@@ -576,30 +587,28 @@ function installBranding() {
 	addHeaderBadge();
 
 	if (typeof addStartScreenSection === 'function') {
+		// Take over the top of the start screen with the two things people
+		// actually want to make. The format list below stays for imports
+		// (Minecraft skins, generic models, …).
 		startScreenSection = addStartScreenSection('bongle', {
 			color: 'var(--color-accent)',
 			text_color: '#ffffff',
 			text: [
-				{ type: 'h2', text: 'Make a bongle avatar or model' },
+				{ type: 'h1', text: 'New Bongle project' },
 				{
 					type: 'p',
-					text: 'Blockbench with the bongle plugin built in, for making avatars and models for bongle games. Click **New**, pick **Bongle Character** (or **Bongle Model**), build it, then export with **File > Export > Export Bongle glTF** and upload the file on bongle.io to wear it in-game.',
+					text: 'Start a rigged **character** or a static **model**. Or pick a format below to import a Minecraft skin, a generic model, and more.',
 				},
-				{
-					type: 'button',
-					text: 'Start here',
-					click: () => openExternal('https://github.com/isaac-mason/bongle-blockbench#readme'),
-				},
-				{
-					type: 'button',
-					text: 'What is bongle?',
-					click: () => openExternal('https://bongle.io'),
-				},
-				{ type: 'button', text: 'bongle on GitHub', click: () => openExternal('https://github.com/isaac-mason/bongle') },
+				{ type: 'button', text: 'New Bongle Character', click: () => newBongleProject(FORMAT_IDS.character) },
+				{ type: 'button', text: 'New Bongle Model', click: () => newBongleProject(FORMAT_IDS.model) },
 			],
 		});
 		decorateBongleButtons();
 	}
+
+	// the start screen can boot scrolled past our section — pin it to the top.
+	scrollStartScreenTop();
+	watchStartScreen();
 
 	// Initial tab title. Blockbench overwrites this once a project is open.
 	try {
@@ -609,18 +618,20 @@ function installBranding() {
 	}
 }
 
-// Prepend a GitHub icon to each link button in the Bongle start-screen card.
+// Turn the two Bongle start-screen buttons into big, iconed calls to action
+// (person = character, view_in_ar = model — matching the format icons).
 function decorateBongleButtons() {
-	const section = document.querySelector(
-		'#start_screen .start_screen_section[section_id="bongle"]',
-	);
+	const section = document.querySelector('#start_screen .start_screen_section[section_id="bongle"]');
 	if (!section) return;
-	section.querySelectorAll('button').forEach((button) => {
-		if (button.querySelector('.bongle-gh-icon')) return;
-		const icon = document.createElement('span');
-		icon.className = 'bongle-gh-icon';
-		icon.innerHTML = GITHUB_SVG;
-		button.insertBefore(icon, button.firstChild);
+	const icons = ['person', 'view_in_ar'];
+	section.querySelectorAll('button').forEach((button, i) => {
+		button.classList.add('bongle-new-button');
+		if (!button.querySelector('.material-icons')) {
+			const icon = document.createElement('i');
+			icon.className = 'material-icons';
+			icon.textContent = icons[i] || 'add';
+			button.insertBefore(icon, button.firstChild);
+		}
 	});
 }
 
@@ -629,6 +640,8 @@ function removeBranding() {
 	if (badge) badge.remove();
 	if (startScreenSection && startScreenSection.delete) startScreenSection.delete();
 	startScreenSection = null;
+	if (startScreenObserver) startScreenObserver.disconnect();
+	startScreenObserver = null;
 }
 
 // ---------------------------------------------------------------------------

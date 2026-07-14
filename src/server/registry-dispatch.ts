@@ -83,6 +83,7 @@ export function applyRegistryChanges(state: EngineServer): void {
         dirtyScriptIds.add(ch.handle.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
     }
+    console.log('[dispatch:server] dirtyScripts=', [...dirtyScriptIds], 'pendingScripts=', registry.scripts.pendingChanges.map((c) => `${c.kind}:${c.handle.id}`), 'pendingTraits=', registry.traits.pendingChanges.length, 'rooms=', state.rooms.rooms.size);
 
     // capture the OLD wire-index id lists before any branch drains. lazy
     // getters return cached arrays keyed on `revision`; once draining bumps

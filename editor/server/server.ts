@@ -93,7 +93,10 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // apply registry changes to the running server on each settled flush (the
     // worker's bundler flushes after evaluating user code / an HMR cascade;
     // this updates the live world in place).
-    const unregister = __kit.registerFlush(() => EngineServer.applyRegistryChanges(state));
+    const unregister = __kit.registerFlush(() => {
+        console.log('[server-worker] flush → applyRegistryChanges');
+        EngineServer.applyRegistryChanges(state);
+    });
 
     // ServerApp adapter — the transport (editor/transport-server.ts) drives the
     // engine through this exactly like game-room/edit-server drive it through

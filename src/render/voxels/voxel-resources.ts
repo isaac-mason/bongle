@@ -90,7 +90,6 @@ import { createQuadMaterial, decodeOct16, decodeQuadCentroid, type VoxelPass } f
 import {
     type BlockTextureAtlasMetadata,
     createVoxelTextureArray,
-    fetchBlockTextureAtlasMetadata,
     loadBlockTextureAtlasIntoTextureArray,
     writeBlockTextureAtlasIntoTextureArray,
 } from './voxel-texture-array';
@@ -2095,16 +2094,15 @@ export function init(registry: BlockRegistry, env: EnvironmentResources, budget:
 /** Load the atlas manifest. Client fetches it (assetUrl); the asset pipeline
  *  reads it off disk via the injected loader. */
 async function loadAtlasMeta(resources: Resources): Promise<BlockTextureAtlasMetadata | null> {
-    if (resources.loader.decodeImage) {
-        try {
-            const bytes = await resources.loader.loadBytes('voxels-atlas.json');
-            return JSON.parse(new TextDecoder().decode(bytes)) as BlockTextureAtlasMetadata;
-        } catch (e) {
-            console.warn('[voxel-resources] atlas manifest load failed:', e);
-            return null;
-        }
+    // JSON always goes through the injected loader (prod: fetch(assetUrl); editor:
+    // vfs; pipeline: disk) — decodeImage only governs the IMAGE path below. A
+    // missing atlas (404 / parse fail) → null, so the world renders untextured.
+    try {
+        const bytes = await resources.loader.loadBytes('voxels-atlas.json');
+        return JSON.parse(new TextDecoder().decode(bytes)) as BlockTextureAtlasMetadata;
+    } catch {
+        return null;
     }
-    return fetchBlockTextureAtlasMetadata();
 }
 
 /** Decode + write the atlas pixels into the array texture. Client takes the
@@ -2126,7 +2124,7 @@ async function writeAtlasPixels(
         writeBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, rgba, textureCutout);
         return;
     }
-    return loadBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, textureCutout);
+    return loadBlockTextureAtlasIntoTextureArray(res.atlas, textureNames, meta, textureCutout, resources.loader);
 }
 
 /** Async side of construction: pre-warms the expansion compute pipeline,

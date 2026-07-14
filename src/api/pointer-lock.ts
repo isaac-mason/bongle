@@ -24,7 +24,13 @@ import type { ScriptContext } from './scripts';
 export function setPointerLock(ctx: ScriptContext, wanted: boolean): void {
     if (!env.client) return;
     const input = ctx.client?.input;
-    if (input) input._lockWanted = wanted;
+    if (input) {
+        input._lockWanted = wanted;
+        // mark intent as declared: from here its `_lockWanted` is authoritative,
+        // so a room swap into it reconciles immediately instead of holding the
+        // lock waiting for a still-pending controller (see reconcilePointerLock).
+        input._lockDeclared = true;
+    }
     const manager = ctx.client?.state?.inputManager;
     if (!manager) return;
     if (wanted) tryAcquirePointerLock(manager);

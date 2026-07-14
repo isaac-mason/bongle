@@ -57,11 +57,32 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // resources the pipeline wrote are visible directly; no snapshot.
     const fs = await openOpfsFilesystem(msg.projectName);
 
+    // the engine UI stylesheet (prebundled tailwind, dist/bongle.css) — inject it
+    // into this iframe. The runner evals the engine JS; its `import './editor.css'`
+    // was extracted at prebundle time, so nothing loads it here otherwise.
+    try {
+        const style = document.createElement('style');
+        style.textContent = await fs.readText('node_modules/bongle/dist/bongle.css');
+        document.head.appendChild(style);
+    } catch (err) {
+        console.warn('[client] engine stylesheet missing', err);
+    }
+
     // evaluate the user code via a ModuleRunner bridged to the ONE host
     // DevServer (host transforms; this realm evaluates → its own client
     // registry, which the renderer reads).
     const runner = makeRunner(createPortBridge(bundlerPort));
+    // set the runtime env flags on the shared `env` object BEFORE user code /
+    // engine eval — mirrors the kit entry (edit-client.ts). Compile-time
+    // replaceEnv covers literal reads, but runtime/destructured reads fall through
+    // to env.js's false defaults, so the editor (env.editor) stays off without this.
+    const { env } = await runner.import('bongle/env');
+    env.client = true;
+    env.server = false;
+    env.editor = true;
     await runner.import(msg.entry ?? 'src/index.ts');
+    // baked barrel — patches model handles with their bin paths (see server-worker).
+    await runner.import('src/generated/models.ts');
     // engine from the SAME runner instance the user code registered into.
     // engine-client wraps its api under `export * as EngineClient`; engine-editor
     // exports its api flat, so its module namespace IS the api.
@@ -81,7 +102,10 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     await EngineEditor.setup(state);
     await EngineClient.load(state);
 
-    __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
+    __kit.registerFlush(() => {
+        console.log('[client] flush → applyRegistryChanges');
+        EngineClient.applyRegistryChanges(state);
+    });
     __kit.flush();
 
     // game transport: inbound frames from the server worker → engine inbox.

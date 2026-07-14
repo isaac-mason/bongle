@@ -358,8 +358,8 @@ export async function load(state: EngineClient) {
     // async load pass, pre-warms compile pipelines, fetches atlases. All
     // resources race in parallel; the placeholder atlas keeps materials
     // valid until SpriteResources.load() swaps the real atlas in.
-    const audioPromise = Audio.loadResources();
-    const spriteLoadPromise = SpriteResources.load(state.spriteResources);
+    const audioPromise = Audio.loadResources(state.resources.loader);
+    const spriteLoadPromise = SpriteResources.load(state.spriteResources, state.resources.loader);
     const voxelLoadPromise = VoxelResources.load(
         state.voxelResources,
         registry.blockRegistry,

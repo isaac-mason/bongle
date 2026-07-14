@@ -3,12 +3,13 @@
 // palette grid. Value is a #rrggbb or #rrggbbaa hex string; onChange fires the
 // same. The picker is squared to the bongle look via global CSS in index.html.
 
-import { type CSSProperties, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { HexAlphaColorPicker } from 'react-colorful';
 
 export const TRANSPARENT = '#00000000';
 
-const CHECKER = 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 8px 8px';
+// transparency checkerboard, tinted to the dark surface.
+const CHECKER = 'repeating-conic-gradient(#2a2e35 0% 25%, #202329 0% 50%) 50% / 8px 8px';
 
 const PALETTE = [
     '#000000',
@@ -60,53 +61,37 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
     const transparent = value.length >= 9 && value.slice(7, 9) === '00';
 
     return (
-        <div style={panel} className="bongle-picker">
+        // horizontal gutter fits react-colorful's edge pointers (they sit half
+        // outside the strips at 0%/100%); see the .bongle-picker overrides in editor.css.
+        <div className="bongle-picker flex flex-col gap-2 px-3 py-2 font-mono text-xs text-fg">
             <HexAlphaColorPicker color={value} onChange={onChange} />
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ ...swatch, background: transparent ? CHECKER : value.slice(0, 7) }} />
+            <div className="flex items-center gap-2">
+                <div
+                    className="h-[30px] w-[30px] shrink-0 border border-border"
+                    style={{ background: transparent ? CHECKER : value.slice(0, 7) }}
+                />
                 <input
                     value={hexText}
                     spellCheck={false}
                     onChange={(e) => onHex(e.target.value)}
-                    style={hexInput}
+                    className="min-w-0 flex-1 border border-border bg-surface px-1.5 py-[5px] font-mono text-xs text-fg"
                     aria-label="hex color"
                 />
             </div>
-            <div style={grid}>
+            <div className="grid grid-cols-8 gap-[3px]">
                 {PALETTE.map((c) => (
                     <button
                         key={c}
                         type="button"
                         title={c === TRANSPARENT ? 'transparent' : c}
                         onClick={() => onChange(c)}
-                        style={{
-                            ...cell,
-                            outline: value === c ? '2px solid #000' : 'none',
-                            background: c === TRANSPARENT ? CHECKER : c,
-                        }}
+                        className={`aspect-square w-full cursor-pointer border border-border-subtle p-0 ${
+                            value === c ? 'outline outline-2 outline-fg' : ''
+                        }`}
+                        style={{ background: c === TRANSPARENT ? CHECKER : c }}
                     />
                 ))}
             </div>
         </div>
     );
 }
-
-const panel: CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    // horizontal gutter fits react-colorful's edge pointers (they sit half
-    // outside the strips at 0%/100%); see the overrides in index.html.
-    padding: '8px 12px',
-    font: '12px/1 ui-monospace, monospace',
-};
-const swatch: CSSProperties = { width: 30, height: 30, border: '1px solid #000', flexShrink: 0 };
-const hexInput: CSSProperties = {
-    flex: 1,
-    minWidth: 0,
-    border: '1px solid #000',
-    padding: '5px 6px',
-    font: '12px/1 ui-monospace, monospace',
-};
-const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 3 };
-const cell: CSSProperties = { width: '100%', aspectRatio: '1', padding: 0, border: '1px solid #999', cursor: 'pointer' };

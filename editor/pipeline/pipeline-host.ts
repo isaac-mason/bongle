@@ -2,8 +2,10 @@
 //
 // Spawns editor/pipeline-worker.ts, connects its bundler conduit to the bundler
 // worker (env 'pipeline'), and surfaces bake results: 'baked' signals a completed
-// bake (optional callback), 'log' → the build log stream. Mirrors server-host.ts;
-// the main doc only brokers + relays.
+// bake (optional callback), 'fs-changed' relays the worker's bake writes, 'log' →
+// the build log stream. Mirrors server-host.ts; the main doc only brokers + relays.
+
+import type { FsChange } from '../fs';
 
 export type PipelineHost = {
     /** resolves once the worker has run its first bake. */
@@ -19,10 +21,13 @@ export type SpawnPipelineWorkerOptions = {
     log?: (msg: string) => void;
     /** a bake completed (atlas written to the shared OPFS for the client renderer). */
     onBaked?: (atlasChanged: boolean) => void;
+    /** the worker's bake writes (OPFS has no cross-context events) — the main doc
+     *  HMRs the generated barrel + refreshes baked resources in the other realms. */
+    onFsChanged?: (changes: FsChange[]) => void;
 };
 
 export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineHost {
-    const { connectRealm, projectName, log = () => {}, onBaked } = opts;
+    const { connectRealm, projectName, log = () => {}, onBaked, onFsChanged } = opts;
 
     const worker = new Worker(new URL('./pipeline-worker.ts', import.meta.url), { type: 'module' });
 
@@ -32,9 +37,10 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
     });
 
     worker.onmessage = (e: MessageEvent) => {
-        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean };
+        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; changes?: FsChange[] };
         if (msg.type === 'log') log(msg.msg ?? '');
         else if (msg.type === 'baked') onBaked?.(!!msg.atlasChanged);
+        else if (msg.type === 'fs-changed') onFsChanged?.(msg.changes ?? []);
         else if (msg.type === 'ready') resolveReady();
     };
     worker.onerror = (e) => log(`pipeline worker crashed: ${e.message}`);

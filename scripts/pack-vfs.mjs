@@ -33,14 +33,21 @@ const addTree = (zipPrefix, absDir, keep) => {
     }
 };
 
-// bongle: the built dist (js/css/assets), minus the d.ts types tree (Monaco's,
-// seeded separately) and sourcemaps. Plus a runtime package.json manifest, the
-// README, and the prose docs (not the doc templates).
+// bongle: the built dist (js/css/assets), minus sourcemaps.
 addTree('bongle/dist', join(ROOT, 'dist'), (abs) => !abs.includes(`${sep}types${sep}`) && !abs.endsWith('.map'));
 files['bongle/package.json'] = enc.encode(`${JSON.stringify({ name: 'bongle', type: 'module' })}\n`);
 if (existsSync(join(ROOT, 'README.md'))) addFile('bongle/README.md', join(ROOT, 'README.md'));
 if (existsSync(join(ROOT, 'docs'))) {
     addTree('bongle/docs', join(ROOT, 'docs'), (abs) => abs.endsWith('.md') && !abs.includes(`${sep}template${sep}`));
+}
+
+// bongle + vendor lib type declarations (emitted by tsgo, gathered by
+// gather-lib-types.mjs). Overwrites bongle's package.json with a types-aware
+// exports map so Monaco resolves bare specifiers to .d.ts.
+const typesRoot = join(ROOT, 'dist/types/node_modules');
+for (const pkg of ['bongle', ...VENDOR_LIBS]) {
+    const dir = join(typesRoot, pkg);
+    if (existsSync(dir)) addTree(pkg, dir);
 }
 
 // first-party libs (from vendor/): package.json + built js + README.

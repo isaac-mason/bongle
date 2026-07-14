@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
@@ -23,6 +24,22 @@ import { defineConfig } from 'vite';
 // specifier `bongle/env`. Every lib chunk then keeps `import { env } from
 // 'bongle/env'`, which the browser envPlugin recognizes + replaces per realm.
 // `dist/env.js` (the `env` entry) provides the object for any residual read.
+// The engine is consumed by the editor's in-browser runner, which loads chunk
+// deps itself. Vite's `__vitePreload` wrapper around dynamic imports is pure DOM
+// machinery — <link modulepreload> off `document` + a `window`-dispatched error
+// event — that crashes the server/pipeline WORKER realms. modulePreload:false
+// empties the deps but leaves the window error handler, so replace the helper
+// with a passthrough. (Its virtual module id is `\0vite/preload-helper.js`.)
+const stripVitePreload = () => ({
+    name: 'strip-vite-preload',
+    transform(_code: string, id: string) {
+        if (id.includes('vite/preload-helper')) {
+            return { code: 'export function __vitePreload(baseModule) { return baseModule(); }', map: null };
+        }
+        return null;
+    },
+});
+
 const externalizeEnvSeam = () => ({
     name: 'externalize-env-seam',
     // 'pre' so this resolveId runs BEFORE vite's resolver turns `./api/env` into
@@ -44,7 +61,11 @@ export default defineConfig({
     // they land on the seeded vfs path AND re-root to a CDN in prod. A default
     // '/' base would emit root-absolute /assets/… that drop the dist prefix.
     base: './',
-    plugins: [externalizeEnvSeam()],
+    // tailwind compiles the engine UI's `@import "tailwindcss"` entry
+    // (src/client/ui/editor.css, scanning src/client/ui + src/editor) → utility
+    // CSS. Emitted as a stable dist/bongle.css the client iframe injects (the
+    // prebundle can't rely on lib/src being present at consume time).
+    plugins: [tailwindcss(), stripVitePreload(), externalizeEnvSeam()],
     // bundled npm deps branch on process.env.NODE_ENV; fold it to a literal so
     // rollup DCEs the dev-only paths. (The realm also installs a process shim for
     // the residual runtime probes — see editor/bundler/runner.ts.)
@@ -59,6 +80,10 @@ export default defineConfig({
         emptyOutDir: false,
         target: 'esnext',
         minify: false,
+        // no `__vitePreload` helper: it injects <link rel=modulepreload> off
+        // `document` around dynamic imports, which crashes in the server/pipeline
+        // WORKER realms (no DOM). The runner loads chunks itself; we don't need it.
+        modulePreload: false,
         // Emit every builtin `new URL(asset, import.meta.url)` reference as a FILE
         // under dist/assets/ instead of inlining it as a data: URL. Vite's lib
         // mode force-inlines these (to keep a library self-contained), so we drive
@@ -105,7 +130,9 @@ export default defineConfig({
                 format: 'es',
                 entryFileNames: '[name].js',
                 chunkFileNames: 'chunks/[name]-[hash].js',
-                assetFileNames: 'assets/[name]-[hash][extname]',
+                // stable name for the one engine stylesheet so the client iframe
+                // can inject it by path; other assets stay content-hashed.
+                assetFileNames: (info) => (info.name?.endsWith('.css') ? 'bongle.css' : 'assets/[name]-[hash][extname]'),
             },
         },
     },

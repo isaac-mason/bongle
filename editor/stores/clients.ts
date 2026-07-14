@@ -15,7 +15,8 @@ type ClientsStore = {
     host: ClientHost | null;
     windows: ClientWindow[];
     setHost: (host: ClientHost) => void;
-    open: () => void;
+    /** spawn a client window; returns its window id (for e.g. maximizing it). */
+    open: () => string;
     close: (id: string) => void;
 };
 
@@ -25,13 +26,14 @@ export const useClients = create<ClientsStore>((set, get) => ({
     setHost: (host) => set({ host }),
     open: () => {
         const host = get().host;
-        if (!host) return;
+        if (!host) return '';
         const connection = host.createClient();
         const id = `client:${connection.connectionId}`;
         const off = (count++ % 6) * 28;
         useWindows.getState().register(id, { x: 780 + off, y: 40 + off, w: 480, h: 360 });
         set((s) => ({ windows: [...s.windows, { id, title: `client ${connection.connectionId}`, connection }] }));
         useWindows.getState().focus(id);
+        return id;
     },
     close: (id) =>
         set((s) => {

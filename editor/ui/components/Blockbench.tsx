@@ -108,7 +108,7 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
             src={BLOCKBENCH_SRC}
             title="Blockbench"
             allow="clipboard-read; clipboard-write; fullscreen"
-            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+            className="block h-full w-full border-none"
         />
     );
 }

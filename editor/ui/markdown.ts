@@ -8,6 +8,8 @@
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const safeUrl = (url: string): string => (/^\s*javascript:/i.test(url) ? '#' : url);
+const headingSlug = (text: string): string =>
+    text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 
 const S0 = '';
 const S1 = ''; // private-use sentinels for extracted code spans
@@ -22,7 +24,12 @@ function inline(text: string): string {
     );
     t = t.replace(
         /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
-        (_m, label: string, url: string) => `<a href="${safeUrl(url)}" target="_blank" rel="noreferrer">${label}</a>`,
+        (_m, label: string, url: string) => {
+            const h = safeUrl(url);
+            return h.startsWith('#')
+                ? `<a href="${h}">${label}</a>`
+                : `<a href="${h}" target="_blank" rel="noreferrer">${label}</a>`;
+        },
     );
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/__([^_]+)__/g, '<strong>$1</strong>');
     t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/(?<![A-Za-z0-9])_([^_]+)_(?![A-Za-z0-9])/g, '<em>$1</em>');
@@ -68,7 +75,8 @@ export function renderMarkdown(src: string): string {
         if (heading) {
             flushPara();
             const lvl = heading[1].length;
-            out.push(`<h${lvl}>${inline(heading[2].replace(/\s+#*\s*$/, '').trim())}</h${lvl}>`);
+            const text = heading[2].replace(/\s+#*\s*$/, '').trim();
+            out.push(`<h${lvl} id="${headingSlug(text)}">${inline(text)}</h${lvl}>`);
             i++;
             continue;
         }

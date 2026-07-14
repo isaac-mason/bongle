@@ -29,7 +29,9 @@ body {
 }
 
 body {
-    font: 13px/1.4 ui-monospace, monospace;
+    font:
+        13px / 1.4 ui-monospace,
+        monospace;
     color: var(--color-fg);
     background: var(--color-desktop);
     overscroll-behavior: none;
@@ -37,6 +39,13 @@ body {
 
 #root {
     height: 100%;
+}
+
+/* while dragging/resizing a window, let pointer events pass THROUGH iframes
+   (game client, Blockbench) — otherwise the iframe swallows the move events and
+   the drag stalls the moment the cursor crosses one. */
+body.window-dragging iframe {
+    pointer-events: none;
 }
 
 /* dark scrollbars for the editor surfaces. */
@@ -52,6 +61,33 @@ body {
 }
 ::-webkit-scrollbar-track {
     background: transparent;
+}
+
+/* active taskbar button: the brand rainbow (see the game-client launcher),
+   slowly sweeping. Icon stays white with a soft shadow so it reads across the
+   hues. */
+@keyframes bongle-rainbow-slide {
+    from {
+        background-position: 200% center;
+    }
+    to {
+        background-position: 0 center;
+    }
+}
+.taskbar-active {
+    background: linear-gradient(90deg, #ff3ea5, #ffd23f, #3fa7ff, #8a2be2, #ff3ea5);
+    background-size: 200% auto;
+    /* slow left-to-right drift. */
+    animation: bongle-rainbow-slide 9s linear infinite;
+    color: #fff;
+}
+.taskbar-active svg {
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+@media (prefers-reduced-motion: reduce) {
+    .taskbar-active {
+        animation: none;
+    }
 }
 
 /* react-colorful, squared to the bongle look (see ColorPicker). Scoped under
@@ -85,7 +121,10 @@ body {
    GitHub-ish heading rules — on the dark editor palette. */
 .bongle-md {
     padding: 16px 20px;
-    font: 14px/1.6 -apple-system, system-ui, sans-serif;
+    font:
+        14px / 1.6 -apple-system,
+        system-ui,
+        sans-serif;
     color: var(--color-fg);
 }
 .bongle-md > :first-child {
@@ -133,7 +172,9 @@ body {
     text-decoration: underline;
 }
 .bongle-md code {
-    font: 0.88em ui-monospace, monospace;
+    font:
+        0.88em ui-monospace,
+        monospace;
     background: var(--color-surface-muted);
     border: 1px solid var(--color-border-subtle);
     padding: 0 3px;

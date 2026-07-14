@@ -109,6 +109,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         dirtyScriptIds.add(ch.handle.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
     }
+    console.log('[dispatch:client] dirtyScripts=', [...dirtyScriptIds], 'pendingScripts=', registry.scripts.pendingChanges.map((c) => `${c.kind}:${c.handle.id}`), 'pendingTraits=', registry.traits.pendingChanges.length, 'rooms=', state.rooms.rooms.size);
 
     // editor HMR toasts, one per kind with pending changes, plus one
     // for script-instance swaps reaching via DepGraph (when trait body
@@ -369,7 +370,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
  * is invalidated wholesale, dispose + re-init so it re-bakes lazily.
  */
 export async function refreshSpriteResources(state: EngineClient): Promise<void> {
-    const changed = await SpriteResources.refresh(state.spriteResources);
+    const changed = await SpriteResources.refresh(state.spriteResources, state.resources.loader);
     if (!changed) return;
     ExtrudedSpriteResources.rebindAtlas(state.extrudedSpriteResources, state.spriteResources.atlas);
     ParticleResources.rebindAtlas(state.particleResources, state.spriteResources.atlas);
@@ -400,7 +401,7 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
  * resources); in-flight playbacks keep their started buffers and finish.
  */
 export async function refreshAudioResources(state: EngineClient): Promise<void> {
-    await Audio.refreshResources(state.audioResources);
+    await Audio.refreshResources(state.audioResources, state.resources.loader);
 }
 
 // per-kind toast labels. singular when one id changed, plural for many.

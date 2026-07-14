@@ -3,7 +3,7 @@
 // a blob url and live-reloads when it changes on disk.
 
 import { Music, Pause, Play, Repeat, Volume2 } from 'lucide-react';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { audioMime } from '../audio-mime';
 import { useObjectUrl } from '../hooks/useObjectUrl';
@@ -60,25 +60,16 @@ export function AudioPlayer({ fs, path }: { fs: Filesystem; path: string }) {
     const name = path.split('/').pop() ?? path;
 
     return (
-        <div
-            style={{
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                padding: 12,
-                gap: 10,
-                font: '12px/1.4 ui-monospace, monospace',
-            }}
-        >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="flex h-full flex-col gap-2.5 p-3 font-mono text-xs leading-[1.4] text-fg">
+            <div className="flex items-center gap-1.5">
                 <Music size={18} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={path}>
+                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={path}>
                     {name}
                 </span>
             </div>
 
             {missing ? (
-                <span style={{ color: '#888' }}>(file not found)</span>
+                <span className="text-fg-muted">(file not found)</span>
             ) : (
                 <>
                     {/* biome-ignore lint/a11y/useMediaCaption: user audio assets have no captions track. */}
@@ -93,8 +84,13 @@ export function AudioPlayer({ fs, path }: { fs: Filesystem; path: string }) {
                         onEnded={() => setPlaying(false)}
                     />
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <button type="button" style={playBtn} onClick={toggle} title={playing ? 'pause' : 'play'}>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            className="grid h-[30px] w-[34px] shrink-0 cursor-pointer place-items-center border border-border bg-surface text-fg"
+                            onClick={toggle}
+                            title={playing ? 'pause' : 'play'}
+                        >
                             {playing ? <Pause size={16} /> : <Play size={16} />}
                         </button>
                         <input
@@ -104,19 +100,21 @@ export function AudioPlayer({ fs, path }: { fs: Filesystem; path: string }) {
                             step={0.01}
                             value={Math.min(time, duration || 0)}
                             onChange={(e) => seek(Number(e.target.value))}
-                            style={{ flex: 1 }}
+                            className="flex-1 accent-accent"
                             title="seek"
                         />
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#888' }}>
+                    <div className="flex items-center gap-2 text-fg-muted">
                         <span>
                             {fmtTime(time)} / {fmtTime(duration)}
                         </span>
-                        <span style={{ flex: 1 }} />
+                        <span className="flex-1" />
                         <button
                             type="button"
-                            style={{ ...tag, ...(loop ? tagOn : null) }}
+                            className={`flex cursor-pointer items-center gap-[5px] border border-border px-1.5 py-[3px] font-mono text-xs ${
+                                loop ? 'bg-accent text-on-accent' : 'bg-surface text-fg'
+                            }`}
                             onClick={() => setLoop((v) => !v)}
                             title="loop"
                         >
@@ -124,8 +122,8 @@ export function AudioPlayer({ fs, path }: { fs: Filesystem; path: string }) {
                         </button>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Volume2 size={16} style={{ color: '#888', flexShrink: 0 }} />
+                    <div className="flex items-center gap-2">
+                        <Volume2 size={16} className="shrink-0 text-fg-muted" />
                         <input
                             type="range"
                             min={0}
@@ -137,7 +135,7 @@ export function AudioPlayer({ fs, path }: { fs: Filesystem; path: string }) {
                                 setVolume(v);
                                 if (audioRef.current) audioRef.current.volume = v;
                             }}
-                            style={{ flex: 1 }}
+                            className="flex-1 accent-accent"
                             title="volume"
                         />
                     </div>
@@ -153,28 +151,3 @@ function fmtTime(s: number): string {
     const sec = Math.floor(s % 60);
     return `${m}:${sec.toString().padStart(2, '0')}`;
 }
-
-const playBtn: CSSProperties = {
-    display: 'grid',
-    placeItems: 'center',
-    width: 34,
-    height: 30,
-    border: '1px solid #000',
-    background: '#fff',
-    cursor: 'pointer',
-    flexShrink: 0,
-};
-
-const tag: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
-    border: '1px solid #000',
-    background: '#fff',
-    color: '#000',
-    cursor: 'pointer',
-    font: '12px/1 ui-monospace, monospace',
-    padding: '3px 6px',
-};
-
-const tagOn: CSSProperties = { background: '#000', color: '#fff' };

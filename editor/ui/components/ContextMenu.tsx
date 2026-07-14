@@ -3,27 +3,32 @@
 // black-bordered to match the desktop. The first context menu in the editor;
 // reuse this rather than hand-rolling another.
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export type MenuItem = { label: string; onClick: () => void };
 
 export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
+        // close on the next pointerdown outside the menu (a right-click elsewhere
+        // fires pointerdown too). The gesture that OPENED this menu already
+        // pointerdown'd before it mounted, so it can't self-close — no timers.
+        const onDown = (e: PointerEvent) => {
+            if (!ref.current?.contains(e.target as Node)) onClose();
+        };
         const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-        // deferred to the next tick so the opening contextmenu event doesn't
-        // immediately close it.
-        window.addEventListener('click', onClose);
-        window.addEventListener('contextmenu', onClose);
+        window.addEventListener('pointerdown', onDown);
         window.addEventListener('keydown', onKey);
         return () => {
-            window.removeEventListener('click', onClose);
-            window.removeEventListener('contextmenu', onClose);
+            window.removeEventListener('pointerdown', onDown);
             window.removeEventListener('keydown', onKey);
         };
     }, [onClose]);
 
     return (
         <div
+            ref={ref}
             className="fixed z-[2000000] min-w-[130px] border border-border bg-surface py-0.5 font-mono text-[11px] leading-none text-fg shadow-[2px_2px_0_rgba(0,0,0,0.5)]"
             style={{ left: x, top: y }}
         >

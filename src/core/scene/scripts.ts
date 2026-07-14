@@ -1187,9 +1187,11 @@ export function pruneRemovedScript(def: ScriptDef): void {
 }
 
 export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: ReadonlySet<string> | null = null): void {
+    console.log('[applyTraitSwap] dirty=', dirtyScriptIds ? [...dirtyScriptIds] : 'ALL', 'nodeCount=', runtime.instances.size, 'instanceKeys=', [...runtime.instances.values()].flatMap((m) => [...m.keys()]));
     for (const [nodeId, nodeInstances] of runtime.instances) {
         for (const [instanceKey, oldInstance] of nodeInstances) {
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;
+            console.log('[applyTraitSwap] SWAPPING', instanceKey);
             const { traitId, scriptId } = oldInstance.def;
 
             const newTraitDef = registry.traits.byId.get(traitId)?.payload;

@@ -1,9 +1,9 @@
 "use strict";
 (() => {
-  // bongle-blockbench/starter/character.bbmodel
+  // starter/character.bbmodel
   var character_default = { meta: { format_version: "5.0", model_format: "bongle_character", box_uv: true }, name: "player", model_identifier: "", visible_box: [1, 1, 0], variable_placeholders: "", multi_file_ruleset: "", variable_placeholder_buttons: [], timeline_setups: [], unhandled_root_fields: {}, resolution: { width: 64, height: 64 }, elements: [{ name: "Body", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-4, 12, -2], to: [4, 24, 2], autouv: 0, color: 0, origin: [0, 0, 0], uv_offset: [16, 16], faces: { north: { uv: [20, 20, 28, 32], texture: 0 }, east: { uv: [16, 20, 20, 32], texture: 0 }, south: { uv: [32, 20, 40, 32], texture: 0 }, west: { uv: [28, 20, 32, 32], texture: 0 }, up: { uv: [28, 20, 20, 16], texture: 0 }, down: { uv: [36, 16, 28, 20], texture: 0 } }, type: "cube", uuid: "7ccc0f1d-69cd-93ef-c6de-d15934cdb3d3" }, { name: "Body Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-4, 12, -2], to: [4, 24, 2], autouv: 0, color: 0, inflate: 0.25, origin: [0, 0, 0], uv_offset: [16, 32], faces: { north: { uv: [20, 36, 28, 48], texture: 0 }, east: { uv: [16, 36, 20, 48], texture: 0 }, south: { uv: [32, 36, 40, 48], texture: 0 }, west: { uv: [28, 36, 32, 48], texture: 0 }, up: { uv: [28, 36, 20, 32], texture: 0 }, down: { uv: [36, 32, 28, 36], texture: 0 } }, type: "cube", uuid: "23f71c3e-db14-7256-4942-1d4d8f79554c" }, { name: "Right Arm", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [4, 12, -2], to: [8, 24, 2], autouv: 0, color: 0, origin: [0, 0, 0], uv_offset: [40, 16], faces: { north: { uv: [44, 20, 48, 32], texture: 0 }, east: { uv: [40, 20, 44, 32], texture: 0 }, south: { uv: [52, 20, 56, 32], texture: 0 }, west: { uv: [48, 20, 52, 32], texture: 0 }, up: { uv: [48, 20, 44, 16], texture: 0 }, down: { uv: [52, 16, 48, 20], texture: 0 } }, type: "cube", uuid: "a6545d31-5bb5-ff7c-99dd-2792840aebf3" }, { name: "Right Arm Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [4, 12, -2], to: [8, 24, 2], autouv: 0, color: 0, inflate: 0.25, origin: [0, 0, 0], uv_offset: [40, 32], faces: { north: { uv: [44, 36, 48, 48], texture: 0 }, east: { uv: [40, 36, 44, 48], texture: 0 }, south: { uv: [52, 36, 56, 48], texture: 0 }, west: { uv: [48, 36, 52, 48], texture: 0 }, up: { uv: [48, 36, 44, 32], texture: 0 }, down: { uv: [52, 32, 48, 36], texture: 0 } }, type: "cube", uuid: "069dbc37-3ea8-7c78-6549-3c1622f204ff" }, { name: "Left Arm", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-8, 12, -2], to: [-4, 24, 2], autouv: 0, color: 0, origin: [0, 0, 0], uv_offset: [32, 48], faces: { north: { uv: [36, 52, 40, 64], texture: 0 }, east: { uv: [32, 52, 36, 64], texture: 0 }, south: { uv: [44, 52, 48, 64], texture: 0 }, west: { uv: [40, 52, 44, 64], texture: 0 }, up: { uv: [40, 52, 36, 48], texture: 0 }, down: { uv: [44, 48, 40, 52], texture: 0 } }, type: "cube", uuid: "62f36d52-35b1-c07b-028e-04c55a49d4d9" }, { name: "Left Arm Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-8, 12, -2], to: [-4, 24, 2], autouv: 0, color: 0, inflate: 0.25, origin: [0, 0, 0], uv_offset: [48, 48], faces: { north: { uv: [52, 52, 56, 64], texture: 0 }, east: { uv: [48, 52, 52, 64], texture: 0 }, south: { uv: [60, 52, 64, 64], texture: 0 }, west: { uv: [56, 52, 60, 64], texture: 0 }, up: { uv: [56, 52, 52, 48], texture: 0 }, down: { uv: [60, 48, 56, 52], texture: 0 } }, type: "cube", uuid: "300e4d99-a77d-0a6b-3903-7dd135c8f046" }, { name: "Right Leg", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-0.1, 0, -2], to: [3.9, 12, 2], autouv: 0, color: 0, origin: [0, 0, 0], uv_offset: [0, 16], faces: { north: { uv: [4, 20, 8, 32], texture: 0 }, east: { uv: [0, 20, 4, 32], texture: 0 }, south: { uv: [12, 20, 16, 32], texture: 0 }, west: { uv: [8, 20, 12, 32], texture: 0 }, up: { uv: [8, 20, 4, 16], texture: 0 }, down: { uv: [12, 16, 8, 20], texture: 0 } }, type: "cube", uuid: "4ec8609c-81e6-c5bb-95f6-383d912c4ac6" }, { name: "Right Leg Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-0.1, 0, -2], to: [3.9, 12, 2], autouv: 0, color: 0, inflate: 0.25, origin: [0, 0, 0], uv_offset: [0, 32], faces: { north: { uv: [4, 36, 8, 48], texture: 0 }, east: { uv: [0, 36, 4, 48], texture: 0 }, south: { uv: [12, 36, 16, 48], texture: 0 }, west: { uv: [8, 36, 12, 48], texture: 0 }, up: { uv: [8, 36, 4, 32], texture: 0 }, down: { uv: [12, 32, 8, 36], texture: 0 } }, type: "cube", uuid: "dd1a16b6-54de-01b6-c8fa-c0181f6f7c6d" }, { name: "Left Leg", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-3.9, 0, -2], to: [0.1, 12, 2], autouv: 0, color: 0, origin: [0, 0, 0], uv_offset: [16, 48], faces: { north: { uv: [20, 52, 24, 64], texture: 0 }, east: { uv: [16, 52, 20, 64], texture: 0 }, south: { uv: [28, 52, 32, 64], texture: 0 }, west: { uv: [24, 52, 28, 64], texture: 0 }, up: { uv: [24, 52, 20, 48], texture: 0 }, down: { uv: [28, 48, 24, 52], texture: 0 } }, type: "cube", uuid: "685c05c4-ce57-9ced-6d44-16e3f07524b4" }, { name: "Left Leg Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-3.9, 0, -2], to: [0.1, 12, 2], autouv: 0, color: 0, inflate: 0.25, origin: [0, 0, 0], uv_offset: [0, 48], faces: { north: { uv: [4, 52, 8, 64], texture: 0 }, east: { uv: [0, 52, 4, 64], texture: 0 }, south: { uv: [12, 52, 16, 64], texture: 0 }, west: { uv: [8, 52, 12, 64], texture: 0 }, up: { uv: [8, 52, 4, 48], texture: 0 }, down: { uv: [12, 48, 8, 52], texture: 0 } }, type: "cube", uuid: "30a965bc-c172-1ee5-f487-9c3a12caebed" }, { name: "Head", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-4, 24, -4], to: [4, 32, 4], autouv: 0, color: 0, origin: [0, 0, 0], faces: { north: { uv: [8, 8, 16, 16], texture: 0 }, east: { uv: [0, 8, 8, 16], texture: 0 }, south: { uv: [24, 8, 32, 16], texture: 0 }, west: { uv: [16, 8, 24, 16], texture: 0 }, up: { uv: [16, 8, 8, 0], texture: 0 }, down: { uv: [24, 0, 16, 8], texture: 0 } }, type: "cube", uuid: "26a44ef2-f33d-a2a0-adb3-3df4f214b2db" }, { name: "Hat Layer", box_uv: true, render_order: "default", locked: false, export: true, scope: 0, allow_mirror_modeling: true, from: [-4, 24, -4], to: [4, 32, 4], autouv: 0, color: 0, inflate: 0.5, origin: [0, 0, 0], uv_offset: [32, 0], faces: { north: { uv: [40, 8, 48, 16], texture: 0 }, east: { uv: [32, 8, 40, 16], texture: 0 }, south: { uv: [56, 8, 64, 16], texture: 0 }, west: { uv: [48, 8, 56, 16], texture: 0 }, up: { uv: [48, 8, 40, 0], texture: 0 }, down: { uv: [56, 0, 48, 8], texture: 0 } }, type: "cube", uuid: "4b229942-3140-5696-e1a2-d2417b1089f0" }], groups: [{ name: "body", uuid: "79f8a4e6-15d2-f368-a37a-3d9b40bf0e37", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [0, 12, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: true, primary_selected: false }, { name: "arm_right", uuid: "f3f67e8b-5bf0-e11a-b3b3-e52fcf167fe5", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [5, 22, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: true, primary_selected: false }, { name: "arm_left", uuid: "0ef4d0ee-6564-716e-a62a-533e6322f0fa", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [-5, 22, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: true, primary_selected: false }, { name: "leg_right", uuid: "636bd8a0-db0d-6e21-e26e-699f4feac839", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [1.9, 12, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: false, primary_selected: false }, { name: "leg_left", uuid: "83683cdd-6120-26ad-4a47-46e5ef7b4c0d", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [-1.9, 12, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: false, primary_selected: false }, { name: "waist", uuid: "b639de34-33ad-380a-97b3-a970e53143ca", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [0, 12, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: true, primary_selected: false }, { name: "head", uuid: "b452967d-4101-428a-f9ca-b9b5cd5c5f3b", export: true, locked: false, scope: 0, selected: false, _static: { properties: {}, temp_data: {} }, origin: [0, 24, 0], rotation: [0, 0, 0], color: 0, children: [], reset: false, shade: true, mirror_uv: false, visibility: true, autouv: 0, isOpen: false, primary_selected: false }], outliner: [{ uuid: "b639de34-33ad-380a-97b3-a970e53143ca", isOpen: true, children: [{ uuid: "79f8a4e6-15d2-f368-a37a-3d9b40bf0e37", isOpen: true, children: ["7ccc0f1d-69cd-93ef-c6de-d15934cdb3d3", "23f71c3e-db14-7256-4942-1d4d8f79554c"] }, { uuid: "b452967d-4101-428a-f9ca-b9b5cd5c5f3b", isOpen: false, children: ["26a44ef2-f33d-a2a0-adb3-3df4f214b2db", "4b229942-3140-5696-e1a2-d2417b1089f0"] }, { uuid: "f3f67e8b-5bf0-e11a-b3b3-e52fcf167fe5", isOpen: true, children: ["a6545d31-5bb5-ff7c-99dd-2792840aebf3", "069dbc37-3ea8-7c78-6549-3c1622f204ff"] }, { uuid: "0ef4d0ee-6564-716e-a62a-533e6322f0fa", isOpen: true, children: ["62f36d52-35b1-c07b-028e-04c55a49d4d9", "300e4d99-a77d-0a6b-3903-7dd135c8f046"] }] }, { uuid: "636bd8a0-db0d-6e21-e26e-699f4feac839", isOpen: false, children: ["4ec8609c-81e6-c5bb-95f6-383d912c4ac6", "dd1a16b6-54de-01b6-c8fa-c0181f6f7c6d"] }, { uuid: "83683cdd-6120-26ad-4a47-46e5ef7b4c0d", isOpen: false, children: ["685c05c4-ce57-9ced-6d44-16e3f07524b4", "30a965bc-c172-1ee5-f487-9c3a12caebed"] }], textures: [{ name: "player.png", path: "", folder: "", namespace: "", id: "0", group: "", scope: 0, width: 64, height: 64, uv_width: 64, uv_height: 64, particle: false, use_as_default: false, layers_enabled: false, sync_to_project: "", file_format: "png", render_mode: "default", render_sides: "auto", wrap_mode: "limited", pbr_channel: "color", fps: 7, frame_time: 1, frame_order_type: "loop", frame_order: "", frame_interpolate: false, visible: true, internal: true, saved: true, uuid: "5578dbf8-7957-f8ff-fa0c-3892ecc8c747", source: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAC+ElEQVR4AexavYoUQRCu3UThLlLwFlZEUfEVLtfYQM0u8gnEn+gwMDDVdzBYzIwMFQzvAUwExR9c2BPTwzO5PWq4D5q6mqqZ673rnple+Kjuqa6vu76ug+6ZG5Pze//559LC/YfPlhYc+uRuVwBe4eaNy6SBjn7TjQlpOHJnbRoJkHUGkYsrAkQK2PnwUgGd38LIBBpVwM7X36QBc893F6QB/pzt+Pbi1dLC28VFsvDm5gWysP/tydJCanGqCtjcuEQasLirkzXSAP/atSukAf5z01ukAf6UthIg5QJSz91IgHtTIgYWy20G+l22jQTocoLe2hsJ8G5OxAAZtxnod9k2EqDLCXprrwTY2f1DGhD8Y7FHGuDf+/6LNMD/f/6FNMB/llbONf44eToK8fjvAwqxP3tBIWZ31kch1re3RyE+3d2iEB/+PaIQWy/HFEK+S5ALlH35bqJtvOSrKkA+xN0fz3HXR9+ziJcWceCTFn7PghfjwIN+G6sK0Iag62NVAXDuR3I456PvWcRLizjwSQu/Z8GLceBBv409dheQ5355zpfnenmPkPGyL/lmzw8oRFt+ySfjPTGqCsA9AINx7kcf53z0ca5Hvy4ePLAYX8cHXliMr+OHv44PfstWAlgD+u4rAvR9h738SgV4CvXdXyqg7zvs5VcqwFOo7/6qAvAuAMni7o8+7vro426Pfl08eGAxvo4PvLAYX8cPfx0f+z0cex8Q3vW5Hd71uX3++utRiPBdArc5xgJzhAi5tDZzhpDcIRe3JYcrgDeg7/7qT6DvSVr5FQEsdYbgKxUwhF22ciwVYKkzBF+pgCHsspVjqQBLnSH4SgUMYZetHHtXAVaymm/lAsR+v4+N15K0nq1cAJ4s9vt9bDyvoSlORYCmk+cw7lQEiP1+HxvfRthoAbz/D/C+38fGt0lWGxstAJPGfr+Pjec1nBQrEeCkk+cQVwTIYRdSrqFUQEr1c5i7VEAOu5ByDaUCUqqfw9wrqYDY7/cx8bEiHgIAAP//rCdZDQAAAAZJREFUAwCVozDeWe9Q4QAAAABJRU5ErkJggg==" }], export_options: { gltf: { encoding: "ascii", scale: 16, embed_textures: true, armature: false, animations: true } } };
 
-  // bongle-blockbench/plugin/src/generic.js
+  // plugin/src/generic.js
   var PLUGIN_ID = "bongle";
   var FORMAT_IDS = {
     character: "bongle_character",
@@ -351,13 +351,22 @@
   }
   var BADGE_ID = "bongle_badge";
   var startScreenSection = null;
-  var GITHUB_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>';
-  function openExternal(url) {
-    if (typeof Blockbench !== "undefined" && typeof Blockbench.openLink === "function") {
-      Blockbench.openLink(url);
-    } else {
-      window.open(url, "_blank", "noopener");
-    }
+  var startScreenObserver = null;
+  function newBongleProject(formatId) {
+    const format = typeof Formats !== "undefined" ? Formats[formatId] : null;
+    if (format && typeof format.new === "function") format.new();
+  }
+  function scrollStartScreenTop() {
+    const el = document.getElementById("start_screen");
+    if (el) el.scrollTop = 0;
+  }
+  function watchStartScreen() {
+    const wrapper = document.getElementById("page_wrapper");
+    if (!wrapper || startScreenObserver) return;
+    startScreenObserver = new MutationObserver(() => {
+      if (wrapper.classList.contains("start_screen")) scrollStartScreenTop();
+    });
+    startScreenObserver.observe(wrapper, { attributes: true, attributeFilter: ["class"] });
   }
   function addHeaderBadge() {
     if (document.getElementById(BADGE_ID)) return;
@@ -380,42 +389,36 @@
         color: "var(--color-accent)",
         text_color: "#ffffff",
         text: [
-          { type: "h2", text: "Make a bongle avatar or model" },
+          { type: "h1", text: "New Bongle project" },
           {
             type: "p",
-            text: "Blockbench with the bongle plugin built in, for making avatars and models for bongle games. Click **New**, pick **Bongle Character** (or **Bongle Model**), build it, then export with **File > Export > Export Bongle glTF** and upload the file on bongle.io to wear it in-game."
+            text: "Start a rigged **character** or a static **model**. Or pick a format below to import a Minecraft skin, a generic model, and more."
           },
-          {
-            type: "button",
-            text: "Start here",
-            click: () => openExternal("https://github.com/isaac-mason/bongle-blockbench#readme")
-          },
-          {
-            type: "button",
-            text: "What is bongle?",
-            click: () => openExternal("https://bongle.io")
-          },
-          { type: "button", text: "bongle on GitHub", click: () => openExternal("https://github.com/isaac-mason/bongle") }
+          { type: "button", text: "New Bongle Character", click: () => newBongleProject(FORMAT_IDS.character) },
+          { type: "button", text: "New Bongle Model", click: () => newBongleProject(FORMAT_IDS.model) }
         ]
       });
       decorateBongleButtons();
     }
+    scrollStartScreenTop();
+    watchStartScreen();
     try {
       document.title = "Bongle \xB7 Blockbench";
     } catch (e) {
     }
   }
   function decorateBongleButtons() {
-    const section = document.querySelector(
-      '#start_screen .start_screen_section[section_id="bongle"]'
-    );
+    const section = document.querySelector('#start_screen .start_screen_section[section_id="bongle"]');
     if (!section) return;
-    section.querySelectorAll("button").forEach((button) => {
-      if (button.querySelector(".bongle-gh-icon")) return;
-      const icon = document.createElement("span");
-      icon.className = "bongle-gh-icon";
-      icon.innerHTML = GITHUB_SVG;
-      button.insertBefore(icon, button.firstChild);
+    const icons = ["person", "view_in_ar"];
+    section.querySelectorAll("button").forEach((button, i) => {
+      button.classList.add("bongle-new-button");
+      if (!button.querySelector(".material-icons")) {
+        const icon = document.createElement("i");
+        icon.className = "material-icons";
+        icon.textContent = icons[i] || "add";
+        button.insertBefore(icon, button.firstChild);
+      }
     });
   }
   function removeBranding() {
@@ -423,6 +426,8 @@
     if (badge) badge.remove();
     if (startScreenSection && startScreenSection.delete) startScreenSection.delete();
     startScreenSection = null;
+    if (startScreenObserver) startScreenObserver.disconnect();
+    startScreenObserver = null;
   }
   var exportAction = null;
   function registerBonglePlugin() {
@@ -501,7 +506,7 @@
     };
   }
 
-  // bongle-blockbench/plugin/src/bridge.js
+  // plugin/src/bridge.js
   (() => {
     const IS_EMBEDDED = typeof window !== "undefined" && window.parent && window.parent !== window;
     if (!IS_EMBEDDED) return;

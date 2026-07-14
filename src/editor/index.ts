@@ -1314,10 +1314,17 @@ function loadEditorAssets(): void {
  */
 async function renderBlockIconsInBrowser(): Promise<void> {
     const state = editorClient;
+    console.log(
+        '[icon-debug] renderBlockIconsInBrowser trigger: client=%o voxelRes=%o inFlight=%o',
+        !!state,
+        !!state?.voxelResources,
+        blockIconRenderInFlight,
+    );
     if (!state || !state.voxelResources || blockIconRenderInFlight) return;
     blockIconRenderInFlight = true;
     try {
         const atlas = await BlockIcons.renderBlockIconAtlas(state);
+        console.log('[icon-debug] atlas result: cols=%d rows=%d', atlas.cols, atlas.rows);
         if (atlas.cols === 0) return; // no renderable blocks yet
         const url = await pixelsToObjectUrl(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
         if (currentBlockIconUrl) URL.revokeObjectURL(currentBlockIconUrl);
@@ -1329,6 +1336,7 @@ async function renderBlockIconsInBrowser(): Promise<void> {
             blockIconCols: atlas.cols,
             blockIconRows: atlas.rows,
         });
+        console.log('[icon-debug] block atlas URL published (%d coords)', Object.keys(atlas.coords).length);
     } catch (e) {
         console.warn('[bongle] in-browser block icon render failed:', e);
     } finally {

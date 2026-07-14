@@ -58,7 +58,7 @@ import {
     vec4f,
 } from 'gpucat';
 import type { TextureNode } from 'gpucat/dist/nodes/nodes';
-import { assetUrl } from '../asset-url';
+import type { ResourceLoader } from '../../core/resource-loader';
 import { EnvConfig } from '../environment';
 import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 
@@ -194,8 +194,8 @@ export function init(): SpriteResources {
  * atlas TextureNode to it, the compiled pipeline is preserved. Returns
  * `true` when the atlas swapped.
  */
-export async function load(res: SpriteResources): Promise<boolean> {
-    const meta = await fetchSpriteAtlasMetadata();
+export async function load(res: SpriteResources, loader: ResourceLoader): Promise<boolean> {
+    const meta = await fetchSpriteAtlasMetadata(loader);
     // An empty manifest (0 sprites) has no PNG on disk — treat it exactly like
     // a missing atlas so we don't fetch (and 404 on) sprites-atlas.png.
     if (!meta || meta.atlasSize === 0) {
@@ -210,7 +210,7 @@ export async function load(res: SpriteResources): Promise<boolean> {
 
     if (res.atlasHash !== null && meta.hash === res.atlasHash) return false;
 
-    const pixels = await fetchAtlasPixels(meta.atlasSize);
+    const pixels = await fetchAtlasPixels(meta.atlasSize, loader);
     if (!pixels) return false;
 
     swapAtlas(res, createAtlasTexture(pixels, meta.atlasSize));
@@ -252,22 +252,22 @@ function swapAtlas(res: SpriteResources, next: Texture): void {
     res.atlasTexNode.samplerNode!.value = next._gpuSampler;
 }
 
-async function fetchSpriteAtlasMetadata(): Promise<SpriteAtlasMetadata | null> {
+async function fetchSpriteAtlasMetadata(loader: ResourceLoader): Promise<SpriteAtlasMetadata | null> {
+    // through the injected loader (prod: fetch(assetUrl); editor: vfs). A missing
+    // atlas (404 / parse fail) → null.
     try {
-        const resp = await fetch(assetUrl('sprites-atlas.json'), { cache: 'no-store' });
-        if (!resp.ok) return null;
-        const ct = resp.headers.get('content-type') ?? '';
-        if (!ct.includes('json')) return null;
-        return (await resp.json()) as SpriteAtlasMetadata;
+        const bytes = await loader.loadBytes('sprites-atlas.json');
+        return JSON.parse(new TextDecoder().decode(bytes)) as SpriteAtlasMetadata;
     } catch {
         return null;
     }
 }
 
-async function fetchAtlasPixels(atlasSize: number): Promise<Uint8Array | null> {
+async function fetchAtlasPixels(atlasSize: number, loader: ResourceLoader): Promise<Uint8Array | null> {
     let img: HTMLImageElement;
     try {
-        img = await loadImage(assetUrl('sprites-atlas.png'));
+        const bytes = await loader.loadBytes('sprites-atlas.png');
+        img = await loadImageFromBytes(bytes);
     } catch {
         return null;
     }
@@ -281,12 +281,20 @@ async function fetchAtlasPixels(atlasSize: number): Promise<Uint8Array | null> {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
+/** decode image bytes → <img> via a transient object url (the loader gives us
+ *  bytes; an <img> can't source a bare vfs/file path). */
+function loadImageFromBytes(bytes: Uint8Array): Promise<HTMLImageElement> {
+    const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
     return new Promise((resolve, reject) => {
         const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(img);
+        };
+        img.onerror = (e) => {
+            URL.revokeObjectURL(url);
+            reject(e);
+        };
         img.src = url;
     });
 }

@@ -11,35 +11,39 @@ export type EnvValues = Record<string, boolean>;
  *  if there's nothing to do (no `env` import, or no matching accesses). */
 export function replaceEnv(code: string, values: EnvValues): string {
     const keys = Object.keys(values);
-    if (!keys.some((k) => code.includes(`env.${k}`))) return code;
+    // ALL local bindings for `env` — the prebundle emits deduped aliases in one
+    // chunk (`import { env, env as env$1 } from "bongle/env"`), and both are used;
+    // replacing only the first leaves `env$1.editor` reading the false default.
+    const names = findEnvImportNames(code);
+    if (names.length === 0) return code;
 
-    const envLocalName = findEnvImportName(code);
-    if (!envLocalName) return code;
-
+    const nameAlt = names.map(escapeRegex).join('|');
     // negative lookbehind: don't match `process.env.client` / `foo.env.client`.
     // negative lookahead: skip assignment targets (`env.x = …`) but allow
     // comparisons (`env.x === …`).
-    const re = new RegExp(`(?<![.\\w])${escapeRegex(envLocalName)}\\.(${keys.join('|')})\\b(?!\\s*=[^=])`, 'g');
+    const re = new RegExp(`(?<![.\\w])(?:${nameAlt})\\.(${keys.join('|')})\\b(?!\\s*=[^=])`, 'g');
     return code.replace(re, (match, prop: string, offset: number) => {
         if (isInsideString(code, offset)) return match;
         return prop in values ? String(values[prop]) : match;
     });
 }
 
-/** Local binding name for `env` imported from 'bongle' or 'bongle/env'. Handles
- *  `import { env }`, `import { env as foo }`, and the whitespace-minimal bundled
- *  form the prebundle emits (`import{env as env$2}from"bongle/env"`). The
- *  'bongle/env' seam is how env survives the prebundle recognizably (the engine
- *  chunks import env from there; see vite.lib.config externalizeEnvSeam). */
-function findEnvImportName(code: string): string | null {
+/** Every local binding name for `env` imported from 'bongle' or 'bongle/env'.
+ *  Handles `import { env }`, `import { env as foo }`, multiple bindings in one
+ *  clause (`{ env, env as env$1 }`), and the whitespace-minimal bundled form
+ *  (`import{env as env$2}from"bongle/env"`). The 'bongle/env' seam is how env
+ *  survives the prebundle recognizably (see vite.lib.config externalizeEnvSeam). */
+function findEnvImportNames(code: string): string[] {
+    const names = new Set<string>();
     const importRegex = /import\s*\{([^}]*)\}\s*from\s*['"]bongle(?:\/env)?['"]/g;
     for (const match of code.matchAll(importRegex)) {
         for (const spec of match[1].split(',').map((s) => s.trim())) {
+            if (!spec) continue;
             const parts = spec.split(/\s+as\s+/);
-            if (parts[0].trim() === 'env') return (parts[1] || parts[0]).trim();
+            if (parts[0].trim() === 'env') names.add((parts[1] || parts[0]).trim());
         }
     }
-    return null;
+    return [...names];
 }
 
 function escapeRegex(s: string): string {

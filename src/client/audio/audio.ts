@@ -46,9 +46,9 @@
 
 import { AudioListenerTrait } from '../../builtins/audio-listener';
 import { getVisualWorldMatrix, getVisualWorldPosition, TransformTrait } from '../../builtins/transform';
+import type { ResourceLoader } from '../../core/resource-loader';
 import type { Node } from '../../core/scene/scene-tree';
 import * as SceneTree from '../../core/scene/scene-tree';
-import { assetUrl } from '../../render/asset-url';
 import type { ClientRoom } from '../rooms';
 
 /* ── manifest types (mirror of asset-pipeline/audio.ts) ────────────── */
@@ -68,7 +68,10 @@ type ResolvedClip =
     | { kind: 'atlas'; buffer: AudioBuffer; offset: number; duration: number }
     | {
           kind: 'standalone';
+          /** loader-relative path (e.g. 'sounds/foo.ogg'); loaded lazily on first
+           *  play through `loader`. */
           url: string;
+          loader: ResourceLoader;
           durationSec: number;
           buffer: AudioBuffer | null;
           pending: Promise<AudioBuffer> | null;
@@ -120,11 +123,12 @@ export function setOutputMuted(resources: AudioResources, muted: boolean): void 
 /** Fetch + parse the audio manifest. `no-store` so a dev rebuild's bytes
  *  aren't served stale from the HTTP cache on an HMR refresh. Returns null
  *  when there's no manifest (no sounds declared) or it's unreadable. */
-async function fetchManifest(): Promise<AudioManifest | null> {
+async function fetchManifest(loader: ResourceLoader): Promise<AudioManifest | null> {
+    // through the injected loader (prod: fetch(assetUrl); editor: vfs). A missing
+    // manifest (no sounds declared / unreadable) → null.
     try {
-        const res = await fetch(assetUrl('audio-manifest.json'), { cache: 'no-store' });
-        if (!res.ok) return null;
-        return (await res.json()) as AudioManifest;
+        const bytes = await loader.loadBytes('audio-manifest.json');
+        return JSON.parse(new TextDecoder().decode(bytes)) as AudioManifest;
     } catch {
         return null;
     }
@@ -133,7 +137,7 @@ async function fetchManifest(): Promise<AudioManifest | null> {
 /** Build the clips map for a manifest against an existing context: one eager
  *  atlas decode covering every atlas-bucket clip, plus lazy standalone stubs.
  *  Shared by `loadResources` (boot) and `refreshResources` (HMR). */
-async function buildClips(context: AudioContext, manifest: AudioManifest): Promise<Map<string, ResolvedClip>> {
+async function buildClips(context: AudioContext, manifest: AudioManifest, loader: ResourceLoader): Promise<Map<string, ResolvedClip>> {
     const clips = new Map<string, ResolvedClip>();
 
     // eager atlas decode, one fetch + one decodeAudioData covers every
@@ -141,12 +145,10 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
     // view into the same shared buffer.
     if (manifest.atlas.length > 0) {
         try {
-            const atlasRes = await fetch(assetUrl('audio-atlas.flac'), { cache: 'no-store' });
-            if (!atlasRes.ok) throw new Error(`atlas HTTP ${atlasRes.status}`);
-            const bytes = await atlasRes.arrayBuffer();
-            // decodeAudioData *detaches* its input ArrayBuffer; pass a fresh
-            // copy so a re-invocation can't be handed a detached buffer.
-            const buffer = await context.decodeAudioData(bytes.slice(0));
+            const raw = await loader.loadBytes('audio-atlas.flac');
+            // decodeAudioData *detaches* its input ArrayBuffer; hand it a fresh
+            // standalone copy (loadBytes may return a subarray view).
+            const buffer = await context.decodeAudioData(raw.slice().buffer);
             for (const e of manifest.atlas) {
                 clips.set(e.id, {
                     kind: 'atlas',
@@ -165,7 +167,8 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
     for (const e of manifest.standalone) {
         clips.set(e.id, {
             kind: 'standalone',
-            url: assetUrl(e.url),
+            url: e.url,
+            loader,
             durationSec: e.durationSec,
             buffer: null,
             pending: null,
@@ -179,17 +182,17 @@ async function buildClips(context: AudioContext, manifest: AudioManifest): Promi
  *  `EngineClient.load()`. Always returns a live `AudioResources`, when
  *  no manifest is present (pipeline emitted nothing) the clips map is
  *  empty and `play(unknownId, ...)` no-ops cleanly. */
-export async function loadResources(): Promise<AudioResources> {
+export async function loadResources(loader: ResourceLoader): Promise<AudioResources> {
     const Ctx: typeof AudioContext =
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
-    const manifest = await fetchManifest();
+    const manifest = await fetchManifest(loader);
     // no manifest = no sounds declared. fine, return a live but empty resources
     // object so `play(unknownId, ...)` still no-ops cleanly.
     if (!manifest) return makeResources(new Ctx(), new Map(), null);
 
     const context = new Ctx({ sampleRate: manifest.sampleRate });
-    const clips = await buildClips(context, manifest);
+    const clips = await buildClips(context, manifest, loader);
     return makeResources(context, clips, manifest.hash);
 }
 
@@ -201,12 +204,12 @@ export async function loadResources(): Promise<AudioResources> {
  *  registry change to ride, so this is the only path that reaches the live
  *  client. The AudioContext is reused (sample rate is a fixed constant), and
  *  in-flight playbacks keep their already-started buffers and finish cleanly. */
-export async function refreshResources(resources: AudioResources): Promise<boolean> {
-    const manifest = await fetchManifest();
+export async function refreshResources(resources: AudioResources, loader: ResourceLoader): Promise<boolean> {
+    const manifest = await fetchManifest(loader);
     if (!manifest) return false;
     if (resources.hash !== null && manifest.hash === resources.hash) return false;
 
-    const clips = await buildClips(resources.context, manifest);
+    const clips = await buildClips(resources.context, manifest, loader);
     // replace the map's CONTENTS, not the reference, `resources.clips` is read
     // on every play and shared across rooms, so mutating in place propagates.
     resources.clips.clear();
@@ -522,9 +525,9 @@ function startStandaloneSource(
         return;
     }
     if (!clip.pending) {
-        clip.pending = fetch(clip.url)
-            .then((r) => r.arrayBuffer())
-            .then((bytes) => ctx.decodeAudioData(bytes))
+        clip.pending = clip.loader
+            .loadBytes(clip.url)
+            .then((bytes) => ctx.decodeAudioData(bytes.slice().buffer))
             .then((buf) => {
                 clip.buffer = buf;
                 return buf;

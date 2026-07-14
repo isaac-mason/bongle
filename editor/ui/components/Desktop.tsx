@@ -2,16 +2,35 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { MonitorPlay } from 'lucide-react';
-import { type ReactNode, useEffect } from 'react';
+import { Code, MonitorPlay, ScrollText } from 'lucide-react';
+import { type ReactNode, useEffect, useMemo } from 'react';
 import type { Filesystem } from '../../fs';
 import { useClients } from '../../stores/clients';
+import { useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
-import { useWindows } from '../../stores/windows';
-import { appById } from '../apps';
+import { useSystemWindows } from '../../stores/system-windows';
+import { useTabDrag } from '../../stores/tab-drag';
+import { snapRect, useSnapPreview, useWindows } from '../../stores/windows';
+import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
-import { Taskbar, type TaskbarAction, type TaskbarItem } from './Taskbar';
+import { CodePane } from './CodePane';
+import type { MenuItem } from './ContextMenu';
+import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
+
+/** a torn-off editor pane in its own window; title tracks its active file. */
+function EditorPaneWindow({ pid, fs }: { pid: string; fs: Filesystem }) {
+    const title = useEditor((s) => {
+        const p = s.panes[pid];
+        const active = p ? s.groups[p.activeGroup]?.active : null;
+        return active ? (active.split('/').pop() ?? 'editor') : 'editor';
+    });
+    return (
+        <Window id={pid} title={title} onClose={() => useEditor.getState().closePane(pid)}>
+            <CodePane fs={fs} pane={pid} />
+        </Window>
+    );
+}
 
 export type WindowDef = {
     id: string;
@@ -27,10 +46,11 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         for (const w of windows) register(w.id, w.initial);
     }, [windows, register]);
 
-    // rescue windows that a viewport shrink would push offscreen — re-clamp each
-    // into the new bounds so its title bar stays reachable.
+    // re-derive layout on viewport resize: snapped windows re-tile their zone (so
+    // split panes stay split), floating windows re-clamp so their title bar stays
+    // reachable.
     useEffect(() => {
-        const onResize = () => useWindows.getState().rescueAll();
+        const onResize = () => useWindows.getState().relayout();
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     }, []);
@@ -58,31 +78,147 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     const closeClient = useClients((s) => s.close);
     const openClient = useClients((s) => s.open);
 
+    const focused = useWindows((s) => s.focused);
+
+    const windowPanes = useEditor((s) => s.windowPanes);
+    const panes = useEditor((s) => s.panes);
+    const groupsById = useEditor((s) => s.groups);
+    const paneTitle = (pid: string): string => {
+        const p = panes[pid];
+        const active = p ? groupsById[p.activeGroup]?.active : null;
+        return active ? (active.split('/').pop() ?? 'editor') : 'editor';
+    };
+
+    const LOG_IDS = useMemo(() => new Set(['build', 'server', 'client']), []);
+    const closed = useSystemWindows((s) => s.closed);
+    const { open: openSystem, close: closeSystem } = useSystemWindows.getState();
+
+    // right-click menu building blocks (show = focus/restore).
+    const show = (id: string) => ({ label: 'Show', onClick: () => useWindows.getState().focus(id) });
+    // build + server + client logs are one pinned 'logs' taskbar button; clicking
+    // it opens (or raises) ALL of them, not just one.
+    const LOG_WINDOWS = ['build', 'server', 'client'];
+    const logsOpen = LOG_WINDOWS.some((id) => !closed[id]);
+    const openLogs = () => {
+        for (const id of LOG_WINDOWS) openSystem(id);
+    };
+    const closeLogs = () => {
+        for (const id of LOG_WINDOWS) closeSystem(id);
+    };
+    // blockbench is pinned (always in the taskbar); running = its window is open.
+    const bbRunning = launched.some((w) => w.appId === 'blockbench');
+    const openBlockbench = () => useLaunched.getState().launch(blockbenchApp, '');
+
     const items: TaskbarItem[] = [
-        ...windows.map((w) => ({ id: w.id, title: w.title, glyph: w.glyph })),
-        ...launched.map((w) => ({ id: w.id, title: w.title, glyph: appById(w.appId)?.glyph ?? null })),
-        ...clients.map((w) => ({ id: w.id, title: w.title, glyph: <MonitorPlay size={16} /> })),
+        // game clients come first — the default layout boots straight into one.
+        ...clients.map((w) => ({
+            id: w.id,
+            title: w.title,
+            glyph: <MonitorPlay size={16} />,
+            menu: [show(w.id), { label: 'Close', onClick: () => closeClient(w.id) }],
+        })),
+        // files + code: pinned + genuinely closable (reopen to last geometry).
+        ...windows
+            .filter((w) => !LOG_IDS.has(w.id))
+            .map((w) => ({
+                id: w.id,
+                title: w.title,
+                glyph: w.glyph,
+                running: !closed[w.id],
+                isActive: !closed[w.id] && focused === w.id,
+                onClick: () => openSystem(w.id),
+                menu: closed[w.id]
+                    ? [{ label: 'Open', onClick: () => openSystem(w.id) }]
+                    : [show(w.id), { label: 'Close', onClick: () => closeSystem(w.id) }],
+            })),
+        {
+            id: 'logs',
+            title: 'logs',
+            glyph: <ScrollText size={18} />,
+            running: logsOpen,
+            isActive: logsOpen && focused != null && LOG_IDS.has(focused),
+            onClick: openLogs,
+            menu: logsOpen
+                ? [
+                      { label: 'Show all', onClick: openLogs },
+                      { label: 'Close', onClick: closeLogs },
+                  ]
+                : [{ label: 'Open', onClick: openLogs }],
+        },
+        {
+            id: 'blockbench',
+            title: 'blockbench',
+            glyph: blockbenchApp.glyph,
+            running: bbRunning,
+            isActive: focused === 'blockbench',
+            onClick: () => (bbRunning ? useWindows.getState().focus('blockbench') : openBlockbench()),
+            menu: bbRunning
+                ? [show('blockbench'), { label: 'Close', onClick: () => closeLaunched('blockbench') }]
+                : [{ label: 'Open', onClick: openBlockbench }],
+        },
+        ...launched
+            .filter((w) => w.appId !== 'blockbench')
+            .map((w) => ({
+                id: w.id,
+                title: w.title,
+                glyph: appById(w.appId)?.glyph ?? null,
+                menu: [show(w.id), { label: 'Close', onClick: () => closeLaunched(w.id) }],
+            })),
+        ...windowPanes.map((pid) => ({
+            id: pid,
+            title: paneTitle(pid),
+            glyph: <Code size={16} />,
+            menu: [show(pid), { label: 'Close', onClick: () => useEditor.getState().closePane(pid) }],
+        })),
     ];
 
-    const actions: TaskbarAction[] = [
-        {
-            id: 'new-client',
-            title: 'Open a client window',
-            glyph: <MonitorPlay size={18} />,
-            onClick: openClient,
-            menu: [
-                { label: 'New client window', onClick: openClient },
-                { label: 'Close all clients', onClick: () => clients.forEach((c) => closeClient(c.id)) },
-            ],
-        },
+    // right-click the empty taskbar rail for these.
+    const taskbarMenu: MenuItem[] = [
+        { label: 'New client window', onClick: openClient },
+        ...(clients.length
+            ? [
+                  {
+                      label: 'Close all clients',
+                      onClick: () => {
+                          for (const c of clients) closeClient(c.id);
+                      },
+                  },
+              ]
+            : []),
     ];
 
     return (
-        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#e9e9e9' }}>
-            {windows.map((w) => (
-                <Window key={w.id} id={w.id} title={w.title}>
-                    {w.content}
-                </Window>
+        // dropping a dragged tab on the desktop (not on a group / tab strip) tears it
+        // off into its own editor window at the cursor.
+        // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only tear-off drop target.
+        <div
+            className="absolute inset-0 overflow-hidden bg-desktop"
+            onDragOver={(e) => {
+                if (useTabDrag.getState().drag) e.preventDefault();
+            }}
+            onDrop={(e) => {
+                const drag = useTabDrag.getState().drag;
+                if (!drag) return;
+                e.preventDefault();
+                const pid = useEditor.getState().tearOff(drag.path, drag.group);
+                useWindows.getState().register(pid, {
+                    x: Math.max(TASKBAR_W + 8, e.clientX - 80),
+                    y: Math.max(0, e.clientY - 13),
+                    w: 720,
+                    h: 520,
+                });
+                useTabDrag.getState().setDrag(null);
+            }}
+        >
+            {windows
+                .filter((w) => !closed[w.id])
+                .map((w) => (
+                    <Window key={w.id} id={w.id} title={w.title} onClose={() => closeSystem(w.id)}>
+                        {w.content}
+                    </Window>
+                ))}
+            {windowPanes.map((pid) => (
+                <EditorPaneWindow key={pid} pid={pid} fs={fs} />
             ))}
             {launched.map((w) => {
                 const app = appById(w.appId);
@@ -94,11 +230,32 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 );
             })}
             {clients.map((w) => (
-                <Window key={w.id} id={w.id} title={w.title} onClose={() => closeClient(w.id)}>
+                <Window key={w.id} id={w.id} title={w.title} keepMounted onClose={() => closeClient(w.id)}>
                     <ClientView connection={w.connection} />
                 </Window>
             ))}
-            <Taskbar items={items} actions={actions} />
+            <SnapOverlay />
+            <Taskbar items={items} menu={taskbarMenu} />
         </div>
+    );
+}
+
+/** the translucent ghost showing where a dragged window will snap. Absolute over
+ *  the desktop, pointer-transparent so it never intercepts the in-flight drag. */
+function SnapOverlay() {
+    const zone = useSnapPreview((s) => s.zone);
+    if (!zone) return null;
+    const r = snapRect(zone);
+    return (
+        <div
+            className="pointer-events-none absolute z-[9999] border-2 border-accent transition-all duration-75"
+            style={{
+                left: r.x,
+                top: r.y,
+                width: r.w,
+                height: r.h,
+                background: 'color-mix(in srgb, var(--color-accent) 22%, transparent)',
+            }}
+        />
     );
 }

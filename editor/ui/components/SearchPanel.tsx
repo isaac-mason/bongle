@@ -1,18 +1,26 @@
 // editor/ui/components/SearchPanel.tsx — search across all files under src/.
 // Debounced, case-insensitive substring search; results grouped by file with the
-// match bolded. Clicking a hit opens the file and jumps to the line (Monaco
-// reveals via the open-file store).
+// match bolded. Clicking a hit opens the file in the pane's active group and
+// jumps to the line (Monaco reveals via the editor store).
 
 import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
-import { useOpenFile } from '../../stores/open-file';
+import { useEditor } from '../../stores/editor';
 
 const SCOPE = 'src';
 
 type Hit = { line: number; col: number; text: string };
 type FileHits = { path: string; hits: Hit[] };
 
-export function SearchPanel({ fs, inputRef }: { fs: Filesystem; inputRef: React.RefObject<HTMLInputElement | null> }) {
+export function SearchPanel({
+    fs,
+    pane,
+    inputRef,
+}: {
+    fs: Filesystem;
+    pane: string;
+    inputRef: React.RefObject<HTMLInputElement | null>;
+}) {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<FileHits[]>([]);
     const [matchLen, setMatchLen] = useState(0);
@@ -91,7 +99,7 @@ export function SearchPanel({ fs, inputRef }: { fs: Filesystem; inputRef: React.
                             <button
                                 key={`${h.line}:${h.col}`}
                                 type="button"
-                                onClick={() => useOpenFile.getState().openAt(r.path, h.line)}
+                                onClick={() => useEditor.getState().openAt(pane, r.path, h.line)}
                                 title={`${r.path}:${h.line}`}
                                 className="flex w-full cursor-pointer items-center border-none bg-transparent px-1.5 py-0.5 text-left font-mono text-xs hover:bg-surface-muted"
                             >
