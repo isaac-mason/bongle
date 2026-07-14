@@ -18,6 +18,7 @@
 import type { ClientDriver } from '../../interface/index';
 import { createPortBridge } from '../bundler/port-bridge';
 import { makeRunner } from '../bundler/runner';
+import { exposeDevtools } from '../devtools';
 import type { Filesystem } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
 
@@ -128,6 +129,10 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
         EngineClient.applyRegistryChanges(state);
     });
     __kit.flush();
+
+    // DevTools automation surface for this client realm: `bongle` in the iframe's
+    // console context (fs + the live EngineClient state / api).
+    exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineEditor, kit: __kit, runner });
 
     // game transport: inbound frames from the server worker → engine inbox.
     gamePort.onmessage = (e: MessageEvent) => {

@@ -27,10 +27,12 @@ export type SpawnServerWorkerOptions = {
     /** OPFS project the worker opens directly (same origin as the main doc). */
     projectName: string;
     log?: (msg: string) => void;
+    /** a specific avatar for the local player (platform intent) — see startEditorServer. */
+    localAvatarUrl?: string;
 };
 
 export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
-    const { connectRealm, projectName, log = () => {} } = opts;
+    const { connectRealm, projectName, log = () => {}, localAvatarUrl } = opts;
 
     const worker = new Worker(new URL('./server-worker.ts', import.meta.url), { type: 'module' });
 
@@ -51,7 +53,7 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
     const bundler = new MessageChannel();
     connectRealm('server', bundler.port1);
 
-    worker.postMessage({ type: 'init', projectName }, [bundler.port2]);
+    worker.postMessage({ type: 'init', projectName, localAvatarUrl }, [bundler.port2]);
 
     return {
         ready,

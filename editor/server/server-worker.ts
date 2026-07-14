@@ -14,6 +14,7 @@
 
 import { createPortBridge } from '../bundler/port-bridge';
 import { makeRunner } from '../bundler/runner';
+import { exposeDevtools } from '../devtools';
 import type { Filesystem } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
 import { type EditorServer, startEditorServer } from './server';
@@ -27,7 +28,7 @@ let transport: PortTransport | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 
 type HostMessage =
-    | { type: 'init'; projectName: string }
+    | { type: 'init'; projectName: string; localAvatarUrl?: string }
     | { type: 'fs-change'; path: string }
     | { type: 'client-join'; connectionId: number; meta: ClientMeta }
     | { type: 'client-leave'; connectionId: number }
@@ -72,8 +73,12 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             const { EngineServer } = await runner.import('bongle/engine-server');
             const { __kit } = await runner.import('bongle/internal');
 
-            server = await startEditorServer({ fs, log, EngineServer, __kit });
+            server = await startEditorServer({ fs, log, EngineServer, __kit, localAvatarUrl: msg.localAvatarUrl });
             __kit.flush(); // initial registry apply.
+
+            // DevTools automation surface for the server realm: `bongle` in the
+            // worker's console context (fs + the live EngineServer state / api).
+            exposeDevtools('server', { fs, server: EngineServer, state: server.state, app: server.app, kit: __kit });
 
             transport = createPortTransport(server.app, server.state, server.resolveAvatar);
 
@@ -107,6 +112,9 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             // OPFS is shared, so the change is already visible here — the server
             // re-reads scenes/resources on demand (source edits HMR via the
             // bundler port). Nothing to write. (Scene live-reapply: later.)
+            // Except the edited avatar: a Blockbench save rewrites avatar.glb, so
+            // live-swap it onto the local player (fresh model id → rig re-mounts).
+            if (msg.path === 'avatar.glb') server?.reloadAvatar();
         } else if (msg.type === 'dispose') {
             stop();
         }

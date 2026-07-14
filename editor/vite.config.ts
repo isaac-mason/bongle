@@ -31,10 +31,12 @@ export default defineConfig(({ command }) => ({
     server: {
         // rolldown-wasm (and later ffmpeg.wasm threads) use SharedArrayBuffer,
         // which requires cross-origin isolation. These headers make
-        // `self.crossOriginIsolated` true.
+        // `self.crossOriginIsolated` true. `credentialless` (not require-corp)
+        // matches the website embed (server.mjs) so cross-origin fetches load
+        // without being CORP-blocked.
         headers: {
             'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'require-corp',
+            'Cross-Origin-Embedder-Policy': 'credentialless',
         },
         // reach ../src (engine source) + hoisted node_modules.
         fs: { allow: ['..'] },

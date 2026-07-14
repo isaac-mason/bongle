@@ -14,6 +14,7 @@ import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../i
 import type * as InternalNS from '../../src/internal';
 // type-only: the RUNTIME EngineServer + __kit come from the runner (the realm's
 // bundled engine instance the user code registered into), passed in via opts.
+import { RIG_TYPE_6BONE } from '../../src/core/avatar/rig';
 import type * as EngineServerNS from '../../src/server/engine-server';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
 import { initZstd, zstdCompress } from '../../zstd-wasm';
@@ -36,6 +37,10 @@ export type EditorServer = {
     /** Synchronous per-join avatar pick (random from the sample pool), mirroring
      *  the deployed matchmaker path so runtime-avatar load is exercised. */
     resolveAvatar: () => ResolvedAvatar | undefined;
+    /** re-apply the (edited) local-player avatar to every connected client —
+     *  live preview after a Blockbench save rewrites avatar.glb. No-op unless a
+     *  localAvatarUrl was set (avatar/game intent with an avatar). */
+    reloadAvatar: () => void;
     stop: () => void;
 };
 
@@ -46,6 +51,11 @@ export type StartEditorServerOptions = {
     EngineServer: EngineServerApi;
     __kit: Kit;
     log?: (msg: string) => void;
+    /** a specific avatar for the local player (the edited avatar in avatar mode,
+     *  or our account avatar when editing a game as ourselves). The URL feeds
+     *  clientUrl/serverUrl: `file://…` reads the edited glb from OPFS, `http(s)`
+     *  fetches the account avatar. When absent, joins get a random sample. */
+    localAvatarUrl?: string;
 };
 
 export async function startEditorServer(opts: StartEditorServerOptions): Promise<EditorServer> {
@@ -78,7 +88,20 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
             },
         },
         resourcesDir: 'resources/server',
-        loadResource: (path) => fs.read(path),
+        // baked server resources read from OPFS by path; a platform avatar's
+        // clientUrl/serverUrl can also be file:// (edited glb in OPFS) or http(s)
+        // (our account avatar on the CDN) — mirror the client loader so the local
+        // player's avatar resolves server-side too. (Cross-origin http needs CORS
+        // on the avatar CDN under the worker's COEP.)
+        loadResource: async (path) => {
+            if (path.startsWith('http:') || path.startsWith('https:')) {
+                const r = await fetch(path);
+                if (!r.ok) throw new Error(`fetch ${path}: ${r.status}`);
+                return new Uint8Array(await r.arrayBuffer());
+            }
+            if (path.startsWith('file:')) return fs.read(new URL(path).pathname.replace(/^\/+/, ''));
+            return fs.read(path);
+        },
         compressChunk: (payload) => zstdCompress(payload, 3),
         options: {},
         driver: {
@@ -120,12 +143,45 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     } catch {
         // empty pool → picker returns undefined → engine uses the builtin.
     }
-    const resolveAvatar = () => (avatarPool.length > 0 ? avatarPool[Math.floor(Math.random() * avatarPool.length)] : undefined);
+    // a platform-supplied avatar (edited avatar / our account avatar) overrides
+    // the random pick so the local player wears it; extra test clients fall back
+    // to the random sample only when no specific avatar is set. The modelId
+    // carries a version so a live swap (reloadAvatar) mints a FRESH id — the same
+    // id would be a CharacterTrait reconciler no-op.
+    let avatarVersion = 0;
+    const makeLocalAvatar = (): ResolvedAvatar | undefined =>
+        opts.localAvatarUrl
+            ? {
+                  source: 'runtime',
+                  modelId: `local-player-avatar@${avatarVersion}`,
+                  clientUrl: opts.localAvatarUrl,
+                  serverUrl: opts.localAvatarUrl,
+                  rigType: RIG_TYPE_6BONE,
+              }
+            : undefined;
+    let localAvatar = makeLocalAvatar();
+    const resolveAvatar = () =>
+        localAvatar ?? (avatarPool.length > 0 ? avatarPool[Math.floor(Math.random() * avatarPool.length)] : undefined);
+
+    // live avatar preview: the edited glb was rewritten (Blockbench save) at the
+    // SAME url, so mint a fresh modelId + re-register/re-stamp every connected
+    // client — the CharacterTrait reconciler unmounts the old rig + mounts the new
+    // one, no re-join. New joins pick up the fresh id too (localAvatar updated).
+    const reloadAvatar = () => {
+        avatarVersion++;
+        localAvatar = makeLocalAvatar();
+        if (!localAvatar) return;
+        for (const client of state.clients.connected.keys()) {
+            EngineServer.reloadClientAvatar(state, client, localAvatar);
+        }
+        log(`avatar reloaded → ${localAvatar.modelId}`);
+    };
 
     return {
         state,
         app,
         resolveAvatar,
+        reloadAvatar,
         stop: () => {
             unregister();
             EngineServer.dispose(state);

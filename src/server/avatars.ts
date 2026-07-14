@@ -16,7 +16,7 @@
  */
 
 import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
-import type { ResolvedAvatar } from 'bongle/interface';
+import type { Client, ResolvedAvatar } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
 import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { PlayerId } from '../core/client';
@@ -88,4 +88,22 @@ export function releaseClientAvatar(state: EngineServer, cs: ClientState): void 
     const modelId = cs.avatar?.modelId;
     if (modelId) Resources.releaseRuntimeModel(state.resources, modelId);
     cs.avatar = null;
+}
+
+/**
+ * Swap a connected client's avatar at runtime (release the old runtime model,
+ * acquire the new, re-stamp every live player node this client owns). The
+ * `CharacterTrait` reconciler unmounts the old rig + mounts the new one on the
+ * next pass. `resolved` MUST carry a FRESH `modelId` — same id is a reconciler
+ * no-op (nothing to converge). Used by the editor's live avatar preview: an
+ * edited glb is re-registered under a new id + re-applied without a re-join.
+ */
+export function reloadClientAvatar(state: EngineServer, client: Client, resolved: ResolvedAvatar): void {
+    const cs = state.clients.connected.get(client);
+    if (!cs) return;
+    releaseClientAvatar(state, cs); // drop the old model + clear cs.avatar
+    setClientAvatar(state, cs, resolved); // acquire the new (cs.avatar was cleared, so not skipped)
+    for (const player of state.rooms.players.values()) {
+        if (player.client === client) stampPlayerCharacter(state, cs, player.id);
+    }
 }

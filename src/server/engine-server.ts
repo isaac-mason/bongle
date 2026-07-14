@@ -33,6 +33,9 @@ import * as Save from './save';
 // through the existing namespace without reaching into engine internals
 // directly.
 export { applyRegistryChanges } from './registry-dispatch';
+// runtime avatar swap (editor live preview — re-register the edited glb under a
+// fresh modelId + re-stamp the player without a re-join).
+export { reloadClientAvatar } from './avatars';
 export { DEFAULT_SCENE_ID };
 
 /** cached editor module ref, populated by load() when env.editor */

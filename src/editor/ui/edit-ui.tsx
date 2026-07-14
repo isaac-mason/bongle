@@ -8,6 +8,7 @@ import { ChatPanel, useChatPanel } from '../../client/ui/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
+import { ControlHints } from './control-hints';
 import { FlySpeedIndicator } from './fly-speed-indicator';
 import { Hotbar } from './hotbar';
 import { InventoryItemIcon } from './inventory-icon';
@@ -277,6 +278,9 @@ function EditUI() {
 
                             {/* fly-speed indicator, fades in/out on scroll change */}
                             <FlySpeedIndicator />
+
+                            {/* control indicator, bottom-right, per equipped camera controller */}
+                            <ControlHints />
 
                             {/* orientation cube, bottom-left, gated by debug pane checkbox */}
                             {showOrientationCube && <OrientationCube />}

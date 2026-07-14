@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client';
 import './editor.css';
 import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
 import { createClientHost } from './client/client-host';
+import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
@@ -67,14 +68,20 @@ async function boot(): Promise<void> {
     // what the embedding platform wants this session to do (null = standalone dev).
     const platform = createPlatformBridge();
     const intent = await platform.ready;
-    usePlatform.getState().init(platform);
+    usePlatform.getState().init(platform, intent);
     platform.onResult((r) => {
         usePlatform.getState().setResult(r);
         log(`platform ${r.of}: ${r.ok ? 'ok' : 'failed'}${r.message ? ` — ${r.message}` : ''}`);
     });
 
-    // avatar intent: this session edits an avatar in Blockbench, not a game — seed
-    // the model, open the app, and skip the game realms + engine seed entirely.
+    // the avatar the local player wears in the running editor session (see
+    // startEditorServer). avatar mode = the edited glb; game mode = our account
+    // avatar; standalone = a random sample.
+    let localAvatarUrl: string | undefined;
+
+    // avatar intent: open the model in Blockbench AND run the game session so the
+    // edited avatar previews live on the player. (Runs the full editor — it no
+    // longer skips the realms.)
     if (intent?.kind === 'avatar') {
         if (intent.bbmodel) {
             await editor.fs.write('avatar.bbmodel', intent.bbmodel);
@@ -82,23 +89,18 @@ async function boot(): Promise<void> {
         } else {
             useLaunched.getState().launch(blockbenchApp, ''); // new avatar → blank Blockbench
         }
-        // the platform's "Save" asks for the current artifacts. Blockbench writes
-        // avatar.bbmodel + avatar.glb to the fs on save (Ctrl+S), so hand those back.
-        platform.onAvatarSaveRequest(async () => {
-            try {
-                const bbmodel = await editor.fs.readText('avatar.bbmodel');
-                const glb = await editor.fs.read('avatar.glb');
-                platform.send({ type: 'bongle:avatar-export', glb, bbmodel, name: intent.name ?? 'avatar' });
-            } catch {
-                platform.send({ type: 'bongle:avatar-export-failed', message: 'save your model in Blockbench (Ctrl+S) first' });
-            }
-        });
-        return;
+        // the "Save avatar" action lives in the in-editor platform window now
+        // (editor-initiated — see ui/components/PlatformWindow).
+        // wear the edited avatar (avatar.glb, written by Blockbench on save). Set
+        // unconditionally: if the glb isn't there yet the engine shows a placeholder
+        // rig, and the first save fires an fs-change → server.reloadAvatar swaps in
+        // the compiled glb live (no re-join).
+        localAvatarUrl = 'file:///avatar.glb';
+    } else if (intent?.kind === 'game') {
+        // a platform-supplied save replaces the project source before boot.
+        if (intent.save) await importGameSave(editor.fs, intent.save);
+        localAvatarUrl = intent.avatarUrl; // play/edit the game as ourselves
     }
-
-    // game / standalone. A platform-supplied save replaces the project source
-    // before the realms boot against it.
-    if (intent?.kind === 'game' && intent.save) await importGameSave(editor.fs, intent.save);
 
     // OPFS is the persistent source of truth: seed the starter project ONLY on a
     // fresh project (no src/index.ts), so edits + loaded game saves survive a
@@ -186,7 +188,7 @@ async function boot(): Promise<void> {
     // the server, off-thread in its own realm (own registry). It opens the SAME
     // OPFS project directly — no snapshot.
     const serverLog = logger('server');
-    const serverHost = spawnServerWorker({ connectRealm, projectName: PROJECT, log: serverLog });
+    const serverHost = spawnServerWorker({ connectRealm, projectName: PROJECT, log: serverLog, localAvatarUrl });
 
     // client iframes: each its own realm, connected to the server worker; the
     // "+ client" button opens more (multiplayer-in-a-tab). They open OPFS too.
@@ -199,6 +201,18 @@ async function boot(): Promise<void> {
     });
     useClients.getState().setHost(clientHost);
     log('realms booting — edit src/index.ts then ⌘/ctrl+S to hot-reload.');
+
+    // DevTools automation surface: `bongle` in the editor console. fs + thin
+    // vfs aliases for terse pasteable snippets, plus the realm hosts + UI stores.
+    exposeDevtools('editor', {
+        fs: editor.fs,
+        ls: (dir = '') => editor.fs.list(dir, { recursive: true }),
+        cat: (path: string) => editor.fs.readText(path),
+        write: (path: string, data: string | Uint8Array) => editor.fs.write(path, data),
+        rm: (path: string, recursive = false) => editor.fs.remove(path, { recursive }),
+        hosts: { pipeline: pipelineHost, server: serverHost, client: clientHost, bundler: bundlerWorker },
+        stores: { editor: useEditor, windows: useWindows, clients: useClients, systemWindows: useSystemWindows },
+    });
 
     // fan a batch of fs changes out to the realms: the bundler re-transforms +
     // HMRs source/barrels; server/client re-read baked resources. Drives BOTH

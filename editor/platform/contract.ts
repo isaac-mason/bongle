@@ -16,6 +16,9 @@ export type PlatformIntent =
           save?: Uint8Array;
           /** a project file to open in the code editor on boot. */
           openPath?: string;
+          /** our account avatar's glb URL, so we play/edit the game as ourselves
+           *  (the local player wears it). Absent → a random sample avatar. */
+          avatarUrl?: string;
       }
     | {
           kind: 'avatar';
@@ -33,16 +36,12 @@ export type EditorMessage =
     /** hand back the built game-version bundle.zip for the platform to upload. */
     | { type: 'bongle:build'; payload: Uint8Array }
     /** hand back the exported avatar (compiled .glb + .bbmodel source) for the
-     *  platform to upload — response to `bongle:avatar-save-request`. */
-    | { type: 'bongle:avatar-export'; glb: Uint8Array; bbmodel: string; name: string }
-    /** the requested avatar export couldn't be produced (e.g. nothing saved yet). */
-    | { type: 'bongle:avatar-export-failed'; message: string };
+     *  platform to upload (editor-initiated from the "editing X" window). */
+    | { type: 'bongle:avatar-export'; glb: Uint8Array; bbmodel: string; name: string };
 
 /** platform → editor. */
 export type PlatformMessage =
     | { type: 'bongle:init'; intent: PlatformIntent }
-    /** ask the editor to hand back the current avatar artifacts (avatar mode). */
-    | { type: 'bongle:avatar-save-request' }
     /** outcome of the editor's last hand-back (save/build/avatar-export). */
     | { type: 'bongle:result'; of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string };
 

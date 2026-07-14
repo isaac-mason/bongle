@@ -23,14 +23,11 @@ export type PlatformBridge = {
     send: (msg: EditorMessage) => void;
     /** subscribe to platform result acks; returns an unsubscribe fn. */
     onResult: (cb: (r: PlatformResult) => void) => () => void;
-    /** the platform asked for the current avatar artifacts (avatar mode). */
-    onAvatarSaveRequest: (cb: () => void) => () => void;
 };
 
 export function createPlatformBridge(): PlatformBridge {
     const parent = window.parent !== window ? window.parent : null;
     const resultCbs = new Set<(r: PlatformResult) => void>();
-    const avatarSaveReqCbs = new Set<() => void>();
     let embedded = false;
 
     const send = (msg: EditorMessage) => parent?.postMessage(msg, '*');
@@ -51,8 +48,6 @@ export function createPlatformBridge(): PlatformBridge {
                 resolve(m.intent);
             } else if (m.type === 'bongle:result') {
                 for (const cb of resultCbs) cb(m);
-            } else if (m.type === 'bongle:avatar-save-request') {
-                for (const cb of avatarSaveReqCbs) cb();
             }
         });
         send({ type: 'bongle:ready' });
@@ -72,10 +67,6 @@ export function createPlatformBridge(): PlatformBridge {
         onResult: (cb) => {
             resultCbs.add(cb);
             return () => resultCbs.delete(cb);
-        },
-        onAvatarSaveRequest: (cb) => {
-            avatarSaveReqCbs.add(cb);
-            return () => avatarSaveReqCbs.delete(cb);
         },
     };
 }

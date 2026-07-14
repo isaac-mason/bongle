@@ -4,12 +4,9 @@
 
 import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { buildBundle, downloadBundle } from '../../build/build';
 import type { Filesystem } from '../../fs';
-import { downloadGameSave, exportGameSave, pickAndImportGameSave } from '../../game-save';
-import { useBuildMeta } from '../../stores/build-meta';
-import { useBuildProgress } from '../../stores/build-progress';
-import { logger } from '../../stores/logs';
+import { pickAndImportGameSave } from '../../game-save';
+import { runBuild, runSave } from '../../platform/actions';
 import { usePlatform } from '../../stores/platform';
 import { useClients } from '../../stores/clients';
 import { useEditor } from '../../stores/editor';
@@ -23,6 +20,7 @@ import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
+import { PlatformWindow } from './PlatformWindow';
 import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
@@ -161,58 +159,22 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
           ]
         : [];
 
-    // embedded under a platform → hand payloads back over postMessage; standalone
-    // → download to disk (the dev tool).
+    // when embedded under a platform, the "editing X" window (PlatformWindow) owns
+    // the save/build actions; standalone gets the footer download dev-tools.
     const embedded = usePlatform((s) => s.embedded);
 
-    // prod build: bundle client + server + resources. Progress shows in the
-    // BuildModal; a summary line lands in the build log. When embedded, the built
-    // bundle.zip is handed to the platform (which uploads it) instead of downloaded.
-    const runBuild = async () => {
-        const progress = useBuildProgress.getState();
-        const log = logger('build');
-        progress.begin();
-        try {
-            const t0 = performance.now();
-            const opts = {
-                maxPlayers: useBuildMeta.getState().maxPlayers,
-                onProgress: (label: string) => useBuildProgress.getState().step(label),
-            };
-            let size: number;
-            if (embedded) {
-                const zip = await buildBundle(fs, opts);
-                usePlatform.getState().send({ type: 'bongle:build', payload: zip });
-                size = zip.length;
-            } else {
-                size = await downloadBundle(fs, opts);
-            }
-            progress.finish(size);
-            log(
-                `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
-            );
-        } catch (err) {
-            progress.fail((err as Error).message);
-            log(`build failed: ${(err as Error).message}`);
-            console.error(err);
-        }
-    };
-
-    // save the source set: hand back to the platform when embedded, else download.
-    const runSave = async () => {
-        if (embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportGameSave(fs) });
-        else await downloadGameSave(fs);
-    };
-
-    // game saves: download the source set as a zip / load one back over the
-    // project. A handy dev tool (also the source shape the platform will persist).
-    const saveFooter: TaskbarItem[] = [
+    // game saves: download the source set as a zip / load one back / build — the
+    // standalone dev tools (embedded routes these through the platform window).
+    const saveFooter: TaskbarItem[] = embedded
+        ? []
+        : [
         {
             id: 'save-download',
-            title: embedded ? 'save game to platform' : 'download game save (.zip)',
+            title: 'download game save (.zip)',
             glyph: <Download size={18} />,
             running: false,
-            onClick: () => void runSave(),
-            menu: [{ label: embedded ? 'Save game to platform' : 'Download game save (.zip)', onClick: () => void runSave() }],
+            onClick: () => void runSave(fs),
+            menu: [{ label: 'Download game save (.zip)', onClick: () => void runSave(fs) }],
         },
         {
             id: 'save-load',
@@ -227,8 +189,8 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             title: 'build prod bundle (.zip)',
             glyph: <Hammer size={18} />,
             running: false,
-            onClick: () => void runBuild(),
-            menu: [{ label: 'Build prod bundle (.zip)', onClick: () => void runBuild() }],
+            onClick: () => void runBuild(fs),
+            menu: [{ label: 'Build prod bundle (.zip)', onClick: () => void runBuild(fs) }],
         },
     ];
 
@@ -267,6 +229,11 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     const openBlockbench = () => useLaunched.getState().launch(blockbenchApp, '');
 
     const items: TaskbarItem[] = [
+        // the platform "editing X" window pins first when embedded — clicking
+        // restores it if minimized (it can't be closed).
+        ...(embedded
+            ? [{ id: 'platform', title: 'platform', glyph: <Hammer size={16} />, onClick: () => useWindows.getState().focus('platform') }]
+            : []),
         // game clients come first — the default layout boots straight into one.
         // When none are open, keep one pinned (not-running) launcher so you can
         // still spawn a client.
@@ -404,6 +371,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 </Window>
             ))}
             <SnapOverlay />
+            <PlatformWindow fs={fs} />
             <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} />
             <SyncChooser fs={fs} />
             <SyncPanel />
