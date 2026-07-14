@@ -11,19 +11,24 @@ import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
+import { importGameSave } from './game-save';
 import { spawnPipelineWorker } from './pipeline/pipeline-host';
+import { createPlatformBridge } from './platform/bridge';
 import { spawnServerWorker } from './server/server-host';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
+import { useLaunched } from './stores/launched';
 import { logger } from './stores/logs';
+import { usePlatform } from './stores/platform';
 import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
+import { blockbenchApp, openPath } from './ui/apps';
 import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
-import { loadEngineTypes } from './ui/components/Monaco';
+import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
 
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
@@ -59,6 +64,42 @@ solid('dev:blue', 70, 110, 230);
 `;
 
 async function boot(): Promise<void> {
+    // what the embedding platform wants this session to do (null = standalone dev).
+    const platform = createPlatformBridge();
+    const intent = await platform.ready;
+    usePlatform.getState().init(platform);
+    platform.onResult((r) => {
+        usePlatform.getState().setResult(r);
+        log(`platform ${r.of}: ${r.ok ? 'ok' : 'failed'}${r.message ? ` — ${r.message}` : ''}`);
+    });
+
+    // avatar intent: this session edits an avatar in Blockbench, not a game — seed
+    // the model, open the app, and skip the game realms + engine seed entirely.
+    if (intent?.kind === 'avatar') {
+        if (intent.bbmodel) {
+            await editor.fs.write('avatar.bbmodel', intent.bbmodel);
+            openPath('avatar.bbmodel', MAIN_PANE); // launches blockbench AND opens the file in it
+        } else {
+            useLaunched.getState().launch(blockbenchApp, ''); // new avatar → blank Blockbench
+        }
+        // the platform's "Save" asks for the current artifacts. Blockbench writes
+        // avatar.bbmodel + avatar.glb to the fs on save (Ctrl+S), so hand those back.
+        platform.onAvatarSaveRequest(async () => {
+            try {
+                const bbmodel = await editor.fs.readText('avatar.bbmodel');
+                const glb = await editor.fs.read('avatar.glb');
+                platform.send({ type: 'bongle:avatar-export', glb, bbmodel, name: intent.name ?? 'avatar' });
+            } catch {
+                platform.send({ type: 'bongle:avatar-export-failed', message: 'save your model in Blockbench (Ctrl+S) first' });
+            }
+        });
+        return;
+    }
+
+    // game / standalone. A platform-supplied save replaces the project source
+    // before the realms boot against it.
+    if (intent?.kind === 'game' && intent.save) await importGameSave(editor.fs, intent.save);
+
     // OPFS is the persistent source of truth: seed the starter project ONLY on a
     // fresh project (no src/index.ts), so edits + loaded game saves survive a
     // reload instead of being clobbered by the sample every boot.
@@ -90,6 +131,9 @@ async function boot(): Promise<void> {
     // code). Fire-and-forget — the code window may not be open yet, but the
     // typescript defaults are global, so it applies whenever an editor mounts.
     void loadEngineTypes(editor.fs);
+    // model every src file (not just open tabs) so the TS worker resolves across
+    // files — cross-file go-to-definition, find-references, project-wide types.
+    void syncProjectModels(editor.fs);
 
     // the ONE dev server — DevServer + @rolldown transform — runs OFF the main
     // thread in the bundler worker (its WASM arena reaches multiple GB under

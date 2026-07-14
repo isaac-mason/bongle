@@ -86,7 +86,7 @@
     ],
     "scripts": {
         "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
-        "build": "rm -rf dist vendor && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/pack-vfs.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs",
+        "build": "rm -rf dist vendor && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
         "test": "vitest run",
         "bench": "vitest bench --run",
         "typecheck": "tsgo -p tsconfig.json",

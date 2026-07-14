@@ -67,8 +67,9 @@ export const audioPlayerApp: AppDef = {
 export const blockbenchApp: AppDef = {
     id: 'blockbench',
     title: 'blockbench',
-    // the real Blockbench logo from the embedded static build.
-    glyph: <img src="/static/blockbench/favicon.png" alt="" className="h-[18px] w-[18px]" />,
+    // the real Blockbench logo from the embedded static build (base-relative so it
+    // resolves under the deployed /static/bongle-editor/ subpath too).
+    glyph: <img src={`${import.meta.env.BASE_URL}static/blockbench/favicon.png`} alt="" className="h-[18px] w-[18px]" />,
     handles: ['bbmodel'],
     initial: { w: 960, h: 640 },
     singleton: true,

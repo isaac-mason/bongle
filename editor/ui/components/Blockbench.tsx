@@ -15,7 +15,9 @@ import type { Filesystem } from '../../fs';
 import { useBlockbench } from '../../stores/blockbench';
 import { useLaunched } from '../../stores/launched';
 
-const BLOCKBENCH_SRC = '/static/blockbench/index.html';
+// base-relative so it resolves at dev root AND under the deployed subpath
+// (/static/bongle-editor/static/blockbench/…) — see editor/vite.config's base.
+const BLOCKBENCH_SRC = `${import.meta.env.BASE_URL}static/blockbench/index.html`;
 
 type Incoming =
     | { type: 'bongle:ready' }

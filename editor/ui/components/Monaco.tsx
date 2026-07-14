@@ -7,6 +7,7 @@
 import * as monaco from 'monaco-editor';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Filesystem } from '../../fs';
+import { isIgnored } from '../../ignored';
 import { useEditor } from '../../stores/editor';
 import './monaco-env'; // side-effect: bundle + register the language workers.
 
@@ -68,10 +69,10 @@ function langOf(path: string): string {
     return 'plaintext';
 }
 
-/** node_modules is seeded (engine dist + first-party libs) + regenerable, not
- *  the user's source. Show it read-only and refuse to save it so an accidental
- *  edit can't diverge the vfs copy from the prebundle. */
-const isReadOnlyPath = (path: string) => path.startsWith('node_modules/');
+// the seeds (node_modules) + bake outputs (dist / resources) are generated, not
+// the user's source — Monaco shows them read-only and refuses to save, matching
+// the file tree's `isIgnored` read-only territory.
+const isReadOnlyPath = isIgnored;
 
 /** get (or lazily create) the shared model for a path. The dirty listener is
  *  attached once, here, so N group editors showing the file don't double-count. */
@@ -95,6 +96,71 @@ async function getOrCreateModel(fs: Filesystem, path: string): Promise<monaco.ed
     });
     return model;
 }
+
+// the group whose editor most recently held focus — where go-to-definition opens
+// the target (a Cmd/Ctrl+click always happens in a focused editor).
+let activeGroupId: string | null = null;
+
+const isSrc = (p: string) => /^src\/.+\.tsx?$/.test(p);
+
+/** create Monaco models for EVERY src `.ts`/`.tsx` file (not just open tabs) so
+ *  the TS worker sees the whole project — cross-file type resolution, go-to-
+ *  definition, find-references. Keeps models in sync with the fs. Call once. */
+export async function syncProjectModels(fs: Filesystem): Promise<void> {
+    try {
+        const files = await fs.list('src', { recursive: true });
+        await Promise.all(files.filter((f) => f.kind === 'file' && isSrc(f.path)).map((f) => getOrCreateModel(fs, f.path)));
+    } catch {
+        /* no src yet */
+    }
+    fs.watch((changes) => {
+        for (const c of changes) {
+            if (!isSrc(c.path)) continue;
+            if (c.type === 'deleted') {
+                models.get(c.path)?.dispose();
+                models.delete(c.path);
+                savedText.delete(c.path);
+            } else {
+                void refreshModel(fs, c.path);
+            }
+        }
+    });
+}
+
+/** create a newly-added src model, or refresh a CLEAN one whose disk copy drifted
+ *  (e.g. folder sync) — never clobber an unsaved buffer. */
+async function refreshModel(fs: Filesystem, path: string): Promise<void> {
+    const existing = models.get(path);
+    if (!existing) {
+        await getOrCreateModel(fs, path);
+        return;
+    }
+    if (existing.getValue() !== (savedText.get(path) ?? '')) return; // dirty — leave it
+    const text = await fs.readText(path).catch(() => null);
+    if (text != null && text !== existing.getValue()) {
+        savedText.set(path, text);
+        existing.setValue(text);
+    }
+}
+
+// route "go to definition" (Cmd/Ctrl+click, F12) navigation into the tab system:
+// open the target — a src file OR a seeded node_modules .d.ts — in the active
+// group and jump to the line. The TS worker already resolved it against the
+// models + extra libs; this just opens/reveals it.
+monaco.editor.registerEditorOpener({
+    openCodeEditor(_source, resource, selectionOrPosition) {
+        const path = resource.path.replace(/^\/+/, '');
+        const group = activeGroupId ? useEditor.getState().groups[activeGroupId] : undefined;
+        if (!group) return false;
+        const line = selectionOrPosition
+            ? 'startLineNumber' in selectionOrPosition
+                ? selectionOrPosition.startLineNumber
+                : selectionOrPosition.lineNumber
+            : 1;
+        useEditor.getState().openAt(group.pane, path, line);
+        return true;
+    },
+});
 
 export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
     const active = useEditor((s) => s.groups[group]?.active ?? null);
@@ -123,8 +189,12 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
             theme: 'vs-dark', // match the dark editor chrome
         });
         editorRef.current = ed;
-        // focusing this editor makes its group the pane's active target.
-        ed.onDidFocusEditorText(() => useEditor.getState().focusGroup(group));
+        // focusing this editor makes its group the pane's active target + the
+        // destination for go-to-definition navigation.
+        ed.onDidFocusEditorText(() => {
+            activeGroupId = group;
+            useEditor.getState().focusGroup(group);
+        });
         ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
             const model = ed.getModel();
             if (!model) return;

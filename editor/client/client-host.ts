@@ -48,7 +48,10 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
         serverHost,
         connectRealm,
         projectName,
-        clientPath = '/client/index.html',
+        // base-relative so it resolves both at dev root ('/client/index.html') and
+        // under the deployed subpath ('/static/bongle-editor/client/index.html').
+        // BASE_URL carries vite's `base` (trailing slash) — see editor/vite.config.
+        clientPath = `${import.meta.env.BASE_URL}client/index.html`,
         entry = 'src/index.ts',
         log = () => {},
     } = opts;

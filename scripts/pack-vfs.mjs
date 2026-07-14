@@ -6,8 +6,10 @@
 // One compressed download, unpacked once. Zip paths are relative to the vfs
 // node_modules root: `bongle/dist/index.js` → node_modules/bongle/dist/index.js.
 //
-// Runs after `vite build` (dist/) + gather-lib-runtime (vendor/). Emits
-// editor/editor-node-modules.zip, which engine-dist.ts imports via ?url.
+// Runs LAST in `pnpm run build` (after vite build → dist/, gather-lib-runtime →
+// vendor/, tsgo → dist/types/, gather-lib-types) so all inputs — runtime JS AND
+// the emitted .d.ts — exist. Emits editor/editor-node-modules.zip, which
+// engine-dist.ts imports via ?url.
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';

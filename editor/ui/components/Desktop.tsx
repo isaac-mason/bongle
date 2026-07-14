@@ -3,13 +3,14 @@
 // positioned over the full desktop; the taskbar overlays the left edge.
 
 import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo } from 'react';
-import { downloadBundle } from '../../build/build';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { buildBundle, downloadBundle } from '../../build/build';
 import type { Filesystem } from '../../fs';
-import { downloadGameSave, pickAndImportGameSave } from '../../game-save';
+import { downloadGameSave, exportGameSave, pickAndImportGameSave } from '../../game-save';
 import { useBuildMeta } from '../../stores/build-meta';
 import { useBuildProgress } from '../../stores/build-progress';
 import { logger } from '../../stores/logs';
+import { usePlatform } from '../../stores/platform';
 import { useClients } from '../../stores/clients';
 import { useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
@@ -22,6 +23,7 @@ import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
+import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
@@ -62,6 +64,21 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         const onResize = () => useWindows.getState().relayout();
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
+    }, []);
+
+    // Cmd/Ctrl+P → VS Code-style quick-open. Capture phase so it beats Monaco's
+    // own key handling, and preventDefault to swallow the browser print dialog.
+    const [quickOpen, setQuickOpen] = useState(false);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+                e.preventDefault();
+                e.stopPropagation();
+                setQuickOpen(true);
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
     }, []);
 
     // clicks inside an iframe don't bubble out, so a Window's pointerdown focus
@@ -144,21 +161,35 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
           ]
         : [];
 
-    // prod build: bundle client + server + resources into a downloadable
-    // bundle.zip (the same artifact shape the platform ingests). Progress shows in
-    // the BuildModal; a summary line also lands in the build log for the record.
+    // embedded under a platform → hand payloads back over postMessage; standalone
+    // → download to disk (the dev tool).
+    const embedded = usePlatform((s) => s.embedded);
+
+    // prod build: bundle client + server + resources. Progress shows in the
+    // BuildModal; a summary line lands in the build log. When embedded, the built
+    // bundle.zip is handed to the platform (which uploads it) instead of downloaded.
     const runBuild = async () => {
         const progress = useBuildProgress.getState();
         const log = logger('build');
         progress.begin();
         try {
             const t0 = performance.now();
-            const size = await downloadBundle(fs, {
+            const opts = {
                 maxPlayers: useBuildMeta.getState().maxPlayers,
-                onProgress: (label) => useBuildProgress.getState().step(label),
-            });
+                onProgress: (label: string) => useBuildProgress.getState().step(label),
+            };
+            let size: number;
+            if (embedded) {
+                const zip = await buildBundle(fs, opts);
+                usePlatform.getState().send({ type: 'bongle:build', payload: zip });
+                size = zip.length;
+            } else {
+                size = await downloadBundle(fs, opts);
+            }
             progress.finish(size);
-            log(`bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, downloaded`);
+            log(
+                `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
+            );
         } catch (err) {
             progress.fail((err as Error).message);
             log(`build failed: ${(err as Error).message}`);
@@ -166,16 +197,22 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         }
     };
 
+    // save the source set: hand back to the platform when embedded, else download.
+    const runSave = async () => {
+        if (embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportGameSave(fs) });
+        else await downloadGameSave(fs);
+    };
+
     // game saves: download the source set as a zip / load one back over the
     // project. A handy dev tool (also the source shape the platform will persist).
     const saveFooter: TaskbarItem[] = [
         {
             id: 'save-download',
-            title: 'download game save (.zip)',
+            title: embedded ? 'save game to platform' : 'download game save (.zip)',
             glyph: <Download size={18} />,
             running: false,
-            onClick: () => void downloadGameSave(fs),
-            menu: [{ label: 'Download game save (.zip)', onClick: () => void downloadGameSave(fs) }],
+            onClick: () => void runSave(),
+            menu: [{ label: embedded ? 'Save game to platform' : 'Download game save (.zip)', onClick: () => void runSave() }],
         },
         {
             id: 'save-load',
@@ -370,6 +407,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} />
             <SyncChooser fs={fs} />
             <SyncPanel />
+            {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}
             <BuildModal />
         </div>
     );

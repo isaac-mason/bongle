@@ -86,7 +86,7 @@ export function Tabs({ group }: { group: string }) {
                                 e.stopPropagation();
                                 closeTab(group, path);
                             }}
-                            className="cursor-pointer border-none bg-transparent p-0 font-mono text-[13px] leading-none text-inherit"
+                            className="grid h-4 w-4 shrink-0 cursor-pointer place-items-center border-none bg-transparent p-0 font-mono text-[15px] leading-none text-inherit hover:bg-fg/20"
                         >
                             ×
                         </button>
