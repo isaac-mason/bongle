@@ -19,7 +19,7 @@ function isInputFocused(): boolean {
 function PlayUI() {
     const debugOpen = useClient((s) => s.debugOpen);
     const debugTab = useClient((s) => s.debugTab);
-    // apps embedding the engine as a display surface (avatar-card/viewer) call
+    // apps embedding the engine as a pure display surface call
     // `chat.setEnabled(ctx, false)`; drop the panel and its keyboard openers.
     const chatEnabled = useChatEnabled();
 

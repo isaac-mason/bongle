@@ -66,6 +66,11 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
 
             const iframe = document.createElement('iframe');
             iframe.src = clientPath;
+            // the client realm shares a SharedArrayBuffer with the bundler worker
+            // (port-bridge), so this nested iframe must be cross-origin isolated
+            // too — delegate the permission (COEP header alone isn't enough for an
+            // embedded doc; the embedder must grant it).
+            iframe.allow = 'cross-origin-isolated';
             iframe.style.cssText = 'border:0;width:100%;height:100%;display:block;background:#000';
 
             const onMessage = async (e: MessageEvent) => {

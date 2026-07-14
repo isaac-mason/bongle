@@ -142,6 +142,22 @@
 				if (project && project.bongle_fs_path) post({ type: 'bongle:dirty', path: project.bongle_fs_path, saved });
 			});
 		}
+		// Robust Ctrl/Cmd+S: overriding the export_over/save_project actions above
+		// only works if Blockbench's own keybind fires — which can miss (Cmd vs
+		// Ctrl on macOS, or the format's export condition), letting the browser's
+		// "save page" dialog through. Capture the shortcut ourselves (capture phase,
+		// so it beats both Blockbench and the browser) and route to the editor save.
+		window.addEventListener(
+			'keydown',
+			(e) => {
+				if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+					e.preventDefault();
+					e.stopPropagation();
+					void saveActive();
+				}
+			},
+			true,
+		);
 		wired = true;
 	}
 

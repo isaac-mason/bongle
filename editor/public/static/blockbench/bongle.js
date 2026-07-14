@@ -608,6 +608,17 @@
           if (project && project.bongle_fs_path) post({ type: "bongle:dirty", path: project.bongle_fs_path, saved });
         });
       }
+      window.addEventListener(
+        "keydown",
+        (e) => {
+          if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "s" || e.key === "S")) {
+            e.preventDefault();
+            e.stopPropagation();
+            void saveActive();
+          }
+        },
+        true
+      );
       wired = true;
     }
     function announceWhenReady() {

@@ -229,11 +229,18 @@ async function boot(): Promise<void> {
     editor.fs.watch(fanOutChange);
 
     // open the first client once the server is live (join before the sim exists
-    // would be dropped); the "+ client" button opens further windows. Default
-    // layout: this client fills the screen (everything else starts closed).
+    // would be dropped); the "+ client" button opens further windows. Layout:
+    // game/standalone fills the screen with the client; avatar mode splits
+    // Blockbench (edit, left) | the game preview (the avatar on your player, right).
     void serverHost.ready.then(() => {
         const id = useClients.getState().open();
-        if (id) useWindows.getState().snapTo(id, 'full');
+        if (!id) return;
+        if (intent?.kind === 'avatar') {
+            useWindows.getState().snapTo('blockbench', 'left');
+            useWindows.getState().snapTo(id, 'right');
+        } else {
+            useWindows.getState().snapTo(id, 'full');
+        }
     });
 }
 

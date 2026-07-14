@@ -57,6 +57,13 @@ rsync -a \
 find "$OUT/lang" -type f -name '*.json' ! -name 'en.json' -delete 2>/dev/null || true
 find "$OUT/content" -type f ! -name 'news.json' -delete 2>/dev/null || true
 
+# Neuter Blockbench's plugin-stats telemetry: on load it `$.getJSON`s
+# blckbn.ch/api/stats/plugins, which fails CORS from the embed origin (their API
+# only allows web.blockbench.net) and spams the console. Repoint it at an inline
+# empty JSON result so it resolves cleanly with no network call. (node, not sed,
+# for macOS/Linux portability — the Blockbench build already needs node.)
+node -e 'const f=process.argv[1],fs=require("fs");fs.writeFileSync(f,fs.readFileSync(f,"utf8").replace("https://blckbn.ch/api/stats/plugins?weeks=2","data:application/json,[]"))' "$OUT/dist/bundle.js"
+
 # Bundle the plugin + branding + inject — shared with the fast, plugin-only
 # rebuild (build-plugin.sh). Reuses the esbuild the Blockbench build just
 # installed, so no extra network fetch here or in the Docker asset-builder.

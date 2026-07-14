@@ -109,7 +109,11 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
             ref={iframeRef}
             src={BLOCKBENCH_SRC}
             title="Blockbench"
-            allow="clipboard-read; clipboard-write; fullscreen"
+            // Blockbench uses a SharedArrayBuffer worker while processing a model,
+            // so this nested iframe needs cross-origin isolation delegated too
+            // (only bites in avatar mode, which auto-loads a .bbmodel — a blank
+            // Blockbench never touches SAB).
+            allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen"
             className="block h-full w-full border-none"
         />
     );

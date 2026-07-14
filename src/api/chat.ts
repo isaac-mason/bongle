@@ -146,7 +146,7 @@ export function message(ctx: ScriptContext, text: string): void {
  * client it hides the chat UI; on the server it stops chat propagation (inbound
  * lines and outbound broadcasts are dropped). a shared script hits both sides.
  * default is enabled; apps that embed the engine as a pure display surface
- * (avatar-card/viewer) call `chat.setEnabled(ctx, false)`.
+ * call `chat.setEnabled(ctx, false)`.
  */
 export function setEnabled(ctx: ScriptContext, enabled: boolean): void {
     if (env.client && ctx.client?.room) ClientChat.setEnabled(ctx.client.room.chat, enabled);

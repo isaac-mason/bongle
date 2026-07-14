@@ -3,6 +3,7 @@ import type { Client, JsonValue } from 'bongle/interface';
 import { addCharacter } from '../builtins/character';
 import { CharacterControllerTrait } from '../builtins/character-controller';
 import { PlayerControllerTrait } from '../builtins/player-controller';
+import { setPosition } from '../builtins/transform';
 import { attachWorldTrait } from '../builtins/world';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
@@ -1049,7 +1050,7 @@ export function createPlayerNode(state: EngineServer, room: Room, player: Player
     const node = createNode({ name: `player:${player.id}`, persist: false });
     addChild(sg.root, node);
     setOwner(sg, node, player.id);
-    addTrait(node, TransformTrait);
+    const transform = addTrait(node, TransformTrait);
     const trait = addTrait(node, PlayerTrait);
     trait.playerId = player.id;
     trait.client = player.client;
@@ -1070,6 +1071,10 @@ export function createPlayerNode(state: EngineServer, room: Room, player: Player
     // (or none) remove these in `onJoin`. Edit-mode players drive via the editor
     // lens, so they're left without.
     if (player.mode === 'play') {
+        // default spawn slightly above the origin (unspecified spawn) so players
+        // drop onto ground at y=0 instead of clipping into it. Games override in
+        // onJoin (their own spawn logic, or `editorPlayData` for "play from here").
+        setPosition(transform, [0, 2, 0]);
         addTrait(node, CharacterControllerTrait);
         addTrait(node, PlayerControllerTrait);
     }
