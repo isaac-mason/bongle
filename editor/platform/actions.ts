@@ -59,3 +59,11 @@ export async function saveAvatar(fs: Filesystem, name: string): Promise<void> {
     }
     usePlatform.getState().send({ type: 'bongle:avatar-export', glb, bbmodel, name });
 }
+
+/** ask the platform to navigate back to bongle.io. The editor never navigates
+ *  itself (it may be a cross-origin iframe), so it hands off over the bridge.
+ *  Confirms first — leaving drops any unsaved editor state. */
+export function backToBongle(): void {
+    if (!window.confirm('Go back to bongle.io? Any unsaved changes will be lost — save first if you need them.')) return;
+    usePlatform.getState().send({ type: 'bongle:exit' });
+}

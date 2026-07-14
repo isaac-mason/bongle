@@ -26,6 +26,13 @@ export type PlatformIntent =
           bbmodel?: string;
           /** display name / id for the avatar being edited. */
           name?: string;
+      }
+    | {
+          /** join someone else's live edit session as a guest. The platform
+           *  resolved the invite (/api/edit/join) and hands over the relay ws
+           *  url (token baked in); the editor connects to it as a remote client. */
+          kind: 'joinEdit';
+          url: string;
       };
 
 /** editor → platform. */
@@ -37,13 +44,24 @@ export type EditorMessage =
     | { type: 'bongle:build'; payload: Uint8Array }
     /** hand back the exported avatar (compiled .glb + .bbmodel source) for the
      *  platform to upload (editor-initiated from the "editing X" window). */
-    | { type: 'bongle:avatar-export'; glb: Uint8Array; bbmodel: string; name: string };
+    | { type: 'bongle:avatar-export'; glb: Uint8Array; bbmodel: string; name: string }
+    /** the host asks the platform to open this session to multiplayer. The
+     *  platform calls /api/edit/host (it owns the session) and replies with a
+     *  multiplayer-opened. `region` is the host's picked region. */
+    | { type: 'bongle:open-multiplayer'; region?: string }
+    /** the user asked to leave the editor. The editor never navigates itself
+     *  (it may be a cross-origin iframe); the platform routes back to bongle.io. */
+    | { type: 'bongle:exit' };
 
 /** platform → editor. */
 export type PlatformMessage =
     | { type: 'bongle:init'; intent: PlatformIntent }
     /** outcome of the editor's last hand-back (save/build/avatar-export). */
-    | { type: 'bongle:result'; of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string };
+    | { type: 'bongle:result'; of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string }
+    /** answer to open-multiplayer: the relay ws url the host connects to + the
+     *  ready-to-share invite link. */
+    | { type: 'bongle:multiplayer-opened'; url: string; shareUrl: string }
+    | { type: 'bongle:multiplayer-failed'; message: string };
 
 /** the result payload the editor surfaces to the user. */
 export type PlatformResult = { of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string };

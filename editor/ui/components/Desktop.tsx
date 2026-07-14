@@ -24,6 +24,7 @@ import { PlatformWindow } from './PlatformWindow';
 import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
+import { Presence } from './Presence';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
 
@@ -372,7 +373,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             ))}
             <SnapOverlay />
             <PlatformWindow fs={fs} />
-            <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} />
+            <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} presence={<Presence />} />
             <SyncChooser fs={fs} />
             <SyncPanel />
             {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}

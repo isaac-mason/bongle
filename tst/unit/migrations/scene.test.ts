@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { migrateScene, SCENE_LATEST } from './scene';
+import { describe, expect, it } from 'vitest';
+import { migrateScene, SCENE_LATEST } from '../../../src/migrations/scene';
 
 describe('migrateScene', () => {
     it('bumps a v0 payload to v1 via the no-op step', () => {

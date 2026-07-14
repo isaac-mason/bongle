@@ -8,5 +8,5 @@
         "rootDir": "./"
     },
     "include": ["./src", "./interface", "./build-ambient.d.ts"],
-    "exclude": ["./dist", "./kit", "./editor", "./tst", "**/*.bench.ts", "**/*-bench.ts"]
+    "exclude": ["./dist", "./editor", "./tst", "**/*.bench.ts", "**/*-bench.ts"]
 }

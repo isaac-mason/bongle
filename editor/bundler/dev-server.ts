@@ -10,6 +10,7 @@
 // plus pushing HMR payloads to each env's registered channel. init()+State+
 // standalone-fns, matching the engine convention.
 
+import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
 import type { Filesystem } from '../fs';
 import type { EnvValues } from './env-replace';
 import { type TransformResult, transformModule } from './transform';
@@ -63,13 +64,30 @@ export type DevServerState = {
     pushers: Map<string, (p: HotPayload) => void>;
     /** node_modules package.json cache (pkg name → parsed json | null miss). */
     pkgCache: Map<string, PackageJson | null>;
+    /** DepGraph AST pass state: module id → SymbolTable, shared across envs
+     *  (dep edges are env-independent). Feeds the __kit.deps consumer wrap. */
+    symbolTables: SymbolTableRegistry;
+    /** dep-wrapped source cache: module id → { version, code }. The wrap is
+     *  env-independent, so it runs once per module content version and both
+     *  realms reuse it (the per-env transform layers env literals on top). */
+    depWrapCache: Map<string, { version: number; code: string }>;
 };
 
 /** the package.json fields node_modules resolution reads. */
 type PackageJson = { main?: string; module?: string; exports?: unknown };
 
 export function initDevServer(fs: Filesystem): DevServerState {
-    return { fs, graphs: new Map(), transformCache: new Map(), version: 0, moduleVersion: new Map(), pushers: new Map(), pkgCache: new Map() };
+    return {
+        fs,
+        graphs: new Map(),
+        transformCache: new Map(),
+        version: 0,
+        moduleVersion: new Map(),
+        pushers: new Map(),
+        pkgCache: new Map(),
+        symbolTables: initSymbolTables(),
+        depWrapCache: new Map(),
+    };
 }
 
 const isBare = (spec: string) => !spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('\0');
@@ -222,6 +240,18 @@ function ensureNode(state: DevServerState, env: string, id: string): ModNode {
     return n;
 }
 
+/** DepGraph AST wrap for a user module, memoised per content version and
+ *  shared across envs (dep edges don't vary by realm). Resolves import specs
+ *  through the dev server's own resolver so the cross-module walk uses the
+ *  same module ids that key the graph. */
+async function ensureDepWrapped(state: DevServerState, id: string, source: string, mv: number): Promise<string> {
+    const cached = state.depWrapCache.get(id);
+    if (cached && cached.version === mv) return cached.code;
+    const code = await wrapModuleDeps(id, source, state.symbolTables, (spec) => resolve(state, spec, id));
+    state.depWrapCache.set(id, { version: mv, code });
+    return code;
+}
+
 /** transport: fetch a module for `env`. Bare specifiers externalize. */
 export async function fetchModule(
     state: DevServerState,
@@ -265,7 +295,10 @@ export async function fetchModule(
         // prebundled lib chunks (node_modules/bongle) are NOT user code — no
         // capture wrapper; user project modules get it.
         const capture = !id.startsWith('node_modules/');
-        result = await transformModule(id, source, { env: envValuesFor(env), capture });
+        // user modules run the DepGraph AST pass (__kit.deps consumer wrap)
+        // once per content version, shared across envs; lib chunks skip it.
+        const input = capture ? await ensureDepWrapped(state, id, source, mv) : source;
+        result = await transformModule(id, input, { env: envValuesFor(env), capture });
         byEnv.set(env, { version: mv, result });
     }
     node.selfAccepts = !id.startsWith('node_modules/'); // user modules self-accept (postlude); lib chunks don't
@@ -293,6 +326,9 @@ export async function applyEdit(state: DevServerState, path: string): Promise<vo
     // stale, every other module stays valid (reused, not re-evaluated).
     state.moduleVersion.set(id, (state.moduleVersion.get(id) ?? 0) + 1);
     state.transformCache.delete(id);
+    // stale dep wrap: re-run the AST pass on next fetch (rebuilds this module's
+    // SymbolTable against the now-complete registry and re-wraps its consumers).
+    state.depWrapCache.delete(id);
 
     for (const [env, g] of state.graphs) {
         if (!g.has(id)) continue; // this env never loaded the module

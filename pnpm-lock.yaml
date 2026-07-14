@@ -56,6 +56,9 @@ importers:
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
+      gatho:
+        specifier: github:isaac-mason/gatho
+        version: https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d
       gpucat:
         specifier: github:isaac-mason/gpucat#8dae93190e99c91c810fd772a3239279b18c5153
         version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/8dae93190e99c91c810fd772a3239279b18c5153
@@ -1569,6 +1572,15 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d}
+    version: 0.0.0-alpha-3
+    peerDependencies:
+      ioredis: ^5.10.1
+    peerDependenciesMeta:
+      ioredis:
+        optional: true
+
   get-caller-file@2.0.5:
     resolution: {integrity: sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==}
     engines: {node: 6.* || 8.* || >= 10.*}
@@ -1826,6 +1838,9 @@ packages:
 
   package-json-from-dist@1.0.1:
     resolution: {integrity: sha512-UEZIS3/by4OC8vL3P2dTXRETpebLI2NiI5vIrjaD/5UtrkFX/tNbwjTSRAGC/+7CAo2pIcBaRgWmcBBHcsaCIw==}
+
+  packcat@0.3.0:
+    resolution: {integrity: sha512-5LfyKTxoyCIFuRIjF9+sr0JtJtLYviQj1NbBlz+EsZli+t12dY1Dx18hHwDM3/9ry39F4lIhUlfuSncPNYQ8Ig==}
 
   packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d:
     resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d}
@@ -3378,6 +3393,14 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  gatho@https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d:
+    dependencies:
+      packcat: 0.3.0
+      ws: 8.20.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
   get-caller-file@2.0.5: {}
 
   get-tsconfig@5.0.0-beta.5:
@@ -3590,6 +3613,8 @@ snapshots:
       wrappy: 1.0.2
 
   package-json-from-dist@1.0.1: {}
+
+  packcat@0.3.0: {}
 
   packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d: {}
 

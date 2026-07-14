@@ -24,7 +24,7 @@ export type TaskbarItem = {
     menu?: MenuItem[];
 };
 
-export function Taskbar({ items, footer }: { items: TaskbarItem[]; footer?: TaskbarItem[] }) {
+export function Taskbar({ items, footer, presence }: { items: TaskbarItem[]; footer?: TaskbarItem[]; presence?: ReactNode }) {
     const geom = useWindows((s) => s.geom);
     const focused = useWindows((s) => s.focused);
     const { focus, setMode } = useWindows.getState();
@@ -71,7 +71,12 @@ export function Taskbar({ items, footer }: { items: TaskbarItem[]; footer?: Task
             style={{ width: TASKBAR_W }}
         >
             {items.map(renderItem)}
-            {footer && footer.length > 0 && <div className="mt-auto flex flex-col gap-1.5">{footer.map(renderItem)}</div>}
+            {(footer?.length || presence) && (
+                <div className="mt-auto flex flex-col gap-1.5">
+                    {footer?.map(renderItem)}
+                    {presence}
+                </div>
+            )}
             {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
         </div>
     );

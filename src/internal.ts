@@ -30,6 +30,7 @@ export type { DepKey } from './core/capture/dep-graph';
 export { directProducersOf } from './core/capture/dep-graph';
 export type { ScenePayload } from './core/content/scene-store';
 export type { MatchmakingConfig } from './core/matchmaking';
+export { migrateScene, SCENE_LATEST } from './migrations/scene';
 export type { ModelHandle } from './core/models/handle';
 export type { ModelBin, ModelBinChannel, ModelBinClip, ModelBinImage, ModelBinMesh } from './core/models/model-bin';
 export { modelBinSchema, pack as packModelBin, unpack as unpackModelBin } from './core/models/model-bin';

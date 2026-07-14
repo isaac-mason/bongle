@@ -21,6 +21,16 @@ import { makeRunner } from '../bundler/runner';
 import { exposeDevtools } from '../devtools';
 import type { Filesystem } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
+import type { PortLike } from '../net/relay-link';
+import { createRemoteFilesystem } from '../net/remote-fs';
+
+/** wrap a transferred MessagePort as a PortLike (createRemoteFilesystem reads
+ *  e.data either way; this keeps the fsrpc port structurally typed). */
+function asPortLike(mp: MessagePort): PortLike {
+    const p: PortLike = { onmessage: null, postMessage: (d) => mp.postMessage(d), close: () => mp.close() };
+    mp.onmessage = (e) => p.onmessage?.({ data: e.data });
+    return p;
+}
 
 // no host portal in the editor: matchmake is a no-op, platform verbs inert.
 const driver: ClientDriver = {
@@ -74,10 +84,12 @@ function opfsSceneSource(fs: Filesystem) {
     };
 }
 
-async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: MessagePort): Promise<void> {
-    // open the SAME OPFS project the main doc uses (same origin) — baked
-    // resources the pipeline wrote are visible directly; no snapshot.
-    const fs = await openOpfsFilesystem(msg.projectName);
+async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: MessagePort, fsrpcPort?: MessagePort): Promise<void> {
+    // the Source seam: a host's own client shares the SAME OPFS project (same
+    // origin — no snapshot); a GUEST (another browser) has no shared OPFS, so it
+    // reads THROUGH to the host over the relay's fsrpc lane.
+    const fs = fsrpcPort ? createRemoteFilesystem(asPortLike(fsrpcPort)) : await openOpfsFilesystem(msg.projectName);
+    const remote = fsrpcPort !== undefined;
 
     // the engine UI stylesheet (prebundled tailwind, dist/bongle.css) — inject it
     // into this iframe. The runner evals the engine JS; its `import './editor.css'`
@@ -152,25 +164,36 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     };
     requestAnimationFrame(frame);
 
-    // incremental fs updates from the parent: HMR source, refresh baked assets.
-    self.addEventListener('message', (e: MessageEvent) => {
-        const m = e.data as FsChangeMessage;
-        if (m?.type !== 'fs-change') return;
-        // a scene file changed on disk → re-list (handles added/removed
-        // blueprints) and re-read the specific scene (handles edits to one).
-        if (m.path.startsWith('content/scenes/')) {
+    // react to a changed path: re-read the matching scene / baked resource. The
+    // bytes are already reachable (OPFS shared for a host, fetched-on-demand for a
+    // guest's remote fs); a baked-asset write carries no registry change, so the
+    // flush path won't propagate it — refresh the resource directly.
+    const applyFsChange = (path: string) => {
+        if (path.startsWith('content/scenes/')) {
             EngineEditor.refreshBlueprints();
-            EngineEditor.reloadBlueprint(m.path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
+            EngineEditor.reloadBlueprint(path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
             return;
         }
-        // OPFS is shared — the new bytes are already here. A baked-asset write
-        // carries no registry change, so the flush path won't propagate it;
-        // refresh the matching resource directly (re-reads OPFS).
-        if (!m.path.startsWith('resources/client/')) return;
-        if (m.path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
-        else if (m.path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
+        if (!path.startsWith('resources/client/')) return;
+        if (path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
+        else if (path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
         else EngineClient.refreshBlockResources(state).catch(console.error);
-    });
+    };
+
+    if (remote) {
+        // a guest has no shared OPFS + no parent signalling it — the host pushes
+        // its change stream over the fsrpc lane, surfaced as remote-fs watch.
+        fs.watch((changes) => {
+            for (const c of changes) if (c.type !== 'deleted') applyFsChange(c.path);
+        });
+    } else {
+        // the host's own iframe: the parent signals writes (OPFS has no
+        // cross-context events).
+        self.addEventListener('message', (e: MessageEvent) => {
+            const m = e.data as FsChangeMessage;
+            if (m?.type === 'fs-change') applyFsChange(m.path);
+        });
+    }
 }
 
 self.addEventListener('message', (e: MessageEvent) => {
@@ -178,10 +201,12 @@ self.addEventListener('message', (e: MessageEvent) => {
     if (msg?.type !== 'client-init' || booted) return;
     booted = true;
     // e.ports[0] = game transport (to the server worker), e.ports[1] = bundler
-    // transport (to the host DevServer).
-    const [gamePort, bundlerPort] = e.ports;
+    // transport (to the host DevServer), e.ports[2] = OPTIONAL fsrpc transport —
+    // present only for a guest (remote read-through fs); absent for a host's own
+    // iframe (shared OPFS).
+    const [gamePort, bundlerPort, fsrpcPort] = e.ports;
     if (!gamePort || !bundlerPort) throw new Error('client-init needs game + bundler ports');
-    void boot(msg, gamePort, bundlerPort).catch((err) => {
+    void boot(msg, gamePort, bundlerPort, fsrpcPort).catch((err) => {
         // surface boot failures to the parent for the client window's log.
         window.parent.postMessage({ type: 'client-error', message: (err as Error).message }, '*');
         console.error(err);

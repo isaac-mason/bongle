@@ -134,3 +134,94 @@ export function createRelayLink(socket: SocketLike): RelayLink {
         },
     };
 }
+
+// ── host side ───────────────────────────────────────────────────────
+//
+// The host holds ONE socket to the relay carrying every guest's frames, each
+// prefixed by the room with the guest's 2-byte localId:
+//   host inbound  = [u16 localId][channel][kind][payload]
+// So the host demuxes (guest, channel), where the guest side is the plain
+// single-peer RelayLink above. This is the asymmetry from apps/edit-relay: a
+// guest speaks plain frames, the room stamps the localId toward the host.
+//
+// Control-channel frames (guest-join / guest-leave, originated by the room)
+// surface on `onControl` with the localId, so the session manager can react to
+// guests appearing/leaving WITHOUT pre-registering every localId. Data channels
+// (game / bundler / fsrpc) are lazily wired via `guestPort` inside that handler.
+
+export type RelayHostLink = {
+    /** A MessagePort-shaped endpoint for one guest's data channel. Posts are
+     *  stamped with the guest localId toward the relay; inbound frames for
+     *  (localId, channel) fire its onmessage. */
+    guestPort(localId: number, channel: number): PortLike;
+    /** Forget a guest's ports (call on guest-leave). */
+    dropGuest(localId: number): void;
+    close(): void;
+};
+
+export type RelayHostLinkOptions = {
+    /** Fired for every control-channel frame, carrying the originating guest's
+     *  localId — the session manager's hook for guest-join / guest-leave. */
+    onControl?: (localId: number, message: unknown) => void;
+};
+
+export function createRelayHostLink(socket: SocketLike, opts: RelayHostLinkOptions = {}): RelayHostLink {
+    // localId → channel → port.
+    const guests = new Map<number, Map<number, PortLike>>();
+
+    const channelsFor = (localId: number) => {
+        let m = guests.get(localId);
+        if (!m) {
+            m = new Map();
+            guests.set(localId, m);
+        }
+        return m;
+    };
+
+    socket.onmessage = (e) => {
+        const bytes = toBytes(e.data);
+        if (bytes.length < 2) return;
+        const localId = (bytes[0] << 8) | bytes[1];
+        const frame = decodeFrame(bytes.subarray(2));
+        if (frame.channel === Channel.control) {
+            opts.onControl?.(localId, frame.data);
+            return;
+        }
+        // data frames land on a lazily-created port; if the session manager
+        // hasn't wired this channel yet the frame is dropped (guest-join, which
+        // triggers wiring, always precedes a guest's data frames).
+        guests.get(localId)?.get(frame.channel)?.onmessage?.({ data: frame.data });
+    };
+
+    return {
+        guestPort(localId, channel) {
+            const m = channelsFor(localId);
+            let p = m.get(channel);
+            if (!p) {
+                p = {
+                    onmessage: null,
+                    postMessage(data) {
+                        const inner = new Uint8Array(encodeFrame(channel, data));
+                        const out = new Uint8Array(2 + inner.byteLength);
+                        out[0] = (localId >> 8) & 0xff;
+                        out[1] = localId & 0xff;
+                        out.set(inner, 2);
+                        socket.send(out.buffer);
+                    },
+                    close() {
+                        m.delete(channel);
+                    },
+                };
+                m.set(channel, p);
+            }
+            return p;
+        },
+        dropGuest(localId) {
+            guests.delete(localId);
+        },
+        close() {
+            guests.clear();
+            socket.close();
+        },
+    };
+}

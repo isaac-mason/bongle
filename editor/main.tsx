@@ -13,6 +13,7 @@ import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
 import { importGameSave } from './game-save';
+import { joinGuestSession } from './net/guest-session';
 import { spawnPipelineWorker } from './pipeline/pipeline-host';
 import { createPlatformBridge } from './platform/bridge';
 import { spawnServerWorker } from './server/server-host';
@@ -20,6 +21,7 @@ import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
 import { useLaunched } from './stores/launched';
+import { useMultiplayer } from './stores/multiplayer';
 import { logger } from './stores/logs';
 import { usePlatform } from './stores/platform';
 import { useSystemWindows } from './stores/system-windows';
@@ -30,6 +32,8 @@ import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
 import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
+import { PLATFORM_WINDOW_ID } from './ui/components/PlatformWindow';
+import { TASKBAR_W } from './ui/components/Taskbar';
 
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
@@ -73,6 +77,20 @@ async function boot(): Promise<void> {
         usePlatform.getState().setResult(r);
         log(`platform ${r.of}: ${r.ok ? 'ok' : 'failed'}${r.message ? ` — ${r.message}` : ''}`);
     });
+
+    // GUEST: joining someone else's session. Run ONLY a client iframe pointed at
+    // the host over the relay — no server/bundler/pipeline workers, no local
+    // project. The full-viewport client covers the (unused) desktop underneath.
+    if (intent?.kind === 'joinEdit') {
+        const guestLog = logger('client');
+        log('joining a multiplayer edit session…');
+        joinGuestSession({
+            url: intent.url,
+            clientPath: `${import.meta.env.BASE_URL}client/index.html`,
+            log: (m) => guestLog(`[guest] ${m}`),
+        });
+        return; // skip the host stack entirely
+    }
 
     // the avatar the local player wears in the running editor session (see
     // startEditorServer). avatar mode = the edited glb; game mode = our account
@@ -190,6 +208,11 @@ async function boot(): Promise<void> {
     const serverLog = logger('server');
     const serverHost = spawnServerWorker({ connectRealm, projectName: PROJECT, log: serverLog, localAvatarUrl });
 
+    // multiplayer editing (opt-in): wire the host subsystems so the "Open to
+    // multiplayer" action can dial the relay and accept guests. Nothing connects
+    // until the host presses the button.
+    useMultiplayer.getState().init({ platform, serverHost, connectRealm, fs: editor.fs, log: (m) => serverLog(`[mp] ${m}`) });
+
     // client iframes: each its own realm, connected to the server worker; the
     // "+ client" button opens more (multiplayer-in-a-tab). They open OPFS too.
     const clientLog = logger('client');
@@ -228,19 +251,24 @@ async function boot(): Promise<void> {
     relayBakeChange = fanOutChange;
     editor.fs.watch(fanOutChange);
 
-    // open the first client once the server is live (join before the sim exists
-    // would be dropped); the "+ client" button opens further windows. Layout:
-    // game/standalone fills the screen with the client; avatar mode splits
-    // Blockbench (edit, left) | the game preview (the avatar on your player, right).
+    // once the server is live (join before the sim exists would be dropped), lay
+    // out the session. game/standalone opens a client that fills the screen.
+    // avatar mode is Blockbench-only to start (no game preview) — center Blockbench
+    // (~70%) with the platform widget kept visible top-right; open a client later
+    // via the "+ client" button to preview the avatar on a player.
     void serverHost.ready.then(() => {
-        const id = useClients.getState().open();
-        if (!id) return;
+        const W = useWindows.getState();
         if (intent?.kind === 'avatar') {
-            useWindows.getState().snapTo('blockbench', 'left');
-            useWindows.getState().snapTo(id, 'right');
-        } else {
-            useWindows.getState().snapTo(id, 'full');
+            const deskW = window.innerWidth - TASKBAR_W;
+            const w = Math.round(deskW * 0.7);
+            const h = Math.round(window.innerHeight * 0.7);
+            W.setBox('blockbench', TASKBAR_W + Math.round((deskW - w) / 2), Math.round((window.innerHeight - h) / 2), w, h);
+            W.focus('blockbench');
+            W.focus(PLATFORM_WINDOW_ID); // keep the platform widget on top / visible
+            return;
         }
+        const id = useClients.getState().open();
+        if (id) W.snapTo(id, 'full');
     });
 }
 
