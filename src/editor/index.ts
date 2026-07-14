@@ -18,7 +18,7 @@ import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
-import { getRenderCamera, setActivePlayer } from '../client/rooms';
+import { getRenderCamera, renderRoomDepsForClient, setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -1315,17 +1315,13 @@ function renderBlockIconsWhenReady(attempt = 0): void {
     const state = editorClient;
     if (!state) return;
     if (!state.voxelResources) {
-        if (attempt === 0 || attempt % 60 === 0) {
-            console.log('[icon-debug] waiting for voxelResources… frame=%d', attempt);
-        }
         if (attempt < 600) {
             requestAnimationFrame(() => renderBlockIconsWhenReady(attempt + 1));
         } else {
-            console.warn('[icon-debug] voxelResources never became ready — block icons not rendered');
+            console.warn('[bongle] voxelResources never became ready — block icons not rendered');
         }
         return;
     }
-    console.log('[icon-debug] voxelResources ready at frame=%d — rendering block icons', attempt);
     void renderBlockIconsInBrowser();
 }
 
@@ -1337,17 +1333,10 @@ function renderBlockIconsWhenReady(attempt = 0): void {
  */
 async function renderBlockIconsInBrowser(): Promise<void> {
     const state = editorClient;
-    console.log(
-        '[icon-debug] renderBlockIconsInBrowser trigger: client=%o voxelRes=%o inFlight=%o',
-        !!state,
-        !!state?.voxelResources,
-        blockIconRenderInFlight,
-    );
     if (!state || !state.voxelResources || blockIconRenderInFlight) return;
     blockIconRenderInFlight = true;
     try {
-        const atlas = await BlockIcons.renderBlockIconAtlas(state);
-        console.log('[icon-debug] atlas result: cols=%d rows=%d', atlas.cols, atlas.rows);
+        const atlas = await BlockIcons.renderBlockIconAtlas(renderRoomDepsForClient(state));
         if (atlas.cols === 0) return; // no renderable blocks yet
         const url = await pixelsToObjectUrl(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
         if (currentBlockIconUrl) URL.revokeObjectURL(currentBlockIconUrl);
@@ -1359,7 +1348,6 @@ async function renderBlockIconsInBrowser(): Promise<void> {
             blockIconCols: atlas.cols,
             blockIconRows: atlas.rows,
         });
-        console.log('[icon-debug] block atlas URL published (%d coords)', Object.keys(atlas.coords).length);
     } catch (e) {
         console.warn('[bongle] in-browser block icon render failed:', e);
     } finally {
@@ -1379,7 +1367,7 @@ export async function ensurePrefabIcon(prefabId: string): Promise<void> {
     if (useEditor.getState().prefabIconUrls[prefabId] || prefabIconInFlight.has(prefabId)) return;
     prefabIconInFlight.add(prefabId);
     try {
-        const icon = await PrefabIcons.renderPrefabIcon(state, prefabId);
+        const icon = await PrefabIcons.renderPrefabIcon(renderRoomDepsForClient(state), prefabId);
         if (!icon) return;
         const url = await pixelsToObjectUrl(icon.pixels, icon.pxSize, icon.pxSize);
         useEditor.setState((s) => ({ prefabIconUrls: { ...s.prefabIconUrls, [prefabId]: url } }));

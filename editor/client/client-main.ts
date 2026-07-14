@@ -52,6 +52,27 @@ function clientResourceLoader(fs: Filesystem) {
     };
 }
 
+// The blueprint scene source, backed by OPFS instead of the legacy dev-server
+// `/__bongle/*` endpoints (which don't exist here — they'd hit the SPA fallback
+// and return index.html). Scenes live at content/scenes/<id>.scene.json.
+function opfsSceneSource(fs: Filesystem) {
+    return {
+        listScenes: async (): Promise<string[]> => {
+            const entries = await fs.list('content/scenes', { recursive: true }).catch(() => []);
+            return entries
+                .filter((e) => e.kind === 'file' && e.path.endsWith('.scene.json'))
+                .map((e) => e.path.replace(/^content\/scenes\//, '').replace(/\.scene\.json$/, ''));
+        },
+        readScene: async (id: string): Promise<string | null> => {
+            try {
+                return await fs.readText(`content/scenes/${id}.scene.json`);
+            } catch {
+                return null;
+            }
+        },
+    };
+}
+
 async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: MessagePort): Promise<void> {
     // open the SAME OPFS project the main doc uses (same origin) — baked
     // resources the pipeline wrote are visible directly; no snapshot.
@@ -98,12 +119,12 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     });
 
     // registers the EditorScript + commands and mounts the in-world edit UI —
-    // must run before load()'s clearPendingChanges sweep.
-    await EngineEditor.setup(state);
+    // must run before load()'s clearPendingChanges sweep. The scene source lets
+    // the editor's blueprint sync read scenes from OPFS (no dev-server here).
+    await EngineEditor.setup(state, { sceneSource: opfsSceneSource(fs) });
     await EngineClient.load(state);
 
     __kit.registerFlush(() => {
-        console.log('[client] flush → applyRegistryChanges');
         EngineClient.applyRegistryChanges(state);
     });
     __kit.flush();
@@ -130,6 +151,11 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     self.addEventListener('message', (e: MessageEvent) => {
         const m = e.data as FsChangeMessage;
         if (m?.type !== 'fs-change') return;
+        // a blueprint scene file changed on disk → re-read the scene list.
+        if (m.path.startsWith('content/scenes/')) {
+            EngineEditor.refreshBlueprints();
+            return;
+        }
         // OPFS is shared — the new bytes are already here. A baked-asset write
         // carries no registry change, so the flush path won't propagate it;
         // refresh the matching resource directly (re-reads OPFS).

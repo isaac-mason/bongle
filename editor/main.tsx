@@ -57,22 +57,32 @@ solid('dev:blue', 70, 110, 230);
 `;
 
 async function boot(): Promise<void> {
-    await editor.fs.write('manifest.json', JSON.stringify({ name: 'dev-sample', engineVersion: '0.0.0' }, null, 2));
-    await editor.fs.write('src/index.ts', SAMPLE_INDEX);
-    // a starter avatar source, openable in the blockbench app from the file tree.
-    await editor.fs.write('character.bbmodel', starterBbmodel);
-    // generated / non-source dirs; the tree grays (and collapses) gitignored entries.
-    await editor.fs.write('.gitignore', 'node_modules/\ndist/\nresources/\n');
+    // OPFS is the persistent source of truth: seed the starter project ONLY on a
+    // fresh project (no src/index.ts), so edits + loaded game saves survive a
+    // reload instead of being clobbered by the sample every boot.
+    if (!(await editor.fs.exists('src/index.ts'))) {
+        // project metadata lives under a `bongle` key in package.json (idiomatic
+        // npm-project home; a placeholder for name/engineVersion/etc. as we settle
+        // what the build + platform actually need). Rides the game save as source.
+        await editor.fs.write(
+            'package.json',
+            `${JSON.stringify({ name: 'dev-sample', private: true, bongle: { engineVersion: '0.0.0' } }, null, 2)}\n`,
+        );
+        await editor.fs.write('src/index.ts', SAMPLE_INDEX);
+        // a starter avatar source, openable in the blockbench app from the file tree.
+        await editor.fs.write('character.bbmodel', starterBbmodel);
+    }
     // empty barrel so realms can import it before the first bake writes it (the
-    // bake patches model/… handles with baked bin paths, mirroring the kit).
-    await editor.fs.write('src/generated/models.ts', 'export {};\n');
+    // bake patches model/… handles with baked bin paths, mirroring the kit). Not
+    // part of a game save (derived) — ensure it exists on every boot.
+    if (!(await editor.fs.exists('src/generated/models.ts'))) {
+        await editor.fs.write('src/generated/models.ts', 'export {};\n');
+    }
     useEditor.getState().open(MAIN_PANE, 'src/index.ts'); // open it in the code window
 
     // seed the engine + first-party libs into the vfs so every realm's bundler
     // resolves `bongle` / `mathcat` / … from there.
-    console.log('[main] seeding engine dist…');
     await seedEngineDist(editor.fs);
-    console.log('[main] seed done; spawning workers');
 
     // the ONE dev server — DevServer + @rolldown transform — runs OFF the main
     // thread in the bundler worker (its WASM arena reaches multiple GB under

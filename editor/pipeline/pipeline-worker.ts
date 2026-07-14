@@ -7,7 +7,7 @@
 // flush → re-bake; results post back to the main doc for the atlas view + logs.
 
 import { createBrowserDecodeAudio } from '../../src/asset-pipeline/decode-audio-browser';
-import { createBakeLoader } from '../../src/asset-pipeline/loader';
+import { createBakeLoader, createClientResourceLoader } from '../../src/asset-pipeline/loader';
 import { createPortBridge } from '../bundler/port-bridge';
 import { makeRunner } from '../bundler/runner';
 import { openOpfsFilesystem } from '../fs-opfs';
@@ -31,23 +31,89 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // transforms; this realm evaluates → its own engine registry).
     const runner = makeRunner(createPortBridge(bundlerPort));
     // runtime env flags before user/engine eval (mirrors the kit entry).
+    // client=true so this realm can build the client render stack for in-worker
+    // icon rendering (experiment — watch for DOM-assuming client-only code that
+    // breaks in a worker with no document/window).
     const { env } = await runner.import('bongle/env');
-    env.client = false;
+    env.client = true;
     env.server = true;
     env.editor = true;
-    console.log('[pipeline-worker] importing src/index.ts…');
     await runner.import('src/index.ts'); // user declarations register into this realm's engine
-    console.log('[pipeline-worker] src/index.ts done');
     const { __kit } = await runner.import('bongle/internal');
-    // engine-asset-pipeline wraps its api under `export * as AssetPipeline`.
-    const { AssetPipeline } = await runner.import('bongle/engine-asset-pipeline');
-    console.log('[pipeline-worker] engine imported');
+    // engine-asset-pipeline exposes the data baker (`AssetPipeline`) and the
+    // post-bake icon render step (`Icons`). Both run in THIS realm, so they see
+    // the registry the user declarations populated (a static worker import would
+    // get a different, empty engine instance). Same JS realm → plain calls, no
+    // serialization: `loader` goes in, atlas pixels come back.
+    const { AssetPipeline, Icons } = await runner.import('bongle/engine-asset-pipeline');
 
     // the baker reads inputs through the loader (project-relative → fs, absolute
     // + file:// → fetch/vfs) and decodes audio via OfflineAudioContext.
     const loader = createBakeLoader(fs);
+    // icons read baked client assets (atlas, model bins) back out of the fs; those
+    // live under resources/client/, not at the project root the bake loader reads.
+    const iconLoader = createClientResourceLoader(fs);
     const decodeAudio = createBrowserDecodeAudio();
     const pipeline = AssetPipeline.init({ mode: 'edit', cache: true, fs, loader, decodeAudio });
+
+    // in-worker icon rendering: a headless GPU render stack, lazily created on
+    // first use (device handshake + pipeline compiles are expensive and atlas-
+    // independent). null until then; a failed handshake stays null and we retry.
+    let renderCtx: Awaited<ReturnType<typeof Icons.createHeadlessRenderContext>> | null = null;
+    let renderingIcons = false;
+
+    // Render block (and later prefab) icons for the current registry + baked
+    // atlas and write them as first-class client assets under resources/client/
+    // (voxels-icons.png + sidecar json) — shipped alongside the atlas so gameplay
+    // (inventory/hotbar) and the editor both read them from the same place. The
+    // main doc picks up the write via the existing fs-changed relay. Fully
+    // isolated: an icon failure logs and never disturbs the bake. Instrumented
+    // per step so a break in the worker render path is pinpointable.
+    async function renderIcons(): Promise<void> {
+        if (renderingIcons) return;
+        renderingIcons = true;
+        try {
+            if (!renderCtx) {
+                log('icons: creating headless render context…');
+                renderCtx = await Icons.createHeadlessRenderContext();
+                log('icons: render context ready');
+            }
+            log('icons: building render deps…');
+            const { deps, dispose } = await Icons.buildRenderDeps(renderCtx, iconLoader);
+            try {
+                log('icons: rendering block atlas…');
+                const atlas = await Icons.renderBlockIconAtlas(deps);
+                if (atlas.atlasWidth === 0 || atlas.atlasHeight === 0) {
+                    log('icons: empty atlas (no renderable blocks) — nothing to write');
+                    return;
+                }
+                log(`icons: encoding ${atlas.atlasWidth}x${atlas.atlasHeight} atlas → png…`);
+                const png = await encodeRgbaPng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
+                await fs.write('resources/client/voxels-icons.png', png);
+                await fs.write(
+                    'resources/client/voxels-icons.json',
+                    new TextEncoder().encode(
+                        JSON.stringify({
+                            coords: atlas.coords,
+                            cols: atlas.cols,
+                            rows: atlas.rows,
+                            iconPx: atlas.iconPx,
+                            atlasWidth: atlas.atlasWidth,
+                            atlasHeight: atlas.atlasHeight,
+                        }),
+                    ),
+                );
+                log(`icons: wrote resources/client/voxels-icons.png (${(png.byteLength / 1024).toFixed(0)}KB)`);
+            } finally {
+                dispose();
+            }
+        } catch (err) {
+            log(`icons error: ${(err as Error).message}`);
+            console.error('[pipeline-worker] icon render failed', err);
+        } finally {
+            renderingIcons = false;
+        }
+    }
 
     // declarations settle → bake. Registered on THIS realm's __kit, so its flush
     // (initial + every HMR re-eval) runs the bake against the registry the user
@@ -67,18 +133,30 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
             } finally {
                 baking = false;
             }
+            // icons after the bake (own error boundary; never blocks the bake result).
+            await renderIcons();
         })();
     });
     __kit.flush(); // initial bake + registry apply
     post({ type: 'ready' });
 }
 
-console.log('[pipeline-worker] script loaded');
+/** RGBA8 pixels → PNG bytes via OffscreenCanvas (worker-safe; no DOM canvas). */
+async function encodeRgbaPng(pixels: Uint8Array, width: number, height: number): Promise<Uint8Array> {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable');
+    // copy into a fresh ArrayBuffer-backed view (ImageData rejects a possibly-
+    // SharedArrayBuffer-backed one).
+    const clamped = new Uint8ClampedArray(pixels);
+    ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return new Uint8Array(await blob.arrayBuffer());
+}
 
 let booted = false;
 self.addEventListener('message', (e: MessageEvent) => {
     const msg = e.data as InitMsg;
-    console.log('[pipeline-worker] message', msg?.type);
     if (msg?.type !== 'init' || booted) return;
     booted = true;
     const bundlerPort = e.ports[0]; // the bundler conduit (→ bundler worker)

@@ -94,7 +94,6 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // worker's bundler flushes after evaluating user code / an HMR cascade;
     // this updates the live world in place).
     const unregister = __kit.registerFlush(() => {
-        console.log('[server-worker] flush → applyRegistryChanges');
         EngineServer.applyRegistryChanges(state);
     });
 

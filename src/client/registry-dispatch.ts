@@ -60,21 +60,7 @@ import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
 import * as Net from './net';
 
-// TEMP diagnostic: count HMR dispatches to detect runaway re-fire loops.
-// Logs every call with elapsed-ms-since-last and a 30-call rolling rate.
-// Remove once the HMR perf regression is found.
-let _hmrCallCount = 0;
-let _hmrLastT = 0;
-let _hmrFirstT = 0;
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
-    const _now = (typeof performance !== 'undefined' ? performance : Date).now();
-    _hmrCallCount++;
-    if (_hmrCallCount === 1) _hmrFirstT = _now;
-    const sinceLast = _hmrLastT > 0 ? (_now - _hmrLastT).toFixed(0) : 'first';
-    const ratePerSec = _hmrCallCount > 1 ? (_hmrCallCount / ((_now - _hmrFirstT) / 1000)).toFixed(2) : '—';
-    console.log(`[registry-dispatch][hmr] call#${_hmrCallCount} sinceLast=${sinceLast}ms rate=${ratePerSec}/s`);
-    _hmrLastT = _now;
-
     const allStores = [
         registry.blockTextures,
         registry.blocks,
@@ -109,7 +95,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         dirtyScriptIds.add(ch.handle.id);
         if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
     }
-    console.log('[dispatch:client] dirtyScripts=', [...dirtyScriptIds], 'pendingScripts=', registry.scripts.pendingChanges.map((c) => `${c.kind}:${c.handle.id}`), 'pendingTraits=', registry.traits.pendingChanges.length, 'rooms=', state.rooms.rooms.size);
 
     // editor HMR toasts, one per kind with pending changes, plus one
     // for script-instance swaps reaching via DepGraph (when trait body

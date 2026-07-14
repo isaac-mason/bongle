@@ -17,8 +17,7 @@ import { ensureChunk, setBlock } from '../core/voxels/voxels';
 import * as Environment from '../render/environment';
 import * as Renderer from '../render/renderer';
 import * as VoxelResources from '../render/voxels/voxel-resources';
-import type { EngineClient } from './engine-client';
-import { createRenderRoom, disposeRenderRoom } from './rooms';
+import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
 const ICON_PX = 128;
 const CAM_DIST = 64;
@@ -56,9 +55,9 @@ const EMPTY_ATLAS: BlockIconAtlas = {
  * world isn't rendering mid-call; the world re-flushes its environment next
  * frame).
  */
-export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIconAtlas> {
+export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockIconAtlas> {
     const registry = engineRegistry.blockRegistry;
-    const voxelResources = state.voxelResources;
+    const voxelResources = deps.voxelResources;
 
     // renderable states: skip AIR (0), MISSING (1), and any MODEL_NONE state.
     const renderable: string[] = [];
@@ -67,11 +66,9 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
         const key = registry.stateToKey[sid];
         if (key) renderable.push(key);
     }
-    console.log('[icon-debug] renderBlockIconAtlas: %d renderable blocks', renderable.length);
     if (renderable.length === 0) return EMPTY_ATLAS;
 
     await voxelResources.atlasReady;
-    console.log('[icon-debug] atlasReady resolved');
 
     const cols = Math.ceil(Math.sqrt(renderable.length));
     const rows = Math.ceil(renderable.length / cols);
@@ -80,8 +77,7 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
     const atlasPixels = new Uint8Array(atlasWidth * atlasHeight * 4);
     const coords: Record<string, [number, number]> = {};
 
-    const room = createRenderRoom(state);
-    console.log('[icon-debug] render room roomLocalIndex=%d', room.roomLocalIndex);
+    const room = createRenderRoom(deps);
     // flat + full-bright: disable the env so an overhead sun doesn't crush the
     // side faces and the sky/cloud meshes don't bleed in — the classic
     // inventory-icon look (per-face directional factor still gives the 3D read).
@@ -109,7 +105,7 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
         depthFormat: 'depth24plus',
         samples: 1,
     });
-    const pipeline = Renderer.createOfflinePipeline(state.renderer, room.scene, camera);
+    const pipeline = Renderer.createOfflinePipeline(deps.renderer, room.scene, camera);
     const meshOutput = createMeshOutput();
     const packer = voxelResources.arenas.packer;
 
@@ -129,12 +125,6 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
             chunk.light.fill(0xf000);
 
             const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, 0, 0, 0), registry);
-            if (i === 0) {
-                const quads = mesh
-                    ? (mesh.opaque?.quadCount ?? 0) + (mesh.transparent?.quadCount ?? 0) + (mesh.translucent?.quadCount ?? 0)
-                    : 0;
-                console.log('[icon-debug] block[0] "%s": mesh=%o quads=%d', key, !!mesh, quads);
-            }
             if (!mesh) {
                 // all-air after culling (shouldn't happen for a solid block): drop
                 // any prior slot so the tile renders empty, then skip.
@@ -146,7 +136,7 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
             VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh, room.roomLocalIndex);
 
             Renderer.renderRoomToTarget(
-                state.renderer,
+                deps.renderer,
                 voxelResources,
                 room.scene,
                 camera,
@@ -155,23 +145,13 @@ export async function renderBlockIconAtlas(state: EngineClient): Promise<BlockIc
                 pipeline,
                 Number.POSITIVE_INFINITY,
             );
-            blitTile(atlasPixels, atlasWidth, await readPixels(state.renderer.renderer, target), ICON_PX, col, row);
+            blitTile(atlasPixels, atlasWidth, await readPixels(deps.renderer.renderer, target), ICON_PX, col, row);
         }
     } finally {
         pipeline.dispose();
         target.dispose();
-        disposeRenderRoom(state, room);
+        disposeRenderRoom(deps, room);
     }
-
-    let nonBlank = 0;
-    for (let p = 3; p < atlasPixels.length; p += 4) if (atlasPixels[p] !== 0) nonBlank++;
-    console.log(
-        '[icon-debug] atlas %dx%d done; non-transparent px=%d / %d (0 ⇒ render drew nothing)',
-        atlasWidth,
-        atlasHeight,
-        nonBlank,
-        atlasWidth * atlasHeight,
-    );
 
     return { pixels: atlasPixels, atlasWidth, atlasHeight, coords, iconPx: ICON_PX, cols, rows };
 }

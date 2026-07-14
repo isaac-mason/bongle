@@ -41,6 +41,11 @@ function langOf(path: string): string {
     return 'plaintext';
 }
 
+/** node_modules is seeded (engine dist + first-party libs) + regenerable, not
+ *  the user's source. Show it read-only and refuse to save it so an accidental
+ *  edit can't diverge the vfs copy from the prebundle. */
+const isReadOnlyPath = (path: string) => path.startsWith('node_modules/');
+
 /** get (or lazily create) the shared model for a path. The dirty listener is
  *  attached once, here, so N group editors showing the file don't double-count. */
 async function getOrCreateModel(fs: Filesystem, path: string): Promise<monaco.editor.ITextModel> {
@@ -97,6 +102,7 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
             const model = ed.getModel();
             if (!model) return;
             const path = model.uri.path.replace(/^\/+/, '');
+            if (isReadOnlyPath(path)) return; // seeded/derived — not writable
             const value = model.getValue();
             void fs.write(path, value);
             savedText.set(path, value);
@@ -119,6 +125,7 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
             const model = await getOrCreateModel(fs, active);
             if (cancelled) return;
             ed.setModel(model);
+            ed.updateOptions({ readOnly: isReadOnlyPath(active) });
             // if a search hit asked to jump here, do it now the model is loaded.
             const r = useEditor.getState().reveal;
             if (r && r.group === group && r.path === active) revealLine(r.line);

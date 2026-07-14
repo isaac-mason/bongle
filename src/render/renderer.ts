@@ -66,6 +66,26 @@ export function init(): Renderer {
     return { renderer, environmentResources, pipeline };
 }
 
+/**
+ * headless twin of `init`, for a render context with no canvas or `window`
+ * (the pipeline worker's in-worker icon renderer). Takes a pre-created device +
+ * adapter — gpucat's headless mode skips the canvas/adapter handshake and every
+ * output goes through a `RenderTarget` (see `renderRoomToTarget`). No pixel
+ * ratio / size to set (those throw in headless).
+ */
+export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): Renderer {
+    const renderer = new WebGPURenderer({
+        antialias: true,
+        headless: true,
+        device: gpu.device,
+        adapter: gpu.adapter,
+        format: 'rgba8unorm',
+    });
+    const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
+    const pipeline = createRenderPipeline(renderer);
+    return { renderer, environmentResources, pipeline };
+}
+
 /** async device handshake. all GPU objects defer their real work until now. */
 export async function load(state: Renderer): Promise<void> {
     await state.renderer.init();

@@ -24,11 +24,8 @@ const ready = new Promise<void>((r) => {
     resolveReady = r;
 });
 
-console.log('[bundler-worker] script loaded');
-
 self.addEventListener('message', async (e: MessageEvent) => {
     const msg = e.data as InitMsg | ConnectMsg | FsChangeMsg;
-    console.log('[bundler-worker] message', (msg as { type: string }).type);
     if (msg.type === 'init') {
         const fs = await openOpfsFilesystem(msg.projectName);
         // build errors surface to the main doc's build log window.
@@ -37,12 +34,10 @@ self.addEventListener('message', async (e: MessageEvent) => {
         // now safe to accept realm connections — the main doc flushes its queued
         // connect-realm ports on this.
         self.postMessage({ type: 'host-ready' });
-        console.log('[bundler-worker] host ready');
     } else if (msg.type === 'connect-realm') {
         await ready;
         // e.ports[0] = this realm's bundler conduit (its ModuleRunner ↔ us).
         host?.connectRealm(msg.env, e.ports[0]);
-        console.log('[bundler-worker] connected realm', msg.env);
     } else if (msg.type === 'fs-change') {
         await ready;
         host?.onFsChange(msg.changes);

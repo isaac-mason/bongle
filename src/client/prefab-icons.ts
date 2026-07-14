@@ -28,8 +28,7 @@ import * as ModelVisuals from '../render/models/model-visuals';
 import * as Renderer from '../render/renderer';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import * as VoxelResources from '../render/voxels/voxel-resources';
-import type { EngineClient } from './engine-client';
-import { createRenderRoom, disposeRenderRoom, type RenderRoom } from './rooms';
+import { createRenderRoom, disposeRenderRoom, type RenderRoom, type RenderRoomDeps } from './rooms';
 
 const ICON_PX = 256;
 const CAM_DIST = 128;
@@ -46,13 +45,13 @@ export type PrefabIcon = { pixels: Uint8Array; pxSize: number };
 
 /** Render one prefab into an RGBA8 icon tile, in-browser. Returns null when the
  *  prefab id is unknown or the instantiated content is empty (nothing to draw). */
-export async function renderPrefabIcon(state: EngineClient, prefabId: string): Promise<PrefabIcon | null> {
+export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): Promise<PrefabIcon | null> {
     const def = engineRegistry.prefabs.byId.get(prefabId)?.payload;
     if (!def) return null;
 
-    await state.voxelResources.atlasReady;
+    await deps.voxelResources.atlasReady;
 
-    const room = createRenderRoom(state);
+    const room = createRenderRoom(deps);
     Environment.applyConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
     Environment.flushActive(room.environment);
 
@@ -69,7 +68,7 @@ export async function renderPrefabIcon(state: EngineClient, prefabId: string): P
         setPrefab(anchor, createPrefabConfig(prefabId));
         let guard = 0;
         do {
-            Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
+            Prefab.tick(room.nodes, room.scriptRuntime, deps.resources, room.voxels, 'client');
         } while (room.nodes._prefabsDirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
 
         // ── preload referenced models + upload to the GPU pools ──
@@ -81,15 +80,15 @@ export async function renderPrefabIcon(state: EngineClient, prefabId: string): P
             modelIds.add(id.modelId);
             meshKeys.add(`${id.modelId}/${id.meshName}`);
         }
-        for (const id of modelIds) Resources.ensureModel(state.resources, id);
+        for (const id of modelIds) Resources.ensureModel(deps.resources, id);
         if (modelIds.size > 0) {
             await waitFor(() => {
-                for (const id of modelIds) if (!Resources.hasModel(state.resources, id)) return false;
+                for (const id of modelIds) if (!Resources.hasModel(deps.resources, id)) return false;
                 return true;
             });
-            ModelResources.update(state.modelResources, state.resources);
+            ModelResources.update(deps.modelResources, deps.resources);
             await waitFor(() => {
-                for (const k of meshKeys) if (meshInfoIndexOf(state.modelResources.meshInfo, k) === null) return false;
+                for (const k of meshKeys) if (meshInfoIndexOf(deps.modelResources.meshInfo, k) === null) return false;
                 return true;
             });
             await sleep(TEXTURE_SETTLE_MS);
@@ -101,7 +100,7 @@ export async function renderPrefabIcon(state: EngineClient, prefabId: string): P
         Interpolation.interpolate(room.interpolation, 1.0, 0);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
-        const packer = state.voxelResources.arenas.packer;
+        const packer = deps.voxelResources.arenas.packer;
         const meshOutput = createMeshOutput();
         for (const chunk of room.voxels.chunks.values()) {
             chunk.light.fill(0xffff);
@@ -129,19 +128,19 @@ export async function renderPrefabIcon(state: EngineClient, prefabId: string): P
         }
 
         // model + voxel-mesh visuals (register cull entries; offline pass draws all).
-        ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
+        ModelVisuals.update(room.modelVisuals, deps.modelResources, deps.resources, room.visibility);
         VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels, room.visibility);
 
         // ── frame + render ──
-        const aabb = computeSceneAabb(room, state);
+        const aabb = computeSceneAabb(room, deps);
         if (!aabb) return null;
         const camera = fitOrthoIsometric(aabb);
-        const pipeline = Renderer.createOfflinePipeline(state.renderer, room.scene, camera);
+        const pipeline = Renderer.createOfflinePipeline(deps.renderer, room.scene, camera);
         try {
             room.scene.updateWorldMatrix();
             Renderer.renderRoomToTarget(
-                state.renderer,
-                state.voxelResources,
+                deps.renderer,
+                deps.voxelResources,
                 room.scene,
                 camera,
                 room.roomLocalIndex,
@@ -149,14 +148,14 @@ export async function renderPrefabIcon(state: EngineClient, prefabId: string): P
                 pipeline,
                 Number.POSITIVE_INFINITY,
             );
-            const pixels = await readPixels(state.renderer.renderer, target);
+            const pixels = await readPixels(deps.renderer.renderer, target);
             return { pixels, pxSize: ICON_PX };
         } finally {
             pipeline.dispose();
         }
     } finally {
         target.dispose();
-        disposeRenderRoom(state, room);
+        disposeRenderRoom(deps, room);
     }
 }
 
@@ -208,7 +207,7 @@ function fitOrthoIsometric(aabb: Aabb): OrthographicCamera {
 
 /** Union AABB of the room's renderable content: non-air voxels + MeshTrait
  *  world bounds. Returns null when there's nothing to render. */
-function computeSceneAabb(room: RenderRoom, state: EngineClient): Aabb | null {
+function computeSceneAabb(room: RenderRoom, deps: RenderRoomDeps): Aabb | null {
     let minX = Infinity;
     let minY = Infinity;
     let minZ = Infinity;
@@ -243,9 +242,9 @@ function computeSceneAabb(room: RenderRoom, state: EngineClient): Aabb | null {
     for (const [meshTrait, transformTrait] of query(room.nodes, [MeshTrait, TransformTrait])) {
         const id = meshTrait.meshId;
         if (!id) continue;
-        const slot = meshInfoIndexOf(state.modelResources.meshInfo, `${id.modelId}/${id.meshName}`);
+        const slot = meshInfoIndexOf(deps.modelResources.meshInfo, `${id.modelId}/${id.meshName}`);
         if (slot === null) continue;
-        const entry = state.modelResources.meshInfo.entries[slot];
+        const entry = deps.modelResources.meshInfo.entries[slot];
         if (!entry) continue;
         // transform the 8 local-AABB corners by the node's world matrix.
         const m = getVisualWorldMatrix(transformTrait);

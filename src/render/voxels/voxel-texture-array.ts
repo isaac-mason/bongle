@@ -99,23 +99,24 @@ export async function loadBlockTextureAtlasIntoTextureArray(
 ): Promise<void> {
     // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
     if (meta.textures.length === 0) return;
-    let img: HTMLImageElement;
+    let img: ImageBitmap;
     try {
         // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs),
-        // then a blob url — an <img> can't take a bare vfs/file path.
+        // then decode via createImageBitmap — no bare vfs/file path, and (unlike
+        // <img>/document.createElement) it runs in a worker too, so this same
+        // path serves the pipeline worker's in-worker icon renderer.
         const bytes = await loader.loadBytes('voxels-atlas.png');
-        img = await loadImageFromBytes(bytes);
+        img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
     } catch {
         return;
     }
 
-    // draw atlas to a canvas for pixel extraction
-    const canvas = document.createElement('canvas');
-    canvas.width = meta.atlasWidth;
-    canvas.height = meta.atlasHeight;
+    // draw atlas to an OffscreenCanvas for pixel extraction (worker-safe).
+    const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
     const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
     ctx2d.imageSmoothingEnabled = false;
     ctx2d.drawImage(img, 0, 0);
+    img.close();
     const fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
     writeBlockTextureAtlasIntoTextureArray(
         atlas,
@@ -202,24 +203,4 @@ export function writeBlockTextureAtlasIntoTextureArray(
     atlas.generateMipmaps = false;
 
     atlas.needsUpdate = true;
-}
-
-// ── helpers ─────────────────────────────────────────────────────────
-
-/** decode encoded image bytes → <img> via a transient object url (the loader
- *  gives us bytes; an <img> can't source a bare vfs/file path). */
-function loadImageFromBytes(bytes: Uint8Array): Promise<HTMLImageElement> {
-    const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            URL.revokeObjectURL(url);
-            resolve(img);
-        };
-        img.onerror = (e) => {
-            URL.revokeObjectURL(url);
-            reject(e);
-        };
-        img.src = url;
-    });
 }

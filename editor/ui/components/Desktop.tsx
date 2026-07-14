@@ -2,18 +2,23 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { Code, Logs, MonitorPlay } from 'lucide-react';
+import { Code, Download, FolderSync, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo } from 'react';
 import type { Filesystem } from '../../fs';
+import { downloadGameSave, pickAndImportGameSave } from '../../game-save';
 import { useClients } from '../../stores/clients';
 import { useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
+import { useSync } from '../../stores/sync';
 import { useSystemWindows } from '../../stores/system-windows';
 import { useTabDrag } from '../../stores/tab-drag';
 import { snapRect, useSnapPreview, useWindows } from '../../stores/windows';
+import { disconnect, syncSupported } from '../../sync/folder-sync';
 import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
+import { SyncChooser } from './SyncChooser';
+import { SyncPanel } from './SyncPanel';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
 
@@ -78,6 +83,82 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     const openClient = useClients((s) => s.open);
 
     const focused = useWindows((s) => s.focused);
+    const geom = useWindows((s) => s.geom);
+
+    // folder-sync: a bottom-pinned taskbar icon (Chromium only). Click when idle
+    // opens the direction chooser; when live or errored it disconnects.
+    const syncPhase = useSync((s) => s.phase);
+    const syncFolder = useSync((s) => s.folder);
+    // spin only during the initial reconcile; once live, a static icon with a
+    // small green corner dot (no constant motion) marks the connected state.
+    const syncGlyph =
+        syncPhase === 'connecting' ? (
+            <RefreshCw size={18} className="animate-spin" />
+        ) : syncPhase === 'connected' ? (
+            <span className="relative inline-flex">
+                <RefreshCw size={18} />
+                <span
+                    className="absolute -top-1 -right-1 h-2 w-2 rounded-full border border-surface"
+                    style={{ background: '#22c55e' }}
+                />
+            </span>
+        ) : (
+            <FolderSync size={18} />
+        );
+    const syncFooter: TaskbarItem[] = syncSupported()
+        ? [
+              {
+                  id: 'sync',
+                  title:
+                      syncPhase === 'connected'
+                          ? `syncing ${syncFolder}`
+                          : syncPhase === 'connecting'
+                            ? 'reconciling…'
+                            : syncPhase === 'error'
+                              ? 'sync error'
+                              : 'sync folder to disk',
+                  glyph: syncGlyph,
+                  // the glyph itself carries the state (spinner / green dot), so
+                  // skip the taskbar's left running-bar + active highlight.
+                  running: false,
+                  isActive: false,
+                  // idle → pick a folder; a live/errored session → open the status
+                  // modal (which carries Close / Stop syncing).
+                  onClick: () => {
+                      if (useSync.getState().phase === 'idle') useSync.getState().beginChoose();
+                      else useSync.getState().openPanel();
+                  },
+                  menu:
+                      syncPhase === 'connected'
+                          ? [
+                                { label: 'Sync status', onClick: () => useSync.getState().openPanel() },
+                                { label: 'Stop syncing', onClick: () => void disconnect() },
+                            ]
+                          : undefined,
+              },
+          ]
+        : [];
+
+    // game saves: download the source set as a zip / load one back over the
+    // project. A handy dev tool (also the source shape the platform will persist).
+    const saveFooter: TaskbarItem[] = [
+        {
+            id: 'save-download',
+            title: 'download game save (.zip)',
+            glyph: <Download size={18} />,
+            running: false,
+            onClick: () => void downloadGameSave(fs),
+            menu: [{ label: 'Download game save (.zip)', onClick: () => void downloadGameSave(fs) }],
+        },
+        {
+            id: 'save-load',
+            title: 'load game save (.zip) — replaces project + reloads',
+            glyph: <Upload size={18} />,
+            running: false,
+            onClick: () => pickAndImportGameSave(fs),
+            menu: [{ label: 'Load game save (.zip)…', onClick: () => pickAndImportGameSave(fs) }],
+        },
+    ];
 
     const windowPanes = useEditor((s) => s.windowPanes);
     const panes = useEditor((s) => s.panes);
@@ -98,11 +179,16 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     // it opens (or raises) ALL of them, not just one.
     const LOG_WINDOWS = ['build', 'server', 'client'];
     const logsOpen = LOG_WINDOWS.some((id) => !closed[id]);
+    // "visible" = open and not minimized; clicking 'logs' toggles all of them.
+    const logsVisible = LOG_WINDOWS.some((id) => !closed[id] && geom[id]?.mode !== 'minimized');
     const openLogs = () => {
         for (const id of LOG_WINDOWS) openSystem(id);
     };
     const closeLogs = () => {
         for (const id of LOG_WINDOWS) closeSystem(id);
+    };
+    const minimizeLogs = () => {
+        for (const id of LOG_WINDOWS) if (!closed[id]) useWindows.getState().setMode(id, 'minimized');
     };
     // blockbench is pinned (always in the taskbar); running = its window is open.
     const bbRunning = launched.some((w) => w.appId === 'blockbench');
@@ -163,7 +249,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             glyph: <Logs size={18} />,
             running: logsOpen,
             isActive: logsOpen && focused != null && LOG_IDS.has(focused),
-            onClick: openLogs,
+            onClick: () => (logsVisible ? minimizeLogs() : openLogs()),
             menu: logsOpen
                 ? [
                       { label: 'Show all', onClick: openLogs },
@@ -246,7 +332,9 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 </Window>
             ))}
             <SnapOverlay />
-            <Taskbar items={items} />
+            <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} />
+            <SyncChooser fs={fs} />
+            <SyncPanel />
         </div>
     );
 }

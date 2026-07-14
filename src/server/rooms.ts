@@ -651,8 +651,8 @@ function seedStarterFloor(room: Room): void {
     const firstUser = blockRegistry.defs.find((d) => d.id !== 'air');
     if (!firstUser) return;
     const key = formatKey(firstUser.id, firstUser.states, 0);
-    for (let x = -1; x <= 1; x++) {
-        for (let z = -1; z <= 1; z++) {
+    for (let x = -25; x <= 25; x++) {
+        for (let z = -25; z <= 25; z++) {
             setBlock(room.voxels, x, 0, z, key, SetBlockFlags.BULK);
         }
     }

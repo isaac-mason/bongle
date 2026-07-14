@@ -294,12 +294,10 @@ export async function applyEdit(state: DevServerState, path: string): Promise<vo
     state.moduleVersion.set(id, (state.moduleVersion.get(id) ?? 0) + 1);
     state.transformCache.delete(id);
 
-    console.log(`[dev-server] applyEdit ${id} — envs with it:`, [...state.graphs].filter(([, g]) => g.has(id)).map(([e]) => e));
     for (const [env, g] of state.graphs) {
         if (!g.has(id)) continue; // this env never loaded the module
         const boundaries = computeBoundaries(g, id);
         const push = state.pushers.get(env);
-        console.log(`[dev-server] applyEdit ${id} env=${env} boundaries=`, boundaries, 'pusher=', !!push);
         if (boundaries === 'full-reload') {
             push?.({ type: 'full-reload', triggeredBy: id });
             continue;

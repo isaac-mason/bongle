@@ -387,10 +387,26 @@ export type RenderRoom = {
     roomLocalIndex: number;
 };
 
-export function createRenderRoom(state: EngineClient): RenderRoom {
+/** Everything `createRenderRoom` needs, decoupled from `EngineClient` so both the
+ *  live client AND a headless pipeline-worker engine can build render rooms. Build
+ *  it from a client with `renderRoomDepsForClient`; the pipeline supplies its own. */
+export type RenderRoomDeps = {
+    resources: Resources;
+    rpc: SceneTreeContext['rpc'];
+    renderer: Renderer.Renderer;
+    voxelResources: VoxelResourcesNs.VoxelResources;
+    voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
+    modelResources: ModelResourcesNs.ModelResources;
+    cloudResources: CloudResourcesNs.CloudResources;
+    /** allocate a distinct arena render index. client: from `Rooms`; pipeline:
+     *  its own scheme (index 0 is free there — no live world to coexist with). */
+    allocRoomIndex: () => number;
+};
+
+export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const { nodes, voxels, physics, clock, scriptRuntime } = newRoomCore({
-        resources: state.resources,
-        rpc: state.rpc,
+        resources: deps.resources,
+        rpc: deps.rpc,
         roomId: `${LOCAL_ROOM_PREFIX}render`,
         playerMode: 'play',
         roomMode: 'play',
@@ -398,13 +414,13 @@ export function createRenderRoom(state: EngineClient): RenderRoom {
     nodes.runtime = scriptRuntime;
 
     const scene = new Scene();
-    const envResources = state.renderer.environmentResources;
-    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, state.voxelResources);
-    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, state.voxelMeshResources, envResources);
-    const modelVisuals = ModelVisuals.init(scene, nodes, state.modelResources, envResources);
+    const envResources = deps.renderer.environmentResources;
+    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources);
+    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, deps.voxelMeshResources, envResources);
+    const modelVisuals = ModelVisuals.init(scene, nodes, deps.modelResources, envResources);
     const visibility = Visibility.init();
     const interpolation = Interpolation.init(nodes, RENDER_ROOM_PLAYER_ID);
-    const environment = Environment.init(scene, envResources, ENVIRONMENT_DEFAULT, state.cloudResources);
+    const environment = Environment.init(scene, envResources, ENVIRONMENT_DEFAULT, deps.cloudResources);
 
     // host trait at the root; its env onInit no-ops with no live scene init.
     attachWorldTrait(nodes.root);
@@ -422,17 +438,31 @@ export function createRenderRoom(state: EngineClient): RenderRoom {
         visibility,
         interpolation,
         environment,
-        roomLocalIndex: allocRoomIndex(state.rooms),
+        roomLocalIndex: deps.allocRoomIndex(),
     };
 }
 
-export function disposeRenderRoom(state: EngineClient, room: RenderRoom): void {
-    VoxelVisuals.unmountRoom(state.voxelResources, room.roomLocalIndex);
+export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void {
+    VoxelVisuals.unmountRoom(deps.voxelResources, room.roomLocalIndex);
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
     ModelVisuals.dispose(room.modelVisuals, room.visibility);
     Environment.dispose(room.environment);
+}
+
+/** Render-room deps backed by a live client. */
+export function renderRoomDepsForClient(state: EngineClient): RenderRoomDeps {
+    return {
+        resources: state.resources,
+        rpc: state.rpc,
+        renderer: state.renderer,
+        voxelResources: state.voxelResources,
+        voxelMeshResources: state.voxelMeshResources,
+        modelResources: state.modelResources,
+        cloudResources: state.cloudResources,
+        allocRoomIndex: () => allocRoomIndex(state.rooms),
+    };
 }
 
 /** prefix used for synthetic local-room ids, server roomIds never collide with this. */
