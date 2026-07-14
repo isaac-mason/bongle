@@ -1303,6 +1303,29 @@ function loadEditorAssets(): void {
         registryChangeWired = true;
         window.addEventListener('bongle:registry-changed', () => invalidatePrefabIcons());
     }
+    renderBlockIconsWhenReady();
+}
+
+/** `registerClient` runs before the async GPU device handshake sets
+ *  `state.voxelResources`, and initial blocks are pre-registered (no
+ *  `applyRegistryChanges` flush, so no `block-resources-changed` event). So the
+ *  boot render would bail early forever. Poll a few frames until the engine is
+ *  live, then render once; registry-change events drive later re-renders. */
+function renderBlockIconsWhenReady(attempt = 0): void {
+    const state = editorClient;
+    if (!state) return;
+    if (!state.voxelResources) {
+        if (attempt === 0 || attempt % 60 === 0) {
+            console.log('[icon-debug] waiting for voxelResources… frame=%d', attempt);
+        }
+        if (attempt < 600) {
+            requestAnimationFrame(() => renderBlockIconsWhenReady(attempt + 1));
+        } else {
+            console.warn('[icon-debug] voxelResources never became ready — block icons not rendered');
+        }
+        return;
+    }
+    console.log('[icon-debug] voxelResources ready at frame=%d — rendering block icons', attempt);
     void renderBlockIconsInBrowser();
 }
 

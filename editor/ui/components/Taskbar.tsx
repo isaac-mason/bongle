@@ -1,6 +1,5 @@
 // editor/ui/components/Taskbar.tsx — the left vertical taskbar. One button per
 // window; click to focus / restore, right-click for per-window actions.
-// Right-clicking empty rail space opens the taskbar menu (e.g. new client).
 
 import { type ReactNode, useState } from 'react';
 import { useWindows } from '../../stores/windows';
@@ -23,23 +22,16 @@ export type TaskbarItem = {
     menu?: MenuItem[];
 };
 
-export function Taskbar({ items, menu: railMenu = [] }: { items: TaskbarItem[]; menu?: MenuItem[] }) {
+export function Taskbar({ items }: { items: TaskbarItem[] }) {
     const geom = useWindows((s) => s.geom);
     const focused = useWindows((s) => s.focused);
-    const { focus } = useWindows.getState();
+    const { focus, setMode } = useWindows.getState();
     const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
     return (
-        // biome-ignore lint/a11y/noStaticElementInteractions: right-click the rail for the taskbar menu.
         <div
             className="absolute top-0 bottom-0 left-0 z-[1000000] flex flex-col gap-1.5 border-r border-border bg-surface p-1.5"
             style={{ width: TASKBAR_W }}
-            onContextMenu={(e) => {
-                // only for empty rail space; item buttons handle their own menu.
-                if (!railMenu.length || e.target !== e.currentTarget) return;
-                e.preventDefault();
-                setMenu({ x: e.clientX, y: e.clientY, items: railMenu });
-            }}
         >
             {items.map((it) => {
                 const g = geom[it.id];
@@ -47,6 +39,9 @@ export function Taskbar({ items, menu: railMenu = [] }: { items: TaskbarItem[]; 
                 // a minimized window is never "active" — even if it still holds focus.
                 const active = !minimized && (it.isActive ?? focused === it.id);
                 const running = it.running ?? true;
+                // clicking the icon of the visible, focused window minimizes it (toggle);
+                // otherwise run its normal open/focus action.
+                const toggleMinimize = !!g && focused === it.id && !minimized;
                 return (
                     <button
                         key={it.id}
@@ -55,7 +50,7 @@ export function Taskbar({ items, menu: railMenu = [] }: { items: TaskbarItem[]; 
                         className={`relative grid h-8 w-8 cursor-pointer place-items-center border border-border font-mono text-[15px] leading-none ${
                             active ? 'taskbar-active' : 'bg-surface text-fg'
                         } ${minimized ? 'opacity-50' : ''}`}
-                        onClick={() => (it.onClick ?? (() => focus(it.id)))()}
+                        onClick={() => (toggleMinimize ? setMode(it.id, 'minimized') : (it.onClick ?? (() => focus(it.id)))())}
                         onContextMenu={(e) => {
                             if (!it.menu) return;
                             e.preventDefault();

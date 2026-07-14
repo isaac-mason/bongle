@@ -2,7 +2,7 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { Code, MonitorPlay, ScrollText } from 'lucide-react';
+import { Code, Logs, MonitorPlay } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo } from 'react';
 import type { Filesystem } from '../../fs';
 import { useClients } from '../../stores/clients';
@@ -14,7 +14,6 @@ import { snapRect, useSnapPreview, useWindows } from '../../stores/windows';
 import { appById, blockbenchApp } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
-import type { MenuItem } from './ContextMenu';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
 
@@ -111,12 +110,39 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
 
     const items: TaskbarItem[] = [
         // game clients come first — the default layout boots straight into one.
-        ...clients.map((w) => ({
-            id: w.id,
-            title: w.title,
-            glyph: <MonitorPlay size={16} />,
-            menu: [show(w.id), { label: 'Close', onClick: () => closeClient(w.id) }],
-        })),
+        // When none are open, keep one pinned (not-running) launcher so you can
+        // still spawn a client.
+        ...(clients.length
+            ? clients.map((w) => ({
+                  id: w.id,
+                  title: w.title,
+                  glyph: <MonitorPlay size={16} />,
+                  menu: [
+                      show(w.id),
+                      { label: 'New client window', onClick: openClient },
+                      ...(clients.length > 1
+                          ? [
+                                {
+                                    label: 'Close all clients',
+                                    onClick: () => {
+                                        for (const c of clients) closeClient(c.id);
+                                    },
+                                },
+                            ]
+                          : []),
+                      { label: 'Close', onClick: () => closeClient(w.id) },
+                  ],
+              }))
+            : [
+                  {
+                      id: 'new-client',
+                      title: 'client',
+                      glyph: <MonitorPlay size={16} />,
+                      running: false,
+                      onClick: openClient,
+                      menu: [{ label: 'New client window', onClick: openClient }],
+                  },
+              ]),
         // files + code: pinned + genuinely closable (reopen to last geometry).
         ...windows
             .filter((w) => !LOG_IDS.has(w.id))
@@ -134,7 +160,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         {
             id: 'logs',
             title: 'logs',
-            glyph: <ScrollText size={18} />,
+            glyph: <Logs size={18} />,
             running: logsOpen,
             isActive: logsOpen && focused != null && LOG_IDS.has(focused),
             onClick: openLogs,
@@ -170,21 +196,6 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             glyph: <Code size={16} />,
             menu: [show(pid), { label: 'Close', onClick: () => useEditor.getState().closePane(pid) }],
         })),
-    ];
-
-    // right-click the empty taskbar rail for these.
-    const taskbarMenu: MenuItem[] = [
-        { label: 'New client window', onClick: openClient },
-        ...(clients.length
-            ? [
-                  {
-                      label: 'Close all clients',
-                      onClick: () => {
-                          for (const c of clients) closeClient(c.id);
-                      },
-                  },
-              ]
-            : []),
     ];
 
     return (
@@ -235,7 +246,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 </Window>
             ))}
             <SnapOverlay />
-            <Taskbar items={items} menu={taskbarMenu} />
+            <Taskbar items={items} />
         </div>
     );
 }

@@ -49,8 +49,16 @@ export type DevServerState = {
     /** transform cache: module id → env → { version, result }. Per-env because
      *  the same module transforms differently per realm (envPlugin literals). */
     transformCache: Map<string, Map<string, { version: number; result: TransformResult }>>;
-    /** bumped on every edit; drives cache-bust + invalidate. */
+    /** global monotonic HMR timestamp. ONLY stamps js-update payloads so the
+     *  runner cache-busts the changed boundary's re-import URL. NOT a cache key
+     *  (that role caused whole-graph re-eval — see moduleVersion). */
     version: number;
+    /** per-module content version, bumped only when THAT module's own source
+     *  changes. This is the runner-cache + transform-cache validity key: an
+     *  edit to one module leaves every other module's version untouched, so the
+     *  runner reuses their evaluated instances (and any singleton they hold —
+     *  e.g. the engine `registry`) instead of re-evaluating the whole graph. */
+    moduleVersion: Map<string, number>;
     /** HMR push channels registered by each env's transport. */
     pushers: Map<string, (p: HotPayload) => void>;
     /** node_modules package.json cache (pkg name → parsed json | null miss). */
@@ -61,7 +69,7 @@ export type DevServerState = {
 type PackageJson = { main?: string; module?: string; exports?: unknown };
 
 export function initDevServer(fs: Filesystem): DevServerState {
-    return { fs, graphs: new Map(), transformCache: new Map(), version: 0, pushers: new Map(), pkgCache: new Map() };
+    return { fs, graphs: new Map(), transformCache: new Map(), version: 0, moduleVersion: new Map(), pushers: new Map(), pkgCache: new Map() };
 }
 
 const isBare = (spec: string) => !spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('\0');
@@ -238,6 +246,10 @@ export async function fetchModule(
 
     const node = ensureNode(state, env, id);
 
+    // per-module content version: the cache-validity key. Unchanged for modules
+    // an edit didn't touch, so their runner + transform caches stay valid.
+    const mv = state.moduleVersion.get(id) ?? 0;
+
     // per-env transform cache (id → env → entry). withExt only needs the outer
     // key, so extension resolution still works.
     let byEnv = state.transformCache.get(id);
@@ -247,14 +259,14 @@ export async function fetchModule(
     }
     const cached = byEnv.get(env);
     let result: TransformResult;
-    if (cached && cached.version === state.version) {
+    if (cached && cached.version === mv) {
         result = cached.result;
     } else {
         // prebundled lib chunks (node_modules/bongle) are NOT user code — no
         // capture wrapper; user project modules get it.
         const capture = !id.startsWith('node_modules/');
         result = await transformModule(id, source, { env: envValuesFor(env), capture });
-        byEnv.set(env, { version: state.version, result });
+        byEnv.set(env, { version: mv, result });
     }
     node.selfAccepts = !id.startsWith('node_modules/'); // user modules self-accept (postlude); lib chunks don't
 
@@ -267,9 +279,9 @@ export async function fetchModule(
         ensureNode(state, env, depId).importers.add(id);
     }
 
-    if (opts.cached && node.lastVersion === state.version) return { cache: true };
-    const invalidate = node.lastVersion !== state.version && node.lastVersion !== -1;
-    node.lastVersion = state.version;
+    if (opts.cached && node.lastVersion === mv) return { cache: true };
+    const invalidate = node.lastVersion !== mv && node.lastVersion !== -1;
+    node.lastVersion = mv;
     return { code: result.code, file: id, id, url: id, invalidate };
 }
 
@@ -277,6 +289,9 @@ export async function fetchModule(
 export async function applyEdit(state: DevServerState, path: string): Promise<void> {
     const id = normalize(path);
     state.version++;
+    // bump ONLY this module's content version — its transform + runner cache go
+    // stale, every other module stays valid (reused, not re-evaluated).
+    state.moduleVersion.set(id, (state.moduleVersion.get(id) ?? 0) + 1);
     state.transformCache.delete(id);
 
     console.log(`[dev-server] applyEdit ${id} — envs with it:`, [...state.graphs].filter(([, g]) => g.has(id)).map(([e]) => e));
