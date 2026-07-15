@@ -1,4 +1,4 @@
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { type EulerOrder, euler, type Quat, quat } from 'mathcat';
 import { type ComponentProps, forwardRef, type ReactNode, useEffect, useRef, useState } from 'react';
 import { IconButton, Input, SearchableSelect, type SearchableSelectItem } from '../../client/ui/components';

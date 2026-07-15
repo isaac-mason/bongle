@@ -16,11 +16,9 @@ import { usePlatform } from '../stores/platform';
  *  on the main thread — Atomics.wait). Returns the zip; progress streams back. */
 function buildInWorker(maxPlayers: number, onProgress: (label: string) => void): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
-        console.log('[build] spawning build worker');
         const worker = new Worker(new URL('../build/build-worker.ts', import.meta.url), { type: 'module' });
         worker.onmessage = (e: MessageEvent<BuildResponse>) => {
             const m = e.data;
-            console.log('[build] worker →', m.type, m.type === 'progress' ? m.label : '');
             // handshake: send the request only once the worker is live (its heavy
             // module survived vite's dep-optimize/reload window).
             if (m.type === 'ready') {

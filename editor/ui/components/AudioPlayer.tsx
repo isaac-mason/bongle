@@ -2,7 +2,7 @@
 // (play/pause, seek, volume, loop) over an <audio> element. Reads the file into
 // a blob url and live-reloads when it changes on disk.
 
-import { Music, Pause, Play, Repeat, Volume2 } from 'lucide-react';
+import { Music, Pause, Play, Repeat, Volume2 } from 'bongle/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { audioMime } from '../audio-mime';

@@ -8,7 +8,7 @@
 // events, so it can't be opened programmatically with a known coordinate,
 // hence DropdownMenu, which anchors to its trigger's bounding box.)
 
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { useCallback, useMemo } from 'react';
 import {
     DropdownMenu,

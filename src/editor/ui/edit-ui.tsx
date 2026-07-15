@@ -1,4 +1,4 @@
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { setEditorEnabledForRoom } from '../../client/editor';

@@ -3,7 +3,7 @@
 // enter to open into the main code pane. Mounted only while open, so it reloads
 // the file list each time.
 
-import { File as FileIcon } from 'lucide-react';
+import { File as FileIcon } from 'bongle/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { isIgnored } from '../../ignored';

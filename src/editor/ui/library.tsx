@@ -13,7 +13,7 @@
  * esc or E again closes.
  */
 
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';

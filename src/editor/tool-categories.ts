@@ -4,7 +4,7 @@
  * handler (category-key cycle + hold-and-digit slot jump).
  */
 
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import type { EditorTool } from './edit-room-store';
 import { TOOL_CATEGORY_KEYS, type ToolCategoryId } from './editor-controls';
 

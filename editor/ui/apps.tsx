@@ -4,7 +4,7 @@
 // falling back to a code-editor tab. Launching is dynamic (one window per
 // file) — see the launched store.
 
-import { Image, Music, Paintbrush } from 'lucide-react';
+import { Image, Music, Paintbrush } from 'bongle/icons';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
 import { useBlockbench } from '../stores/blockbench';

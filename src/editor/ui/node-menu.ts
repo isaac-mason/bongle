@@ -10,13 +10,13 @@
 // viewport) are not represented here, surfaces compose them around the
 // shared entries inline.
 
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import type { Node } from '../../core/scene/scene-tree';
 
 export type NodeMenuItem = {
     kind: 'item';
     id: string;
-    Icon: Icons.LucideIcon;
+    Icon: Icons.IconComponent;
     label: string;
     onSelect: () => void;
     variant?: 'danger';

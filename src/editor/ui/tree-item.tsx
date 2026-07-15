@@ -1,5 +1,5 @@
 import { useSortable } from '@dnd-kit/react/sortable';
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { IconButton } from '../../client/ui/components';
 import { useEditRoom } from '../edit-room-store';

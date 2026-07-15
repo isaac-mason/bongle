@@ -39,7 +39,6 @@ const OUT = join(ROOT, 'deps-dist', 'node_modules');
 // react-dom are handled separately (REACT_INPUTS). Keep in sync with src imports
 // — a bare import of an unseeded dep fails at resolve.
 const SPECIFIERS = [
-    'lucide-react',
     'zustand',
     '@base-ui/react/collapsible',
     '@base-ui/react/context-menu',
@@ -75,22 +74,22 @@ function split(spec) {
     return { pkg, subpath: rest.length ? `./${rest.join('/')}` : '.', name: rest.length ? rest.join('/') : 'index' };
 }
 
-/** installed version of a package, for the seeded package.json. */
-function versionOf(pkg) {
+/** the installed package's own package.json (for version + sideEffects). */
+function originalPkg(pkg) {
     try {
         let dir = dirname(fileURLToPath(import.meta.resolve(`${pkg}/package.json`, import.meta.url)));
         for (;;) {
             const pj = join(dir, 'package.json');
             if (existsSync(pj)) {
                 const j = JSON.parse(readFileSync(pj, 'utf8'));
-                if (j.name === pkg) return j.version ?? '0.0.0';
+                if (j.name === pkg) return j;
             }
             const up = dirname(dir);
             if (up === dir) break;
             dir = up;
         }
     } catch {}
-    return '0.0.0';
+    return {};
 }
 
 // react et al branch on process.env.NODE_ENV; fold to a literal so dev-only code
@@ -171,11 +170,17 @@ async function bundlePackage(input, external, destPkg, extraPlugins = []) {
     return bytes;
 }
 
-const writePkg = (pkg, exportsMap) =>
-    writeFileSync(
-        join(OUT, pkg, 'package.json'),
-        `${JSON.stringify({ name: pkg, version: versionOf(pkg), type: 'module', exports: exportsMap }, null, 2)}\n`,
-    );
+const writePkg = (pkg, exportsMap) => {
+    const orig = originalPkg(pkg);
+    const json = { name: pkg, version: orig.version ?? '0.0.0', type: 'module', exports: exportsMap };
+    // preserve `sideEffects: false` so the PUBLISH build can tree-shake unused
+    // exports out of a seeded dep. Only when the original explicitly declares it;
+    // otherwise stay conservative. (NOTE: this only helps once a dep keeps its
+    // per-module structure — a flattened barrel still can't shake; see the icons
+    // discussion in src/icons/create-icon.tsx.)
+    if (orig.sideEffects === false) json.sideEffects = false;
+    writeFileSync(join(OUT, pkg, 'package.json'), `${JSON.stringify(json, null, 2)}\n`);
+};
 
 rmSync(join(ROOT, 'deps-dist'), { recursive: true, force: true });
 let totalBytes = 0;

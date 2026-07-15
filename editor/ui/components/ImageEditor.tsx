@@ -4,7 +4,7 @@
 // the project fs — which live-refreshes the image viewer. Rudimentary by
 // design: one canvas is the source of truth, undo is a bounded ImageData stack.
 
-import { Eraser, Grid3x3, type LucideIcon, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eraser, Grid3x3, type IconComponent, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from 'bongle/icons';
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useLaunched } from '../../stores/launched';
@@ -13,7 +13,7 @@ import { ColorPicker, TRANSPARENT } from './ColorPicker';
 
 type Tool = 'pencil' | 'eraser' | 'picker' | 'bucket';
 
-const TOOLS: { id: Tool; Icon: LucideIcon; title: string }[] = [
+const TOOLS: { id: Tool; Icon: IconComponent; title: string }[] = [
     { id: 'pencil', Icon: Pencil, title: 'pencil' },
     { id: 'eraser', Icon: Eraser, title: 'eraser' },
     { id: 'picker', Icon: Pipette, title: 'eyedropper' },

@@ -37,14 +37,6 @@
             "import": "./src/asset-pipeline/index.ts",
             "default": "./src/asset-pipeline/index.ts"
         },
-        "./editor/fs": {
-            "import": "./editor/fs.ts",
-            "default": "./editor/fs.ts"
-        },
-        "./editor/fs-opfs": {
-            "import": "./editor/fs-opfs.ts",
-            "default": "./editor/fs-opfs.ts"
-        },
         "./internal": {
             "import": "./src/internal.ts",
             "default": "./src/internal.ts"
@@ -60,6 +52,10 @@
         "./starter": {
             "import": "./src/starter/index.ts",
             "default": "./src/starter/index.ts"
+        },
+        "./icons": {
+            "import": "./src/icons/index.tsx",
+            "default": "./src/icons/index.tsx"
         },
         "./package.json": "./package.json"
     },
@@ -102,7 +98,6 @@
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",
         "gpucat": "github:isaac-mason/gpucat#8dae93190e99c91c810fd772a3239279b18c5153",
-        "lucide-react": "^1.7.0",
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
         "meshoptimizer": "^0.25.0",

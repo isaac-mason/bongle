@@ -4,7 +4,7 @@
 // ⌘/ctrl+shift+F opens search-across-files (scoped to src/); ⌘/ctrl+F stays
 // Monaco's in-file find. Drag a tab to another group / a split / a new window.
 
-import { FolderTree, Search } from 'lucide-react';
+import { FolderTree, Search } from 'bongle/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useEditor } from '../../stores/editor';

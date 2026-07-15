@@ -20,7 +20,7 @@
  * outbox for the next tick to forward to the server.
  */
 
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'bongle/icons';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ParseState, Suggestion } from '../../core/chat-commands';

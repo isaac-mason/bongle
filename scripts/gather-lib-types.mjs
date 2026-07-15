@@ -7,8 +7,8 @@
 // prebuilt dist d.ts in as real node_modules packages — user code imports
 // mathcat/gpucat/crashcat/packcat DIRECTLY (there's no `bongle/<lib>` re-export).
 // We also gather @webgpu/types for the ambient GPU* globals the engine uses.
-// `three` (crashcat's optional peer dep) and editor-only npm (react/zustand/
-// lucide) are intentionally left out.
+// `three` (crashcat's optional peer dep) and editor-only npm (react/zustand)
+// are intentionally left out.
 //
 // Also writes bongle's package.json with a types-only exports map (the real one
 // points at .ts source) so `bongle`, `bongle/interface`, … resolve to the

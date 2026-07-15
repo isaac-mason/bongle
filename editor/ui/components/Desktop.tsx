@@ -2,7 +2,7 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'lucide-react';
+import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'bongle/icons';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { pickAndImportGameSave } from '../../game-save';

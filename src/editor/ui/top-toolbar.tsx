@@ -1,4 +1,4 @@
-import * as Icons from 'lucide-react';
+import * as Icons from 'bongle/icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { setEditorEnabledForRoom, setRoomView } from '../../client/editor';
 import type { RoomView, RoomViewId } from '../../client/rooms';

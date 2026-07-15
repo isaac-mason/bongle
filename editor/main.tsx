@@ -2,7 +2,7 @@
 // wires the project session: engine externals (workspace source here; a CDN
 // dist in the deployed website), the bundler, and flush→bake.
 
-import { Code, Files, Hammer, MonitorPlay, Server } from 'lucide-react';
+import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
 import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';

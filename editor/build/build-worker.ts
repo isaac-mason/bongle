@@ -21,18 +21,13 @@ export type BuildResponse =
 // postMessage(message, transfer) overload (mirrors mesh-worker.entry.ts).
 const workerSelf = self as unknown as { postMessage: (msg: unknown, transfer?: Transferable[]) => void };
 
-console.log('[build-worker] module loaded');
-
 self.onmessage = async (e: MessageEvent<BuildRequest>) => {
     const { projectName, maxPlayers } = e.data;
     const post = (msg: BuildResponse, transfer?: Transferable[]) => workerSelf.postMessage(msg, transfer);
-    console.log('[build-worker] request received', e.data);
     try {
         post({ type: 'progress', label: 'Opening project' });
         const fs = await openOpfsFilesystem(projectName);
-        console.log('[build-worker] project opened, bundling…');
         const zip = await buildBundle(fs, { maxPlayers, onProgress: (label) => post({ type: 'progress', label }) });
-        console.log('[build-worker] done', zip.length);
         post({ type: 'done', zip }, [zip.buffer]);
     } catch (err) {
         console.error('[build-worker] failed', err);
