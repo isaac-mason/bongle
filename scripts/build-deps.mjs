@@ -221,8 +221,15 @@ for (const spec of SPECIFIERS) {
     if (!groups.has(pkg)) groups.set(pkg, []);
     groups.get(pkg).push(spec);
 }
-const reactPatterns = [/^react($|\/)/, /^react-dom($|\/)/];
-const externalOthers = [/^node:/, ...reactPatterns];
+// Every seeded package is a SINGLE instance: externalize all the OTHER seeded
+// packages from each bundle, so cross-references resolve to the one seeded copy
+// instead of a duplicate bundled-in copy. Same reason react is shared — e.g.
+// @gltf-transform/functions imports @gltf-transform/core, whose static state (the
+// graph→document map) must be shared; a duplicated core breaks
+// Document.fromGraph (returns null → `null.getLogger()`).
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const seededNames = ['react', 'react-dom', ...new Set(SPECIFIERS.map((s) => split(s).pkg))];
+const nameRe = (n) => new RegExp(`^${escapeRe(n)}($|/)`);
 for (const [pkg, specs] of groups) {
     const input = {};
     const exportsMap = {};
@@ -231,7 +238,8 @@ for (const [pkg, specs] of groups) {
         input[name] = spec;
         exportsMap[subpath] = `./${name}.js`;
     }
-    totalBytes += await bundlePackage(input, externalOthers, pkg, [esmExternalRequire(reactPatterns)]);
+    const shared = seededNames.filter((n) => n !== pkg).map(nameRe);
+    totalBytes += await bundlePackage(input, [/^node:/, ...shared], pkg, [esmExternalRequire(shared)]);
     writePkg(pkg, exportsMap);
     console.log(`bundled ${pkg} (${specs.length} entr${specs.length === 1 ? 'y' : 'ies'})`);
 }
