@@ -14,9 +14,11 @@
 // module is transformed once no matter how many realms load it. An fs edit runs
 // applyEdit once, which fans HMR to every realm that had loaded the file.
 
+import { applyEdit, fetchModule, handleRunnerMessage, initDevServer, registerPusher } from '../../build';
 import type { Filesystem, FsChange } from '../fs';
-import { applyEdit, fetchModule, handleRunnerMessage, initDevServer, registerPusher } from './dev-server';
 import type { BundlerFrame } from './port-bridge';
+import { transformModule } from './transform';
+import { createBundleWorker } from './worker-bundle';
 
 export type BundlerHost = {
     /** attach a realm reached over a MessagePort (pipeline runner / server worker
@@ -34,7 +36,7 @@ function describe(err: unknown): string {
 }
 
 export function createBundlerHost(fs: Filesystem, reportError?: (msg: string) => void): BundlerHost {
-    const devServer = initDevServer(fs);
+    const devServer = initDevServer(fs, { transform: transformModule, bundleWorker: createBundleWorker(fs) });
 
     // the module-runner request handler (fetchModule / getBuiltins), shared by
     // local + port-connected realms.

@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
-import { envPlugin } from './bundler/env-plugin';
+import { envPlugin } from './env-plugin';
 
 // monaco-editor 0.55's bundled TypeScript attaches a `repopulateInfo` FUNCTION to
 // the "cannot find declaration for module / try npm i @types" DIAGNOSTIC message

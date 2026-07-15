@@ -1,29 +1,42 @@
-// editor/bundler/dev-server.ts — in-browser dev server for user project code.
+// lib/build/dev-server.ts — the host-neutral dev server for user project code.
 //
-// The single source of truth for the module runner: reads user modules from
-// the project `Filesystem`, transforms them (bundler/transform.ts), owns one
-// module graph per env, and propagates HMR. Engine imports (bare specifiers
-// like `bongle`, `bongle/internal`) are NOT served here — they externalize to
-// the host's engine (resolved by the runner's externals map).
+// The single source of truth for the module runner: reads user modules from the
+// project fs, transforms them, owns one module graph per env, and propagates HMR.
+// Engine imports (bare specifiers like `bongle`, `bongle/internal`) are NOT served
+// here — they externalize to the host's engine (resolved by the runner's externals
+// map). Speaks the Vite ModuleRunner transport protocol: fetchModule(...) → result,
+// plus pushing HMR payloads to each env's registered channel.
 //
-// Speaks the Vite ModuleRunner transport protocol: fetchModule(...) → result,
-// plus pushing HMR payloads to each env's registered channel. init()+State+
-// standalone-fns, matching the engine convention.
+// Host-neutral like bundle.ts: the two browser-coupled capabilities are INJECTED
+// (see DevServerDeps) — `transform` (oxc TS-strip + module-runner rewrite,
+// @rolldown/browser/experimental in the editor) and `bundleWorker` (bundling a
+// `?worker` graph, which reaches into rolldown). A node `bongle dev` supplies node
+// impls; the rest (resolve, DepGraph capture, HMR) runs unchanged in both.
 
-import {
-    type Bundler,
-    dirOf,
-    initSymbolTables,
-    type PackageJson,
-    posixJoin,
-    resolveFile,
-    resolvePackage,
-    type SymbolTableRegistry,
-    wrapModuleDeps,
-} from '../../build';
-import type { Filesystem } from '../fs';
-import { ensureProcessShim } from './runner';
-import { type TransformResult, transformModule } from './transform';
+import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
+import { type BuildFs, dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from './resolve';
+
+/** the transformed form of one module, as the ModuleRunner evals it. */
+export type TransformResult = {
+    code: string;
+    deps: string[];
+    dynamicDeps: string[];
+};
+
+/** transform one module into runner-eval form: (optional capture wrapper →) TS-
+ *  strip → module-runner (SSR) rewrite. Browser impl: editor/bundler/transform.ts. */
+export type TransformModule = (id: string, source: string, opts: { capture: boolean }) => Promise<TransformResult>;
+
+/** bundle a `?worker` entry's graph into ONE self-contained worker-wrapper module
+ *  SOURCE (pre-transform), like vite's `?worker&inline`. Reaches into rolldown, so
+ *  it's injected; the editor's impl lazy-loads @rolldown/browser + caches. */
+export type BundleWorker = (entryId: string) => Promise<string>;
+
+/** the browser-coupled capabilities the dev server needs, injected at init. */
+export type DevServerDeps = {
+    transform: TransformModule;
+    bundleWorker: BundleWorker;
+};
 
 /** a HotPayload subset the runner accepts. */
 export type HotPayload = { type: 'update' | 'custom' | 'full-reload' | 'connected'; [k: string]: unknown };
@@ -44,9 +57,11 @@ type ModNode = {
 };
 
 export type DevServerState = {
-    /** project working copy — user module source + the seeded engine dist
-     *  (node_modules/bongle/dist) live here. */
-    fs: Filesystem;
+    /** project working copy — user module source + the seeded engine source
+     *  (node_modules/bongle/**) live here. */
+    fs: BuildFs;
+    /** the injected browser-coupled capabilities (transform + worker bundling). */
+    deps: DevServerDeps;
     /** per-env module graphs, created lazily as envs register. */
     graphs: Map<string, Map<string, ModNode>>;
     /** transform cache: module id → { version, result }. SHARED across realms —
@@ -81,15 +96,12 @@ export type DevServerState = {
     resolveCache: Map<string, string>;
     /** cold-start cost breakdown (SPIKE, task #13) — cumulative ms per phase. */
     perf: { modules: number; resolveMs: number; readMs: number; transformMs: number };
-    /** `?worker` bundle cache: entry id → self-contained bundled code. A worker
-     *  can't run the ModuleRunner, so its graph is bundled once (like vite's
-     *  ?worker) and blob-spawned. Immutable seed → keyed by entry id alone. */
-    workerCache: Map<string, string>;
 };
 
-export function initDevServer(fs: Filesystem): DevServerState {
+export function initDevServer(fs: BuildFs, deps: DevServerDeps): DevServerState {
     return {
         fs,
+        deps,
         graphs: new Map(),
         transformCache: new Map(),
         version: 0,
@@ -100,7 +112,6 @@ export function initDevServer(fs: Filesystem): DevServerState {
         depWrapCache: new Map(),
         resolveCache: new Map(),
         perf: { modules: 0, resolveMs: 0, readMs: 0, transformMs: 0 },
-        workerCache: new Map(),
     };
 }
 
@@ -223,6 +234,52 @@ async function ensureDepWrapped(state: DevServerState, id: string, source: strin
     return code;
 }
 
+/** a `?worker` import → bundle its graph (injected) into a self-contained
+ *  WorkerWrapper module, then transform it into runner-eval form. */
+async function serveWorkerModule(state: DevServerState, id: string): Promise<FetchResult> {
+    const entryId = id.slice(WORKER_ID_PREFIX.length);
+    const wrapper = await state.deps.bundleWorker(entryId);
+    const result = await state.deps.transform(`${entryId}.worker.js`, wrapper, { capture: false });
+    return { code: result.code, file: id, id, url: id, invalidate: false };
+}
+
+/** read + (capture-wrap + dep-wrap) + transform one module, memoised in the SHARED
+ *  env-neutral transform cache. Returns the externalize sentinel when the read
+ *  misses on a bare npm dep the realm native-imports; throws on a genuine miss. */
+async function loadModuleCode(
+    state: DevServerState,
+    env: string,
+    rawId: string,
+    id: string,
+    importer: string | undefined,
+    mv: number,
+): Promise<TransformResult | { externalize: string; type: 'module' }> {
+    const cached = state.transformCache.get(id);
+    if (cached && cached.version === mv) return cached.result;
+
+    let source: string;
+    const tRead = performance.now();
+    try {
+        source = await state.fs.readText(id);
+    } catch {
+        // not a user/engine module in the vfs → a bare npm dep the realm
+        // native-imports. relative/absolute misses are real errors.
+        if (isBare(rawId) && !isEngine(rawId)) return { externalize: rawId, type: 'module' };
+        throw new Error(`[dev-server:${env}] module not found: ${rawId} (resolved ${id}) from ${importer}`);
+    }
+    state.perf.readMs += performance.now() - tRead;
+
+    // seeded lib source (node_modules/**) is NOT user code — no capture wrapper;
+    // user project modules get it + the DepGraph AST pass (shared across envs).
+    const capture = !id.startsWith('node_modules/');
+    const input = capture ? await ensureDepWrapped(state, id, source, mv) : source;
+    const tTransform = performance.now();
+    const result = await state.deps.transform(id, input, { capture });
+    state.perf.transformMs += performance.now() - tTransform;
+    state.transformCache.set(id, { version: mv, result });
+    return result;
+}
+
 /** transport: fetch a module for `env`. Bare specifiers externalize. */
 export async function fetchModule(
     state: DevServerState,
@@ -238,34 +295,14 @@ export async function fetchModule(
     const id = await resolve(state, rawId, importer);
     state.perf.resolveMs += performance.now() - tResolve;
 
-    // synthetic modules served without an fs read:
-    //  - `\0worker:<entry>` — a `?worker` import: bundle the worker's graph into
-    //    one self-contained blob (like vite's ?worker) → a WorkerWrapper module.
+    // synthetic modules served without a normal fs read:
+    //  - `\0worker:<entry>` — a `?worker` import → a self-contained WorkerWrapper
+    //    module (the worker's graph is bundled by the injected bundleWorker).
     //  - `*.css` — engine `import './x.css'`. Styles ship as the prebuilt
     //    bongle.css (injected by client-main); serve an empty side-effect module.
-    if (id.startsWith(WORKER_ID_PREFIX)) {
-        const entryId = id.slice(WORKER_ID_PREFIX.length);
-        // lazy: @rolldown/browser's wasm loads only when a ?worker is actually hit.
-        const [{ bundleWorkerEntry, workerWrapperModule }, { rolldown }] = await Promise.all([
-            import('../../build/bongle-plugin'),
-            import('@rolldown/browser'),
-        ]);
-        let jsContent = state.workerCache.get(entryId);
-        if (jsContent === undefined) {
-            // the worker runs in the client render pipeline (CPU compute, no DOM).
-            jsContent = await bundleWorkerEntry(
-                state.fs,
-                entryId,
-                { client: true, server: false, editor: true },
-                { rolldown: rolldown as unknown as Bundler['rolldown'], prepare: ensureProcessShim },
-            );
-            state.workerCache.set(entryId, jsContent);
-        }
-        const result = await transformModule(`${entryId}.worker.js`, workerWrapperModule(jsContent), { capture: false });
-        return { code: result.code, file: id, id, url: id, invalidate: false };
-    }
+    if (id.startsWith(WORKER_ID_PREFIX)) return serveWorkerModule(state, id);
     if (id.endsWith('.css')) {
-        const result = await transformModule(`${id}.js`, '', { capture: false });
+        const result = await state.deps.transform(`${id}.js`, '', { capture: false });
         return { code: result.code, file: id, id, url: id, invalidate: false };
     }
 
@@ -275,35 +312,12 @@ export async function fetchModule(
     // an edit didn't touch, so their runner + transform caches stay valid.
     const mv = state.moduleVersion.get(id) ?? 0;
 
-    // SHARED transform cache (env-neutral): a hit skips BOTH the read and the
-    // transform, so the engine's ~360 modules are read + compiled ONCE, not once
-    // per realm. The module GRAPH below is still per-env (HMR boundaries differ
-    // by realm); only the transformed code is shared.
-    let result: TransformResult;
-    const cached = state.transformCache.get(id);
-    if (cached && cached.version === mv) {
-        result = cached.result;
-    } else {
-        let source: string;
-        const tRead = performance.now();
-        try {
-            source = await state.fs.readText(id);
-        } catch {
-            // not a user/engine module in the vfs → a bare npm dep the realm
-            // native-imports. relative/absolute misses are real errors.
-            if (isBare(rawId) && !isEngine(rawId)) return { externalize: rawId, type: 'module' };
-            throw new Error(`[dev-server:${env}] module not found: ${rawId} (resolved ${id}) from ${importer}`);
-        }
-        state.perf.readMs += performance.now() - tRead;
-        // seeded lib source (node_modules/**) is NOT user code — no capture
-        // wrapper; user project modules get it + the DepGraph AST pass (shared).
-        const capture = !id.startsWith('node_modules/');
-        const input = capture ? await ensureDepWrapped(state, id, source, mv) : source;
-        const tTransform = performance.now();
-        result = await transformModule(id, input, { capture });
-        state.perf.transformMs += performance.now() - tTransform;
-        state.transformCache.set(id, { version: mv, result });
-    }
+    // load + transform, memoised in the SHARED env-neutral cache (a hit skips both
+    // read + transform, so the engine's ~360 modules compile ONCE, not once per
+    // realm). The module GRAPH below is still per-env — only the code is shared.
+    const loaded = await loadModuleCode(state, env, rawId, id, importer, mv);
+    if ('externalize' in loaded) return loaded; // a bare npm dep the realm native-imports
+    const result = loaded;
     node.selfAccepts = !id.startsWith('node_modules/'); // user modules self-accept (postlude); lib chunks don't
 
     // refresh this env's import edges.

@@ -19,5 +19,19 @@
 export { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
 export { type BuildOptions, buildBundle } from './bundle';
 export { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
+export {
+    applyEdit,
+    type BundleWorker,
+    type DevServerDeps,
+    type DevServerState,
+    type FetchResult,
+    fetchModule,
+    type HotPayload,
+    handleRunnerMessage,
+    initDevServer,
+    registerPusher,
+    type TransformModule,
+    type TransformResult,
+} from './dev-server';
 export { type EnvValues, replaceEnv } from './env-replace';
 export { type BuildFs, dirOf, type PackageJson, posixJoin, resolveFile, resolveModule, resolvePackage } from './resolve';

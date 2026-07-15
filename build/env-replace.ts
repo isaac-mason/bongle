@@ -1,6 +1,7 @@
-// editor/bundler/env-replace.ts — the pure `env.<key>` → literal replacement,
-// vite-free so it runs BOTH as a vite plugin (env-plugin.ts) and inside the
-// editor's in-browser transform (transform.ts / @rolldown/browser), per env.
+// lib/build/env-replace.ts — the pure `env.<key>` → literal replacement, vite-free
+// so it runs BOTH behind the editor's vite plugin (editor/env-plugin.ts, which just
+// wraps this) and inside the in-browser dev transform (editor/bundler/transform.ts
+// / @rolldown/browser), per env.
 //
 // Import-aware: only rewrites property accesses on the `env` binding imported
 // from 'bongle', and skips matches inside string literals + assignment targets.

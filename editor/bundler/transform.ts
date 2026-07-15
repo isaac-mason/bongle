@@ -18,6 +18,7 @@
 // runs __kit.reload → invalidate-or-flush.
 
 import { moduleRunnerTransform, transform } from '@rolldown/browser/experimental';
+import type { TransformResult } from '../../build';
 
 const PRELUDE = `import { __kit } from 'bongle/internal';
 const __kit_prev = __kit.push(import.meta.url);
@@ -34,12 +35,6 @@ if (import.meta.hot) {
   });
 }
 `;
-
-export type TransformResult = {
-    code: string;
-    deps: string[];
-    dynamicDeps: string[];
-};
 
 export type TransformOptions = {
     /** inject the bongle capture wrapper — user project modules only, not the
