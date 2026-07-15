@@ -120,7 +120,11 @@ export async function wrapModuleDeps(
  * factory already wired untouched. The wrap preserves the call's return value
  * so `export const X = prefab(...)` assignments still work.
  */
-function wrapConsumerCalls(code: string, table: ReturnType<typeof buildSymbolTable>, registry: SymbolTableRegistry): string | null {
+function wrapConsumerCalls(
+    code: string,
+    table: ReturnType<typeof buildSymbolTable>,
+    registry: SymbolTableRegistry,
+): string | null {
     let ms: MagicString | null = null;
     for (const consumer of table.consumers) {
         const bodyNode = consumer.kind === 'prefab' ? consumer.fnNode : consumer.factoryNode;

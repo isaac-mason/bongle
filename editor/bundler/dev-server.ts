@@ -10,9 +10,19 @@
 // plus pushing HMR payloads to each env's registered channel. init()+State+
 // standalone-fns, matching the engine convention.
 
-import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from '../../plugin';
+import {
+    type Bundler,
+    dirOf,
+    initSymbolTables,
+    type PackageJson,
+    posixJoin,
+    resolveFile,
+    resolvePackage,
+    type SymbolTableRegistry,
+    wrapModuleDeps,
+} from '../../build';
 import type { Filesystem } from '../fs';
-import { dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from './resolve';
+import { ensureProcessShim } from './runner';
 import { type TransformResult, transformModule } from './transform';
 
 /** a HotPayload subset the runner accepts. */
@@ -117,7 +127,7 @@ function normalize(id: string): string {
 
 // worker imports (`x?worker&inline`) resolve to a synthetic id fetchModule
 // serves as a Worker-constructor module (bundled + blob-spawned — see
-// vfs-plugin.ts + the WORKER_ID_PREFIX branch in fetchModule).
+// bongle-plugin.ts + the WORKER_ID_PREFIX branch in fetchModule).
 const WORKER_ID_PREFIX = '\0worker:';
 
 /** resolve a user specifier relative to its importer to an fs-relative id (or a
@@ -235,14 +245,23 @@ export async function fetchModule(
     //    bongle.css (injected by client-main); serve an empty side-effect module.
     if (id.startsWith(WORKER_ID_PREFIX)) {
         const entryId = id.slice(WORKER_ID_PREFIX.length);
-        const vp = await import('./vfs-plugin'); // lazy: pulls in @rolldown/browser only when a ?worker is hit
+        // lazy: @rolldown/browser's wasm loads only when a ?worker is actually hit.
+        const [{ bundleWorkerEntry, workerWrapperModule }, { rolldown }] = await Promise.all([
+            import('../../build/bongle-plugin'),
+            import('@rolldown/browser'),
+        ]);
         let jsContent = state.workerCache.get(entryId);
         if (jsContent === undefined) {
             // the worker runs in the client render pipeline (CPU compute, no DOM).
-            jsContent = await vp.bundleWorkerEntry(state.fs, entryId, { client: true, server: false, editor: true });
+            jsContent = await bundleWorkerEntry(
+                state.fs,
+                entryId,
+                { client: true, server: false, editor: true },
+                { rolldown: rolldown as unknown as Bundler['rolldown'], prepare: ensureProcessShim },
+            );
             state.workerCache.set(entryId, jsContent);
         }
-        const result = await transformModule(`${entryId}.worker.js`, vp.workerWrapperModule(jsContent), { capture: false });
+        const result = await transformModule(`${entryId}.worker.js`, workerWrapperModule(jsContent), { capture: false });
         return { code: result.code, file: id, id, url: id, invalidate: false };
     }
     if (id.endsWith('.css')) {

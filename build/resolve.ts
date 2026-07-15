@@ -1,8 +1,8 @@
-// editor/bundler/resolve.ts — module resolution over the editor's vfs.
+// lib/build/resolve.ts — module resolution over a project vfs.
 //
 // A hand-rolled SUBSET of Node ESM resolution, shared by both the edit-time
-// module runner (dev-server.ts) and the prod build (build.ts). It works against
-// the project vfs instead of a real filesystem; each caller keeps only its own
+// module runner (editor/bundler/dev-server.ts) and the prod build (bundle.ts). It
+// works against the project vfs instead of a real filesystem; each caller keeps its own
 // transport quirks (dev's rolldown code-split root-relative ids, build's virtual
 // entry + node: externals) and delegates the Node-shaped work to here.
 //
@@ -34,6 +34,14 @@ export type ResolveFs = {
      *  listing + in-memory lookups, not a `stat` per candidate. */
     readDir(dir: string): Promise<Map<string, 'file' | 'dir'>>;
     readText(path: string): Promise<string>;
+};
+
+/** the fs surface the build core (bongle-plugin + bundle) needs, beyond resolution.
+ *  The editor's `Filesystem` (over OPFS) satisfies this structurally, as does a
+ *  node-fs adapter for a future `bongle build` CLI. */
+export type BuildFs = ResolveFs & {
+    read(path: string): Promise<Uint8Array>;
+    list(dir?: string, opts?: { recursive?: boolean }): Promise<{ path: string; kind: 'file' | 'dir' }[]>;
 };
 
 /** the package.json fields this resolver reads. */

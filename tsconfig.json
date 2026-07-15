@@ -21,6 +21,6 @@
         "rootDir": "./",
         "allowSyntheticDefaultImports": true
     },
-    "include": ["./src", "./tst", "./editor", "./plugin"],
+    "include": ["./src", "./tst", "./editor", "./build"],
     "exclude": ["./dist", "**/*.bench.ts", "**/*-bench.ts"]
 }

@@ -1,6 +1,6 @@
-// editor/bundler/vfs-plugin.ts — the shared @rolldown/browser plugin for
-// bundling from the editor's vfs, used by the publish build (build.ts) and by
-// worker bundling. ONE resolver (resolve.ts, World C), ONE set of vfs concerns:
+// lib/build/bongle-plugin.ts — the rolldown plugin that compiles bongle (+ the
+// user's game) SOURCE into a module graph, used by the publish build (bundle.ts)
+// and by worker bundling. ONE resolver (resolve.ts, World C), one set of concerns:
 //   - resolve relative + bare (package.json exports) + `/`-absolute + a virtual
 //     entry; node: (and caller externals like sharp) stay external;
 //   - load with the right `moduleType` (bongle ships .ts SOURCE — rolldown must
@@ -8,14 +8,24 @@
 //     self-contained blob (bundled here, then vite's WorkerWrapper);
 //   - bake env (replaceEnv) + a caller-specific transform hook.
 //
-// The dev path (dev-server.ts) doesn't use this — it drives a ModuleRunner, not
-// rolldown — but it shares the same worker bundling helpers below.
+// Host-neutral: the `rolldown` impl is INJECTED (`@rolldown/browser`'s is the same
+// shape as node `rolldown`), so this runs in the browser editor or a node CLI.
+// The dev path (editor/bundler/dev-server.ts) doesn't use this — it drives a
+// ModuleRunner, not rolldown — but shares resolve.ts + the worker helpers below.
 
-import { type Plugin, rolldown } from '@rolldown/browser';
-import type { Filesystem } from '../fs';
-import { type EnvValues, replaceEnv } from '../../plugin';
-import { dirOf, posixJoin, resolveFile, resolveModule } from './resolve';
-import { ensureProcessShim } from './runner';
+import type { Plugin } from 'rolldown';
+import { type EnvValues, replaceEnv } from './env-replace';
+import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule } from './resolve';
+
+export type RolldownFn = typeof import('rolldown').rolldown;
+
+/** the injected bundler: a `rolldown` impl (`@rolldown/browser`'s or node's) plus
+ *  an optional host prep hook (the browser installs a `process` shim; node no-ops). */
+export type Bundler = {
+    rolldown: RolldownFn;
+    /** run once before a rolldown build (browser: ensureProcessShim; node: omit). */
+    prepare?: () => void;
+};
 
 /** `?worker` imports resolve to this-prefixed ids; load() bundles + wraps them. */
 const WORKER_PREFIX = '\0worker:';
@@ -26,7 +36,7 @@ function moduleTypeOf(id: string): ModuleType {
     return ext === 'tsx' ? 'tsx' : ext === 'ts' ? 'ts' : ext === 'jsx' ? 'jsx' : 'js';
 }
 
-export type VfsPluginOptions = {
+export type BonglePluginOptions = {
     /** env values baked into every module (replaceEnv). */
     env: EnvValues;
     /** a virtual entry module (e.g. build.ts's generated play entry): id + code.
@@ -44,10 +54,10 @@ export type VfsPluginOptions = {
     workers?: Map<string, string>;
 };
 
-/** the shared vfs bundling plugin. */
-export function createVfsPlugin(fs: Filesystem, opts: VfsPluginOptions): Plugin {
+/** the rolldown plugin that compiles bongle (+ game) source into a module graph. */
+export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plugin {
     return {
-        name: 'bongle:vfs',
+        name: 'bongle:source',
         async resolveId(source, importer) {
             if (opts.entry && source === opts.entry.id) return opts.entry.id;
             if (source.startsWith('node:')) return { id: source, external: true };
@@ -79,7 +89,7 @@ export function createVfsPlugin(fs: Filesystem, opts: VfsPluginOptions): Plugin 
                 const jsContent = opts.workers?.get(entryId);
                 if (jsContent === undefined) {
                     throw new Error(
-                        `[vfs-plugin] worker not pre-bundled: ${entryId} — call bundleWorkers() before the main build (nested @rolldown/browser deadlocks).`,
+                        `[bongle-plugin] worker not pre-bundled: ${entryId} — call bundleWorkers() before the main build (nested @rolldown/browser deadlocks).`,
                     );
                 }
                 return { code: workerWrapperModule(jsContent), moduleType: 'js' };
@@ -101,8 +111,8 @@ export function createVfsPlugin(fs: Filesystem, opts: VfsPluginOptions): Plugin 
 
 /** discover every `?worker` import across the project + engine source and bundle
  *  each entry AHEAD of the main build (standalone, non-nested rolldown calls) →
- *  a map the createVfsPlugin `?worker` load looks up. */
-export async function bundleWorkers(fs: Filesystem, env: EnvValues): Promise<Map<string, string>> {
+ *  a map the createBonglePlugin `?worker` load looks up. */
+export async function bundleWorkers(fs: BuildFs, env: EnvValues, bundler: Bundler): Promise<Map<string, string>> {
     const workers = new Map<string, string>();
     for (const dir of ['src', 'node_modules/bongle/src']) {
         const files = await fs.list(dir, { recursive: true }).catch(() => []);
@@ -115,7 +125,7 @@ export async function bundleWorkers(fs: Filesystem, env: EnvValues): Promise<Map
                 if (!spec.startsWith('.')) continue; // relative worker entries only (our case)
                 const entryId = await resolveFile(fs, posixJoin(dirOf(f.path), spec));
                 if (!entryId || workers.has(entryId)) continue;
-                workers.set(entryId, await bundleWorkerEntry(fs, entryId, env));
+                workers.set(entryId, await bundleWorkerEntry(fs, entryId, env, bundler));
             }
         }
     }
@@ -123,11 +133,11 @@ export async function bundleWorkers(fs: Filesystem, env: EnvValues): Promise<Map
 }
 
 /** bundle a vfs worker entry → one self-contained ESM string, ready to blob. */
-export async function bundleWorkerEntry(fs: Filesystem, entryId: string, env: EnvValues): Promise<string> {
-    ensureProcessShim(); // @rolldown/browser reads `process` in bindingifyInputOptions
-    const bundle = await rolldown({
+export async function bundleWorkerEntry(fs: BuildFs, entryId: string, env: EnvValues, bundler: Bundler): Promise<string> {
+    bundler.prepare?.(); // browser: @rolldown/browser reads `process` in bindingifyInputOptions
+    const bundle = await bundler.rolldown({
         input: { worker: entryId },
-        plugins: [createVfsPlugin(fs, { env })],
+        plugins: [createBonglePlugin(fs, { env })],
         external: [/^node:/],
         platform: 'browser',
         onLog: (level, log, handler) => {
@@ -140,7 +150,7 @@ export async function bundleWorkerEntry(fs: Filesystem, entryId: string, env: En
     const { output } = await bundle.generate({ format: 'es', inlineDynamicImports: true, minify: true });
     await bundle.close();
     const entry = output.find((o) => o.type === 'chunk' && o.isEntry);
-    if (!entry || entry.type !== 'chunk') throw new Error(`[vfs-plugin] no worker entry chunk for ${entryId}`);
+    if (!entry || entry.type !== 'chunk') throw new Error(`[bongle-plugin] no worker entry chunk for ${entryId}`);
     return entry.code;
 }
 

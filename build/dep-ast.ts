@@ -383,7 +383,10 @@ function collectStarExports(node: ExportAllDeclaration, table: SymbolTable): voi
  *     whose method name matches PRODUCER_FACTORIES and whose first arg is
  *     a string literal)
  */
-function classifyInitializer(init: NonNullable<import('estree').VariableDeclarator['init']>, table: SymbolTable): LocalBinding | null {
+function classifyInitializer(
+    init: NonNullable<import('estree').VariableDeclarator['init']>,
+    table: SymbolTable,
+): LocalBinding | null {
     if (init.type !== 'CallExpression') return null;
     const call = init;
 
@@ -422,10 +425,7 @@ function classifyInitializer(init: NonNullable<import('estree').VariableDeclarat
     return null;
 }
 
-function producerFromCall(
-    factory: { registry: string; fixedId?: string },
-    call: CallExpression,
-): LocalBinding | null {
+function producerFromCall(factory: { registry: string; fixedId?: string }, call: CallExpression): LocalBinding | null {
     if (factory.fixedId !== undefined) {
         return { kind: 'producer', registry: factory.registry, id: factory.fixedId };
     }
@@ -554,7 +554,10 @@ function parsePrefabCall(call: CallExpression): ConsumerCall | null {
     let userSuppliedDeps: ArrayExpression | null = null;
     for (const prop of optsArg.properties) {
         if (prop.type !== 'Property' || prop.key.type !== 'Identifier') continue;
-        if (prop.key.name === 'fn' && (prop.value.type === 'ArrowFunctionExpression' || prop.value.type === 'FunctionExpression')) {
+        if (
+            prop.key.name === 'fn' &&
+            (prop.value.type === 'ArrowFunctionExpression' || prop.value.type === 'FunctionExpression')
+        ) {
             fnNode = prop.value;
         }
         if (prop.key.name === 'deps' && prop.value.type === 'ArrayExpression') {
@@ -593,9 +596,7 @@ function parseScriptCall(call: CallExpression): ConsumerCall | null {
         };
     }
     const factoryNode =
-        factoryArg.type === 'ArrowFunctionExpression' || factoryArg.type === 'FunctionExpression'
-            ? factoryArg
-            : null;
+        factoryArg.type === 'ArrowFunctionExpression' || factoryArg.type === 'FunctionExpression' ? factoryArg : null;
 
     return {
         kind: 'script',
@@ -633,10 +634,7 @@ export type IdentifierUse =
     | { kind: 'producer'; localName: string; dep: DepKey }
     | { kind: 'unresolved-import'; localName: string; binding: LocalBinding };
 
-export function collectIdentifierUses(
-    fn: ArrowFunctionExpression | FunctionExpression,
-    table: SymbolTable,
-): IdentifierUse[] {
+export function collectIdentifierUses(fn: ArrowFunctionExpression | FunctionExpression, table: SymbolTable): IdentifierUse[] {
     const seen = new Set<string>();
     const out: IdentifierUse[] = [];
 

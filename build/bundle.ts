@@ -1,24 +1,24 @@
-// editor/build/build.ts — the in-browser PROD build (Option A).
+// lib/build/bundle.ts — the PROD build (Option A), host-neutral.
 //
-// Mirrors what `lib/kit/build.ts` produced, but runs entirely in the browser via
-// @rolldown/browser's bundler (its wasm lives in a library-managed worker, so
-// this orchestrates on the main thread). Two env-DCE'd bundles over a per-target
-// entry (the existing generated barrels + src/index + a kit-shape play-* adapter)
-// → client/index.js + server/index.js; baked resources copied in; a bongle.json
-// manifest (schema 1, sha384 SRI, matchmaking) written; the tree zipped.
+// Two env-DCE'd bundles over a per-target entry (the existing generated barrels +
+// src/index + a kit-shape play-* adapter) → client/index.js + server/index.js;
+// baked resources copied in; a bongle.json manifest (schema 1, sha384 SRI,
+// matchmaking) written; the tree zipped.
+//
+// The `rolldown` impl is INJECTED (see Bundler): the browser editor passes
+// @rolldown/browser (its wasm lives in a library-managed worker); a node CLI
+// passes node `rolldown`. Same graph, same output.
 //
 // The bundle is byte-shaped for the platform's ingest (client/index.js +
 // server/index.js + bongle.json required). The server bundle isn't yet
 // runtime-wired to the refactored EngineServer (deferred play-infra touch) — it
 // builds with kit's play-server shape, enough to prove + persist the artifact.
 
-import { rolldown } from '@rolldown/browser';
 import { zipSync } from 'fflate';
-import { INTERFACE_VERSION } from '../../interface/index';
-import type { EnvValues } from '../../plugin';
-import { ensureProcessShim } from '../bundler/runner';
-import { bundleWorkers, createVfsPlugin } from '../bundler/vfs-plugin';
-import type { Filesystem } from '../fs';
+import { INTERFACE_VERSION } from '../interface/index';
+import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
+import type { EnvValues } from './env-replace';
+import type { BuildFs } from './resolve';
 
 type Target = 'client' | 'server';
 
@@ -81,18 +81,52 @@ export default server({
 });
 `;
 
-// `new URL('./x.{ogg,png,glb,…}', import.meta.url)` for already-baked binary
-// assets: in a bundle these inline as base64 (~1.5MB of starter audio/models
-// alone), though the runtime only ever loads them from the atlases/bins. Strip
-// to "" — sound()/model()/texture registration ignore an empty src (mirrors
-// kit's stripBinaryAssetUrlsPlugin). bongle now ships SOURCE, so these live in
-// the graph (they were resolved to dist/assets at prebundle before). Client
-// only; server has no asset URLs.
-const BINARY_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf|png|jpe?g|webp)['"]\s*,\s*import\.meta\.url\)/g;
+// ── source-asset URL stripping ──────────────────────────────────────────────
+//
+// Engine asset registrations reference their SOURCE files by URL, e.g.
+//   model(new URL('./player.glb', import.meta.url))
+//   sound(new URL('./jump.ogg', import.meta.url))
+// Those `new URL(...)` refs are real and load-bearing in TWO places:
+//   - the editor/dev — loads the source asset from the URL for previews;
+//   - the asset PIPELINE — discovers *what to bake* by finding these refs.
+// But at PLAY runtime the registration ignores the URL entirely: the model /
+// sound / texture is served from the baked ATLAS/BIN the pipeline produced. So in
+// the shipped client the ref is dead.
+//
+// The trap: this is NOT an "inline vs. emit-as-file" question. A bundler
+// special-cases `new URL('./x', import.meta.url)` as an asset reference and will
+// pull `player.glb` into the output EITHER way — base64-inlined, or as a sibling
+// file. Disabling inlining just ships it as a file instead. But the atlas is the
+// runtime source of truth, so we don't want it emitted at ALL — shipping the raw
+// source asset (bongle now ships SOURCE, so it's right there in the graph) is pure
+// dead weight, ~1.5MB of starter audio/models alone. We must DROP the ref, not
+// re-home the bytes.
+//
+// So: rewrite each matched `new URL(...)` to "" before it reaches rolldown's
+// asset handling — sound()/model()/texture() treat an empty src as "no source
+// file, use the atlas". A source-level regex (rather than a resolve/load hook) is
+// deliberate: the `new URL(literal, import.meta.url)` asset pattern is matched by
+// the bundler at a lower level than plugin `resolveId`, so there's no clean hook
+// to intercept it — neutralizing the syntax is the reliable move (a port of kit's
+// stripBinaryAssetUrlsPlugin). CLIENT-ONLY: the server has no asset URLs.
+const SOURCE_ASSET_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf|png|jpe?g|webp)['"]\s*,\s*import\.meta\.url\)/g;
+
+/** drop dead source-asset refs from client modules (see SOURCE_ASSET_URL). */
+function stripSourceAssetUrls(code: string, target: Target): string {
+    return target === 'client' ? code.replace(SOURCE_ASSET_URL, '""') : code;
+}
+
+/** user src (incl. generated barrels) calls `__kit.registerScene/…` as a free
+ *  var; make it resolve by importing it (mirrors kit's capture-import). Stopgap:
+ *  the dev path does the equivalent via capture-deps/wrapModuleDeps — unifying the
+ *  two is the dev/build DepGraph parity follow-up. */
+function injectKitPrelude(code: string, id: string): string {
+    return id.startsWith('src/') && /\.tsx?$/.test(id) ? `import { __kit } from 'bongle/internal';\n${code}` : code;
+}
 
 /** the per-target entry: side-effect-import every existing generated barrel +
  *  user src (registries populate), then the play-* adapter as default. */
-async function entrySource(fs: Filesystem, target: Target): Promise<string> {
+async function entrySource(fs: BuildFs, target: Target): Promise<string> {
     const generated = (await fs.list('src/generated', { recursive: true }).catch(() => []))
         .filter((e) => e.kind === 'file' && e.path.endsWith('.ts'))
         .map((e) => e.path)
@@ -101,34 +135,34 @@ async function entrySource(fs: Filesystem, target: Target): Promise<string> {
     return `${imports}\n${target === 'client' ? PLAY_CLIENT : PLAY_SERVER}`;
 }
 
-// vfs resolution + load + env-bake is the shared createVfsPlugin (vfs-plugin.ts,
-// resolve.ts-backed). build.ts only supplies the per-target specifics: the
-// virtual play entry, the sharp external (server), and the build-time transforms
-// (asset-URL strip on the client + __kit injection for user src barrels).
-function buildVfsPlugin(fs: Filesystem, target: Target, entry: string, workers: Map<string, string>) {
-    return createVfsPlugin(fs, {
+// Module resolution + load + env-bake is the shared createBonglePlugin (resolve.ts-
+// backed). The build only supplies the per-target specifics: the virtual play
+// entry, the sharp external (server), and the two build-time source transforms
+// (drop dead source-asset URLs on the client + inject the __kit prelude for user
+// src barrels).
+function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: Map<string, string>) {
+    return createBonglePlugin(fs, {
         env: envFor(target),
         entry: { id: ENTRY_ID, code: entry },
         external: (source) => target === 'server' && source === 'sharp',
         workers,
-        transformExtra: (code, id) => {
-            let out = target === 'client' ? code.replace(BINARY_URL, '""') : code;
-            // user src (incl. generated barrels) needs `__kit` as a free var — the
-            // barrels call __kit.registerScene/… (mirrors kit's capture-import).
-            if (id.startsWith('src/') && /\.tsx?$/.test(id)) out = `import { __kit } from 'bongle/internal';\n${out}`;
-            return out;
-        },
+        transformExtra: (code, id) => injectKitPrelude(stripSourceAssetUrls(code, target), id),
     });
 }
 
 // ── build a single target → { fileName: bytes } ─────────────────────────────
 
-async function buildTarget(fs: Filesystem, target: Target, workers: Map<string, string>): Promise<Record<string, Uint8Array>> {
-    ensureProcessShim(); // @rolldown/browser reads `process` in bindingifyInputOptions
+async function buildTarget(
+    fs: BuildFs,
+    target: Target,
+    workers: Map<string, string>,
+    bundler: Bundler,
+): Promise<Record<string, Uint8Array>> {
+    bundler.prepare?.(); // browser: @rolldown/browser reads `process` in bindingifyInputOptions
     const entry = await entrySource(fs, target);
-    const bundle = await rolldown({
+    const bundle = await bundler.rolldown({
         input: { index: ENTRY_ID },
-        plugins: [buildVfsPlugin(fs, target, entry, workers)],
+        plugins: [buildTargetPlugin(fs, target, entry, workers)],
         external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
         // NODE_ENV is already build-defined into the prebundled engine dist (where
         // React lives); user + play-shell code don't read process.env, so no define.
@@ -152,7 +186,8 @@ async function buildTarget(fs: Filesystem, target: Target, workers: Map<string, 
     const enc = new TextEncoder();
     const files: Record<string, Uint8Array> = {};
     for (const o of output) {
-        files[o.fileName] = o.type === 'chunk' ? enc.encode(o.code) : typeof o.source === 'string' ? enc.encode(o.source) : o.source;
+        files[o.fileName] =
+            o.type === 'chunk' ? enc.encode(o.code) : typeof o.source === 'string' ? enc.encode(o.source) : o.source;
     }
     return files;
 }
@@ -166,7 +201,7 @@ async function sri(bytes: Uint8Array): Promise<string> {
     return `sha384-${btoa(bin)}`;
 }
 
-async function bongleVersion(fs: Filesystem): Promise<string> {
+async function bongleVersion(fs: BuildFs): Promise<string> {
     try {
         const pkg = JSON.parse(await fs.readText('node_modules/bongle/package.json')) as { version?: string };
         return pkg.version ?? '0.0.0';
@@ -176,7 +211,7 @@ async function bongleVersion(fs: Filesystem): Promise<string> {
 }
 
 /** copy an OPFS subtree into the zip map under `dest/`, stripping `srcDir/`. */
-async function copyTree(fs: Filesystem, srcDir: string, zip: Record<string, Uint8Array>, dest: string): Promise<void> {
+async function copyTree(fs: BuildFs, srcDir: string, zip: Record<string, Uint8Array>, dest: string): Promise<void> {
     for (const e of await fs.list(srcDir, { recursive: true }).catch(() => [])) {
         if (e.kind !== 'file') continue;
         const rel = e.path.slice(srcDir.length + 1);
@@ -193,16 +228,20 @@ export type BuildOptions = {
     onProgress?: (label: string) => void;
 };
 
-/** build the whole bundle → zip bytes (client/ + server/ + bongle.json). */
-export async function buildBundle(fs: Filesystem, opts: BuildOptions): Promise<Uint8Array> {
+/** build the whole bundle → zip bytes (client/ + server/ + bongle.json). The
+ *  `bundler` (rolldown impl + host prep) is injected — see Bundler. */
+export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOptions): Promise<Uint8Array> {
     const progress = opts.onProgress ?? (() => {});
     // workers first: `?worker` entries (mesh worker) bundle standalone BEFORE the
     // main build — a nested @rolldown/browser build from inside a plugin hook
     // deadlocks on main-thread Atomics.wait. They're client-side compute.
     progress('Bundling workers');
-    const workers = await bundleWorkers(fs, envFor('client'));
+    const workers = await bundleWorkers(fs, envFor('client'), bundler);
     progress('Bundling client + server');
-    const [clientFiles, serverFiles] = await Promise.all([buildTarget(fs, 'client', workers), buildTarget(fs, 'server', workers)]);
+    const [clientFiles, serverFiles] = await Promise.all([
+        buildTarget(fs, 'client', workers, bundler),
+        buildTarget(fs, 'server', workers, bundler),
+    ]);
 
     const zip: Record<string, Uint8Array> = {};
     for (const [name, bytes] of Object.entries(clientFiles)) zip[`client/${name}`] = bytes;
@@ -244,16 +283,4 @@ export async function buildBundle(fs: Filesystem, opts: BuildOptions): Promise<U
 
     progress('Zipping');
     return zipSync(zip);
-}
-
-/** build + trigger a browser download of bundle.zip. Returns the zip size in bytes. */
-export async function downloadBundle(fs: Filesystem, opts: BuildOptions): Promise<number> {
-    const zip = await buildBundle(fs, opts);
-    const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'bundle.zip';
-    a.click();
-    URL.revokeObjectURL(url);
-    return zip.length;
 }

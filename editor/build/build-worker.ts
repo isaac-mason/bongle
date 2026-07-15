@@ -7,8 +7,15 @@
 // the platform bridge). Spawned per build + terminated, so its multi-GB wasm
 // arena doesn't linger.
 
+import { rolldown } from '@rolldown/browser';
+import { type Bundler, buildBundle } from '../../build';
+import { ensureProcessShim } from '../bundler/runner';
 import { openOpfsFilesystem } from '../fs-opfs';
-import { buildBundle } from './build';
+
+// @rolldown/browser's `rolldown` has the same runtime API as node `rolldown` (the
+// type the build core injects), but a nominally-distinct declared type — cast at
+// this boundary. This is the one thing that makes the build browser- vs node-run.
+const browserBundler: Bundler = { rolldown: rolldown as unknown as Bundler['rolldown'], prepare: ensureProcessShim };
 
 export type BuildRequest = { projectName: string; maxPlayers: number };
 export type BuildResponse =
@@ -27,7 +34,10 @@ self.onmessage = async (e: MessageEvent<BuildRequest>) => {
     try {
         post({ type: 'progress', label: 'Opening project' });
         const fs = await openOpfsFilesystem(projectName);
-        const zip = await buildBundle(fs, { maxPlayers, onProgress: (label) => post({ type: 'progress', label }) });
+        const zip = await buildBundle(fs, browserBundler, {
+            maxPlayers,
+            onProgress: (label) => post({ type: 'progress', label }),
+        });
         post({ type: 'done', zip }, [zip.buffer]);
     } catch (err) {
         console.error('[build-worker] failed', err);
