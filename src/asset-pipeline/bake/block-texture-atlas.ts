@@ -14,7 +14,7 @@
 // get a magenta placeholder tile.
 //
 // DrawSource frames (procedural / composed block textures) are baked upstream
-// by `draw-textures.ts` and threaded in via `bakedDraws` as OffscreenCanvases;
+// by `draw-textures.ts` and threaded in via `bakedDraws` as raster surfaces;
 // the composite loop draws them directly.
 
 import type { ResourceLoader } from '../../core/resource-loader';
@@ -22,7 +22,8 @@ import type { DrawSource, ModuleVersion } from '../../internal';
 import type { Filesystem } from '../filesystem';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
-import { canvasPixels, decodeBitmap, encodePng, makeCanvas, scaleTo, sha256HexParts } from './raster';
+import type { Raster, RasterCanvas, RasterContext2D } from './raster';
+import { sha256HexParts } from './raster';
 
 const TILE_SIZE = 16;
 const ATLAS_PNG = 'resources/client/voxels-atlas.png';
@@ -40,6 +41,8 @@ export type BuildBlockTextureAtlasOptions = {
     /** the editor project filesystem the atlas artifacts write into
      *  (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
+    /** host-injected 2d raster (host-provided; see pipeline InitCtx). */
+    raster: Raster;
 };
 
 export type BlockTextureAtlasMetadata = {
@@ -62,14 +65,14 @@ type TileSource = string | DrawSource;
  *  hash input that gates rebuilds. `null` bytes/canvas → magenta. */
 type LoadedTile =
     | { kind: 'file'; bytes: Uint8Array | null; hashPart: string | Uint8Array }
-    | { kind: 'draw'; canvas: OffscreenCanvas | null; hashPart: string | Uint8ClampedArray };
+    | { kind: 'draw'; canvas: RasterCanvas | null; hashPart: string | Uint8ClampedArray };
 
 /**
  * build the texture atlas from the block registry's texture list.
  * returns true if the atlas was rebuilt, false if skipped (unchanged).
  */
 export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildBlockTextureAtlasOptions): Promise<boolean> {
-    const { bakedDraws, cache, loader, fs } = opts;
+    const { bakedDraws, cache, loader, fs, raster } = opts;
 
     const textures = module.blocks.textures;
 
@@ -102,7 +105,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
                     console.warn(`[bongle] block texture "${textures[i]}" is a DrawSource with no baked canvas (magenta)`);
                     return { kind: 'draw', canvas: null, hashPart: 'magenta' };
                 }
-                return { kind: 'draw', canvas, hashPart: canvasPixels(canvas) };
+                return { kind: 'draw', canvas, hashPart: raster.canvasPixels(canvas) };
             }
             let bytes: Uint8Array | null = null;
             try {
@@ -126,20 +129,20 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
     const rows = Math.ceil(textures.length / columns);
     const atlasWidth = columns * TILE_SIZE;
     const atlasHeight = rows * TILE_SIZE;
-    const { canvas: atlas, ctx } = makeCanvas(atlasWidth, atlasHeight);
+    const { canvas: atlas, ctx } = raster.makeCanvas(atlasWidth, atlasHeight);
 
     for (let i = 0; i < loaded.length; i++) {
         const tile = loaded[i]!;
         const u = (i % columns) * TILE_SIZE;
         const v = Math.floor(i / columns) * TILE_SIZE;
 
-        let tileCanvas: OffscreenCanvas | null = null;
+        let tileCanvas: RasterCanvas | null = null;
         if (tile.kind === 'draw') {
-            tileCanvas = tile.canvas ? scaleTo(tile.canvas, TILE_SIZE, TILE_SIZE) : null;
+            tileCanvas = tile.canvas ? raster.scaleTo(tile.canvas, TILE_SIZE, TILE_SIZE) : null;
         } else if (tile.bytes) {
-            const bitmap = await decodeBitmap(tile.bytes);
-            tileCanvas = scaleTo(bitmap, TILE_SIZE, TILE_SIZE);
-            bitmap.close();
+            const bitmap = await raster.decodeBitmap(tile.bytes);
+            tileCanvas = raster.scaleTo(bitmap, TILE_SIZE, TILE_SIZE);
+            bitmap.close?.();
         }
 
         if (tileCanvas) {
@@ -149,7 +152,7 @@ export async function buildBlockTextureAtlas(module: ModuleVersion, opts: BuildB
         }
     }
 
-    await fs.write(ATLAS_PNG, await encodePng(atlas));
+    await fs.write(ATLAS_PNG, await raster.encodePng(atlas));
     const metadata: BlockTextureAtlasMetadata = { tileSize: TILE_SIZE, columns, rows, atlasWidth, atlasHeight, textures, hash };
     await fs.write(ATLAS_JSON, JSON.stringify(metadata, null, 2));
 
@@ -182,7 +185,7 @@ function resolveSources(textures: string[], module: ModuleVersion): TileSource[]
     });
 }
 
-function drawMagenta(ctx: OffscreenCanvasRenderingContext2D, u: number, v: number): void {
+function drawMagenta(ctx: RasterContext2D, u: number, v: number): void {
     ctx.fillStyle = '#ff00ff';
     ctx.fillRect(u, v, TILE_SIZE, TILE_SIZE);
 }

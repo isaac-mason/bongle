@@ -12,7 +12,6 @@
 
 import type { ResourceLoader } from '../core/resource-loader';
 import { buildBlockRegistry, registry } from '../internal';
-import type { Filesystem } from './filesystem';
 import { readArtifactHash } from './bake/cache';
 import type { DecodeAudio } from './bake/decode-audio';
 import {
@@ -22,6 +21,8 @@ import {
     type PipelineState,
     runAssetPipelinePass,
 } from './bake/pass';
+import type { Raster } from './bake/raster';
+import type { Filesystem } from './filesystem';
 
 /** baked-output root, project-relative on the ctx filesystem. */
 const CLIENT_RESOURCES_DIR = 'resources/client';
@@ -40,6 +41,10 @@ export type InitCtx = {
     /** audio decode for the audio bake (bytes → per-channel s16 PCM).
      *  host-provided (browser: OfflineAudioContext). See bake/decode-audio.ts. */
     decodeAudio: DecodeAudio;
+    /** 2d raster for the atlas bakes (decode/scale/composite/encode images).
+     *  host-provided (browser: OffscreenCanvas; node: @napi-rs/canvas). See
+     *  bake/raster.ts. */
+    raster: Raster;
 };
 
 export type RunResult = {
@@ -79,7 +84,7 @@ export function init(ctx: InitCtx): State {
 /** Run one bake pass. Idempotent and internally revision-gated; coalescing
  *  and when-to-fire are the caller's concern. */
 export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<RunResult> {
-    const { mode, cache, fs, loader, decodeAudio } = s.ctx;
+    const { mode, cache, fs, loader, decodeAudio, raster } = s.ctx;
     const atlasJsonPath = `${CLIENT_RESOURCES_DIR}/voxels-atlas.json`;
     const spriteAtlasJsonPath = `${CLIENT_RESOURCES_DIR}/sprites-atlas.json`;
     // the audio manifest doubles as its own sidecar, its combined `hash` field
@@ -89,7 +94,7 @@ export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<
     const prevAtlasHash = await readArtifactHash(fs, atlasJsonPath);
     const prevSpriteAtlasHash = await readArtifactHash(fs, spriteAtlasJsonPath);
     const prevAudioAtlasHash = await readArtifactHash(fs, audioManifestPath);
-    const timings = await runAssetPipelinePass(s.internal, { mode, cache, fs, loader, decodeAudio }, s.bake, {
+    const timings = await runAssetPipelinePass(s.internal, { mode, cache, fs, loader, decodeAudio, raster }, s.bake, {
         forceAll: opts.forceAll,
     });
     const atlasHash = await readArtifactHash(fs, atlasJsonPath);

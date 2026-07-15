@@ -3,6 +3,9 @@
     "version": "0.0.0-alpha.1",
     "license": "MIT",
     "type": "module",
+    "bin": {
+        "bongle": "./cli/bongle.ts"
+    },
     "sideEffects": [
         "src/index.ts",
         "src/engine-client.ts",
@@ -97,11 +100,13 @@
         "canvas": "^3.2.3",
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",
+        "gatho": "github:isaac-mason/gatho",
         "gpucat": "github:isaac-mason/gpucat#8dae93190e99c91c810fd772a3239279b18c5153",
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
         "meshoptimizer": "^0.25.0",
         "monaco-editor": "^0.55.1",
+        "node-web-audio-api": "^2.0.0",
         "packcat": "github:isaac-mason/packcat#dev",
         "react": "^19.2.4",
         "react-colorful": "^5.7.0",
@@ -110,8 +115,7 @@
         "skia-canvas": "^3.0.0",
         "vite": "^8.1.0",
         "ws": "^8.18.0",
-        "zustand": "^5.0.12",
-        "gatho": "github:isaac-mason/gatho"
+        "zustand": "^5.0.12"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.3.13",

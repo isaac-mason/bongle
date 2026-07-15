@@ -10,7 +10,7 @@
 // doubles up to 4096 until all frames fit.
 //
 // DrawSource frames are baked upstream by `draw-textures.ts` and threaded in
-// via `bakedDraws` as OffscreenCanvases; the composite draws them directly.
+// via `bakedDraws` as raster surfaces; the composite draws them directly.
 
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { DrawSource, KindStore, NormalizedImageSource, Region, SpriteHandle } from '../../internal';
@@ -18,7 +18,8 @@ import { addSkylineLevel, emptySkyline, findBestFit } from '../../internal';
 import type { Filesystem } from '../filesystem';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
-import { canvasPixels, decodeBitmap, encodePng, makeCanvas, sha256HexParts } from './raster';
+import type { Raster, RasterCanvas, RasterImage } from './raster';
+import { sha256HexParts } from './raster';
 
 const INITIAL_ATLAS_SIZE = 256;
 const MAX_ATLAS_SIZE = 4096;
@@ -37,6 +38,8 @@ export type BuildSpriteAtlasOptions = {
     /** the editor project filesystem the atlas artifacts write into
      *  (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
+    /** host-injected 2d raster (host-provided; see pipeline InitCtx). */
+    raster: Raster;
 };
 
 /** uv rect in pixel coords of the atlas. SpriteResources divides by
@@ -67,7 +70,7 @@ export async function buildSpriteAtlas(
     spritesRegistry: KindStore<SpriteHandle>,
     opts: BuildSpriteAtlasOptions,
 ): Promise<boolean> {
-    const { bakedDraws, cache, loader, fs } = opts;
+    const { bakedDraws, cache, loader, fs, raster } = opts;
 
     const handles = [...spritesRegistry.byId.values()].map((h) => h.payload);
 
@@ -86,7 +89,7 @@ export async function buildSpriteAtlas(
     const items = handles.flatMap(collectFrames);
 
     // load every frame up front: bitmap/canvas source + dimensions + hash part.
-    const loaded = await Promise.all(items.map((it) => loadFrame(it, bakedDraws, loader)));
+    const loaded = await Promise.all(items.map((it) => loadFrame(it, bakedDraws, loader, raster)));
 
     const hash = await computeBuildHash(handles, loaded);
     if (cache) {
@@ -109,7 +112,7 @@ export async function buildSpriteAtlas(
         throw new Error(`[bongle] sprite atlas: ${items.length} frames don't fit in ${MAX_ATLAS_SIZE}x${MAX_ATLAS_SIZE}`);
     }
 
-    const { canvas: atlas, ctx } = makeCanvas(atlasSize, atlasSize);
+    const { canvas: atlas, ctx } = raster.makeCanvas(atlasSize, atlasSize);
     for (const p of packed) {
         if (p.drawSource) ctx.drawImage(p.drawSource, p.x, p.y);
         else {
@@ -117,7 +120,7 @@ export async function buildSpriteAtlas(
             ctx.fillRect(p.x, p.y, p.w, p.h);
         }
     }
-    await fs.write(ATLAS_PNG, await encodePng(atlas));
+    await fs.write(ATLAS_PNG, await raster.encodePng(atlas));
 
     // bundle frames back into per-sprite entries.
     const sprites: Record<string, SpriteAtlasEntry> = {};
@@ -152,7 +155,7 @@ type FrameItem = {
 
 type LoadedFrame = FrameItem & {
     /** draw source (bitmap/canvas), null → magenta. */
-    drawSource: CanvasImageSource | null;
+    drawSource: RasterImage | RasterCanvas | null;
     w: number;
     h: number;
     /** hash input for the rebuild gate. */
@@ -166,14 +169,14 @@ function collectFrames(handle: SpriteHandle): FrameItem[] {
     return srcs.map((s, frameIdx) => ({ spriteId: handle.spriteId, frameIdx, padding: handle.padding, source: s }));
 }
 
-async function loadFrame(item: FrameItem, bakedDraws: BakedDraws, loader: ResourceLoader): Promise<LoadedFrame> {
+async function loadFrame(item: FrameItem, bakedDraws: BakedDraws, loader: ResourceLoader, raster: Raster): Promise<LoadedFrame> {
     if (typeof item.source !== 'string') {
         const canvas = bakedDraws.get(item.source);
         if (!canvas) {
             console.warn(`[bongle] sprite "${item.spriteId}" frame ${item.frameIdx} DrawSource has no baked canvas (magenta)`);
             return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: 'magenta' };
         }
-        return { ...item, drawSource: canvas, w: canvas.width, h: canvas.height, hashPart: canvasPixels(canvas) };
+        return { ...item, drawSource: canvas, w: canvas.width, h: canvas.height, hashPart: raster.canvasPixels(canvas) };
     }
     let bytes: Uint8Array;
     try {
@@ -182,7 +185,7 @@ async function loadFrame(item: FrameItem, bakedDraws: BakedDraws, loader: Resour
         console.warn(`[bongle] sprite source not found: ${item.source} (magenta)`);
         return { ...item, drawSource: null, w: PLACEHOLDER_SIZE, h: PLACEHOLDER_SIZE, hashPart: `missing:${item.source}` };
     }
-    const bitmap = await decodeBitmap(bytes);
+    const bitmap = await raster.decodeBitmap(bytes);
     return { ...item, drawSource: bitmap, w: bitmap.width, h: bitmap.height, hashPart: bytes };
 }
 

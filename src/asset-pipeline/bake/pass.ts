@@ -34,6 +34,7 @@ import { buildBlockTextureAtlas } from './block-texture-atlas';
 import type { DecodeAudio } from './decode-audio';
 import { type BakedDraws, bakeDrawTextures } from './draw-textures';
 import { buildModels, type ModelsCacheEntry } from './models';
+import type { Raster } from './raster';
 import { buildScenes } from './scenes';
 import { buildSpriteAtlas } from './sprite-atlas';
 
@@ -56,6 +57,8 @@ export type PipelineOpts = {
     loader: ResourceLoader;
     /** host-injected audio decode (host-provided; see pipeline InitCtx). */
     decodeAudio: DecodeAudio;
+    /** host-injected 2d raster (host-provided; see pipeline InitCtx). */
+    raster: Raster;
     /** kit invocation mode, controls scene barrel discovery (see buildScenes). */
     mode: 'edit' | 'play';
     /** forwarded to the two atlas builders as their `cache` option. true
@@ -144,7 +147,7 @@ export async function runAssetPipelinePass(
     state: PipelineState,
     runOpts: RunPassOptions = {},
 ): Promise<PipelinePassTimings> {
-    const { mode, cache, fs, loader, decodeAudio } = opts;
+    const { mode, cache, fs, loader, decodeAudio, raster } = opts;
     const { forceAll = false } = runOpts;
     const timings: PipelinePassTimings = {};
     const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
@@ -208,7 +211,7 @@ export async function runAssetPipelinePass(
     // apply.
     const bakedDraws: BakedDraws =
         atlasDirty || spritesDirty
-            ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { loader }))
+            ? await timed('draw', bakeDrawTextures(registry.blockTextures, registry.sprites, { loader, raster }))
             : new Map();
 
     const tasks: Promise<void>[] = [];
@@ -216,7 +219,9 @@ export async function runAssetPipelinePass(
     if (moduleView) {
         if (atlasDirty)
             tasks.push(
-                timed('block-atlas', buildBlockTextureAtlas(moduleView, { bakedDraws, cache, loader, fs })).then(() => undefined),
+                timed('block-atlas', buildBlockTextureAtlas(moduleView, { bakedDraws, cache, loader, fs, raster })).then(
+                    () => undefined,
+                ),
             );
         if (modelsDirty)
             tasks.push(timed('models', buildModels(moduleView, { cache: state.modelsCache, loader, fs })).then(() => undefined));
@@ -236,7 +241,9 @@ export async function runAssetPipelinePass(
         // of the draw-textures pass above; nullable map entries fall back
         // to magenta inside the builder.
         tasks.push(
-            timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { bakedDraws, cache, loader, fs })).then(() => undefined),
+            timed('sprite-atlas', buildSpriteAtlas(registry.sprites, { bakedDraws, cache, loader, fs, raster })).then(
+                () => undefined,
+            ),
         );
     }
 

@@ -6,6 +6,7 @@
 // AssetPipeline the user declarations registered into. HMR re-evals re-fire the
 // flush → re-bake; results post back to the main doc for the atlas view + logs.
 
+import { createBrowserRaster } from '../../src/asset-pipeline/bake/raster-browser';
 import { createBrowserDecodeAudio } from '../../src/asset-pipeline/decode-audio-browser';
 import { createBakeLoader, createClientResourceLoader } from '../../src/asset-pipeline/loader';
 import { createPortBridge } from '../bundler/port-bridge';
@@ -56,7 +57,8 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // live under resources/client/, not at the project root the bake loader reads.
     const iconLoader = createClientResourceLoader(fs);
     const decodeAudio = createBrowserDecodeAudio();
-    const pipeline = AssetPipeline.init({ mode: 'edit', cache: true, fs, loader, decodeAudio });
+    const raster = createBrowserRaster();
+    const pipeline = AssetPipeline.init({ mode: 'edit', cache: true, fs, loader, decodeAudio, raster });
 
     // in-worker icon rendering: a headless GPU render stack, lazily created on
     // first use (device handshake + pipeline compiles are expensive and atlas-
