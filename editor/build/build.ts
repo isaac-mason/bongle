@@ -12,11 +12,12 @@
 // runtime-wired to the refactored EngineServer (deferred play-infra touch) — it
 // builds with kit's play-server shape, enough to prove + persist the artifact.
 
-import { type Plugin, rolldown } from '@rolldown/browser';
+import { rolldown } from '@rolldown/browser';
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
-import { type EnvValues, replaceEnv } from '../../plugin';
+import type { EnvValues } from '../../plugin';
 import { ensureProcessShim } from '../bundler/runner';
+import { bundleWorkers, createVfsPlugin } from '../bundler/vfs-plugin';
 import type { Filesystem } from '../fs';
 
 type Target = 'client' | 'server';
@@ -80,12 +81,14 @@ export default server({
 });
 `;
 
-// `new URL('./x.{ogg,glb,…}', import.meta.url)` for already-baked binary assets:
-// in a bundle these inline as base64 (~1.5MB of starter audio/models alone),
-// though the runtime only ever loads them from the atlases/bins. Strip to "" —
-// sound()/model() ignore an empty src, keeping registration intact (mirrors
-// kit's stripBinaryAssetUrlsPlugin). Client only; server has no asset URLs.
-const BINARY_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf)['"]\s*,\s*import\.meta\.url\)/g;
+// `new URL('./x.{ogg,png,glb,…}', import.meta.url)` for already-baked binary
+// assets: in a bundle these inline as base64 (~1.5MB of starter audio/models
+// alone), though the runtime only ever loads them from the atlases/bins. Strip
+// to "" — sound()/model()/texture registration ignore an empty src (mirrors
+// kit's stripBinaryAssetUrlsPlugin). bongle now ships SOURCE, so these live in
+// the graph (they were resolved to dist/assets at prebundle before). Client
+// only; server has no asset URLs.
+const BINARY_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf|png|jpe?g|webp)['"]\s*,\s*import\.meta\.url\)/g;
 
 /** the per-target entry: side-effect-import every existing generated barrel +
  *  user src (registries populate), then the play-* adapter as default. */
@@ -98,117 +101,34 @@ async function entrySource(fs: Filesystem, target: Target): Promise<string> {
     return `${imports}\n${target === 'client' ? PLAY_CLIENT : PLAY_SERVER}`;
 }
 
-// ── vfs resolution (rolldown reads the project + seeded engine dist from OPFS) ─
-
-function posixJoin(dir: string, rel: string): string {
-    const out: string[] = [];
-    for (const p of `${dir}/${rel}`.split('/')) {
-        if (p === '' || p === '.') continue;
-        if (p === '..') out.pop();
-        else out.push(p);
-    }
-    return out.join('/');
-}
-
-async function withExt(fs: Filesystem, id: string): Promise<string> {
-    for (const cand of [id, `${id}.ts`, `${id}.tsx`, `${id}.js`, `${id}/index.ts`, `${id}/index.js`]) {
-        if (await fs.exists(cand)) return cand;
-    }
-    return id; // let load() throw a clear "missing" error
-}
-
-type PkgJson = { main?: string; module?: string; exports?: unknown };
-
-/** resolve a bare specifier to a seeded node_modules package via package.json. */
-async function resolvePackage(fs: Filesystem, spec: string): Promise<string | null> {
-    const scoped = spec.startsWith('@');
-    const parts = spec.split('/');
-    const pkg = scoped ? `${parts[0]}/${parts[1]}` : parts[0];
-    const subParts = scoped ? parts.slice(2) : parts.slice(1);
-    const sub = subParts.length ? `./${subParts.join('/')}` : '.';
-    let json: PkgJson;
-    try {
-        json = JSON.parse(await fs.readText(`node_modules/${pkg}/package.json`)) as PkgJson;
-    } catch {
-        return null;
-    }
-    const pick = (cond: unknown): string | null => {
-        if (typeof cond === 'string') return cond;
-        if (cond && typeof cond === 'object') {
-            const c = cond as Record<string, unknown>;
-            return (c.import ?? c.default ?? c.module ?? c.require ?? null) as string | null;
-        }
-        return null;
-    };
-    let target: string | null = null;
-    if (json.exports && typeof json.exports === 'object') {
-        const map = json.exports as Record<string, unknown>;
-        const entry = sub in map ? map[sub] : sub === '.' ? map : undefined;
-        target = entry === undefined ? null : pick(entry);
-    } else if (typeof json.exports === 'string') {
-        target = sub === '.' ? json.exports : null;
-    } else if (sub === '.') {
-        target = json.module ?? json.main ?? './index.js';
-    } else {
-        target = sub;
-    }
-    if (!target) return null;
-    return withExt(fs, `node_modules/${pkg}/${target.replace(/^\.\//, '')}`);
-}
-
-/** map a specifier to a vfs module id, or null (→ rolldown default / error). */
-async function resolveVfs(fs: Filesystem, source: string, importer: string | undefined): Promise<string | null> {
-    if (source === 'bongle' || source.startsWith('bongle/')) {
-        const sub = source === 'bongle' ? 'index' : source.slice('bongle/'.length);
-        return withExt(fs, `node_modules/bongle/dist/${sub}`);
-    }
-    if (source.startsWith('.')) {
-        const base = importer ? importer.replace(/[?#].*$/, '') : '';
-        const dir = base.slice(0, base.lastIndexOf('/'));
-        return withExt(fs, posixJoin(dir, source));
-    }
-    // root-absolute id (the entry's `/src/...` imports, or a resolved id echoed back)
-    if (source.startsWith('/')) return withExt(fs, source.replace(/^\/+/, ''));
-    // bare: a seeded first-party package (mathcat/…), else treat as vfs-root path
-    const pkg = await resolvePackage(fs, source);
-    if (pkg) return pkg;
-    return withExt(fs, source);
-}
-
-function vfsPlugin(fs: Filesystem, target: Target, entry: string): Plugin {
-    const env = envFor(target);
-    return {
-        name: 'bongle:vfs-build',
-        async resolveId(source, importer) {
-            if (source === ENTRY_ID) return ENTRY_ID;
-            if (source.startsWith('node:')) return { id: source, external: true };
-            if (target === 'server' && source === 'sharp') return { id: source, external: true };
-            return await resolveVfs(fs, source, importer);
-        },
-        async load(id) {
-            if (id === ENTRY_ID) return { code: entry, moduleType: 'js' };
-            return await fs.readText(id);
-        },
-        transform(code, id) {
-            if (id === ENTRY_ID) return null;
-            let out = replaceEnv(code, env);
-            if (target === 'client') out = out.replace(BINARY_URL, '""');
+// vfs resolution + load + env-bake is the shared createVfsPlugin (vfs-plugin.ts,
+// resolve.ts-backed). build.ts only supplies the per-target specifics: the
+// virtual play entry, the sharp external (server), and the build-time transforms
+// (asset-URL strip on the client + __kit injection for user src barrels).
+function buildVfsPlugin(fs: Filesystem, target: Target, entry: string, workers: Map<string, string>) {
+    return createVfsPlugin(fs, {
+        env: envFor(target),
+        entry: { id: ENTRY_ID, code: entry },
+        external: (source) => target === 'server' && source === 'sharp',
+        workers,
+        transformExtra: (code, id) => {
+            let out = target === 'client' ? code.replace(BINARY_URL, '""') : code;
             // user src (incl. generated barrels) needs `__kit` as a free var — the
             // barrels call __kit.registerScene/… (mirrors kit's capture-import).
             if (id.startsWith('src/') && /\.tsx?$/.test(id)) out = `import { __kit } from 'bongle/internal';\n${out}`;
-            return out === code ? null : out;
+            return out;
         },
-    };
+    });
 }
 
 // ── build a single target → { fileName: bytes } ─────────────────────────────
 
-async function buildTarget(fs: Filesystem, target: Target): Promise<Record<string, Uint8Array>> {
+async function buildTarget(fs: Filesystem, target: Target, workers: Map<string, string>): Promise<Record<string, Uint8Array>> {
     ensureProcessShim(); // @rolldown/browser reads `process` in bindingifyInputOptions
     const entry = await entrySource(fs, target);
     const bundle = await rolldown({
         input: { index: ENTRY_ID },
-        plugins: [vfsPlugin(fs, target, entry)],
+        plugins: [buildVfsPlugin(fs, target, entry, workers)],
         external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
         // NODE_ENV is already build-defined into the prebundled engine dist (where
         // React lives); user + play-shell code don't read process.env, so no define.
@@ -276,8 +196,13 @@ export type BuildOptions = {
 /** build the whole bundle → zip bytes (client/ + server/ + bongle.json). */
 export async function buildBundle(fs: Filesystem, opts: BuildOptions): Promise<Uint8Array> {
     const progress = opts.onProgress ?? (() => {});
+    // workers first: `?worker` entries (mesh worker) bundle standalone BEFORE the
+    // main build — a nested @rolldown/browser build from inside a plugin hook
+    // deadlocks on main-thread Atomics.wait. They're client-side compute.
+    progress('Bundling workers');
+    const workers = await bundleWorkers(fs, envFor('client'));
     progress('Bundling client + server');
-    const [clientFiles, serverFiles] = await Promise.all([buildTarget(fs, 'client'), buildTarget(fs, 'server')]);
+    const [clientFiles, serverFiles] = await Promise.all([buildTarget(fs, 'client', workers), buildTarget(fs, 'server', workers)]);
 
     const zip: Record<string, Uint8Array> = {};
     for (const [name, bytes] of Object.entries(clientFiles)) zip[`client/${name}`] = bytes;

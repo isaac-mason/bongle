@@ -18,8 +18,8 @@ export function BuildModal() {
     const title = status === 'done' ? 'Build complete' : status === 'error' ? 'Build failed' : 'Building bundle';
 
     return (
-        // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop (only once done).
-        <div className="fixed inset-0 z-[2000000] grid place-items-center bg-black/40" onPointerDown={done ? close : undefined}>
+        // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop.
+        <div className="fixed inset-0 z-[2000000] grid place-items-center bg-black/40" onPointerDown={close}>
             <div
                 className="w-[380px] border border-border bg-surface p-4 font-mono text-fg shadow-[4px_4px_0_rgba(0,0,0,0.5)]"
                 onPointerDown={(e) => e.stopPropagation()}
@@ -50,17 +50,18 @@ export function BuildModal() {
                     </div>
                 )}
 
-                {done && (
-                    <div className="mt-3 flex justify-end">
-                        <button
-                            type="button"
-                            className="cursor-pointer border border-border bg-surface px-3 py-1 text-xs hover:bg-hover"
-                            onClick={close}
-                        >
-                            Close
-                        </button>
-                    </div>
-                )}
+                {/* always dismissable — a stuck/failed build must never trap the
+                    user (they may need to get out and save). Cancel just closes
+                    the modal; the background build is abandoned. */}
+                <div className="mt-3 flex justify-end">
+                    <button
+                        type="button"
+                        className="cursor-pointer border border-border bg-surface px-3 py-1 text-xs hover:bg-hover"
+                        onClick={close}
+                    >
+                        {done ? 'Close' : 'Cancel'}
+                    </button>
+                </div>
             </div>
         </div>
     );

@@ -3,13 +3,47 @@
 // in-editor "editing X" window (embedded). When embedded they hand payloads to
 // the platform over the bridge; standalone they download.
 
-import { buildBundle, downloadBundle } from '../build/build';
+import type { BuildRequest, BuildResponse } from '../build/build-worker';
 import type { Filesystem } from '../fs';
 import { downloadGameSave, exportGameSave, SAVE_MAX_BYTES, saveSizeBytes } from '../game-save';
+import { PROJECT_NAME } from '../project';
 import { useBuildMeta } from '../stores/build-meta';
 import { useBuildProgress } from '../stores/build-progress';
 import { logger } from '../stores/logs';
 import { usePlatform } from '../stores/platform';
+
+/** run the prod build in a Worker (@rolldown/browser's threaded wasm can't run
+ *  on the main thread — Atomics.wait). Returns the zip; progress streams back. */
+function buildInWorker(maxPlayers: number, onProgress: (label: string) => void): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+        console.log('[build] spawning build worker');
+        const worker = new Worker(new URL('../build/build-worker.ts', import.meta.url), { type: 'module' });
+        worker.onmessage = (e: MessageEvent<BuildResponse>) => {
+            const m = e.data;
+            console.log('[build] worker →', m.type, m.type === 'progress' ? m.label : '');
+            // handshake: send the request only once the worker is live (its heavy
+            // module survived vite's dep-optimize/reload window).
+            if (m.type === 'ready') {
+                worker.postMessage({ projectName: PROJECT_NAME, maxPlayers } satisfies BuildRequest);
+                return;
+            }
+            if (m.type === 'progress') onProgress(m.label);
+            else if (m.type === 'done') {
+                worker.terminate();
+                resolve(m.zip);
+            } else {
+                worker.terminate();
+                reject(new Error(m.message));
+            }
+        };
+        worker.onerror = (e) => {
+            console.error('[build] worker onerror', e.message, e.filename, e.lineno, e);
+            worker.terminate();
+            reject(new Error(e.message || 'build worker failed to load (see console)'));
+        };
+        worker.onmessageerror = (e) => console.error('[build] worker message error', e);
+    });
+}
 
 /** build the prod bundle. Embedded → hand to the platform; standalone → download.
  *  Progress shows in the BuildModal; a summary lands in the build log. */
@@ -20,24 +54,23 @@ export async function runBuild(fs: Filesystem): Promise<void> {
     progress.begin();
     try {
         const t0 = performance.now();
-        const opts = {
-            maxPlayers: useBuildMeta.getState().maxPlayers,
-            onProgress: (l: string) => useBuildProgress.getState().step(l),
-        };
-        let size: number;
+        const zip = await buildInWorker(useBuildMeta.getState().maxPlayers, (l) => useBuildProgress.getState().step(l));
         if (embedded) {
-            const zip = await buildBundle(fs, opts);
             // ship the source alongside the built bundle so the platform can
             // snapshot it as a game_version + record the build's provenance.
             const source = await exportGameSave(fs);
             usePlatform.getState().send({ type: 'bongle:build', payload: zip, source });
-            size = zip.length;
         } else {
-            size = await downloadBundle(fs, opts);
+            const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bundle.zip';
+            a.click();
+            URL.revokeObjectURL(url);
         }
-        progress.finish(size);
+        progress.finish(zip.length);
         log(
-            `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(size / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
+            `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(zip.length / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
         );
     } catch (err) {
         progress.fail((err as Error).message);

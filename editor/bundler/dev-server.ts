@@ -117,7 +117,7 @@ function normalize(id: string): string {
 
 // worker imports (`x?worker&inline`) resolve to a synthetic id fetchModule
 // serves as a Worker-constructor module (bundled + blob-spawned — see
-// worker-bundle.ts + the WORKER_ID_PREFIX branch in fetchModule).
+// vfs-plugin.ts + the WORKER_ID_PREFIX branch in fetchModule).
 const WORKER_ID_PREFIX = '\0worker:';
 
 /** resolve a user specifier relative to its importer to an fs-relative id (or a
@@ -235,13 +235,14 @@ export async function fetchModule(
     //    bongle.css (injected by client-main); serve an empty side-effect module.
     if (id.startsWith(WORKER_ID_PREFIX)) {
         const entryId = id.slice(WORKER_ID_PREFIX.length);
-        const wb = await import('./worker-bundle'); // lazy: pulls in @rolldown/browser only when a ?worker is hit
+        const vp = await import('./vfs-plugin'); // lazy: pulls in @rolldown/browser only when a ?worker is hit
         let jsContent = state.workerCache.get(entryId);
         if (jsContent === undefined) {
-            jsContent = await wb.bundleWorkerEntry(state.fs, entryId);
+            // the worker runs in the client render pipeline (CPU compute, no DOM).
+            jsContent = await vp.bundleWorkerEntry(state.fs, entryId, { client: true, server: false, editor: true });
             state.workerCache.set(entryId, jsContent);
         }
-        const result = await transformModule(`${entryId}.worker.js`, wb.workerWrapperModule(jsContent), { capture: false });
+        const result = await transformModule(`${entryId}.worker.js`, vp.workerWrapperModule(jsContent), { capture: false });
         return { code: result.code, file: id, id, url: id, invalidate: false };
     }
     if (id.endsWith('.css')) {

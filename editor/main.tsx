@@ -9,6 +9,7 @@ import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
 import { createClientHost } from './client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
+import { PROJECT_NAME } from './project';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
@@ -38,7 +39,7 @@ import { TASKBAR_W } from './ui/components/Taskbar';
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
 // snapshot. Top-level await: the whole editor waits on the fs.
-const PROJECT = 'project';
+const PROJECT = PROJECT_NAME;
 const fs = await openOpfsFilesystem(PROJECT);
 const editor = initEditor({ fs });
 // the 'build' log window shows both bundler (transform) errors and bake output.
