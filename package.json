@@ -74,8 +74,8 @@
     ],
     "scripts": {
         "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
-        "build": "rm -rf dist vendor && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
-        "build:incremental": "vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
+        "build": "rm -rf dist vendor deps-dist && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
+        "build:incremental": "vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
         "test": "vitest run",
         "bench": "vitest bench --run",
         "typecheck": "tsgo -p tsconfig.json",
@@ -131,6 +131,7 @@
         "@webgpu/types": "^0.1.71",
         "dts-bundle-generator": "^9.5.1",
         "happy-dom": "^20.8.9",
+        "rolldown": "^1.1.2",
         "rolldown-plugin-dts": "^0.27.1",
         "tailwindcss": "^4.2.2",
         "tsdown": "^0.22.3",

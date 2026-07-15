@@ -32,19 +32,52 @@ export async function openOpfsFilesystem(projectName: string): Promise<Filesyste
 
 class OpfsFilesystem implements Filesystem {
     private watchers = new Set<(changes: FsChange[]) => void>();
+    // Lookup caches (the perf win — every read/stat otherwise re-walks the dir
+    // chain from root, and resolution probes ~8 candidate paths per import). Both
+    // are keyed by normalized dir path.
+    //   - dirCache: dir path → its handle, so reads skip the traversal.
+    //   - entryCache: dir path → {name→kind} of its immediate children, so
+    //     existence/resolution is an in-memory map lookup, not N OPFS `stat`s.
+    // Invalidated on structural writes THROUGH this instance (create/delete/
+    // move). Cross-INSTANCE coherence (another thread's write) rides the change
+    // stream — see the fs-change unification; until then this is safe for the
+    // immutable seed + this instance's own writes.
+    private dirCache = new Map<string, FileSystemDirectoryHandle>();
+    private entryCache = new Map<string, Map<string, 'file' | 'dir'>>();
 
     constructor(private root: FileSystemDirectoryHandle) {}
 
+    /** resolve a dir path to its handle, caching every level so siblings +
+     *  descendants reuse the walk. */
     private async dirHandle(dirs: string[], create: boolean): Promise<FileSystemDirectoryHandle | null> {
+        const key = dirs.join('/');
+        const cached = this.dirCache.get(key);
+        if (cached) return cached;
         let cur = this.root;
+        let prefix = '';
         for (const d of dirs) {
+            prefix = prefix ? `${prefix}/${d}` : d;
+            const hit = this.dirCache.get(prefix);
+            if (hit) {
+                cur = hit;
+                continue;
+            }
             try {
                 cur = await cur.getDirectoryHandle(d, { create });
             } catch {
                 return null;
             }
+            this.dirCache.set(prefix, cur);
         }
         return cur;
+    }
+
+    /** evict the dir + entry caches for `path` and everything under it. */
+    private invalidateSubtree(path: string): void {
+        const p = normalize(path);
+        const pfx = `${p}/`;
+        for (const key of this.dirCache.keys()) if (key === p || key.startsWith(pfx)) this.dirCache.delete(key);
+        for (const key of this.entryCache.keys()) if (key === p || key.startsWith(pfx)) this.entryCache.delete(key);
     }
 
     private async fileHandle(path: FsPath, create: boolean): Promise<FileSystemFileHandle | null> {
@@ -131,8 +164,31 @@ class OpfsFilesystem implements Filesystem {
         return out;
     }
 
+    async readDir(dir: FsPath = ''): Promise<Map<string, 'file' | 'dir'>> {
+        const key = normalize(dir);
+        const cached = this.entryCache.get(key);
+        if (cached) return cached;
+        const handle = await this.dirHandle(key ? key.split('/') : [], false);
+        const out = new Map<string, 'file' | 'dir'>();
+        if (handle) {
+            try {
+                // entries() yields name + kind WITHOUT opening each file — the
+                // whole point vs `list` (which getFile()s every entry for mtime).
+                for await (const [name, child] of handle.entries() as AsyncIterable<[string, FileSystemHandle]>) {
+                    out.set(name, child.kind === 'directory' ? 'dir' : 'file');
+                }
+            } catch {
+                // dir vanished mid-walk — cache the partial (a change event re-lists).
+            }
+        }
+        this.entryCache.set(key, out);
+        return out;
+    }
+
     async exists(path: FsPath): Promise<boolean> {
-        return (await this.stat(path)) !== null;
+        const { dirs, name } = split(path);
+        if (!name) return true; // root always exists
+        return (await this.readDir(dirs.join('/'))).has(name);
     }
 
     async write(path: FsPath, data: Uint8Array | string): Promise<void> {
@@ -156,6 +212,10 @@ class OpfsFilesystem implements Filesystem {
         const writable = await handle.createWritable();
         await writable.write(typeof data === 'string' ? data : (data as unknown as BufferSource));
         await writable.close();
+        // keep the parent's entry index warm + correct (idempotent: adds a new
+        // file or no-ops an existing one) rather than evicting + re-listing.
+        const { dirs, name } = split(path);
+        this.entryCache.get(dirs.join('/'))?.set(name, 'file');
         this.emit([{ type: existed ? 'modified' : 'created', path: normalize(path) }]);
     }
 
@@ -165,6 +225,8 @@ class OpfsFilesystem implements Filesystem {
         if (!parent) return;
         try {
             await parent.removeEntry(name, { recursive: opts?.recursive ?? false });
+            this.entryCache.get(dirs.join('/'))?.delete(name);
+            this.invalidateSubtree(path); // path may have been a directory
             this.emit([{ type: 'deleted', path: normalize(path) }]);
         } catch {
             // missing is fine.

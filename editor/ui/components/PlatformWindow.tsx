@@ -22,7 +22,7 @@ const BTN = 'w-full cursor-pointer border border-border bg-surface px-2 py-1.5 t
 // bigger footprint now that the window carries build/save + the multiplayer
 // control (which grows a share-link block when a session is open).
 const PLATFORM_W = 300;
-const PLATFORM_H = 220;
+const PLATFORM_H = 260;
 
 export function PlatformWindow({ fs }: { fs: Filesystem }) {
     const intent = usePlatform((s) => s.intent);
@@ -63,10 +63,13 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                         <button type="button" className={BTN} onClick={() => void runBuild(fs)}>
                             Build &amp; publish
                         </button>
-                        <button type="button" className={BTN} onClick={() => void runSave(fs)}>
-                            Save source
-                        </button>
-                        <SaveSizeIndicator fs={fs} />
+                        <section className="flex flex-col gap-1.5 border border-border p-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-muted">Save</span>
+                            <button type="button" className={BTN} onClick={() => void runSave(fs)}>
+                                Save
+                            </button>
+                            <SaveSizeIndicator fs={fs} />
+                        </section>
                         <MultiplayerControl />
                     </>
                 )}
@@ -103,11 +106,25 @@ function SaveSizeIndicator({ fs }: { fs: Filesystem }) {
     if (bytes === null) return null;
     const capMb = SAVE_MAX_BYTES / (1024 * 1024);
     const mb = bytes / (1024 * 1024);
-    const color = bytes > SAVE_MAX_BYTES ? 'text-red-500' : bytes > SAVE_WARN_BYTES ? 'text-amber-500' : 'text-fg-muted';
+    const over = bytes > SAVE_MAX_BYTES;
+    const warn = bytes > SAVE_WARN_BYTES;
+    const pct = Math.min(100, (bytes / SAVE_MAX_BYTES) * 100);
+    const textColor = over ? 'text-red-500' : warn ? 'text-amber-500' : 'text-fg-muted';
+    const barColor = over ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-fg-muted';
     return (
-        <span className={`text-[10px] ${color}`}>
-            save size: {mb.toFixed(1)} MB / {capMb} MB{bytes > SAVE_MAX_BYTES ? ' — over limit, trim assets/' : ''}
-        </span>
+        <div className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between text-[10px]">
+                <span className="text-fg-muted">Disk used</span>
+                <span className={textColor}>
+                    {mb.toFixed(1)} / {capMb} MB
+                </span>
+            </div>
+            {/* fill bar: how full the save is against the hard cap. */}
+            <div className="h-1.5 w-full border border-border bg-surface">
+                <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+            </div>
+            {over && <span className="text-[10px] text-red-500">Over the {capMb} MB limit — trim assets to save.</span>}
+        </div>
     );
 }
 

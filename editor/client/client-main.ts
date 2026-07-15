@@ -102,6 +102,12 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
         console.warn('[client] engine stylesheet missing', err);
     }
 
+    // SPIKE (World C cold-start, task #13): time booting on bongle SOURCE — the
+    // runner transforms + evals the engine's ~363 modules + deps in-browser vs
+    // the old ~10 prebundled chunks. Numbers land in the client iframe console.
+    const spikeT0 = performance.now();
+    const spikeMark = (label: string) => console.log(`[spike] ${label}: ${(performance.now() - spikeT0).toFixed(0)}ms`);
+
     // evaluate the user code via a ModuleRunner bridged to the ONE host
     // DevServer (host transforms; this realm evaluates → its own client
     // registry, which the renderer reads).
@@ -123,6 +129,7 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     const { EngineClient } = await runner.import('bongle/engine-client');
     const EngineEditor = await runner.import('bongle/engine-editor');
     const { __kit } = await runner.import('bongle/internal');
+    spikeMark('engine modules transformed + evaluated');
 
     const state = EngineClient.init({
         mode: 'edit',
@@ -136,6 +143,7 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // the editor's blueprint sync read scenes from OPFS (no dev-server here).
     await EngineEditor.setup(state, { sceneSource: opfsSceneSource(fs) });
     await EngineClient.load(state);
+    spikeMark('client realm booted (cold-start total)');
 
     __kit.registerFlush(() => {
         EngineClient.applyRegistryChanges(state);

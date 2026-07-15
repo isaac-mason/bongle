@@ -12,16 +12,8 @@
 
 import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
 import type { Filesystem } from '../fs';
-import type { EnvValues } from './env-replace';
+import { dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from './resolve';
 import { type TransformResult, transformModule } from './transform';
-
-// env-id → env values. Realms use env-ids `client:<n>` / `server` / `pipeline`;
-// client realms are client-env, server + pipeline are server-env.
-function envValuesFor(env: string): EnvValues {
-    return env.startsWith('client')
-        ? { client: true, server: false, editor: true }
-        : { client: false, server: true, editor: true };
-}
 
 /** a HotPayload subset the runner accepts. */
 export type HotPayload = { type: 'update' | 'custom' | 'full-reload' | 'connected'; [k: string]: unknown };
@@ -47,9 +39,10 @@ export type DevServerState = {
     fs: Filesystem;
     /** per-env module graphs, created lazily as envs register. */
     graphs: Map<string, Map<string, ModNode>>;
-    /** transform cache: module id → env → { version, result }. Per-env because
-     *  the same module transforms differently per realm (envPlugin literals). */
-    transformCache: Map<string, Map<string, { version: number; result: TransformResult }>>;
+    /** transform cache: module id → { version, result }. SHARED across realms —
+     *  the transform is env-neutral now (see transform.ts), so the engine's
+     *  modules are read + compiled ONCE, and every realm reuses the result. */
+    transformCache: Map<string, { version: number; result: TransformResult }>;
     /** global monotonic HMR timestamp. ONLY stamps js-update payloads so the
      *  runner cache-busts the changed boundary's re-import URL. NOT a cache key
      *  (that role caused whole-graph re-eval — see moduleVersion). */
@@ -71,10 +64,14 @@ export type DevServerState = {
      *  env-independent, so it runs once per module content version and both
      *  realms reuse it (the per-env transform layers env literals on top). */
     depWrapCache: Map<string, { version: number; code: string }>;
+    /** resolution cache: `${importer}\0${spec}` → resolved id. A module's deps
+     *  re-resolve on every fetch (3 realms × every import), and each resolve does
+     *  several OPFS `stat` probes — memoise them. Cleared on edit (a new file can
+     *  change a resolution). */
+    resolveCache: Map<string, string>;
+    /** cold-start cost breakdown (SPIKE, task #13) — cumulative ms per phase. */
+    perf: { modules: number; resolveMs: number; readMs: number; transformMs: number };
 };
-
-/** the package.json fields node_modules resolution reads. */
-type PackageJson = { main?: string; module?: string; exports?: unknown };
 
 export function initDevServer(fs: Filesystem): DevServerState {
     return {
@@ -87,6 +84,8 @@ export function initDevServer(fs: Filesystem): DevServerState {
         pkgCache: new Map(),
         symbolTables: initSymbolTables(),
         depWrapCache: new Map(),
+        resolveCache: new Map(),
+        perf: { modules: 0, resolveMs: 0, readMs: 0, transformMs: 0 },
     };
 }
 
@@ -111,114 +110,85 @@ function normalize(id: string): string {
     return id.replace(/[?#].*$/, '').replace(/^\/+/, '');
 }
 
-/** resolve a user specifier relative to its importer to an fs-relative id. */
+// worker imports (`x?worker&inline`) resolve to a synthetic id fetchModule
+// serves as a Worker-constructor module (SPIKE: stubbed — see fetchModule).
+const WORKER_ID_PREFIX = '\0worker:';
+
+// SPIKE stub for `?worker` imports: a no-op WorkerLike so the client realm boots
+// without a source-side worker runtime. Real support (a worker that evals bongle
+// source via its own runner bridge) is task #11 — off-thread work (voxel meshing)
+// is disabled until then.
+const WORKER_STUB_SOURCE = `export default class {
+    constructor() { console.warn('[editor] worker stubbed (World C spike) — off-thread work disabled'); }
+    postMessage() {}
+    terminate() {}
+    addEventListener() {}
+    removeEventListener() {}
+    onmessage = null;
+    onerror = null;
+    onmessageerror = null;
+};`;
+
+/** resolve a user specifier relative to its importer to an fs-relative id (or a
+ *  synthetic `\0worker:` id). Extension/index + package.json `exports` handling
+ *  lives in resolve.ts (a documented subset of Node resolution over the vfs);
+ *  this keeps only the dev-transport concerns (the `?worker` tag, and a
+ *  best-effort id on a miss so fetchModule surfaces a clear error / externalizes
+ *  a bare dep). */
 async function resolve(state: DevServerState, spec: string, importer: string | undefined): Promise<string> {
+    const key = `${importer ?? ''}\0${spec}`;
+    const hit = state.resolveCache.get(key);
+    if (hit !== undefined) return hit;
+    const id = await resolveUncached(state, spec, importer);
+    state.resolveCache.set(key, id);
+    return id;
+}
+
+async function resolveUncached(state: DevServerState, spec: string, importer: string | undefined): Promise<string> {
+    const importerDir = dirOf(importer ? normalize(importer) : '');
+
+    // worker entry import — strip the query, resolve the base module, tag it.
+    const q = spec.indexOf('?');
+    if (q !== -1 && /\bworker\b/.test(spec.slice(q))) {
+        const base = spec.slice(0, q);
+        const baseId = base.startsWith('.')
+            ? ((await resolveFile(state.fs, posixJoin(importerDir, base))) ?? posixJoin(importerDir, base))
+            : normalize(base);
+        return `${WORKER_ID_PREFIX}${baseId}`;
+    }
+
+    // relative → extension/index probe.
     if (spec.startsWith('.')) {
-        const base = importer ? normalize(importer) : '';
-        const dir = base.slice(0, base.lastIndexOf('/'));
-        return withExt(state, posixJoin(dir, spec));
+        const target = posixJoin(importerDir, spec);
+        return (await resolveFile(state.fs, target)) ?? `${target.replace(/\.[a-z]+$/i, '')}.ts`;
     }
-    // engine imports resolve to the prebundled dist seeded in the vfs (bundled
-    // in, NOT external): `bongle` → dist/index.js, `bongle/X` → dist/X.js.
-    if (spec === 'bongle' || spec.startsWith('bongle/')) {
-        const sub = spec === 'bongle' ? 'index' : spec.slice('bongle/'.length);
-        return `node_modules/bongle/dist/${sub}.js`;
-    }
-    // bare specifier → a seeded node_modules package (first-party mathcat/gpucat/
-    // crashcat/packcat), resolved through its package.json exports/main.
+
+    // bare (bongle source, first-party libs, prebundled deps) via package.json
+    // `exports` — one resolver, no bongle special-case.
     if (isBare(spec)) {
-        const pkg = await resolvePackage(state, spec);
+        const pkg = await resolvePackage(state.fs, spec, { pkgCache: state.pkgCache });
         if (pkg) return pkg;
     }
-    // a root-absolute path FROM a prebundled package chunk. Two sources:
-    //   - a code-split ref emitted with a root path (`/chunks/mesh-worker.js`).
-    //   - a relative DYNAMIC import (`import('./chunks/x')`) the runner pre-
-    //     resolves against the module's bare-specifier base rather than its
-    //     resolved path, so `bongle/engine-server` + `./chunks/x` → `/bongle/chunks/x`.
-    // Resolve against the importer's package dist, stripping the runner's spurious
-    // `/<pkg>/` base prefix when present.
+
+    const rooted = normalize(spec);
+    const atRoot = await resolveFile(state.fs, rooted);
+    if (atRoot) return atRoot;
+
+    // A `/`-absolute miss is often a RELATIVE dynamic import the module-runner
+    // collapsed against the raw (unresolved) request specifier — dropping the
+    // importer's real prefix (vite module-runner `dynamicRequest` does
+    // `posixResolve(posixDirname(rawSpec), dep)`, and our specifiers stay
+    // relative rather than pre-resolved to root-absolute). Reconstruct by
+    // resolving the tail up the RESOLVED importer's directory tree, closest
+    // first — the level the collapse landed on is where the file exists.
     if (spec.startsWith('/') && importer) {
-        const stripped = spec.replace(/^\/+/, '');
-        if (stripped.startsWith('node_modules/')) return withExt(state, stripped); // already a full vfs path
-        const imp = normalize(importer);
-        const distMatch = /^(node_modules\/(?:@[^/]+\/)?[^/]+\/dist)\//.exec(imp);
-        if (distMatch) {
-            const pkg = /^node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(imp)?.[1];
-            const tail = pkg && stripped.startsWith(`${pkg}/`) ? stripped.slice(pkg.length + 1) : stripped;
-            return withExt(state, `${distMatch[1]}/${tail}`);
+        for (let dir = dirOf(normalize(importer)); ; dir = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : '') {
+            const hit = await resolveFile(state.fs, dir ? `${dir}/${rooted}` : rooted);
+            if (hit) return hit;
+            if (!dir) break;
         }
     }
-    // root-relative fs path ('src/index.ts' or '/src/index.ts').
-    return withExt(state, normalize(spec));
-}
-
-/** node_modules resolution for a bare specifier via package.json. Returns the
- *  fs-relative module id, or null if no such package is seeded (caller falls
- *  through to an fs path / externalizes). */
-async function resolvePackage(state: DevServerState, spec: string): Promise<string | null> {
-    const scoped = spec.startsWith('@');
-    const parts = spec.split('/');
-    const pkg = scoped ? `${parts[0]}/${parts[1]}` : parts[0];
-    const subParts = scoped ? parts.slice(2) : parts.slice(1);
-    const sub = subParts.length ? `./${subParts.join('/')}` : '.';
-
-    let json = state.pkgCache.get(pkg);
-    if (json === undefined) {
-        try {
-            json = JSON.parse(await state.fs.readText(`node_modules/${pkg}/package.json`)) as PackageJson;
-        } catch {
-            json = null;
-        }
-        state.pkgCache.set(pkg, json);
-    }
-    if (!json) return null;
-
-    const target = resolveEntry(json, sub);
-    if (!target) return null;
-    return `node_modules/${pkg}/${target.replace(/^\.\//, '')}`;
-}
-
-/** pick the module target for a subpath from a package.json (exports map first,
- *  then main/module). Only the fields our seeded packages use. */
-function resolveEntry(json: PackageJson, sub: string): string | null {
-    const pick = (cond: unknown): string | null => {
-        if (typeof cond === 'string') return cond;
-        if (cond && typeof cond === 'object') {
-            const c = cond as Record<string, unknown>;
-            return (c.import ?? c.default ?? c.module ?? c.require ?? null) as string | null;
-        }
-        return null;
-    };
-    if (json.exports && typeof json.exports === 'object') {
-        const map = json.exports as Record<string, unknown>;
-        // exports may be a bare conditions object (sub '.') or a subpath map.
-        const entry = sub in map ? map[sub] : sub === '.' ? map : undefined;
-        return entry === undefined ? null : pick(entry);
-    }
-    if (json.exports) return sub === '.' ? (json.exports as string) : null;
-    if (sub === '.') return json.module ?? json.main ?? './index.js';
-    return sub; // no exports map → subpath is a literal file path
-}
-
-function withExt(state: DevServerState, id: string): string {
-    // fs paths are known synchronously via a cheap membership probe would be
-    // async; instead try the common extensions by convention. The graph only
-    // needs a stable id; fetchModule reads the actual bytes.
-    for (const cand of [id, `${id}.ts`, `${id}.tsx`, `${id}/index.ts`]) {
-        if (state.transformCache.has(cand)) return cand;
-    }
-    // default to .ts if extension-less (user src is TS).
-    return /\.[a-z]+$/.test(id) ? id : `${id}.ts`;
-}
-
-function posixJoin(dir: string, rel: string): string {
-    const out: string[] = [];
-    for (const p of `${dir}/${rel}`.split('/')) {
-        if (p === '' || p === '.') continue;
-        if (p === '..') out.pop();
-        else out.push(p);
-    }
-    return out.join('/');
+    return rooted;
 }
 
 function graphOf(state: DevServerState, env: string): Map<string, ModNode> {
@@ -263,15 +233,22 @@ export async function fetchModule(
     // node builtins externalize up front (stubbed by the runner's evaluator).
     if (rawId.startsWith('node:')) return { externalize: rawId, type: 'module' };
 
+    const tResolve = performance.now();
     const id = await resolve(state, rawId, importer);
-    let source: string;
-    try {
-        source = await state.fs.readText(id);
-    } catch {
-        // not a user/engine module in the vfs → a bare npm dep the realm
-        // native-imports. relative/absolute misses are real errors.
-        if (isBare(rawId) && !isEngine(rawId)) return { externalize: rawId, type: 'module' };
-        throw new Error(`[dev-server:${env}] module not found: ${rawId} (resolved ${id}) from ${importer}`);
+    state.perf.resolveMs += performance.now() - tResolve;
+
+    // synthetic modules served without an fs read:
+    //  - `\0worker:<entry>` — a `?worker` import. SPIKE: a no-op Worker stub
+    //    (running the entry in a source realm is a follow-up — see task #11).
+    //  - `*.css` — engine `import './x.css'`. Styles ship as the prebuilt
+    //    bongle.css (injected by client-main); serve an empty side-effect module.
+    if (id.startsWith(WORKER_ID_PREFIX)) {
+        const result = await transformModule(`${id.slice(WORKER_ID_PREFIX.length)}.worker.js`, WORKER_STUB_SOURCE, { capture: false });
+        return { code: result.code, file: id, id, url: id, invalidate: false };
+    }
+    if (id.endsWith('.css')) {
+        const result = await transformModule(`${id}.js`, '', { capture: false });
+        return { code: result.code, file: id, id, url: id, invalidate: false };
     }
 
     const node = ensureNode(state, env, id);
@@ -280,36 +257,56 @@ export async function fetchModule(
     // an edit didn't touch, so their runner + transform caches stay valid.
     const mv = state.moduleVersion.get(id) ?? 0;
 
-    // per-env transform cache (id → env → entry). withExt only needs the outer
-    // key, so extension resolution still works.
-    let byEnv = state.transformCache.get(id);
-    if (!byEnv) {
-        byEnv = new Map();
-        state.transformCache.set(id, byEnv);
-    }
-    const cached = byEnv.get(env);
+    // SHARED transform cache (env-neutral): a hit skips BOTH the read and the
+    // transform, so the engine's ~360 modules are read + compiled ONCE, not once
+    // per realm. The module GRAPH below is still per-env (HMR boundaries differ
+    // by realm); only the transformed code is shared.
     let result: TransformResult;
+    const cached = state.transformCache.get(id);
     if (cached && cached.version === mv) {
         result = cached.result;
     } else {
-        // prebundled lib chunks (node_modules/bongle) are NOT user code — no
-        // capture wrapper; user project modules get it.
+        let source: string;
+        const tRead = performance.now();
+        try {
+            source = await state.fs.readText(id);
+        } catch {
+            // not a user/engine module in the vfs → a bare npm dep the realm
+            // native-imports. relative/absolute misses are real errors.
+            if (isBare(rawId) && !isEngine(rawId)) return { externalize: rawId, type: 'module' };
+            throw new Error(`[dev-server:${env}] module not found: ${rawId} (resolved ${id}) from ${importer}`);
+        }
+        state.perf.readMs += performance.now() - tRead;
+        // seeded lib source (node_modules/**) is NOT user code — no capture
+        // wrapper; user project modules get it + the DepGraph AST pass (shared).
         const capture = !id.startsWith('node_modules/');
-        // user modules run the DepGraph AST pass (__kit.deps consumer wrap)
-        // once per content version, shared across envs; lib chunks skip it.
         const input = capture ? await ensureDepWrapped(state, id, source, mv) : source;
-        result = await transformModule(id, input, { env: envValuesFor(env), capture });
-        byEnv.set(env, { version: mv, result });
+        const tTransform = performance.now();
+        result = await transformModule(id, input, { capture });
+        state.perf.transformMs += performance.now() - tTransform;
+        state.transformCache.set(id, { version: mv, result });
     }
     node.selfAccepts = !id.startsWith('node_modules/'); // user modules self-accept (postlude); lib chunks don't
 
     // refresh this env's import edges.
     node.imports.clear();
+    const tDeps = performance.now();
     for (const dep of result.deps) {
         if (isExternalDep(dep)) continue; // externals aren't graph nodes
         const depId = await resolve(state, dep, id);
         node.imports.add(depId);
         ensureNode(state, env, depId).importers.add(id);
+    }
+    state.perf.resolveMs += performance.now() - tDeps;
+
+    // SPIKE (task #13): cold-start breakdown, logged as it grinds through the
+    // ~360 engine modules × 3 realms. resolve = OPFS stat probes, read = OPFS
+    // reads, transform = oxc strip + module-runner rewrite (wasm).
+    if (++state.perf.modules % 100 === 0) {
+        const p = state.perf;
+        console.log(
+            `[perf] ${p.modules} modules | resolve ${p.resolveMs | 0}ms · read ${p.readMs | 0}ms · transform ${p.transformMs | 0}ms`,
+        );
     }
 
     if (opts.cached && node.lastVersion === mv) return { cache: true };
@@ -329,6 +326,8 @@ export async function applyEdit(state: DevServerState, path: string): Promise<vo
     // stale dep wrap: re-run the AST pass on next fetch (rebuilds this module's
     // SymbolTable against the now-complete registry and re-wraps its consumers).
     state.depWrapCache.delete(id);
+    // a new/renamed/deleted file can change what a specifier resolves to.
+    state.resolveCache.clear();
 
     for (const [env, g] of state.graphs) {
         if (!g.has(id)) continue; // this env never loaded the module

@@ -60,6 +60,11 @@ export type Filesystem = {
     /** entries under `dir` ('' = root). recursive lists the whole subtree.
      *  [] when the dir is missing — absent output dirs read as empty. */
     list(dir?: FsPath, opts?: { recursive?: boolean }): Promise<FsStat[]>;
+    /** immediate children of `dir` as a name→kind map — the CHEAP enumeration
+     *  primitive (no size/mtime, so no per-entry file open). Empty map for a
+     *  missing dir. Resolution + existence checks go through this instead of
+     *  N `stat` probes; OPFS caches it per directory. */
+    readDir(dir?: FsPath): Promise<Map<string, 'file' | 'dir'>>;
     exists(path: FsPath): Promise<boolean>;
     /** write, creating parent dirs. */
     write(path: FsPath, data: Uint8Array | string): Promise<void>;
@@ -160,6 +165,17 @@ export function createMemoryFilesystem(initial?: Record<FsPath, Uint8Array | str
                 }
             }
             out.sort((a, b) => a.path.localeCompare(b.path));
+            return out;
+        },
+        async readDir(dir = '') {
+            const d = normalize(dir);
+            const out = new Map<string, 'file' | 'dir'>();
+            for (const p of files.keys()) {
+                if (!inDir(p, d) || p === d) continue;
+                const rest = d === '' ? p : p.slice(d.length + 1);
+                const slash = rest.indexOf('/');
+                out.set(slash === -1 ? rest : rest.slice(0, slash), slash === -1 ? 'file' : 'dir');
+            }
             return out;
         },
         async exists(path) {

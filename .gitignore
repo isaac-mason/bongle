@@ -12,3 +12,6 @@ editor-node-modules.zip
 
 .DS_Store
 **/.DS_Store
+
+# World C dependency prebundle (build artifact, seeded into editor vfs)
+deps-dist/

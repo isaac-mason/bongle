@@ -78,6 +78,7 @@ export function createRemoteFilesystem(port: PortLike): Filesystem {
         readText: (path) => call<string>('readText', path),
         stat: (path) => call<FsStat | null>('stat', path),
         list: (dir, opts) => call<FsStat[]>('list', dir ?? '', opts ?? {}),
+        readDir: (dir) => call<Map<string, 'file' | 'dir'>>('readDir', dir ?? ''),
         exists: (path) => call<boolean>('exists', path),
         write: () => Promise.reject(new Error(READ_ONLY)),
         writeIfChanged: () => Promise.reject(new Error(READ_ONLY)),
@@ -129,6 +130,8 @@ export function serveFilesystemOverPort(fs: Filesystem, port: PortLike): { close
                     return respond(req.id, await fs.stat(a));
                 case 'list':
                     return respond(req.id, await fs.list(a, b as { recursive?: boolean } | undefined));
+                case 'readDir':
+                    return respond(req.id, await fs.readDir(a));
                 case 'exists':
                     return respond(req.id, await fs.exists(a));
                 default:
