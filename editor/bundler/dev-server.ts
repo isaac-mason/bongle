@@ -10,7 +10,7 @@
 // plus pushing HMR payloads to each env's registered channel. init()+State+
 // standalone-fns, matching the engine convention.
 
-import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
+import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from '../../plugin';
 import type { Filesystem } from '../fs';
 import { dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from './resolve';
 import { type TransformResult, transformModule } from './transform';
@@ -71,6 +71,10 @@ export type DevServerState = {
     resolveCache: Map<string, string>;
     /** cold-start cost breakdown (SPIKE, task #13) — cumulative ms per phase. */
     perf: { modules: number; resolveMs: number; readMs: number; transformMs: number };
+    /** `?worker` bundle cache: entry id → self-contained bundled code. A worker
+     *  can't run the ModuleRunner, so its graph is bundled once (like vite's
+     *  ?worker) and blob-spawned. Immutable seed → keyed by entry id alone. */
+    workerCache: Map<string, string>;
 };
 
 export function initDevServer(fs: Filesystem): DevServerState {
@@ -86,6 +90,7 @@ export function initDevServer(fs: Filesystem): DevServerState {
         depWrapCache: new Map(),
         resolveCache: new Map(),
         perf: { modules: 0, resolveMs: 0, readMs: 0, transformMs: 0 },
+        workerCache: new Map(),
     };
 }
 
@@ -111,23 +116,9 @@ function normalize(id: string): string {
 }
 
 // worker imports (`x?worker&inline`) resolve to a synthetic id fetchModule
-// serves as a Worker-constructor module (SPIKE: stubbed — see fetchModule).
+// serves as a Worker-constructor module (bundled + blob-spawned — see
+// worker-bundle.ts + the WORKER_ID_PREFIX branch in fetchModule).
 const WORKER_ID_PREFIX = '\0worker:';
-
-// SPIKE stub for `?worker` imports: a no-op WorkerLike so the client realm boots
-// without a source-side worker runtime. Real support (a worker that evals bongle
-// source via its own runner bridge) is task #11 — off-thread work (voxel meshing)
-// is disabled until then.
-const WORKER_STUB_SOURCE = `export default class {
-    constructor() { console.warn('[editor] worker stubbed (World C spike) — off-thread work disabled'); }
-    postMessage() {}
-    terminate() {}
-    addEventListener() {}
-    removeEventListener() {}
-    onmessage = null;
-    onerror = null;
-    onmessageerror = null;
-};`;
 
 /** resolve a user specifier relative to its importer to an fs-relative id (or a
  *  synthetic `\0worker:` id). Extension/index + package.json `exports` handling
@@ -238,12 +229,19 @@ export async function fetchModule(
     state.perf.resolveMs += performance.now() - tResolve;
 
     // synthetic modules served without an fs read:
-    //  - `\0worker:<entry>` — a `?worker` import. SPIKE: a no-op Worker stub
-    //    (running the entry in a source realm is a follow-up — see task #11).
+    //  - `\0worker:<entry>` — a `?worker` import: bundle the worker's graph into
+    //    one self-contained blob (like vite's ?worker) → a WorkerWrapper module.
     //  - `*.css` — engine `import './x.css'`. Styles ship as the prebuilt
     //    bongle.css (injected by client-main); serve an empty side-effect module.
     if (id.startsWith(WORKER_ID_PREFIX)) {
-        const result = await transformModule(`${id.slice(WORKER_ID_PREFIX.length)}.worker.js`, WORKER_STUB_SOURCE, { capture: false });
+        const entryId = id.slice(WORKER_ID_PREFIX.length);
+        const wb = await import('./worker-bundle'); // lazy: pulls in @rolldown/browser only when a ?worker is hit
+        let jsContent = state.workerCache.get(entryId);
+        if (jsContent === undefined) {
+            jsContent = await wb.bundleWorkerEntry(state.fs, entryId);
+            state.workerCache.set(entryId, jsContent);
+        }
+        const result = await transformModule(`${entryId}.worker.js`, wb.workerWrapperModule(jsContent), { capture: false });
         return { code: result.code, file: id, id, url: id, invalidate: false };
     }
     if (id.endsWith('.css')) {

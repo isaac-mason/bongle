@@ -15,7 +15,7 @@
 import { type Plugin, rolldown } from '@rolldown/browser';
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
-import { type EnvValues, replaceEnv } from '../bundler/env-replace';
+import { type EnvValues, replaceEnv } from '../../plugin';
 import { ensureProcessShim } from '../bundler/runner';
 import type { Filesystem } from '../fs';
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initSymbolTables, wrapModuleDeps } from '../../../editor/bundler/capture-deps';
+import { initSymbolTables, wrapModuleDeps } from '../../../plugin/capture-deps';
 
 // identity resolver: specs already ARE the module ids we key the registry by.
 const idResolve = async (spec: string) => spec;
