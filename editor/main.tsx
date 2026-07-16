@@ -9,7 +9,6 @@ import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
 import { createClientHost } from './client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
-import { PROJECT_NAME } from './project';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
@@ -17,13 +16,15 @@ import { importGameSave } from './game-save';
 import { joinGuestSession } from './net/guest-session';
 import { spawnPipelineWorker } from './pipeline/pipeline-host';
 import { createPlatformBridge } from './platform/bridge';
+import { PROJECT_NAME } from './project';
+import { registerProjectFsWorker } from './project-url';
 import { spawnServerWorker } from './server/server-host';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
 import { useLaunched } from './stores/launched';
-import { useMultiplayer } from './stores/multiplayer';
 import { logger } from './stores/logs';
+import { useMultiplayer } from './stores/multiplayer';
 import { usePlatform } from './stores/platform';
 import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
@@ -39,6 +40,9 @@ import { TASKBAR_W } from './ui/components/Taskbar';
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
 // snapshot. Top-level await: the whole editor waits on the fs.
+// serves the OPFS working copy at <base>@project/… for <img>/?url/new URL.
+registerProjectFsWorker();
+
 const PROJECT = PROJECT_NAME;
 const fs = await openOpfsFilesystem(PROJECT);
 const editor = initEditor({ fs });

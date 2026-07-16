@@ -107,9 +107,8 @@ export async function loadBlockTextureAtlasIntoTextureArray(
     try {
         // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs).
         const bytes = await loader.loadBytes('voxels-atlas.png');
-        const decodeImage = loader.decodeImage;
-        if (decodeImage) {
-            fullPixels = (await decodeImage(bytes, 'image/png')).rgba;
+        if (loader.decodeImage) {
+            fullPixels = (await loader.decodeImage(bytes, 'image/png')).rgba;
         } else {
             const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
             const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);

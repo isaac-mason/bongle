@@ -5,10 +5,9 @@
 import { Paintbrush } from 'bongle/icons';
 import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
+import { projectUrl } from '../../project-url';
 import { useLaunched } from '../../stores/launched';
 import { imageEditorApp } from '../apps';
-import { useObjectUrl } from '../hooks/useObjectUrl';
-import { imageMime } from '../image-mime';
 
 // transparency checkerboard, tinted to the dark surface.
 const CHECKER = 'repeating-conic-gradient(#2a2e35 0% 25%, #202329 0% 50%) 50% / 16px 16px';
@@ -17,7 +16,10 @@ export function ImageViewer({ fs, path }: { fs: Filesystem; path: string }) {
     const [data, setData] = useState<Uint8Array | null>(null);
     const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
     const [missing, setMissing] = useState(false);
-    const url = useObjectUrl(data, imageMime(path));
+    // the <img> loads from the project-fs SW (public/sw.js) — no blob juggling.
+    // `version` cache-busts on edit (the SW sends no-store, but a stable src won't
+    // re-fetch on the same element).
+    const [version, setVersion] = useState(0);
 
     useEffect(() => {
         let alive = true;
@@ -37,7 +39,10 @@ export function ImageViewer({ fs, path }: { fs: Filesystem; path: string }) {
         void load();
         // re-read when the file changes underneath us (paint editor save, bake…).
         const w = fs.watch((changes) => {
-            if (changes.some((c) => c.path === path)) void load();
+            if (changes.some((c) => c.path === path)) {
+                void load();
+                setVersion((v) => v + 1);
+            }
         });
         return () => {
             alive = false;
@@ -64,9 +69,9 @@ export function ImageViewer({ fs, path }: { fs: Filesystem; path: string }) {
             <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-3" style={{ background: CHECKER }}>
                 {missing ? (
                     <span className="text-fg-muted">(file not found)</span>
-                ) : url ? (
+                ) : data ? (
                     <img
-                        src={url}
+                        src={projectUrl(path, version)}
                         alt={path}
                         onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
                         className="max-h-full max-w-full border border-border object-contain [image-rendering:pixelated]"
