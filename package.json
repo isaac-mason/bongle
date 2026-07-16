@@ -4,7 +4,7 @@
     "license": "MIT",
     "type": "module",
     "bin": {
-        "bongle": "./cli/bongle.ts"
+        "bongle": "./cli/bongle.mjs"
     },
     "sideEffects": [
         "src/index.ts",
@@ -64,6 +64,8 @@
     },
     "files": [
         "src",
+        "cli",
+        "build",
         "interface",
         "avatars",
         "assets",
@@ -113,6 +115,7 @@
         "react-dom": "^19.2.4",
         "sharp": "^0.34.5",
         "skia-canvas": "^3.0.0",
+        "tsx": "^4.23.0",
         "vite": "^8.1.0",
         "ws": "^8.18.0",
         "zustand": "^5.0.12"
@@ -144,5 +147,8 @@
         "esbuild",
         "sharp",
         "skia-canvas"
-    ]
+    ],
+    "optionalDependencies": {
+        "webgpu": "^0.4.0"
+    }
 }

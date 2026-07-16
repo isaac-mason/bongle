@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import type { Filesystem } from '../src/asset-pipeline/filesystem';
 import { createBakeLoader } from '../src/asset-pipeline/loader';
 import { createNodeDecodeAudio } from './decode-audio-node';
+import { renderBlockIcons } from './icons-node';
 import { openNodeFs } from './node-fs';
 import { createNodeRaster } from './raster-node';
 
@@ -60,7 +61,7 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
 
     // the SAME engine instance the declarations registered into.
     const { registry, __kit } = (await import(entry('./internal'))) as typeof import('../src/internal');
-    const { AssetPipeline } = (await import(entry('./engine-asset-pipeline'))) as typeof import('../src/asset-pipeline');
+    const { AssetPipeline, Icons } = (await import(entry('./engine-asset-pipeline'))) as typeof import('../src/asset-pipeline');
     __kit.flush();
 
     const pipeline = AssetPipeline.init({
@@ -72,6 +73,14 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
         decodeAudio: createNodeDecodeAudio(),
     });
     const r = await AssetPipeline.run(pipeline, { forceAll: true });
+
+    // GPU icon render (block thumbnails) — optional, after the data bake wrote the
+    // atlas it reads. Own error boundary: an icon failure never fails the bake.
+    try {
+        await renderBlockIcons(fs, Icons);
+    } catch (err) {
+        console.log(`  · icons: render failed (skipped) — ${(err as Error).message}`);
+    }
 
     return {
         matchmaking: registry.matchmaking.byId.get('main')?.payload ?? null,

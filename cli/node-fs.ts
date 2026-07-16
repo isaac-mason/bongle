@@ -34,12 +34,26 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         return out;
     };
 
+    // file:// URLs to builtin engine assets (e.g. the avatar glb) reach the bake
+    // loader as stripped-absolute paths — they live OUTSIDE the project root (in
+    // node_modules/bongle/…), so a project-relative read misses. Fall back to the
+    // restored absolute path. Project files hit the fast path (no extra stat).
+    const readAt = (p: string, enc?: 'utf8') => {
+        try {
+            return enc ? readFileSync(abs(p), enc) : readFileSync(abs(p));
+        } catch (e) {
+            const asAbsolute = `/${p}`;
+            if (existsSync(asAbsolute)) return enc ? readFileSync(asAbsolute, enc) : readFileSync(asAbsolute);
+            throw e;
+        }
+    };
+
     return {
         async read(p) {
-            return readFileSync(abs(p)); // Buffer is a Uint8Array
+            return readAt(p) as Uint8Array; // Buffer is a Uint8Array
         },
         async readText(p) {
-            return readFileSync(abs(p), 'utf8');
+            return readAt(p, 'utf8') as string;
         },
         async stat(p) {
             try {

@@ -29,15 +29,26 @@ export type HeadlessRenderContext = {
     budget: VoxelResources.VoxelArenaBudget;
 };
 
-/** Request a GPU device (works in a worker — WebGPU is not DOM-bound) and stand
- *  up a headless renderer against it. */
-export async function createHeadlessRenderContext(): Promise<HeadlessRenderContext> {
-    if (typeof navigator === 'undefined' || !navigator.gpu) {
-        throw new Error('[headless-render] WebGPU unavailable here (no navigator.gpu)');
+/** Stand up a headless renderer. The GPU device is either injected (node: Dawn
+ *  via the `webgpu` pkg, which has no `navigator.gpu`) or requested from
+ *  `navigator.gpu` (browser worker — WebGPU is not DOM-bound). */
+export async function createHeadlessRenderContext(gpu?: {
+    device: GPUDevice;
+    adapter: GPUAdapter;
+}): Promise<HeadlessRenderContext> {
+    let adapter: GPUAdapter;
+    let device: GPUDevice;
+    if (gpu) {
+        ({ device, adapter } = gpu);
+    } else {
+        if (typeof navigator === 'undefined' || !navigator.gpu) {
+            throw new Error('[headless-render] WebGPU unavailable here (no navigator.gpu)');
+        }
+        const requested = await navigator.gpu.requestAdapter();
+        if (!requested) throw new Error('[headless-render] no GPU adapter');
+        adapter = requested;
+        device = await adapter.requestDevice();
     }
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) throw new Error('[headless-render] no GPU adapter');
-    const device = await adapter.requestDevice();
     const renderer = Renderer.initHeadless({ device, adapter });
     await Renderer.load(renderer);
     const performance = Performance.detect(adapter);

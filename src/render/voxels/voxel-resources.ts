@@ -1710,7 +1710,7 @@ export function packerDrainEvicted(packer: ArenaPacker, room: number): string[] 
     return out;
 }
 
-const EMPTY_KEYS_ARRAY: string[] = /* @__PURE__ */ [];
+const EMPTY_KEYS_ARRAY: string[] = [];
 
 // ── arena tier sizing ───────────────────────────────────────────────
 

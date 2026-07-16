@@ -99,25 +99,29 @@ export async function loadBlockTextureAtlasIntoTextureArray(
 ): Promise<void> {
     // Empty atlas (0 textures): no PNG is emitted, and there's nothing to load.
     if (meta.textures.length === 0) return;
-    let img: ImageBitmap;
+    // whole-atlas RGBA. Two decode paths (mirrors model-resources): the asset
+    // pipeline injects `loader.decodeImage` (node: sharp) → raw bytes, no DOM; the
+    // browser/editor client has no decoder → createImageBitmap + OffscreenCanvas
+    // (worker-safe, but both absent in node).
+    let fullPixels: Uint8Array | Uint8ClampedArray;
     try {
-        // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs),
-        // then decode via createImageBitmap — no bare vfs/file path, and (unlike
-        // <img>/document.createElement) it runs in a worker too, so this same
-        // path serves the pipeline worker's in-worker icon renderer.
+        // bytes through the injected loader (prod: fetch(assetUrl); editor: vfs).
         const bytes = await loader.loadBytes('voxels-atlas.png');
-        img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+        const decodeImage = loader.decodeImage;
+        if (decodeImage) {
+            fullPixels = (await decodeImage(bytes, 'image/png')).rgba;
+        } else {
+            const img = await createImageBitmap(new Blob([bytes as unknown as BlobPart]));
+            const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
+            const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
+            ctx2d.imageSmoothingEnabled = false;
+            ctx2d.drawImage(img, 0, 0);
+            img.close();
+            fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
+        }
     } catch {
         return;
     }
-
-    // draw atlas to an OffscreenCanvas for pixel extraction (worker-safe).
-    const canvas = new OffscreenCanvas(meta.atlasWidth, meta.atlasHeight);
-    const ctx2d = canvas.getContext('2d', { willReadFrequently: true })!;
-    ctx2d.imageSmoothingEnabled = false;
-    ctx2d.drawImage(img, 0, 0);
-    img.close();
-    const fullPixels = ctx2d.getImageData(0, 0, meta.atlasWidth, meta.atlasHeight).data;
     writeBlockTextureAtlasIntoTextureArray(
         atlas,
         textureNames,

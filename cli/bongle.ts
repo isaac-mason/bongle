@@ -1,12 +1,11 @@
-#!/usr/bin/env -S node --import tsx
-// lib/cli/bongle.ts — the `bongle` CLI entry.
+// lib/cli/bongle.ts — the `bongle` CLI logic. The installable bin is bongle.mjs,
+// which registers a TS loader (tsx) then imports this: bongle ships SOURCE, so
+// lib/build + the engine use extensionless bundler-style imports node's own
+// resolver won't follow.
 //
-// Run under a TS loader (tsx): bongle ships SOURCE, so lib/build + the engine use
-// extensionless bundler-style imports node's own resolver won't follow. tsx is the
-// loader; packaging (bundle the CLI to .js, or declare tsx a dep) is a later call.
-//
-// Today: `bongle build`. `bongle dev` is next — its core (lib/build/dev-server.ts)
-// is ready; it needs a node HTTP/WS realm transport (the browser uses MessagePort).
+// Today: `bongle build` (bake + bundle) + `bongle bake`. `bongle dev` is next —
+// its core (lib/build/dev-server.ts) is ready; it needs a node HTTP/WS realm
+// transport (the browser uses MessagePort).
 
 import { buildCommand } from './build';
 import { bakeCommand } from './pipeline';
