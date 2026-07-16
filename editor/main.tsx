@@ -5,7 +5,7 @@
 import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
-import starterBbmodel from '../bongle-blockbench/starter/character.bbmodel?raw';
+import starterBbmodel from '../blockbench/starter/character.bbmodel?raw';
 import { createClientHost } from './client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';

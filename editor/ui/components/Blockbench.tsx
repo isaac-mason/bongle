@@ -8,7 +8,7 @@
 //     hands artefacts back -> we write the .bbmodel + compiled .glb to the fs
 //     (untitled projects prompt for a path first).
 // Saving is Blockbench-native, so there's no editor chrome here — just the iframe.
-// The iframe side is lib/bongle-blockbench's merged plugin.
+// The iframe side is lib/blockbench's merged plugin.
 
 import { useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';

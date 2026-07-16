@@ -82,8 +82,8 @@
         "typecheck": "tsgo -p tsconfig.json",
         "lint": "biome check src tst",
         "lint:fix": "biome check --write src tst",
-        "blockbench:build": "bongle-blockbench/build.sh",
-        "blockbench:plugin": "bongle-blockbench/build-plugin.sh"
+        "blockbench:build": "blockbench/build.sh",
+        "blockbench:plugin": "blockbench/build-plugin.sh"
     },
     "dependencies": {
         "@base-ui/react": "^1.5.0",

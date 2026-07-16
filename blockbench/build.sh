@@ -24,7 +24,7 @@ OUT="$ROOT/../editor/public/static/blockbench"
 
 if [ ! -e "$BB/package.json" ]; then
 	echo "error: the Blockbench submodule is not initialised." >&2
-	echo "       run: git submodule update --init lib/bongle-blockbench/blockbench" >&2
+	echo "       run: git submodule update --init lib/blockbench/blockbench" >&2
 	exit 1
 fi
 
