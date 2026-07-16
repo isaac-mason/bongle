@@ -5,7 +5,6 @@
 import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
-import starterBbmodel from '../blockbench/starter/character.bbmodel?raw';
 import { createClientHost } from './client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
@@ -137,8 +136,6 @@ async function boot(): Promise<void> {
             `${JSON.stringify({ name: 'dev-sample', private: true, bongle: { engineVersion: '0.0.0' } }, null, 2)}\n`,
         );
         await editor.fs.write('src/index.ts', SAMPLE_INDEX);
-        // a starter avatar source, openable in the blockbench app from the file tree.
-        await editor.fs.write('character.bbmodel', starterBbmodel);
     }
     // empty barrel so realms can import it before the first bake writes it (the
     // bake patches model/… handles with baked bin paths, mirroring the kit). Not
