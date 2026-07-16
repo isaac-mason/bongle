@@ -10,6 +10,7 @@
 // but neither depends on this file.
 
 export * from './api/animation';
+export * from './api/asset';
 export * from './api/audio';
 export * from './api/avatars';
 export * from './api/blocks';

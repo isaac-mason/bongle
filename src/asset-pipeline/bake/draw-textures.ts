@@ -14,7 +14,6 @@
 // both atlas builders draw the canvas directly.
 
 import type { ResourceLoader } from '../../core/resource-loader';
-import { normalizeImageSource } from '../../core/sprites/draw';
 import type { BlockTextureDef, DrawSource, KindStore, NormalizedImageSource, SpriteHandle } from '../../internal';
 import type { Raster, RasterCanvas, RasterContext2D, RasterImage } from './raster';
 
@@ -101,9 +100,7 @@ async function bakeOne(
 
     const inputEntries = await Promise.all(
         Object.entries(ds.inputs).map(async ([key, src]) => {
-            // `ds.inputs` values are `ImageSource` (may carry a URL); collapse to
-            // the normalized form `resolveInput` consumes.
-            const resolved = await resolveInput(normalizeImageSource(src), baked, imageCache, loader, raster, cycleGuard);
+            const resolved = await resolveInput(src, baked, imageCache, loader, raster, cycleGuard);
             return [key, resolved] as const;
         }),
     );

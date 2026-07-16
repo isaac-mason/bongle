@@ -43,21 +43,13 @@ export type ModelOptions = {
      *  falls back to the string id when omitted. */
     name?: string;
     /**
-     * source .gltf/.glb. either:
-     *   - a string path relative to project root, or
-     *   - a URL (typically `new URL('./model.glb', import.meta.url)`).
-     *
-     * the URL form lets 3rd-party packs ship gltf bundled alongside
-     * their modules: vite statically rewrites the `new URL(...)` call
-     * in client bundles, and the asset pipeline (running under bun)
-     * resolves the `file://` URL via fileURLToPath to a disk path the
-     * gltf loader can read.
-     *
-     * stored as a string at registration, URLs are normalized to
-     * `.href` so downstream consumers (registry hashes, codegen, the
-     * pipeline) only deal with one shape.
+     * source .gltf/.glb: either a string path relative to project root, or a
+     * module-relative `asset('./model.glb', import.meta.url)` ref. The `asset()`
+     * form lets 3rd-party packs ship gltf alongside their modules — it resolves
+     * relative to the calling module wherever it's installed, and the pipeline
+     * reads the resolved path.
      */
-    src: string | URL;
+    src: string;
 };
 
 /**
@@ -157,7 +149,7 @@ export function model<const Id extends string>(
     id: Id,
     options: ModelOptions,
 ): Id extends keyof ModelHandleMap ? ModelHandleMap[Id] : ModelHandle {
-    const src = options.src instanceof URL ? options.src.href : options.src;
+    const src = options.src;
     const name = options.name ?? id;
     const existing = get(registry.models, id);
     if (existing) {
@@ -171,11 +163,7 @@ export function model<const Id extends string>(
         // re-hashes and fires `changed`, bumping `revision`.
         let dirty = false;
         if (existing.src !== src) {
-            // Guard: don't overwrite a barrel-resolved src with an empty string.
-            // The client build plugin strips `new URL('./model.glb', import.meta.url)`
-            // to "" so Vite lib mode won't inline raw GLB files; the barrel's path
-            // is the correct value and should be preserved.
-            if (src !== '') (existing as Mutable<ModelHandle>).src = src;
+            (existing as Mutable<ModelHandle>).src = src;
             dirty = true;
         }
         if (existing.name !== name) {

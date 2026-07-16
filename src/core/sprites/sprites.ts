@@ -22,12 +22,11 @@
 import { recordSprite } from '../capture/module-scope';
 import { registry, upsert } from '../registry';
 import type { ImageSource, NormalizedImageSource } from './draw';
-import { normalizeImageSource } from './draw';
 
 /* ── source types re-exported for back-compat with existing import sites ── */
 
 export type { DrawFn, DrawInputs, DrawParams, DrawSource, ImageSource, NormalizedImageSource } from './draw';
-export { draw, normalizeImageSource } from './draw';
+export { draw } from './draw';
 
 /* ── public types ── */
 
@@ -94,9 +93,7 @@ export type SpriteHandle = {
  * ```
  */
 export function sprite(id: string, options: SpriteOptions): SpriteHandle {
-    const src: NormalizedImageSource | NormalizedImageSource[] = Array.isArray(options.src)
-        ? options.src.map(normalizeImageSource)
-        : normalizeImageSource(options.src);
+    const src: NormalizedImageSource | NormalizedImageSource[] = options.src;
 
     const handle: SpriteHandle = {
         spriteId: id,

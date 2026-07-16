@@ -66,14 +66,15 @@ export type DrawSource = {
     params: DrawParams;
 };
 
-/** one image: path string, URL (normalized to `.href` at registration),
- *  or a bake-time `DrawSource`. Used as the source type for both
- *  `sprite()` (frames) and `blockTexture()` (frames). Arrays of
- *  `ImageSource` only appear at the top-level `src` field (flipbook). */
-export type ImageSource = string | URL | DrawSource;
+/** one image: a path / `asset()` href string, or a bake-time `DrawSource`.
+ *  Used as the source type for both `sprite()` (frames) and `blockTexture()`
+ *  (frames). Arrays of `ImageSource` only appear at the top-level `src` field
+ *  (flipbook). */
+export type ImageSource = string | DrawSource;
 
-/** post-normalization form, URLs collapsed to `.href` strings.
- *  Downstream consumers (atlas builder, hashing) only see this shape. */
+/** the resolved frame shape downstream consumers (atlas builder, hashing) see.
+ *  Structurally identical to `ImageSource`; kept as a distinct name to mark a
+ *  value that has passed through registration. */
 export type NormalizedImageSource = string | DrawSource;
 
 /**
@@ -107,9 +108,4 @@ export function draw<I extends DrawInputs = DrawInputs, P extends DrawParams = D
         inputs: (opts.inputs ?? {}) as DrawInputs,
         params: (opts.params ?? {}) as DrawParams,
     };
-}
-
-/** collapse URLs to `.href` strings; pass paths + DrawSources through. */
-export function normalizeImageSource(s: ImageSource): NormalizedImageSource {
-    return s instanceof URL ? s.href : s;
 }

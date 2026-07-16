@@ -4,7 +4,7 @@ import { particleUpdate } from '../particles/particle-update';
 import { type ParticleHandle, particle } from '../particles/particles';
 import { registry, upsert } from '../registry';
 import type { SoundHandle } from '../sounds/sounds';
-import { draw, type ImageSource, type NormalizedImageSource, normalizeImageSource } from '../sprites/draw';
+import { draw, type ImageSource, type NormalizedImageSource } from '../sprites/draw';
 import { sprite } from '../sprites/sprites';
 import type { BlockShape } from './block-collider';
 import { formatKey } from './block-registry';
@@ -14,16 +14,13 @@ import * as bs from './block-state';
 export type BlockTextureOptions = {
     /**
      * source image(s). single entry for static, array for animated. each
-     * entry may be a string path (project-root-relative), a URL
-     * (typically `new URL('./texture.png', import.meta.url)`), or a
-     * `draw()` bake-time descriptor for procedural / composed textures.
+     * entry may be a string path (project-root-relative), a module-relative
+     * `asset('./texture.png', import.meta.url)` ref, or a `draw()` bake-time
+     * descriptor for procedural / composed textures.
      *
-     * the URL form lets 3rd-party packs ship textures bundled alongside
-     * their modules, vite rewrites the `new URL(...)` call in client
-     * bundles, and the asset pipeline resolves the `file://` URL via
-     * fileURLToPath to a real disk path sharp can read. URLs are
-     * normalized to `.href` strings at registration; nested DrawSources
-     * pass through untouched.
+     * the `asset()` form lets 3rd-party packs ship textures alongside their
+     * modules — it resolves relative to the calling module wherever it's
+     * installed, and the pipeline reads the resolved path.
      */
     src: ImageSource | ImageSource[];
     /** animation speed in frames per second. default 1. ignored if single frame. */
@@ -59,8 +56,7 @@ export type BlockTextureDef = {
  */
 export function blockTexture(id: string, options: BlockTextureOptions): BlockTextureDef {
     const src = options.src;
-    const rawFrames = Array.isArray(src) ? src : [src];
-    const frames = rawFrames.map(normalizeImageSource);
+    const frames: NormalizedImageSource[] = Array.isArray(src) ? src : [src];
     const def: BlockTextureDef = {
         id,
         dependency: { registry: 'blockTextures', id },

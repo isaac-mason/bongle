@@ -81,40 +81,11 @@ export default server({
 });
 `;
 
-// ── source-asset URL stripping ──────────────────────────────────────────────
-//
-// Engine asset registrations reference their SOURCE files by URL, e.g.
-//   model(new URL('./player.glb', import.meta.url))
-//   sound(new URL('./jump.ogg', import.meta.url))
-// Those `new URL(...)` refs are real and load-bearing in TWO places:
-//   - the editor/dev — loads the source asset from the URL for previews;
-//   - the asset PIPELINE — discovers *what to bake* by finding these refs.
-// But at PLAY runtime the registration ignores the URL entirely: the model /
-// sound / texture is served from the baked ATLAS/BIN the pipeline produced. So in
-// the shipped client the ref is dead.
-//
-// The trap: this is NOT an "inline vs. emit-as-file" question. A bundler
-// special-cases `new URL('./x', import.meta.url)` as an asset reference and will
-// pull `player.glb` into the output EITHER way — base64-inlined, or as a sibling
-// file. Disabling inlining just ships it as a file instead. But the atlas is the
-// runtime source of truth, so we don't want it emitted at ALL — shipping the raw
-// source asset (bongle now ships SOURCE, so it's right there in the graph) is pure
-// dead weight, ~1.5MB of starter audio/models alone. We must DROP the ref, not
-// re-home the bytes.
-//
-// So: rewrite each matched `new URL(...)` to "" before it reaches rolldown's
-// asset handling — sound()/model()/texture() treat an empty src as "no source
-// file, use the atlas". A source-level regex (rather than a resolve/load hook) is
-// deliberate: the `new URL(literal, import.meta.url)` asset pattern is matched by
-// the bundler at a lower level than plugin `resolveId`, so there's no clean hook
-// to intercept it — neutralizing the syntax is the reliable move (a port of kit's
-// stripBinaryAssetUrlsPlugin). CLIENT-ONLY: the server has no asset URLs.
-const SOURCE_ASSET_URL = /new URL\(['"][^'"]*\.(ogg|mp3|wav|flac|glb|gltf|png|jpe?g|webp)['"]\s*,\s*import\.meta\.url\)/g;
-
-/** drop dead source-asset refs from client modules (see SOURCE_ASSET_URL). */
-function stripSourceAssetUrls(code: string, target: Target): string {
-    return target === 'client' ? code.replace(SOURCE_ASSET_URL, '""') : code;
-}
+// Asset registrations reference their SOURCE files with `asset('./x', import.meta.url)`
+// (a plain fn, not the `new URL(literal, import.meta.url)` the bundler treats as an
+// emit-me asset), so nothing pulls the raw source file into the client — the model /
+// sound / texture is served from the baked atlas/bin the pipeline produced, and the
+// `asset()` href sits unused in the shipped registry. No stripping needed.
 
 /** user src (incl. generated barrels) calls `__kit.registerScene/…` as a free
  *  var; make it resolve by importing it (mirrors kit's capture-import). Stopgap:
@@ -137,16 +108,15 @@ async function entrySource(fs: BuildFs, target: Target): Promise<string> {
 
 // Module resolution + load + env-bake is the shared createBonglePlugin (resolve.ts-
 // backed). The build only supplies the per-target specifics: the virtual play
-// entry, the sharp external (server), and the two build-time source transforms
-// (drop dead source-asset URLs on the client + inject the __kit prelude for user
-// src barrels).
+// entry, the sharp external (server), and the __kit-prelude injection for user src
+// barrels.
 function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: Map<string, string>) {
     return createBonglePlugin(fs, {
         env: envFor(target),
         entry: { id: ENTRY_ID, code: entry },
         external: (source) => target === 'server' && source === 'sharp',
         workers,
-        transformExtra: (code, id) => injectKitPrelude(stripSourceAssetUrls(code, target), id),
+        transformExtra: (code, id) => injectKitPrelude(code, id),
     });
 }
 

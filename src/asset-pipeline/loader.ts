@@ -23,9 +23,10 @@ async function loadUrlBytes(src: string): Promise<Uint8Array> {
 
 /**
  * fs-backed byte loader, shared by every browser pipeline loader. Passthroughs:
- * http/blob URLs are fetched; `file:` srcs (builtin engine assets, from
- * `new URL(asset, import.meta.url)`) read the seeded vfs file by pathname.
- * Everything else is a project-relative path read off `fs`, rooted at `base`.
+ * http/blob URLs are fetched; `file:` srcs (builtin engine assets, from an
+ * `asset('./x', import.meta.url)` ref resolved under node) read the seeded vfs
+ * file by pathname. Everything else is a project-relative path read off `fs`,
+ * rooted at `base`.
  */
 function createFsLoader(fs: Filesystem, base = ''): ResourceLoader {
     const prefix = base ? `${base}/` : '';

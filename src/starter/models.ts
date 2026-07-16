@@ -1,15 +1,15 @@
 // Starter pack model handles.
 //
-// Each `model()` call uses the URL form: `new URL('./assets/...',
-// import.meta.url)` resolves to a bundled asset URL under vite, and to
-// a `file://` path under bun (which the pipeline turns back into a disk
-// path via fileURLToPath).
+// Each `model()` call sources its gltf via `asset('./assets/…',
+// import.meta.url)`, so the file ships alongside this module and resolves
+// relative to it wherever the starter package is installed; the pipeline reads
+// the resolved path.
 //
 // Exposed individually so the package index can re-export them as
 // `export * as models`. Consumers reach them as `models.spark` etc.
 
-import { model } from 'bongle';
+import { asset, model } from 'bongle';
 
 export const spark = model('starter:spark', {
-    src: new URL('./assets/models/spark.gltf', import.meta.url),
+    src: asset('./assets/models/spark.gltf', import.meta.url),
 });

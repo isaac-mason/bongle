@@ -39,21 +39,13 @@ export type SoundOptions = {
      *  key everywhere else. */
     name?: string;
     /**
-     * source audio (.wav/.mp3/.ogg/.flac). either:
-     *   - a string path relative to project root, or
-     *   - a URL (typically `new URL('./clip.ogg', import.meta.url)`).
-     *
-     * the URL form lets engine builtins + 3rd-party deps ship audio
-     * bundled with their modules: vite statically rewrites the
-     * `new URL(...)` call in client bundles, and the asset pipeline
-     * (running under bun) resolves the `file://` URL via fileURLToPath
-     * to a disk path ffmpeg can read.
-     *
-     * stored as a string at registration, URLs are normalized to
-     * `.href` so downstream consumers (registry hashes, codegen, the
-     * pipeline) only deal with one shape.
+     * source audio (.wav/.mp3/.ogg/.flac): either a string path relative to
+     * project root, or a module-relative `asset('./clip.ogg', import.meta.url)`
+     * ref. The `asset()` form lets engine builtins + 3rd-party deps ship audio
+     * alongside their modules — it resolves relative to the calling module
+     * wherever it's installed, and the pipeline reads the resolved path.
      */
-    src: string | URL;
+    src: string;
     /**
      * opt out of the audio atlas, ship + decode standalone. default false.
      *
@@ -185,7 +177,7 @@ export function sound<const Id extends string>(
     options: SoundOptions,
 ): Id extends keyof SoundHandleMap ? SoundHandleMap[Id] : SoundHandle {
     const long = options.long ?? false;
-    const src = options.src instanceof URL ? options.src.href : options.src;
+    const src = options.src;
     const name = options.name ?? id;
     const existing = get(registry.sounds, id);
     if (existing) {
@@ -199,11 +191,7 @@ export function sound<const Id extends string>(
         // re-hashes and fires `changed`, bumping `revision`.
         if (existing.src !== src || existing.long !== long || existing.name !== name) {
             const target = existing as Mutable<SoundHandle>;
-            // Guard: don't overwrite a barrel-resolved src with an empty string.
-            // The client build plugin strips `new URL('./clip.ogg', import.meta.url)`
-            // to "" so Vite lib mode won't inline the raw audio files; the barrel's
-            // file:// path is the correct value and should be preserved.
-            if (src !== '') target.src = src;
+            target.src = src;
             target.long = long;
             target.name = name;
             touch(registry.sounds, id);

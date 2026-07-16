@@ -54,7 +54,7 @@ export type {
     SpriteHandle,
     SpriteOptions,
 } from './core/sprites/sprites';
-export { draw, normalizeImageSource } from './core/sprites/sprites';
+export { draw } from './core/sprites/sprites';
 export type { BlockRegistry } from './core/voxels/block-registry';
 // block registry builder, pure data computation that takes the raw
 // BlockDef / BlockHandle / BlockTextureDef maps and produces the flat
