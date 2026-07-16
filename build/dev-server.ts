@@ -36,6 +36,9 @@ export type BundleWorker = (entryId: string) => Promise<string>;
 export type DevServerDeps = {
     transform: TransformModule;
     bundleWorker: BundleWorker;
+    /** map a resolved vfs path to a DOM-usable URL, for `?url` asset imports.
+     *  In the editor this is the project-fs SW URL (`/@project/<path>`). */
+    assetUrl?: (path: string) => string;
 };
 
 /** a HotPayload subset the runner accepts. */
@@ -141,6 +144,13 @@ function normalize(id: string): string {
 // bongle-plugin.ts + the WORKER_ID_PREFIX branch in fetchModule).
 const WORKER_ID_PREFIX = '\0worker:';
 
+// `?url` asset imports resolve to a synthetic id fetchModule serves as a module
+// whose default export is a DOM-usable URL for the asset (the injected
+// `assetUrl` — in the editor, the project-fs SW's `/@project/<path>`). The base
+// path is a real vfs path, so this works uniformly for `src/**` and seeded
+// `node_modules/**` assets alike.
+const ASSET_URL_PREFIX = '\0asseturl:';
+
 /** resolve a user specifier relative to its importer to an fs-relative id (or a
  *  synthetic `\0worker:` id). Extension/index + package.json `exports` handling
  *  lives in resolve.ts (a documented subset of Node resolution over the vfs);
@@ -167,6 +177,15 @@ async function resolveUncached(state: DevServerState, spec: string, importer: st
             ? ((await resolveFile(state.fs, posixJoin(importerDir, base))) ?? posixJoin(importerDir, base))
             : normalize(base);
         return `${WORKER_ID_PREFIX}${baseId}`;
+    }
+
+    // `?url` asset import — strip the query, resolve the base file, tag it.
+    if (q !== -1 && /\burl\b/.test(spec.slice(q))) {
+        const base = spec.slice(0, q);
+        const baseId = base.startsWith('.')
+            ? ((await resolveFile(state.fs, posixJoin(importerDir, base))) ?? posixJoin(importerDir, base))
+            : normalize(base);
+        return `${ASSET_URL_PREFIX}${baseId}`;
     }
 
     // relative → extension/index probe.
@@ -298,9 +317,19 @@ export async function fetchModule(
     // synthetic modules served without a normal fs read:
     //  - `\0worker:<entry>` — a `?worker` import → a self-contained WorkerWrapper
     //    module (the worker's graph is bundled by the injected bundleWorker).
+    //  - `\0asseturl:<path>` — a `?url` import → a module whose default export is
+    //    a DOM-usable URL for the asset (the injected `assetUrl`).
     //  - `*.css` — engine `import './x.css'`. Styles ship as the prebuilt
     //    bongle.css (injected by client-main); serve an empty side-effect module.
     if (id.startsWith(WORKER_ID_PREFIX)) return serveWorkerModule(state, id);
+    if (id.startsWith(ASSET_URL_PREFIX)) {
+        const path = id.slice(ASSET_URL_PREFIX.length);
+        const url = state.deps.assetUrl?.(path) ?? `/${path}`;
+        const result = await state.deps.transform(`${path}.url.js`, `export default ${JSON.stringify(url)};`, {
+            capture: false,
+        });
+        return { code: result.code, file: id, id, url: id, invalidate: false };
+    }
     if (id.endsWith('.css')) {
         const result = await state.deps.transform(`${id}.js`, '', { capture: false });
         return { code: result.code, file: id, id, url: id, invalidate: false };

@@ -6,6 +6,7 @@
 // every bare specifier externalizes and is resolved here from `externals`.
 
 import { ESModulesEvaluator, ModuleRunner, type ModuleRunnerOptions, type ModuleRunnerTransport } from 'vite/module-runner';
+import { projectUrl } from '../project-url';
 
 /** the runner's link to the dev server. */
 export type RunnerBridge = {
@@ -82,15 +83,18 @@ export function makeRunner(bridge: RunnerBridge): ModuleRunner {
         transport,
         hmr: true,
         sourcemapInterceptor: false,
-        // We own import.meta. url must be a VALID absolute URL — bundled engine
-        // chunks do `new URL(x, import.meta.url)` (worker/wasm loaders), which
-        // throws on a bare-path base. A `file://` href off the clean module id
-        // keeps it stable + unique across re-evals (the __kit capture keys module
-        // snapshots by it) while being a legal base. The runner injects
+        // We own import.meta. url is the module's own project-fs SW URL
+        // (`<origin><base>@project/<path>`), so `new URL('./x.png',
+        // import.meta.url)` — the engine's asset-ref pattern — resolves to a real,
+        // fetchable sibling URL the SW serves out of OPFS (src/** and seeded
+        // node_modules/** alike). It's a valid absolute base and stays stable +
+        // unique across re-evals (the __kit capture keys module snapshots by it).
+        // (Node builds keep real file:// urls; browser realms carry no node
+        // builtins, so nothing here needs fileURLToPath.) The runner injects
         // import.meta.hot itself.
         createImportMeta: async (modulePath: string) =>
             ({
-                url: `file:///${modulePath.replace(/^\/+/, '')}`,
+                url: new URL(projectUrl(modulePath), location.origin).href,
                 filename: modulePath,
                 // biome-ignore lint/suspicious/noExplicitAny: import.meta shape is loose.
             }) as any,

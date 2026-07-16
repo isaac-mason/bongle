@@ -16,6 +16,7 @@
 
 import { applyEdit, fetchModule, handleRunnerMessage, initDevServer, registerPusher } from '../../build';
 import type { Filesystem, FsChange } from '../fs';
+import { projectUrl } from '../project-url';
 import type { BundlerFrame } from './port-bridge';
 import { transformModule } from './transform';
 import { createBundleWorker } from './worker-bundle';
@@ -36,7 +37,12 @@ function describe(err: unknown): string {
 }
 
 export function createBundlerHost(fs: Filesystem, reportError?: (msg: string) => void): BundlerHost {
-    const devServer = initDevServer(fs, { transform: transformModule, bundleWorker: createBundleWorker(fs) });
+    const devServer = initDevServer(fs, {
+        transform: transformModule,
+        bundleWorker: createBundleWorker(fs),
+        // `?url` asset imports → the project-fs SW URL (public/sw.js serves OPFS).
+        assetUrl: (path) => projectUrl(path),
+    });
 
     // the module-runner request handler (fetchModule / getBuiltins), shared by
     // local + port-connected realms.
