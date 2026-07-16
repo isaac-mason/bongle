@@ -5,6 +5,7 @@ import {
     Animation,
     AnimatorTrait,
     addChild,
+    asset,
     cloneModel,
     findByName,
     getTrait,
@@ -18,7 +19,7 @@ import {
 
 /* SNIPPET_START: place-model */
 // declare a model from a glTF at module scope
-const ChestModel = model('chest', { src: new URL('./assets/chest.gltf', import.meta.url) });
+const ChestModel = model('chest', { src: asset('./assets/chest.gltf', import.meta.url) });
 
 system('place-chest', (ctx) => {
     onInit(ctx, () => {
@@ -50,7 +51,7 @@ system('open-chest', (ctx) => {
 /* SNIPPET_START: animate */
 // any glTF that ships clips can be animated, not just characters. bongle plays the
 // glTF's TRS tracks (node translation/rotation/scale). there is no skinning.
-const CrabModel = model('crab', { src: new URL('./assets/crab.gltf', import.meta.url) });
+const CrabModel = model('crab', { src: asset('./assets/crab.gltf', import.meta.url) });
 
 system('crab-anim', (ctx) => {
     onInit(ctx, () => {

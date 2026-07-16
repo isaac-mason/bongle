@@ -2,6 +2,7 @@
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
 import {
+    asset,
     CameraTrait,
     configureFloodFillLighting,
     ENVIRONMENT_OVERWORLD,
@@ -87,7 +88,7 @@ system(
 
 /* SNIPPET_START: particles */
 // a particle type pairs a sprite with a motion update
-const SmokeSprite = sprite('smoke', { src: new URL('./assets/smoke.png', import.meta.url) });
+const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
 const SmokeParticle = particle('smoke', {
     sprite: SmokeSprite,
     playback: 'stretch',
@@ -106,7 +107,7 @@ system('smoke-puffs', (ctx) => {
 // for effects past the presets, write your own update: it runs per live particle each
 // tick over a pooled buffer, composing the particleUpdate.* primitives and mutating
 // the particle's velocity, size, and tint directly.
-const SparkSprite = sprite('spark', { src: new URL('./assets/spark.png', import.meta.url) });
+const SparkSprite = sprite('spark', { src: asset('./assets/spark.png', import.meta.url) });
 const SparkParticle = particle('spark', {
     sprite: SparkSprite,
     playback: 'stretch', // map age across the sprite's frames over the lifetime

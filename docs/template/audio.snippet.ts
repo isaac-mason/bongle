@@ -1,11 +1,11 @@
 // Typechecked snippets for Audio.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { onInit, playOnNode, sound, system } from 'bongle';
+import { asset, onInit, playOnNode, sound, system } from 'bongle';
 
 /* SNIPPET_START: play */
 // declare a sound at module scope, then play it following a node
-const ChimeSound = sound('chime', { src: new URL('./assets/chime.ogg', import.meta.url) });
+const ChimeSound = sound('chime', { src: asset('./assets/chime.ogg', import.meta.url) });
 
 system('play-chime', (ctx) => {
     onInit(ctx, () => {

@@ -74,7 +74,7 @@ my-game/
   every build and editor session overwrites them.
 - **`assets/`** holds the raw files you reference: a `.gltf` for `model()`, a `.png`
   for `blockTexture()` or `sprite()`, an `.ogg` for `sound()`. Point a declaration's
-  `src` at one with `new URL('./assets/...', import.meta.url)`.
+  `src` at one with `asset('./assets/...', import.meta.url)`.
 - **`content/`** holds what you author in the editor, scenes saved as `.scene.json`.
   The editor regenerates `src/generated/scenes.ts` so code references them by name.
 - **`dist/`** is the output of `bongle build`: a self-contained `bundle.zip` of
@@ -750,10 +750,11 @@ declare each as a handle at module scope and point it at its source: `model(id,
 `sprite` for images. That handle is what the rest of your code and the editor
 reference.
 
-Give `src` a `new URL('./file', import.meta.url)`. The asset then co-locates with
-the module that declares it and survives bundling, which is what lets a shared pack
-ship its assets alongside its code. A plain string path relative to the project root
-also works, but prefer the URL form.
+Give `src` an `asset('./file', import.meta.url)`. The asset then co-locates with
+the module that declares it and resolves relative to that module wherever it's
+installed, which is what lets a shared pack ship its assets alongside its code. A
+plain string path relative to the project root also works, but prefer the `asset()`
+form.
 
 <Snippet source="assets.snippet.ts" select="declare" />
 

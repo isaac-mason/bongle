@@ -74,7 +74,7 @@ my-game/
   every build and editor session overwrites them.
 - **`assets/`** holds the raw files you reference: a `.gltf` for `model()`, a `.png`
   for `blockTexture()` or `sprite()`, an `.ogg` for `sound()`. Point a declaration's
-  `src` at one with `new URL('./assets/...', import.meta.url)`.
+  `src` at one with `asset('./assets/...', import.meta.url)`.
 - **`content/`** holds what you author in the editor, scenes saved as `.scene.json`.
   The editor regenerates `src/generated/scenes.ts` so code references them by name.
 - **`dist/`** is the output of `bongle build`: a self-contained `bundle.zip` of
@@ -236,7 +236,7 @@ room. So per-room state belongs on `ctx`-reachable things, a trait or the world
 itself, never in a module-scope variable, which every room in the process would
 share. Rooms get a fuller treatment in [Multiplayer](#rooms).
 
-### Nodes and the scene graph
+### Nodes and the scene tree
 
 A node is one object in the scene tree. On its own it carries almost nothing;
 what it can do comes from the traits you add. `createNode` returns a **detached**
@@ -318,7 +318,7 @@ const worldPos = getWorldPosition(transform);
 console.log(worldPos);
 ```
 
-See the [API reference](./api.md#transforms--scene-graph) for the full set of
+See the [API reference](./api.md#transforms--scene-tree) for the full set of
 transform setters and getters.
 
 ### Traits
@@ -725,7 +725,7 @@ with RPC; and managing multiple rooms.
 Most multiplayer state never needs an explicit message: give a trait field a `sync`
 and it replicates from its authoritative side to every other side automatically, on
 every change. (Replication applies only to shared-realm nodes; the
-[realm](#nodes-and-the-scene-graph) section covers the others.)
+[realm](#nodes-and-the-scene-tree) section covers the others.)
 
 When a field gets noisy, tune how often it emits with the sync's `rate`. The default
 is `'realtime'`, every change. The alternatives trade freshness for bandwidth:
@@ -919,7 +919,7 @@ script(ProjectileTrait, 'projectile', (ctx) => {
     // stamp the spawn instant in the shared server clock, on the server
     if (ctx.server) {
         onInit(ctx, () => {
-            ctx.trait.spawnTime = ctx.clock.server;
+            ctx.trait.spawnTime = ctx.clock.serverSmoothed;
         });
     }
 
@@ -927,7 +927,7 @@ script(ProjectileTrait, 'projectile', (ctx) => {
         // age in that same shared timeline. the client's clock.server is held about
         // one-way latency behind, so a server-stamped event lines up: the projectile
         // appears at the muzzle as clock.server crosses spawnTime, not already downrange.
-        const age = Math.max(0, ctx.clock.server - ctx.trait.spawnTime);
+        const age = Math.max(0, ctx.clock.serverSmoothed - ctx.trait.spawnTime);
         if (age > 5) return; // past its 5s lifetime
         // ... advance the projectile and its trail by `age` ...
     });
@@ -1189,19 +1189,20 @@ declare each as a handle at module scope and point it at its source: `model(id,
 `sprite` for images. That handle is what the rest of your code and the editor
 reference.
 
-Give `src` a `new URL('./file', import.meta.url)`. The asset then co-locates with
-the module that declares it and survives bundling, which is what lets a shared pack
-ship its assets alongside its code. A plain string path relative to the project root
-also works, but prefer the URL form.
+Give `src` an `asset('./file', import.meta.url)`. The asset then co-locates with
+the module that declares it and resolves relative to that module wherever it's
+installed, which is what lets a shared pack ship its assets alongside its code. A
+plain string path relative to the project root also works, but prefer the `asset()`
+form.
 
 ```ts
 // declare each asset once at module scope; the handle is what you reference
-// src is a `new URL('./file', import.meta.url)`, so each asset co-locates with the
-// module that declares it and survives bundling (a plain project-root path also works)
-const MascotModel = model('mascot', { src: new URL('./assets/mascot.gltf', import.meta.url) });
-const ChimeSound = sound('chime', { src: new URL('./assets/chime.ogg', import.meta.url) });
-const MarbleBlockTexture = blockTexture('marble', { src: new URL('./assets/marble.png', import.meta.url) });
-const SmokeSprite = sprite('smoke', { src: new URL('./assets/smoke.png', import.meta.url) });
+// src is `asset('./file', import.meta.url)`, so each asset co-locates with the
+// module that declares it and resolves wherever it's installed (a plain project-root path also works)
+const MascotModel = model('mascot', { src: asset('./assets/mascot.gltf', import.meta.url) });
+const ChimeSound = sound('chime', { src: asset('./assets/chime.ogg', import.meta.url) });
+const MarbleBlockTexture = blockTexture('marble', { src: asset('./assets/marble.png', import.meta.url) });
+const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
 
 // a block texture feeds a block model
 const MarbleBlock = block('guide:marble', {
@@ -1496,7 +1497,7 @@ by hand.
 
 ```ts
 // declare a model from a glTF at module scope
-const ChestModel = model('chest', { src: new URL('./assets/chest.gltf', import.meta.url) });
+const ChestModel = model('chest', { src: asset('./assets/chest.gltf', import.meta.url) });
 
 system('place-chest', (ctx) => {
     onInit(ctx, () => {
@@ -1689,7 +1690,7 @@ blending. A model's clips are reachable by name off its handle, as
 ```ts
 // any glTF that ships clips can be animated, not just characters. bongle plays the
 // glTF's TRS tracks (node translation/rotation/scale). there is no skinning.
-const CrabModel = model('crab', { src: new URL('./assets/crab.gltf', import.meta.url) });
+const CrabModel = model('crab', { src: asset('./assets/crab.gltf', import.meta.url) });
 
 system('crab-anim', (ctx) => {
     onInit(ctx, () => {
@@ -1794,7 +1795,7 @@ bundles whole presets under `particlePresets` in `bongle/starter`.
 
 ```ts
 // a particle type pairs a sprite with a motion update
-const SmokeSprite = sprite('smoke', { src: new URL('./assets/smoke.png', import.meta.url) });
+const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
 const SmokeParticle = particle('smoke', {
     sprite: SmokeSprite,
     playback: 'stretch',
@@ -1833,7 +1834,7 @@ per-particle `seed` is also readable inside the update for stable per-particle n
 // for effects past the presets, write your own update: it runs per live particle each
 // tick over a pooled buffer, composing the particleUpdate.* primitives and mutating
 // the particle's velocity, size, and tint directly.
-const SparkSprite = sprite('spark', { src: new URL('./assets/spark.png', import.meta.url) });
+const SparkSprite = sprite('spark', { src: asset('./assets/spark.png', import.meta.url) });
 const SparkParticle = particle('spark', {
     sprite: SparkSprite,
     playback: 'stretch', // map age across the sprite's frames over the lifetime
@@ -2489,7 +2490,7 @@ no-op and return `null` on the server.
 
 ```ts
 // declare a sound at module scope, then play it following a node
-const ChimeSound = sound('chime', { src: new URL('./assets/chime.ogg', import.meta.url) });
+const ChimeSound = sound('chime', { src: asset('./assets/chime.ogg', import.meta.url) });
 
 system('play-chime', (ctx) => {
     onInit(ctx, () => {

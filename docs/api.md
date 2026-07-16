@@ -8,270 +8,7 @@ examples, see [the guide](./docs.md).
 
 Create nodes, compose them with traits, and walk the tree.
 
-#### `Node`
-
-```ts
-export type Node = {
-    id: number;
-    name: string | undefined;
-    parent: Node | null;
-    children: Node[];
-    scene: Nodes | null;
-    owner: PlayerId | null;
-    persist: boolean;
-    realm: Realm;
-    _traits: Map<number, TraitBase>;
-    _sync: NodeSyncState;
-    _bitset: Bitset;
-    _unresolvedTraits: Map<string, {
-        binary?: Uint8Array;
-        json?: Record<string, unknown>;
-    }>;
-    _traitIssues: Map<number, ValidationIssue[]>;
-    prefab: PrefabConfig | null;
-    _prefabState: PrefabState | null;
-};
-```
-
-#### `Realm`
-
-```ts
-/**
- * which side(s) a node lives on. see {@link Node.realm}.
- *
- * - `'inherit'`: take the effective realm from the nearest non-inherit ancestor (default)
- * - `'shared'`: server-owned, replicated to all clients
- * - `'client'`: lives only on the client that created it; never replicated
- * - `'server'`: lives only on the server; never replicated
- * - `'each'`: server AND every client get their own independent copy on attach
- *
- * the scene graph root is always `'shared'`, so an `'inherit'` node with no
- * explicit realm anywhere in its chain resolves to `'shared'`.
- */
-export type Realm = 'inherit' | 'shared' | 'client' | 'server' | 'each';
-```
-
-#### `addChild`
-
-```ts
-/**
- * add a child node to a parent. if the child already has a parent, it is
- * removed from the old parent first. if the parent is in a scene graph, the
- * child (and its descendants) are registered in that scene graph.
- */
-export function addChild(parent: Node, child: Node): void;
-```
-
-#### `findAncestor`
-
-```ts
-/**
- * walk up the tree from `node.parent` toward the root and return the first
- * ancestor that has **all** of the given traits. returns a tuple of
- * `[...traitValues]`, or `null` if no ancestor matches. access the ancestor
- * node via any returned trait's `.node` property.
- *
- * this is an ad-hoc traversal, it is **not** reactive. call it when you
- * need to resolve inherited / contextual data from the hierarchy.
- *
- * @example
- * ```ts
- * const result = findAncestor(node, [Physics]);
- * if (result) {
- *   const [physics] = result;
- *   console.log(physics.gravity);
- *   console.log(physics.node); // the ancestor node
- * }
- * ```
- */
-export function findAncestor<const Args extends TraitHandle[]>(node: Node, traits: Args): [
-    ...traits: {
-        [K in keyof Args]: Args[K] extends TraitHandle<infer T> ? T : never;
-    }
-] | null;
-```
-
-#### `findChildByName`
-
-```ts
-/**
- * find the first descendant of `node` (depth-first) whose `name` matches `name`.
- * returns null if none found. `node` itself is not considered a match.
- *
- * useful for resolving rig joint targets in animations and similar
- * name-keyed lookups (mirrors three.js `Object3D.getObjectByName`).
- */
-export function findChildByName(node: Node, name: string): Node | null;
-```
-
-#### `findChildrenByName`
-
-```ts
-/**
- * find every descendant of `node` (depth-first) whose `name` matches `name`.
- * returns an empty array if none found. `node` itself is not considered a match.
- *
- * use when you genuinely need to handle multiple matches (e.g. counted-suffix
- * names from non-unique gltf labels). prefer `findChildByName` for unique lookups.
- */
-export function findChildrenByName(node: Node, name: string): Node[];
-```
-
-#### `getTrait`
-
-```ts
-export function getTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>): T | undefined;
-```
-
-#### `hasTrait`
-
-```ts
-export function hasTrait(node: Node, handle: TraitHandle): boolean;
-```
-
-#### `isLocalNode`
-
-```ts
-/**
- * True iff this node was created locally on the current runtime rather than
- * allocated by the server. The server allocates positive ids (and nodes
- * replicated in from the server keep their positive server id); a client
- * allocates negative ids for nodes it creates locally (see id assignment in
- * the attach path above). So on a client this is false for server-owned
- * (replicated-in) nodes and true for client-only ones, a true *origin* test,
- * unlike `isReplicable` (a realm-policy test). Use it to decide who authors a
- * node's derived content (e.g. the character rig): the server builds for its
- * nodes, a client builds only its own local ones and otherwise defers to
- * replication.
- */
-export function isLocalNode(node: Node): boolean;
-```
-
-#### `removeChild`
-
-```ts
-/**
- * remove a child from its parent. the child (and its descendants) are
- * detached from the scene graph and removed from all queries.
- */
-export function removeChild(parent: Node, child: Node): void;
-```
-
-#### `replaceChildren`
-
-```ts
-/**
- * replace all children of `root` with `node`, destroying every other child.
- * `node` must be a direct child of `root`. analogous to the DOM's
- * `replaceChildren()`, useful after eager prefab instantiation when you
- * want to keep only one sub-node and discard the rest.
- */
-export function replaceChildren(root: Node, node: Node): void;
-```
-
-#### `traverse`
-
-```ts
-/**
- * depth-first pre-order traversal of a node and all its descendants.
- *
- * the callback receives each node. return `false` to skip that node's
- * children (prune). return anything else (or nothing) to continue.
- */
-export function traverse(node: Node, callback: (node: Node) => boolean | void): void;
-```
-
-#### `cloneNode`
-
-```ts
-/**
- * clone a node and all its descendants. the returned subtree is **detached**,
- * attach with `addChild(parent, clone)` to wake it up.
- */
-export function cloneNode(node: Node): Node;
-```
-
-#### `cloneModel`
-
-```ts
-/**
- * Clone a node intended for the **visual scene**, same as `cloneNode`, plus
- * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
- * installed on the clone root. Use this for every cloneNode site that goes
- * into the visible scene; reserve `cloneNode` for non-visual subtree
- * duplication (e.g. detached prefab data).
- *
- * Typical usage:
- * ```ts
- * const instance = cloneModel(wizard.scene);
- * // or for a sub-mesh:
- * const hat = cloneModel(wizard.nodes.HatA);
- * ```
- *
- * Frustum culling is per-mesh and derived automatically by the renderer from
- * each mesh's own geometry, so there's nothing cull-related for the caller to
- * supply or maintain. If the source already has a `ModelTrait`, the existing
- * one is left in place.
- */
-export function cloneModel(node: Node): Node;
-```
-
-#### `createNode`
-
-```ts
-/**
- * create a new **detached** node, no parent, no scripts fired, not in queries.
- * attach with `addChild(parent, node)` to make it live; an id is allocated at
- * attach time (negative on the client, positive on the server).
- *
- * `realm` controls which side(s) the node lives on (default `'inherit'`, which
- * resolves to the nearest ancestor's realm, i.e. `'shared'` under the scene
- * root). Use `'server'` for server-only nodes that must never replicate, or
- * `'client'` for purely local client-side nodes.
- */
-export function createNode(options?: {
-    name?: string;
-    persist?: boolean;
-    realm?: Realm;
-}): Node;
-```
-
-#### `addTrait`
-
-```ts
-/**
- * add a trait to a node. returns the new trait instance.
- */
-export function addTrait<T extends TraitBase>(node: Node, traitHandle: TraitHandle<T>, props?: TraitProps<T>): T;
-```
-
-#### `removeTrait`
-
-```ts
-/**
- * remove a trait from a node.
- */
-export function removeTrait(node: Node, traitHandle: TraitHandle): void;
-```
-
-#### `destroyNode`
-
-```ts
-/**
- * destroy a node and detach it from the scene.
- */
-export function destroyNode(node: Node): void;
-```
-
-#### `findByName`
-
-```ts
-/**
- * depth-first search from `from` (inclusive) by node name.
- * returns the first matching node, or null if not found.
- */
-export function findByName(from: Node, name: string): Node | null;
-```
+<!-- RenderModule: module not found: api/scene-graph -->
 #### `TRANSFORM_DIRTY_WORLD_MATRIX`
 
 ```ts
@@ -331,6 +68,67 @@ export const TRANSFORM_DIRTY_ALL;
  * descendants. renderers read via getVisualWorld*, see below.
  */
 export const TransformTrait;
+```
+
+#### `NetSnapshots`
+
+```ts
+export type NetSnapshots = {
+    posTime: Float64Array;
+    pos: Float32Array;
+    posHead: number;
+    posCount: number;
+    rotTime: Float64Array;
+    rot: Float32Array;
+    rotHead: number;
+    rotCount: number;
+};
+```
+
+#### `ensureNetSnapshots`
+
+```ts
+/** lazily allocate the ring on the first remote pose. owner/local/static nodes
+ *  never call this, so they carry a null field and pay nothing. */
+export function ensureNetSnapshots(t: TransformTrait): NetSnapshots;
+```
+
+#### `pushPositionSnapshot`
+
+```ts
+/** append a position keyframe stamped at server-clock `time`. */
+export function pushPositionSnapshot(t: TransformTrait, time: number, p: Vec3): void;
+```
+
+#### `pushRotationSnapshot`
+
+```ts
+/** append a rotation keyframe stamped at server-clock `time`. */
+export function pushRotationSnapshot(t: TransformTrait, time: number, q: Quat): void;
+```
+
+#### `resetNetSnapshots`
+
+```ts
+/** collapse both rings to a single keyframe at `(pos, quat, time)`. used on a
+ *  teleport edge (and local→remote ownership handoff) so the sampler holds on the
+ *  new pose instead of interpolating across the discontinuity. */
+export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, time: number): void;
+```
+
+#### `samplePositionSnapshot`
+
+```ts
+/** sample the interpolated local position at `renderTime` into `out`. `frac > 1`
+ *  (dry buffer) extrapolates the last-known velocity, the lerp form handles it as-is. */
+export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void;
+```
+
+#### `sampleRotationSnapshot`
+
+```ts
+/** sample the interpolated local rotation at `renderTime` into `out`. */
+export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void;
 ```
 
 #### `markTransformDirty`
@@ -587,7 +385,7 @@ export function getVisualWorldScale(t: TransformTrait): Vec3;
  * (read during the tick). this just catches anything that was dirtied
  * but never read.
  */
-export function computeWorldTransforms(nodes: Nodes): void;
+export function computeWorldTransforms(nodes: SceneTree): void;
 ```
 
 #### `worldToLocalPosition`
@@ -675,7 +473,7 @@ export const WorldTrait;
 ```ts
 /** idempotent, attach WorldTrait to the scene root if it isn't already
  *  there. called from room creation on both sides, and again after
- *  `loadSceneGraph` on the server (which clears `root._traits` and
+ *  `loadSceneTree` on the server (which clears `root._traits` and
  *  repopulates from persisted data, which never includes WorldTrait
  *  because `persist: false`). */
 export function attachWorldTrait(root: Node): void;
@@ -840,11 +638,42 @@ export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void;
 
 Define traits and the schemas behind editor controls (`prop`) and network packing (`pack`).
 
+#### `dirty`
+
+```ts
+/**
+ * `dirty` policy constructors — what counts as a change worth sending. the metric
+ * variants bake their metric so it can't be mismatched with the value, and read as
+ * English at the call site: `dirty: dirty.distance(0.05)`.
+ */
+export const dirty: {
+    distance: (threshold: number) => DirtyThreshold;
+    angle: (threshold: number) => DirtyThreshold;
+    scalar: (threshold: number) => DirtyThreshold;
+    onChange: () => "onChange";
+    explicit: () => "explicit";
+};
+```
+
+#### `rate`
+
+```ts
+/**
+ * `rate` policy constructors — the maximum send cadence for a dirty value.
+ */
+export const rate: {
+    hz: (hz: number) => {
+        hz: number;
+    };
+    realtime: () => "realtime";
+};
+```
+
 #### `syncMetric`
 
 ```ts
 /**
- * change metrics for `ThresholdRate`. each receives the previously-emitted value
+ * change metrics for `DirtyThreshold`. each receives the previously-emitted value
  * and the current one (the field's own value, not bytes), returning a magnitude
  * the diff compares against the rate's `threshold`. body-agnostic: a node moved by
  * a rigid body, an AABB body, a script, or an animation all measure the same way.
@@ -856,27 +685,53 @@ export const syncMetric: {
 };
 ```
 
-#### `syncRate`
-
-```ts
-/**
- * `ThresholdRate` constructors for the common shapes, bake the metric so it can't
- * be mismatched with the value, and read as English at the call site:
- * `rate: syncRate.distance(0.05)`. for an exotic metric, write the raw
- * `{ threshold, metric }` form instead.
- */
-export const syncRate: {
-    distance: (threshold: number) => ThresholdRate;
-    angle: (threshold: number) => ThresholdRate;
-    scalar: (threshold: number) => ThresholdRate;
-};
-```
-
 #### `ControlDef`
 
 ```ts
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
+```
+
+#### `DirtyConfig`
+
+```ts
+/**
+ * DIRTINESS policy: what counts as a change worth sending. orthogonal to `rate`
+ * (how often) — nothing un-dirty ever sends, regardless of rate.
+ * - 'onChange' (default), dirty whenever the packed bytes differ.
+ * - 'explicit', never auto-dirty; only `SyncHandle.dirty()` marks it (set-once
+ *   fields whose value the byte-diff can't be trusted to catch cheaply).
+ * - DirtyThreshold, dirty only on a significant value change (movement/rotation/…).
+ */
+export type DirtyConfig = 'onChange' | 'explicit' | DirtyThreshold;
+```
+
+#### `DirtyThreshold`
+
+```ts
+/** threshold dirtiness: the value counts as changed only once `metric(previous,
+ *  current)` reaches `threshold` since the last emit. sub-threshold changes
+ *  accumulate against the last emitted value, so slow drift still reconciles.
+ *  body-agnostic, it reads the field's own value, so it works for any field and any
+ *  driver (rigid body, AABB body, script, animation). */
+export type DirtyThreshold = {
+    threshold: number;
+    metric: SyncMetric;
+};
+```
+
+#### `RateConfig`
+
+```ts
+/**
+ * RATE policy: the maximum send cadence for a dirty value. orthogonal to `dirty`.
+ * - 'realtime' (default), send every tick the value is dirty (no throttle).
+ * - { hz }, send at most `hz` times/sec — a dirty value that comes up before the
+ *   interval elapses waits, then sends its latest (Quake's snapshotMsec gate).
+ */
+export type RateConfig = 'realtime' | {
+    hz: number;
+};
 ```
 
 #### `SyncDef`
@@ -907,36 +762,9 @@ export type SyncHandle<T extends TraitBase = TraitBase> = {
 
 ```ts
 /** measures how much a sync value changed, receives the previously-emitted value
- *  and the current one, returns a magnitude compared against a `ThresholdRate`'s
- *  `threshold`. `syncMetric.{distance,angle,scalar}` cover the common shapes. */
+ *  and the current one, returns a magnitude compared against a `DirtyThreshold`'s
+ *  `threshold`. `dirty.{distance,angle,scalar}` cover the common shapes. */
 export type SyncMetric = (previous: any, current: any) => number;
-```
-
-#### `SyncRateConfig`
-
-```ts
-/**
- * sync rate category or explicit Hz cap for per-sync rate gating.
- * - 'realtime', emit whenever bytes change (no throttle)
- * - 'dirty', never auto-emit; only when SyncHandle.dirty() is called
- * - number, explicit Hz cap for the cold-path byte diff
- * - ThresholdRate, emit only on a significant value change (movement/rotation/etc.)
- */
-export type SyncRateConfig = 'realtime' | 'dirty' | number | ThresholdRate;
-```
-
-#### `ThresholdRate`
-
-```ts
-/** threshold-gated rate: re-emit only once `metric(previous, current)` reaches
- *  `threshold` since the last emit. sub-threshold changes accumulate against the
- *  last emitted value, so slow drift still reconciles. body-agnostic, it reads the
- *  field's own value, so it works for any field and any driver (rigid body, AABB
- *  body, script, animation). this replaces the old velocity-based 'movement' rate. */
-export type ThresholdRate = {
-    threshold: number;
-    metric: SyncMetric;
-};
 ```
 
 #### `TraitBase`
@@ -1177,11 +1005,11 @@ export type QueryMatches<Args extends ConditionArgs[]> = Query<ConditionArgsToCo
 ```ts
 export type ClientContext = {
     scene: Scene;
-    subject: nodes.Node | null;
-    player: nodes.Node;
-    camera: nodes.Node;
-    defaultSubject: nodes.Node | null;
-    defaultCamera: nodes.Node;
+    subject: SceneTree.Node | null;
+    player: SceneTree.Node;
+    camera: SceneTree.Node;
+    defaultSubject: SceneTree.Node | null;
+    defaultCamera: SceneTree.Node;
     domElement: HTMLCanvasElement;
     viewport: HTMLDivElement;
     touchOverlay: HTMLDivElement;
@@ -1189,6 +1017,25 @@ export type ClientContext = {
     input: Input;
     state?: EngineClient;
     room?: ClientRoom;
+};
+```
+
+#### `EditorPlayData`
+
+```ts
+/** editor viewpoint pose passed under `EDITOR_JOIN_KEY` in join data. */
+export type EditorPlayData = {
+    position: [
+        number,
+        number,
+        number
+    ];
+    quaternion: [
+        number,
+        number,
+        number,
+        number
+    ];
 };
 ```
 
@@ -1211,8 +1058,8 @@ export type ClientContext = {
  */
 export type EditRoomState = {
     id: string;
-    subject: nodes.Node;
-    camera: nodes.Node;
+    subject: SceneTree.Node;
+    camera: SceneTree.Node;
 };
 ```
 
@@ -1229,7 +1076,7 @@ export type FrameArgs = {
 ```ts
 export type JoinArgs = {
     client: ClientId;
-    playerNode: nodes.Node;
+    playerNode: SceneTree.Node;
     user: User;
     joinData: Record<string, JsonValue>;
     characterModelId: string;
@@ -1243,7 +1090,7 @@ export type JoinArgs = {
 /** args passed to onLeave callbacks */
 export type LeaveArgs = {
     client: ClientId;
-    playerNode: nodes.Node;
+    playerNode: SceneTree.Node;
 };
 ```
 
@@ -1265,8 +1112,8 @@ export type PhysicsContactArgs = {
 export type ScriptContext<T extends TraitBase = TraitBase> = {
     mode: 'edit' | 'play';
     trait: T;
-    node: nodes.Node;
-    nodes: nodes.Nodes;
+    node: SceneTree.Node;
+    nodes: SceneTree.SceneTree;
     voxels: Voxels;
     physics: Physics;
     clock: Clock;
@@ -1274,7 +1121,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     client?: ClientContext;
     server?: ServerContext;
     _instance?: ScriptInstance;
-    _runtime?: NodesContext;
+    _runtime?: SceneTreeContext;
 };
 ```
 
@@ -1314,6 +1161,18 @@ export type UpdateArgs = {
 };
 ```
 
+#### `editorPlayData`
+
+```ts
+/**
+ * read the editor viewpoint from join data, if this session was launched via
+ * the editor "play" button. returns `null` for normal joins (the key is
+ * absent), so a game can fall back to its usual spawn. games use this to offer
+ * "play from here" during development.
+ */
+export function editorPlayData(joinData: Record<string, JsonValue>): EditorPlayData | null;
+```
+
 #### `broadcast`
 
 ```ts
@@ -1323,7 +1182,7 @@ export function broadcast(ctx: ScriptContext, handle: CommandHandle<Scripts.Sche
 #### `filter`
 
 ```ts
-export function filter<const Args extends nodes.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): nodes.Node[];
+export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[];
 ```
 
 #### `first`
@@ -1339,7 +1198,7 @@ export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandl
  *  - on a client, true iff the active Player in this script's room is the node's owner.
  *  - on the server, true iff the node has no client owner (server is the implicit
  *    owner of unowned nodes, so server-driven NPCs / props tick from the server side). */
-export function isOwner(ctx: ScriptContext, node: nodes.Node): boolean;
+export function isOwner(ctx: ScriptContext, node: SceneTree.Node): boolean;
 ```
 
 #### `listen`
@@ -1394,7 +1253,7 @@ export function onDispose(ctx: ScriptContext, fn: () => void): Unsubscribe;
  * register a callback that fires when this script's node enters the scene tree.
  * fires on initial attach and on every reparent (after the new parent is set).
  */
-export function onEnter(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Unsubscribe;
+export function onEnter(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe;
 ```
 
 #### `onExit`
@@ -1404,7 +1263,7 @@ export function onEnter(ctx: ScriptContext, fn: (parent: nodes.Node) => void): U
  * register a callback that fires when this script's node exits the scene tree.
  * fires on detach and before every reparent detach.
  */
-export function onExit(ctx: ScriptContext, fn: (parent: nodes.Node) => void): Unsubscribe;
+export function onExit(ctx: ScriptContext, fn: (parent: SceneTree.Node) => void): Unsubscribe;
 ```
 
 #### `onFrame`
@@ -1544,7 +1403,7 @@ export function onUpdate(ctx: ScriptContext, fn: (args: UpdateArgs) => void): Un
  * the query is released when the script instance disposes, do not hold
  * references across `onSwap` boundaries.
  */
-export function query<const Args extends nodes.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): nodes.Query<nodes.ConditionArgsToConditions<Args>>;
+export function query<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Query<SceneTree.ConditionArgsToConditions<Args>>;
 ```
 
 #### `script`
@@ -1657,6 +1516,11 @@ export const platform: {
 
 Declare models, sounds, and sprites, and keep data-only handles alive.
 
+#### `asset`
+
+```ts
+export function asset(rel: string, base: string): string;
+```
 #### `getModel`
 
 ```ts
@@ -1777,7 +1641,7 @@ export interface SoundHandleMap {
 ```ts
 export type SoundOptions = {
     name?: string;
-    src: string | URL;
+    src: string;
     long?: boolean;
 };
 ```
@@ -2266,7 +2130,7 @@ export interface ModelHandleMap {
 ```ts
 export type ModelOptions = {
     name?: string;
-    src: string | URL;
+    src: string;
 };
 ```
 
@@ -2408,6 +2272,12 @@ export function rotateY(shape: BlockShape, steps: number): BlockShape;
 export function blockShapeToShape(shape: Exclude<BlockShape, BlockShapeCube>): crashcat.Shape;
 ```
 
+#### `SetBlockFlags`
+
+```ts
+export const SetBlockFlags;
+```
+
 #### `blockModel.quad`
 
 ```ts
@@ -2463,9 +2333,17 @@ export function box(from: Vec3, to: Vec3, textures: CubeTextures, options?: {
  * rotate an array of BlockQuad around the Y axis by `steps` × 90° CW.
  * positions rotate around block center (0.5, y, 0.5).
  * normals and cullFace directions rotate accordingly.
- * uvs are preserved, texture orientation stays the same relative to the face.
+ *
+ * uvs are preserved by default (texture orientation stays fixed relative to the
+ * face, so it spins with the geometry). pass `uvlock: true` to instead pin the
+ * top/bottom faces' texture to world axes (see lockUvsY) — this is what keeps a
+ * directional top texture (e.g. wood grain on stairs) aligned across facings.
+ * because uvlock derives ±Y uvs from world position, it applies even at steps=0
+ * so the reference facing matches the rotated ones.
  */
-export function rotateY(quads: BlockQuad[], steps: number): BlockQuad[];
+export function rotateY(quads: BlockQuad[], steps: number, options?: {
+    uvlock?: boolean;
+}): BlockQuad[];
 ```
 
 #### `blockModel.mirrorX`
@@ -3310,6 +3188,56 @@ export function resolveTextureRef(ref: TextureRef): string;
 export function propagateAllLight(voxels: Voxels): void;
 ```
 
+#### `relightChunks`
+
+```ts
+export function relightChunks(voxels: Voxels, dirty: Set<Chunk>): void;
+```
+
+#### `VoxelSweepHit`
+
+```ts
+/** result of a voxel sweep. mutated in place. */
+export type VoxelSweepHit = {
+    toi: number;
+    axis: number;
+    sign: number;
+    normalX: number;
+    normalY: number;
+    normalZ: number;
+    vx: number;
+    vy: number;
+    vz: number;
+    stateId: number;
+    subAabbIndex: number;
+    boxMinX: number;
+    boxMinY: number;
+    boxMinZ: number;
+    boxMaxX: number;
+    boxMaxY: number;
+    boxMaxZ: number;
+    overlapDepth: number;
+};
+```
+
+#### `createVoxelSweepHit`
+
+```ts
+export function createVoxelSweepHit(): VoxelSweepHit;
+```
+
+#### `sweepAabbVsVoxels`
+
+```ts
+/**
+ * sweep an AABB through the voxel grid. used by VCC and any future
+ * voxel-aware character controller.
+ *
+ * `out` is reset internally; on return, `out.axis === -1` iff no hit.
+ */
+export function sweepAabbVsVoxels(voxels: Voxels, mcX: number, mcY: number, mcZ: number, mhX: number, mhY: number, mhZ: number, dx: number, dy: number, dz: number, out: VoxelSweepHit): boolean;
+```
+
 #### `VoxelRaycastResult`
 
 ```ts
@@ -3342,7 +3270,7 @@ export function createVoxelRaycastResult(): VoxelRaycastResult;
 /**
  * cast a ray through the voxel world using DDA.
  *
- * skips empty/missing chunks via aggregate count. for cube blocks
+ * skips empty/missing chunks via nonAirCount. for cube blocks
  * (colliderId=0), the DDA step itself is the intersection test. for
  * custom collider shapes, tests against the prebuilt crashcat shape.
  *
@@ -3368,7 +3296,8 @@ export type Chunk = {
     wx: number;
     wy: number;
     wz: number;
-    aggregate: number;
+    nonAirCount: number;
+    solidCount: number;
     paletteKeys: string[];
     palette: number[];
     paletteMap: Map<string, number>;
@@ -3387,6 +3316,7 @@ export type Chunk = {
         rgb: Uint8Array;
     } | null;
     neighbors: (Chunk | null)[];
+    knownNeighbourCount: number;
 };
 ```
 
@@ -3417,8 +3347,9 @@ export type Voxels = {
  */
 export type VoxelsAuthority = {
     changes: VoxelChanges;
-    observers: Map<number, import('./block-hooks').BlockObserverEntry> | null;
+    observers: Map<number, BlockObserverEntry> | null;
     floodFillLighting: FloodFillLightingState;
+    hookDepth: number;
 };
 ```
 
@@ -3514,6 +3445,13 @@ export function blockTopCenter(out: Vec3, x: number, y: number, z: number): Vec3
 export function createChunk(cx: number, cy: number, cz: number): Chunk;
 ```
 
+#### `newNeighbors`
+
+```ts
+/** fresh 26-slot neighbor array, all null. */
+export function newNeighbors(): (Chunk | null)[];
+```
+
 #### `EMPTY_DATA`
 
 ```ts
@@ -3558,24 +3496,61 @@ export const EMPTY_LIGHT_MASK;
  * create a Chunk stub representing a chunk the server has confirmed is
  * empty (all air). `data` and `light` alias module-level singletons so the
  * stub costs ~a Chunk struct + a 1-entry palette. mesher/light skip it via
- * the existing `aggregate === 0` check; getBlock returns AIR for palette
+ * the existing `nonAirCount === 0` check; getBlock returns AIR for palette
  * index 0; neighbor links work like any other chunk.
  */
 export function createEmptyChunk(cx: number, cy: number, cz: number): Chunk;
 ```
 
+#### `NEIGHBOR_COUNT`
+
+```ts
+/** number of neighbour slots on `Chunk.neighbors` (full 3×3×3 minus self). */
+export const NEIGHBOR_COUNT;
+```
+
+#### `neighbourSlot`
+
+```ts
+/** slot index in `neighbors[]` for the neighbour at chunk-offset (dx,dy,dz),
+ *  each in [-1,1]. -1 for (0,0,0) / out of range. lets the mesher follow
+ *  neighbour pointers instead of rebuilding chunk keys. */
+export function neighbourSlot(dx: number, dy: number, dz: number): number;
+```
+
 #### `linkChunkNeighbors`
 
 ```ts
-/** wire up bidirectional neighbor refs for a chunk that was just added to voxels.chunks. */
+/** wire up bidirectional neighbor refs for a chunk that was just added to
+ *  voxels.chunks, and bump the `knownNeighbourCount` on both sides. */
 export function linkChunkNeighbors(voxels: Voxels, chunk: Chunk): void;
 ```
 
 #### `unlinkChunkNeighbors`
 
 ```ts
-/** null out neighbor refs when a chunk is about to be removed from voxels.chunks. */
+/** null out neighbor refs when a chunk is about to be removed from
+ *  voxels.chunks, decrementing each surviving neighbour's count. */
 export function unlinkChunkNeighbors(chunk: Chunk): void;
+```
+
+#### `loadChunk`
+
+```ts
+/** insert (or update in place) a chunk from already-decoded parts — the mesh
+ *  worker's mirror uses this to load chunks from a packet. a new chunk aliases
+ *  the shared empty arrays then takes the given data/light/palette and links
+ *  into the neighbour graph; an existing chunk is updated in place so its links
+ *  survive. does NOT touch columns/dirty/light-seeding (this is a raw mirror
+ *  load, not an authored/streamed edit). */
+export function loadChunk(voxels: Voxels, cx: number, cy: number, cz: number, version: number, data: Uint16Array, light: Uint16Array, palette: number[]): Chunk;
+```
+
+#### `removeChunk`
+
+```ts
+/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph. */
+export function removeChunk(voxels: Voxels, cx: number, cy: number, cz: number): void;
 ```
 
 #### `getChunkBlock`
@@ -3600,15 +3575,53 @@ export function getChunkBlock(chunk: Chunk, x: number, y: number, z: number): nu
 export function getChunkBlockKey(chunk: Chunk, x: number, y: number, z: number): string;
 ```
 
+#### `ensureChunkPaletteSlot`
+
+```ts
+/** get-or-allocate the chunk-local palette index for a block key. tier-1
+ *  callers grab a slot once, then write `chunkData(chunk)[idx] = slot` directly. */
+export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: BlockRegistry): number;
+```
+
+#### `chunkData`
+
+```ts
+/** the chunk's writable voxel-data array, COWing out of the shared EMPTY_DATA
+ *  stub first so a direct write can't corrupt the singleton. for tier-1 raw
+ *  fills: grab this, write/`.fill()` slots into it, then call invalidateChunk. */
+export function chunkData(chunk: Chunk): Uint16Array;
+```
+
 #### `setChunkBlock`
 
 ```ts
 /**
- * set a block at a local position within a chunk using a string key.
- * the registry is used to resolve the key to a runtime numeric id.
- * no bounds checking, caller must ensure 0 <= x,y,z < CHUNK_SIZE.
+ * set a block at a chunk-local position — the meat of a voxel write. resolves
+ * the palette slot, writes the cell, maintains nonAir/solid counts + mesh gen,
+ * registers the chunk mesh-dirty, and (when `voxels` is authoritative) records
+ * the op and routes lighting by flag:
+ *   DEFAULT → per-block incremental (pendingLight) + inline hook drain
+ *   BULK    → whole-chunk relight (staleLightChunks) + skip inline hooks
+ * All authority-side work no-ops when `voxels.authority` is null (client mirror,
+ * bare test fixtures) — those get just the data + palette + counts.
+ *
+ * `setBlock` is a thin wrapper over this that resolves world coords → chunk.
+ * no bounds checking, caller ensures 0 <= x,y,z < CHUNK_SIZE.
  */
-export function setChunkBlock(chunk: Chunk, x: number, y: number, z: number, key: string, registry: BlockRegistry): void;
+export function setChunkBlock(voxels: Voxels, chunk: Chunk, x: number, y: number, z: number, key: string, flags: number = SetBlockFlags.DEFAULT): void;
+```
+
+#### `invalidateChunk`
+
+```ts
+/**
+ * reconcile a chunk after tier-1 raw writes into `chunkData(chunk)`: rescans
+ * nonAir/solid counts from the data + palette, marks the chunk mesh-dirty and
+ * schedules its light (a tick-end whole-chunk relight, or an inline flat seed
+ * when flood-fill is disabled). No ops, no hooks — the raw-write path trades
+ * those away for speed. no-op past the rescan when `voxels.authority` is null.
+ */
+export function invalidateChunk(voxels: Voxels, chunk: Chunk): void;
 ```
 
 #### `setLight`
@@ -3699,20 +3712,27 @@ export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
 #### `VoxelChanges`
 
 ```ts
+/**
+ * per-tick accumulator of authoritative voxel mutations, grouped by the
+ * consumer that drains each part:
+ *   - `ops`         → block-hooks (settle, inline per write) + discovery (network)
+ *   - `addedChunks` → discovery (streaming)
+ *   - `light`       → flushPendingLight (relight)
+ */
 export type VoxelChanges = {
     ops: VoxelOp[];
-    lightEpoch: number;
-    pendingLight: Array<{
-        wx: number;
-        wy: number;
-        wz: number;
-        oldStateId: number;
-    }>;
-    pendingNewChunks: Chunk[];
     addedChunks: Set<Chunk>;
-    notifyNeighboursCursor: number;
-    fireEventsCursor: number;
-    _draining: boolean;
+    light: {
+        blocks: Array<{
+            wx: number;
+            wy: number;
+            wz: number;
+            oldStateId: number;
+        }>;
+        chunks: Set<Chunk>;
+        newChunks: Chunk[];
+        epoch: number;
+    };
 };
 ```
 
@@ -3725,14 +3745,12 @@ export function createVoxelChanges(): VoxelChanges;
 #### `clearVoxelChanges`
 
 ```ts
-/** clear ops after flush. lightEpoch is NOT cleared, it's monotonic. */
+/**
+ * clear the network per-tick state after end-of-tick dispatch. the `light`
+ * queues are cleared by their own consumer (flushPendingLight, which runs
+ * earlier in the tick); `light.epoch` is monotonic and never cleared.
+ */
 export function clearVoxelChanges(changes: VoxelChanges): void;
-```
-
-#### `_registerBlockHooksDriver`
-
-```ts
-export function _registerBlockHooksDriver(fn: (voxels: Voxels, mask: number) => void): void;
 ```
 
 #### `FloodFillLightingState`
@@ -3841,13 +3859,11 @@ export function forEachBlock(voxels: Voxels, cb: (wx: number, wy: number, wz: nu
 /**
  * set a block at a world position. creates the chunk if it doesn't exist.
  *
- * `flags` controls which hook passes fire inline before this call returns,
- * default is gameplay-coherent (`SetBlockFlags.DEFAULT` = NOTIFY_NEIGHBOURS
- * + FIRE_EVENTS), so a place-then-read sees settled state. bulk paths
- * (editor command drain, worldgen, prefab paste) should pass
- * `SetBlockFlags.BULK` and drain explicitly via runNeighbourRecompute or
- * runBlockEventHooks once at the end. inline drains from inside a hook
- * handler are guarded against re-entry, see block-hooks.runBlockHooks.
+ * every write settles its block-def hooks (onNeighbourUpdate/onNeighbourChanged)
+ * inline before returning, so a place-then-read sees settled state. `flags`
+ * only controls script observers: `DEFAULT` fires them, `BULK` (worldgen, paste,
+ * editor brush) does not. chained setBlocks from inside a hook are guarded
+ * against re-entry, see block-hooks.runBlockHooks.
  */
 export function setBlock(voxels: Voxels, wx: number, wy: number, wz: number, key: string, flags: number = SetBlockFlags.DEFAULT): void;
 ```
@@ -3920,7 +3936,7 @@ export const CameraTrait;
  *
  * server-side, ctx.client is undefined and this returns null.
  */
-export function getCamera(ctx: ScriptContext): nodes.Node | null;
+export function getCamera(ctx: ScriptContext): sceneTree.Node | null;
 ```
 
 #### `getSubject`
@@ -3937,7 +3953,7 @@ export function getCamera(ctx: ScriptContext): nodes.Node | null;
  * is observed everywhere without re-seating. server-side, ctx.client is
  * undefined and this returns null (server scripts shouldn't gate on POV).
  */
-export function getSubject(ctx: ScriptContext): nodes.Node | null;
+export function getSubject(ctx: ScriptContext): sceneTree.Node | null;
 ```
 
 #### `setCamera`
@@ -3948,7 +3964,7 @@ export function getSubject(ctx: ScriptContext): nodes.Node | null;
  * client state (`ctx.client.camera`), observed by the renderer and every
  * script without re-seating. client-only: a no-op on the server.
  */
-export function setCamera(ctx: ScriptContext, node: nodes.Node): void;
+export function setCamera(ctx: ScriptContext, node: sceneTree.Node): void;
 ```
 
 #### `setSubject`
@@ -3960,7 +3976,7 @@ export function setCamera(ctx: ScriptContext, node: nodes.Node): void;
  * changes what this client controls/sees, never ownership or the server-side
  * streaming anchor (that stays the player node).
  */
-export function setSubject(ctx: ScriptContext, node: nodes.Node | null): void;
+export function setSubject(ctx: ScriptContext, node: sceneTree.Node | null): void;
 ```
 #### `configureFloodFillLighting`
 
@@ -4702,7 +4718,7 @@ export type Animations = {
 #### `Animation.init`
 
 ```ts
-export function init(nodes: Nodes): Animations;
+export function init(sceneTree: SceneTree): Animations;
 ```
 
 #### `Animation.tick`
@@ -4991,7 +5007,7 @@ The player, fly, and orbit controller traits.
  * ephemeral, created at Player join time.
  *
  * playerId/client/userId/username are server-set runtime state. they're
- * replicated as 'dirty' syncs (no editor exposure, no auto byte-diff).
+ * replicated as explicit-dirty syncs (no editor exposure, no auto byte-diff).
  * server code that mutates them must call <field>Sync.dirty(t).
  */
 export const PlayerTrait;
@@ -5068,19 +5084,6 @@ export type ControlsConfig = {
  * when nothing's mounted.
  */
 export const PlayerControllerTouchIds;
-```
-
-#### `CrosshairConfig`
-
-```ts
-export type CrosshairConfig = {
-    enabled: boolean;
-    spread: number;
-    length: number;
-    thickness: number;
-    color: string;
-    lerpSpeed: number;
-};
 ```
 
 #### `PlayerControllerTrait`
@@ -5290,7 +5293,11 @@ export function groundShortcut(walkable: Walkable = groundWalkable()): Shortcut;
 /** breadth-first expansion of every cell reachable from `start` under the successor
  *  `actions`. `start` is included; order is roughly nearest-first. flood-fill is
  *  otherwise unbounded, so `maxIterations` caps cells expanded (the same work budget
- *  `findPath` takes); the result includes the frontier discovered up to that bound. */
+ *  `findPath` takes); the result includes the frontier discovered up to that bound.
+ *
+ *  the returned array ALIASES a reused pool — it (and its cells) are valid only until
+ *  the next `floodFill` call. read or copy what you need out before then; clone any
+ *  cell you intend to retain (`[c[0], c[1], c[2]]`). */
 export function floodFill(voxels: Voxels, start: Vec3, actions: Actions, maxIterations: number): Vec3[];
 ```
 
@@ -5341,6 +5348,7 @@ export type Input = {
     mouseKeyboard: MouseKeyboardInput;
     touch: TouchInput;
     _lockWanted: boolean;
+    _lockDeclared: boolean;
 };
 ```
 
@@ -5388,6 +5396,8 @@ export type MouseKeyboardInput = {
         middle: MouseButtonGesture;
         right: MouseButtonGesture;
     };
+    _locked: boolean;
+    _prevLocked: boolean;
 };
 ```
 
@@ -5481,25 +5491,25 @@ export function isJoystickJustReleased(t: TouchInput, id: string): boolean;
 #### `isKeyDown`
 
 ```ts
-export function isKeyDown(mk: MouseKeyboardInput, code: string): boolean;
+export function isKeyDown(mouseKeyboard: MouseKeyboardInput, code: string): boolean;
 ```
 
 #### `isKeyJustDown`
 
 ```ts
-export function isKeyJustDown(mk: MouseKeyboardInput, code: string): boolean;
+export function isKeyJustDown(mouseKeyboard: MouseKeyboardInput, code: string): boolean;
 ```
 
 #### `isKeyJustUp`
 
 ```ts
-export function isKeyJustUp(mk: MouseKeyboardInput, code: string): boolean;
+export function isKeyJustUp(mouseKeyboard: MouseKeyboardInput, code: string): boolean;
 ```
 
 #### `isMouseDown`
 
 ```ts
-export function isMouseDown(mk: MouseKeyboardInput, button: MouseButton): boolean;
+export function isMouseDown(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
 ```
 
 #### `isMouseDragStart`
@@ -5511,19 +5521,33 @@ export function isMouseDown(mk: MouseKeyboardInput, button: MouseButton): boolea
  * commit to a drag gesture (e.g. fly-look pointer-lock), so a quick
  * click doesn't trigger them.
  */
-export function isMouseDragStart(mk: MouseKeyboardInput, button: MouseButton): boolean;
+export function isMouseDragStart(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
 ```
 
 #### `isMouseJustDown`
 
 ```ts
-export function isMouseJustDown(mk: MouseKeyboardInput, button: MouseButton): boolean;
+export function isMouseJustDown(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
+```
+
+#### `isMouseJustLocked`
+
+```ts
+/** Fires for one frame the moment the pointer becomes locked (unlocked → locked). */
+export function isMouseJustLocked(mouseKeyboard: MouseKeyboardInput): boolean;
 ```
 
 #### `isMouseJustUp`
 
 ```ts
-export function isMouseJustUp(mk: MouseKeyboardInput, button: MouseButton): boolean;
+export function isMouseJustUp(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
+```
+
+#### `isMouseLocked`
+
+```ts
+/** Is the pointer locked this frame? (mouse-look / cursor captured.) */
+export function isMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean;
 ```
 
 #### `isMouseTap`
@@ -5534,7 +5558,7 @@ export function isMouseJustUp(mk: MouseKeyboardInput, button: MouseButton): bool
  * drag threshold. use for click commit actions (e.g. block placement)
  * so a drag release doesn't double as a tap.
  */
-export function isMouseTap(mk: MouseKeyboardInput, button: MouseButton): boolean;
+export function isMouseTap(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
 ```
 
 #### `isTouchButtonDown`
@@ -5553,6 +5577,13 @@ export function isTouchButtonJustDown(t: TouchInput, id: string): boolean;
 
 ```ts
 export function isTouchButtonJustUp(t: TouchInput, id: string): boolean;
+```
+
+#### `wasMouseLocked`
+
+```ts
+/** Was the pointer locked last frame? Pair with `isMouseLocked` for edge logic. */
+export function wasMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean;
 ```
 #### `isTouchDevice`
 
@@ -5578,17 +5609,21 @@ export function isTouchPrimary(ctx: ScriptContext): boolean;
 #### `isMobileViewport`
 
 ```ts
-/** viewport width below the 768px breakpoint. */
+/** viewport width below the 768px breakpoint. FRAGILE on its own — a phone whose
+ *  host page renders desktop-style reports ~980px here — so `isMobile` only uses it
+ *  as an extra catch on top of the robust device signal, never as the sole check. */
 export function isMobileViewport(): boolean;
 ```
 
 #### `isMobile`
 
 ```ts
-/** isTouchDevice() && isMobileViewport(). A small touch SCREEN, use this to
- *  pick a compact/phone HUD LAYOUT. For gating touch CONTROLS (joystick, action
- *  buttons) use `isTouchPrimary` instead: this is false on a tablet or a phone
- *  in landscape (viewport ≥ breakpoint), where you still want the controls. */
+/** A phone-class device — the "use a compact/phone HUD LAYOUT" check. Reads the
+ *  robust, viewport-independent device probe (Client Hints / UA), so it holds on a
+ *  real phone even when the host page (e.g. the editor) renders desktop-width; the
+ *  narrow-viewport check is only an extra catch (small window / split-screen). For
+ *  gating touch CONTROLS (joystick, action buttons) use `isTouchPrimary`, which is
+ *  also true on tablets. */
 export function isMobile(ctx: ScriptContext): boolean;
 ```
 #### `createTouchJoystick`
@@ -5933,14 +5968,17 @@ export function matchmaking(opts: MatchmakingOptions = {
 
 ```ts
 /**
- * Create a new room from a scene id.
+ * Create a new room.
  *
- * Server: allocates a server room in the caller's namespace. Returns the
- * new roomId.
+ * With `o.sceneId`: boots from that scene's content. Without it: boots EMPTY —
+ * just the root node + empty voxels, no content file — for the caller to author
+ * itself, e.g. a procedurally generated world written via `setBlock`.
  *
- * Client: creates a local-only ClientRoom from a scene() handle (Phase 8).
+ * Server: allocates a server room in the caller's namespace. Returns the new
+ * roomId. Client: creates a local-only ClientRoom.
  */
-export function create(ctx: ScriptContext, sceneId: string, o?: {
+export function create(ctx: ScriptContext, o?: {
+    sceneId?: string;
     mode?: PlayerMode;
     sourceRoomId?: string;
 }): string;
@@ -6146,6 +6184,20 @@ export function onMessage(ctx: ScriptContext, fn: MessageHandler): () => void;
  * chat.message(ctx, `[#55ffff][b]Alice[/] [#aaaaaa]slew[/] [#ff5555][b]Bob[/]`);
  */
 export function message(ctx: ScriptContext, text: string): void;
+```
+
+#### `chat.setEnabled`
+
+```ts
+/**
+ * enable or disable chat for the calling script's room. state lives on the
+ * room's chat (per-room, not global), so call it from a script with ctx. on the
+ * client it hides the chat UI; on the server it stops chat propagation (inbound
+ * lines and outbound broadcasts are dropped). a shared script hits both sides.
+ * default is enabled; apps that embed the engine as a pure display surface
+ * call `chat.setEnabled(ctx, false)`.
+ */
+export function setEnabled(ctx: ScriptContext, enabled: boolean): void;
 ```
 
 #### `chat.argType`

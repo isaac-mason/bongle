@@ -1,16 +1,16 @@
 // Typechecked snippets for Assets.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { block, blockTexture, draw, model, sound, sprite, use } from 'bongle';
+import { asset, block, blockTexture, draw, model, sound, sprite, use } from 'bongle';
 
 /* SNIPPET_START: declare */
 // declare each asset once at module scope; the handle is what you reference
-// src is a `new URL('./file', import.meta.url)`, so each asset co-locates with the
-// module that declares it and survives bundling (a plain project-root path also works)
-const MascotModel = model('mascot', { src: new URL('./assets/mascot.gltf', import.meta.url) });
-const ChimeSound = sound('chime', { src: new URL('./assets/chime.ogg', import.meta.url) });
-const MarbleBlockTexture = blockTexture('marble', { src: new URL('./assets/marble.png', import.meta.url) });
-const SmokeSprite = sprite('smoke', { src: new URL('./assets/smoke.png', import.meta.url) });
+// src is `asset('./file', import.meta.url)`, so each asset co-locates with the
+// module that declares it and resolves wherever it's installed (a plain project-root path also works)
+const MascotModel = model('mascot', { src: asset('./assets/mascot.gltf', import.meta.url) });
+const ChimeSound = sound('chime', { src: asset('./assets/chime.ogg', import.meta.url) });
+const MarbleBlockTexture = blockTexture('marble', { src: asset('./assets/marble.png', import.meta.url) });
+const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });
 
 // a block texture feeds a block model
 const MarbleBlock = block('guide:marble', {

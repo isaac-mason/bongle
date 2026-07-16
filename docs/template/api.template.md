@@ -44,6 +44,7 @@ Tagged logging and the build-time `env` / `platform` flags.
 
 Declare models, sounds, and sprites, and keep data-only handles alive.
 
+<RenderModule select="api/asset" />
 <RenderModule select="api/models" />
 <RenderModule select="api/sounds" />
 <RenderModule select="api/sprites" />
