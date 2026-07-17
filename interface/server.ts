@@ -26,7 +26,7 @@ export type StorageListOpts = {
 };
 
 export type StorageServerDriver = {
-    game: {
+    project: {
         get(key: string): Promise<StorageEntry | null>;
         set(
             key: string,

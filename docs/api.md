@@ -1494,7 +1494,7 @@ export const env: {
 /**
  * Game-facing bridge to the active host portal (CrazyGames / Poki / none).
  * Client-only. The transport lives on the ClientDriver supplied at engine init,
- * this just hands off to it. Standalone / kit-dev hosts wire these to an
+ * this just hands off to it. Standalone / bongle-dev hosts wire these to an
  * inert impl, so a game can call them unconditionally regardless of where it's
  * running.
  *
@@ -1661,7 +1661,7 @@ export type SoundOptions = {
  * const Ambient  = sound('ambient', { src: 'audio/ambient.ogg', long: true });
  * ```
  *
- * The kit's asset pipeline reads `soundsRegistry` on every flush and
+ * The bongle asset pipeline reads `soundsRegistry` on every flush and
  * builds the atlas (long:false bucket) + standalone files (long:true
  * bucket) into `resources/client/`, then codegens per-id sidecars +
  * barrel under `src/generated/sounds*`. Playback is via the script APIs
@@ -5812,11 +5812,11 @@ export const UILayer;
 
 Server-only key-value stores.
 
-#### `gameStorage`
+#### `projectStorage`
 
 ```ts
-/** Game-scoped KV, shared across every room and player of this game. */
-export const gameStorage: {
+/** Project-scoped KV, shared across every room and player of this project. */
+export const projectStorage: {
     get(ctx: ScriptContext, key: string): Promise<StorageEntry | null>;
     set(ctx: ScriptContext, key: string, value: JsonValue, opts?: {
         ifVersion?: string;
@@ -5832,7 +5832,7 @@ export const gameStorage: {
 
 ```ts
 /**
- * Per-(game, user) KV, private to one player within this game. `userId`
+ * Per-(project, user) KV, private to one player within this project. `userId`
  * is the durable platform identity (`User.id`). Resolve it from a
  * `Client` via `clientToUser(ctx, client).id`.
  */

@@ -2,7 +2,7 @@
 // cli/realms/client/edit-client.ts — the browser EDIT client for `bongle dev`.
 // Runs the game client in mode:'edit' — the in-game scene + voxel editing tools
 // (EngineEditor.setup mounts the edit UI). Your IDE is the code editor; this is the
-// in-game editor. Served by the Vite `client` env; dials the edit server over /game.
+// in-project editor. Served by the Vite `client` env; dials the edit server over /game.
 //
 // (Play-from-source lives in play-client.ts, reserved for `bongle start`/preview.)
 

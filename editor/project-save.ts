@@ -1,11 +1,11 @@
-// editor/game-save.ts — export/import a project's SOURCE SET as a zip.
+// editor/project-save.ts — export/import a project's SOURCE SET as a zip.
 //
-// A "game save" is the project's authored source, NOT its derived outputs. It's
+// A "project save" is the project's authored source, NOT its derived outputs. It's
 // the same source contract the platform persists (later, over postMessage) and
 // the input to a build. Everything the pipeline bakes or the editor seeds is
 // reconstructable, so it's excluded: node_modules (seeded engine dist + libs),
 // dist (build output), .bongle / tmp (transient), src/generated + resources
-// (pipeline bake outputs). Mirrors a game project's .gitignore.
+// (pipeline bake outputs). Mirrors a project's .gitignore.
 //
 // Zipped with STORE (level 0): saves are mostly already-compressed assets, so
 // deflate buys ~nothing for real time (measured elsewhere: ratio ~0.98).
@@ -21,12 +21,12 @@ function isDerived(path: FsPath): boolean {
     return DERIVED.some((d) => path === d || path.startsWith(`${d}/`));
 }
 
-/** true when `path` is authored source (belongs in a game save). */
+/** true when `path` is authored source (belongs in a project save). */
 export function isSourcePath(path: FsPath): boolean {
     return !isDerived(path);
 }
 
-/** Server-enforced per-save cap (mirrors the game_version.size_bytes CHECK). */
+/** Server-enforced per-save cap (mirrors the project_version.size_bytes CHECK). */
 export const SAVE_MAX_BYTES = 20 * 1024 * 1024;
 /** Warn threshold (~80% of the cap) — surfaced before the hard limit. */
 export const SAVE_WARN_BYTES = 16 * 1024 * 1024;
@@ -46,7 +46,7 @@ export async function saveSizeBytes(fs: Filesystem): Promise<number> {
 }
 
 /** zip the project's source set (derived trees excluded). */
-export async function exportGameSave(fs: Filesystem): Promise<Uint8Array> {
+export async function exportProjectSave(fs: Filesystem): Promise<Uint8Array> {
     const files = await fs.list('', { recursive: true });
     const entries: Record<string, Uint8Array> = {};
     for (const f of files) {
@@ -60,7 +60,7 @@ export async function exportGameSave(fs: Filesystem): Promise<Uint8Array> {
  *  source + bake caches (keeps node_modules — the seeded engine dist is
  *  re-seed-skipped on reload), then writes the save's files. The caller reloads
  *  so every realm reboots against the new source (re-seed skips, re-bake runs). */
-export async function importGameSave(fs: Filesystem, zip: Uint8Array): Promise<void> {
+export async function importProjectSave(fs: Filesystem, zip: Uint8Array): Promise<void> {
     const incoming = unzipSync(zip);
 
     // wipe existing project files EXCEPT the seeded engine dist under
@@ -88,12 +88,12 @@ async function projectName(fs: Filesystem): Promise<string> {
     } catch {
         /* no/invalid package.json */
     }
-    return 'game-save';
+    return 'project-save';
 }
 
 /** build the save zip and trigger a browser download. */
-export async function downloadGameSave(fs: Filesystem): Promise<void> {
-    const zip = await exportGameSave(fs);
+export async function downloadProjectSave(fs: Filesystem): Promise<void> {
+    const zip = await exportProjectSave(fs);
     const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
     const a = document.createElement('a');
     a.href = url;
@@ -103,14 +103,14 @@ export async function downloadGameSave(fs: Filesystem): Promise<void> {
 }
 
 /** prompt for a .zip, import it over the project, then reload the editor. */
-export function pickAndImportGameSave(fs: Filesystem): void {
+export function pickAndImportProjectSave(fs: Filesystem): void {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.zip,application/zip';
     input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
-        await importGameSave(fs, new Uint8Array(await file.arrayBuffer()));
+        await importProjectSave(fs, new Uint8Array(await file.arrayBuffer()));
         location.reload();
     };
     input.click();

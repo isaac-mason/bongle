@@ -5,7 +5,7 @@
 import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'bongle/icons';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Filesystem } from '../../fs';
-import { pickAndImportGameSave } from '../../game-save';
+import { pickAndImportProjectSave } from '../../project-save';
 import { runBuild, runSave } from '../../platform/actions';
 import { usePlatform } from '../../stores/platform';
 import { useClients } from '../../stores/clients';
@@ -164,26 +164,26 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     // the save/build actions; standalone gets the footer download dev-tools.
     const embedded = usePlatform((s) => s.embedded);
 
-    // game saves: download the source set as a zip / load one back / build — the
+    // project saves: download the source set as a zip / load one back / build — the
     // standalone dev tools (embedded routes these through the platform window).
     const saveFooter: TaskbarItem[] = embedded
         ? []
         : [
         {
             id: 'save-download',
-            title: 'download game save (.zip)',
+            title: 'download project save (.zip)',
             glyph: <Download size={18} />,
             running: false,
             onClick: () => void runSave(fs),
-            menu: [{ label: 'Download game save (.zip)', onClick: () => void runSave(fs) }],
+            menu: [{ label: 'Download project save (.zip)', onClick: () => void runSave(fs) }],
         },
         {
             id: 'save-load',
-            title: 'load game save (.zip) — replaces project + reloads',
+            title: 'load project save (.zip), replaces project + reloads',
             glyph: <Upload size={18} />,
             running: false,
-            onClick: () => pickAndImportGameSave(fs),
-            menu: [{ label: 'Load game save (.zip)…', onClick: () => pickAndImportGameSave(fs) }],
+            onClick: () => pickAndImportProjectSave(fs),
+            menu: [{ label: 'Load project save (.zip)…', onClick: () => pickAndImportProjectSave(fs) }],
         },
         {
             id: 'build',

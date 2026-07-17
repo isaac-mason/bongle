@@ -41,7 +41,7 @@ export * from './api/scenes';
 export * from './api/scripts';
 export * from './api/sounds';
 export * from './api/sprites';
-export { gameStorage, userStorage } from './api/storage';
+export { projectStorage, userStorage } from './api/storage';
 export * from './api/subject';
 export * from './api/touch-controls';
 export * from './api/traits';

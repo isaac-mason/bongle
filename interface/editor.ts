@@ -36,12 +36,12 @@ export function editorInterfaceCompatible(a: string | undefined, b: string | und
 /** what the platform mounted the editor to do. */
 export type PlatformIntent =
     | {
-          kind: 'game';
-          /** the game-save source zip to open into OPFS (absent = new/empty project). */
+          kind: 'project';
+          /** the project-save source zip to open into OPFS (absent = new/empty project). */
           save?: Uint8Array;
           /** a project file to open in the code editor on boot. */
           openPath?: string;
-          /** our account avatar's glb URL, so we play/edit the game as ourselves
+          /** our account avatar's glb URL, so we play/edit the project as ourselves
            *  (the local player wears it). Absent → a random sample avatar. */
           avatarUrl?: string;
       }
@@ -71,11 +71,11 @@ export type EditorMessage =
     /** editor booted + listening. `version` is EDITOR_INTERFACE_VERSION of the
      *  editor bundle (optional until every live bundle announces it). */
     | { type: 'bongle:ready'; version?: string }
-    /** hand back the game-save source zip for the platform to persist. */
+    /** hand back the project-save source zip for the platform to persist. */
     | { type: 'bongle:save'; payload: Uint8Array }
-    /** hand back the built game-build bundle.zip for the platform to upload.
+    /** hand back the built project-build bundle.zip for the platform to upload.
      *  `source` is the project source zip (same as bongle:save) so the platform
-     *  can snapshot it as a game_version + record the build's provenance. */
+     *  can snapshot it as a project_version + record the build's provenance. */
     | { type: 'bongle:build'; payload: Uint8Array; source?: Uint8Array }
     /** hand back the exported avatar (compiled .glb + .bbmodel source) for the
      *  platform to upload (editor-initiated from the "editing X" window). */

@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
-import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../game-save';
+import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
 import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/actions';
 import { useMultiplayer } from '../../stores/multiplayer';
 import { usePlatform } from '../../stores/platform';
@@ -44,7 +44,7 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
     }, [embedded, register]);
 
     if (!embedded || !intent) return null;
-    const label = intent.kind === 'avatar' ? (intent.name ?? 'avatar') : 'game';
+    const label = intent.kind === 'avatar' ? (intent.name ?? 'avatar') : 'project';
 
     return (
         // no onClose → the X minimizes (reopen from the taskbar) rather than destroys.

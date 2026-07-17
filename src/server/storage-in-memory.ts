@@ -46,7 +46,7 @@ function listFromMap(map: Map<string, Row>, opts: StorageListOpts | undefined): 
 }
 
 export function createInMemoryStorageDriver(): ServerDriver['storage'] {
-    const game = new Map<string, Row>();
+    const project = new Map<string, Row>();
     // user storage keyed by userId so cross-user listing is constrained
     // to one Map per user (matches the service's per-user PK).
     const userByUserId = new Map<string, Map<string, Row>>();
@@ -80,19 +80,19 @@ export function createInMemoryStorageDriver(): ServerDriver['storage'] {
     }
 
     return {
-        game: {
+        project: {
             async get(key: string): Promise<StorageEntry | null> {
-                const row = game.get(key);
+                const row = project.get(key);
                 return row ? { value: row.value, version: row.version } : null;
             },
             async set(key, value, opts) {
-                return setOn(game, key, value, opts?.ifVersion);
+                return setOn(project, key, value, opts?.ifVersion);
             },
             async delete(key, opts) {
-                return deleteOn(game, key, opts?.ifVersion);
+                return deleteOn(project, key, opts?.ifVersion);
             },
             async list(opts) {
-                return listFromMap(game, opts);
+                return listFromMap(project, opts);
             },
         },
         user: {

@@ -11,7 +11,7 @@ import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
-import { importGameSave } from './game-save';
+import { importProjectSave } from './project-save';
 import { joinGuestSession } from './net/guest-session';
 import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
 import { createPlatformBridge } from './platform/bridge';
@@ -118,19 +118,19 @@ async function boot(): Promise<void> {
         // rig, and the first save fires an fs-change → server.reloadAvatar swaps in
         // the compiled glb live (no re-join).
         localAvatarUrl = 'file:///avatar.glb';
-    } else if (intent?.kind === 'game') {
+    } else if (intent?.kind === 'project') {
         // a platform-supplied save replaces the project source before boot.
-        if (intent.save) await importGameSave(editor.fs, intent.save);
-        localAvatarUrl = intent.avatarUrl; // play/edit the game as ourselves
+        if (intent.save) await importProjectSave(editor.fs, intent.save);
+        localAvatarUrl = intent.avatarUrl; // play/edit the project as ourselves
     }
 
     // OPFS is the persistent source of truth: seed the starter project ONLY on a
-    // fresh project (no src/index.ts), so edits + loaded game saves survive a
+    // fresh project (no src/index.ts), so edits + loaded project saves survive a
     // reload instead of being clobbered by the sample every boot.
     if (!(await editor.fs.exists('src/index.ts'))) {
         // project metadata lives under a `bongle` key in package.json (idiomatic
         // npm-project home; a placeholder for name/engineVersion/etc. as we settle
-        // what the build + platform actually need). Rides the game save as source.
+        // what the build + platform actually need). Rides the project save as source.
         await editor.fs.write(
             'package.json',
             `${JSON.stringify({ name: 'dev-sample', private: true, bongle: { engineVersion: '0.0.0' } }, null, 2)}\n`,
@@ -139,7 +139,7 @@ async function boot(): Promise<void> {
     }
     // empty barrel so realms can import it before the first bake writes it (the
     // bake patches model/… handles with baked bin paths, mirroring the build). Not
-    // part of a game save (derived) — ensure it exists on every boot.
+    // part of a project save (derived), ensure it exists on every boot.
     if (!(await editor.fs.exists('src/generated/models.ts'))) {
         await editor.fs.write('src/generated/models.ts', 'export {};\n');
     }

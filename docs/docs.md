@@ -748,8 +748,8 @@ sync(PlayerStateTrait, 'score', {
     },
 });
 
-// `aimX` is written by the node's owning client (authority: 'owner'), and throttled
-// with a threshold rate so it only re-emits once it has moved 0.1 units.
+// `aimX` is written by the node's owning client (authority: 'owner'), and marked
+// dirty on a distance threshold so it only re-emits once it has moved 0.1 units.
 sync(PlayerStateTrait, 'aimX', {
     schema: pack.float32(),
     pack: (t) => t.aimX,
@@ -757,7 +757,7 @@ sync(PlayerStateTrait, 'aimX', {
         t.aimX = value;
     },
     authority: 'owner',
-    rate: syncRate.distance(0.1),
+    dirty: dirty.distance(0.1),
 });
 ```
 
@@ -2534,8 +2534,8 @@ rendering can draw into the gpucat scene directly via `ctx.client.scene`.
 
 ## Persistence
 
-bongle persists data at two scopes, both server-only: the **game** and a single
-**game-user**. `gameStorage` is the game-scoped store, shared across every room and
+bongle persists data at two scopes, both server-only: the **project** and a single
+**project-user**. `projectStorage` is the project-scoped store, shared across every room and
 player, for leaderboards and shared world state. `userStorage` is scoped to one
 player, for inventory, progression, and settings; key it by the player's user id,
 which you resolve from a client with `clientToUser(ctx, client).id`. Both are simple
@@ -2578,11 +2578,11 @@ Both scopes expose the same four async operations, `get`, `set`, `delete`, and
 `list`. They take `ctx` first; the user store also takes a `userId` (resolve it with
 `clientToUser(ctx, client).id`):
 
-#### `gameStorage`
+#### `projectStorage`
 
 ```ts
-/** Game-scoped KV, shared across every room and player of this game. */
-export const gameStorage: {
+/** Project-scoped KV, shared across every room and player of this project. */
+export const projectStorage: {
     get(ctx: ScriptContext, key: string): Promise<StorageEntry | null>;
     set(ctx: ScriptContext, key: string, value: JsonValue, opts?: {
         ifVersion?: string;
@@ -2597,7 +2597,7 @@ export const gameStorage: {
 
 ```ts
 /**
- * Per-(game, user) KV, private to one player within this game. `userId`
+ * Per-(project, user) KV, private to one player within this project. `userId`
  * is the durable platform identity (`User.id`). Resolve it from a
  * `Client` via `clientToUser(ctx, client).id`.
  */
@@ -2744,7 +2744,7 @@ Feature examples:
 - [dom-ui](../examples/dom-ui): the UI traits, `HtmlTrait` and `CanvasTrait`.
 - [voxel-model](../examples/voxel-model): a movable `VoxelModel` with a collider, a floating boat you can stand on.
 - [terrain](../examples/terrain): a fuller scene, generated terrain with blocks and an animated character.
-- [persistent-data](../examples/persistent-data): per-player and game-wide progress with `userStorage` and `gameStorage`.
+- [persistent-data](../examples/persistent-data): per-player and project-wide progress with `userStorage` and `projectStorage`.
 - [rooms](../examples/rooms): managing multiple rooms and moving clients between them.
 
 Performance stress tests, each loading one subsystem heavily:

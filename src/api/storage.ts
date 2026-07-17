@@ -1,10 +1,10 @@
 // api/storage.ts, script-facing persistent KV.
 //
-// Two scopes (matching the service tables `game_storage` /
-// `game_user_storage`):
-//   - `gameStorage.*`, gameId-scoped, shared across all rooms/players.
+// Two scopes (matching the service tables `project_storage` /
+// `project_user_storage`):
+//   - `projectStorage.*`, project-scoped, shared across all rooms/players.
 //     Use for leaderboards, world state, season buckets.
-//   - `userStorage.*`, (gameId, userId)-scoped, private to one player.
+//   - `userStorage.*`, (project, user)-scoped, private to one player.
 //     Use for inventory, progression, settings.
 //
 // Server-only. Calling from a client context throws. Backed by the
@@ -32,24 +32,24 @@ function requireDriver(ctx: ScriptContext) {
     return ctx.server.state.driver.storage;
 }
 
-/** Game-scoped KV, shared across every room and player of this game. */
-export const gameStorage = {
+/** Project-scoped KV, shared across every room and player of this project. */
+export const projectStorage = {
     get(ctx: ScriptContext, key: string): Promise<StorageEntry | null> {
-        return requireDriver(ctx).game.get(key);
+        return requireDriver(ctx).project.get(key);
     },
     set(ctx: ScriptContext, key: string, value: JsonValue, opts?: { ifVersion?: string }): Promise<StorageSetResult> {
-        return requireDriver(ctx).game.set(key, value, opts);
+        return requireDriver(ctx).project.set(key, value, opts);
     },
     delete(ctx: ScriptContext, key: string, opts?: { ifVersion?: string }): Promise<StorageDeleteResult> {
-        return requireDriver(ctx).game.delete(key, opts);
+        return requireDriver(ctx).project.delete(key, opts);
     },
     list(ctx: ScriptContext, opts?: StorageListOpts): Promise<StorageListPage> {
-        return requireDriver(ctx).game.list(opts);
+        return requireDriver(ctx).project.list(opts);
     },
 };
 
 /**
- * Per-(game, user) KV, private to one player within this game. `userId`
+ * Per-(project, user) KV, private to one player within this project. `userId`
  * is the durable platform identity (`User.id`). Resolve it from a
  * `Client` via `clientToUser(ctx, client).id`.
  */

@@ -2,7 +2,7 @@
 // cli/realms/server/edit-server.ts — boot EngineServer in mode:'edit' inside the
 // `server` Vite env (a RunnableDevEnvironment in node) for `bongle dev`. Same shape
 // as play-server.ts, but edit mode + scene persist writes back to disk (so the
-// in-game editor's scene edits save). noExternal gives one shared bongle instance
+// in-project editor's scene edits save). noExternal gives one shared bongle instance
 // with the user code (userEntry).
 
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';

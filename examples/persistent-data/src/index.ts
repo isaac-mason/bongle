@@ -1,7 +1,7 @@
 // Demo: persistent player progress backed by bongle's storage API.
 //
 //   userStorage  → each player's lifetime spark count (private)
-//   gameStorage  → all-time game-wide spark count (shared)
+//   projectStorage  → all-time project-wide spark count (shared)
 //
 // Walk over a spark to collect it. Both counters CAS-increment with a
 // small retry budget; the spark hides for 5s then respawns. On join,
@@ -17,7 +17,7 @@ import {
     command,
     ContactsTrait,
     env,
-    gameStorage,
+    projectStorage,
     getTrait,
     listen,
     log,
@@ -232,7 +232,7 @@ async function greetPlayer(ctx: ScriptContext, client: ClientId, userId: string,
     log(ctx, `reading persisted state for ${username}…`);
     const [scoreEntry, totalEntry] = await Promise.all([
         userStorage.get(ctx, userId, 'score'),
-        gameStorage.get(ctx, 'total_sparks'),
+        projectStorage.get(ctx, 'total_sparks'),
     ]);
     const score = numberOr(scoreEntry?.value, 0);
     const total = numberOr(totalEntry?.value, 0);
@@ -270,16 +270,16 @@ async function casIncrementUser(ctx: ScriptContext, userId: string, key: string)
 
 async function casIncrementGame(ctx: ScriptContext, key: string): Promise<number> {
     for (let attempt = 0; attempt < CAS_RETRIES; attempt++) {
-        const entry = await gameStorage.get(ctx, key);
+        const entry = await projectStorage.get(ctx, key);
         const next = numberOr(entry?.value, 0) + 1;
-        const result = await gameStorage.set(ctx, key, next, { ifVersion: entry?.version });
+        const result = await projectStorage.set(ctx, key, next, { ifVersion: entry?.version });
         if (result.ok) return next;
         if (result.code !== 'version_conflict') {
-            throw new Error(`gameStorage.set failed: ${result.code}`);
+            throw new Error(`projectStorage.set failed: ${result.code}`);
         }
-        warn(ctx, `CAS conflict on gameStorage[${key}] — retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
+        warn(ctx, `CAS conflict on projectStorage[${key}] — retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
     }
-    throw new Error('CAS retry budget exceeded for gameStorage');
+    throw new Error('CAS retry budget exceeded for projectStorage');
 }
 
 function numberOr(v: unknown, fallback: number): number {

@@ -1,4 +1,4 @@
-// cli/dev/serve-scenes.ts — serve the project's scene files to the in-game
+// cli/dev/serve-scenes.ts — serve the project's scene files to the in-project
 // editor's SceneSource: GET /__bongle/scenes → id list; GET /__bongle/scenes/<id>
 // → raw JSON. Read-only; scene WRITES flow through the engine's scene protocol to
 // the edit server's disk persist (edit-server.ts).

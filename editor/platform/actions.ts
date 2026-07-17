@@ -1,11 +1,11 @@
-// editor/platform/actions.ts — the platform-facing actions (build / save game /
+// editor/platform/actions.ts — the platform-facing actions (build / save project /
 // save avatar), shared by the taskbar footer (standalone dev tool) and the
 // in-editor "editing X" window (embedded). When embedded they hand payloads to
 // the platform over the bridge; standalone they download.
 
 import type { BuildRequest, BuildResponse } from '../build/build-worker';
 import type { Filesystem } from '../fs';
-import { downloadGameSave, exportGameSave, SAVE_MAX_BYTES, saveSizeBytes } from '../game-save';
+import { downloadProjectSave, exportProjectSave, SAVE_MAX_BYTES, saveSizeBytes } from '../project-save';
 import { PROJECT_NAME } from '../project';
 import { useBuildMeta } from '../stores/build-meta';
 import { useBuildProgress } from '../stores/build-progress';
@@ -55,8 +55,8 @@ export async function runBuild(fs: Filesystem): Promise<void> {
         const zip = await buildInWorker(useBuildMeta.getState().maxPlayers, (l) => useBuildProgress.getState().step(l));
         if (embedded) {
             // ship the source alongside the built bundle so the platform can
-            // snapshot it as a game_version + record the build's provenance.
-            const source = await exportGameSave(fs);
+            // snapshot it as a project_version + record the build's provenance.
+            const source = await exportProjectSave(fs);
             usePlatform.getState().send({ type: 'bongle:build', payload: zip, source });
         } else {
             const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
@@ -77,7 +77,7 @@ export async function runBuild(fs: Filesystem): Promise<void> {
     }
 }
 
-/** save the game source. Embedded → hand to the platform; standalone → download.
+/** save the project source. Embedded → hand to the platform; standalone → download.
  *  Refuses over the size cap (the server enforces the same; this saves a
  *  round-trip + gives a clear, actionable message). */
 export async function runSave(fs: Filesystem): Promise<void> {
@@ -88,8 +88,8 @@ export async function runSave(fs: Filesystem): Promise<void> {
         alert(`Save is ${mb} MB, over the ${cap} MB limit. Trim assets under assets/ and try again.`);
         return;
     }
-    if (usePlatform.getState().embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportGameSave(fs) });
-    else await downloadGameSave(fs);
+    if (usePlatform.getState().embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportProjectSave(fs) });
+    else await downloadProjectSave(fs);
 }
 
 /** hand the edited avatar (Blockbench-compiled glb + bbmodel source) to the

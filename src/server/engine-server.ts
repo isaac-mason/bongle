@@ -72,7 +72,7 @@ export type InitOptions = {
      */
     options?: Record<string, string | number | boolean>;
     /**
-     * Side-effect handle for persistent KV (gameStorage / userStorage).
+     * Side-effect handle for persistent KV (projectStorage / userStorage).
      * Deployed: HTTP driver pointed at the service. bongle dev / editor: an
      * in-memory impl. Required, scripts can call storage APIs at any
      * point so a missing driver would only manifest at first call.
