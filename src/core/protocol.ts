@@ -333,8 +333,8 @@ export type OpenScene = pack.SchemaType<typeof OpenScene>;
 /**
  * Dual-purpose. Editor "Play" button passes `sceneId` + `sourceRoomId`
  * and mints a fresh `play-<uuid>` namespace. Game runtime
- * `client.matchmake` passes `gameOptions` + `joinData` and
- * find-or-creates a room keyed on `canonicalJson(gameOptions)`.
+ * `client.matchmake` passes `options` + `joinData` and
+ * find-or-creates a room keyed on `canonicalJson(options)`.
  * `sceneId`/`sourceRoomId` are optional so the game-runtime caller can
  * omit them (falls back to default scene).
  */
@@ -343,7 +343,7 @@ export const Play = pack.object({
     sceneId: pack.optional(pack.string()),
     sourceRoomId: pack.optional(pack.string()),
     /** JSON-encoded Record<string, string|number|boolean>. */
-    gameOptions: pack.optional(pack.string()),
+    options: pack.optional(pack.string()),
     /** JSON-encoded Record<string, JsonValue>. */
     joinData: pack.optional(pack.string()),
 });

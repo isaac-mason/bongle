@@ -60,7 +60,7 @@ export type InitOptions = {
     /**
      * Transport for actions a script triggers on the client that need to
      * exit the engine, currently just `client.matchmake` (re-enter matchmaking
-     * with new gameOptions/joinData). bongle dev wraps a `play` message send;
+     * with new options/joinData). bongle dev wraps a `play` message send;
      * deployed (game-client/poki) wraps the iframe-parent bridge so the
      * parent disposes + re-enqueues. Always
      * supplied: assemblers construct one at boot.
@@ -245,13 +245,13 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
  */
 export function play(
     state: EngineClient,
-    opts: { gameOptions: Record<string, string | number | boolean>; joinData?: Record<string, JsonValue> },
+    opts: { options: Record<string, string | number | boolean>; joinData?: Record<string, JsonValue> },
 ): void {
     Net.send(state.net, {
         type: 'play',
         sceneId: undefined,
         sourceRoomId: undefined,
-        gameOptions: JSON.stringify(opts.gameOptions),
+        options: JSON.stringify(opts.options),
         joinData: opts.joinData ? JSON.stringify(opts.joinData) : undefined,
     });
 }

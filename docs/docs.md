@@ -990,13 +990,13 @@ move a client in and out; `rooms.list` and `rooms.view` inspect them; `rooms.act
 and `rooms.observed` report which room a client is in; and `rooms.stop` closes one.
 
 A client can also re-enter matchmaking itself with `client.matchmake`, handing
-over new `gameOptions` to switch gamemodes or move from a lobby into a match.
+over new `options` to switch gamemodes or move from a lobby into a match.
 
 ```ts
 // move this client into another gamemode by re-entering matchmaking
 system('switch-mode', (ctx) => {
     onInit(ctx, () => {
-        if (ctx.client) client.matchmake(ctx, { gameOptions: { mode: 'ffa' } });
+        if (ctx.client) client.matchmake(ctx, { options: { mode: 'ffa' } });
     });
 });
 ```

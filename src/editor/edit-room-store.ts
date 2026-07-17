@@ -602,7 +602,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 type: 'play',
                 sceneId: room.sceneId,
                 sourceRoomId: room.roomId,
-                gameOptions: '{}',
+                options: '{}',
                 joinData: JSON.stringify(joinData),
             });
         },

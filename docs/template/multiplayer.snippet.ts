@@ -28,7 +28,7 @@ system('weapon-rpc', (ctx) => {
 // move this client into another gamemode by re-entering matchmaking
 system('switch-mode', (ctx) => {
     onInit(ctx, () => {
-        if (ctx.client) client.matchmake(ctx, { gameOptions: { mode: 'ffa' } });
+        if (ctx.client) client.matchmake(ctx, { options: { mode: 'ffa' } });
     });
 });
 /* SNIPPET_END: rematch */

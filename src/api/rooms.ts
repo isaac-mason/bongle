@@ -117,7 +117,7 @@ export function recreate(ctx: ScriptContext): void {
     const state = ctx.server.state;
     const old = ctx.server.room;
 
-    // fresh room from the same scene, in the same namespace, gameOptions and
+    // fresh room from the same scene, in the same namespace, options and
     // matchmaking are namespace-scoped, so they carry over untouched.
     const fresh = ServerRooms.createRoomInNamespace(state, old.sceneId, old.mode, old.namespace, old.sourceRoomId ?? undefined);
 
@@ -248,7 +248,7 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
             physics: target.physics,
             blocks: rt.blocks,
             client: undefined,
-            server: { state: ctx.server.state, room: target, gameOptions: ctx.server.gameOptions },
+            server: { state: ctx.server.state, room: target, options: ctx.server.options },
             _runtime: rt,
             _instance: ctx._instance,
             trait: ctx.trait,

@@ -68,7 +68,7 @@ export type InitOptions = {
     compressChunk: ChunkCompressor;
     /**
      * Matchmaker grouping key for this server's `main` namespace. Stamped at
-     * init so scripts can read it via `ctx.server.gameOptions`.
+     * init so scripts can read it via `ctx.server.options`.
      */
     options?: Record<string, string | number | boolean>;
     /**
@@ -85,7 +85,7 @@ export function init(opts: InitOptions) {
     const clients = Clients.init();
     const rooms = Rooms.init();
     if (opts.options && Object.keys(opts.options).length > 0) {
-        Rooms.setNamespaceGameOptions(rooms, 'main', opts.options);
+        Rooms.setNamespaceOptions(rooms, 'main', opts.options);
     }
     const contentManager = ContentManager.init(opts.content);
     const resourceManager = ResourceManager.init({ resourcesDir: opts.resourcesDir });
@@ -164,7 +164,7 @@ export type EngineServer = ReturnType<typeof init>;
  * calls this directly. `joinData` is a one-shot: scripts that want it past
  * the join must copy it themselves.
  *
- * gameOptions are NOT routed here, they live on namespaces (set by the
+ * options are NOT routed here, they live on namespaces (set by the
  * runtime at boot for deployed, or by the `play` handler for in-game
  * `client.matchmake`). The default room's namespace is pre-stamped.
  */
@@ -598,20 +598,20 @@ export function processInbox(state: EngineServer) {
                         // - editor "Play" button: { sceneId, sourceRoomId }; mints a
                         //   fresh `play-<uuid>` namespace each press (matchmaking-free
                         //   preview).
-                        // - game `client.matchmake({gameOptions, joinData})`: keys the
-                        //   namespace on canonicalGameOptions so callers with the same
+                        // - game `client.matchmake({options, joinData})`: keys the
+                        //   namespace on canonicalJson(options) so callers with the same
                         //   opts converge into one room. The namespace metadata stamps
-                        //   `gameOptions` so scripts can read it back via
-                        //   `ctx.server.gameOptions`.
+                        //   `options` so scripts can read it back via
+                        //   `ctx.server.options`.
                         const sceneId = message.sceneId ?? DEFAULT_SCENE_ID;
                         const t0 = performance.now();
 
                         let namespace: string;
                         let joinData: Record<string, JsonValue> = {};
-                        if (message.gameOptions) {
-                            const gameOptions = JSON.parse(message.gameOptions) as Record<string, string | number | boolean>;
-                            namespace = Rooms.canonicalJson(gameOptions);
-                            Rooms.getOrCreateNamespace(state.rooms, namespace, gameOptions);
+                        if (message.options) {
+                            const options = JSON.parse(message.options) as Record<string, string | number | boolean>;
+                            namespace = Rooms.canonicalJson(options);
+                            Rooms.getOrCreateNamespace(state.rooms, namespace, options);
                             if (message.joinData) joinData = JSON.parse(message.joinData) as Record<string, JsonValue>;
                         } else {
                             namespace = `play-${SceneTree.generateUuid()}`;

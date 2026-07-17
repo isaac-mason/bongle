@@ -159,9 +159,9 @@ export type ServerContext = {
      * Matchmaking opts on this room's namespace. Stamped at namespace-creation
      * time, by the `play` handler for `client.matchmake`-allocated rooms, by
      * the runtime at boot for the deployed 'main' namespace. Empty for the
-     * editor namespace and for dev runs that never received gameOptions.
+     * editor namespace and for dev runs that never received options.
      */
-    readonly gameOptions: Readonly<Record<string, string | number | boolean>>;
+    readonly options: Readonly<Record<string, string | number | boolean>>;
 };
 
 export type SceneTreeContext = {

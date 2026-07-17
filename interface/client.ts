@@ -2,7 +2,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: s
 
 export type ClientDriver = {
     matchmake(opts: {
-        gameOptions: Record<string, string | number | boolean>;
+        options: Record<string, string | number | boolean>;
         joinData?: Record<string, JsonValue>;
     }): void;
     /** Bridge to the active host portal (CrazyGames / Poki / none). The game

@@ -160,9 +160,9 @@ export type Player = {
  * A namespace is the grouping concept that ties one matchmaking allocation
  * together. Every Room belongs to exactly one Namespace (Room.namespace
  * matches Namespace.id). Production = one 'main' namespace. Editor "Play" =
- * a fresh `play-<uuid>`. Game `client.matchmake({gameOptions})` keys a namespace
- * on `canonicalJson(opts)`. The namespace stores its own gameOptions so
- * scripts can read them back via `ctx.server.gameOptions` without the engine
+ * a fresh `play-<uuid>`. Game `client.matchmake({options})` keys a namespace
+ * on `canonicalJson(opts)`. The namespace stores its own options so
+ * scripts can read them back via `ctx.server.options` without the engine
  * needing a separate per-client cache.
  *
  * The 'main' and 'editor' ids are conventional roots that auto-cleanup
@@ -170,7 +170,7 @@ export type Player = {
  */
 export type Namespace = {
     id: string;
-    gameOptions: Record<string, string | number | boolean>;
+    options: Record<string, string | number | boolean>;
 };
 
 /**
@@ -224,18 +224,18 @@ export function init(): Rooms {
 
 /**
  * Look up an existing namespace or create a fresh one. Idempotent on
- * gameOptions: if the namespace exists, `gameOptions` is ignored (use
- * `setNamespaceGameOptions` to overwrite). Called by `createRoom` so
+ * options: if the namespace exists, `options` is ignored (use
+ * `setNamespaceOptions` to overwrite). Called by `createRoom` so
  * every room is paired with a registered namespace.
  */
 export function getOrCreateNamespace(
     state: Rooms,
     id: string,
-    gameOptions?: Record<string, string | number | boolean>,
+    options?: Record<string, string | number | boolean>,
 ): Namespace {
     const existing = state.namespaces.get(id);
     if (existing) return existing;
-    const ns: Namespace = { id, gameOptions: gameOptions ?? {} };
+    const ns: Namespace = { id, options: options ?? {} };
     state.namespaces.set(id, ns);
     return ns;
 }
@@ -245,16 +245,16 @@ export function getNamespace(state: Rooms, id: string): Namespace | undefined {
 }
 
 /**
- * Overwrite the gameOptions on an existing namespace (creates if absent).
- * Runtime calls this once at boot in deployed (game-room) to stamp gatho's
- * `joinData.gameOptions` onto the 'main' namespace so scripts can read it.
+ * Overwrite the options on an existing namespace (creates if absent).
+ * Runtime calls this once at boot in deployed (game-room) to stamp the
+ * matchmaking options onto the 'main' namespace so scripts can read it.
  */
-export function setNamespaceGameOptions(state: Rooms, id: string, gameOptions: Record<string, string | number | boolean>): void {
+export function setNamespaceOptions(state: Rooms, id: string, options: Record<string, string | number | boolean>): void {
     const ns = state.namespaces.get(id);
     if (ns) {
-        ns.gameOptions = gameOptions;
+        ns.options = options;
     } else {
-        state.namespaces.set(id, { id, gameOptions });
+        state.namespaces.set(id, { id, options });
     }
 }
 
@@ -281,8 +281,8 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     const id = `room_${state._nextRoomId++}`;
     const namespace = opts.namespace ?? 'main';
     // ensure the namespace exists in the registry before the room references
-    // it. metadata (gameOptions) is set separately via setNamespaceGameOptions
-    // or by the `play` handler when a gameOptions-keyed namespace is born.
+    // it. metadata (options) is set separately via setNamespaceOptions
+    // or by the `play` handler when an options-keyed namespace is born.
     getOrCreateNamespace(state, namespace);
 
     const sceneGraph = createSceneTree();
@@ -629,7 +629,7 @@ export function findRoomsInNamespace(state: Rooms, namespace: string): Room[] {
 /**
  * The (at most one) room currently occupying the given namespace. Used
  * by the matchmaking-style join flow to find-or-create a play room keyed
- * on canonicalJson(gameOptions). Returns the first match, namespaces
+ * on canonicalJson(options). Returns the first match, namespaces
  * are unique per session, so there's only ever one root.
  */
 export function findRoomByNamespace(state: Rooms, namespace: string): Room | undefined {
@@ -667,8 +667,8 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     room.scriptRuntime.server = {
         state,
         room,
-        get gameOptions() {
-            return state.rooms.namespaces.get(room.namespace)?.gameOptions ?? {};
+        get options() {
+            return state.rooms.namespaces.get(room.namespace)?.options ?? {};
         },
     };
 
