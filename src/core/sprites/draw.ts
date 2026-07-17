@@ -7,7 +7,7 @@
 //
 // Plain-data descriptor: `draw()` returns `{ _kind, fn, size, inputs,
 // params }` and never executes `fn`. The asset-pipeline pass (step 10:
-// `lib/kit/src/asset-pipeline/draw-textures.ts`) walks both registries,
+// `src/asset-pipeline/bake/draw-textures.ts`) walks both registries,
 // depth-first-bakes nested draws, and hands the resulting canvases to
 // the atlas builders. Invalidation rides the existing payload-hash
 // machinery, `structuralHash` walks fn bodies via

@@ -1,6 +1,6 @@
 // engine-editor, editor-mode boot composition.
 //
-// Imported only by the kit's edit-mode `client.ts` template. `setup(state)`
+// Imported only by the edit-mode realm entries (the cli + editor edit clients). `setup(state)`
 // is called between `EngineClient.init` and `EngineClient.load` so the
 // editor's EditorScript + commands land in the registry before
 // `EngineClient.load`'s `clearPendingChanges` sweep. Splitting the editor
@@ -17,7 +17,7 @@ import { mountEditUI } from './editor/ui/edit-ui';
 // (the browser editor). refreshBlueprints re-lists; reloadBlueprint re-reads one.
 export { refreshBlueprints, reloadBlueprint, type SceneSource } from './editor/blueprints';
 // The editor UI store. Re-exported here because engine-editor is the editor's
-// public surface, the kit's edit client reads it for the net-sim toggle.
+// public surface, the edit client reads it for the net-sim toggle.
 export { useEditor } from './editor/editor-store';
 
 export async function setup(state: EngineClient, opts?: { sceneSource?: SceneSource }): Promise<void> {

@@ -28,7 +28,7 @@
  * authored payload off `handle._payload` (stamped at module-eval by the
  * codegen barrel's `_registerScenePayload` calls) and feed it through
  * `Content.populateScene` so the declared `SceneHandle` reflects the
- * authored state. Live disk-edit updates flow separately through the kit's
+ * authored state. Live disk-edit updates flow separately through bongle's
  * `bongle:scenes` Vite plugin → HMR event → `applyScenePayload` in the
  * server boot template. Removed declarations clear the handle.
  *
@@ -149,7 +149,7 @@ export function applyRegistryChanges(state: EngineServer): void {
 
     // scenes: declaration-side change. read each declared handle's
     // `_payload` (stamped by the codegen barrel) and apply it. `removed`
-    // clears the handle. live disk-edit updates are out-of-band: the kit's
+    // clears the handle. live disk-edit updates are out-of-band: bongle's
     // `bongle:scenes` plugin fires HMR events that the boot template
     // routes through `applyScenePayload` directly.
     if (registry.scenes.pendingChanges.length > 0) {

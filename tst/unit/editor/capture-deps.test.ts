@@ -19,7 +19,7 @@ describe('wrapModuleDeps', () => {
             `script(Enemy, (ctx) => { const t = Enemy; return t; });`,
         ].join('\n');
         const out = await wrapModuleDeps('src/game.ts', code, reg, idResolve);
-        expect(out).toContain('__kit.deps(script(');
+        expect(out).toContain('__bongle.deps(script(');
         expect(out).toContain('[Enemy])');
     });
 
@@ -37,7 +37,7 @@ describe('wrapModuleDeps', () => {
         // './traits' → 'src/traits.ts' (in registry); './player' → opaque (no table).
         const resolve = async (spec: string) => (spec === './traits' ? 'src/traits.ts' : spec === './player' ? 'src/player.ts' : spec);
         const out = await wrapModuleDeps('src/scripts.ts', consumer, reg, resolve);
-        expect(out).toContain('__kit.deps(script(');
+        expect(out).toContain('__bongle.deps(script(');
         expect(out).toContain('[Enemy])');
     });
 
@@ -45,7 +45,7 @@ describe('wrapModuleDeps', () => {
         const reg = initSymbolTables();
         const code = `import { script } from 'bongle';\nscript(SomeTrait, (ctx) => { ctx.log('hi'); });`;
         const out = await wrapModuleDeps('src/plain.ts', code, reg, idResolve);
-        expect(out).not.toContain('__kit.deps');
+        expect(out).not.toContain('__bongle.deps');
         expect(out).toBe(code);
     });
 

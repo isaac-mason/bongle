@@ -119,7 +119,7 @@ export type EditorStore = {
      * random [0, jitter] on top, so releases are unevenly spaced — the
      * variable-latency condition that exercises snapshot interpolation and
      * the server-clock estimator (a constant delay alone spaces releases
-     * evenly and hides jitter). Read by kit/runtime/edit-client.ts via
+     * evenly and hides jitter). Read by the edit-client realm via
      * `useEditor.getState()` each frame. Per-session, never persisted. */
     netSimEnabled: boolean;
     netSimRttMs: number;

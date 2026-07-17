@@ -12,7 +12,7 @@
 // would break the browser bundle.
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import type * as InternalNS from '../../../src/internal';
-// type-only: the RUNTIME EngineServer + __kit come from the runner (the realm's
+// type-only: the RUNTIME EngineServer + __bongle come from the runner (the realm's
 // bundled engine instance the user code registered into), passed in via opts.
 import { RIG_TYPE_6BONE } from '../../../src/core/avatar/rig';
 import type * as EngineServerNS from '../../../src/server/engine-server';
@@ -25,14 +25,14 @@ const SCENES_DIR = 'content/scenes';
 const SCENE_EXT = '.scene.json';
 
 type EngineServerApi = typeof EngineServerNS;
-type Kit = typeof InternalNS.__kit;
+type BongleRuntime = typeof InternalNS.__bongle;
 type ServerState = ReturnType<EngineServerApi['init']>;
 
 export type EditorServer = {
     state: ServerState;
     /** ServerApp adapter over the EngineServer module — the transport drives
      *  join/leave/inbox/outbox/update through this, same contract game-room
-     *  and the kit dev transport use. */
+     *  and the cli dev transport use. */
     app: ServerApp<ServerState>;
     /** Synchronous per-join avatar pick (random from the sample pool), mirroring
      *  the deployed matchmaker path so runtime-avatar load is exercised. */
@@ -46,10 +46,10 @@ export type EditorServer = {
 
 export type StartEditorServerOptions = {
     fs: Filesystem;
-    /** the realm's bundled engine + __kit, from `runner.import` — the SAME
+    /** the realm's bundled engine + __bongle, from `runner.import` — the SAME
      *  instance the user code registered its declarations into. */
     EngineServer: EngineServerApi;
-    __kit: Kit;
+    __bongle: BongleRuntime;
     log?: (msg: string) => void;
     /** a specific avatar for the local player (the edited avatar in avatar mode,
      *  or our account avatar when editing a game as ourselves). The URL feeds
@@ -59,7 +59,7 @@ export type StartEditorServerOptions = {
 };
 
 export async function startEditorServer(opts: StartEditorServerOptions): Promise<EditorServer> {
-    const { fs, EngineServer, __kit, log = () => {} } = opts;
+    const { fs, EngineServer, __bongle, log = () => {} } = opts;
 
     // zstd compressor for the voxel wire codec (client decodes with fzstd).
     await initZstd();
@@ -116,7 +116,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // apply registry changes to the running server on each settled flush (the
     // worker's bundler flushes after evaluating user code / an HMR cascade;
     // this updates the live world in place).
-    const unregister = __kit.registerFlush(() => {
+    const unregister = __bongle.registerFlush(() => {
         EngineServer.applyRegistryChanges(state);
     });
 

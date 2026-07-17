@@ -1,8 +1,8 @@
 // build-runtime-handle.ts, construct a `ModelHandle` from a parsed
 // `Model`. Used by `Resources.ensureModel` to hydrate the empty handle
 // that `setModel` created for runtime models (avatars, uploaded assets).
-// Structurally mirrors the kit pipeline's codegen barrel
-// (`renderModelConstruction` in kit/src/asset-pipeline/models.ts), the
+// Structurally mirrors the bongle pipeline's codegen barrel
+// (`renderModelConstruction` in src/asset-pipeline/bake/models.ts), the
 // codegen path is still the source of truth for *declared* models
 // because it gives a synchronous typed handle at module-eval; this
 // function is the runtime equivalent for models that have no codegen

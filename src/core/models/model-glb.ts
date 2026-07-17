@@ -9,7 +9,7 @@
 //   - single-buffer `.glb` (one BIN chunk, embedded; no external URIs)
 //   - vertex attrs `POSITION`/`NORMAL`/`TEXCOORD_0` as `Float32` only
 //     (NORMAL/TEXCOORD_0 optional, defaults match `extractMesh` in the
-//      kit pipeline so loose user uploads still render)
+//      bongle pipeline so loose user uploads still render)
 //   - indices as `UNSIGNED_BYTE` / `UNSIGNED_SHORT` / `UNSIGNED_INT`
 //     (upcast to `Uint32Array` to match ModelBin's downstream shape)
 //   - one primitive per mesh after worker canonicalization, but we
@@ -158,7 +158,7 @@ const TYPE_COMPONENTS: Record<GltfAccessor['type'], number> = {
  * I/O, no mutation of the input bytes. Safe in both browser and node.
  *
  * `modelId` is used to name a synthetic wrapper root when the source
- * glb has multiple top-level nodes, matches the kit codegen barrel's
+ * glb has multiple top-level nodes, matches the bongle codegen barrel's
  * convention for declared models.
  */
 export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
@@ -212,7 +212,7 @@ export function gltfUnpack(modelId: string, bytes: Uint8Array): Model {
 
     // ── meshes: extracted lazily during the scene walk so the first node
     //          referencing an anonymous gltf mesh can name it after itself
-    //          (matches kit's convention). dedup mesh names independently
+    //          (matches bongle's convention). dedup mesh names independently
     //          of node names. ─────────────────────────────────────────
     const meshNameSet = new Set<string>();
     const meshesByName = new Map<string, ModelMesh>();
@@ -600,7 +600,7 @@ function extractMesh(
     bin: Uint8Array,
     resolveImage: (mat: number | undefined) => ModelImage | null,
 ): ModelMesh {
-    // Mirror kit's `extractMesh` semantics: concat primitives end-to-end,
+    // Mirror bongle's `extractMesh` semantics: concat primitives end-to-end,
     // rebase indices per primitive. With worker canonicalization this loop
     // usually runs once.
     const positions: number[] = [];
@@ -640,7 +640,7 @@ function extractMesh(
             const nrm = readFloat32Accessor(accessors, views, bin, prim.attributes.NORMAL, 'VEC3');
             for (let i = 0; i < nrm.length; i++) normals.push(nrm[i]!);
         } else {
-            // default to +Y, matching kit's projection fallback
+            // default to +Y, matching bongle's projection fallback
             for (let v = 0; v < vc; v++) normals.push(0, 1, 0);
         }
 

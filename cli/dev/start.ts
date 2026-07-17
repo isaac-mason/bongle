@@ -1,6 +1,6 @@
 // cli/dev/start.ts — `bongle dev`: the Vite Environments dev server.
 //
-// Resurrected from the pre-pivot kit/dev/start.ts (commit 0ca35db):
+// Boot sequence:
 //   1. createServer(defineBongleDevConfig) — client + server envs, bongle() plugin.
 //   2. server.listen() — Vite's http server (so /game can hook `upgrade`).
 //   3. boot the server env: import virtual:bongle/play-server through the server
@@ -71,7 +71,7 @@ export async function startDevServer(opts: { projectDir: string; port?: number }
     };
     let game = await bootServer();
 
-    // pipeline realm: evaluates user code + re-bakes on the SAME __kit flush HMR
+    // pipeline realm: evaluates user code + re-bakes on the SAME __bongle flush HMR
     // fires (so a code edit re-bakes) and on asset-file change (the watcher below).
     // onBaked fans the client HMR refresh events the edit-client listens for.
     const pipelineEnv = server.environments.pipeline as RunnableDevEnvironment;

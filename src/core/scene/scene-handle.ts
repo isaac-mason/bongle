@@ -4,7 +4,7 @@
 // a stable handle. the handle's `node`, `voxels`, and `version` fields are
 // mutated in place by the engine when the authored payload arrives, at
 // boot via the codegen `src/generated/scenes.ts` barrel, and live via the
-// kit `bongle:scenes` vite plugin's HMR events (dev only). user code holds
+// the `bongle:scenes` HMR events (dev only). user code holds
 // the handle reference permanently and reads through it; reference identity
 // is stable for the lifetime of the module.
 //

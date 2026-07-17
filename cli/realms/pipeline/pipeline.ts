@@ -2,7 +2,7 @@
 // cli/realms/pipeline/pipeline.ts — the asset-pipeline realm for `bongle dev`,
 // booted in the `pipeline` Vite env (a RunnableDevEnvironment in node). It
 // evaluates the user code (so it owns the registry the AssetPipeline reads) and
-// re-bakes on the SAME __kit flush that HMR fires — so a CODE edit (a block(),
+// re-bakes on the SAME __bongle flush that HMR fires — so a CODE edit (a block(),
 // blockTexture(), sprite/model/sound decl) re-bakes just like an asset-file edit
 // (start.ts calls rebake() for those). One trigger for both.
 //
@@ -13,7 +13,7 @@
 
 import { AssetPipeline } from 'bongle/engine-asset-pipeline';
 import { env } from 'bongle/env';
-import { __kit } from 'bongle/internal';
+import { __bongle } from 'bongle/internal';
 import { createBakeLoader } from '../../../src/asset-pipeline/loader';
 import { createNodeDecodeAudio } from '../../bake/decode-audio-node';
 import { createNodeRaster } from '../../bake/raster-node';
@@ -70,14 +70,14 @@ export async function start(opts: StartPipelineOptions): Promise<PipelineBootRes
     // edit → HMR cascade → flush → here). The initial flush is skipped — the
     // startup child-bake already produced the cold resources (incl. icons).
     let firstFlush = true;
-    __kit.registerFlush(() => {
+    __bongle.registerFlush(() => {
         if (firstFlush) {
             firstFlush = false;
             return;
         }
         void rebake();
     });
-    __kit.flush();
+    __bongle.flush();
 
     return { rebake, stop: () => {} };
 }

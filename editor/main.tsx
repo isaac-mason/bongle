@@ -138,7 +138,7 @@ async function boot(): Promise<void> {
         await editor.fs.write('src/index.ts', SAMPLE_INDEX);
     }
     // empty barrel so realms can import it before the first bake writes it (the
-    // bake patches model/… handles with baked bin paths, mirroring the kit). Not
+    // bake patches model/… handles with baked bin paths, mirroring the build). Not
     // part of a game save (derived) — ensure it exists on every boot.
     if (!(await editor.fs.exists('src/generated/models.ts'))) {
         await editor.fs.write('src/generated/models.ts', 'export {};\n');
@@ -207,7 +207,7 @@ async function boot(): Promise<void> {
         // the prod build reads maxPlayers here (it can't evaluate user code itself).
         onMatchmaking: (maxPlayers) => useBuildMeta.getState().setMaxPlayers(maxPlayers),
     });
-    // bake-then-run (mirrors the kit): wait for the first bake so every realm
+    // bake-then-run (mirrors the build): wait for the first bake so every realm
     // fresh-imports the REAL generated barrel (baked model bin paths) at boot,
     // rather than racing an empty→real HMR that worker realms can't apply cleanly.
     console.log('[boot] main: awaiting first bake (pipelineHost.ready)…');

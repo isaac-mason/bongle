@@ -4,7 +4,7 @@
 // that the engine streams at runtime). future: any other generated
 // non-code asset that needs server-side resolution lives here.
 //
-// the kit wrapper bakes the absolute `resourcesDir` at build/dev time
+// the bongle build bakes the absolute `resourcesDir` at build/dev time
 // (via `import.meta.url`-relative resolution); engine internals never
 // touch cwd. `ModelHandle.bin.server` stores a path relative to
 // `resourcesDir`, and `resolveModelBin` joins them.

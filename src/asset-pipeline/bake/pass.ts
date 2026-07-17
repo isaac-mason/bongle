@@ -1,13 +1,13 @@
 /**
  * Shared asset-pipeline pass. Two call sites:
  *
- *   - dev: bongle:pipeline Vite plugin handler (kit/src/vite/plugin.ts),
+ *   - dev: the bongle:pipeline realm (cli/realms/pipeline + editor pipeline-worker),
  *     fired on every settled HMR cascade. Pulls the typed registries off
  *     the server env via `env.runner.import('bongle/internal')`.
  *
  *   - prod: build.ts's `runAssetPipelineInProcess`, fired once before
  *     the Vite bundle. Pulls them off the same process via plain
- *     `await import('bongle/internal')` (kit's bin runs under bun, so
+ *     `await import('bongle/internal')` (the node bin runs the bake in-process, so
  *     dynamic TS imports of the user module are native).
  *
  * Both call sites materialize a partial ProjectModule view (only the
@@ -59,7 +59,7 @@ export type PipelineOpts = {
     decodeAudio: DecodeAudio;
     /** host-injected 2d raster (host-provided; see pipeline InitCtx). */
     raster: Raster;
-    /** kit invocation mode, controls scene barrel discovery (see buildScenes). */
+    /** bake invocation mode, controls scene barrel discovery (see buildScenes). */
     mode: 'edit' | 'play';
     /** forwarded to the two atlas builders as their `cache` option. true
      *  in dev HMR (the upstream revision gate has already decided this

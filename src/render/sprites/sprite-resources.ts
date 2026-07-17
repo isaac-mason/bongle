@@ -62,7 +62,7 @@ import type { ResourceLoader } from '../../core/resource-loader';
 import { EnvConfig } from '../environment';
 import { ditherDiscard, shadeTinted } from '../visuals/dsl';
 
-// ── sidecar shape (must match kit/src/asset-pipeline/sprite-atlas.ts) ──
+// ── sidecar shape (must match src/asset-pipeline/bake sprite-atlas) ──
 
 /** uv rect in pixel coords of the atlas. divide by `atlasSize` for 0..1. */
 export type SpriteFrameRect = {

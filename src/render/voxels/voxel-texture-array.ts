@@ -38,7 +38,7 @@ export type BlockTextureAtlasMetadata = {
     atlasWidth: number;
     atlasHeight: number;
     textures: string[];
-    /** content hash from the kit asset pipeline (sources + tile size). */
+    /** content hash from the bongle asset pipeline (sources + tile size). */
     hash: string;
 };
 

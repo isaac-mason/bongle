@@ -56,7 +56,7 @@ export function makeRunner(bridge: RunnerBridge): ModuleRunner {
         // (`<origin><base>@project/<path>`), so `new URL('./x.png', import.meta.url)`
         // — the engine's asset-ref pattern — resolves to a real, SW-served sibling
         // (src/** + seeded node_modules/** alike). Valid absolute base, stable +
-        // unique across re-evals (the __kit capture keys module snapshots by it).
+        // unique across re-evals (the __bongle capture keys module snapshots by it).
         createImportMeta: async (modulePath) => ({
             url: new URL(projectUrl(modulePath), location.origin).href,
             filename: modulePath,

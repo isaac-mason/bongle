@@ -70,7 +70,7 @@ const imageSchema = packcat.object({
 });
 
 /**
- * Flat scene-tree entry. Mirrors the kit pipeline's `SceneNodeInfo` shape
+ * Flat scene-tree entry. Mirrors the bongle pipeline's `SceneNodeInfo` shape
  * so the runtime hydrator and codegen barrel can produce equivalent
  * `ModelHandle.scene` trees from the same data.
  *
@@ -78,7 +78,7 @@ const imageSchema = packcat.object({
  * resolve `parent` indices and accumulate world matrices.
  */
 const sceneNodeSchema = packcat.object({
-    /** unique within model (kit/parser dedupe via numeric suffix). */
+    /** unique within model (parser dedupe via numeric suffix). */
     name: packcat.string(),
     /** index of parent in the flat array, or -1 for roots. */
     parent: packcat.int32(),

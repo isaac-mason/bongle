@@ -1,7 +1,6 @@
 // cli/dev/config.ts — Vite config for `bongle dev` (client + server envs).
 //
-// Resurrected from the pre-pivot kit/vite/config.ts (commit 0ca35db). Two named
-// environments via the Environment API:
+// Two named environments via the Environment API:
 //   • client — browser bundle (default web env). user code + engine client sources.
 //   • server — createRunnableDevEnvironment (node runner, in-process). Hosts
 //     EngineServer + the /game WS.

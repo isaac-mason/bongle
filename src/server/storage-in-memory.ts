@@ -1,5 +1,5 @@
 // In-process StorageServerDriver. Used by `lib/runtime` standalone
-// (kit dev `./dev.sh`) and the editor, anywhere there is no
+// (bongle dev) and the editor, anywhere there is no
 // bongle service to talk to. Persists for the lifetime of the
 // process; restarting the dev server wipes it.
 //

@@ -28,7 +28,7 @@ import type { Filesystem } from './filesystem';
 const CLIENT_RESOURCES_DIR = 'resources/client';
 
 export type InitCtx = {
-    /** kit invocation mode, controls scene barrel discovery (see buildScenes). */
+    /** bake invocation mode, controls scene barrel discovery (see buildScenes). */
     mode: 'edit' | 'play';
     /** forwarded to the atlas builders as their `cache` option (true in dev HMR). */
     cache: boolean;

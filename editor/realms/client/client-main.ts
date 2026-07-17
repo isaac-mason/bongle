@@ -113,7 +113,7 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // registry, which the renderer reads).
     const runner = makeRunner(createPortBridge(bundlerPort));
     // set the runtime env flags on the shared `env` object BEFORE user code /
-    // engine eval — mirrors the kit entry (edit-client.ts). Compile-time
+    // engine eval — mirrors the cli realm entry (edit-client.ts). Compile-time
     // replaceEnv covers literal reads, but runtime/destructured reads fall through
     // to env.js's false defaults, so the editor (env.editor) stays off without this.
     const { env } = await runner.import('bongle/env');
@@ -128,7 +128,7 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // exports its api flat, so its module namespace IS the api.
     const { EngineClient } = await runner.import('bongle/engine-client');
     const EngineEditor = await runner.import('bongle/engine-editor');
-    const { __kit } = await runner.import('bongle/internal');
+    const { __bongle } = await runner.import('bongle/internal');
     spikeMark('engine modules transformed + evaluated');
 
     const state = EngineClient.init({
@@ -145,14 +145,14 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     await EngineClient.load(state);
     spikeMark('client realm booted (cold-start total)');
 
-    __kit.registerFlush(() => {
+    __bongle.registerFlush(() => {
         EngineClient.applyRegistryChanges(state);
     });
-    __kit.flush();
+    __bongle.flush();
 
     // DevTools automation surface for this client realm: `bongle` in the iframe's
     // console context (fs + the live EngineClient state / api).
-    exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineEditor, kit: __kit, runner });
+    exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineEditor, bongle: __bongle, runner });
 
     // game transport: inbound frames from the server worker → engine inbox.
     gamePort.onmessage = (e: MessageEvent) => {

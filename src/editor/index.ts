@@ -227,7 +227,7 @@ script(
                     chat.message(ctx, `[blueprint] ${result.error}`);
                     return;
                 }
-                // disk write → kit's `bongle:scenes` file watcher fires →
+                // disk write → the `bongle:scenes` file watcher fires →
                 // `bongle:scene-list` emission catches up the editor.
                 chat.message(
                     ctx,

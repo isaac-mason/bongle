@@ -1,13 +1,12 @@
 // cli/dev/plugin.ts — the bongle() Vite plugin (CLI host).
 //
-// The runtime side of granular engine HMR, resurrected from the pre-pivot
-// kit/vite/plugin.ts (commit 0ca35db) against the current build/capture core.
+// The runtime side of granular engine HMR, over the build/capture core.
 //
 // Two plugins:
-//   • bongle:capture-transform — brackets every USER-src module with the __kit
-//     capture push/pop + a self-accept (import.meta.hot.accept → __kit.reload →
+//   • bongle:capture-transform — brackets every USER-src module with the __bongle
+//     capture push/pop + a self-accept (import.meta.hot.accept → __bongle.reload →
 //     invalidate-or-flush), AND runs the rung-2 dep-wrap (build/capture's
-//     wrapModuleDeps injects __kit.deps around prefab()/script() bodies so an
+//     wrapModuleDeps injects __bongle.deps around prefab()/script() bodies so an
 //     importer-cascade fires on shape change). Same contract as the editor
 //     mini-bundler's transform (build/dev/transform.ts) — Vite provides
 //     import.meta.hot natively, so the emitted code runs unchanged here.
@@ -24,18 +23,18 @@ import { type DepParser, initSymbolTables, wrapModuleDeps } from '../../build';
 // wasi binding logs an ExperimentalWarning + loads a multi-MB wasm bundle in node).
 const depParser = parseSync as unknown as DepParser;
 
-const PRELUDE = `import { __kit } from 'bongle/internal';
-const __kit_prev = __kit.push(import.meta.url);
+const PRELUDE = `import { __bongle } from 'bongle/internal';
+const __bongle_prev = __bongle.push(import.meta.url);
 `;
 
 const POSTLUDE = `
-;__kit.pop(__kit_prev);
+;__bongle.pop(__bongle_prev);
 if (import.meta.hot) {
-  import.meta.hot.accept((__kit_next) => {
-    if (__kit.reload(import.meta.url, __kit_next) === 'invalidate') {
+  import.meta.hot.accept((__bongle_next) => {
+    if (__bongle.reload(import.meta.url, __bongle_next) === 'invalidate') {
       import.meta.hot.invalidate();
     }
-    __kit.flush();
+    __bongle.flush();
   });
 }
 `;
@@ -91,7 +90,7 @@ export function bongle(opts: BongleOptions): Plugin[] {
                 const filePath = id.split('?')[0] ?? id;
                 if (!filePath.startsWith(userSrcDir) || !/\.tsx?$/.test(filePath)) return null;
 
-                // rung-2 dep-wrap: __kit.deps around prefab()/script() bodies, so an
+                // rung-2 dep-wrap: __bongle.deps around prefab()/script() bodies, so an
                 // importer-cascade fires when a producer's shape changes. Swallow a
                 // parse failure — it must not break the capture bracket.
                 let wrapped = code;

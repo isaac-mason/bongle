@@ -2,7 +2,7 @@
 // cli/realms/server/play-server.ts — boot EngineServer inside the `server` Vite
 // env (a RunnableDevEnvironment in the node process). Imported through
 // virtual:bongle/play-server by start.ts; noExternal bundles bongle into this env's
-// graph, so EngineServer/__kit/env are the SAME instance the user code (userEntry)
+// graph, so EngineServer/__bongle/env are the SAME instance the user code (userEntry)
 // registered into. Sets env → evaluates user code → inits + loads EngineServer →
 // attaches the /game WS transport → runs the 60Hz sim loop.
 
@@ -11,7 +11,7 @@ import type { Server as HttpServer } from 'node:http';
 import path from 'node:path';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { env } from 'bongle/env';
-import { __kit } from 'bongle/internal';
+import { __bongle } from 'bongle/internal';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { attachGameTransport, type GameTransport } from './transport';
@@ -89,7 +89,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
-    __kit.registerFlush(() => EngineServer.applyRegistryChanges(state));
+    __bongle.registerFlush(() => EngineServer.applyRegistryChanges(state));
 
     const app: ServerApp<ServerState> = {
         init: () => state,
@@ -115,7 +115,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         transport.flush();
     }, 1000 / 60);
 
-    __kit.flush();
+    __bongle.flush();
 
     return {
         app,

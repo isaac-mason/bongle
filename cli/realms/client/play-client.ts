@@ -6,7 +6,7 @@
 
 import { EngineClient } from 'bongle/engine-client';
 import { env } from 'bongle/env';
-import { __kit } from 'bongle/internal';
+import { __bongle } from 'bongle/internal';
 import type { ClientDriver } from 'bongle/interface';
 
 export type StartClientOptions = {
@@ -46,8 +46,8 @@ export async function start(opts: StartClientOptions): Promise<void> {
     // load set up (otherwise settingsForTier reads a null tier). Mirrors the editor.
     EngineClient.mountPlayUI(state.domElement);
     await EngineClient.load(state);
-    __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
-    __kit.flush();
+    __bongle.registerFlush(() => EngineClient.applyRegistryChanges(state));
+    __bongle.flush();
 
     // /game transport: inbound server frames → engine inbox; the frame loop
     // advances then drains the outbox onto the socket.

@@ -2,7 +2,7 @@
 //
 // shape mirrors `blockTexture()` (`core/voxels/blocks.ts`), not `model()`:
 //   - no `_registerSpriteHandle` mutation path
-//   - no codegen barrel (`lib/kit/src/user-entry.ts` `GENERATED_BARRELS`
+//   - no codegen barrel (the bake's `GENERATED_BARRELS`
 //     stays `['models', 'scenes', 'sounds']`, sprites are not added)
 //   - declarations are pure source data; runtime wiring is a JSON
 //     sidecar (`sprites-atlas.json`) emitted by the asset-pipeline pass

@@ -28,8 +28,8 @@ import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
 import * as Save from './save';
 
-// Re-export the registry-dispatch entry so consumers (kit boot entries,
-// kit internals) can call `EngineServer.applyRegistryChanges(state)`
+// Re-export the registry-dispatch entry so consumers (realm boot entries,
+// bongle internals) can call `EngineServer.applyRegistryChanges(state)`
 // through the existing namespace without reaching into engine internals
 // directly.
 export { applyRegistryChanges } from './registry-dispatch';
@@ -73,7 +73,7 @@ export type InitOptions = {
     options?: Record<string, string | number | boolean>;
     /**
      * Side-effect handle for persistent KV (gameStorage / userStorage).
-     * Deployed: HTTP driver pointed at the service. Kit-dev / editor: an
+     * Deployed: HTTP driver pointed at the service. bongle dev / editor: an
      * in-memory impl. Required, scripts can call storage APIs at any
      * point so a missing driver would only manifest at first call.
      */

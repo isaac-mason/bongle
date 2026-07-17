@@ -56,7 +56,7 @@ export interface WorkerLike {
 
 /** spawnMeshWorker lives in `mesh-worker-spawn.ts` so the `?worker&inline`
  *  query stays out of mesh-dispatcher's static import graph, Bun's TS
- *  loader doesn't strip Vite query suffixes, and the kit asset pipeline
+ *  loader doesn't strip Vite query suffixes, and the bongle asset pipeline
  *  imports this file via the `bongle` graph. voxel-resources reaches the
  *  spawn helper through a dynamic import that only resolves under Vite. */
 

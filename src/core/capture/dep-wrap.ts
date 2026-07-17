@@ -1,7 +1,7 @@
 /**
  * core/capture/dep-wrap.ts, runtime helper for AST-injected dep wiring.
  *
- * The kit's capture-transform plugin walks each user module, scans the
+ * The capture-transform pass walks each user module, scans the
  * body of every `prefab(...)` / `script(...)` consumer call for producer
  * identifier refs, and wraps the call with `__addDeps(call, [refs])`
  * when it finds any. At runtime this helper:

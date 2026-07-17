@@ -33,7 +33,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // evaluate user code via a ModuleRunner bridged to the bundler worker (it
     // transforms; this realm evaluates → its own engine registry).
     const runner = makeRunner(createPortBridge(bundlerPort));
-    // runtime env flags before user/engine eval (mirrors the kit entry).
+    // runtime env flags before user/engine eval (mirrors the realm boot entry).
     // client=true so this realm can build the client render stack for in-worker
     // icon rendering (experiment — watch for DOM-assuming client-only code that
     // breaks in a worker with no document/window).
@@ -47,7 +47,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     console.log('[boot] pipeline-worker: src/index.ts evaluated');
     // registry is populated by the import above — the prod build reads matchmaking
     // off it (see below), since the build itself never evaluates user code.
-    const { __kit, registry } = await runner.import('bongle/internal');
+    const { __bongle, registry } = await runner.import('bongle/internal');
     // engine-asset-pipeline exposes the data baker (`AssetPipeline`) and the
     // post-bake icon render step (`Icons`). Both run in THIS realm, so they see
     // the registry the user declarations populated (a static worker import would
@@ -124,11 +124,11 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
         }
     }
 
-    // declarations settle → bake. Registered on THIS realm's __kit, so its flush
+    // declarations settle → bake. Registered on THIS realm's __bongle, so its flush
     // (initial + every HMR re-eval) runs the bake against the registry the user
     // code populated.
     let baking = false;
-    __kit.registerFlush(() => {
+    __bongle.registerFlush(() => {
         if (baking) return;
         baking = true;
         void (async () => {
@@ -150,7 +150,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
         })();
     });
     console.log('[boot] pipeline-worker: running initial bake (flush)…');
-    __kit.flush(); // initial bake + registry apply
+    __bongle.flush(); // initial bake + registry apply
     console.log('[boot] pipeline-worker: flush returned → posting ready');
     post({ type: 'ready' });
 }

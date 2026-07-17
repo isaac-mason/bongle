@@ -3,8 +3,7 @@
 // Mounts a `ws.WebSocketServer` in noServer mode and hooks Vite's HTTP server's
 // `upgrade` event: `/game` upgrades handshake into a binary-frame WS; every other
 // path (Vite HMR, file requests) flows to Vite normally. Each connection is plumbed
-// through a `ServerApp<S>` (inbox push / outbox drain on flush). Resurrected from
-// the pre-pivot kit/runtime/transport.ts (commit 0ca35db).
+// through a `ServerApp<S>` (inbox push / outbox drain on flush).
 
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Socket } from 'node:net';

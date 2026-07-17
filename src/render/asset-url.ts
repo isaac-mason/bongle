@@ -9,7 +9,7 @@
 //
 // Dev: Vite serves each engine module at its own dev URL, so
 // `import.meta.url` is module-specific and useless as a base. Instead,
-// the kit's dev middleware (kit/src/dev.ts → bongle-serve-resources)
+// the dev middleware (cli/dev/serve-resources.ts + the editor's serveResources)
 // streams everything in `resources/client/` from the document origin's
 // root, so a leading `/` works.
 //

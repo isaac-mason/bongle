@@ -29,7 +29,7 @@
  * authored payload changes), the codegen barrel's `_registerScenePayload`
  * write lands on the handle's `_payload` field. This branch reads
  * `_payload` and re-populates scene state on the client side. Live
- * disk-edit updates flow separately through the kit's `bongle:scenes`
+ * disk-edit updates flow separately through the `bongle:scenes`
  * Vite plugin → HMR event → `applyScenePayload` in the client boot
  * template.
  *
@@ -222,7 +222,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // drain so the queue doesn't grow unbounded.
     registry.particles.pendingChanges.length = 0;
 
-    // sprites: a registry change means the kit asset-pipeline pass will
+    // sprites: a registry change means the bongle asset-pipeline pass will
     // (re)emit `sprites-atlas.{png,json}`. refresh here re-fetches both
     // and short-circuits on hash equality. image-file edits without a
     // registry change ride the `bongle:sprite-atlas-updated` HMR path

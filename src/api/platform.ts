@@ -3,7 +3,7 @@ import type { ScriptContext } from '../core/scene/scripts';
 /**
  * Game-facing bridge to the active host portal (CrazyGames / Poki / none).
  * Client-only. The transport lives on the ClientDriver supplied at engine init,
- * this just hands off to it. Standalone / kit-dev hosts wire these to an
+ * this just hands off to it. Standalone / bongle-dev hosts wire these to an
  * inert impl, so a game can call them unconditionally regardless of where it's
  * running.
  *

@@ -1,6 +1,6 @@
 // Worker spawn helper, isolated so the `?worker&inline` query never
 // shows up in the static import graph that Bun's TS loader walks during
-// the kit asset pipeline. `voxel-resources.init()` loads this lazily via
+// the bongle asset pipeline. `voxel-resources.init()` loads this lazily via
 // `await import('./mesh-worker-spawn')`; Vite resolves the inline query
 // at bundle time, Bun never has to.
 //

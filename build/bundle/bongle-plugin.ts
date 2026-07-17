@@ -44,7 +44,7 @@ export type BonglePluginOptions = {
     entry?: { id: string; code: string };
     /** bare specifiers to externalize beyond node: (e.g. sharp for the server). */
     external?: (source: string) => boolean;
-    /** caller-specific transform run AFTER env replacement (e.g. build.ts's __kit
+    /** caller-specific transform run AFTER env replacement (e.g. build.ts's __bongle
      *  injection for user src + asset-url stripping). */
     transformExtra?: (code: string, id: string) => string;
     /** PRE-BUILT `?worker` bundles (entry id → self-contained code). Required for

@@ -56,7 +56,7 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             const bundlerPort = e.ports[0];
             if (!bundlerPort) throw new Error('init without a bundler port');
             const runner = makeRunner(createPortBridge(bundlerPort));
-            // runtime env flags before user/engine eval (mirrors the kit entry);
+            // runtime env flags before user/engine eval (mirrors the realm boot entry);
             // env.editor gates the server-side EditorTrait attach on join.
             const { env } = await runner.import('bongle/env');
             env.client = false;
@@ -64,21 +64,21 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             env.editor = true;
             await runner.import('src/index.ts');
             // the bake's generated barrel patches model/… handles with their
-            // baked bin paths (mirrors the kit importing src/generated). Empty
+            // baked bin paths (mirrors the realm importing src/generated). Empty
             // until the first bake; HMR re-imports it when the pipeline writes it.
             await runner.import('src/generated/models.ts');
             // the engine the server drives comes from the SAME runner instance
             // (the one the user code registered into), NOT a native import.
             // engine-server wraps its api under `export * as EngineServer`.
             const { EngineServer } = await runner.import('bongle/engine-server');
-            const { __kit } = await runner.import('bongle/internal');
+            const { __bongle } = await runner.import('bongle/internal');
 
-            server = await startEditorServer({ fs, log, EngineServer, __kit, localAvatarUrl: msg.localAvatarUrl });
-            __kit.flush(); // initial registry apply.
+            server = await startEditorServer({ fs, log, EngineServer, __bongle, localAvatarUrl: msg.localAvatarUrl });
+            __bongle.flush(); // initial registry apply.
 
             // DevTools automation surface for the server realm: `bongle` in the
             // worker's console context (fs + the live EngineServer state / api).
-            exposeDevtools('server', { fs, server: EngineServer, state: server.state, app: server.app, kit: __kit });
+            exposeDevtools('server', { fs, server: EngineServer, state: server.state, app: server.app, bongle: __bongle });
 
             transport = createPortTransport(server.app, server.state, server.resolveAvatar);
 

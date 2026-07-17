@@ -57,7 +57,7 @@ export function makeRunner(bridge: RunnerBridge, host: RunnerHost = {}): ModuleR
         hmr: true,
         sourcemapInterceptor: false,
         // import.meta.url must be a VALID absolute URL, stable + unique across
-        // re-evals (the __kit capture keys module snapshots by it). The default
+        // re-evals (the __bongle capture keys module snapshots by it). The default
         // file:// base suits node realms (the fs loader reads asset refs by
         // pathname); the browser editor overrides it with the /@project SW URL.
         createImportMeta: (host.createImportMeta ??

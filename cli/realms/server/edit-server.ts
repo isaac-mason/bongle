@@ -11,7 +11,7 @@ import path from 'node:path';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { createFallbackAvatarsDriver } from 'bongle/engine-server-node';
 import { env } from 'bongle/env';
-import { __kit } from 'bongle/internal';
+import { __bongle } from 'bongle/internal';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { attachGameTransport, type GameTransport } from './transport';
@@ -94,7 +94,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
-    __kit.registerFlush(() => EngineServer.applyRegistryChanges(state));
+    __bongle.registerFlush(() => EngineServer.applyRegistryChanges(state));
 
     // random sample avatar per join → onClientJoin (via the transport), so clients
     // wear a real avatar instead of the failing builtin fallback.
@@ -129,7 +129,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         transport.flush();
     }, 1000 / 60);
 
-    __kit.flush();
+    __bongle.flush();
 
     return {
         app,

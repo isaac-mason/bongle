@@ -166,7 +166,7 @@ function createPlaceholderHandle(id: string, src: string, long: boolean, name: s
  * const Ambient  = sound('ambient', { src: 'audio/ambient.ogg', long: true });
  * ```
  *
- * The kit's asset pipeline reads `soundsRegistry` on every flush and
+ * The bongle asset pipeline reads `soundsRegistry` on every flush and
  * builds the atlas (long:false bucket) + standalone files (long:true
  * bucket) into `resources/client/`, then codegens per-id sidecars +
  * barrel under `src/generated/sounds*`. Playback is via the script APIs

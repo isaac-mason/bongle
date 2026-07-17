@@ -89,7 +89,7 @@ export type DevServerState = {
     /** node_modules package.json cache (pkg name → parsed json | null miss). */
     pkgCache: Map<string, PackageJson | null>;
     /** DepGraph AST pass state: module id → SymbolTable, shared across envs
-     *  (dep edges are env-independent). Feeds the __kit.deps consumer wrap. */
+     *  (dep edges are env-independent). Feeds the __bongle.deps consumer wrap. */
     symbolTables: SymbolTableRegistry;
     /** dep-wrapped source cache: module id → { version, code }. The wrap is
      *  env-independent, so it runs once per module content version and both

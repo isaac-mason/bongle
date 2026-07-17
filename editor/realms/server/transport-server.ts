@@ -1,8 +1,8 @@
 // editor/realms/server/transport-server.ts — the in-tab game transport, server side.
 //
 // Runs in the server worker (server-env). Where the deployed server accepts WS
-// upgrades (apps/game-room) and the kit dev server accepts WS upgrades
-// (kit/runtime/transport.ts), this accepts a MessagePort per connected client
+// upgrades (apps/game-room) and the cli dev server accepts WS upgrades
+// (cli/realms/server/transport.ts), this accepts a MessagePort per connected client
 // iframe. Each port is one client's bidirectional frame pipe:
 //   - inbound  : port.onmessage → push the frame onto app.getInbox(state).get(clientId)
 //   - outbound : flush() drains app.getOutbox(state) → port.postMessage(frame)

@@ -11,12 +11,6 @@ export default defineConfig({
             },
             {
                 test: {
-                    name: 'kit',
-                    include: ['kit/**/*.test.ts'],
-                },
-            },
-            {
-                test: {
                     name: 'integration',
                     include: ['tst/integration/**/*.test.ts'],
                 },

@@ -9,7 +9,7 @@
 //
 // Server-only. Calling from a client context throws. Backed by the
 // `ServerDriver.storage` handle wired at engine init: HTTP in deployed
-// rooms, in-memory in kit-dev / editor.
+// rooms, in-memory in bongle-dev / editor.
 //
 // Both surfaces are CAS-safe: pass `opts.ifVersion` on set/delete to
 // guard against concurrent overwrites. The version is returned by

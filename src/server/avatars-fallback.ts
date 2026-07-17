@@ -2,14 +2,14 @@
 //
 // `ServerDriver.avatars` is required, like `storage`: a deployed host sources
 // real avatars from its backend (the HTTP driver, published avatars on R2),
-// and kit dev / editor / offline supply this fallback. It mirrors how the
+// and bongle dev / editor / offline supply this fallback. It mirrors how the
 // platform sources them: each is a `runtime` avatar served as a plain `.glb`
 // the engine fetches and parses via `gltfUnpack`, NOT a bundled `model()`.
 // That keeps dev on the exact same runtime-avatar path as prod and needs no
 // per-game codegen/baking of the engine's example avatars.
 //
 // The bytes live in the engine's `lib/avatars/<name>/<name>.glb`. The client
-// fetches them from the dev host at `SAMPLE_AVATAR_ROUTE_PREFIX` (the kit's
+// fetches them from the dev host at `SAMPLE_AVATAR_ROUTE_PREFIX` (the dev host's
 // Vite middleware in edit, the node static server in `bongle start`); the
 // server reads the same files straight off disk via its absolute `serverUrl`.
 

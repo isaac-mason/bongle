@@ -7,7 +7,7 @@
  *
  * three consumers read from ProjectModule.matchmaking:
  *   1. the engine itself (engine-server), refuses onClientJoin past the cap.
- *   2. the kit build pipeline, stamps the value into bongle.json so the
+ *   2. the bongle build pipeline, stamps the value into bongle.json so the
  *      platform can read it without booting the bundle.
  *   3. (future) any in-game UI that wants to display the cap.
  *

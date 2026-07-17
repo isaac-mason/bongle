@@ -1,7 +1,7 @@
 // skyline rectangle packer, pure data structure + algorithms.
 //
 // shared by `render/models/model-atlas.ts` (runtime gltf textures) and
-// `lib/kit/src/asset-pipeline/sprite-atlas.ts` (bake-time sprite atlas).
+// `src/asset-pipeline/bake` sprite-atlas (bake-time sprite atlas).
 // no GPU state, no allocator harness, callers wrap this with their own
 // `regions` map + pixel buffer + texture handle.
 //

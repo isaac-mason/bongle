@@ -15,24 +15,24 @@
 // (no per-env cache; the engine is compiled once, not 3×). The publish BUILD keeps
 // per-env `replaceEnv` (bundle.ts) since DCE still matters for the shipped bundle.
 //
-// The capture wrapper is the SAME contract the kit Vite plugin injects: push/pop
+// The capture wrapper is the SAME contract both dev hosts inject: push/pop
 // bracket the body so registry upserts stamp the owning module; the self-accept
-// runs __kit.reload → invalidate-or-flush.
+// runs __bongle.reload → invalidate-or-flush.
 
 import type { TransformModule, TransformResult } from './dev-server';
 
-const PRELUDE = `import { __kit } from 'bongle/internal';
-const __kit_prev = __kit.push(import.meta.url);
+const PRELUDE = `import { __bongle } from 'bongle/internal';
+const __bongle_prev = __bongle.push(import.meta.url);
 `;
 
 const POSTLUDE = `
-;__kit.pop(__kit_prev);
+;__bongle.pop(__bongle_prev);
 if (import.meta.hot) {
-  import.meta.hot.accept((__kit_next) => {
-    if (__kit.reload(import.meta.url, __kit_next) === 'invalidate') {
+  import.meta.hot.accept((__bongle_next) => {
+    if (__bongle.reload(import.meta.url, __bongle_next) === 'invalidate') {
       import.meta.hot.invalidate();
     }
-    __kit.flush();
+    __bongle.flush();
   });
 }
 `;

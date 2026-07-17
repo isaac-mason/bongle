@@ -9,7 +9,7 @@
 //   - the bongle-source compile plugin (bongle-plugin.ts) + `?worker` bundling.
 //   - the module resolver (resolve.ts).
 //   - ENGINE SEMANTICS: the DepGraph capture pass (recognise scene/block/trait/
-//     script producers + consumers, wrap with __kit.deps) + env replacement —
+//     script producers + consumers, wrap with __bongle.deps) + env replacement —
 //     cross-module resolution is injected so it runs over a vfs or a node resolver.
 //
 //   - the host-neutral realm conduit (realm-host.ts): attachRealm owns the

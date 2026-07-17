@@ -7,7 +7,7 @@
 // engine `load()` walks `module.scenes` and calls `populateScene` for any
 // handle whose `_payload` is set. live updates (dev) flow through engine
 // entries `applyScenePayload` / `clearScene` from HMR listeners in the
-// kit boot entries, which both update `_payload` and re-`populateScene`.
+// realm boot entries, which both update `_payload` and re-`populateScene`.
 //
 // scene declarations live on `module.scenes` (captured by `scene()` in user
 // code). this module does not keep a parallel registry, the project module

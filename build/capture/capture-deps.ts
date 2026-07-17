@@ -1,6 +1,6 @@
-// editor/bundler/capture-deps.ts — the DepGraph AST pass for the in-browser
-// dev server. Ported from kit's `bongle:capture-transform` (kit/vite/plugin.ts),
-// which is retired in favour of the editor bundler.
+// build/capture/capture-deps.ts — the DepGraph AST pass, shared by both dev
+// hosts (the editor's browser bundler + cli's Vite plugin). It implements the
+// `bongle:capture-transform` semantics.
 //
 // For every user `.ts/.tsx` module the dev server transforms, this pass:
 //   1. parses it (oxc parseSync → an ESTree-compatible Program),
@@ -8,11 +8,11 @@
 //      handles, imports/exports, and `prefab()`/`script()` consumer calls,
 //   3. pre-resolves each import/re-export spec to a module id via the dev
 //      server's own resolver (the editor equivalent of Vite's this.resolve),
-//   4. wraps eligible consumer calls with `__kit.deps(call, [refs])` so the
+//   4. wraps eligible consumer calls with `__bongle.deps(call, [refs])` so the
 //      engine DepGraph learns the source-blind producer→consumer edges
 //      (a `script` re-runs when a trait/block/texture it references changes).
 //
-// The `__kit.deps` runtime helper (bongle/internal → core/capture/dep-wrap)
+// The `__bongle.deps` runtime helper (bongle/internal → core/capture/dep-wrap)
 // already exists; this pass only decides which identifiers go in the array.
 //
 // Cross-module resolution is best-effort on cold load: resolving an imported
@@ -20,7 +20,7 @@
 // transformed before a producer it imports (import order in the graph) misses
 // that edge until it next re-transforms — at which point the whole graph is in
 // the registry and the wrap is complete. Same-module producers always resolve.
-// This mirrors kit's semantics; a settle-pass could close the cold-load gap if
+// Inherent to single-pass transform; a settle-pass could close the cold-load gap if
 // a real miss ever surfaces.
 
 import type { Program } from 'estree';
@@ -44,7 +44,7 @@ export function initSymbolTables(): SymbolTableRegistry {
 }
 
 /**
- * Analyse a user module and return its source with `__kit.deps(...)` wraps
+ * Analyse a user module and return its source with `__bongle.deps(...)` wraps
  * injected around eligible consumer calls. Populates `registry` with the
  * module's SymbolTable as a side effect. Parse failures fall back to the
  * unwrapped source — a syntax error in user code must not break the transform.
@@ -66,7 +66,7 @@ export async function wrapModuleDeps(
     try {
         // oxc emits an ESTree-compatible AST (Literal / Identifier node types,
         // start/end offsets) — the shape dep-ast.ts targets. Cast through the
-        // binding's own Program type, matching kit's `this.parse(...) as Program`.
+        // binding's own Program type, matching the injected parser's `parse(...)` result.
         const { program } = parse(fname, code);
         table = buildSymbolTable(program as unknown as Program, id);
     } catch {
@@ -99,7 +99,7 @@ export async function wrapModuleDeps(
 
     registry.set(id, table);
 
-    // Inject `__kit.deps(...)` around eligible prefab()/script() calls.
+    // Inject `__bongle.deps(...)` around eligible prefab()/script() calls.
     const rewritten = wrapConsumerCalls(code, table, registry);
 
     // Drop the consumer AST nodes now the wrap is done — they are the ONLY
@@ -118,7 +118,7 @@ export async function wrapModuleDeps(
 
 /**
  * Wrap every `prefab(...)` / `script(...)` call whose body closes over
- * producer identifiers with `__kit.deps(call, [refs])`. Returns the rewritten
+ * producer identifiers with `__bongle.deps(call, [refs])`. Returns the rewritten
  * source, or null when no wrap was needed.
  *
  * The runtime helper reads `handle.dependency` off the call's return value and
@@ -141,7 +141,7 @@ function wrapConsumerCalls(
 
         const names = all.map((d) => d.localName).join(', ');
         ms ??= new MagicString(code);
-        ms.appendLeft(consumer.callStart, '__kit.deps(');
+        ms.appendLeft(consumer.callStart, '__bongle.deps(');
         ms.appendRight(consumer.callEnd, `, [${names}])`);
     }
     return ms ? ms.toString() : null;

@@ -13,7 +13,7 @@
 //      reserved name (`idle`, `walk`, …) against the equipped avatar's
 //      handle first, then against `baseAvatar.animations` second.
 //
-// Codegen runs at kit's asset-pipeline pass and populates
+// Codegen runs at the bongle asset-pipeline pass and populates
 // `baseAvatar.scene/nodes/meshes/animations` synchronously at module
 // eval, `CharacterTrait` can read these without an `ensureModel` race.
 

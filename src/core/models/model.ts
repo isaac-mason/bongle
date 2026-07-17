@@ -97,7 +97,7 @@ export type Model = {
  * Resolves all flat indices into direct object refs (parent/children,
  * node→mesh, mesh→image, channel→target), builds the by-name maps, and
  * synthesizes a wrapper root when the source has multiple top-level
- * nodes (matches the kit codegen barrel's same convention).
+ * nodes (matches the bongle codegen barrel's same convention).
  *
  * `modelId` is only used to name the synthetic wrapper root when needed;
  * pass the same id you registered the model under in `Resources`.

@@ -24,7 +24,7 @@ import { renderBlockIcons } from './icons-node';
 import { createNodeRaster } from './raster-node';
 
 // Resolve a subpath of the PROJECT's own bongle install. Registry-bearing engine
-// modules (registry / __kit / AssetPipeline) MUST be the project's instance — the
+// modules (registry / __bongle / AssetPipeline) MUST be the project's instance — the
 // same one the user's `import 'bongle'` declarations register into — so we import
 // them from projectRoot/node_modules/bongle, not lib's copy. (In a real
 // `npm i bongle`, the `bongle` bin IS this dep, so they're one and the same; this
@@ -60,11 +60,11 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
     await import(pathToFileURL(resolve(projectRoot, 'src/index.ts')).href);
 
     // the SAME engine instance the declarations registered into.
-    const { registry, __kit } = (await import(entry('./internal'))) as typeof import('../../src/internal');
+    const { registry, __bongle } = (await import(entry('./internal'))) as typeof import('../../src/internal');
     const { AssetPipeline, Icons } = (await import(
         entry('./engine-asset-pipeline')
     )) as typeof import('../../src/asset-pipeline');
-    __kit.flush();
+    __bongle.flush();
 
     const pipeline = AssetPipeline.init({
         mode: 'edit',

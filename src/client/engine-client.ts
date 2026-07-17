@@ -60,7 +60,7 @@ export type InitOptions = {
     /**
      * Transport for actions a script triggers on the client that need to
      * exit the engine, currently just `client.matchmake` (re-enter matchmaking
-     * with new gameOptions/joinData). Kit dev wraps a `play` message send;
+     * with new gameOptions/joinData). bongle dev wraps a `play` message send;
      * deployed (game-client/poki) wraps the iframe-parent bridge so the
      * parent disposes + re-enqueues. Always
      * supplied: assemblers construct one at boot.
@@ -159,7 +159,7 @@ export function init(opts: InitOptions) {
         voxelMeshResources: null! as VoxelMeshResources.VoxelMeshResources,
         /** engine-global sprite atlas + frame UV LUT. sync-created at
          *  `load()` time with a magenta placeholder; the trailing async
-         *  `SpriteResources.load()` fetches the real atlas if the kit
+         *  `SpriteResources.load()` fetches the real atlas if the bongle
          *  pipeline has produced one. refreshed by the spritesRegistry
          *  dispatch branch + the `bongle:sprite-atlas-updated` HMR event. */
         spriteResources: null! as SpriteResources.SpriteResources,
@@ -221,7 +221,7 @@ export type EngineClient = ReturnType<typeof init>;
 
 /**
  * Boot a self-contained room, no server, no matchmaking, one local player.
- * Used by the kit `standalone` build (and the asset pipeline worker conceptually):
+ * Used by the bongle `standalone` build (and the asset pipeline worker conceptually):
  * `init()` → `load()` → `startStandaloneRoom()` → frame loop. The returned
  * room is already the active player; the caller just has to drive `update()`.
  */
@@ -238,7 +238,7 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
 }
 
 /**
- * Send a `play` message to the server. Kit-dev wraps this in its
+ * Send a `play` message to the server. bongle dev wraps this in its
  * ClientDriver.matchmake impl, the local game server then find-or-creates a
  * namespaced room and re-joins this client. Deployed shells (game-client/poki)
  * bypass the engine entirely and signal the parent host instead.

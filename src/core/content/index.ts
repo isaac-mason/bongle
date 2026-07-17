@@ -4,7 +4,7 @@
 // authored types). pairs with `server/content-manager.ts`, which owns the
 // disk I/O on the server side. cross-side: both server and client mutate
 // scene handles as authored payloads arrive, at boot via the codegen
-// `src/generated/scenes.ts` barrel, and live via the kit `bongle:scenes`
+// `src/generated/scenes.ts` barrel, and live via the `bongle:scenes`
 // vite plugin's HMR events routed through `applyScenePayload`.
 //
 // scene handles live on `module.scenes` (declared via `scene()` in user

@@ -9,7 +9,7 @@
 import { EngineClient } from 'bongle/engine-client';
 import * as EngineEditor from 'bongle/engine-editor';
 import { env } from 'bongle/env';
-import { __kit } from 'bongle/internal';
+import { __bongle } from 'bongle/internal';
 import type { ClientDriver } from 'bongle/interface';
 
 export type StartClientOptions = {
@@ -54,8 +54,8 @@ export async function start(opts: StartClientOptions): Promise<void> {
     // (startup child-bake), so no pipeline-ready gate is needed.
     await EngineEditor.setup(state, { sceneSource });
     await EngineClient.load(state);
-    __kit.registerFlush(() => EngineClient.applyRegistryChanges(state));
-    __kit.flush();
+    __bongle.registerFlush(() => EngineClient.applyRegistryChanges(state));
+    __bongle.flush();
 
     // scene HMR: a .scene.json edit on disk → live update in the running world.
     if (import.meta.hot) {

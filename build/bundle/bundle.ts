@@ -1,7 +1,7 @@
 // lib/build/bundle.ts — the PROD build (Option A), host-neutral.
 //
 // Two env-DCE'd bundles over a per-target entry (the existing generated barrels +
-// src/index + a kit-shape play-* adapter) → client/index.js + server/index.js;
+// src/index + a play-* adapter) → client/index.js + server/index.js;
 // baked resources copied in; a bongle.json manifest (schema 1, sha384 SRI,
 // matchmaking) written; the tree zipped.
 //
@@ -12,7 +12,7 @@
 // The bundle is byte-shaped for the platform's ingest (client/index.js +
 // server/index.js + bongle.json required). The server bundle isn't yet
 // runtime-wired to the refactored EngineServer (deferred play-infra touch) — it
-// builds with kit's play-server shape, enough to prove + persist the artifact.
+// builds with the play-server shape, enough to prove + persist the artifact.
 
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
@@ -25,7 +25,7 @@ type Target = 'client' | 'server';
 /** virtual entry id (per build call — a fresh rolldown graph per target). */
 const ENTRY_ID = '\0bongle:build-entry';
 
-/** bumped when the bundle layout the platform expects changes (mirrors kit). */
+/** bumped when the bundle layout the platform expects changes. */
 const BUNDLE_SCHEMA = 1;
 
 function envFor(target: Target): EnvValues {
@@ -34,9 +34,9 @@ function envFor(target: Target): EnvValues {
         : { client: false, server: true, editor: false, offline: false };
 }
 
-// ── kit-shape play-* adapters (editor-owned; kit is being retired) ──────────
+// ── play-* adapters (the deployed client/server entry shims) ────────────────
 //
-// Same shape kit's runtime/play-{client,server}.ts emit: a `bongle/interface`
+// Same shape the dev realms' play-{client,server} emit: a `bongle/interface`
 // adapter default-exported after the user side-effect imports run. Env is set
 // inside init(), matching the prod ordering.
 
@@ -87,12 +87,12 @@ export default server({
 // sound / texture is served from the baked atlas/bin the pipeline produced, and the
 // `asset()` href sits unused in the shipped registry. No stripping needed.
 
-/** user src (incl. generated barrels) calls `__kit.registerScene/…` as a free
- *  var; make it resolve by importing it (mirrors kit's capture-import). Stopgap:
+/** user src (incl. generated barrels) calls `__bongle.registerScene/…` as a free
+ *  var; make it resolve by importing it (mirrors the dev capture-import). Stopgap:
  *  the dev path does the equivalent via capture-deps/wrapModuleDeps — unifying the
  *  two is the dev/build DepGraph parity follow-up. */
-function injectKitPrelude(code: string, id: string): string {
-    return id.startsWith('src/') && /\.tsx?$/.test(id) ? `import { __kit } from 'bongle/internal';\n${code}` : code;
+function injectBonglePrelude(code: string, id: string): string {
+    return id.startsWith('src/') && /\.tsx?$/.test(id) ? `import { __bongle } from 'bongle/internal';\n${code}` : code;
 }
 
 /** the per-target entry: side-effect-import every existing generated barrel +
@@ -108,7 +108,7 @@ async function entrySource(fs: BuildFs, target: Target): Promise<string> {
 
 // Module resolution + load + env-bake is the shared createBonglePlugin (resolve.ts-
 // backed). The build only supplies the per-target specifics: the virtual play
-// entry, the sharp external (server), and the __kit-prelude injection for user src
+// entry, the sharp external (server), and the __bongle-prelude injection for user src
 // barrels.
 function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: Map<string, string>) {
     return createBonglePlugin(fs, {
@@ -116,7 +116,7 @@ function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: 
         entry: { id: ENTRY_ID, code: entry },
         external: (source) => target === 'server' && source === 'sharp',
         workers,
-        transformExtra: (code, id) => injectKitPrelude(code, id),
+        transformExtra: (code, id) => injectBonglePrelude(code, id),
     });
 }
 
@@ -162,7 +162,7 @@ async function buildTarget(
     return files;
 }
 
-// ── manifest (sha384 SRI, mirrors kit/manifest.ts) ──────────────────────────
+// ── manifest (sha384 SRI) ───────────────────────────────────────────────────
 
 async function sri(bytes: Uint8Array): Promise<string> {
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-384', bytes as unknown as BufferSource));
@@ -219,7 +219,7 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
 
     // engine UI css was extracted at prebundle time (dist/bongle.css) rather than
     // re-emitted by this bundle, so ship it as client/index.css for the deployed
-    // client's styled UI (mirrors kit's client/index.css).
+    // client's styled UI.
     let clientCss: Uint8Array | undefined;
     try {
         clientCss = await fs.read('node_modules/bongle/dist/bongle.css');
@@ -229,7 +229,7 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
     }
 
     // baked outputs (the pipeline already produced these) + authored content +
-    // the project's static public/ dir (kit's copyPublicDir → client root).
+    // the project's static public/ dir (copied to the client root).
     progress('Copying baked resources');
     await copyTree(fs, 'resources/client', zip, 'client');
     await copyTree(fs, 'resources/server', zip, 'server/resources');
