@@ -5,7 +5,7 @@ import * as Resources from '../../../src/core/resources';
 import { addChild, addTrait, createNode } from '../../../src/core/scene/scene-tree';
 import { syncRate } from '../../../src/core/scene/sync/sync-rate';
 import { sync, trait } from '../../../src/core/scene/traits';
-import { compressChunkZstd } from '../../../src/server/chunk-encode';
+import { nodeZstd } from '../../../src/server/chunk-encode';
 import * as Discovery from '../../../src/server/discovery';
 import * as Net from '../../../src/server/net';
 import * as Rooms from '../../../src/server/rooms';
@@ -39,7 +39,7 @@ const M = 8;
  *  so the benched flushes measure steady state. */
 function setup() {
     const server = createTestServer({ mode: 'play' });
-    const discovery = Discovery.init(compressChunkZstd);
+    const discovery = Discovery.init(nodeZstd);
     const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
     const net = Net.init();
 

@@ -21,7 +21,7 @@ import {
 import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
-import { type ChunkCompressor, encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
+import { type Zstd, encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,
     type Chunk,
@@ -245,17 +245,18 @@ export type Discovery = {
      *  / scene_sync) onto a client's ordered socket. */
     commandQueue: QueuedCommand[];
 
-    /** chunk_full compressor, injected by the server entry (Node zstd). kept off
-     *  the codec so this browser-bundled module never imports node:zlib. */
-    compressChunk: ChunkCompressor;
+    /** zstd impl for chunk_full snapshots, injected by the server entry (Node
+     *  zstd, or zstd-wasm in the editor). kept off the codec so this
+     *  browser-bundled module never imports node:zlib. */
+    zstd: Zstd;
 };
 
-export function init(compressChunk: ChunkCompressor): Discovery {
+export function init(zstd: Zstd): Discovery {
     return {
         roomListVersion: 0,
         clients: new Map(),
         commandQueue: [],
-        compressChunk,
+        zstd,
     };
 }
 
@@ -1350,11 +1351,11 @@ function buildExpansionOrder(radius: number): [number, number, number][] {
 /* ── compressed snapshot caching ── */
 
 /** get or build the compressed snapshot for a chunk. caches on the chunk. */
-function getCompressedSnapshot(chunk: Chunk, compress: ChunkCompressor): { compressed: Uint8Array; palette: string[] } {
+function getCompressedSnapshot(chunk: Chunk, zstd: Zstd): { compressed: Uint8Array; palette: string[] } {
     if (chunk.compressedSnapshot && chunk.snapshotPalette) {
         return { compressed: chunk.compressedSnapshot, palette: chunk.snapshotPalette };
     }
-    const compressed = encodeChunk(chunk.data, chunk.light, compress);
+    const compressed = encodeChunk(chunk.data, chunk.light, zstd);
     const palette = chunk.paletteKeys.slice();
     chunk.compressedSnapshot = compressed;
     chunk.snapshotPalette = palette;
@@ -1583,7 +1584,7 @@ function dispatchFull(
         FULL_CHUNKS_PER_CLIENT_PER_TICK,
         (k) => k.pendingFull,
         (c, knowledge, client) => {
-            const { compressed, palette } = getCompressedSnapshot(c.chunk, state.compressChunk);
+            const { compressed, palette } = getCompressedSnapshot(c.chunk, state.zstd);
             out.push([
                 client,
                 {

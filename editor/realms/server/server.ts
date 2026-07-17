@@ -102,7 +102,7 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
             if (path.startsWith('file:')) return fs.read(new URL(path).pathname.replace(/^\/+/, ''));
             return fs.read(path);
         },
-        compressChunk: (payload) => zstdCompress(payload, 3),
+        zstd: { compress: zstdCompress },
         options: {},
         driver: {
             storage: createInMemoryStorageDriver(),

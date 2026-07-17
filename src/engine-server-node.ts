@@ -6,4 +6,4 @@
 // node hosts import these.
 
 export { createFallbackAvatarsDriver, resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from './server/avatars-fallback';
-export { compressChunkZstd } from './server/chunk-encode';
+export { nodeZstd } from './server/chunk-encode';

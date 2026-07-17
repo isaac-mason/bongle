@@ -81,7 +81,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
             if (p.startsWith('file:')) return new Uint8Array(await readFile(new URL(p)));
             return new Uint8Array(await readFile(path.join(projectDir, p)));
         },
-        compressChunk: (payload) => zstdCompress(payload, 3),
+        zstd: { compress: zstdCompress },
         options: {},
         // node dev: no sample-avatar pool (joins get the builtin avatar).
         driver: { storage: createInMemoryStorageDriver(), avatars: { sample: async () => [] } },

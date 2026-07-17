@@ -100,10 +100,18 @@ function bytesAsU16(bytes: Uint8Array): Uint16Array {
         : new Uint16Array(bytes.slice().buffer);
 }
 
-/** compresses a packed chunk payload into the wire frame. supplied by whoever
- *  runs the server (Node native zstd) and injected into encodeChunk, so this
- *  browser-safe module never hard-depends on a Node compressor. */
-export type ChunkCompressor = (payload: Uint8Array) => Uint8Array;
+/** a zstd implementation, supplied by whoever runs the server (Node native
+ *  zstd, or zstd-wasm in the browser editor / cli dev loop) and injected into
+ *  encodeChunk, so this browser-safe module never hard-depends on a particular
+ *  zstd build. only `compress` today — the client decodes with fzstd — but the
+ *  object shape leaves room for a `decompress` sibling. */
+export type Zstd = { compress: (payload: Uint8Array, level: number) => Uint8Array };
+
+// zstd level for chunk_full snapshots. level 6 encodes cheaper than the old
+// deflate path with comparable size, and each snapshot is cached after the
+// first build — raise it if egress matters more than server CPU. decode cost is
+// essentially level-independent, so this only trades encode CPU against bytes.
+const CHUNK_ZSTD_LEVEL = 6;
 
 /** pack a chunk's data + light into the pre-compression byte payload: two RLE
  *  streams under an 8-byte length header. */
@@ -122,10 +130,10 @@ function packChunkStreams(data: Uint16Array, light: Uint16Array): Uint8Array {
 }
 
 /** encode a chunk's data + light into a chunk_full wire payload: RLE-pack, then
- *  compress via the injected `compress` (server-only Node zstd). the client
+ *  zstd-compress via the injected `zstd` at the codec's chunk level. the client
  *  reverses this with decodeChunk. */
-export function encodeChunk(data: Uint16Array, light: Uint16Array, compress: ChunkCompressor): Uint8Array {
-    return compress(packChunkStreams(data, light));
+export function encodeChunk(data: Uint16Array, light: Uint16Array, zstd: Zstd): Uint8Array {
+    return zstd.compress(packChunkStreams(data, light), CHUNK_ZSTD_LEVEL);
 }
 
 /** decode zstd-compressed chunk bytes back to data + light arrays. */

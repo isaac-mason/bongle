@@ -7,7 +7,7 @@ import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/pr
 import * as Resources from '../../../src/core/resources';
 import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../../../src/core/scene/scene-tree';
 import { setBlock } from '../../../src/core/voxels/voxels';
-import { compressChunkZstd } from '../../../src/server/chunk-encode';
+import { nodeZstd } from '../../../src/server/chunk-encode';
 import * as Discovery from '../../../src/server/discovery';
 import * as Net from '../../../src/server/net';
 import * as Rooms from '../../../src/server/rooms';
@@ -72,7 +72,7 @@ function ackAllFulls(discovery: Discovery.Discovery, out: Array<[Client, { type:
 
 function setupRoom(mode: 'edit' | 'play') {
     const server = createTestServer({ mode });
-    const discovery = Discovery.init(compressChunkZstd);
+    const discovery = Discovery.init(nodeZstd);
     const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
     Discovery.addClient(discovery, FAKE_CLIENT);
     const net = Net.init();

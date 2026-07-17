@@ -16,7 +16,7 @@ import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
 import * as Light from '../core/voxels/light';
 import type * as EditorModule from '../editor/index';
-import type { ChunkCompressor } from '../core/voxels/chunk-codec';
+import type { Zstd } from '../core/voxels/chunk-codec';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
 import * as Clients from './clients';
@@ -61,11 +61,12 @@ export type InitOptions = {
      */
     loadResource: (path: string) => Promise<Uint8Array>;
     /**
-     * Chunk compressor for the voxel wire codec. Host-provided so the engine
-     * never hard-depends on a node zlib: node game-room passes the native zstd
-     * (server/chunk-encode), the browser editor passes zstd-wasm.
+     * zstd impl `{ compress(payload, level) }` for the voxel wire codec.
+     * Host-provided so the engine never hard-depends on a node zlib: node hosts
+     * pass the native zstd (`nodeZstd` from engine-server-node), the browser
+     * editor / cli dev loop wrap zstd-wasm's `zstdCompress`.
      */
-    compressChunk: ChunkCompressor;
+    zstd: Zstd;
     /**
      * Matchmaker grouping key for this server's `main` namespace. Stamped at
      * init so scripts can read it via `ctx.server.options`.
@@ -115,7 +116,7 @@ export function init(opts: InitOptions) {
         },
         'server',
     );
-    const discovery = Discovery.init(opts.compressChunk);
+    const discovery = Discovery.init(opts.zstd);
 
     // server-side rpc. driver constructed by ./rpc; listener registry +
     // dispatch live in core/rpc. one shared instance across all rooms;
