@@ -18,6 +18,17 @@
     --color-link: #6ea8ff; /* links */
 }
 
+/* Geist Pixel Square — the brand/display font, self-hosted (mirrors the website
+   wordmark). License at ./fonts/GeistPixel-LICENSE.txt (SIL OFL 1.1). The url is
+   CSS-relative so vite hashes it and applies the build base automatically. */
+@font-face {
+    font-family: "Geist Pixel";
+    src: url("./fonts/GeistPixel-Square.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -86,6 +97,129 @@ body.window-dragging iframe {
 }
 @media (prefers-reduced-motion: reduce) {
     .taskbar-active {
+        animation: none;
+    }
+}
+
+/* desktop watermark: the brand wordmark, centered behind every window. Geist
+   Pixel like the boot screen, but flat/monochrome — a faint tint just above the
+   desktop backdrop so it reads as a watermark, never competing with content. */
+.desktop-wordmark {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    user-select: none;
+    font: 400 clamp(64px, 16vw, 240px) / 1 "Geist Pixel", ui-monospace, monospace;
+    color: color-mix(in srgb, var(--color-fg) 50%, transparent);
+}
+
+/* boot overlay: covers the desktop while the dev env spins up. A big rainbow
+   "bongle" wordmark on the desktop backdrop, gradient clipped to the glyphs
+   (matching the website header's hover treatment), always sliding. Fades out
+   and unmounts once boot completes (see BootScreen). */
+.boot-screen {
+    position: fixed;
+    inset: 0;
+    /* above the taskbar (z 1000000) so it, too, hides behind the overlay and is
+       cleanly revealed by the fade-out. */
+    z-index: 2000000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    background: var(--color-desktop);
+    transition: opacity 480ms ease;
+}
+.boot-screen-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+.boot-wordmark {
+    font: 400 clamp(44px, 11vw, 128px) / 1 "Geist Pixel", ui-monospace, monospace;
+    background-image: linear-gradient(90deg, #ff3ea5, #ffd23f, #3fa7ff, #8a2be2, #ff3ea5);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: bongle-rainbow-slide 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .boot-wordmark {
+        animation: none;
+    }
+}
+
+/* a little terminal box under the wordmark: square, bordered, title bar with
+   traffic-light dots. Fixed-size so streaming steps don't jitter the layout. */
+.boot-terminal {
+    width: min(520px, 82vw);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.4);
+}
+.boot-terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-muted);
+}
+.boot-terminal-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--color-border);
+}
+.boot-terminal-title {
+    margin-left: 4px;
+    font:
+        11px / 1 ui-monospace,
+        monospace;
+    color: var(--color-fg-muted);
+}
+
+/* terminal-style boot log; scrolls to the newest line, top edge faded. */
+.boot-log {
+    height: 132px;
+    overflow: hidden;
+    padding: 10px 12px;
+    font:
+        12px / 1.7 ui-monospace,
+        monospace;
+    color: var(--color-fg-muted);
+    text-align: left;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px);
+    mask-image: linear-gradient(to bottom, transparent, #000 28px);
+}
+.boot-log-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.boot-log-prompt {
+    color: #3fa7ff;
+}
+.boot-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    margin-top: 3px;
+    background: var(--color-fg-muted);
+    animation: boot-cursor-blink 1s step-end infinite;
+}
+@keyframes boot-cursor-blink {
+    50% {
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .boot-cursor {
         animation: none;
     }
 }

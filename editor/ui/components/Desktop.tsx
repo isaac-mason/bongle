@@ -8,6 +8,7 @@ import type { Filesystem } from '../../fs';
 import { pickAndImportProjectSave } from '../../project-save';
 import { runBuild, runSave } from '../../platform/actions';
 import { usePlatform } from '../../stores/platform';
+import { useBoot } from '../../stores/boot';
 import { useClients } from '../../stores/clients';
 import { useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
@@ -105,6 +106,10 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
 
     const focused = useWindows((s) => s.focused);
     const geom = useWindows((s) => s.geom);
+
+    // the taskbar stays hidden behind the BootScreen overlay until the dev env
+    // finishes booting (the overlay fades out and reveals it).
+    const bootReady = useBoot((s) => s.ready);
 
     // folder-sync: a bottom-pinned taskbar icon (Chromium only). Click when idle
     // opens the direction chooser; when live or errored it disconnects.
@@ -347,6 +352,11 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 useTabDrag.getState().setDrag(null);
             }}
         >
+            {/* faint brand watermark behind the windows — the same Geist Pixel
+                wordmark as the boot screen, monochrome (not rainbow). */}
+            <div className="desktop-wordmark" aria-hidden>
+                bongle
+            </div>
             {windows
                 .filter((w) => !closed[w.id])
                 .map((w) => (
@@ -373,7 +383,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             ))}
             <SnapOverlay />
             <PlatformWindow fs={fs} />
-            <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} presence={<Presence />} />
+            {bootReady && <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} presence={<Presence />} />}
             <SyncChooser fs={fs} />
             <SyncPanel />
             {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}

@@ -41,14 +41,17 @@ export async function seedEngineDist(fs: Filesystem): Promise<void> {
     } catch {}
 
     const entries = unzipSync(buf);
-    let count = 0;
-    for (const [path, bytes] of Object.entries(entries)) {
-        if (path.endsWith('/')) continue; // directory entry
-        await fs.write(`node_modules/${path}`, bytes);
-        count++;
+    const files = Object.entries(entries).filter(([path]) => !path.endsWith('/')); // skip dir entries
+    // ~200 files; sequential awaited OPFS writes cost ~3s (dominated by per-write
+    // latency, not throughput). Write in bounded-concurrency batches so the
+    // latencies overlap. Distinct paths + OPFS's idempotent dir creation make
+    // concurrent writes safe; the batch cap avoids thrashing the disk.
+    const BATCH = 32;
+    for (let i = 0; i < files.length; i += BATCH) {
+        await Promise.all(files.slice(i, i + BATCH).map(([path, bytes]) => fs.write(`node_modules/${path}`, bytes)));
     }
     await fs.write(SEED_MARKER, hash);
-    if (count === 0) console.warn('[engine-dist] seed zip was empty');
+    if (files.length === 0) console.warn('[engine-dist] seed zip was empty');
 }
 
 async function sha256Hex(buf: Uint8Array): Promise<string> {

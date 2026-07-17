@@ -5,6 +5,7 @@
 import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
+import { createBootTimer } from './boot-timing';
 import { createClientHost } from './realms/client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
@@ -18,6 +19,7 @@ import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
 import { registerProjectFsWorker } from './project-url';
 import { spawnServerWorker } from './realms/server/server-host';
+import { useBoot } from './stores/boot';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
@@ -29,6 +31,7 @@ import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
 import { blockbenchApp, openPath } from './ui/apps';
 import { CodePane } from './ui/components/CodePane';
+import { BootScreen } from './ui/components/BootScreen';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
@@ -42,8 +45,13 @@ import { TASKBAR_W } from './ui/components/Taskbar';
 // serves the OPFS working copy at <base>@project/… for <img>/?url/new URL.
 registerProjectFsWorker();
 
+// boot instrumentation — 'start' anchors at this module's eval; every bootLog
+// step below is a timed phase boundary. See boot-timing.ts.
+const bootTimer = createBootTimer('main');
+
 const PROJECT = PROJECT_NAME;
 const fs = await openOpfsFilesystem(PROJECT);
+bootTimer.mark('opfs open');
 const editor = initEditor({ fs });
 // the 'build' log window shows both bundler (transform) errors and bake output.
 const log = logger('build');
@@ -72,7 +80,15 @@ solid('dev:green', 60, 200, 90);
 solid('dev:blue', 70, 110, 230);
 `;
 
+// boot progress → both the console (with +delta/total timing) and the BootScreen
+// terminal log (each step shows its own delta).
+const bootLog = (msg: string): void => {
+    const delta = bootTimer.mark(msg);
+    useBoot.getState().log(`${msg}  ${delta}`);
+};
+
 async function boot(): Promise<void> {
+    bootLog('booting dev environment…');
     // what the embedding platform wants this session to do (null = standalone dev).
     const platform = createPlatformBridge();
     const intent = await platform.ready;
@@ -87,12 +103,14 @@ async function boot(): Promise<void> {
     // project. The full-viewport client covers the (unused) desktop underneath.
     if (intent?.kind === 'joinEdit') {
         const guestLog = logger('client');
-        log('joining a multiplayer edit session…');
+        bootLog('joining a multiplayer edit session…');
         joinGuestSession({
             url: intent.url,
             clientPath: `${import.meta.env.BASE_URL}realms/client/index.html`,
             log: (m) => guestLog(`[guest] ${m}`),
         });
+        useBoot.getState().setReady(); // guest client covers the viewport itself
+        bootTimer.summary();
         return; // skip the host stack entirely
     }
 
@@ -146,23 +164,22 @@ async function boot(): Promise<void> {
     useEditor.getState().open(MAIN_PANE, 'src/index.ts'); // open it in the code window
 
     // seed the engine + first-party libs into the vfs so every realm's bundler
-    // resolves `bongle` / `mathcat` / … from there.
-    console.log('[boot] main: seeding engine dist…');
-    await seedEngineDist(editor.fs);
-    console.log('[boot] main: engine seed written');
-
-    // feed the seeded .d.ts into Monaco's TS worker (types/intellisense for user
-    // code). Fire-and-forget — the code window may not be open yet, but the
-    // typescript defaults are global, so it applies whenever an editor mounts.
-    void loadEngineTypes(editor.fs);
-    // model every src file (not just open tabs) so the TS worker resolves across
-    // files — cross-file go-to-definition, find-references, project-wide types.
-    void syncProjectModels(editor.fs);
+    // resolves `bongle` / `mathcat` / … from there. Kick it off but DON'T block
+    // yet: the bundler worker's heavy @rolldown WASM compile (below) can run
+    // concurrently, and only the pipeline's first transform actually reads
+    // node_modules. We await the seed just before spawning the pipeline.
+    bootLog('seeding engine…');
+    const seedStart = performance.now();
+    const seedDone = seedEngineDist(editor.fs).then(() => {
+        console.log(`[boot:main] seedEngineDist ${(performance.now() - seedStart).toFixed(0)}ms`);
+        bootLog('engine ready');
+    });
 
     // the ONE dev server — DevServer + @rolldown transform — runs OFF the main
     // thread in the bundler worker (its WASM arena reaches multiple GB under
     // load). Every realm connects to it over a transferred MessagePort; the main
-    // doc only brokers the connection + relays fs edits.
+    // doc only brokers the connection + relays fs edits. Spawned NOW (before the
+    // seed resolves) so its WASM compile overlaps the seed writes.
     const bundlerWorker = new Worker(new URL('./dev/bundler-worker.ts', import.meta.url), { type: 'module' });
     bundlerWorker.onerror = (e) => console.error('[bundler-worker] load error', e.message);
     // messages posted to the worker before it's live get lost in vite's dep-
@@ -174,14 +191,13 @@ async function boot(): Promise<void> {
         if (bundlerReady) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
         else pendingConnects.push({ env, port });
     };
-    console.log('[boot] main: bundler worker spawned, awaiting worker-ready');
+    bootLog('starting bundler…');
     bundlerWorker.onmessage = (e: MessageEvent) => {
         const d = e.data as { __buildlog?: string; type?: string };
         if (d?.type === 'worker-ready') {
-            console.log('[boot] main: worker-ready → posting init');
             bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
         } else if (d?.type === 'host-ready') {
-            console.log(`[boot] main: host-ready → flushing ${pendingConnects.length} queued realm connect(s)`);
+            bootLog('bundler ready');
             bundlerReady = true;
             for (const { env, port } of pendingConnects) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
             pendingConnects.length = 0;
@@ -198,7 +214,19 @@ async function boot(): Promise<void> {
     // `await pipelineHost.ready`, before they're spawned, and its outputs reach
     // the realms via their fresh barrel import at boot, so a no-op then is right.
     let relayBakeChange: (changes: FsChange[]) => void = () => {};
-    console.log('[boot] main: spawning pipeline worker');
+
+    // the pipeline realm is the first to request transforms (its engine-graph
+    // import resolves `bongle` from the seeded node_modules), so the seed MUST be
+    // complete before it spawns. This is where the overlap collapses back: by now
+    // the bundler's WASM compile has been running alongside the seed.
+    await seedDone;
+    // feed the seeded .d.ts into Monaco's TS worker (types/intellisense for user
+    // code) + model every src file for cross-file resolution. Fire-and-forget —
+    // the code window may not be open yet, but the TS defaults are global.
+    void loadEngineTypes(editor.fs);
+    void syncProjectModels(editor.fs);
+
+    bootLog('baking assets…');
     const pipelineHost = spawnPipelineWorker({
         connectRealm,
         projectName: PROJECT,
@@ -210,9 +238,9 @@ async function boot(): Promise<void> {
     // bake-then-run (mirrors the build): wait for the first bake so every realm
     // fresh-imports the REAL generated barrel (baked model bin paths) at boot,
     // rather than racing an empty→real HMR that worker realms can't apply cleanly.
-    console.log('[boot] main: awaiting first bake (pipelineHost.ready)…');
     await pipelineHost.ready;
-    console.log('[boot] main: first bake done → spawning server');
+    bootLog('assets baked');
+    bootLog('starting server…');
 
     // the server, off-thread in its own realm (own registry). It opens the SAME
     // OPFS project directly — no snapshot.
@@ -268,6 +296,7 @@ async function boot(): Promise<void> {
     // (~70%) with the platform widget kept visible top-right; open a client later
     // via the "+ client" button to preview the avatar on a player.
     void serverHost.ready.then(() => {
+        bootLog('server ready');
         const W = useWindows.getState();
         if (intent?.kind === 'avatar') {
             const deskW = window.innerWidth - TASKBAR_W;
@@ -276,10 +305,15 @@ async function boot(): Promise<void> {
             W.setBox('blockbench', TASKBAR_W + Math.round((deskW - w) / 2), Math.round((window.innerHeight - h) / 2), w, h);
             W.focus('blockbench');
             W.focus(PLATFORM_WINDOW_ID); // keep the platform widget on top / visible
+            useBoot.getState().setReady();
+            bootTimer.summary();
             return;
         }
+        bootLog('opening client…');
         const id = useClients.getState().open();
         if (id) W.snapTo(id, 'full');
+        useBoot.getState().setReady();
+        bootTimer.summary();
     });
 }
 
@@ -351,5 +385,10 @@ window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
 });
 
-createRoot(document.getElementById('root')!).render(<Desktop windows={windows} fs={editor.fs} />);
+createRoot(document.getElementById('root')!).render(
+    <>
+        <Desktop windows={windows} fs={editor.fs} />
+        <BootScreen />
+    </>,
+);
 void boot();

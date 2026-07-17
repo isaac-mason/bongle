@@ -10,9 +10,12 @@
 // It opens the SAME OPFS project (same origin) to read source. The seed writes
 // complete in the main doc before this worker is asked to serve anything.
 
+import { createBootTimer } from '../boot-timing';
 import type { FsChange } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
 import { type BundlerHost, createBundlerHost } from './host';
+
+const bt = createBootTimer('bundler');
 
 type InitMsg = { type: 'init'; projectName: string };
 type ConnectMsg = { type: 'connect-realm'; env: string };
@@ -27,13 +30,13 @@ const ready = new Promise<void>((r) => {
 self.addEventListener('message', async (e: MessageEvent) => {
     const msg = e.data as InitMsg | ConnectMsg | FsChangeMsg;
     if (msg.type === 'init') {
-        console.log('[boot] bundler-worker: init received, opening OPFS…');
+        bt.mark('init received');
         const fs = await openOpfsFilesystem(msg.projectName);
-        console.log('[boot] bundler-worker: OPFS open, creating host…');
+        bt.mark('opfs open');
         // build errors surface to the main doc's build log window.
         host = createBundlerHost(fs, (buildlog) => self.postMessage({ __buildlog: buildlog }));
+        bt.mark('host created');
         resolveReady();
-        console.log('[boot] bundler-worker: host created, posting host-ready');
         // now safe to accept realm connections — the main doc flushes its queued
         // connect-realm ports on this.
         self.postMessage({ type: 'host-ready' });

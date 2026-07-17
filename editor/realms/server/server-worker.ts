@@ -13,6 +13,7 @@
 // the in-tab transport (transport-server.ts) pumps that port's frames.
 
 import { createPortBridge } from '../../../build';
+import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
 import { exposeDevtools } from '../../devtools';
 import type { Filesystem } from '../../fs';
@@ -21,6 +22,7 @@ import { type EditorServer, startEditorServer } from './server';
 import { type ClientMeta, createPortTransport, type PortTransport } from './transport-server';
 
 const log = (msg: string) => self.postMessage({ type: 'log', msg });
+const bt = createBootTimer('server');
 
 let fs: Filesystem | null = null;
 let server: EditorServer | null = null;
@@ -47,9 +49,11 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
     const msg = e.data;
     try {
         if (msg.type === 'init') {
+            bt.mark('init received');
             // open the SAME OPFS project the main doc uses (same origin) — the
             // server reads scenes/resources from it directly, no snapshot.
             fs = await openOpfsFilesystem(msg.projectName);
+            bt.mark('opfs open');
             // the bundler port rides on e.ports[0]; run the user entry through a
             // ModuleRunner bridged to the host DevServer (host does the
             // transform, this realm evaluates → populates the server registry).
@@ -58,11 +62,12 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             const runner = makeRunner(createPortBridge(bundlerPort));
             // runtime env flags before user/engine eval (mirrors the realm boot entry);
             // env.editor gates the server-side EditorTrait attach on join.
-            const { env } = await runner.import('bongle/env');
+            const { env } = await runner.import('bongle/env'); // first bundler fetch
+            bt.mark('import bongle/env');
             env.client = false;
             env.server = true;
             env.editor = true;
-            await runner.import('src/index.ts');
+            await runner.import('src/index.ts'); // full user + engine graph
             // the bake's generated barrel patches model/… handles with their
             // baked bin paths (mirrors the realm importing src/generated). Empty
             // until the first bake; HMR re-imports it when the pipeline writes it.
@@ -72,8 +77,10 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             // engine-server wraps its api under `export * as EngineServer`.
             const { EngineServer } = await runner.import('bongle/engine-server');
             const { __bongle } = await runner.import('bongle/internal');
+            bt.mark('import graph + engine barrels');
 
             server = await startEditorServer({ fs, log, EngineServer, __bongle, localAvatarUrl: msg.localAvatarUrl });
+            bt.mark('startEditorServer');
             __bongle.flush(); // initial registry apply.
 
             // DevTools automation surface for the server realm: `bongle` in the
@@ -98,6 +105,8 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
                 }
             }, 1000 / 60);
 
+            bt.mark('sim loop started');
+            bt.summary();
             self.postMessage({ type: 'ready' });
         } else if (msg.type === 'client-join') {
             // the transferred port rides on e.ports[0].

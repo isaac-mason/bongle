@@ -10,8 +10,11 @@ import { createBrowserRaster } from '../../../src/asset-pipeline/bake/raster-bro
 import { createBrowserDecodeAudio } from '../../../src/asset-pipeline/decode-audio-browser';
 import { createBakeLoader, createClientResourceLoader } from '../../../src/asset-pipeline/loader';
 import { createPortBridge } from '../../../build';
+import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
 import { openOpfsFilesystem } from '../../fs-opfs';
+
+const bt = createBootTimer('pipeline');
 
 type InitMsg = { type: 'init'; projectName: string };
 
@@ -19,11 +22,11 @@ const post = (msg: unknown) => self.postMessage(msg);
 const log = (m: string) => post({ type: 'log', msg: m });
 
 async function boot(projectName: string, bundlerPort: MessagePort): Promise<void> {
-    console.log('[boot] pipeline-worker: boot() start, opening OPFS…');
+    bt.mark('boot() start');
     // shared OPFS project (same origin) — baked outputs land here for the main
     // doc's atlas view to re-read; no snapshot.
     const fs = await openOpfsFilesystem(projectName);
-    console.log('[boot] pipeline-worker: OPFS open, building runner…');
+    bt.mark('opfs open');
 
     // the bake writes through THIS fs handle; OPFS has no cross-context change
     // events, so relay those writes to the main doc, which HMRs the generated
@@ -37,14 +40,14 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // client=true so this realm can build the client render stack for in-worker
     // icon rendering (experiment — watch for DOM-assuming client-only code that
     // breaks in a worker with no document/window).
-    console.log('[boot] pipeline-worker: import bongle/env… (first bundler fetch)');
-    const { env } = await runner.import('bongle/env');
-    console.log('[boot] pipeline-worker: bongle/env OK → importing src/index.ts (full graph)…');
+    bt.mark('runner built');
+    const { env } = await runner.import('bongle/env'); // first bundler fetch
+    bt.mark('import bongle/env');
     env.client = true;
     env.server = true;
     env.editor = true;
-    await runner.import('src/index.ts'); // user declarations register into this realm's engine
-    console.log('[boot] pipeline-worker: src/index.ts evaluated');
+    await runner.import('src/index.ts'); // user declarations register into this realm's engine (full graph)
+    bt.mark('import src/index.ts (full graph)');
     // registry is populated by the import above — the prod build reads matchmaking
     // off it (see below), since the build itself never evaluates user code.
     const { __bongle, registry } = await runner.import('bongle/internal');
@@ -54,6 +57,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // get a different, empty engine instance). Same JS realm → plain calls, no
     // serialization: `loader` goes in, atlas pixels come back.
     const { AssetPipeline, Icons } = await runner.import('bongle/engine-asset-pipeline');
+    bt.mark('import engine barrels');
 
     // the baker reads inputs through the loader (project-relative → fs, absolute
     // + file:// → fetch/vfs) and decodes audio via OfflineAudioContext.
@@ -149,9 +153,10 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
             await renderIcons();
         })();
     });
-    console.log('[boot] pipeline-worker: running initial bake (flush)…');
-    __bongle.flush(); // initial bake + registry apply
-    console.log('[boot] pipeline-worker: flush returned → posting ready');
+    bt.mark('pipeline init');
+    __bongle.flush(); // initial bake + registry apply (bake runs async — timed via its own `bake Nms` log)
+    bt.mark('initial flush dispatched');
+    bt.summary();
     post({ type: 'ready' });
 }
 
