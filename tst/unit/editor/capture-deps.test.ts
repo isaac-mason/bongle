@@ -1,8 +1,14 @@
+import { parseSync } from 'rolldown/experimental';
 import { describe, expect, it } from 'vitest';
-import { initSymbolTables, wrapModuleDeps } from '../../../build/capture-deps';
+import { type DepParser, initSymbolTables, type SymbolTableRegistry, wrapModuleDeps as wrapWithParse } from '../../../build/capture/capture-deps';
 
 // identity resolver: specs already ARE the module ids we key the registry by.
 const idResolve = async (spec: string) => spec;
+
+// tests run in node → native rolldown's parser (the injected DepParser).
+const parse = parseSync as unknown as DepParser;
+const wrapModuleDeps = (id: string, code: string, reg: SymbolTableRegistry, resolve: (s: string) => Promise<string>) =>
+    wrapWithParse(id, code, reg, resolve, parse);
 
 describe('wrapModuleDeps', () => {
     it('wraps a script whose body references a same-module producer', async () => {

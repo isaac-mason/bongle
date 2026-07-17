@@ -3,7 +3,7 @@
 // stamps the localId on outbound frames. Control frames surface on onControl.
 
 import { describe, expect, it } from 'vitest';
-import { Channel, createRelayHostLink, encodeFrame, type SocketLike } from '../../../editor/net/relay-link';
+import { Channel, createRelayHostLink, encodeFrame, type SocketLike } from '../../../build';
 
 /** a socket that records what the host sends and lets the test inject inbound. */
 function fakeSocket(): SocketLike & { sent: Uint8Array[] } {

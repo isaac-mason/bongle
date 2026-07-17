@@ -12,8 +12,8 @@
 // `client-join` message carries a transferred port + synthesized identity;
 // the in-tab transport (transport-server.ts) pumps that port's frames.
 
-import { createPortBridge } from '../bundler/port-bridge';
-import { makeRunner } from '../bundler/runner';
+import { createPortBridge } from '../../build';
+import { makeRunner } from '../dev/runner';
 import { exposeDevtools } from '../devtools';
 import type { Filesystem } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
@@ -124,3 +124,8 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
         console.error(err);
     }
 };
+
+// handshake (mirrors bundler-worker): announce we're live so the host posts init
+// (with the transferred bundler port) only now — a blind init at spawn is dropped
+// in vite's dep-optimize/reload window (this module may finish eval after it).
+self.postMessage({ type: 'worker-ready' });

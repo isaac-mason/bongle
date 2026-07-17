@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 import { rolldown } from 'rolldown';
 import { buildBundle } from '../build';
 import { openNodeFs } from './node-fs';
-import { bake } from './pipeline';
+import { bake } from './pipeline/pipeline';
 
 export async function buildCommand(projectDir: string, opts: { maxPlayers: number; out: string }): Promise<void> {
     const root = resolve(projectDir);

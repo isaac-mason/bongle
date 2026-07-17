@@ -14,8 +14,8 @@
 // ModuleRunner, not rolldown — but shares resolve.ts + the worker helpers below.
 
 import type { Plugin } from 'rolldown';
-import { type EnvValues, replaceEnv } from './env-replace';
-import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule } from './resolve';
+import { type EnvValues, replaceEnv } from '../env-replace';
+import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule } from '../resolve';
 
 export type RolldownFn = typeof import('rolldown').rolldown;
 

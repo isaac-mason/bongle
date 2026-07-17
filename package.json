@@ -40,6 +40,10 @@
             "import": "./src/asset-pipeline/index.ts",
             "default": "./src/asset-pipeline/index.ts"
         },
+        "./env": {
+            "import": "./src/api/env.ts",
+            "default": "./src/api/env.ts"
+        },
         "./internal": {
             "import": "./src/internal.ts",
             "default": "./src/internal.ts"
@@ -75,6 +79,7 @@
     ],
     "scripts": {
         "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
+        "build:dev-client": "vite build --config cli/client/vite.config.ts",
         "build": "rm -rf dist vendor deps-dist && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
         "build:incremental": "vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
         "test": "vitest run",
@@ -99,7 +104,6 @@
         "@tailwindcss/vite": "^4.2.2",
         "@tanstack/react-virtual": "^3.13.24",
         "archiver": "^7.0.1",
-        "canvas": "^3.2.3",
         "crashcat": "github:isaac-mason/crashcat#dev",
         "fflate": "^0.8.2",
         "gatho": "github:isaac-mason/gatho",
@@ -143,7 +147,6 @@
     },
     "packageManager": "pnpm@10.30.3",
     "onlyBuiltDependencies": [
-        "canvas",
         "esbuild",
         "sharp",
         "skia-canvas"

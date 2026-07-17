@@ -43,17 +43,21 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
 
     worker.onmessage = (e: MessageEvent) => {
         const msg = e.data as { type: string; msg?: string };
-        if (msg.type === 'log') log(msg.msg ?? '');
-        else if (msg.type === 'ready') resolveReady();
+        if (msg.type === 'worker-ready') {
+            // worker is live — NOW wire the bundler conduit + post init (transferred
+            // port). A blind init at spawn is dropped in vite's dep-optimize window.
+            console.log('[boot] server: worker-ready → connecting bundler conduit + posting init');
+            const bundler = new MessageChannel();
+            connectRealm('server', bundler.port1);
+            worker.postMessage({ type: 'init', projectName, localAvatarUrl }, [bundler.port2]);
+        } else if (msg.type === 'log') log(msg.msg ?? '');
+        else if (msg.type === 'ready') {
+            console.log('[boot] server: worker reported ready');
+            resolveReady();
+        }
     };
     worker.onerror = (e) => log(`worker crashed: ${e.message}`);
-
-    // dedicated bundler conduit: the worker's ModuleRunner ↔ the bundler worker
-    // DevServer (env 'server'). One port to the bundler worker, one to this worker.
-    const bundler = new MessageChannel();
-    connectRealm('server', bundler.port1);
-
-    worker.postMessage({ type: 'init', projectName, localAvatarUrl }, [bundler.port2]);
+    console.log('[boot] server: worker spawned, awaiting worker-ready');
 
     return {
         ready,

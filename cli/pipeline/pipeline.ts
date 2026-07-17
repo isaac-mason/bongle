@@ -16,11 +16,11 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Filesystem } from '../src/asset-pipeline/filesystem';
-import { createBakeLoader } from '../src/asset-pipeline/loader';
+import type { Filesystem } from '../../src/asset-pipeline/filesystem';
+import { createBakeLoader } from '../../src/asset-pipeline/loader';
+import { openNodeFs } from '../node-fs';
 import { createNodeDecodeAudio } from './decode-audio-node';
 import { renderBlockIcons } from './icons-node';
-import { openNodeFs } from './node-fs';
 import { createNodeRaster } from './raster-node';
 
 // Resolve a subpath of the PROJECT's own bongle install. Registry-bearing engine
@@ -60,8 +60,10 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
     await import(pathToFileURL(resolve(projectRoot, 'src/index.ts')).href);
 
     // the SAME engine instance the declarations registered into.
-    const { registry, __kit } = (await import(entry('./internal'))) as typeof import('../src/internal');
-    const { AssetPipeline, Icons } = (await import(entry('./engine-asset-pipeline'))) as typeof import('../src/asset-pipeline');
+    const { registry, __kit } = (await import(entry('./internal'))) as typeof import('../../src/internal');
+    const { AssetPipeline, Icons } = (await import(
+        entry('./engine-asset-pipeline')
+    )) as typeof import('../../src/asset-pipeline');
     __kit.flush();
 
     const pipeline = AssetPipeline.init({

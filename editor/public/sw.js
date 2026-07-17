@@ -57,6 +57,8 @@ function notFound() {
     return new Response('vfs: not found', { status: 404, headers: { 'Cross-Origin-Resource-Policy': 'same-origin' } });
 }
 
+// mirror of build/mime.ts contentType — a raw SW can't import the graph, so keep
+// the two maps in sync.
 function contentType(name) {
     const ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
     return (

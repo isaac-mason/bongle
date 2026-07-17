@@ -15,10 +15,10 @@
 // builds with kit's play-server shape, enough to prove + persist the artifact.
 
 import { zipSync } from 'fflate';
-import { INTERFACE_VERSION } from '../interface/index';
+import { INTERFACE_VERSION } from '../../interface/index';
+import type { EnvValues } from '../env-replace';
+import type { BuildFs } from '../resolve';
 import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
-import type { EnvValues } from './env-replace';
-import type { BuildFs } from './resolve';
 
 type Target = 'client' | 'server';
 

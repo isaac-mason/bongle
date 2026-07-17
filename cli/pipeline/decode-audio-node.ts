@@ -5,7 +5,7 @@
 // browser impl (which leans on the exact same WebAudio API).
 
 import { OfflineAudioContext } from 'node-web-audio-api';
-import type { DecodeAudio, DecodedAudio } from '../src/asset-pipeline/bake/decode-audio';
+import type { DecodeAudio, DecodedAudio } from '../../src/asset-pipeline/bake/decode-audio';
 
 export function createNodeDecodeAudio(): DecodeAudio {
     return async (bytes: Uint8Array, sampleRate: number): Promise<DecodedAudio> => {

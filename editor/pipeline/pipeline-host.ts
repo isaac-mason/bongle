@@ -41,20 +41,27 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
 
     worker.onmessage = (e: MessageEvent) => {
         const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; maxPlayers?: number; changes?: FsChange[] };
-        if (msg.type === 'log') log(msg.msg ?? '');
+        if (msg.type === 'worker-ready') {
+            // the worker is live — NOW wire its bundler conduit + post init (with the
+            // transferred port). Posting at spawn drops it in vite's dep-optimize
+            // window, since the worker's module often finishes eval after it.
+            console.log('[boot] pipeline: worker-ready → connecting bundler conduit + posting init');
+            const bundler = new MessageChannel();
+            connectRealm('pipeline', bundler.port1);
+            worker.postMessage({ type: 'init', projectName }, [bundler.port2]);
+        } else if (msg.type === 'log') log(msg.msg ?? '');
         else if (msg.type === 'baked') {
             onBaked?.(!!msg.atlasChanged);
             if (typeof msg.maxPlayers === 'number') onMatchmaking?.(msg.maxPlayers);
         } else if (msg.type === 'fs-changed') onFsChanged?.(msg.changes ?? []);
-        else if (msg.type === 'ready') resolveReady();
+        else if (msg.type === 'ready') {
+            console.log('[boot] pipeline: worker reported ready (first bake done)');
+            resolveReady();
+        }
     };
-    worker.onerror = (e) => log(`pipeline worker crashed: ${e.message}`);
+    worker.onerror = (e) => console.error('[boot] pipeline worker crashed:', e.message);
 
-    // bundler conduit: the worker's ModuleRunner ↔ the bundler worker DevServer
-    // (env 'pipeline'). One port to the bundler worker, the other to this worker.
-    const bundler = new MessageChannel();
-    connectRealm('pipeline', bundler.port1);
-    worker.postMessage({ type: 'init', projectName }, [bundler.port2]);
+    console.log('[boot] pipeline: worker spawned, awaiting worker-ready');
 
     return {
         ready,

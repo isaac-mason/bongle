@@ -11,7 +11,7 @@
 // present). We bridge each relay PortLike to a MessageChannel transferred into
 // the iframe (an iframe can't receive a PortLike, only a real transferable port).
 
-import { Channel, createRelayLink, type PortLike } from './relay-link';
+import { Channel, createRelayLink, type PortLike } from '../../build';
 import { connectRelaySocket } from './gatho-socket';
 
 export type GuestSession = { close(): void };

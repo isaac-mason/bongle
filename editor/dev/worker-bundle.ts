@@ -17,7 +17,7 @@ export function createBundleWorker(fs: Filesystem): BundleWorker {
         if (hit !== undefined) return hit;
         // lazy: @rolldown/browser's wasm loads only when a ?worker is actually hit.
         const [{ bundleWorkerEntry, workerWrapperModule }, { rolldown }] = await Promise.all([
-            import('../../build/bongle-plugin'),
+            import('../../build/bundle/bongle-plugin'),
             import('@rolldown/browser'),
         ]);
         // the worker runs in the client render pipeline (CPU compute, no DOM).

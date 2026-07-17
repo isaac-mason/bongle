@@ -16,12 +16,12 @@
 // watcher HMRs source, and resource writes trigger the matching engine refresh.
 
 import type { ClientDriver } from '../../interface/index';
-import { createPortBridge } from '../bundler/port-bridge';
-import { makeRunner } from '../bundler/runner';
+import { createPortBridge } from '../../build';
+import { makeRunner } from '../dev/runner';
 import { exposeDevtools } from '../devtools';
 import type { Filesystem } from '../fs';
 import { openOpfsFilesystem } from '../fs-opfs';
-import type { PortLike } from '../net/relay-link';
+import type { PortLike } from '../../build';
 import { createRemoteFilesystem } from '../net/remote-fs';
 
 /** wrap a transferred MessagePort as a PortLike (createRemoteFilesystem reads

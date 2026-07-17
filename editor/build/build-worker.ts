@@ -9,7 +9,7 @@
 
 import { rolldown } from '@rolldown/browser';
 import { type Bundler, buildBundle } from '../../build';
-import { ensureProcessShim } from '../bundler/runner';
+import { ensureProcessShim } from '../dev/runner';
 import { openOpfsFilesystem } from '../fs-opfs';
 
 // @rolldown/browser's `rolldown` has the same runtime API as node `rolldown` (the

@@ -20,7 +20,7 @@
 // doesn't pay a base64/JSON tax; everything else is JSON.
 
 import type { Filesystem, FilesystemSnapshot, FsChange, FsPath, FsStat } from '../fs';
-import type { PortLike } from './relay-link';
+import type { PortLike } from '../../build';
 
 type ReqFrame = { __fsrpc: 'req'; id: number; op: string; args: unknown[] };
 type ResFrame = { __fsrpc: 'res'; id: number; ok: true; value: unknown } | { __fsrpc: 'res'; id: number; ok: false; error: string };

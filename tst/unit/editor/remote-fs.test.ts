@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { createMemoryFilesystem } from '../../../editor/fs';
-import type { PortLike } from '../../../editor/net/relay-link';
+import type { PortLike } from '../../../build';
 import { createRemoteFilesystem, serveFilesystemOverPort } from '../../../editor/net/remote-fs';
 
 /** two PortLikes cross-wired like a MessageChannel (async delivery). */

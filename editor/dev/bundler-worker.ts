@@ -27,14 +27,18 @@ const ready = new Promise<void>((r) => {
 self.addEventListener('message', async (e: MessageEvent) => {
     const msg = e.data as InitMsg | ConnectMsg | FsChangeMsg;
     if (msg.type === 'init') {
+        console.log('[boot] bundler-worker: init received, opening OPFS…');
         const fs = await openOpfsFilesystem(msg.projectName);
+        console.log('[boot] bundler-worker: OPFS open, creating host…');
         // build errors surface to the main doc's build log window.
         host = createBundlerHost(fs, (buildlog) => self.postMessage({ __buildlog: buildlog }));
         resolveReady();
+        console.log('[boot] bundler-worker: host created, posting host-ready');
         // now safe to accept realm connections — the main doc flushes its queued
         // connect-realm ports on this.
         self.postMessage({ type: 'host-ready' });
     } else if (msg.type === 'connect-realm') {
+        console.log(`[boot] bundler-worker: connect-realm ${msg.env}`);
         await ready;
         // e.ports[0] = this realm's bundler conduit (its ModuleRunner ↔ us).
         host?.connectRealm(msg.env, e.ports[0]);
@@ -47,4 +51,5 @@ self.addEventListener('message', async (e: MessageEvent) => {
 // announce once this (heavy @rolldown) module is live — the main doc posts init
 // in response. Buffering a postMessage across vite's dep-optimize/reload window
 // is unreliable, so we handshake rather than fire init blindly at spawn time.
+console.log('[boot] bundler-worker: module eval complete, posting worker-ready');
 self.postMessage({ type: 'worker-ready' });

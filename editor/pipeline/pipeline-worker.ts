@@ -9,8 +9,8 @@
 import { createBrowserRaster } from '../../src/asset-pipeline/bake/raster-browser';
 import { createBrowserDecodeAudio } from '../../src/asset-pipeline/decode-audio-browser';
 import { createBakeLoader, createClientResourceLoader } from '../../src/asset-pipeline/loader';
-import { createPortBridge } from '../bundler/port-bridge';
-import { makeRunner } from '../bundler/runner';
+import { createPortBridge } from '../../build';
+import { makeRunner } from '../dev/runner';
 import { openOpfsFilesystem } from '../fs-opfs';
 
 type InitMsg = { type: 'init'; projectName: string };
@@ -19,9 +19,11 @@ const post = (msg: unknown) => self.postMessage(msg);
 const log = (m: string) => post({ type: 'log', msg: m });
 
 async function boot(projectName: string, bundlerPort: MessagePort): Promise<void> {
+    console.log('[boot] pipeline-worker: boot() start, opening OPFS…');
     // shared OPFS project (same origin) — baked outputs land here for the main
     // doc's atlas view to re-read; no snapshot.
     const fs = await openOpfsFilesystem(projectName);
+    console.log('[boot] pipeline-worker: OPFS open, building runner…');
 
     // the bake writes through THIS fs handle; OPFS has no cross-context change
     // events, so relay those writes to the main doc, which HMRs the generated
@@ -35,11 +37,14 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // client=true so this realm can build the client render stack for in-worker
     // icon rendering (experiment — watch for DOM-assuming client-only code that
     // breaks in a worker with no document/window).
+    console.log('[boot] pipeline-worker: import bongle/env… (first bundler fetch)');
     const { env } = await runner.import('bongle/env');
+    console.log('[boot] pipeline-worker: bongle/env OK → importing src/index.ts (full graph)…');
     env.client = true;
     env.server = true;
     env.editor = true;
     await runner.import('src/index.ts'); // user declarations register into this realm's engine
+    console.log('[boot] pipeline-worker: src/index.ts evaluated');
     // registry is populated by the import above — the prod build reads matchmaking
     // off it (see below), since the build itself never evaluates user code.
     const { __kit, registry } = await runner.import('bongle/internal');
@@ -144,7 +149,9 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
             await renderIcons();
         })();
     });
+    console.log('[boot] pipeline-worker: running initial bake (flush)…');
     __kit.flush(); // initial bake + registry apply
+    console.log('[boot] pipeline-worker: flush returned → posting ready');
     post({ type: 'ready' });
 }
 
@@ -164,6 +171,7 @@ async function encodeRgbaPng(pixels: Uint8Array, width: number, height: number):
 let booted = false;
 self.addEventListener('message', (e: MessageEvent) => {
     const msg = e.data as InitMsg;
+    console.log('[boot] pipeline-worker: message received:', msg?.type);
     if (msg?.type !== 'init' || booted) return;
     booted = true;
     const bundlerPort = e.ports[0]; // the bundler conduit (→ bundler worker)
@@ -173,3 +181,9 @@ self.addEventListener('message', (e: MessageEvent) => {
         console.error(err);
     });
 });
+
+// handshake (mirrors bundler-worker): announce we're live so the host posts init
+// (with the transferred bundler port) only now. A blind init at spawn is dropped
+// in vite's dep-optimize/reload window — this module often finishes eval AFTER it.
+console.log('[boot] pipeline-worker: module eval complete, posting worker-ready');
+self.postMessage({ type: 'worker-ready' });

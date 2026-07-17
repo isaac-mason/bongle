@@ -1,31 +1,32 @@
-// editor/bundler/port-bridge.ts — the realm side of the bundler conduit.
-//
-// A realm (server worker / client iframe) runs a ModuleRunner whose transport is
-// this bridge: it tunnels the module-runner protocol (fetchModule invoke + HMR
-// push + vite:invalidate) over a MessagePort to the host DevServer (connectRealm
-// in host.ts). Kept SEPARATE from host.ts so realms don't import the transform
-// (@rolldown/browser → SharedArrayBuffer); the realm only evaluates.
+// build/port-bridge.ts — the REALM side of the BundlerFrame protocol (the host
+// side is realm-host.ts's attachRealm). A realm's RunnerBridge tunnels the
+// module-runner protocol (fetchModule invoke + HMR push + vite:invalidate) over a
+// port. The port is host-supplied: a browser MessagePort (editor), a
+// worker_threads MessagePort or relay PortLike (`bongle dev`). All this needs is
+// postMessage + a settable onmessage, so RealmPort covers every one.
 
+import type { BundlerFrame } from './realm-host';
 import type { RunnerBridge } from './runner';
 
-/** frames on the bundler conduit (a dedicated MessagePort per remote realm). */
-export type BundlerFrame =
-    | { __bundler: 'invoke'; id: number; payload: unknown }
-    | { __bundler: 'result'; id: number; result?: unknown; error?: unknown }
-    | { __bundler: 'send'; payload: unknown }
-    | { __bundler: 'push'; payload: unknown };
+export type { BundlerFrame };
+
+/** the minimal port createPortBridge needs — satisfied by a browser MessagePort, a
+ *  worker_threads MessagePort, and a relay PortLike alike. */
+export type RealmPort = {
+    postMessage(data: unknown): void;
+    // biome-ignore lint/suspicious/noExplicitAny: the event shape varies by port kind; only .data is read.
+    onmessage: ((e: any) => void) | null;
+};
 
 type ResultFrame = Extract<BundlerFrame, { __bundler: 'result' }>;
 
-/** the remote realm's RunnerBridge over its bundler MessagePort — the mirror of
- *  host.ts's connectRealm. */
-export function createPortBridge(port: MessagePort): RunnerBridge {
+export function createPortBridge(port: RealmPort): RunnerBridge {
     let onMsg: ((p: unknown) => void) | undefined;
     const pending = new Map<number, (frame: ResultFrame) => void>();
     let nextId = 0;
 
-    port.onmessage = (e: MessageEvent<BundlerFrame>) => {
-        const msg = e.data;
+    port.onmessage = (e) => {
+        const msg = e.data as BundlerFrame;
         if (msg.__bundler === 'result') {
             pending.get(msg.id)?.(msg);
             pending.delete(msg.id);

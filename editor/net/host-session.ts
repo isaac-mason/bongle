@@ -17,7 +17,7 @@
 
 import type { Filesystem } from '../fs';
 import type { ServerHost } from '../server/server-host';
-import { Channel, createRelayHostLink, type PortLike, type SocketLike } from './relay-link';
+import { Channel, createRelayHostLink, type PortLike, type SocketLike } from '../../build';
 import { serveFilesystemOverPort } from './remote-fs';
 
 /** Guest connectionIds live above the local client iframe range so the server

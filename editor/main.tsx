@@ -147,7 +147,9 @@ async function boot(): Promise<void> {
 
     // seed the engine + first-party libs into the vfs so every realm's bundler
     // resolves `bongle` / `mathcat` / … from there.
+    console.log('[boot] main: seeding engine dist…');
     await seedEngineDist(editor.fs);
+    console.log('[boot] main: engine seed written');
 
     // feed the seeded .d.ts into Monaco's TS worker (types/intellisense for user
     // code). Fire-and-forget — the code window may not be open yet, but the
@@ -161,7 +163,7 @@ async function boot(): Promise<void> {
     // thread in the bundler worker (its WASM arena reaches multiple GB under
     // load). Every realm connects to it over a transferred MessagePort; the main
     // doc only brokers the connection + relays fs edits.
-    const bundlerWorker = new Worker(new URL('./bundler/bundler-worker.ts', import.meta.url), { type: 'module' });
+    const bundlerWorker = new Worker(new URL('./dev/bundler-worker.ts', import.meta.url), { type: 'module' });
     bundlerWorker.onerror = (e) => console.error('[bundler-worker] load error', e.message);
     // messages posted to the worker before it's live get lost in vite's dep-
     // optimize/reload window, so we handshake: init on `worker-ready`, and queue
@@ -172,10 +174,14 @@ async function boot(): Promise<void> {
         if (bundlerReady) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
         else pendingConnects.push({ env, port });
     };
+    console.log('[boot] main: bundler worker spawned, awaiting worker-ready');
     bundlerWorker.onmessage = (e: MessageEvent) => {
         const d = e.data as { __buildlog?: string; type?: string };
-        if (d?.type === 'worker-ready') bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
-        else if (d?.type === 'host-ready') {
+        if (d?.type === 'worker-ready') {
+            console.log('[boot] main: worker-ready → posting init');
+            bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
+        } else if (d?.type === 'host-ready') {
+            console.log(`[boot] main: host-ready → flushing ${pendingConnects.length} queued realm connect(s)`);
             bundlerReady = true;
             for (const { env, port } of pendingConnects) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
             pendingConnects.length = 0;
@@ -192,6 +198,7 @@ async function boot(): Promise<void> {
     // `await pipelineHost.ready`, before they're spawned, and its outputs reach
     // the realms via their fresh barrel import at boot, so a no-op then is right.
     let relayBakeChange: (changes: FsChange[]) => void = () => {};
+    console.log('[boot] main: spawning pipeline worker');
     const pipelineHost = spawnPipelineWorker({
         connectRealm,
         projectName: PROJECT,
@@ -203,7 +210,9 @@ async function boot(): Promise<void> {
     // bake-then-run (mirrors the kit): wait for the first bake so every realm
     // fresh-imports the REAL generated barrel (baked model bin paths) at boot,
     // rather than racing an empty→real HMR that worker realms can't apply cleanly.
+    console.log('[boot] main: awaiting first bake (pipelineHost.ready)…');
     await pipelineHost.ready;
+    console.log('[boot] main: first bake done → spawning server');
 
     // the server, off-thread in its own realm (own registry). It opens the SAME
     // OPFS project directly — no snapshot.

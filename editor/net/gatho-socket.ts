@@ -7,7 +7,7 @@
 // createRelayHostLink / createRelayLink unchanged.
 
 import { connect } from 'gatho/client';
-import type { SocketLike } from './relay-link';
+import type { SocketLike } from '../../build';
 
 export type ConnectRelayOptions = {
     onOpen?: () => void;

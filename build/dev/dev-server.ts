@@ -13,8 +13,8 @@
 // `?worker` graph, which reaches into rolldown). A node `bongle dev` supplies node
 // impls; the rest (resolve, DepGraph capture, HMR) runs unchanged in both.
 
-import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-deps';
-import { type BuildFs, dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from './resolve';
+import { type DepParser, initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from '../capture/capture-deps';
+import { type BuildFs, dirOf, type PackageJson, posixJoin, resolveFile, resolvePackage } from '../resolve';
 
 /** the transformed form of one module, as the ModuleRunner evals it. */
 export type TransformResult = {
@@ -35,6 +35,9 @@ export type BundleWorker = (entryId: string) => Promise<string>;
 /** the browser-coupled capabilities the dev server needs, injected at init. */
 export type DevServerDeps = {
     transform: TransformModule;
+    /** the oxc parser for the capture dep-wrap (host-injected: node rolldown /
+     *  browser @rolldown/browser) — see build/capture DepParser. */
+    parse: DepParser;
     bundleWorker: BundleWorker;
     /** map a resolved vfs path to a DOM-usable URL, for `?url` asset imports.
      *  In the editor this is the project-fs SW URL (`/@project/<path>`). */
@@ -248,7 +251,7 @@ function ensureNode(state: DevServerState, env: string, id: string): ModNode {
 async function ensureDepWrapped(state: DevServerState, id: string, source: string, mv: number): Promise<string> {
     const cached = state.depWrapCache.get(id);
     if (cached && cached.version === mv) return cached.code;
-    const code = await wrapModuleDeps(id, source, state.symbolTables, (spec) => resolve(state, spec, id));
+    const code = await wrapModuleDeps(id, source, state.symbolTables, (spec) => resolve(state, spec, id), state.deps.parse);
     state.depWrapCache.set(id, { version: mv, code });
     return code;
 }

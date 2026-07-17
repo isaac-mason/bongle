@@ -23,11 +23,16 @@
 // This mirrors kit's semantics; a settle-pass could close the cold-load gap if
 // a real miss ever surfaces.
 
-import { parseSync } from '@rolldown/browser/experimental';
 import type { Program } from 'estree';
 import MagicString from 'magic-string';
 import { buildSymbolTable } from './dep-ast';
 import { extractConsumerDeps, type SymbolTableRegistry } from './dep-resolve';
+
+/** the oxc parser, passed in per host — node wires `rolldown/experimental`, the
+ *  browser editor wires `@rolldown/browser/experimental`. Kept out of the shared
+ *  core so `@rolldown/browser` (a multi-MB wasm bundle whose node wasi binding logs
+ *  an ExperimentalWarning) never loads in node, which has native rolldown. */
+export type DepParser = (filename: string, code: string) => { program: unknown };
 
 const KNOWN_EXT = /\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
 
@@ -54,6 +59,7 @@ export async function wrapModuleDeps(
     code: string,
     registry: SymbolTableRegistry,
     resolveSpec: (spec: string) => Promise<string>,
+    parse: DepParser,
 ): Promise<string> {
     const fname = KNOWN_EXT.test(id) ? id : `${id}.ts`;
     let table: ReturnType<typeof buildSymbolTable>;
@@ -61,7 +67,7 @@ export async function wrapModuleDeps(
         // oxc emits an ESTree-compatible AST (Literal / Identifier node types,
         // start/end offsets) — the shape dep-ast.ts targets. Cast through the
         // binding's own Program type, matching kit's `this.parse(...) as Program`.
-        const { program } = parseSync(fname, code);
+        const { program } = parse(fname, code);
         table = buildSymbolTable(program as unknown as Program, id);
     } catch {
         return code;

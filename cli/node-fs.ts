@@ -24,10 +24,19 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         const walk = (d: string) => {
             for (const e of readDirEntries(d)) {
                 const rel = d ? `${d}/${e.name}` : e.name;
-                const kind = e.isDirectory() ? 'dir' : 'file';
-                const st = statSync(abs(rel));
+                let st: ReturnType<typeof statSync>;
+                try {
+                    // statSync follows symlinks so a workspace-linked package dir
+                    // (node_modules/bongle → lib) is a 'dir', not lstat's 'file'.
+                    st = statSync(abs(rel));
+                } catch {
+                    continue; // broken symlink / vanished entry
+                }
+                const kind = st.isDirectory() ? 'dir' : 'file';
                 out.push({ path: rel, kind, size: st.size, mtime: st.mtimeMs });
-                if (kind === 'dir' && recursive) walk(rel);
+                // recurse only into REAL dirs — never follow a symlink (a workspace
+                // link can point back into a parent and cycle).
+                if (kind === 'dir' && !e.isSymbolicLink() && recursive) walk(rel);
             }
         };
         walk(dir);
@@ -71,7 +80,20 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         async readDir(dir) {
             const m = new Map<string, 'file' | 'dir'>();
             try {
-                for (const e of readdirSync(abs(dir), { withFileTypes: true })) m.set(e.name, e.isDirectory() ? 'dir' : 'file');
+                for (const e of readdirSync(abs(dir), { withFileTypes: true })) {
+                    // follow symlinks so a workspace-linked package dir
+                    // (node_modules/bongle → lib) reads as 'dir', not lstat's 'file'
+                    // — otherwise the resolver never finds the package.
+                    let kind: 'file' | 'dir' = e.isDirectory() ? 'dir' : 'file';
+                    if (e.isSymbolicLink()) {
+                        try {
+                            kind = statSync(abs(dir ? `${dir}/${e.name}` : e.name)).isDirectory() ? 'dir' : 'file';
+                        } catch {
+                            kind = 'file';
+                        }
+                    }
+                    m.set(e.name, kind);
+                }
             } catch {}
             return m;
         },

@@ -5,7 +5,7 @@
 // loop work over a relay with no changes.
 
 import { describe, expect, it } from 'vitest';
-import { Channel, createRelayLink, decodeFrame, encodeFrame, type SocketLike } from '../../../editor/net/relay-link';
+import { Channel, createRelayLink, decodeFrame, encodeFrame, type SocketLike } from '../../../build';
 
 /** two SocketLikes wired to each other, synchronously — a fake wire. */
 function pairedSockets(): [SocketLike, SocketLike] {
