@@ -11,7 +11,7 @@ import type { Filesystem } from '../fs';
 import { connectRelaySocket } from '../net/gatho-socket';
 import { createHostSession, type HostSession } from '../net/host-session';
 import type { PlatformBridge } from '../platform/bridge';
-import type { ServerHost } from '../server/server-host';
+import type { ServerHost } from '../realms/server/server-host';
 
 type MultiplayerDeps = {
     platform: PlatformBridge;

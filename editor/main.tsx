@@ -5,7 +5,7 @@
 import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
-import { createClientHost } from './client/client-host';
+import { createClientHost } from './realms/client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
@@ -13,11 +13,11 @@ import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
 import { importGameSave } from './game-save';
 import { joinGuestSession } from './net/guest-session';
-import { spawnPipelineWorker } from './pipeline/pipeline-host';
+import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
 import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
 import { registerProjectFsWorker } from './project-url';
-import { spawnServerWorker } from './server/server-host';
+import { spawnServerWorker } from './realms/server/server-host';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
@@ -90,7 +90,7 @@ async function boot(): Promise<void> {
         log('joining a multiplayer edit session…');
         joinGuestSession({
             url: intent.url,
-            clientPath: `${import.meta.env.BASE_URL}client/index.html`,
+            clientPath: `${import.meta.env.BASE_URL}realms/client/index.html`,
             log: (m) => guestLog(`[guest] ${m}`),
         });
         return; // skip the host stack entirely

@@ -16,7 +16,7 @@
 // front of them differs (local channel vs relay).
 
 import type { Filesystem } from '../fs';
-import type { ServerHost } from '../server/server-host';
+import type { ServerHost } from '../realms/server/server-host';
 import { Channel, createRelayHostLink, type PortLike, type SocketLike } from '../../build';
 import { serveFilesystemOverPort } from './remote-fs';
 

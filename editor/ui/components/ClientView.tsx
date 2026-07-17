@@ -3,7 +3,7 @@
 // front so the handshake can start); this just parents it into the DOM.
 
 import { useEffect, useRef } from 'react';
-import type { ClientConnection } from '../../client/client-host';
+import type { ClientConnection } from '../../realms/client/client-host';
 
 export function ClientView({ connection }: { connection: ClientConnection }) {
     const ref = useRef<HTMLDivElement>(null);

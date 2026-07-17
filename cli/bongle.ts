@@ -7,8 +7,8 @@
 // local dev host: the lib/build dev-server core served over HTTP/WS, dev.ts).
 
 import { buildCommand } from './build';
-import { devCommand } from './dev/vite/start';
-import { bakeCommand } from './pipeline/pipeline';
+import { devCommand } from './dev/start';
+import { bakeCommand } from './bake/bake';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name: string): string | undefined => {

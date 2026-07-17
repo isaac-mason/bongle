@@ -101,13 +101,13 @@ export default defineConfig(({ command }) => ({
     },
     build: {
         // TWO HTML documents: the editor shell + the client realm's iframe. The
-        // client (client/index.html → client-main) is loaded at RUNTIME via
+        // client (realms/client/index.html → client-main) is loaded at RUNTIME via
         // iframe.src, not a static import, so it must be an explicit input or the
         // production build omits it (dev's vite serves any index.html on demand).
         rollupOptions: {
             input: {
                 main: fileURLToPath(new URL('./index.html', import.meta.url)),
-                client: fileURLToPath(new URL('./client/index.html', import.meta.url)),
+                client: fileURLToPath(new URL('./realms/client/index.html', import.meta.url)),
             },
         },
     },

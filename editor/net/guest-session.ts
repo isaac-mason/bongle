@@ -6,7 +6,7 @@
 //   game    → the host's server worker
 //   bundler → the host's DevServer (transforms; the guest only evaluates)
 //   fsrpc   → the host's OPFS (read-through)
-// The iframe is the same client/index.html the host uses locally; only its
+// The iframe is the same realms/client/index.html the host uses locally; only its
 // Source differs (relay lanes + a remote fs, keyed by the fsrpc port being
 // present). We bridge each relay PortLike to a MessageChannel transferred into
 // the iframe (an iframe can't receive a PortLike, only a real transferable port).
@@ -19,7 +19,7 @@ export type GuestSession = { close(): void };
 export type GuestSessionOptions = {
     /** relay ws url + token from /api/edit/join. */
     url: string;
-    /** same-origin path to the client document (client/index.html), as the host
+    /** same-origin path to the client document (realms/client/index.html), as the host
      *  uses for its own client windows. */
     clientPath: string;
     /** the project entry to evaluate (resolved over the bundler lane from the
