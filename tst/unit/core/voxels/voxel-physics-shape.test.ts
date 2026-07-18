@@ -25,7 +25,11 @@ import { aabbs } from '../../../../src/core/voxels/block-collider';
 import { box } from '../../../../src/core/voxels/block-model';
 import { CullType } from '../../../../src/core/voxels/blocks';
 import { buildTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
-import { createVoxelPhysicsShape, type VoxelPhysicsShape, voxelPhysicsShapeDef } from '../../../../src/core/voxels/voxel-physics-shape';
+import {
+    createVoxelPhysicsShape,
+    type VoxelPhysicsShape,
+    voxelPhysicsShapeDef,
+} from '../../../../src/core/voxels/voxel-physics-shape';
 import { createChunk, createVoxels, setChunkBlock } from '../../../../src/core/voxels/voxels';
 
 // ── test helpers ────────────────────────────────────────────────────
@@ -1002,6 +1006,107 @@ describe('voxelPhysicsShape collideShape', () => {
     });
 });
 
+// ── ghost-collision rejection ────────────────────────────────────────
+//
+// per-cube contacts whose contacted face is buried behind a solid neighbour cube
+// are tessellation artifacts. the narrowphase drops them (neighbour-reject), so a
+// body on a continuous cube floor never gets a spurious sideways normal, while a
+// body against a genuinely exposed face still does.
+
+const dominantAxis = (n: ArrayLike<number>): number => {
+    const ax = Math.abs(n[0]!);
+    const ay = Math.abs(n[1]!);
+    const az = Math.abs(n[2]!);
+    if (ax >= ay && ax >= az) return 0;
+    if (ay >= az) return 1;
+    return 2;
+};
+
+function collideBoxVsVoxels(voxelShape: VoxelPhysicsShape, bx: number, by: number, bz: number, half = 0.4) {
+    const testBox = boxShape.create({ halfExtents: vec3.fromValues(half, half, half), convexRadius: 0.02 });
+    const collector = createAllCollideShapeCollector();
+    const settings = createDefaultCollideShapeSettings();
+    collideShapeVsShape(
+        collector,
+        settings,
+        asShape(voxelShape),
+        SUB_SHAPE_ID,
+        SUB_SHAPE_ID_BITS,
+        SHAPE_POS_X,
+        SHAPE_POS_Y,
+        SHAPE_POS_Z,
+        SHAPE_QUAT_X,
+        SHAPE_QUAT_Y,
+        SHAPE_QUAT_Z,
+        SHAPE_QUAT_W,
+        SHAPE_SCALE_X,
+        SHAPE_SCALE_Y,
+        SHAPE_SCALE_Z,
+        testBox,
+        SUB_SHAPE_ID,
+        SUB_SHAPE_ID_BITS,
+        bx,
+        by,
+        bz,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+    );
+    return collector;
+}
+
+describe('voxelPhysicsShape ghost-collision rejection', () => {
+    it('flat cube floor produces no sideways (horizontal) contacts', () => {
+        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const voxels = createVoxels(registry);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        // a contiguous floor strip: cells x=4..6 at y=5, z=5. floor top at y=6.
+        setChunkBlock(voxels, chunk, 4, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
+
+        const aabb = [0, 0, 0, 16, 16, 16] as Box3;
+        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+
+        // box penetrating the floor (bottom at y=5.7, floor top y=6 → 0.3 deep), at several
+        // asymmetric straddle offsets — the configuration that makes per-cube EPA flip to a
+        // horizontal normal. every surviving contact must be vertical (+Y), never sideways.
+        let totalHits = 0;
+        for (const bx of [5.5, 5.6, 5.65, 5.7, 5.8]) {
+            const collector = collideBoxVsVoxels(voxelShape, bx, 6.1, 5.5);
+            for (const h of collector.hits) {
+                totalHits++;
+                expect(dominantAxis(h.penetrationAxis)).toBe(1); // Y, i.e. up — never X/Z ghost
+            }
+        }
+        expect(totalHits).toBeGreaterThan(0); // the floor is genuinely being contacted
+    });
+
+    it('exposed vertical face is preserved (a real wall still pushes sideways)', () => {
+        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const voxels = createVoxels(registry);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        // a single isolated cube at (5,5,5): every face is exposed (all neighbours air).
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+
+        const aabb = [0, 0, 0, 16, 16, 16] as Box3;
+        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+
+        // box level with the cube, overlapping only its -X face (box center x=4.75, half 0.4 →
+        // +X face at 5.15 into cube [5,6] by 0.15; y/z overlap 0.8, so shortest exit is -X).
+        // the -X neighbour (x=4) is air, so this is a real face and must survive: X-dominant contact.
+        const collector = collideBoxVsVoxels(voxelShape, 4.75, 5.5, 5.5);
+        expect(collector.hits.length).toBeGreaterThan(0);
+        expect(collector.hits.some((h) => dominantAxis(h.penetrationAxis) === 0)).toBe(true);
+    });
+});
+
 // ── castShape ───────────────────────────────────────────────────────
 
 describe('voxelPhysicsShape castShape', () => {
@@ -1174,26 +1279,27 @@ describe('voxelPhysicsShape castShape', () => {
 
 // ── multiple blocks ─────────────────────────────────────────────────
 
-describe('voxelPhysicsShape multi-block', () => {
-    it('collides with multiple adjacent blocks', () => {
-        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+describe('voxelPhysicsShape merge-by-stateId', () => {
+    // collide a wide box over two adjacent x-cells (5,5,5)+(6,5,5), return narrowphase hit count.
+    // contiguous same-stateId cubes merge into one box (one hit); different kinds stay separate.
+    function hitsOverAdjacentPair(idA: string, idB: string): number {
+        const registry = buildTestRegistry([
+            { id: 'stone', texId: 'stone' },
+            { id: 'dirt', texId: 'dirt' },
+        ]);
         const voxels = createVoxels(registry);
         const chunk = createChunk(0, 0, 0);
         voxels.chunks.set('0,0,0', chunk);
-
-        // two adjacent blocks
-        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
-        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 5, idA);
+        setChunkBlock(voxels, chunk, 6, 5, 5, idB);
 
         const aabb = [0, 0, 0, 16, 16, 16] as Box3;
         const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
 
-        // large box overlapping both blocks
+        // wide box (x∈[4,7]) resting on top of both cells, slightly overlapping
         const testBox = boxShape.create({ halfExtents: vec3.fromValues(1.5, 0.5, 0.5), convexRadius: 0.02 });
-
         const collector = createAllCollideShapeCollector();
         const settings = createDefaultCollideShapeSettings();
-
         collideShapeVsShape(
             collector,
             settings,
@@ -1224,9 +1330,69 @@ describe('voxelPhysicsShape multi-block', () => {
             1,
             1,
         );
+        return collector.hits.length;
+    }
 
-        // should have hits from both blocks
-        expect(collector.hits.length).toBeGreaterThanOrEqual(2);
+    it('merges adjacent same-stateId cubes into one contact', () => {
+        // one merged box for the two stone cells → a single narrowphase hit
+        expect(hitsOverAdjacentPair('stone', 'stone')).toBe(1);
+    });
+
+    it('does not merge adjacent different-stateId cubes', () => {
+        // stone + dirt are distinct kinds → two boxes → two hits
+        expect(hitsOverAdjacentPair('stone', 'dirt')).toBe(2);
+    });
+
+    it('merges a 2D patch of same-stateId cubes into one contact (x + z)', () => {
+        // 2×2 patch in the xz-plane merges across both axes → a single box → one hit,
+        // proving the merge is 3D (greedy x, then z, then y), not x-runs only.
+        const registry = buildTestRegistry([{ id: 'stone', texId: 'stone' }]);
+        const voxels = createVoxels(registry);
+        const chunk = createChunk(0, 0, 0);
+        voxels.chunks.set('0,0,0', chunk);
+        setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 5, 'stone');
+        setChunkBlock(voxels, chunk, 5, 5, 6, 'stone');
+        setChunkBlock(voxels, chunk, 6, 5, 6, 'stone');
+
+        const aabb = [0, 0, 0, 16, 16, 16] as Box3;
+        const voxelShape = createVoxelPhysicsShape(voxels, registry, aabb);
+
+        // wide box (x,z ∈ [4.5,7.5]) resting on the whole patch top
+        const testBox = boxShape.create({ halfExtents: vec3.fromValues(1.5, 0.5, 1.5), convexRadius: 0.02 });
+        const collector = createAllCollideShapeCollector();
+        const settings = createDefaultCollideShapeSettings();
+        collideShapeVsShape(
+            collector,
+            settings,
+            asShape(voxelShape),
+            SUB_SHAPE_ID,
+            SUB_SHAPE_ID_BITS,
+            SHAPE_POS_X,
+            SHAPE_POS_Y,
+            SHAPE_POS_Z,
+            SHAPE_QUAT_X,
+            SHAPE_QUAT_Y,
+            SHAPE_QUAT_Z,
+            SHAPE_QUAT_W,
+            SHAPE_SCALE_X,
+            SHAPE_SCALE_Y,
+            SHAPE_SCALE_Z,
+            testBox,
+            SUB_SHAPE_ID,
+            SUB_SHAPE_ID_BITS,
+            6.0,
+            6.4,
+            6.0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+        );
+        expect(collector.hits.length).toBe(1);
     });
 
     it('empty world produces no contacts', () => {

@@ -98,9 +98,17 @@ const FACE_MAX_VERTS = 16;
 const FACE_VERT_FLOATS = FACE_MAX_VERTS * 3;
 
 export type VoxelHitInfo = {
-    vx: number;
-    vy: number;
-    vz: number;
+    // min cell corner (inclusive). for a single cube this is the voxel; for a merged run
+    // it is the run's low corner.
+    minX: number;
+    minY: number;
+    minZ: number;
+    // max cell corner (exclusive). unit cube: (minX+1, minY+1, minZ+1). merged run: the run
+    // bounds. used by getSupportingFace / getSurfaceNormal to build the box face, and by the
+    // contact listener to enumerate the covered cells under the contact footprint. unused for custom.
+    maxX: number;
+    maxY: number;
+    maxZ: number;
     stateId: number;
     cid: number; // 0 = cube, >0 = custom collider
     subAabbIndex: number; // -1 for cube; reserved for sub-aabb tagging on custom colliders
@@ -119,9 +127,12 @@ let _hitCount = 0;
 function allocHitEntry(): VoxelHitInfo {
     if (_hitCount === _hitPool.length) {
         _hitPool.push({
-            vx: 0,
-            vy: 0,
-            vz: 0,
+            minX: 0,
+            minY: 0,
+            minZ: 0,
+            maxX: 0,
+            maxY: 0,
+            maxZ: 0,
             stateId: 0,
             cid: 0,
             subAabbIndex: -1,
@@ -138,9 +149,39 @@ function allocHitEntry(): VoxelHitInfo {
 function pushCubeHit(vx: number, vy: number, vz: number, stateId: number): number {
     const idx = _hitCount;
     const entry = allocHitEntry();
-    entry.vx = vx;
-    entry.vy = vy;
-    entry.vz = vz;
+    entry.minX = vx;
+    entry.minY = vy;
+    entry.minZ = vz;
+    entry.maxX = vx + 1;
+    entry.maxY = vy + 1;
+    entry.maxZ = vz + 1;
+    entry.stateId = stateId;
+    entry.cid = 0;
+    entry.subAabbIndex = -1;
+    entry.faceNumVerts = 0;
+    return idx;
+}
+
+// a merged run of same-stateId cube cells, spanning [minX,maxX) × [minY,maxY) × [minZ,maxZ).
+// treated as a single box for collision; the contact listener enumerates the covered
+// cells under the contact footprint so per-cell contact fidelity is preserved.
+function pushMergedHit(
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number,
+    stateId: number,
+): number {
+    const idx = _hitCount;
+    const entry = allocHitEntry();
+    entry.minX = minX;
+    entry.minY = minY;
+    entry.minZ = minZ;
+    entry.maxX = maxX;
+    entry.maxY = maxY;
+    entry.maxZ = maxZ;
     entry.stateId = stateId;
     entry.cid = 0;
     entry.subAabbIndex = -1;
@@ -161,9 +202,14 @@ function pushCustomHit(
 ): number {
     const idx = _hitCount;
     const entry = allocHitEntry();
-    entry.vx = vx;
-    entry.vy = vy;
-    entry.vz = vz;
+    entry.minX = vx;
+    entry.minY = vy;
+    entry.minZ = vz;
+    // custom colliders occupy a single cell; a unit box range keeps the contact-listener
+    // cell enumeration uniform (one cell) even though the box face isn't used for custom.
+    entry.maxX = vx + 1;
+    entry.maxY = vy + 1;
+    entry.maxZ = vz + 1;
     entry.stateId = stateId;
     entry.cid = cid;
     entry.subAabbIndex = -1;
@@ -337,6 +383,132 @@ const _wrapCastCollector: CastShapeCollector = {
     },
 };
 
+// ── merged cube box + neighbour-reject wrapper ──────────────────────
+//
+// contiguous same-stateId cube cells are collided as one box (see the merge in
+// collideVoxelsVsConvex), so the moving body sees a continuous surface instead of
+// a grid of unit cubes — no interior seams to snag on. this shared box shape is
+// resized per merged run in place (no per-run allocation).
+const _mergedBoxShape = box.create({ halfExtents: vec3.fromValues(0.5, 0.5, 0.5), convexRadius: 0.05 });
+
+function setMergedBoxHalfExtents(hx: number, hy: number, hz: number): void {
+    _mergedBoxShape.halfExtents[0] = hx;
+    _mergedBoxShape.halfExtents[1] = hy;
+    _mergedBoxShape.halfExtents[2] = hz;
+    _mergedBoxShape.aabb[0] = -hx;
+    _mergedBoxShape.aabb[1] = -hy;
+    _mergedBoxShape.aabb[2] = -hz;
+    _mergedBoxShape.aabb[3] = hx;
+    _mergedBoxShape.aabb[4] = hy;
+    _mergedBoxShape.aabb[5] = hz;
+}
+
+// wraps the outer collector for the merged-box collision. a contact whose contacted
+// face is buried behind a solid neighbour cube is a tessellation artifact (a "ghost
+// collision"): the moving body could not physically reach that internal face without
+// first hitting the neighbour. we drop it; only exposed-face contacts (neighbour is
+// air or a non-cube) are forwarded. because a merged box spans many cells, the buried
+// test samples the cell just across the contacted face at the CONTACT POINT rather
+// than a fixed neighbour.
+//
+// the contacted face is the one the penetrationAxis points out of (voxel is A;
+// penetrationAxis is the direction to push B out of A, i.e. A's outward normal).
+// pushing the hit + encoding its subShapeId happens lazily here, only for kept
+// contacts; the covered run [min,max) rides along so the contact listener can
+// enumerate the touched cells under the contact footprint.
+
+type MergedRejectState = {
+    outer: CollideShapeCollector | null;
+    voxels: Voxels | null;
+    registry: BlockRegistry | null;
+    minX: number;
+    minY: number;
+    minZ: number;
+    maxX: number;
+    maxY: number;
+    maxZ: number;
+    stateId: number;
+    outerSubShapeId: number;
+    outerSubShapeIdBits: number;
+};
+
+const _mergedReject: MergedRejectState = {
+    outer: null,
+    voxels: null,
+    registry: null,
+    minX: 0,
+    minY: 0,
+    minZ: 0,
+    maxX: 0,
+    maxY: 0,
+    maxZ: 0,
+    stateId: 0,
+    outerSubShapeId: 0,
+    outerSubShapeIdBits: 0,
+};
+
+const _mergedRejectBuilder = subShape.builder();
+
+const _mergedRejectCollector: CollideShapeCollector = {
+    bodyIdB: 0,
+    earlyOutFraction: 0,
+    addHit(h: CollideShapeHit) {
+        // dominant axis + sign of the outward penetration axis = the contacted face.
+        const px = h.penetrationAxis[0];
+        const py = h.penetrationAxis[1];
+        const pz = h.penetrationAxis[2];
+        const ax = Math.abs(px);
+        const ay = Math.abs(py);
+        const az = Math.abs(pz);
+        // sample the cell just across the contacted face at the contact point (world space
+        // equals voxel-local for the identity terrain body). nudge half a cell along the
+        // contact axis into the neighbour; floor the other two axes at the contact point.
+        let nx = Math.floor(h.pointA[0]);
+        let ny = Math.floor(h.pointA[1]);
+        let nz = Math.floor(h.pointA[2]);
+        if (ax >= ay && ax >= az) nx = Math.floor(h.pointA[0] + (px >= 0 ? 0.5 : -0.5));
+        else if (ay >= az) ny = Math.floor(h.pointA[1] + (py >= 0 ? 0.5 : -0.5));
+        else nz = Math.floor(h.pointA[2] + (pz >= 0 ? 0.5 : -0.5));
+
+        // buried behind a solid cube → internal face → drop the ghost contact.
+        if (isBackingCube(_mergedReject.voxels!, _mergedReject.registry!, nx, ny, nz)) return;
+
+        // kept: register the merged run and encode its hit index into subShapeIdA, then forward.
+        const hitIdx = pushMergedHit(
+            _mergedReject.minX,
+            _mergedReject.minY,
+            _mergedReject.minZ,
+            _mergedReject.maxX,
+            _mergedReject.maxY,
+            _mergedReject.maxZ,
+            _mergedReject.stateId,
+        );
+        _mergedRejectBuilder.value = _mergedReject.outerSubShapeId;
+        _mergedRejectBuilder.currentBit = _mergedReject.outerSubShapeIdBits;
+        subShape.push(_mergedRejectBuilder, _mergedRejectBuilder, hitIdx, HIT_BUFFER_BITS);
+        h.subShapeIdA = _mergedRejectBuilder.value;
+
+        const outer = _mergedReject.outer!;
+        outer.addHit(h);
+        _mergedRejectCollector.earlyOutFraction = outer.earlyOutFraction;
+    },
+    addMiss() {
+        _mergedReject.outer!.addMiss();
+    },
+    shouldEarlyOut() {
+        return _mergedReject.outer!.shouldEarlyOut();
+    },
+    onBody(bodyId: number) {
+        _mergedReject.outer!.onBody?.(bodyId);
+    },
+    onBodyEnd() {
+        _mergedReject.outer!.onBodyEnd?.();
+    },
+    reset() {
+        _mergedReject.outer!.reset?.();
+    },
+};
+
 // ── face helpers ────────────────────────────────────────────────────
 //
 // face index convention: 0=east(+x), 1=west(-x), 2=up(+y), 3=down(-y), 4=south(+z), 5=north(-z)
@@ -354,111 +526,106 @@ function getFaceFromNormal(nx: number, ny: number, nz: number): number {
     }
 }
 
-// build a 4-vertex quad for a cube face into an output array
-function buildCubeQuad(out: Face, faceIdx: number, vx: number, vy: number, vz: number): void {
+// build a 4-vertex quad for an axis-aligned box face into an output array.
+// box spans [x0,x1] × [y0,y1] × [z0,z1]. a unit cube passes x1=x0+1 etc; a merged run
+// passes the run bounds. CCW when viewed from outside.
+function buildBoxQuad(out: Face, faceIdx: number, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): void {
     out.numVertices = 4;
-    // CCW when viewed from outside
     switch (faceIdx) {
         case 0: {
             // east (+x)
-            const x = vx + 1;
-            out.vertices[0] = x;
-            out.vertices[1] = vy;
-            out.vertices[2] = vz;
-            out.vertices[3] = x;
-            out.vertices[4] = vy;
-            out.vertices[5] = vz + 1;
-            out.vertices[6] = x;
-            out.vertices[7] = vy + 1;
-            out.vertices[8] = vz + 1;
-            out.vertices[9] = x;
-            out.vertices[10] = vy + 1;
-            out.vertices[11] = vz;
+            out.vertices[0] = x1;
+            out.vertices[1] = y0;
+            out.vertices[2] = z0;
+            out.vertices[3] = x1;
+            out.vertices[4] = y0;
+            out.vertices[5] = z1;
+            out.vertices[6] = x1;
+            out.vertices[7] = y1;
+            out.vertices[8] = z1;
+            out.vertices[9] = x1;
+            out.vertices[10] = y1;
+            out.vertices[11] = z0;
             break;
         }
         case 1: {
             // west (-x)
-            const x = vx;
-            out.vertices[0] = x;
-            out.vertices[1] = vy;
-            out.vertices[2] = vz;
-            out.vertices[3] = x;
-            out.vertices[4] = vy + 1;
-            out.vertices[5] = vz;
-            out.vertices[6] = x;
-            out.vertices[7] = vy + 1;
-            out.vertices[8] = vz + 1;
-            out.vertices[9] = x;
-            out.vertices[10] = vy;
-            out.vertices[11] = vz + 1;
+            out.vertices[0] = x0;
+            out.vertices[1] = y0;
+            out.vertices[2] = z0;
+            out.vertices[3] = x0;
+            out.vertices[4] = y1;
+            out.vertices[5] = z0;
+            out.vertices[6] = x0;
+            out.vertices[7] = y1;
+            out.vertices[8] = z1;
+            out.vertices[9] = x0;
+            out.vertices[10] = y0;
+            out.vertices[11] = z1;
             break;
         }
         case 2: {
             // up (+y)
-            const y = vy + 1;
-            out.vertices[0] = vx;
-            out.vertices[1] = y;
-            out.vertices[2] = vz;
-            out.vertices[3] = vx + 1;
-            out.vertices[4] = y;
-            out.vertices[5] = vz;
-            out.vertices[6] = vx + 1;
-            out.vertices[7] = y;
-            out.vertices[8] = vz + 1;
-            out.vertices[9] = vx;
-            out.vertices[10] = y;
-            out.vertices[11] = vz + 1;
+            out.vertices[0] = x0;
+            out.vertices[1] = y1;
+            out.vertices[2] = z0;
+            out.vertices[3] = x1;
+            out.vertices[4] = y1;
+            out.vertices[5] = z0;
+            out.vertices[6] = x1;
+            out.vertices[7] = y1;
+            out.vertices[8] = z1;
+            out.vertices[9] = x0;
+            out.vertices[10] = y1;
+            out.vertices[11] = z1;
             break;
         }
         case 3: {
             // down (-y)
-            const y = vy;
-            out.vertices[0] = vx;
-            out.vertices[1] = y;
-            out.vertices[2] = vz;
-            out.vertices[3] = vx;
-            out.vertices[4] = y;
-            out.vertices[5] = vz + 1;
-            out.vertices[6] = vx + 1;
-            out.vertices[7] = y;
-            out.vertices[8] = vz + 1;
-            out.vertices[9] = vx + 1;
-            out.vertices[10] = y;
-            out.vertices[11] = vz;
+            out.vertices[0] = x0;
+            out.vertices[1] = y0;
+            out.vertices[2] = z0;
+            out.vertices[3] = x0;
+            out.vertices[4] = y0;
+            out.vertices[5] = z1;
+            out.vertices[6] = x1;
+            out.vertices[7] = y0;
+            out.vertices[8] = z1;
+            out.vertices[9] = x1;
+            out.vertices[10] = y0;
+            out.vertices[11] = z0;
             break;
         }
         case 4: {
             // south (+z)
-            const z = vz + 1;
-            out.vertices[0] = vx;
-            out.vertices[1] = vy;
-            out.vertices[2] = z;
-            out.vertices[3] = vx + 1;
-            out.vertices[4] = vy;
-            out.vertices[5] = z;
-            out.vertices[6] = vx + 1;
-            out.vertices[7] = vy + 1;
-            out.vertices[8] = z;
-            out.vertices[9] = vx;
-            out.vertices[10] = vy + 1;
-            out.vertices[11] = z;
+            out.vertices[0] = x0;
+            out.vertices[1] = y0;
+            out.vertices[2] = z1;
+            out.vertices[3] = x1;
+            out.vertices[4] = y0;
+            out.vertices[5] = z1;
+            out.vertices[6] = x1;
+            out.vertices[7] = y1;
+            out.vertices[8] = z1;
+            out.vertices[9] = x0;
+            out.vertices[10] = y1;
+            out.vertices[11] = z1;
             break;
         }
         case 5: {
             // north (-z)
-            const z = vz;
-            out.vertices[0] = vx;
-            out.vertices[1] = vy;
-            out.vertices[2] = z;
-            out.vertices[3] = vx;
-            out.vertices[4] = vy + 1;
-            out.vertices[5] = z;
-            out.vertices[6] = vx + 1;
-            out.vertices[7] = vy + 1;
-            out.vertices[8] = z;
-            out.vertices[9] = vx + 1;
-            out.vertices[10] = vy;
-            out.vertices[11] = z;
+            out.vertices[0] = x0;
+            out.vertices[1] = y0;
+            out.vertices[2] = z0;
+            out.vertices[3] = x0;
+            out.vertices[4] = y1;
+            out.vertices[5] = z0;
+            out.vertices[6] = x1;
+            out.vertices[7] = y1;
+            out.vertices[8] = z0;
+            out.vertices[9] = x1;
+            out.vertices[10] = y0;
+            out.vertices[11] = z0;
             break;
         }
     }
@@ -477,6 +644,18 @@ function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number 
     const lz = wz & (CHUNK_SIZE - 1);
     const paletteIdx = chunk.data[voxelIndex(lx, ly, lz)]!;
     return chunk.palette[paletteIdx]!;
+}
+
+// whether the cell at (wx,wy,wz) is a solid collidable CUBE (colliderId 0), i.e. a full
+// unit box that "backs" a shared face. used by the neighbour-reject below: only a backing
+// cube behind a face makes that face internal. non-cube solids (slabs, hulls) fill their
+// cell partially, so they never back a neighbour's face — a cube face against them is a
+// real geometric transition (matches voxel-active-edges' cube-vs-custom rule).
+function isBackingCube(voxels: Voxels, registry: BlockRegistry, wx: number, wy: number, wz: number): boolean {
+    const stateId = getStateId(voxels, wx, wy, wz);
+    if (stateId === AIR || stateId === MISSING) return false;
+    if (!(registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) return false;
+    return registry.colliderId[stateId] === 0;
 }
 
 // ── castRay ─────────────────────────────────────────────────────────
@@ -688,8 +867,14 @@ function collidePointVsVoxels(
 // ── collideVoxelsVsConvex ───────────────────────────────────────────
 //
 // the big one. two codepaths:
-//   cube blocks (colliderId=0): collideConvexVsConvexLocal with unit box
+//   cube blocks (colliderId=0): greedy-merged into boxes, collideConvexVsConvexLocal
 //   custom shapes (colliderId≠0): crashcat collideShapeVsShape
+//
+// cube cells in the scan window are stamped into `_collideVox_mergeGrid` by stateId,
+// then a greedy 3D merge (extend x, then z, then y — same as voxel-model-collider)
+// collapses contiguous same-stateId runs into one box each. the moving body sees a
+// continuous surface instead of a grid of unit cubes, so there are no interior seams
+// to snag on, and far fewer narrowphase calls on flat/dense terrain.
 
 // scratch for cube fast path
 const _collideVox_quatAInv = quat.create();
@@ -700,7 +885,15 @@ const _collideVox_scaleAInv = vec3.create();
 const _collideVox_scaleB = vec3.create();
 const _collideVox_aabbMatrix = mat4.create();
 const _collideVox_convexAABB = box3.create();
-const _collideVox_subShapeIdBuilder = subShape.builder();
+// per-query cube-cell grid over the scan window, stateId per cell (0 = empty/consumed).
+// grows monotonically; cleared to the used size each query.
+let _collideVox_mergeGrid = new Int32Array(0);
+
+// flat index into the scan-window grid; x contiguous inner (matches voxel-model-collider).
+function cellIndex(x: number, y: number, z: number, dimX: number, dimZ: number): number {
+    return (y * dimZ + z) * dimX + x;
+}
+
 const _collideVox_posBRelToBox = vec3.create();
 const _collideVox_transformAInWorld = mat4.create();
 const _collideVox_transformBInA = mat4.create();
@@ -771,7 +964,16 @@ function collideVoxelsVsConvex(
     const maxVY = Math.ceil(_collideVox_convexAABB[4]);
     const maxVZ = Math.ceil(_collideVox_convexAABB[5]);
 
-    // ── iterate voxels in AABB range ────────────────────────────────
+    // cube-cell grid over the scan window (local indices, x contiguous inner).
+    const gridDimX = maxVX - minVX + 1;
+    const gridDimY = maxVY - minVY + 1;
+    const gridDimZ = maxVZ - minVZ + 1;
+    const gridSize = gridDimX * gridDimY * gridDimZ;
+    if (_collideVox_mergeGrid.length < gridSize) _collideVox_mergeGrid = new Int32Array(gridSize);
+    _collideVox_mergeGrid.fill(0, 0, gridSize);
+    const grid = _collideVox_mergeGrid;
+
+    // ── pass 1: stamp cube cells into the grid; collide custom colliders inline ──
 
     for (let vz = minVZ; vz <= maxVZ; vz++) {
         for (let vy = minVY; vy <= maxVY; vy++) {
@@ -796,45 +998,9 @@ function collideVoxelsVsConvex(
                 if (mt === MODEL_NONE && cid === 0) continue;
 
                 if (cid === 0) {
-                    // ── cube fast path ──────────────────────────────
-
-                    const hitIdx = pushCubeHit(vx, vy, vz, stateId);
-
-                    vec3.set(_collideVox_boxPos, vx + 0.5, vy + 0.5, vz + 0.5);
-
-                    // convex B's position relative to voxel box
-                    vec3.sub(_collideVox_posBRelToBox, _collideVox_posBInA, _collideVox_boxPos);
-
-                    _collideVox_subShapeIdBuilder.value = subShapeIdA;
-                    _collideVox_subShapeIdBuilder.currentBit = _subShapeIdBitsA;
-                    subShape.push(_collideVox_subShapeIdBuilder, _collideVox_subShapeIdBuilder, hitIdx, HIT_BUFFER_BITS);
-
-                    // build transform matrices
-                    // bug 4 fix: transformAInWorld must be in world space, not voxel-local space.
-                    // _collideVox_boxPos is in voxel A's local space, so transform it to world.
-                    vec3.set(
-                        _collideVox_worldBoxPos,
-                        posAX + _collideVox_boxPos[0] * scaleAX,
-                        posAY + _collideVox_boxPos[1] * scaleAY,
-                        posAZ + _collideVox_boxPos[2] * scaleAZ,
-                    );
-                    mat4.fromRotationTranslation(_collideVox_transformAInWorld, _voxelBoxQuat, _collideVox_worldBoxPos);
-                    mat4.fromRotationTranslation(_collideVox_transformBInA, _collideVox_quatBInA, _collideVox_posBRelToBox);
-
-                    collideConvexVsConvexLocal(
-                        collector,
-                        settings,
-                        _voxelBoxShape,
-                        _collideVox_subShapeIdBuilder.value,
-                        shapeB,
-                        subShapeIdB,
-                        _collideVox_transformBInA,
-                        _collideVox_transformAInWorld,
-                        _voxelBoxScale,
-                        _collideVox_scaleB,
-                    );
-
-                    if (collector.shouldEarlyOut()) return;
+                    // cube cell → stamp its stateId into the grid; the merge pass below
+                    // collapses contiguous same-stateId cells into boxes and collides them.
+                    grid[cellIndex(vx - minVX, vy - minVY, vz - minVZ, gridDimX, gridDimZ)] = stateId;
                 } else {
                     // ── custom collider shape: delegate to crashcat ──
 
@@ -896,6 +1062,102 @@ function collideVoxelsVsConvex(
 
                     if (collector.shouldEarlyOut()) return;
                 }
+            }
+        }
+    }
+
+    // ── pass 2: greedy-merge cube runs and collide each box ─────────
+    // extend along x, then z, then y (matching voxel-model-collider). each maximal
+    // same-stateId run collides once, through the reject wrapper that drops boundary
+    // internal-face ghosts; the run rides along on the hit so the contact listener can
+    // enumerate the covered cells.
+    for (let lgy = 0; lgy < gridDimY; lgy++) {
+        for (let lgz = 0; lgz < gridDimZ; lgz++) {
+            for (let lgx = 0; lgx < gridDimX; lgx++) {
+                const s = grid[cellIndex(lgx, lgy, lgz, gridDimX, gridDimZ)]!;
+                if (s === 0) continue;
+
+                // extend along x
+                let extX = 1;
+                while (lgx + extX < gridDimX && grid[cellIndex(lgx + extX, lgy, lgz, gridDimX, gridDimZ)] === s) extX++;
+
+                // extend along z: the whole x-row at z+extZ must match
+                let extZ = 1;
+                zExtend: while (lgz + extZ < gridDimZ) {
+                    for (let xx = 0; xx < extX; xx++) {
+                        if (grid[cellIndex(lgx + xx, lgy, lgz + extZ, gridDimX, gridDimZ)] !== s) break zExtend;
+                    }
+                    extZ++;
+                }
+
+                // extend along y: the whole xz-slab at y+extY must match
+                let extY = 1;
+                yExtend: while (lgy + extY < gridDimY) {
+                    for (let zz = 0; zz < extZ; zz++) {
+                        for (let xx = 0; xx < extX; xx++) {
+                            if (grid[cellIndex(lgx + xx, lgy + extY, lgz + zz, gridDimX, gridDimZ)] !== s) break yExtend;
+                        }
+                    }
+                    extY++;
+                }
+
+                // consume the run
+                for (let yy = 0; yy < extY; yy++) {
+                    for (let zz = 0; zz < extZ; zz++) {
+                        for (let xx = 0; xx < extX; xx++) {
+                            grid[cellIndex(lgx + xx, lgy + yy, lgz + zz, gridDimX, gridDimZ)] = 0;
+                        }
+                    }
+                }
+
+                // merged box: world cell range [wx0,wx0+extX) × [wy0,..) × [wz0,..)
+                const wx0 = minVX + lgx;
+                const wy0 = minVY + lgy;
+                const wz0 = minVZ + lgz;
+
+                vec3.set(_collideVox_boxPos, wx0 + extX * 0.5, wy0 + extY * 0.5, wz0 + extZ * 0.5);
+                setMergedBoxHalfExtents(extX * 0.5, extY * 0.5, extZ * 0.5);
+                vec3.sub(_collideVox_posBRelToBox, _collideVox_posBInA, _collideVox_boxPos);
+
+                _mergedReject.outer = collector;
+                _mergedReject.voxels = voxels;
+                _mergedReject.registry = registry;
+                _mergedReject.minX = wx0;
+                _mergedReject.minY = wy0;
+                _mergedReject.minZ = wz0;
+                _mergedReject.maxX = wx0 + extX;
+                _mergedReject.maxY = wy0 + extY;
+                _mergedReject.maxZ = wz0 + extZ;
+                _mergedReject.stateId = s;
+                _mergedReject.outerSubShapeId = subShapeIdA;
+                _mergedReject.outerSubShapeIdBits = _subShapeIdBitsA;
+                _mergedRejectCollector.bodyIdB = collector.bodyIdB;
+                _mergedRejectCollector.earlyOutFraction = collector.earlyOutFraction;
+
+                // transformAInWorld must be in world space; _collideVox_boxPos is voxel-local.
+                vec3.set(
+                    _collideVox_worldBoxPos,
+                    posAX + _collideVox_boxPos[0] * scaleAX,
+                    posAY + _collideVox_boxPos[1] * scaleAY,
+                    posAZ + _collideVox_boxPos[2] * scaleAZ,
+                );
+                mat4.fromRotationTranslation(_collideVox_transformAInWorld, _voxelBoxQuat, _collideVox_worldBoxPos);
+                mat4.fromRotationTranslation(_collideVox_transformBInA, _collideVox_quatBInA, _collideVox_posBRelToBox);
+
+                collideConvexVsConvexLocal(
+                    _mergedRejectCollector,
+                    settings,
+                    _mergedBoxShape,
+                    subShapeIdA,
+                    shapeB,
+                    subShapeIdB,
+                    _collideVox_transformBInA,
+                    _collideVox_transformAInWorld,
+                    _voxelBoxScale,
+                    _collideVox_scaleB,
+                );
+
+                if (collector.shouldEarlyOut()) return;
             }
         }
     }
@@ -1151,23 +1413,18 @@ function getSurfaceNormal(ioResult: SurfaceNormalResult, _shape: VoxelPhysicsSha
     const info = _hitPool[_getSurfaceNormal_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube block, compute closest face geometrically using exact voxel coords from buffer
+        // cube or merged run: closest face of the box [v, m] using exact bounds from buffer
         const px = ioResult.position[0];
         const py = ioResult.position[1];
         const pz = ioResult.position[2];
 
-        // fractional position within the voxel [0, 1]
-        const fx = px - info.vx;
-        const fy = py - info.vy;
-        const fz = pz - info.vz;
-
-        // distance to each face
-        const dEast = 1 - fx;
-        const dWest = fx;
-        const dUp = 1 - fy;
-        const dDown = fy;
-        const dSouth = 1 - fz;
-        const dNorth = fz;
+        // distance to each face of the box
+        const dEast = info.maxX - px;
+        const dWest = px - info.minX;
+        const dUp = info.maxY - py;
+        const dDown = py - info.minY;
+        const dSouth = info.maxZ - pz;
+        const dNorth = pz - info.minZ;
 
         // find the closest face
         let minDist = dEast;
@@ -1236,10 +1493,10 @@ function getSupportingFace(
     const info = _hitPool[_getSupportingFace_popResult.value]!;
 
     if (info.cid === 0) {
-        // cube block, pick face most aligned with direction, build quad
+        // cube or merged run: pick face most aligned with direction, build the box quad
         // direction is in shape-local space (voxel coords), pointing INTO the surface
         const faceIdx = getFaceFromNormal(-direction[0], -direction[1], -direction[2]);
-        buildCubeQuad(face, faceIdx, info.vx, info.vy, info.vz);
+        buildBoxQuad(face, faceIdx, info.minX, info.minY, info.minZ, info.maxX, info.maxY, info.maxZ);
     } else {
         // custom collider, copy the per-hit face captured at emission time.
         const n = info.faceNumVerts;

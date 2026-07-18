@@ -733,7 +733,20 @@ function applyVoxelMaterialOverride(
 type SideKind = 'rigidBody' | 'voxel' | 'unresolved';
 type SideInfo =
     | { kind: 'rigidBody'; nodeId: number; bodyId: BodyId; subShapeId: number; isSensor: boolean }
-    | { kind: 'voxel'; voxelX: number; voxelY: number; voxelZ: number; stateId: number; subAabbIndex: number }
+    | {
+          kind: 'voxel';
+          // voxelX/Y/Z is the min cell corner of the hit; for a merged run the contact
+          // listener overwrites it with each covered cell while enumerating the footprint.
+          voxelX: number;
+          voxelY: number;
+          voxelZ: number;
+          // max cell corner (exclusive) of the hit's box run; used only to bound enumeration.
+          maxX: number;
+          maxY: number;
+          maxZ: number;
+          stateId: number;
+          subAabbIndex: number;
+      }
     | { kind: 'unresolved' };
 
 const _sideA: SideInfo = { kind: 'unresolved' };
@@ -747,13 +760,19 @@ function resolveSide(out: SideInfo, world: World, body: RigidBody, subShapeId: n
             voxelX: number;
             voxelY: number;
             voxelZ: number;
+            maxX: number;
+            maxY: number;
+            maxZ: number;
             stateId: number;
             subAabbIndex: number;
         };
         const info = unpackVoxelHitInfo(subShapeId);
-        v.voxelX = info.vx;
-        v.voxelY = info.vy;
-        v.voxelZ = info.vz;
+        v.voxelX = info.minX;
+        v.voxelY = info.minY;
+        v.voxelZ = info.minZ;
+        v.maxX = info.maxX;
+        v.maxY = info.maxY;
+        v.maxZ = info.maxZ;
         v.stateId = info.stateId;
         v.subAabbIndex = info.subAabbIndex;
         return 'voxel';
@@ -812,26 +831,21 @@ function writePairSide(p: ContactPair, side: 'a' | 'b', s: SideInfo): void {
     }
 }
 
-function recordContactFromManifold(
-    world: World,
+// emit one ContactPair for the resolved sides + shared manifold fields.
+function emitContactPair(
     contacts: PhysicsContacts,
     pool: ContactPairPool,
+    sideA: SideInfo,
+    sideB: SideInfo,
+    manifold: ContactManifold,
     bodyA: RigidBody,
     bodyB: RigidBody,
-    manifold: ContactManifold,
 ): void {
-    const subA = (manifold as { subShapeIdA?: number }).subShapeIdA ?? 0;
-    const subB = (manifold as { subShapeIdB?: number }).subShapeIdB ?? 0;
-
-    const kindA = resolveSide(_sideA, world, bodyA, subA);
-    const kindB = resolveSide(_sideB, world, bodyB, subB);
-    if (kindA === 'unresolved' || kindB === 'unresolved') return;
-
-    const key = pairKey(sideKey(_sideA), sideKey(_sideB));
+    const key = pairKey(sideKey(sideA), sideKey(sideB));
     const pair = recordContactPair(contacts, pool, key);
 
-    writePairSide(pair, 'a', _sideA);
-    writePairSide(pair, 'b', _sideB);
+    writePairSide(pair, 'a', sideA);
+    writePairSide(pair, 'b', sideB);
 
     // manifold fields. point: first A-side contact point (consistent with the
     // old PhysicsCollision). normal: world-space A→B.
@@ -848,6 +862,86 @@ function recordContactFromManifold(
     pair.relativeVelocity[0] = (bLin?.[0] ?? 0) - (aLin?.[0] ?? 0);
     pair.relativeVelocity[1] = (bLin?.[1] ?? 0) - (aLin?.[1] ?? 0);
     pair.relativeVelocity[2] = (bLin?.[2] ?? 0) - (aLin?.[2] ?? 0);
+}
+
+const clampCell = (v: number, lo: number, hiExclusive: number): number => (v < lo ? lo : v >= hiExclusive ? hiExclusive - 1 : v);
+
+function recordContactFromManifold(
+    world: World,
+    contacts: PhysicsContacts,
+    pool: ContactPairPool,
+    bodyA: RigidBody,
+    bodyB: RigidBody,
+    manifold: ContactManifold,
+): void {
+    const subA = (manifold as { subShapeIdA?: number }).subShapeIdA ?? 0;
+    const subB = (manifold as { subShapeIdB?: number }).subShapeIdB ?? 0;
+
+    const kindA = resolveSide(_sideA, world, bodyA, subA);
+    const kindB = resolveSide(_sideB, world, bodyB, subB);
+    if (kindA === 'unresolved' || kindB === 'unresolved') return;
+
+    // when a side is the voxel terrain, one hit may cover a merged run of cells. emit one
+    // ContactPair per cell UNDER THE CONTACT FOOTPRINT (not the whole run), so the contacts
+    // trait stays per-cell faithful while physics still resolves the single merged manifold.
+    const voxelSide = kindA === 'voxel' ? _sideA : kindB === 'voxel' ? _sideB : null;
+    const numPoints = manifold.numContactPoints;
+    if (voxelSide === null || voxelSide.kind !== 'voxel' || numPoints === 0) {
+        emitContactPair(contacts, pool, _sideA, _sideB, manifold, bodyA, bodyB);
+        return;
+    }
+
+    // run bounds: min corner is in voxelX/Y/Z, max is exclusive.
+    const minX = voxelSide.voxelX;
+    const minY = voxelSide.voxelY;
+    const minZ = voxelSide.voxelZ;
+    const { maxX, maxY, maxZ } = voxelSide;
+
+    // single-cell hit (cube or custom collider): nothing to enumerate.
+    if (maxX - minX <= 1 && maxY - minY <= 1 && maxZ - minZ <= 1) {
+        emitContactPair(contacts, pool, _sideA, _sideB, manifold, bodyA, bodyB);
+        return;
+    }
+
+    // footprint = bbox of the manifold contact points on the voxel side, intersected with the
+    // run box. points lie on the contacted face, so the range collapses to the touched cell
+    // layer along the normal axis and spans the body's contact patch in-plane.
+    const rel = kindA === 'voxel' ? manifold.relativeContactPointsOnA : manifold.relativeContactPointsOnB;
+    let pMinX = Infinity;
+    let pMinY = Infinity;
+    let pMinZ = Infinity;
+    let pMaxX = -Infinity;
+    let pMaxY = -Infinity;
+    let pMaxZ = -Infinity;
+    for (let i = 0; i < numPoints; i++) {
+        const x = manifold.baseOffset[0] + rel[i * 3]!;
+        const y = manifold.baseOffset[1] + rel[i * 3 + 1]!;
+        const z = manifold.baseOffset[2] + rel[i * 3 + 2]!;
+        if (x < pMinX) pMinX = x;
+        if (x > pMaxX) pMaxX = x;
+        if (y < pMinY) pMinY = y;
+        if (y > pMaxY) pMaxY = y;
+        if (z < pMinZ) pMinZ = z;
+        if (z > pMaxZ) pMaxZ = z;
+    }
+
+    const cx0 = clampCell(Math.floor(pMinX), minX, maxX);
+    const cx1 = clampCell(Math.floor(pMaxX), minX, maxX);
+    const cy0 = clampCell(Math.floor(pMinY), minY, maxY);
+    const cy1 = clampCell(Math.floor(pMaxY), minY, maxY);
+    const cz0 = clampCell(Math.floor(pMinZ), minZ, maxZ);
+    const cz1 = clampCell(Math.floor(pMaxZ), minZ, maxZ);
+
+    for (let cz = cz0; cz <= cz1; cz++) {
+        for (let cy = cy0; cy <= cy1; cy++) {
+            for (let cx = cx0; cx <= cx1; cx++) {
+                voxelSide.voxelX = cx;
+                voxelSide.voxelY = cy;
+                voxelSide.voxelZ = cz;
+                emitContactPair(contacts, pool, _sideA, _sideB, manifold, bodyA, bodyB);
+            }
+        }
+    }
 }
 
 /** record a body↔body contact from an explicit point/normal (no manifold),
