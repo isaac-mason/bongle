@@ -10,7 +10,7 @@
  */
 
 import { addLockRelease, reconcilePointerLock, removeLockRelease, tryAcquirePointerLock } from '../client/input';
-import { env } from './env';
+import { env } from '../env';
 import type { ScriptContext } from './scripts';
 
 /**

@@ -1,4 +1,4 @@
-import { env } from '../../api/env';
+import { env } from '../../env';
 import { markAncestryChanged, TransformTrait } from '../../builtins/transform';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';

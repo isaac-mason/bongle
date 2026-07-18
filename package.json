@@ -17,52 +17,76 @@
     ],
     "exports": {
         ".": {
-            "import": "./src/index.ts",
-            "default": "./src/index.ts"
+            "source": "./src/index.ts",
+            "types": "./dist/types/src/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
         },
         "./engine-client": {
-            "import": "./src/engine-client.ts",
-            "default": "./src/engine-client.ts"
+            "source": "./src/engine-client.ts",
+            "types": "./dist/types/src/engine-client.d.ts",
+            "import": "./dist/engine-client.js",
+            "default": "./dist/engine-client.js"
         },
         "./engine-server": {
-            "import": "./src/engine-server.ts",
-            "default": "./src/engine-server.ts"
+            "source": "./src/engine-server.ts",
+            "types": "./dist/types/src/engine-server.d.ts",
+            "import": "./dist/engine-server.js",
+            "default": "./dist/engine-server.js"
         },
         "./engine-server-node": {
-            "import": "./src/engine-server-node.ts",
-            "default": "./src/engine-server-node.ts"
+            "source": "./src/engine-server-node.ts",
+            "types": "./dist/types/src/engine-server-node.d.ts",
+            "import": "./dist/engine-server-node.js",
+            "default": "./dist/engine-server-node.js"
         },
         "./engine-editor": {
-            "import": "./src/engine-editor.ts",
-            "default": "./src/engine-editor.ts"
+            "source": "./src/engine-editor.ts",
+            "types": "./dist/types/src/engine-editor.d.ts",
+            "import": "./dist/engine-editor.js",
+            "default": "./dist/engine-editor.js"
         },
         "./engine-asset-pipeline": {
-            "import": "./src/asset-pipeline/index.ts",
-            "default": "./src/asset-pipeline/index.ts"
+            "source": "./src/asset-pipeline/index.ts",
+            "types": "./dist/types/src/asset-pipeline/index.d.ts",
+            "import": "./dist/engine-asset-pipeline.js",
+            "default": "./dist/engine-asset-pipeline.js"
         },
         "./env": {
-            "import": "./src/api/env.ts",
-            "default": "./src/api/env.ts"
+            "source": "./src/env.ts",
+            "types": "./dist/types/src/env.d.ts",
+            "import": "./dist/env.js",
+            "default": "./dist/env.js"
         },
         "./internal": {
-            "import": "./src/internal.ts",
-            "default": "./src/internal.ts"
+            "source": "./src/internal.ts",
+            "types": "./dist/types/src/internal.d.ts",
+            "import": "./dist/internal.js",
+            "default": "./dist/internal.js"
         },
         "./interface": {
-            "import": "./interface/index.ts",
-            "default": "./interface/index.ts"
+            "source": "./interface/index.ts",
+            "types": "./dist/types/interface/index.d.ts",
+            "import": "./dist/interface.js",
+            "default": "./dist/interface.js"
         },
         "./avatar/rig": {
-            "import": "./src/core/avatar/rig.ts",
-            "default": "./src/core/avatar/rig.ts"
+            "source": "./src/core/avatar/rig.ts",
+            "types": "./dist/types/src/core/avatar/rig.d.ts",
+            "import": "./dist/avatar/rig.js",
+            "default": "./dist/avatar/rig.js"
         },
         "./starter": {
-            "import": "./src/starter/index.ts",
-            "default": "./src/starter/index.ts"
+            "source": "./src/starter/index.ts",
+            "types": "./dist/types/src/starter/index.d.ts",
+            "import": "./dist/starter.js",
+            "default": "./dist/starter.js"
         },
         "./icons": {
-            "import": "./src/icons/index.tsx",
-            "default": "./src/icons/index.tsx"
+            "source": "./src/icons/index.tsx",
+            "types": "./dist/types/src/icons/index.d.ts",
+            "import": "./dist/icons.js",
+            "default": "./dist/icons.js"
         },
         "./package.json": "./package.json"
     },
@@ -80,8 +104,8 @@
     "scripts": {
         "docs": "tsgo -p docs/template/tsconfig.json && node docs/template/build.js",
         "build:dev-client": "vite build --config cli/client/vite.config.ts",
-        "build": "rm -rf dist vendor deps-dist && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
-        "build:incremental": "vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo && node scripts/gather-lib-types.mjs && node scripts/pack-vfs.mjs",
+        "build": "rm -rf dist vendor deps-dist && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json && node scripts/pack-vfs.mjs",
+        "build:incremental": "vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo && node scripts/pack-vfs.mjs",
         "test": "vitest run",
         "bench": "vitest bench --run",
         "typecheck": "tsgo -p tsconfig.json",

@@ -40,7 +40,7 @@ import {
     updateCrosshair,
 } from '../api/crosshair';
 import { warn } from '../api/debug';
-import { env } from '../api/env';
+import { env } from '../env';
 import {
     consumeTouchButtonLookDrag,
     getCanvasTouches,

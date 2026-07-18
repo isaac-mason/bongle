@@ -105,7 +105,7 @@ import type { Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec3 } from 'mathcat';
 import { Animation } from '../api/animation';
 import { playAt, playMono } from '../api/audio';
-import { env } from '../api/env';
+import { env } from '../env';
 import { ensureModel, getModel } from '../api/models';
 import { spawnParticle } from '../api/particles';
 import {

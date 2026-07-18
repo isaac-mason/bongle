@@ -15,7 +15,13 @@
 
 import type { Plugin } from 'rolldown';
 import { type EnvValues, replaceEnv } from '../env-replace';
-import { type BuildFs, dirOf, posixJoin, resolveFile, resolveModule } from '../resolve';
+import { type BuildFs, DEFAULT_CONDITIONS, dirOf, posixJoin, resolveFile, resolveModule } from '../resolve';
+
+// The build compiles bongle from SOURCE (that's this plugin's job), so it prefers
+// the `source` export condition — bongle's exports resolve to ./src/*.ts, not the
+// built ./dist/*.js the editor + CLI dev hosts consume. Non-bongle packages lack a
+// `source` condition, so they fall through to their normal import/default target.
+const BUILD_CONDITIONS = ['source', ...DEFAULT_CONDITIONS];
 
 export type RolldownFn = typeof import('rolldown').rolldown;
 
@@ -70,7 +76,7 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
                 const baseId =
                     base.startsWith('.') && importer
                         ? ((await resolveFile(fs, posixJoin(dirOf(importer), base))) ?? posixJoin(dirOf(importer), base))
-                        : ((await resolveModule(fs, base, importer)) ?? base);
+                        : ((await resolveModule(fs, base, importer, { conditions: BUILD_CONDITIONS })) ?? base);
                 return `${WORKER_PREFIX}${baseId}`;
             }
 
@@ -80,7 +86,7 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
                 const rooted = clean.replace(/^\/+/, '');
                 return (await resolveFile(fs, rooted)) ?? rooted;
             }
-            return resolveModule(fs, clean, importer); // relative + bare (exports)
+            return resolveModule(fs, clean, importer, { conditions: BUILD_CONDITIONS }); // relative + bare (exports)
         },
         async load(id) {
             if (opts.entry && id === opts.entry.id) return { code: opts.entry.code, moduleType: 'js' };

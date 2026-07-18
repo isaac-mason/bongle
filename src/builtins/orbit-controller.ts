@@ -17,7 +17,7 @@
  */
 
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
-import { env } from '../api/env';
+import { env } from '../env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { getTrait } from '../api/scene-tree';

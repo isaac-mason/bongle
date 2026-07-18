@@ -5,5 +5,5 @@
 // editor injects its own drivers (createEditorAvatarsDriver, zstd-wasm), the
 // node hosts import these.
 
-export { createFallbackAvatarsDriver, resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from './server/avatars-fallback';
-export { nodeZstd } from './server/chunk-encode';
+export { createFallbackAvatarsDriver, resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from './node/sample-avatars-driver';
+export { nodeZstd } from './node/zstd';

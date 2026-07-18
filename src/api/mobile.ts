@@ -8,7 +8,7 @@
  */
 
 import type { ScriptContext } from '../core/scene/scripts';
-import { env } from './env';
+import { env } from '../env';
 
 /** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. true on
  *  touchscreen laptops too, use `isTouchPrimary` to gate touch controls. */

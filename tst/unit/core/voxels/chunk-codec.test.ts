@@ -9,7 +9,7 @@ import {
 } from '../../../../src/core/voxels/chunk-codec';
 import { CHUNK_VOLUME } from '../../../../src/core/voxels/voxels';
 // the codec takes an injected zstd impl; the server supplies Node native zstd
-import { nodeZstd } from '../../../../src/server/chunk-encode';
+import { nodeZstd } from '../../../../src/node/zstd';
 
 describe('rleEncode / rleDecode', () => {
     it('empty input', () => {

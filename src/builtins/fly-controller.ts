@@ -14,7 +14,7 @@
  */
 
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { env } from '../api/env';
+import { env } from '../env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';

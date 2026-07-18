@@ -157,10 +157,26 @@ body.window-dragging iframe {
 /* a little terminal box under the wordmark: square, bordered, title bar with
    traffic-light dots. Fixed-size so streaming steps don't jitter the layout. */
 .boot-terminal {
+    position: relative;
     width: min(520px, 82vw);
     border: 1px solid var(--color-border);
     background: var(--color-surface);
     box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.4);
+}
+/* soft rainbow halo bleeding out behind the box: the wordmark gradient, blurred so
+   it reads as ambient light rather than a second frame, and sliding in sync with
+   .boot-wordmark via bongle-rainbow-slide. Sits behind the opaque surface (z-index
+   -1) so only the overspill around the square shows. */
+.boot-terminal::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    z-index: -1;
+    background: linear-gradient(90deg, #ff3ea5, #ffd23f, #3fa7ff, #8a2be2, #ff3ea5);
+    background-size: 200% auto;
+    filter: blur(18px);
+    opacity: 0.45;
+    animation: bongle-rainbow-slide 2s linear infinite;
 }
 .boot-terminal-bar {
     display: flex;
@@ -219,7 +235,8 @@ body.window-dragging iframe {
     }
 }
 @media (prefers-reduced-motion: reduce) {
-    .boot-cursor {
+    .boot-cursor,
+    .boot-terminal::before {
         animation: none;
     }
 }

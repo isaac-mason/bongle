@@ -4,7 +4,7 @@
         "noEmit": false,
         "emitDeclarationOnly": true,
         "declaration": true,
-        "declarationDir": "./dist/types/node_modules/bongle",
+        "declarationDir": "./dist/types",
         "rootDir": "./"
     },
     "include": ["./src", "./interface", "./build-ambient.d.ts"],

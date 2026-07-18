@@ -14,7 +14,7 @@
  */
 
 import { type Crosshair, type CrosshairConfig, createCrosshairImpl } from '../client/crosshair';
-import { env } from './env';
+import { env } from '../env';
 import type { ScriptContext } from './scripts';
 
 export type { Crosshair, CrosshairConfig };

@@ -34,7 +34,7 @@ import * as ClientNet from '../../src/client/net';
 import type * as ClientRooms from '../../src/client/rooms';
 import { registry } from '../../src/core/registry';
 import * as SceneTree from '../../src/core/scene/scene-tree';
-import { createFallbackAvatarsDriver } from '../../src/server/avatars-fallback';
+import { createFallbackAvatarsDriver } from '../../src/node/sample-avatars-driver';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';

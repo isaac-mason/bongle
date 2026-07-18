@@ -25,7 +25,7 @@
 import type { Scene } from 'gpucat';
 import { createIndirectBuffer, DrawIndexedIndirect, d, Geometry, GpuBuffer, layoutStrideOf, Mesh } from 'gpucat';
 import { box3 } from 'mathcat';
-import { env } from '../../api/env';
+import { env } from '../../env';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';

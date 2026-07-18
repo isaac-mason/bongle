@@ -14,7 +14,7 @@ import {
     createTouchButtonImpl,
     createTouchJoystickImpl,
 } from '../client/touch-controls';
-import { env } from './env';
+import { env } from '../env';
 import type { ScriptContext } from './scripts';
 
 export type { CreateTouchJoystickOpts, CreateTouchButtonOpts };

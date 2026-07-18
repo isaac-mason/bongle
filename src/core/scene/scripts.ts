@@ -2,7 +2,7 @@ import type { Client, JsonValue, User } from 'bongle/interface';
 import type { ContactManifold, ContactSettings, RigidBody } from 'crashcat';
 import type { Scene } from 'gpucat';
 import type * as Scripts from 'packcat';
-import { env } from '../../api/env';
+import { env } from '../../env';
 import type { EngineClient } from '../../client/engine-client';
 import type { Input } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';

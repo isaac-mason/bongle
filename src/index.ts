@@ -19,7 +19,7 @@ export { client } from './api/client';
 export { clientToUser } from './api/clients';
 export * from './api/crosshair';
 export * from './api/debug';
-export { env } from './api/env';
+export { env } from './env';
 export * from './api/environment';
 export * from './api/input';
 export * from './api/lighting';

@@ -5,7 +5,7 @@
 
 import { createReadStream } from 'node:fs';
 import type { Plugin } from 'vite';
-import { resolveSampleAvatarFile } from '../../src/server/avatars-fallback';
+import { resolveSampleAvatarFile } from '../../src/node/sample-avatars-driver';
 
 export function serveAvatars(): Plugin {
     return {

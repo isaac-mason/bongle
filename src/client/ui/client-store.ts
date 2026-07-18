@@ -6,7 +6,7 @@
  */
 
 import { create } from 'zustand';
-import { env } from '../../api/env';
+import { env } from '../../env';
 import type { PlayerId } from '../../core/client';
 import type * as Debug from '../../core/debug';
 import type { InputManager } from '../input';

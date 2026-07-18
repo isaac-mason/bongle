@@ -1,5 +1,5 @@
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { env } from '../../api/env';
+import { env } from '../../env';
 import { AnimatorTrait } from '../../builtins/animator';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';
