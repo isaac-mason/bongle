@@ -53,11 +53,15 @@ export function renderMarkdown(src: string): string {
 
         if (/^```/.test(line)) {
             flushPara();
+            // capture the info-string language (```ts) — MarkdownView syntax-
+            // highlights `code[data-lang]` blocks with Monaco after render.
+            const lang = /^```([\w+#-]+)/.exec(line)?.[1]?.toLowerCase() ?? '';
             const buf: string[] = [];
             i++;
             while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
             i++; // closing fence
-            out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+            const code = esc(buf.join('\n'));
+            out.push(lang ? `<pre><code data-lang="${lang}">${code}</code></pre>` : `<pre><code>${code}</code></pre>`);
             continue;
         }
 

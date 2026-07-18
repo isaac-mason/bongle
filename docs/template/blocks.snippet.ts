@@ -15,7 +15,7 @@ import {
     setBlock,
     system,
 } from 'bongle';
-import { blockTextures } from 'bongle/starter';
+import { blockTextures } from 'bongle/kit';
 
 /* SNIPPET_START: define-block */
 // declare a block type at module scope. a cube model maps a texture to its

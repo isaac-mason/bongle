@@ -2,7 +2,7 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'bongle/icons';
+import { BookOpen, Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'bongle/icons';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { pickAndImportProjectSave } from '../../project-save';
@@ -10,14 +10,14 @@ import { runBuild, runSave } from '../../platform/actions';
 import { usePlatform } from '../../stores/platform';
 import { useBoot } from '../../stores/boot';
 import { useClients } from '../../stores/clients';
-import { useEditor } from '../../stores/editor';
+import { MAIN_PANE, useEditor } from '../../stores/editor';
 import { useLaunched } from '../../stores/launched';
 import { useSync } from '../../stores/sync';
 import { useSystemWindows } from '../../stores/system-windows';
 import { useTabDrag } from '../../stores/tab-drag';
 import { snapRect, useSnapPreview, useWindows } from '../../stores/windows';
 import { disconnect, syncSupported } from '../../sync/folder-sync';
-import { appById, blockbenchApp } from '../apps';
+import { appById, blockbenchApp, openPath } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
@@ -288,6 +288,19 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                     ? [{ label: 'Open', onClick: () => openSystem(w.id) }]
                     : [show(w.id), { label: 'Close', onClick: () => closeSystem(w.id) }],
             })),
+        // docs launcher: opens the seeded engine markdown (node_modules/bongle/docs)
+        // in the markdown viewer app. Pinned (never a running window itself).
+        {
+            id: 'docs',
+            title: 'docs',
+            glyph: <BookOpen size={16} />,
+            running: false,
+            onClick: () => openPath('node_modules/bongle/docs/docs.md', MAIN_PANE),
+            menu: [
+                { label: 'Guide', onClick: () => openPath('node_modules/bongle/docs/docs.md', MAIN_PANE) },
+                { label: 'API reference', onClick: () => openPath('node_modules/bongle/docs/api.md', MAIN_PANE) },
+            ],
+        },
         {
             id: 'logs',
             title: 'logs',

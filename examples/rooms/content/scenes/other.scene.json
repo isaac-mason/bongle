@@ -19,7 +19,7 @@
     "0,0,0": {
       "palette": [
         "air",
-        "starter:dirt"
+        "kit:dirt"
       ],
       "blocks": "H4sIAHdmEmoAA+3JsQ0AAAjDMPj/aR5gYESqnTEFAMTpJf/+AQAAAADgowGaGaZBACAAAA==",
       "light": ""

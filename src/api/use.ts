@@ -16,9 +16,9 @@ let _kept = 0;
  * `use()` is a non-pure call that takes the handles you depend on:
  *
  *   import { use } from 'bongle';
- *   import { blocks } from 'bongle/starter';
+ *   import { blocks } from 'bongle/kit';
  *
- *   // scene data references `starter:stone`, keep its declaration alive.
+ *   // scene data references `kit:stone`, keep its declaration alive.
  *   use(blocks.stone, blocks.dirt);
  *
  * Bundlers preserve the call (can't prove it pure across module

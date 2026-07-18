@@ -23,7 +23,7 @@
     "0,0,0": {
       "palette": [
         "air",
-        "starter:grass"
+        "kit:grass"
       ],
       "blocks": "H4sIAAAAAAAAA+3JsQ0AAAjDMPj/adQD2DvYGbPzF373BwAAAAAAAIA4TyL0sQAgAAA=",
       "light": "H4sIAAAAAAAAA+3JMQEAAAjDMPyrRQJTwL0jzdn52vC7PwAAAAAAAADEAb/ge0IAIAAA"

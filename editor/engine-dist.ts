@@ -3,10 +3,10 @@
 // any project module (one vfs-driven resolver; realms read assets from the same
 // fs).
 //
-// The payload is ONE zip (scripts/pack-vfs.mjs) fetched + unpacked into OPFS
-// once, rather than inlining every file into the editor bundle (bundle bloat) +
-// fetching each asset separately. A version marker (the fingerprinted zip url)
-// makes reboots skip the fetch — the vfs already holds it.
+// The payload is ONE zip (scripts/pack-vfs.mjs) fetched + unpacked into OPFS on
+// every boot, rather than inlining every file into the editor bundle (bundle
+// bloat) + fetching each asset separately. node_modules is wiped-and-replaced
+// each time (a seed-managed tree — no merge, no cache); see seedEngineDist.
 //
 // env is left as a real property read in the bongle chunks (behind the
 // `bongle/env` seam) — the dev-server's per-env transform does the replacement.
@@ -15,46 +15,35 @@ import { unzipSync } from 'fflate';
 import type { Filesystem } from './fs';
 
 // glob (not a bare `import ?url`) so a missing zip is an empty map + clear warn,
-// not a build error. vite fingerprints the url → the marker cache-busts on
-// rebuild. Built by `pnpm run build` (pack-vfs).
+// not a build error. Built by `pnpm run build` (pack-vfs).
 const ZIP = import.meta.glob('./editor-node-modules.zip', { query: '?url', eager: true, import: 'default' }) as Record<
     string,
     string
 >;
 const ZIP_URL: string | undefined = Object.values(ZIP)[0];
 
-const SEED_MARKER = 'node_modules/.bongle-seed';
-
 export async function seedEngineDist(fs: Filesystem): Promise<void> {
     if (!ZIP_URL) {
         console.warn('[engine-dist] editor-node-modules.zip not found — run `pnpm run build` in lib/ first');
         return;
     }
-    // fetch always (a cheap local/cached read); key the marker on the zip CONTENT,
-    // not its url — the dev `?url` is a stable path, so a rebuild would otherwise
-    // look unchanged and skip re-seeding stale dist. Matching hash → skip the
-    // expensive unzip + 200 vfs writes.
+    // REPLACE node_modules wholesale every boot: it's a seed-managed (ignored)
+    // tree, so wipe-then-write rather than merge — a merge orphans files dropped
+    // from a newer seed (e.g. the whole bongle/src tree, after the src→dist
+    // switch), which the bundler + Monaco then pick up stale. No marker/cache:
+    // prod runs in a credentialless iframe (ephemeral OPFS) so it reseeds every
+    // load anyway, and always-reseed keeps dev from ever going stale. Everything
+    // under node_modules comes from the zip, so a clean slate is safe.
+    await fs.remove('node_modules', { recursive: true }).catch(() => {});
     const buf = new Uint8Array(await (await fetch(ZIP_URL)).arrayBuffer());
-    const hash = await sha256Hex(buf);
-    try {
-        if ((await fs.readText(SEED_MARKER)) === hash) return;
-    } catch {}
-
     const entries = unzipSync(buf);
     const files = Object.entries(entries).filter(([path]) => !path.endsWith('/')); // skip dir entries
-    // ~200 files; sequential awaited OPFS writes cost ~3s (dominated by per-write
-    // latency, not throughput). Write in bounded-concurrency batches so the
-    // latencies overlap. Distinct paths + OPFS's idempotent dir creation make
-    // concurrent writes safe; the batch cap avoids thrashing the disk.
+    // batched, bounded-concurrency writes so the per-write OPFS latencies overlap
+    // (sequential awaits cost ~3s); distinct paths + OPFS's idempotent dir creation
+    // make concurrent writes safe, and the batch cap avoids thrashing the disk.
     const BATCH = 32;
     for (let i = 0; i < files.length; i += BATCH) {
         await Promise.all(files.slice(i, i + BATCH).map(([path, bytes]) => fs.write(`node_modules/${path}`, bytes)));
     }
-    await fs.write(SEED_MARKER, hash);
     if (files.length === 0) console.warn('[engine-dist] seed zip was empty');
-}
-
-async function sha256Hex(buf: Uint8Array): Promise<string> {
-    const digest = await crypto.subtle.digest('SHA-256', buf as unknown as BufferSource);
-    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

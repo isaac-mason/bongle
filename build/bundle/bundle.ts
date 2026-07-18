@@ -127,9 +127,11 @@ async function buildTarget(
     target: Target,
     workers: Map<string, string>,
     bundler: Bundler,
+    progress: (label: string) => void = () => {},
 ): Promise<Record<string, Uint8Array>> {
     bundler.prepare?.(); // browser: @rolldown/browser reads `process` in bindingifyInputOptions
     const entry = await entrySource(fs, target);
+    progress(`Bundling ${target}`);
     const bundle = await bundler.rolldown({
         input: { index: ENTRY_ID },
         plugins: [buildTargetPlugin(fs, target, entry, workers)],
@@ -207,11 +209,13 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
     // deadlocks on main-thread Atomics.wait. They're client-side compute.
     progress('Bundling workers');
     const workers = await bundleWorkers(fs, envFor('client'), bundler);
-    progress('Bundling client + server');
-    const [clientFiles, serverFiles] = await Promise.all([
-        buildTarget(fs, 'client', workers, bundler),
-        buildTarget(fs, 'server', workers, bundler),
-    ]);
+    // sequential, NOT Promise.all: the browser bundler (@rolldown/browser) is one
+    // wasm instance over a shared WASI thread pool — two concurrent rolldown()
+    // bundles deadlock its async runtime (one finishes, the other hangs). Native
+    // node rolldown is reentrant and wouldn't care, but the core is host-neutral,
+    // and the server graph is tiny so serializing costs ~nothing.
+    const clientFiles = await buildTarget(fs, 'client', workers, bundler, progress);
+    const serverFiles = await buildTarget(fs, 'server', workers, bundler, progress);
 
     const zip: Record<string, Uint8Array> = {};
     for (const [name, bytes] of Object.entries(clientFiles)) zip[`client/${name}`] = bytes;

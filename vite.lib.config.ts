@@ -49,7 +49,7 @@ export default defineConfig({
                 env: entry('src/env.ts'),
                 internal: entry('src/internal.ts'),
                 'avatar/rig': entry('src/core/avatar/rig.ts'),
-                starter: entry('src/starter/index.ts'),
+                kit: entry('src/kit/index.ts'),
                 icons: entry('src/icons/index.tsx'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry

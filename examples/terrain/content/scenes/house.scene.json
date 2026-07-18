@@ -12,8 +12,8 @@
     "0,0,0": {
       "palette": [
         "air",
-        "starter:stone",
-        "starter:grass"
+        "kit:stone",
+        "kit:grass"
       ],
       "blocks": "H4sIAAAAAAAAA+3VQQqAIBAFUPX+hy4X0UYbIWoK3hNXX9x8B2s51lgtbV8r+fjEef/sBjJF3UStxXnUvXeR6enZNPvflj//ZOp/d9/XebuV6//f5u2u5QAAAAAAvG8DVcRefwAgAAA=",
       "light": "H4sIAAAAAAAAA+3TsQ2AIBQEUPafxhEcwREcwRGMlQ1yNoCJj9dxP7/gQrnPUfU+r0+k/Cj7wz0jtLu58rVsjY5y3t5/Tcx+gz9L/Syh35Sn/cyV+un//5kp99835/tSeykHAAAAAGC4E6K6wncAIAAA"
@@ -21,7 +21,7 @@
     "0,0,-1": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAAAAAAAAA+3OAQ0AAAgDIO1f2hZ++yABA0CpTQcAAAAAAAB4dJFtQYcAIAAA",
       "light": "H4sIAAAAAAAAA+3RAQkAQAgEQfun/AgfwRYe6DAFFrY+y714AUn+31bxAgAAAAAAAMY0m6yXnwAgAAA="

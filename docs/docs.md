@@ -23,36 +23,9 @@ the server and rendered in every player's browser. The engine gives you:
 The chapters build this up from zero: scaffold a project, then nodes, traits, and
 scripts; the multiplayer model; then rendering, physics, voxels, and the rest.
 
-## Getting Started
-
-> NOTE: bongle is in early development and is not yet published to npm. Install
-> directly from the repo:
-
-```sh
-npx github:isaac-mason/bongle new my-game
-cd my-game
-npm run edit
-```
-
-Running the above will scaffold a minimal project and start the editor on
-`http://localhost:3002`.
-
-From there, you can edit the game code in `src/`, and see your changes live in
-the editor.
-
-### Start from the new-bongle template
-
-[new-bongle](https://github.com/isaac-mason/new-bongle) is a ready-made starter
-project. Not yet set up for local development? You can poke around with a cloud environment like GitHub Codespaces:
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/isaac-mason/new-bongle)
-
-It boots a container, installs dependencies, and starts the editor (forwarded on
-`:3002`). You can also clone the `new-bongle` project and run `npm install && npm run edit` locally.
-
 ## Project structure
 
-A scaffolded project is a small npm package. The pieces you work with:
+The pieces you work with:
 
 ```text
 my-game/
@@ -86,22 +59,17 @@ Commit `src/index.ts`, `assets/`, `content/`, and the config files. The generate
 
 ## Your first scripts
 
-`bongle new my-game` scaffolds a project whose `src/index.ts` is already a complete,
-playable game, built from a few short scripts. They are short enough to read in full,
-so we will walk them top to bottom. Everything below is imported from `bongle`, except
-the starter blocks, which come from `bongle/starter`.
-
 First, register content and size the room:
 
 ```ts
-// register the starter block set so those blocks exist and show up in the editor
+// register the kit block set so those blocks exist and show up in the editor
 use(blocks);
 
 // cap how many players matchmaking puts in one room
 matchmaking({ maxPlayers: 32 });
 ```
 
-`use(blocks)` pulls in the starter block set so those block types are registered
+`use(blocks)` pulls in the kit block set so those block types are registered
 and appear in the editor palette (it keeps the declarations alive through
 bundling). `matchmaking({ maxPlayers: 32 })` sets how many players matchmaking
 puts in one room.
@@ -163,7 +131,7 @@ a world position, computing the look yaw and pitch through the character's eyes.
 player controller reads those angles, so the client's camera starts pointed that way.
 (For a raw yaw and pitch, `setCharacterLook(controller, yaw, pitch?)` writes them directly.)
 
-That is the whole starter: register blocks, size the room, light the world,
+That is the whole kit: register blocks, size the room, light the world,
 spawn players. The rest of this guide unpacks the pieces it leans on, starting
 with the [concepts](#concepts) behind the world model and then the
 [programming model](#the-programming-model) for nodes, traits, and scripts in
@@ -451,7 +419,7 @@ script(WorldTrait, 'hooks', (ctx) => {
 ```
 
 The `opts` argument takes `{ editor: true }` to also run the script in the
-editor, as the starter's environment script does.
+editor, as the kit's environment script does.
 
 ### Ticks, frames, and interpolation
 
@@ -610,7 +578,7 @@ live behind it and never ship.
 
 **Edit vs play.** A script's lifecycle hooks do not run while the editor is in edit
 mode by default; pass `{ editor: true }` as the script's options to opt in (the
-starter's lighting script does exactly this, so the world is lit while you build it). A
+kit's lighting script does exactly this, so the world is lit while you build it). A
 script that runs in both then reads `ctx.mode`, which is `'edit'` or `'play'` per room,
 to tell which it is. A classic use is an authoring-only marker, a label over each spawn
 point while editing, gone at play time.
@@ -983,7 +951,7 @@ through `ctx` belongs to its room, and most games run many rooms at once so no
 single instance fills up or slows the others.
 
 `matchmaking(config)` decides how arriving players are grouped into rooms (the
-starter caps a room at 32 players). When you need rooms beyond the ones matchmaking
+kit caps a room at 32 players). When you need rooms beyond the ones matchmaking
 creates, for lobbies, private matches, or instanced dungeons, manage them yourself:
 `rooms.create` opens one from a scene; `rooms.join`, `rooms.swap`, and `rooms.leave`
 move a client in and out; `rooms.list` and `rooms.view` inspect them; `rooms.active`
@@ -1251,7 +1219,7 @@ split into fixed-size chunks, and you can change it freely while the game runs.
 
 `block(id, options)` declares a block at module scope. The most common model is a
 textured cube: map a texture to `all` faces, or to `top`, `bottom`, and `sides`
-separately. The starter pack ships ready-made textures under `bongle/starter`.
+separately. The kit pack ships ready-made textures under `bongle/kit`.
 
 ```ts
 // declare a block type at module scope. a cube model maps a texture to its
@@ -1272,9 +1240,9 @@ common ones for you, wiring up the model, collision, and any block states the sh
 needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`, `trapdoor`,
 `door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`, `column`, and
 `cube`. These cover most of what a world needs without authoring a model. The
-starter blocks are the worked examples here: `bongle/starter` is built almost
+kit blocks are the worked examples here: `bongle/kit` is built almost
 entirely from these presets, so its source
-([src/starter/blocks.ts](../src/starter/blocks.ts)) is the best place to see them in
+([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best place to see them in
 use. When you need a shape no preset covers, the preset source itself
 ([src/core/voxels/block-presets.ts](../src/core/voxels/block-presets.ts)) shows how
 each one assembles its model and states, which is the template for a custom one.
@@ -1337,7 +1305,7 @@ system('place-ruby', (ctx) => {
 ```
 
 To find which block a ray hits, for a build cursor or a hitscan weapon, use
-`raycastVoxels` (covered under [Scene queries](#scene-queries)). The starter blocks
+`raycastVoxels` (covered under [Scene queries](#scene-queries)). The kit blocks
 also include presets such as doors; toggle one with `getDoorOpen` and `setDoorOpen`.
 
 ### Reacting to changes
@@ -1790,8 +1758,8 @@ Particles are short-lived sprites for effects like smoke, sparks, and dust.
 Declare a particle type with `particle(id, { sprite, playback, update })`, pairing
 a sprite with a motion `update`, then emit instances at a position with
 `spawnParticle`. The quickest path is a ready-made `update`: `particleUpdate` ships
-complete behaviours (`smoke`, `dust`, `spark`, `snow`, `rain`), and the starter pack
-bundles whole presets under `particlePresets` in `bongle/starter`.
+complete behaviours (`smoke`, `dust`, `spark`, `snow`, `rain`), and the kit pack
+bundles whole presets under `particlePresets` in `bongle/kit`.
 
 ```ts
 // a particle type pairs a sprite with a motion update
@@ -2382,7 +2350,7 @@ carrying a default set of traits:
 The node is owned by its client, so its movement is
 [owner-authoritative](#replication-and-authority). The local player is
 `ctx.client.player`; a joining player arrives as the `playerNode` in `onJoin`, as the
-starter's spawn script uses. Add your own gameplay traits, health, score, an inventory,
+kit's spawn script uses. Add your own gameplay traits, health, score, an inventory,
 to it in `onJoin`, and you usually drive movement with the `PlayerControllerTrait`
 rather than writing it from scratch.
 

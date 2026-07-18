@@ -8,7 +8,270 @@ examples, see [the guide](./docs.md).
 
 Create nodes, compose them with traits, and walk the tree.
 
-<!-- RenderModule: module not found: api/scene-graph -->
+#### `Node`
+
+```ts
+export type Node = {
+    id: number;
+    name: string | undefined;
+    parent: Node | null;
+    children: Node[];
+    scene: SceneTree | null;
+    owner: PlayerId | null;
+    persist: boolean;
+    realm: Realm;
+    _traits: Map<number, TraitBase>;
+    _sync: NodeSyncState;
+    _bitset: Bitset;
+    _unresolvedTraits: Map<string, {
+        binary?: Uint8Array;
+        json?: Record<string, unknown>;
+    }>;
+    _traitIssues: Map<number, ValidationIssue[]>;
+    prefab: PrefabConfig | null;
+    _prefabState: PrefabState | null;
+};
+```
+
+#### `Realm`
+
+```ts
+/**
+ * which side(s) a node lives on. see {@link Node.realm}.
+ *
+ * - `'inherit'`: take the effective realm from the nearest non-inherit ancestor (default)
+ * - `'shared'`: server-owned, replicated to all clients
+ * - `'client'`: lives only on the client that created it; never replicated
+ * - `'server'`: lives only on the server; never replicated
+ * - `'each'`: server AND every client get their own independent copy on attach
+ *
+ * the scene tree root is always `'shared'`, so an `'inherit'` node with no
+ * explicit realm anywhere in its chain resolves to `'shared'`.
+ */
+export type Realm = 'inherit' | 'shared' | 'client' | 'server' | 'each';
+```
+
+#### `addChild`
+
+```ts
+/**
+ * add a child node to a parent. if the child already has a parent, it is
+ * removed from the old parent first. if the parent is in a scene tree, the
+ * child (and its descendants) are registered in that scene tree.
+ */
+export function addChild(parent: Node, child: Node): void;
+```
+
+#### `findAncestor`
+
+```ts
+/**
+ * walk up the tree from `node.parent` toward the root and return the first
+ * ancestor that has **all** of the given traits. returns a tuple of
+ * `[...traitValues]`, or `null` if no ancestor matches. access the ancestor
+ * node via any returned trait's `.node` property.
+ *
+ * this is an ad-hoc traversal, it is **not** reactive. call it when you
+ * need to resolve inherited / contextual data from the hierarchy.
+ *
+ * @example
+ * ```ts
+ * const result = findAncestor(node, [Physics]);
+ * if (result) {
+ *   const [physics] = result;
+ *   console.log(physics.gravity);
+ *   console.log(physics.node); // the ancestor node
+ * }
+ * ```
+ */
+export function findAncestor<const Args extends TraitHandle[]>(node: Node, traits: Args): [
+    ...traits: {
+        [K in keyof Args]: Args[K] extends TraitHandle<infer T> ? T : never;
+    }
+] | null;
+```
+
+#### `findChildByName`
+
+```ts
+/**
+ * find the first descendant of `node` (depth-first) whose `name` matches `name`.
+ * returns null if none found. `node` itself is not considered a match.
+ *
+ * useful for resolving rig joint targets in animations and similar
+ * name-keyed lookups (mirrors three.js `Object3D.getObjectByName`).
+ */
+export function findChildByName(node: Node, name: string): Node | null;
+```
+
+#### `findChildrenByName`
+
+```ts
+/**
+ * find every descendant of `node` (depth-first) whose `name` matches `name`.
+ * returns an empty array if none found. `node` itself is not considered a match.
+ *
+ * use when you genuinely need to handle multiple matches (e.g. counted-suffix
+ * names from non-unique gltf labels). prefer `findChildByName` for unique lookups.
+ */
+export function findChildrenByName(node: Node, name: string): Node[];
+```
+
+#### `getTrait`
+
+```ts
+export function getTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>): T | undefined;
+```
+
+#### `hasTrait`
+
+```ts
+export function hasTrait(node: Node, handle: TraitHandle): boolean;
+```
+
+#### `isLocalNode`
+
+```ts
+/**
+ * True iff this node was created locally on the current runtime rather than
+ * allocated by the server. The server allocates positive ids (and nodes
+ * replicated in from the server keep their positive server id); a client
+ * allocates negative ids for nodes it creates locally (see id assignment in
+ * the attach path above). So on a client this is false for server-owned
+ * (replicated-in) nodes and true for client-only ones, a true *origin* test,
+ * unlike `isReplicable` (a realm-policy test). Use it to decide who authors a
+ * node's derived content (e.g. the character rig): the server builds for its
+ * nodes, a client builds only its own local ones and otherwise defers to
+ * replication.
+ */
+export function isLocalNode(node: Node): boolean;
+```
+
+#### `removeChild`
+
+```ts
+/**
+ * remove a child from its parent. the child (and its descendants) are
+ * detached from the scene tree and removed from all queries.
+ */
+export function removeChild(parent: Node, child: Node): void;
+```
+
+#### `replaceChildren`
+
+```ts
+/**
+ * replace all children of `root` with `node`, destroying every other child.
+ * `node` must be a direct child of `root`. analogous to the DOM's
+ * `replaceChildren()`, useful after eager prefab instantiation when you
+ * want to keep only one sub-node and discard the rest.
+ */
+export function replaceChildren(root: Node, node: Node): void;
+```
+
+#### `traverse`
+
+```ts
+/**
+ * depth-first pre-order traversal of a node and all its descendants.
+ *
+ * the callback receives each node. return `false` to skip that node's
+ * children (prune). return anything else (or nothing) to continue.
+ */
+export function traverse(node: Node, callback: (node: Node) => boolean | void): void;
+```
+
+#### `cloneNode`
+
+```ts
+/**
+ * clone a node and all its descendants. the returned subtree is **detached**,
+ * attach with `addChild(parent, clone)` to wake it up.
+ */
+export function cloneNode(node: Node): Node;
+```
+
+#### `cloneModel`
+
+```ts
+/**
+ * Clone a node intended for the **visual scene**, same as `cloneNode`, plus
+ * a `ModelTrait` (the shared voxel-light slot for descendant meshes)
+ * installed on the clone root. Use this for every cloneNode site that goes
+ * into the visible scene; reserve `cloneNode` for non-visual subtree
+ * duplication (e.g. detached prefab data).
+ *
+ * Typical usage:
+ * ```ts
+ * const instance = cloneModel(wizard.scene);
+ * // or for a sub-mesh:
+ * const hat = cloneModel(wizard.nodes.HatA);
+ * ```
+ *
+ * Frustum culling is per-mesh and derived automatically by the renderer from
+ * each mesh's own geometry, so there's nothing cull-related for the caller to
+ * supply or maintain. If the source already has a `ModelTrait`, the existing
+ * one is left in place.
+ */
+export function cloneModel(node: Node): Node;
+```
+
+#### `createNode`
+
+```ts
+/**
+ * create a new **detached** node, no parent, no scripts fired, not in queries.
+ * attach with `addChild(parent, node)` to make it live; an id is allocated at
+ * attach time (negative on the client, positive on the server).
+ *
+ * `realm` controls which side(s) the node lives on (default `'inherit'`, which
+ * resolves to the nearest ancestor's realm, i.e. `'shared'` under the scene
+ * root). Use `'server'` for server-only nodes that must never replicate, or
+ * `'client'` for purely local client-side nodes.
+ */
+export function createNode(options?: {
+    name?: string;
+    persist?: boolean;
+    realm?: Realm;
+}): Node;
+```
+
+#### `addTrait`
+
+```ts
+/**
+ * add a trait to a node. returns the new trait instance.
+ */
+export function addTrait<T extends TraitBase>(node: Node, traitHandle: TraitHandle<T>, props?: TraitProps<T>): T;
+```
+
+#### `removeTrait`
+
+```ts
+/**
+ * remove a trait from a node.
+ */
+export function removeTrait(node: Node, traitHandle: TraitHandle): void;
+```
+
+#### `destroyNode`
+
+```ts
+/**
+ * destroy a node and detach it from the scene.
+ */
+export function destroyNode(node: Node): void;
+```
+
+#### `findByName`
+
+```ts
+/**
+ * depth-first search from `from` (inclusive) by node name.
+ * returns the first matching node, or null if not found.
+ */
+export function findByName(from: Node, name: string): Node | null;
+```
 #### `TRANSFORM_DIRTY_WORLD_MATRIX`
 
 ```ts
@@ -1784,9 +2047,9 @@ Also exported: `DrawFn`, `DrawInputs`, `DrawParams`, `DrawSource`, `ImageSource`
  * `use()` is a non-pure call that takes the handles you depend on:
  *
  *   import { use } from 'bongle';
- *   import { blocks } from 'bongle/starter';
+ *   import { blocks } from 'bongle/kit';
  *
- *   // scene data references `starter:stone`, keep its declaration alive.
+ *   // scene data references `kit:stone`, keep its declaration alive.
  *   use(blocks.stone, blocks.dirt);
  *
  * Bundlers preserve the call (can't prove it pure across module
@@ -3058,7 +3321,7 @@ export type BlockQuad = {
  * across clips for variation; an empty array silences the category.
  *
  * Compose preset bundles from `blockSoundPresets.*` in
- * `bongle/starter` or build a fully custom config. All slots
+ * `bongle/kit` or build a fully custom config. All slots
  * optional; omit a category to leave it silent.
  *
  * NOTE: the systems that actually drive playback off these handles

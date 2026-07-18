@@ -4,7 +4,7 @@
 // falling back to a code-editor tab. Launching is dynamic (one window per
 // file) — see the launched store.
 
-import { Image, Music, Paintbrush } from 'bongle/icons';
+import { File, Image, Music, Paintbrush } from 'bongle/icons';
 import type { ReactNode } from 'react';
 import type { Filesystem } from '../fs';
 import { useBlockbench } from '../stores/blockbench';
@@ -16,6 +16,7 @@ import { AudioPlayer } from './components/AudioPlayer';
 import { Blockbench } from './components/Blockbench';
 import { ImageEditor } from './components/ImageEditor';
 import { ImageViewer } from './components/ImageViewer';
+import { MarkdownView } from './components/MarkdownView';
 
 export type AppDef = {
     /** stable app id; also the window-id prefix (`${id}:${path}`). */
@@ -64,6 +65,22 @@ export const audioPlayerApp: AppDef = {
     render: (fs, path) => <AudioPlayer fs={fs} path={path} />,
 };
 
+export const markdownViewerApp: AppDef = {
+    id: 'markdown-viewer',
+    title: 'markdown',
+    glyph: <File size={18} />,
+    handles: ['md', 'markdown'],
+    initial: { w: 720, h: 640 },
+    // MarkdownView is `absolute inset-0` (built for the code editor's preview
+    // pane); wrap it in a positioned, full-height box so it fills the WINDOW BODY
+    // rather than the whole window (which would cover the draggable title bar).
+    render: (fs, path) => (
+        <div className="relative h-full">
+            <MarkdownView fs={fs} path={path} />
+        </div>
+    ),
+};
+
 export const blockbenchApp: AppDef = {
     id: 'blockbench',
     title: 'blockbench',
@@ -76,7 +93,7 @@ export const blockbenchApp: AppDef = {
     render: (fs, _path, windowId) => <Blockbench fs={fs} windowId={windowId} />,
 };
 
-export const APPS: AppDef[] = [imageViewerApp, imageEditorApp, audioPlayerApp, blockbenchApp];
+export const APPS: AppDef[] = [imageViewerApp, imageEditorApp, audioPlayerApp, markdownViewerApp, blockbenchApp];
 
 /** the app that opens this extension, or null → the code editor. */
 export function appForFile(path: string): AppDef | null {

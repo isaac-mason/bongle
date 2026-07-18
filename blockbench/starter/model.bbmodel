@@ -1,0 +1,35 @@
+{
+	"meta": {
+		"format_version": "5.0",
+		"model_format": "bongle_model",
+		"box_uv": false
+	},
+	"name": "model",
+	"resolution": {
+		"width": 16,
+		"height": 16
+	},
+	"elements": [
+		{
+			"name": "cube",
+			"box_uv": false,
+			"type": "cube",
+			"from": [-4, 0, -4],
+			"to": [4, 8, 4],
+			"origin": [0, 0, 0],
+			"autouv": 0,
+			"color": 0,
+			"faces": {
+				"north": { "uv": [0, 0, 16, 16] },
+				"east": { "uv": [0, 0, 16, 16] },
+				"south": { "uv": [0, 0, 16, 16] },
+				"west": { "uv": [0, 0, 16, 16] },
+				"up": { "uv": [0, 0, 16, 16] },
+				"down": { "uv": [0, 0, 16, 16] }
+			},
+			"uuid": "b0a9f3c1-0000-4000-8000-000000000001"
+		}
+	],
+	"outliner": ["b0a9f3c1-0000-4000-8000-000000000001"],
+	"textures": []
+}

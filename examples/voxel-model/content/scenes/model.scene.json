@@ -12,7 +12,7 @@
     "-1,0,-1": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAHdmEmoAA+3RsQkAAAgDQd1/acEFBDvlLmXKD57K3v7ntrk/AAAAAAAA8EsBZ9hHVQAgAAA=",
       "light": ""
@@ -20,7 +20,7 @@
     "-1,0,0": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAHdmEmoAA+3RoQ0AQAgEwf/+mybBExQEMXPy5L7Sz8393Na163/9AQAAAAAAAPYE0Hj3yQAgAAA=",
       "light": ""
@@ -28,7 +28,7 @@
     "0,0,-1": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAHdmEmoAA+3RoREAAAgDMdh/aQwDcDiOpLLyg9Oyt/25bdZXfwAAAAAAAPigAC8WjbwAIAAA",
       "light": ""
@@ -36,7 +36,7 @@
     "0,0,0": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAHdmEmoAA+3TMQoAIAwEQf3/p0WsRdBGLjMpUy7X27qd1z+/m+1O/fTPpV1t99sngf4AAAAAAJBmAIQvNOIAIAAA",
       "light": ""

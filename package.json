@@ -76,11 +76,11 @@
             "import": "./dist/avatar/rig.js",
             "default": "./dist/avatar/rig.js"
         },
-        "./starter": {
-            "source": "./src/starter/index.ts",
-            "types": "./dist/types/src/starter/index.d.ts",
-            "import": "./dist/starter.js",
-            "default": "./dist/starter.js"
+        "./kit": {
+            "source": "./src/kit/index.ts",
+            "types": "./dist/types/src/kit/index.d.ts",
+            "import": "./dist/kit.js",
+            "default": "./dist/kit.js"
         },
         "./icons": {
             "source": "./src/icons/index.tsx",

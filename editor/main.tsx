@@ -15,6 +15,7 @@ import { openOpfsFilesystem } from './fs-opfs';
 import { importProjectSave } from './project-save';
 import { joinGuestSession } from './net/guest-session';
 import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
+import { initAutosave } from './platform/autosave';
 import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
 import { registerProjectFsWorker } from './project-url';
@@ -23,13 +24,12 @@ import { useBoot } from './stores/boot';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
-import { useLaunched } from './stores/launched';
 import { logger } from './stores/logs';
 import { useMultiplayer } from './stores/multiplayer';
 import { usePlatform } from './stores/platform';
 import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
-import { blockbenchApp, openPath } from './ui/apps';
+import { openPath } from './ui/apps';
 import { CodePane } from './ui/components/CodePane';
 import { BootScreen } from './ui/components/BootScreen';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
@@ -38,6 +38,11 @@ import { LogView } from './ui/components/LogView';
 import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
 import { PLATFORM_WINDOW_ID } from './ui/components/PlatformWindow';
 import { TASKBAR_W } from './ui/components/Taskbar';
+
+// the starter humanoid seeded for a NEW avatar (no platform-supplied source) so
+// Blockbench opens on an editable character rig, not an empty scene. `?raw`
+// inlines the .bbmodel JSON into the editor bundle.
+import starterCharacterBbmodel from '../blockbench/starter/character.bbmodel?raw';
 
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
@@ -56,28 +61,20 @@ const editor = initEditor({ fs });
 // the 'build' log window shows both bundler (transform) errors and bake output.
 const log = logger('build');
 
-const SAMPLE_INDEX = `import { block, blockTexture, draw } from 'bongle';
+const SAMPLE_INDEX = `import { system, onJoin, setPosition, blockTopCenter, use, getTrait, TransformTrait } from 'bongle';
+import { blocks } from 'bongle/kit';
+import { vec3 } from 'mathcat';
 
-const solid = (id: string, r: number, g: number, b: number) => {
-    const tex = blockTexture(id, {
-        src: draw(
-            (c, _inputs, params) => {
-                const p = params.rgb as number;
-                c.fillStyle = \`rgb(\${(p >> 16) & 0xff}, \${(p >> 8) & 0xff}, \${p & 0xff})\`;
-                c.fillRect(0, 0, 16, 16);
-                c.fillStyle = 'rgba(0,0,0,0.25)';
-                c.fillRect(0, 0, 16, 1);
-                c.fillRect(0, 15, 16, 1);
-            },
-            { size: [16, 16], params: { rgb: (r << 16) | (g << 8) | b } },
-        ),
+use(blocks);
+
+const SPAWN = blockTopCenter(vec3.create(), 0, 5, 0);
+
+system('setup', (ctx) => {
+    onJoin(ctx, (e) => {
+        const transform = getTrait(e.playerNode, TransformTrait)!;
+        setPosition(transform, SPAWN);
     });
-    return block(id, { model: () => ({ type: 'cube', textures: { all: { texture: tex } } }) });
-};
-
-solid('dev:red', 220, 60, 60);
-solid('dev:green', 60, 200, 90);
-solid('dev:blue', 70, 110, 230);
+});
 `;
 
 // boot progress → both the console (with +delta/total timing) and the BootScreen
@@ -123,12 +120,11 @@ async function boot(): Promise<void> {
     // edited avatar previews live on the player. (Runs the full editor — it no
     // longer skips the realms.)
     if (intent?.kind === 'avatar') {
-        if (intent.bbmodel) {
-            await editor.fs.write('avatar.bbmodel', intent.bbmodel);
-            openPath('avatar.bbmodel', MAIN_PANE); // launches blockbench AND opens the file in it
-        } else {
-            useLaunched.getState().launch(blockbenchApp, ''); // new avatar → blank Blockbench
-        }
+        // seed the model to edit: a platform-supplied source (edit an owned avatar
+        // or remix another's), or — for a brand-new avatar — the starter character
+        // rig so Blockbench opens on an editable humanoid rather than an empty scene.
+        await editor.fs.write('avatar.bbmodel', intent.bbmodel ?? starterCharacterBbmodel);
+        openPath('avatar.bbmodel', MAIN_PANE); // launches blockbench AND opens the file in it
         // the "Save avatar" action lives in the in-editor platform window now
         // (editor-initiated — see ui/components/PlatformWindow).
         // wear the edited avatar (avatar.glb, written by Blockbench on save). Set
@@ -289,6 +285,11 @@ async function boot(): Promise<void> {
     };
     relayBakeChange = fanOutChange;
     editor.fs.watch(fanOutChange);
+
+    // autosave: genuine edits (this same fs change stream) arm a throttled
+    // `bongle:autosave` hand-back. Wired AFTER load/seed so those writes never
+    // arm it. No-op when standalone or non-project.
+    initAutosave(editor.fs, platform, intent);
 
     // once the server is live (join before the sim exists would be dropped), lay
     // out the session. game/standalone opens a client that fills the screen.

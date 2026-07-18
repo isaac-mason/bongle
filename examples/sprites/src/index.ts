@@ -3,18 +3,18 @@
  * one of the new visual primitives so they can be eyeballed independently:
  *
  *   left   (x≈-6..-2)  three `SpriteTrait` quads in billboard /
- *                      y-billboard / world modes, same `starter:smoke`
+ *                      y-billboard / world modes, same `kit:smoke`
  *                      sprite — shows how the orientation flag alone
  *                      changes the quad's relationship to the camera.
  *   middle (x=0)       a single `ExtrudedSpriteMeshTrait` slowly spinning
  *                      on Y so the per-pixel extrusion is unmistakable
  *                      (the back face vanishes when viewed edge-on).
  *   right  (x≈4..6)    a tick-rate particle emitter spawning `Puff`s
- *                      (`particlePresets.smoke` over `starter:smoke`)
+ *                      (`particlePresets.smoke` over `kit:smoke`)
  *                      from a fixed world point — exercises
  *                      `spawnParticle` + `particleUpdate.smoke` rise.
  *
- * Everything uses bundled `bongle/starter` sprites — the example ships
+ * Everything uses bundled `bongle/kit` sprites — the example ships
  * no PNGs of its own.
  */
 
@@ -42,7 +42,7 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks, particlePresets, sprites } from 'bongle/starter';
+import { blocks, particlePresets, sprites } from 'bongle/kit';
 import { quat } from 'mathcat';
 
 matchmaking({ maxPlayers: 1 });

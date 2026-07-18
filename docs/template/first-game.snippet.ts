@@ -20,10 +20,10 @@ import {
     TransformTrait,
     use,
 } from 'bongle';
-import { blocks } from 'bongle/starter';
+import { blocks } from 'bongle/kit';
 
 /* SNIPPET_START: setup */
-// register the starter block set so those blocks exist and show up in the editor
+// register the kit block set so those blocks exist and show up in the editor
 use(blocks);
 
 // cap how many players matchmaking puts in one room

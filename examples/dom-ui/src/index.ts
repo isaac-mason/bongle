@@ -29,12 +29,12 @@ import {
     use,
     type ScriptContext,
 } from 'bongle';
-import { blocks } from 'bongle/starter';
+import { blocks } from 'bongle/kit';
 
 matchmaking({ maxPlayers: 1 });
 scene('main');
 
-// scene's voxel palette references `starter:stone` — `use()` keeps the
+// scene's voxel palette references `kit:stone` — `use()` keeps the
 // declaration in the bundle so the registration fires at module-eval.
 use(blocks.stone);
 

@@ -35,7 +35,7 @@ import {
     VoxelMeshTrait,
     ENVIRONMENT_OVERWORLD,
 } from 'bongle';
-import { blocks, models } from 'bongle/starter';
+import { blocks, models } from 'bongle/kit';
 import { quat } from 'mathcat';
 
 // ── matchmaking ─────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ const HousePrefab = prefab('house', {
 // });
 
 // ── blocks ──────────────────────────────────────────────────────────
-// Stone/Dirt/Grass/Stairs/Flower/Leaves come from bongle/starter. The
+// Stone/Dirt/Grass/Stairs/Flower/Leaves come from bongle/kit. The
 // cube-block Lava + Water variants and the four lamps are example-
 // specific (non-collidable cubes / unique animated textures / per-channel
 // light emission) and stay declared locally.

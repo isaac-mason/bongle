@@ -19,7 +19,7 @@
     "0,0,0": {
       "palette": [
         "air",
-        "starter:stone"
+        "kit:stone"
       ],
       "blocks": "H4sIAHdmEmoAA+3JsQ0AAAjDMPj/aR5gYESqnTEFAMTpJf/+AQAAAADgowGaGaZBACAAAA==",
       "light": ""

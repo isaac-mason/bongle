@@ -28,23 +28,27 @@ export function BootScreen() {
     if (gone) return null;
     return (
         <div className={`boot-screen${ready ? ' boot-screen-hidden' : ''}`}>
-            <div className="boot-wordmark">bongle</div>
-            <div className="boot-terminal">
-                <div className="boot-terminal-bar">
-                    <span className="boot-terminal-dot" />
-                    <span className="boot-terminal-dot" />
-                    <span className="boot-terminal-dot" />
-                    <span className="boot-terminal-title">boot</span>
-                </div>
-                <div className="boot-log" ref={logRef}>
-                    {lines.map((line, i) => (
-                        // steps are append-only and ordered, so the index is a stable key.
-                        // biome-ignore lint/suspicious/noArrayIndexKey: append-only ordered log.
-                        <div key={i} className="boot-log-line">
-                            <span className="boot-log-prompt">›</span> {line}
-                        </div>
-                    ))}
-                    {!ready && <span className="boot-cursor" />}
+            <div className="boot-content">
+                <span className="boot-notch boot-notch-tl" />
+                <span className="boot-notch boot-notch-br" />
+                <div className="boot-wordmark">bongle</div>
+                <div className="boot-terminal">
+                    <div className="boot-terminal-bar">
+                        <span className="boot-terminal-dot" />
+                        <span className="boot-terminal-dot" />
+                        <span className="boot-terminal-dot" />
+                        <span className="boot-terminal-title">boot</span>
+                    </div>
+                    <div className="boot-log" ref={logRef}>
+                        {lines.map((line, i) => (
+                            // steps are append-only and ordered, so the index is a stable key.
+                            // biome-ignore lint/suspicious/noArrayIndexKey: append-only ordered log.
+                            <div key={i} className="boot-log-line">
+                                <span className="boot-log-prompt">›</span> {line}
+                            </div>
+                        ))}
+                        {!ready && <span className="boot-cursor" />}
+                    </div>
                 </div>
             </div>
         </div>

@@ -50,7 +50,7 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blockSoundPresets, blocks } from 'bongle/starter';
+import { blockSoundPresets, blocks } from 'bongle/kit';
 
 // ── matchmaking ─────────────────────────────────────────────────────
 

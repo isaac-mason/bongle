@@ -1,4 +1,4 @@
-import { blocks } from 'bongle/starter';
+import { blocks } from 'bongle/kit';
 import {
     addChild,
     addTrait,

@@ -1,8 +1,8 @@
-// `bongle/starter`, a free baseline of blocks, textures, models and
+// `bongle/kit`, a free baseline of blocks, textures, models and
 // sounds. Each subsystem is re-exported as its own namespace so usage
 // is uniform across kinds:
 //
-//   import { blocks, blockTextures, models, sounds, sprites, blockSoundPresets, particlePresets } from 'bongle/starter';
+//   import { blocks, blockTextures, models, sounds, sprites, blockSoundPresets, particlePresets } from 'bongle/kit';
 //
 //   blocks.stone
 //   blockTextures.grassTop

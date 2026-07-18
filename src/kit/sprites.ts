@@ -19,20 +19,20 @@
 import { asset, sprite } from 'bongle';
 
 /** 16×16 RGBA puff. minetest_game tnt mod. */
-export const smoke = sprite('starter:smoke', {
+export const smoke = sprite('kit:smoke', {
     src: asset('./assets/sprites/smoke.png', import.meta.url),
     mipmap: false,
 });
 
 /** 12×12 snowflake. VoxeLibre mcl_weather (snowflake4, the largest
  *  of the 11 weather-pack flakes that's still cleanly readable). */
-export const snow = sprite('starter:snow', {
+export const snow = sprite('kit:snow', {
     src: asset('./assets/sprites/snow.png', import.meta.url),
     mipmap: false,
 });
 
 /** 16×16 raindrop. VoxeLibre mcl_weather. */
-export const rain = sprite('starter:rain', {
+export const rain = sprite('kit:rain', {
     src: asset('./assets/sprites/rain.png', import.meta.url),
     mipmap: false,
 });
@@ -40,7 +40,7 @@ export const rain = sprite('starter:rain', {
 /** 8×8 small dust mote. minetest_game default_item_smoke, repurposed
  *  as dust because it's the closest size to what `particleUpdate.dust`
  *  motion expects (small, neutral, monotone). */
-export const dust = sprite('starter:dust', {
+export const dust = sprite('kit:dust', {
     src: asset('./assets/sprites/dust.png', import.meta.url),
     mipmap: false,
 });

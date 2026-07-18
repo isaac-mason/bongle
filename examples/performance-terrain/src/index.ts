@@ -35,7 +35,7 @@ import {
     type Voxels,
     voxelIndex,
 } from 'bongle';
-import { blocks } from 'bongle/starter';
+import { blocks } from 'bongle/kit';
 
 matchmaking({ maxPlayers: 4 });
 

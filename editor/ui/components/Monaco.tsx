@@ -11,10 +11,18 @@ import { isIgnored } from '../../ignored';
 import { useEditor } from '../../stores/editor';
 import './monaco-env'; // side-effect: bundle + register the language workers.
 
+// Bundler resolution (TS `ModuleResolutionKind.Bundler` = 100) so the TS worker
+// reads package.json `exports` maps — bongle's types resolve through an `exports`
+// `types` condition (./dist/types/…), which classic NodeJs resolution finds but
+// refuses to use ("could not be resolved under your current moduleResolution").
+// monaco's own enum only names Classic/NodeJs, but its bundled TS (5.x) supports
+// Bundler; the option is a plain number, so we pass it directly.
+const BUNDLER_MODULE_RESOLUTION = 100 as monaco.typescript.ModuleResolutionKind;
+
 monaco.typescript.typescriptDefaults.setCompilerOptions({
     target: monaco.typescript.ScriptTarget.ESNext,
     module: monaco.typescript.ModuleKind.ESNext,
-    moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
+    moduleResolution: BUNDLER_MODULE_RESOLUTION,
     jsx: monaco.typescript.JsxEmit.ReactJSX,
     strict: true,
     allowNonTsExtensions: true,
@@ -37,7 +45,8 @@ export async function loadEngineTypes(fs: Filesystem): Promise<void> {
     engineTypesLoaded = true;
     try {
         // only the type-bearing files: the .d.ts trees + each package's package.json
-        // (Monaco's NodeJs resolution reads `types`/`main` + walks the file layout).
+        // (bundler resolution reads each package.json `exports` → the `types`
+        // condition, then loads that .d.ts from the layout below).
         const files = (await fs.list('node_modules', { recursive: true })).filter(
             (e) => e.kind === 'file' && (e.path.endsWith('.d.ts') || e.path.endsWith('package.json')),
         );

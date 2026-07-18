@@ -14,7 +14,7 @@ import {
     TransformTrait,
     VoxelMeshTrait,
 } from 'bongle';
-import { blockTextures } from 'bongle/starter';
+import { blockTextures } from 'bongle/kit';
 
 const PlankBlock = block('guide:plank', {
     name: 'Plank',

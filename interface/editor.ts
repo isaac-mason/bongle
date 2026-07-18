@@ -22,15 +22,28 @@
  *  INTERFACE_VERSION — they evolve independently). The editor announces its
  *  value in `bongle:ready`; the platform announces its own in `bongle:init`, so
  *  either side can warn / degrade when the peer's major differs. */
-export const EDITOR_INTERFACE_VERSION = '1.0.0';
+export const EDITOR_INTERFACE_VERSION = '1.1.0';
 
-/** whether two EDITOR_INTERFACE_VERSION values can bridge. Starts STRICT — exact
- *  match — while the contract is young; loosen to same-major once it stabilises
- *  (minor/patch changes are additive by rule #1). A missing version, a bundle
- *  predating the handshake, is treated as compatible (best effort, don't warn). */
+/** whether two EDITOR_INTERFACE_VERSION values can bridge. The contract has
+ *  stabilised to same-major-compatible per rule #1: minor/patch changes are
+ *  additive (new intent kinds, new message types, optional fields), so a peer on
+ *  the same major can always be driven — a newer minor just carries fields an
+ *  older peer ignores. Only a major bump signals a genuine break. A missing
+ *  version, or a version we can't parse a major out of, is treated as compatible
+ *  (best effort — a bundle predating the handshake, don't warn). */
 export function editorInterfaceCompatible(a: string | undefined, b: string | undefined): boolean {
     if (!a || !b) return true;
-    return a === b;
+    const majorA = major(a);
+    const majorB = major(b);
+    if (majorA === undefined || majorB === undefined) return true;
+    return majorA === majorB;
+}
+
+/** parse the major component of a semver ("1.2.3" → 1). Returns undefined for a
+ *  malformed value so the caller can fall back to best-effort compatible. */
+function major(version: string): number | undefined {
+    const n = Number.parseInt(version.split('.', 1)[0] ?? '', 10);
+    return Number.isNaN(n) ? undefined : n;
 }
 
 /** what the platform mounted the editor to do. */
@@ -44,6 +57,15 @@ export type PlatformIntent =
           /** our account avatar's glb URL, so we play/edit the project as ourselves
            *  (the local player wears it). Absent → a random sample avatar. */
           avatarUrl?: string;
+          /** the project_version id `save` was taken from — echoed back on
+           *  autosave/save so the platform knows which slot a draft descends from.
+           *  An OPAQUE round-trip token: the editor never interprets version
+           *  semantics (rule #3), it just carries it back out. Absent = new/anonymous. */
+          baseVersion?: string;
+          /** the draft rev `save` represents, so the editor resumes its monotonic
+           *  counter above it (restore continuity across the local ring + server).
+           *  OPAQUE like baseVersion — a round-trip token, not interpreted. Absent = fresh. */
+          rev?: number;
       }
     | {
           kind: 'avatar';
@@ -73,6 +95,11 @@ export type EditorMessage =
     | { type: 'bongle:ready'; version?: string }
     /** hand back the project-save source zip for the platform to persist. */
     | { type: 'bongle:save'; payload: Uint8Array }
+    /** high-frequency working snapshot for the platform to persist as a DRAFT
+     *  (local ring always; server if owned + dirty). Distinct from bongle:save so
+     *  the platform keeps it quiet — no version minted, no toast. `baseVersion`/`rev`
+     *  are the opaque tokens from bongle:init, `rev` incremented per edit. */
+    | { type: 'bongle:autosave'; payload: Uint8Array; baseVersion: string | null; rev: number }
     /** hand back the built project-build bundle.zip for the platform to upload.
      *  `source` is the project source zip (same as bongle:save) so the platform
      *  can snapshot it as a project_version + record the build's provenance. */
@@ -93,12 +120,31 @@ export type PlatformMessage =
     /** configure the editor for its purpose. `version` is the platform's
      *  EDITOR_INTERFACE_VERSION (optional until wired). */
     | { type: 'bongle:init'; version?: string; intent: PlatformIntent }
-    /** outcome of the editor's last hand-back (save/build/avatar-export). */
-    | { type: 'bongle:result'; of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string }
+    /** outcome of the editor's last hand-back (save/build/avatar-export). On a
+     *  successful `of: 'save'`, `versionId`/`rev` carry the minted head version so
+     *  the editor rebases its draft to `draft@versionId` with a fresh `rev`
+     *  baseline. Load-bearing, not cosmetic: without them the editor keeps
+     *  autosaving into the stale pre-save slot. */
+    | {
+          type: 'bongle:result';
+          of: 'save' | 'build' | 'avatar-export';
+          ok: boolean;
+          message?: string;
+          versionId?: string;
+          rev?: number;
+      }
     /** answer to open-multiplayer: the relay ws url the host connects to + the
      *  ready-to-share invite link. */
     | { type: 'bongle:multiplayer-opened'; url: string; shareUrl: string }
     | { type: 'bongle:multiplayer-failed'; message: string };
 
-/** the result payload the editor surfaces to the user. */
-export type PlatformResult = { of: 'save' | 'build' | 'avatar-export'; ok: boolean; message?: string };
+/** the result payload the editor surfaces to the user. Mirrors bongle:result:
+ *  `versionId`/`rev` populated on a successful `of: 'save'` so the editor rebases
+ *  its draft to `draft@versionId` with a fresh `rev` baseline. */
+export type PlatformResult = {
+    of: 'save' | 'build' | 'avatar-export';
+    ok: boolean;
+    message?: string;
+    versionId?: string;
+    rev?: number;
+};

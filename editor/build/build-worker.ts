@@ -12,6 +12,18 @@ import { type Bundler, buildBundle } from '../../build';
 import { ensureProcessShim } from '../dev/runner';
 import { openOpfsFilesystem } from '../fs-opfs';
 
+// @rolldown/browser's WASI runtime spawns a nested pool worker and, on a worker
+// fault, calls `window.dispatchEvent(new CustomEvent('napi-rs-worker-error'))`.
+// `window` is undefined in a Worker, so that fault path throws into the void and
+// the bundle promise hangs forever with no error. Shim `window` → the worker
+// global (which has dispatchEvent/CustomEvent) so the fault actually surfaces,
+// and forward the event so a failed pool worker becomes a build error, not a hang.
+const workerGlobal = globalThis as unknown as {
+    window?: unknown;
+    addEventListener(type: string, cb: (e: Event) => void): void;
+};
+workerGlobal.window ??= globalThis;
+
 // @rolldown/browser's `rolldown` has the same runtime API as node `rolldown` (the
 // type the build core injects), but a nominally-distinct declared type — cast at
 // this boundary. This is the one thing that makes the build browser- vs node-run.
@@ -34,10 +46,18 @@ self.onmessage = async (e: MessageEvent<BuildRequest>) => {
     try {
         post({ type: 'progress', label: 'Opening project' });
         const fs = await openOpfsFilesystem(projectName);
-        const zip = await buildBundle(fs, browserBundler, {
-            maxPlayers,
-            onProgress: (label) => post({ type: 'progress', label }),
+        // a WASI pool-worker fault would otherwise hang the bundle silently — race
+        // the build against it so the fault becomes a real, reported error.
+        const poolFault = new Promise<never>((_, reject) => {
+            workerGlobal.addEventListener('napi-rs-worker-error', (e) => {
+                const detail = (e as CustomEvent).detail;
+                reject(new Error(`@rolldown/browser WASI pool worker failed: ${JSON.stringify(detail)}`));
+            });
         });
+        const zip = await Promise.race([
+            buildBundle(fs, browserBundler, { maxPlayers, onProgress: (label) => post({ type: 'progress', label }) }),
+            poolFault,
+        ]);
         post({ type: 'done', zip }, [zip.buffer]);
     } catch (err) {
         console.error('[build-worker] failed', err);

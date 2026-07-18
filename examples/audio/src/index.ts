@@ -9,7 +9,7 @@
  *   4) PlaybackHandle        imperative handle for setVolume / stop(fade)
  *
  * No user-supplied audio assets — every clip comes from `sounds.*` in
- * `bongle/starter` (Minetest CC BY-SA 3.0). Same for the Stone block
+ * `bongle/kit` (Minetest CC BY-SA 3.0). Same for the Stone block
  * and Spark model used as the orbiter visual.
  *
  * Browser tab must be focused + clicked once before audio plays —
@@ -45,13 +45,13 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks, models, sounds } from 'bongle/starter';
+import { blocks, models, sounds } from 'bongle/kit';
 
 matchmaking({ maxPlayers: 1 });
 
 // ── terrain ─────────────────────────────────────────────────────────
 // minimal stone floor so the character has somewhere to stand. Stone +
-// Spark come from bongle/starter so the example doesn't ship its own
+// Spark come from bongle/kit so the example doesn't ship its own
 // texture/model assets.
 
 // ── trait + server bootstrap ────────────────────────────────────────

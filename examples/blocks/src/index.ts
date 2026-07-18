@@ -21,13 +21,13 @@ import {
     trait,
     CharacterControllerTrait,
 } from 'bongle';
-import { blocks, blockTextures, blockSoundPresets } from 'bongle/starter';
+import { blocks, blockTextures, blockSoundPresets } from 'bongle/kit';
 
 // ── matchmaking ─────────────────────────────────────────────────────
 
 matchmaking({ maxPlayers: 4 });
 
-// ── blocks (from starter) ───────────────────────────────────────────
+// ── blocks (from kit) ───────────────────────────────────────────
 
 const {
     stone: Stone,
@@ -56,9 +56,9 @@ const {
     oakLeaves: OakLeaves,
 } = blocks;
 
-// ── inline blocks (starter primitives, composed here) ───────────────
-// starter ships oak_planks as a full cube but not a full-cube snow
-// block (snow only ships as a carpet). compose snow here from starter
+// ── inline blocks (kit primitives, composed here) ───────────────
+// kit ships oak_planks as a full cube but not a full-cube snow
+// block (snow only ships as a carpet). compose snow here from kit
 // textures + sound presets to round out the ground-platform showcase.
 
 const WoodFloor = block('demo:wood_floor', {
@@ -72,7 +72,7 @@ const SnowBlock = block('demo:snow_block', {
 });
 
 // ── translucent stained-glass cubes (for the translucent-sort lab) ───
-// alpha-BLENDED cubes (MaterialType.TRANSLUCENT), unlike starter `glass` which
+// alpha-BLENDED cubes (MaterialType.TRANSLUCENT), unlike kit `glass` which
 // is TRANSPARENT (alpha-cutout). Translucent geometry is what the GPU per-
 // section quad sort orders back-to-front, so these are the blocks that exercise
 // it. The texture is a semi-transparent colour fill with a higher-alpha 1px
@@ -112,11 +112,11 @@ const GlassBlue = stainedGlass('demo:glass_blue', 70, 110, 230);
 const GlassAmber = stainedGlass('demo:glass_amber', 235, 175, 60);
 
 // ── number blocks (demoing draw() composition) ──────────────────────
-// 10 blocks (0-9) whose top texture is the starter dirt overlaid with
+// 10 blocks (0-9) whose top texture is the kit dirt overlaid with
 // a 3×5 pixel-font digit. each blockTexture's `src` is a `draw()`
 // descriptor: the bake pass loads dirt.png, blits it full-size, then
 // stamps the digit pixels on top. shows the asset-pipeline composing
-// user fns over bundled starter textures — same `draw()` primitive
+// user fns over bundled kit textures — same `draw()` primitive
 // `block()` uses to auto-derive `<id>:particle{0,1,2}` dust slices,
 // just hand-authored here for a visible side-by-side row.
 

@@ -19,7 +19,7 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks } from 'bongle/starter';
+import { blocks } from 'bongle/kit';
 
 // ── matchmaking ─────────────────────────────────────────────────────
 

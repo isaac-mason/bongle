@@ -49,6 +49,11 @@ const addTree = (zipPrefix, absDir, keep) => {
 addTree('bongle/dist', join(ROOT, 'dist'));
 addTree('bongle/avatars', join(ROOT, 'avatars'), (abs) => !abs.endsWith('.DS_Store'));
 if (existsSync(join(ROOT, 'README.md'))) addFile('bongle/README.md', join(ROOT, 'README.md'));
+// engine docs (the generated reader-facing markdown) → node_modules/bongle/docs,
+// so the in-editor markdown viewer can open them.
+for (const md of ['docs.md', 'api.md']) {
+    if (existsSync(join(ROOT, 'docs', md))) addFile(`bongle/docs/${md}`, join(ROOT, 'docs', md));
+}
 
 const real = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 // seed the real exports, minus the `source` condition (src isn't in the seed).

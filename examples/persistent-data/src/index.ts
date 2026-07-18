@@ -41,7 +41,7 @@ import {
     userStorage,
     warn,
 } from 'bongle';
-import { blocks, models } from 'bongle/starter';
+import { blocks, models } from 'bongle/kit';
 
 // ── matchmaking ─────────────────────────────────────────────────────
 

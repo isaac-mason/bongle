@@ -8,7 +8,7 @@ examples, see [the guide](./docs.md).
 
 Create nodes, compose them with traits, and walk the tree.
 
-<RenderModule select="api/scene-graph" />
+<RenderModule select="api/scene-tree" />
 <RenderModule select="builtins/transform" />
 <RenderModule select="builtins/world" />
 
@@ -37,7 +37,7 @@ Attach behaviour and register lifecycle hooks.
 Tagged logging and the build-time `env` / `platform` flags.
 
 <RenderModule select="api/debug" />
-<RenderModule select="api/env" />
+<RenderModule select="env" />
 <RenderModule select="api/platform" />
 
 ## Assets

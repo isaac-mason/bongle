@@ -4,7 +4,7 @@
  * the engine vocabulary, drop one in for one-line authoring of common
  * visual fx:
  *
- *   import { particlePresets } from 'bongle/starter';
+ *   import { particlePresets } from 'bongle/kit';
  *
  *   const Puff   = particlePresets.smoke('puff',   { sprite: SmokeSprite });
  *   const Ember  = particlePresets.spark('ember',  { sprite: EmberSprite });

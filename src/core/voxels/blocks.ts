@@ -347,7 +347,7 @@ export type ScreenTintSpec = {
  * across clips for variation; an empty array silences the category.
  *
  * Compose preset bundles from `blockSoundPresets.*` in
- * `bongle/starter` or build a fully custom config. All slots
+ * `bongle/kit` or build a fully custom config. All slots
  * optional; omit a category to leave it silent.
  *
  * NOTE: the systems that actually drive playback off these handles

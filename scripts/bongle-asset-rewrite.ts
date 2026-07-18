@@ -31,7 +31,7 @@ const PKG_ROOT = fileURLToPath(new URL('..', import.meta.url)); // lib/ (the bon
 const ASSET_RE = /\basset\(\s*(['"])([^'"]+)\1\s*,\s*import\.meta\.url\s*\)/g;
 
 // map a source path to its clean dist target: strip everything up to & including
-// the last `/assets/` (source asset dirs) so `src/starter/assets/textures/x.png`
+// the last `/assets/` (source asset dirs) so `src/kit/assets/textures/x.png`
 // → `assets/textures/x.png`; sources with no `assets/` segment (avatars/) keep
 // their package-relative path → `assets/avatars/base/player.glb`.
 function distTargetFor(absSource: string): string {

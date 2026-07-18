@@ -15,7 +15,7 @@ import {
     onDispose,
     destroyNode,
 } from 'bongle';
-import { models } from 'bongle/starter';
+import { models } from 'bongle/kit';
 
 const PenguinModel = models.peng;
 

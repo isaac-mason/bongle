@@ -14,7 +14,7 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { models } from 'bongle/starter';
+import { models } from 'bongle/kit';
 import { quat } from 'mathcat';
 
 // ── matchmaking ─────────────────────────────────────────────────────

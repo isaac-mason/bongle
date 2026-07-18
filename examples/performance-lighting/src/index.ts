@@ -16,10 +16,10 @@ import {
     TransformTrait,
     trait,
 } from 'bongle';
-import { blocks, blockTextures } from 'bongle/starter';
+import { blocks, blockTextures } from 'bongle/kit';
 
 // ── blocks ──────────────────────────────────────────────────────────
-// stone comes from the starter pack; the rgb emitters are example-local
+// stone comes from the kit pack; the rgb emitters are example-local
 // because they only exist to drive the lighting stress demo.
 
 const RedEmitter = block('emitter_r', {
