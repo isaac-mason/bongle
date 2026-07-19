@@ -1,6 +1,7 @@
+import { Grid3x3 } from 'bongle/icons';
 import { useState } from 'react';
 import { useEditRoom } from '../edit-room-store';
-import { formatKeyLabel } from '../editor-controls';
+import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
 import { TOOL_CATEGORIES, type ToolCategory, type ToolDef } from '../tool-categories';
 import { Kbd } from './kbd';
 
@@ -72,6 +73,32 @@ function ToolButton({
     );
 }
 
+function InventoryButton() {
+    const libraryOpen = useEditRoom((s) => s.libraryOpen);
+    const toggleLibrary = useEditRoom((s) => s.toggleLibrary);
+    const keyLabel = formatKeyLabel(LIBRARY_KEYS.toggleLibrary);
+
+    return (
+        <div className="mt-auto flex flex-col items-center gap-1 pt-1">
+            <div className="w-6 h-px bg-neutral-300 mb-1" />
+            {/* control indicator: the key that toggles the inventory */}
+            <Kbd size="xs">{keyLabel}</Kbd>
+            <button
+                type="button"
+                onClick={toggleLibrary}
+                title={`inventory  (${keyLabel})`}
+                className={`w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
+                    libraryOpen
+                        ? 'bg-neutral-800 text-white border-neutral-800'
+                        : 'text-neutral-500 border-neutral-300 hover:bg-neutral-200 hover:text-neutral-700'
+                }`}
+            >
+                <Grid3x3 size={15} />
+            </button>
+        </div>
+    );
+}
+
 export function LeftToolbar() {
     const activeTool = useEditRoom((s) => s.activeTool);
     const setActiveTool = useEditRoom((s) => s.setActiveTool);
@@ -109,6 +136,9 @@ export function LeftToolbar() {
                     );
                 })}
             </div>
+
+            {/* inventory (library) toggle, pinned to the bottom with an E key hint */}
+            <InventoryButton />
         </div>
     );
 }

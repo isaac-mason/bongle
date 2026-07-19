@@ -37,12 +37,58 @@ import { TypeScriptWorker } from 'monaco-editor/esm/vs/language/typescript/tsWor
 const AUTO_IMPORT_PREFERENCES = {
     includeCompletionsForModuleExports: true,
     includeCompletionsWithInsertText: true,
-    importModuleSpecifierPreference: 'shortest',
+    // 'relative' (RelativePreference 0), NOT 'shortest': with moduleResolution:Bundler,
+    // resolvePackageJsonImports is on, so for LOCAL (non-node_modules) targets monaco's
+    // bundled TS 5.9.3 computes a paths base dir and passes `undefined` into
+    // getNormalizedAbsolutePath → `normalizeSlashes(undefined)` crash (no baseUrl/paths
+    // in this host). relativePreference 0 short-circuits to the relative path before that
+    // line. node_modules packages are unaffected (they resolve to the bare name earlier,
+    // and getLocalModuleSpecifier early-returns via pathsOnly && !paths) — so packages
+    // still import as `bongle`, local files as `./foo`, matching our import style.
+    importModuleSpecifierPreference: 'relative',
     quotePreference: 'single',
+};
+
+// FormatCodeSettings shared by the auto-import code action and the Format Document /
+// Organize Imports commands. Two reasons this must be COMPLETE, not a partial:
+//   * getCompletionEntryDetails builds `formatOptions && getFormatContext(...)`, so
+//     passing undefined crashes the code-action generator (reads `.options`);
+//   * TS's formatter does NOT default omitted boolean flags — a missing
+//     `insertSpace*` is treated as false. A partial object silently strips spacing
+//     (e.g. `const x = 1` → `const x=1`). So mirror TS's own getDefaultFormatCodeSettings,
+//     overriding only `semicolons` to match the house (semicolon) style.
+const FORMAT_OPTIONS = {
+    tabSize: 4,
+    indentSize: 4,
+    convertTabsToSpaces: true,
+    newLineCharacter: '\n',
+    indentStyle: 2, // Smart
+    trimTrailingWhitespace: true,
+    indentSwitchCase: true,
+    insertSpaceAfterConstructor: false,
+    insertSpaceAfterCommaDelimiter: true,
+    insertSpaceAfterSemicolonInForStatements: true,
+    insertSpaceBeforeAndAfterBinaryOperators: true,
+    insertSpaceAfterKeywordsInControlFlowStatements: true,
+    insertSpaceAfterFunctionKeywordForAnonymousFunctions: false,
+    insertSpaceAfterOpeningAndBeforeClosingNonemptyParenthesis: false,
+    insertSpaceAfterOpeningAndBeforeClosingNonemptyBrackets: false,
+    insertSpaceAfterOpeningAndBeforeClosingNonemptyBraces: true,
+    insertSpaceAfterOpeningAndBeforeClosingTemplateStringBraces: false,
+    insertSpaceAfterOpeningAndBeforeClosingJsxExpressionBraces: false,
+    insertSpaceBeforeFunctionParenthesis: false,
+    placeOpenBraceOnNewLineForFunctions: false,
+    placeOpenBraceOnNewLineForControlBlocks: false,
+    semicolons: 'insert',
 };
 
 interface DiagnosticLike {
     messageText?: unknown;
+}
+
+interface TextChangeLike {
+    span: { start: number; length: number };
+    newText: string;
 }
 
 interface WorkerLanguageService {
@@ -56,6 +102,12 @@ interface WorkerLanguageService {
         preferences: unknown,
         data: unknown,
     ): unknown;
+    getFormattingEditsForDocument(fileName: string, options: unknown): TextChangeLike[];
+    organizeImports(
+        args: { type: 'file'; fileName: string; mode: string },
+        formatOptions: unknown,
+        preferences: unknown,
+    ): readonly { textChanges: TextChangeLike[] }[];
 }
 
 // the TypeScriptWorker prototype surface we read + augment (monaco ships no types).
@@ -78,6 +130,8 @@ interface TsWorkerProto {
         source: string | undefined,
         data: unknown,
     ): Promise<unknown>;
+    getFormatEdits(fileName: string): Promise<TextChangeLike[]>;
+    getOrganizeImportsEdits(fileName: string): Promise<readonly { textChanges: TextChangeLike[] }[]>;
 }
 
 // delete the non-cloneable repopulateInfo fn from a DiagnosticMessageChain node.
@@ -151,10 +205,23 @@ try {
             fileName,
             position,
             name,
-            undefined,
+            FORMAT_OPTIONS,
             source,
             AUTO_IMPORT_PREFERENCES,
             data,
+        );
+    };
+
+    // (3) Format Document + Organize Imports — reached from the command palette. Both
+    // return TextChange[] the caller maps to editor edits.
+    proto.getFormatEdits = async function (this: TsWorkerProto, fileName: string) {
+        return this._languageService.getFormattingEditsForDocument(fileName, FORMAT_OPTIONS);
+    };
+    proto.getOrganizeImportsEdits = async function (this: TsWorkerProto, fileName: string) {
+        return this._languageService.organizeImports(
+            { type: 'file', fileName, mode: 'All' },
+            FORMAT_OPTIONS,
+            AUTO_IMPORT_PREFERENCES,
         );
     };
 } catch (err) {

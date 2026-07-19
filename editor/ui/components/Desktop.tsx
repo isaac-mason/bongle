@@ -21,6 +21,7 @@ import { appById, blockbenchApp, openPath } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
+import { CommandPalette } from './CommandPalette';
 import { PlatformWindow } from './PlatformWindow';
 import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
@@ -66,16 +67,18 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         return () => window.removeEventListener('resize', onResize);
     }, []);
 
-    // Cmd/Ctrl+P → VS Code-style quick-open. Capture phase so it beats Monaco's
-    // own key handling, and preventDefault to swallow the browser print dialog.
+    // Cmd/Ctrl+P → file quick-open, Cmd/Ctrl+Shift+P → command palette. Capture
+    // phase so they beat Monaco's own key handling, and preventDefault to swallow
+    // the browser print dialog.
     const [quickOpen, setQuickOpen] = useState(false);
+    const [palette, setPalette] = useState(false);
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
-                e.preventDefault();
-                e.stopPropagation();
-                setQuickOpen(true);
-            }
+            if (!(e.metaKey || e.ctrlKey) || e.altKey || (e.key !== 'p' && e.key !== 'P')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.shiftKey) setPalette(true);
+            else setQuickOpen(true);
         };
         window.addEventListener('keydown', onKey, true);
         return () => window.removeEventListener('keydown', onKey, true);
@@ -400,6 +403,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             <SyncChooser fs={fs} />
             <SyncPanel />
             {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}
+            {palette && <CommandPalette fs={fs} onClose={() => setPalette(false)} />}
             <BuildModal />
         </div>
     );

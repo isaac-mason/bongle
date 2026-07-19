@@ -114,6 +114,9 @@ async function getOrCreateModel(fs: Filesystem, path: string): Promise<monaco.ed
 // the group whose editor most recently held focus — where go-to-definition opens
 // the target (a Cmd/Ctrl+click always happens in a focused editor).
 let activeGroupId: string | null = null;
+// the editor instance that most recently held focus — the target for palette
+// commands (format / organize imports), which run while focus is in the palette.
+let activeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
 
 const isSrc = (p: string) => /^src\/.+\.tsx?$/.test(p);
 
@@ -209,6 +212,8 @@ interface AutoImportWorker {
         source: string | undefined,
         data: unknown,
     ): Promise<{ codeActions?: TsCodeAction[] } | undefined>;
+    getFormatEdits(fileName: string): Promise<TsTextChange[]>;
+    getOrganizeImportsEdits(fileName: string): Promise<readonly { textChanges: TsTextChange[] }[]>;
 }
 interface AutoImportItem extends monaco.languages.CompletionItem {
     _autoImport: { uri: monaco.Uri; offset: number; name: string; source: string | undefined; data: unknown };
@@ -219,10 +224,6 @@ async function autoImportWorker(uri: monaco.Uri): Promise<AutoImportWorker> {
     return (await getWorker(uri)) as unknown as AutoImportWorker;
 }
 
-// TEMP diagnostics — one-shot log so we can confirm the worker path end-to-end. Remove
-// once auto-import suggestions are verified working.
-let loggedAutoImport = false;
-
 monaco.languages.registerCompletionItemProvider('typescript', {
     async provideCompletionItems(model, position) {
         const offset = model.getOffsetAt(position);
@@ -230,11 +231,7 @@ monaco.languages.registerCompletionItemProvider('typescript', {
         try {
             const worker = await autoImportWorker(model.uri);
             info = await worker.getAutoImportCompletions(model.uri.toString(), offset);
-        } catch (err) {
-            if (!loggedAutoImport) {
-                loggedAutoImport = true;
-                console.warn('[monaco] auto-import completions unavailable', err);
-            }
+        } catch {
             return { suggestions: [] };
         }
         if (!info) return { suggestions: [] };
@@ -242,10 +239,6 @@ monaco.languages.registerCompletionItemProvider('typescript', {
         // CompletionEntryData for an export origin) — the built-in provider already
         // offers everything in scope, so this never overlaps.
         const importable = info.entries.filter((e): e is TsCompletionEntry & { data: unknown } => e.data != null);
-        if (!loggedAutoImport) {
-            loggedAutoImport = true;
-            console.info(`[monaco] auto-import: ${info.entries.length} entries, ${importable.length} importable`);
-        }
         const word = model.getWordUntilPosition(position);
         const range: monaco.IRange = {
             startLineNumber: position.lineNumber,
@@ -269,8 +262,15 @@ monaco.languages.registerCompletionItemProvider('typescript', {
         if (!info) return item;
         const model = monaco.editor.getModel(info.uri);
         if (!model) return item;
-        const worker = await autoImportWorker(info.uri);
-        const details = await worker.getAutoImportDetails(info.uri.toString(), info.offset, info.name, info.source, info.data);
+        let details: { codeActions?: TsCodeAction[] } | undefined;
+        try {
+            const worker = await autoImportWorker(info.uri);
+            details = await worker.getAutoImportDetails(info.uri.toString(), info.offset, info.name, info.source, info.data);
+        } catch {
+            return item;
+        }
+        // turn the language service's import code action into additionalTextEdits — this
+        // is what actually inserts `import { X } from '…'` when the item is accepted.
         const action = details?.codeActions?.[0];
         if (action) {
             item.additionalTextEdits = action.changes.flatMap((change) =>
@@ -293,6 +293,52 @@ monaco.languages.registerCompletionItemProvider('typescript', {
         return item;
     },
 });
+
+// --- palette commands (see ui/commands.ts) -------------------------------------
+// These act on the most-recently-focused editor, since the palette itself holds
+// focus while a command runs. The TS worker computes the text changes; we apply
+// them as one undoable batch.
+
+const isTsPath = (p: string) => /\.tsx?$/.test(p);
+
+/** true when the active editor holds a writable TS/TSX file — gates the format /
+ *  organize-imports commands in the palette. */
+export function hasActiveTsModel(): boolean {
+    const path = activeEditor?.getModel()?.uri.path.replace(/^\/+/, '');
+    return !!path && isTsPath(path) && !isReadOnlyPath(path);
+}
+
+async function applyWorkerTextChanges(kind: 'format' | 'organizeImports'): Promise<void> {
+    const ed = activeEditor;
+    const model = ed?.getModel();
+    if (!ed || !model) return;
+    const worker = await autoImportWorker(model.uri);
+    const uri = model.uri.toString();
+    const changes =
+        kind === 'format'
+            ? await worker.getFormatEdits(uri)
+            : (await worker.getOrganizeImportsEdits(uri)).flatMap((f) => f.textChanges);
+    if (!changes.length) return;
+    const edits = changes.map((tc) => {
+        const start = model.getPositionAt(tc.span.start);
+        const end = model.getPositionAt(tc.span.start + tc.span.length);
+        return {
+            range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+            text: tc.newText,
+        };
+    });
+    ed.pushUndoStop();
+    ed.executeEdits(kind, edits);
+    ed.pushUndoStop();
+}
+
+export function formatActiveDocument(): Promise<void> {
+    return applyWorkerTextChanges('format');
+}
+
+export function organizeActiveImports(): Promise<void> {
+    return applyWorkerTextChanges('organizeImports');
+}
 
 export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
     const active = useEditor((s) => s.groups[group]?.active ?? null);
@@ -325,6 +371,7 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
         // destination for go-to-definition navigation.
         ed.onDidFocusEditorText(() => {
             activeGroupId = group;
+            activeEditor = ed;
             useEditor.getState().focusGroup(group);
         });
         ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -337,7 +384,10 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
             savedText.set(path, value);
             useEditor.getState().setDirty(path, false);
         });
-        return () => ed.dispose();
+        return () => {
+            if (activeEditor === ed) activeEditor = null;
+            ed.dispose();
+        };
     }, [fs, group]);
 
     // swap the model when this group's active file changes (load lazily, cache).
