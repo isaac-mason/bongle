@@ -9,7 +9,12 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { Filesystem } from '../../fs';
 import { isIgnored } from '../../ignored';
 import { useEditor } from '../../stores/editor';
-import './monaco-env'; // side-effect: bundle + register the language workers.
+import { installMonacoWorkers } from './monaco-env';
+
+// Route monaco's workers through our vite `?worker` bundles (incl. our custom TS
+// worker) BEFORE any editor is created. Must be a call, not a bare side-effect
+// import — the build tree-shakes the latter (see monaco-env.ts).
+installMonacoWorkers();
 
 // Bundler resolution (TS `ModuleResolutionKind.Bundler` = 100) so the TS worker
 // reads package.json `exports` maps — bongle's types resolve through an `exports`
@@ -168,6 +173,124 @@ monaco.editor.registerEditorOpener({
             : 1;
         useEditor.getState().openAt(group.pane, path, line);
         return true;
+    },
+});
+
+// VSCode-style auto-imports. The built-in TS completion provider only offers
+// in-scope symbols (its worker asks for completions with no preferences). Our
+// BongleTypeScriptWorker (ts.worker.ts) adds getAutoImport* methods with
+// includeCompletionsForModuleExports on; this provider surfaces ONLY the
+// not-yet-imported entries (they carry a `source`) and, on accept, applies the
+// language service's own code-action text change as an additionalTextEdit —
+// inserting the `import { X } from '…'` line. The built-in provider keeps owning
+// in-scope completions, so the two lists never overlap (no duplicate entries).
+interface TsCompletionEntry {
+    name: string;
+    source?: string;
+    sourceDisplay?: { text: string }[];
+    data?: unknown;
+    sortText: string;
+    kindModifiers?: string;
+}
+interface TsTextChange {
+    span: { start: number; length: number };
+    newText: string;
+}
+interface TsCodeAction {
+    description: string;
+    changes: { textChanges: TsTextChange[] }[];
+}
+interface AutoImportWorker {
+    getAutoImportCompletions(fileName: string, position: number): Promise<{ entries: TsCompletionEntry[] } | undefined>;
+    getAutoImportDetails(
+        fileName: string,
+        position: number,
+        name: string,
+        source: string | undefined,
+        data: unknown,
+    ): Promise<{ codeActions?: TsCodeAction[] } | undefined>;
+}
+interface AutoImportItem extends monaco.languages.CompletionItem {
+    _autoImport: { uri: monaco.Uri; offset: number; name: string; source: string | undefined; data: unknown };
+}
+
+async function autoImportWorker(uri: monaco.Uri): Promise<AutoImportWorker> {
+    const getWorker = await monaco.typescript.getTypeScriptWorker();
+    return (await getWorker(uri)) as unknown as AutoImportWorker;
+}
+
+// TEMP diagnostics — one-shot log so we can confirm the worker path end-to-end. Remove
+// once auto-import suggestions are verified working.
+let loggedAutoImport = false;
+
+monaco.languages.registerCompletionItemProvider('typescript', {
+    async provideCompletionItems(model, position) {
+        const offset = model.getOffsetAt(position);
+        let info: { entries: TsCompletionEntry[] } | undefined;
+        try {
+            const worker = await autoImportWorker(model.uri);
+            info = await worker.getAutoImportCompletions(model.uri.toString(), offset);
+        } catch (err) {
+            if (!loggedAutoImport) {
+                loggedAutoImport = true;
+                console.warn('[monaco] auto-import completions unavailable', err);
+            }
+            return { suggestions: [] };
+        }
+        if (!info) return { suggestions: [] };
+        // an entry needs an import iff the language service attached `data` (the
+        // CompletionEntryData for an export origin) — the built-in provider already
+        // offers everything in scope, so this never overlaps.
+        const importable = info.entries.filter((e): e is TsCompletionEntry & { data: unknown } => e.data != null);
+        if (!loggedAutoImport) {
+            loggedAutoImport = true;
+            console.info(`[monaco] auto-import: ${info.entries.length} entries, ${importable.length} importable`);
+        }
+        const word = model.getWordUntilPosition(position);
+        const range: monaco.IRange = {
+            startLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endLineNumber: position.lineNumber,
+            endColumn: word.endColumn,
+        };
+        const suggestions: AutoImportItem[] = importable.map((e) => ({
+            label: { label: e.name, description: e.sourceDisplay?.map((p) => p.text).join('') ?? e.source },
+            insertText: e.name,
+            kind: monaco.languages.CompletionItemKind.Reference,
+            sortText: e.sortText, // TS already sinks auto-imports below in-scope entries
+            tags: e.kindModifiers?.includes('deprecated') ? [monaco.languages.CompletionItemTag.Deprecated] : undefined,
+            range,
+            _autoImport: { uri: model.uri, offset, name: e.name, source: e.source, data: e.data },
+        }));
+        return { suggestions };
+    },
+    async resolveCompletionItem(item) {
+        const info = (item as AutoImportItem)._autoImport;
+        if (!info) return item;
+        const model = monaco.editor.getModel(info.uri);
+        if (!model) return item;
+        const worker = await autoImportWorker(info.uri);
+        const details = await worker.getAutoImportDetails(info.uri.toString(), info.offset, info.name, info.source, info.data);
+        const action = details?.codeActions?.[0];
+        if (action) {
+            item.additionalTextEdits = action.changes.flatMap((change) =>
+                change.textChanges.map((tc) => {
+                    const start = model.getPositionAt(tc.span.start);
+                    const end = model.getPositionAt(tc.span.start + tc.span.length);
+                    return {
+                        range: {
+                            startLineNumber: start.lineNumber,
+                            startColumn: start.column,
+                            endLineNumber: end.lineNumber,
+                            endColumn: end.column,
+                        },
+                        text: tc.newText,
+                    };
+                }),
+            );
+            item.detail = action.description;
+        }
+        return item;
     },
 });
 

@@ -3,7 +3,7 @@
 // A DRAFT is uncommitted working state; the platform persists it (local ring
 // always, server when owned + dirty) keyed by the version it descends from. This
 // module's job is narrow: turn genuine document edits into throttled
-// `bongle:autosave` hand-backs over the platform bridge. It never mints a version
+// `bongle:draft` hand-backs over the platform bridge. It never mints a version
 // and never touches storage itself — it emits bytes + the opaque baseVersion/rev
 // tokens and lets the platform decide durability.
 //
@@ -12,8 +12,9 @@
 // (or produce no genuine mutation), so browsing an old version emits zero edits
 // and therefore zero autosaves — nothing older can clobber newer work.
 
-import { exportProjectSave } from '../project-save';
 import type { Filesystem, FsChange } from '../fs';
+import { exportProjectSave } from '../project-save';
+import { useAutosave } from '../stores/autosave';
 import type { PlatformBridge } from './bridge';
 import type { PlatformIntent, PlatformResult } from './contract';
 
@@ -63,9 +64,13 @@ export function initAutosave(fs: Filesystem, bridge: PlatformBridge, intent: Pla
     // and reset the counter, so subsequent autosaves land in draft@versionId.
     const offResult = bridge.onResult((r) => onSaveResult(state, r));
 
+    // expose an on-demand flush for the "Save draft" button (force a snapshot now).
+    useAutosave.getState().register(() => flushNow(state));
+
     return () => {
         watch.close();
         offResult();
+        useAutosave.getState().register(null);
         if (state.pending !== null) clearTimeout(state.pending);
     };
 }
@@ -88,20 +93,34 @@ function arm(state: State): void {
     }, delay);
 }
 
+/** force an immediate draft snapshot ("Save draft" button) — cancel any pending
+ *  debounced fire and snapshot now. Bumps rev so the fire carries a fresh revision
+ *  the server accepts; identical content is deduped downstream (local ring + the
+ *  server's sha guard), so a no-change save is a cheap no-op. */
+async function flushNow(state: State): Promise<void> {
+    if (state.pending !== null) {
+        clearTimeout(state.pending);
+        state.pending = null;
+    }
+    state.rev += 1;
+    await fire(state);
+}
+
 /** export the current source + hand it back as an autosave snapshot. */
 async function fire(state: State): Promise<void> {
     state.lastFireAt = performance.now();
     // exportProjectSave() is a level-0 (STORE) zip — fast enough inline at this
     // cadence. If it ever janks the editor, move it to a worker (measure first).
     const payload = await exportProjectSave(state.fs);
-    state.bridge.send({ type: 'bongle:autosave', payload, baseVersion: state.baseVersion, rev: state.rev });
+    state.bridge.send({ type: 'bongle:draft', payload, baseVersion: state.baseVersion, rev: state.rev });
 }
 
-/** on a successful manual save the platform mints a new head version; adopt it as
- *  the new base and reset the counter to its rev — a clean draft@versionId slot —
- *  then keep autosaving into it. Non-save / failed / token-less results are ignored. */
+/** a save OR a build mints a manual version the draft now descends from; adopt it as
+ *  the new base and reset the counter to its rev — a clean draft@versionId slot — then
+ *  keep autosaving into it. Both carry `versionId`; failed / token-less results are
+ *  ignored. (A build mints a version just like a save, so it rebases the same way.) */
 function onSaveResult(state: State, r: PlatformResult): void {
-    if (r.of !== 'save' || !r.ok || r.versionId === undefined) return;
+    if ((r.of !== 'version' && r.of !== 'build') || !r.ok || r.versionId === undefined) return;
     state.baseVersion = r.versionId;
     if (r.rev !== undefined) state.rev = r.rev;
 }

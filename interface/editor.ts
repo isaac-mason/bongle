@@ -93,15 +93,17 @@ export type EditorMessage =
     /** editor booted + listening. `version` is EDITOR_INTERFACE_VERSION of the
      *  editor bundle (optional until every live bundle announces it). */
     | { type: 'bongle:ready'; version?: string }
-    /** hand back the project-save source zip for the platform to persist. */
-    | { type: 'bongle:save'; payload: Uint8Array }
+    /** mint a manual version: hand back the source zip for the platform to persist
+     *  as an immutable snapshot (origin='manual'). Deliberate, enters history. */
+    | { type: 'bongle:version'; payload: Uint8Array }
     /** high-frequency working snapshot for the platform to persist as a DRAFT
-     *  (local ring always; server if owned + dirty). Distinct from bongle:save so
-     *  the platform keeps it quiet — no version minted, no toast. `baseVersion`/`rev`
-     *  are the opaque tokens from bongle:init, `rev` incremented per edit. */
-    | { type: 'bongle:autosave'; payload: Uint8Array; baseVersion: string | null; rev: number }
+     *  (autosave snapshot: local ring always; server if owned + dirty). Distinct
+     *  from bongle:version so the platform keeps it quiet — no version minted, no
+     *  toast. `baseVersion`/`rev` are the opaque tokens from bongle:init, `rev`
+     *  incremented per edit. */
+    | { type: 'bongle:draft'; payload: Uint8Array; baseVersion: string | null; rev: number }
     /** hand back the built project-build bundle.zip for the platform to upload.
-     *  `source` is the project source zip (same as bongle:save) so the platform
+     *  `source` is the project source zip (same as bongle:version) so the platform
      *  can snapshot it as a project_version + record the build's provenance. */
     | { type: 'bongle:build'; payload: Uint8Array; source?: Uint8Array }
     /** hand back the exported avatar (compiled .glb + .bbmodel source) for the
@@ -120,14 +122,14 @@ export type PlatformMessage =
     /** configure the editor for its purpose. `version` is the platform's
      *  EDITOR_INTERFACE_VERSION (optional until wired). */
     | { type: 'bongle:init'; version?: string; intent: PlatformIntent }
-    /** outcome of the editor's last hand-back (save/build/avatar-export). On a
-     *  successful `of: 'save'`, `versionId`/`rev` carry the minted head version so
-     *  the editor rebases its draft to `draft@versionId` with a fresh `rev`
-     *  baseline. Load-bearing, not cosmetic: without them the editor keeps
-     *  autosaving into the stale pre-save slot. */
+    /** outcome of the editor's last hand-back (version/build/avatar-export). A save
+     *  (`of: 'version'`) AND a build (`of: 'build'`) both mint a manual version and
+     *  carry its `versionId`/`rev`, so the editor rebases its draft to
+     *  `draft@versionId` with a fresh `rev` baseline. Load-bearing, not cosmetic:
+     *  without them the editor keeps autosaving into the stale pre-save slot. */
     | {
           type: 'bongle:result';
-          of: 'save' | 'build' | 'avatar-export';
+          of: 'version' | 'build' | 'avatar-export';
           ok: boolean;
           message?: string;
           versionId?: string;
@@ -139,10 +141,10 @@ export type PlatformMessage =
     | { type: 'bongle:multiplayer-failed'; message: string };
 
 /** the result payload the editor surfaces to the user. Mirrors bongle:result:
- *  `versionId`/`rev` populated on a successful `of: 'save'` so the editor rebases
- *  its draft to `draft@versionId` with a fresh `rev` baseline. */
+ *  `versionId`/`rev` populated on a successful `of: 'version'` OR `of: 'build'` so the
+ *  editor rebases its draft to `draft@versionId` with a fresh `rev` baseline. */
 export type PlatformResult = {
-    of: 'save' | 'build' | 'avatar-export';
+    of: 'version' | 'build' | 'avatar-export';
     ok: boolean;
     message?: string;
     versionId?: string;

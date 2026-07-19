@@ -70,7 +70,7 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
             // (port-bridge), so this nested iframe must be cross-origin isolated
             // too — delegate the permission (COEP header alone isn't enough for an
             // embedded doc; the embedder must grant it).
-            iframe.allow = 'cross-origin-isolated';
+            iframe.allow = 'cross-origin-isolated; autoplay';
             iframe.style.cssText = 'border:0;width:100%;height:100%;display:block;background:#000';
 
             const onMessage = async (e: MessageEvent) => {

@@ -7,8 +7,9 @@
 
 import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
-import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
 import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/actions';
+import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
+import { useAutosave } from '../../stores/autosave';
 import { useMultiplayer } from '../../stores/multiplayer';
 import { usePlatform } from '../../stores/platform';
 import { useWindows } from '../../stores/windows';
@@ -65,9 +66,8 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                         </button>
                         <section className="flex flex-col gap-1.5 border border-border p-1.5">
                             <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-muted">Save</span>
-                            <button type="button" className={BTN} onClick={() => void runSave(fs)}>
-                                Save
-                            </button>
+                            <DraftButton />
+                            <SaveButton fs={fs} />
                             <SaveSizeIndicator fs={fs} />
                         </section>
                         <MultiplayerControl />
@@ -79,6 +79,70 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                 </button>
             </div>
         </Window>
+    );
+}
+
+/** Save version button: mints an immutable manual version (enters history, is what
+ *  builds come from). Lifecycle feedback — "Saving…" (disabled) while the platform
+ *  uploads, then a transient "Saved" tick or a sticky error from the bongle:result. */
+function SaveButton({ fs }: { fs: Filesystem }) {
+    const status = usePlatform((s) => s.saveStatus);
+    const message = usePlatform((s) => s.saveMessage);
+    const resetSave = usePlatform((s) => s.resetSave);
+
+    // clear the transient "Saved" tick after a moment; errors stay until the next save.
+    useEffect(() => {
+        if (status !== 'saved') return;
+        const t = setTimeout(resetSave, 2500);
+        return () => clearTimeout(t);
+    }, [status, resetSave]);
+
+    return (
+        <>
+            <button type="button" className={BTN} disabled={status === 'saving'} onClick={() => void runSave(fs)}>
+                {status === 'saving' ? 'Saving…' : 'Save version'}
+            </button>
+            {status === 'saved' && <span className="text-[10px] text-green-500">Saved ✓</span>}
+            {status === 'error' && <span className="text-[10px] text-red-500">{message ?? 'Save failed'}</span>}
+        </>
+    );
+}
+
+/** Save draft button: force an immediate draft snapshot (the working copy) without
+ *  minting a version — the crash-net on demand. Drafts have no bongle:result ack, so
+ *  feedback is optimistic: a transient "Draft saved" once the flush resolves. Hidden
+ *  until the autosave driver is armed (embedded + a project intent). */
+function DraftButton() {
+    const flush = useAutosave((s) => s.flush);
+    const [busy, setBusy] = useState(false);
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        if (!saved) return;
+        const t = setTimeout(() => setSaved(false), 2500);
+        return () => clearTimeout(t);
+    }, [saved]);
+
+    if (!flush) return null;
+
+    const onSaveDraft = async () => {
+        setBusy(true);
+        setSaved(false);
+        try {
+            await flush();
+            setSaved(true);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <>
+            <button type="button" className={BTN} disabled={busy} onClick={() => void onSaveDraft()}>
+                {busy ? 'Saving draft…' : 'Save draft'}
+            </button>
+            {saved && <span className="text-[10px] text-green-500">Draft saved ✓</span>}
+        </>
     );
 }
 

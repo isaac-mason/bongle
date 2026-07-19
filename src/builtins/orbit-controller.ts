@@ -20,7 +20,7 @@ import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat'
 import { env } from '../env';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
-import { getTrait } from '../api/scene-tree';
+import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { type TraitType, trait } from '../api/traits';
@@ -61,7 +61,25 @@ const _up: Vec3 = [0, 0, 0];
 const _eye: Vec3 = [0, 0, 0];
 const _lookMat = mat4.create();
 const _lookQuat = quat.create();
+const _bodyYaw = quat.create();
+const _anchorPos: Vec3 = [0, 0, 0];
 const _UP: Vec3 = [0, 1, 0];
+
+// fallback eye-to-feet drop for the mirrored avatar anchor, used before the
+// rig's bones resolve or when ctx.node carries no character head bone. once
+// the rig exists we read the real head height off it (see `headDrop`).
+const FALLBACK_EYE_HEIGHT = 1.62;
+
+// height of the rig's `head` bone above the node root, so the avatar's head
+// sits at the lens rather than dropping a hardcoded amount. yaw-only body
+// orientation keeps this vertical offset constant regardless of facing.
+function headDrop(node: Parameters<typeof findByName>[0], rootTransform: TransformTrait): number {
+    const head = findByName(node, 'head');
+    if (!head) return FALLBACK_EYE_HEIGHT;
+    const headTransform = getTrait(head, TransformTrait);
+    if (!headTransform) return FALLBACK_EYE_HEIGHT;
+    return getWorldPosition(headTransform)[1] - getWorldPosition(rootTransform)[1];
+}
 
 // tunables
 const ROTATE_SPEED = 1.0;
@@ -238,7 +256,20 @@ script(
             mat4.targetTo(_lookMat, _eye, target, _UP);
             quat.fromMat4(_lookQuat, _lookMat);
             setWorldQuaternion(cameraTransform, _lookQuat);
-            if (nodeTransform) setWorldPosition(nodeTransform, _eye);
+
+            // mirror the pose onto ctx.node (the server chunk-discovery anchor
+            // and the avatar collaborators see). drop the root so the rig's head
+            // lands at the lens, and face the orbit target, yaw only, so the
+            // avatar reads as an upright person looking at the focal point
+            // rather than a static tower floating at the camera.
+            if (nodeTransform) {
+                quat.setAxisAngle(_bodyYaw, _UP, Math.atan2(_eye[0] - target[0], _eye[2] - target[2]));
+                _anchorPos[0] = _eye[0];
+                _anchorPos[1] = _eye[1] - headDrop(ctx.node, nodeTransform);
+                _anchorPos[2] = _eye[2];
+                setWorldPosition(nodeTransform, _anchorPos);
+                setWorldQuaternion(nodeTransform, _bodyYaw);
+            }
 
             // damping decay
             sphDelta[1] *= 1 - DAMPING_FACTOR;

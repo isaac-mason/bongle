@@ -18,7 +18,7 @@ import { env } from '../env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { prop } from '../api/prop';
-import { getTrait } from '../api/scene-tree';
+import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
 import { getCamera, getSubject } from '../api/subject';
 import { control, type TraitType, trait } from '../api/traits';
@@ -36,9 +36,28 @@ const _qPitch: Quat = [0, 0, 0, 1];
 const _qTmp: Quat = [0, 0, 0, 1];
 const _qOut: Quat = [0, 0, 0, 1];
 const _posOut: Vec3 = [0, 0, 0];
+const _bodyFwd: Vec3 = [0, 0, 0];
+const _bodyYaw: Quat = [0, 0, 0, 1];
+const _anchorPos: Vec3 = [0, 0, 0];
 
 const AXIS_UP: Vec3 = [0, 1, 0];
 const AXIS_RIGHT: Vec3 = [1, 0, 0];
+
+// fallback eye-to-feet drop for the mirrored avatar anchor, used before the
+// rig's bones resolve or when ctx.node carries no character head bone. once
+// the rig exists we read the real head height off it (see `headDrop`).
+const FALLBACK_EYE_HEIGHT = 1.62;
+
+// height of the rig's `head` bone above the node root, so the avatar's head
+// sits at the lens rather than dropping a hardcoded amount. yaw-only body
+// orientation keeps this vertical offset constant regardless of facing.
+function headDrop(node: Parameters<typeof findByName>[0], rootTransform: TransformTrait): number {
+    const head = findByName(node, 'head');
+    if (!head) return FALLBACK_EYE_HEIGHT;
+    const headTransform = getTrait(head, TransformTrait);
+    if (!headTransform) return FALLBACK_EYE_HEIGHT;
+    return getWorldPosition(headTransform)[1] - getWorldPosition(rootTransform)[1];
+}
 
 const PITCH_LIMIT = Math.PI / 2 - 0.01;
 
@@ -315,7 +334,22 @@ script(
             _posOut[2] = camPos[2] + _velocity[2] * delta;
             setWorldPosition(cameraTransform, _posOut);
             setWorldQuaternion(cameraTransform, _qOut);
-            if (nodeTransform) setWorldPosition(nodeTransform, _posOut);
+
+            // mirror the pose onto ctx.node (the server chunk-discovery anchor
+            // and the avatar collaborators see). drop the root so the rig's head
+            // lands at the lens, and face the flight heading, yaw only, so the
+            // avatar reads as an upright person looking through the lens rather
+            // than a static tower floating at the camera.
+            if (nodeTransform) {
+                vec3.set(_bodyFwd, 0, 0, -1);
+                vec3.transformQuat(_bodyFwd, _bodyFwd, _qOut);
+                quat.setAxisAngle(_bodyYaw, AXIS_UP, Math.atan2(-_bodyFwd[0], -_bodyFwd[2]));
+                _anchorPos[0] = _posOut[0];
+                _anchorPos[1] = _posOut[1] - headDrop(ctx.node, nodeTransform);
+                _anchorPos[2] = _posOut[2];
+                setWorldPosition(nodeTransform, _anchorPos);
+                setWorldQuaternion(nodeTransform, _bodyYaw);
+            }
 
             quat.copy(lastQuaternion, _qOut);
 

@@ -76,7 +76,7 @@ export function joinGuestSession(opts: GuestSessionOptions): GuestSession {
     const iframe = document.createElement('iframe');
     iframe.src = clientPath;
     iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;background:#000;z-index:2147483000';
-    iframe.allow = 'clipboard-read; clipboard-write; fullscreen';
+    iframe.allow = 'clipboard-read; clipboard-write; fullscreen; autoplay';
 
     const onMessage = (e: MessageEvent) => {
         if (e.origin !== targetOrigin || e.source !== iframe.contentWindow) return;

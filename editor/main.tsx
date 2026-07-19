@@ -61,13 +61,17 @@ const editor = initEditor({ fs });
 // the 'build' log window shows both bundler (transform) errors and bake output.
 const log = logger('build');
 
-const SAMPLE_INDEX = `import { system, onJoin, setPosition, blockTopCenter, use, getTrait, TransformTrait } from 'bongle';
+const SAMPLE_INDEX = `import { system, onJoin, setPosition, blockTopCenter, use, getTrait, TransformTrait, setEnvironment, ENVIRONMENT_OVERWORLD } from 'bongle';
 import { blocks } from 'bongle/kit';
 import { vec3 } from 'mathcat';
 
 use(blocks);
 
 const SPAWN = blockTopCenter(vec3.create(), 0, 5, 0);
+
+system('environment', (ctx) => {
+    setEnvironment(ctx, ENVIRONMENT_OVERWORLD);
+}, { editor: true });
 
 system('setup', (ctx) => {
     onJoin(ctx, (e) => {
@@ -287,7 +291,7 @@ async function boot(): Promise<void> {
     editor.fs.watch(fanOutChange);
 
     // autosave: genuine edits (this same fs change stream) arm a throttled
-    // `bongle:autosave` hand-back. Wired AFTER load/seed so those writes never
+    // `bongle:draft` hand-back. Wired AFTER load/seed so those writes never
     // arm it. No-op when standalone or non-project.
     initAutosave(editor.fs, platform, intent);
 

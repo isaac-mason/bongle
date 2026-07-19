@@ -5,8 +5,8 @@
 
 import type { BuildRequest, BuildResponse } from '../build/build-worker';
 import type { Filesystem } from '../fs';
-import { downloadProjectSave, exportProjectSave, SAVE_MAX_BYTES, saveSizeBytes } from '../project-save';
 import { PROJECT_NAME } from '../project';
+import { downloadProjectSave, exportProjectSave, SAVE_MAX_BYTES, saveSizeBytes } from '../project-save';
 import { useBuildMeta } from '../stores/build-meta';
 import { useBuildProgress } from '../stores/build-progress';
 import { logger } from '../stores/logs';
@@ -88,8 +88,25 @@ export async function runSave(fs: Filesystem): Promise<void> {
         alert(`Save is ${mb} MB, over the ${cap} MB limit. Trim assets under assets/ and try again.`);
         return;
     }
-    if (usePlatform.getState().embedded) usePlatform.getState().send({ type: 'bongle:save', payload: await exportProjectSave(fs) });
-    else await downloadProjectSave(fs);
+    if (usePlatform.getState().embedded) {
+        // 'saving' the instant we hand off, so the button reflects it while the
+        // platform uploads (or an anonymous first-save collects a name/team). The
+        // platform's bongle:result flips it to saved/error; a cancelled first-save
+        // sends a result too, so the button never sticks.
+        const platform = usePlatform.getState();
+        platform.beginSave();
+        try {
+            platform.send({ type: 'bongle:version', payload: await exportProjectSave(fs) });
+        } catch (err) {
+            platform.setResult({
+                of: 'version',
+                ok: false,
+                message: err instanceof Error ? err.message : 'save failed',
+            });
+        }
+    } else {
+        await downloadProjectSave(fs);
+    }
 }
 
 /** hand the edited avatar (Blockbench-compiled glb + bbmodel source) to the
