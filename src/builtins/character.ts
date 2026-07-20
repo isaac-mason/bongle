@@ -100,7 +100,7 @@ type CharacterState = {
     modelNodes: Set<Node>;
 };
 
-import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from 'bongle/avatar/rig';
+import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from "../../avatar/rig";
 import type { Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, quat, vec3 } from 'mathcat';
 import { Animation } from '../api/animation';

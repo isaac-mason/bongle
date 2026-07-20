@@ -48,11 +48,6 @@ export default defineConfig({
                 'engine-asset-pipeline': entry('src/asset-pipeline/index.ts'),
                 env: entry('src/env.ts'),
                 internal: entry('src/internal.ts'),
-                // flat key (NOT 'avatar/rig') so it emits dist/avatar-rig.js at the
-                // dist ROOT — the asset-rewrite assumes every output sits at root so
-                // `./assets/` resolves to dist/assets/ (a dist/avatar/ subdir would
-                // break base-avatar's player.glb ref → builtin:avatar fails to load).
-                'avatar-rig': entry('src/core/avatar/rig.ts'),
                 kit: entry('src/kit/index.ts'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry
@@ -96,10 +91,10 @@ export default defineConfig({
                         // transitively. Rule: LEAF groups that pull nothing (env,
                         // internal) go FIRST so the general subsystems don't
                         // capture them into a bigger chunk; groups that PULL shared
-                        // modules (node imports core/avatar/rig) go LAST so the
-                        // general groups (core) claim those shared modules first —
-                        // else `node` grabs rig.ts and drags node:fs into every
-                        // realm that imports rig via the api chunk.
+                        // modules (node imports the avatar rig) go LAST so the leaf
+                        // groups (avatar) claim those shared modules first — else
+                        // `node` grabs rig.ts and drags node:fs into every realm
+                        // that imports rig.
                         { name: 'env', test: /\/lib\/src\/env\.ts$/ },
                         { name: 'internal', test: /\/lib\/src\/internal(-runtime)?\.ts$/ },
                         { name: 'core', test: /\/lib\/src\/core\// },
@@ -108,6 +103,7 @@ export default defineConfig({
                         { name: 'client', test: /\/lib\/src\/client\// },
                         { name: 'editor', test: /\/lib\/src\/editor\// },
                         { name: 'icons', test: /\/lib\/icons\// },
+                        { name: 'avatar', test: /\/lib\/avatar\// },
                         { name: 'migrations', test: /\/lib\/src\/migrations\// },
                         { name: 'render', test: /\/lib\/src\/render\// },
                         { name: 'server', test: /\/lib\/src\/server\// },

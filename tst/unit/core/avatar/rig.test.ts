@@ -5,7 +5,7 @@ import {
     type RigNodeView,
     type RigSceneView,
     validateRig6Bone,
-} from 'bongle/avatar/rig';
+} from '../../../../avatar/rig';
 import { describe, expect, it } from 'vitest';
 
 // Small builder so each test reads as a tree literal rather than an

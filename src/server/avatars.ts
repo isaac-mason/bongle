@@ -15,7 +15,7 @@
  * builtin) are codegen-hydrated already.
  */
 
-import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
+import { RIG_TYPE_6BONE } from "../../avatar/rig";
 import type { Client, ResolvedAvatar } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
 import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';

@@ -14,7 +14,7 @@
 // The load/assign internals live in core/avatar/model and are shared with the engine
 // player-join path (server/avatars); this module is the script-facing surface.
 
-import { RIG_TYPE_6BONE } from 'bongle/avatar/rig';
+import { RIG_TYPE_6BONE } from "../../avatar/rig";
 import type { ResolvedAvatar } from 'bongle/interface';
 import { acquireAvatarModel } from '../core/avatar/model';
 import * as Resources from '../core/resources';
@@ -27,7 +27,7 @@ export { assignAvatar } from '../core/avatar/model';
 // Rig contract (bone names, required/attach node lists, validator). Also reachable
 // via the `bongle/avatar/rig` subpath; surfaced here so scripts can resolve bones by
 // name (`findByName(playerNode, RIG_6BONE_HAND_RIGHT)`) straight off bare `bongle`.
-export * from 'bongle/avatar/rig';
+export * from "../../avatar/rig";
 
 /**
  * Pull a batch of avatars for populating NPCs. Opaque + unordered + non-stable,

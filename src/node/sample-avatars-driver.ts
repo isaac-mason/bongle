@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ResolvedAvatar, ServerDriver } from 'bongle/interface';
-import { RIG_TYPE_6BONE } from '../core/avatar/rig';
+import { RIG_TYPE_6BONE } from "../../avatar/rig";
 
 /** Request-path prefix the dev hosts serve the sample-avatar `.glb`s from.
  *  The client's `clientUrl` is `${prefix}<slug>.glb`, same-origin. */

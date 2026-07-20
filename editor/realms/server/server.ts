@@ -14,7 +14,7 @@ import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../.
 import type * as InternalNS from '../../../src/internal';
 // type-only: the RUNTIME EngineServer + __bongle come from the runner (the realm's
 // bundled engine instance the user code registered into), passed in via opts.
-import { RIG_TYPE_6BONE } from '../../../src/core/avatar/rig';
+import { RIG_TYPE_6BONE } from "../../../avatar/rig";
 import type * as EngineServerNS from '../../../src/server/engine-server';
 import { createInMemoryStorageDriver } from '../../../src/server/storage-in-memory';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';

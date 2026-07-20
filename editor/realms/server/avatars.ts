@@ -5,7 +5,7 @@
 // path as prod: served as plain `.glb`, fetched + gltfUnpack'd by the engine.
 
 import type { ResolvedAvatar, ServerDriver } from 'bongle/interface';
-import { RIG_TYPE_6BONE } from '../../../src/core/avatar/rig';
+import { RIG_TYPE_6BONE } from "../../../avatar/rig";
 
 // vite emits each avatar glb as an asset and gives us its served URL.
 const AVATAR_URLS = import.meta.glob('../avatars/*/*.glb', {
