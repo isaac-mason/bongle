@@ -192,13 +192,6 @@ export type TransformTrait = TraitType<typeof TransformTrait>;
  *  that actually move — single-digit depth, like Source's time-bounded history. */
 const NET_SNAPSHOT_CAP = 8;
 
-/** cap (seconds) on how far past the newest keyframe the sampler will extrapolate
- *  when the buffer runs dry (a stall beyond the render-behind reserve). continues the
- *  last-known velocity instead of freezing on the frontier, so a brief starvation
- *  glides rather than snapping; capped tight because extrapolation overshoots on a
- *  direction change, and the bracketing reserve makes this a rare safety net, not the
- *  common path. mirrors Source's `cl_extrapolate_amount` (position only). */
-const MAX_EXTRAPOLATION = 0.05;
 
 export type NetSnapshots = {
     /** position keyframes: server-clock seconds, and x/y/z flat (stride 3). */
@@ -286,12 +279,11 @@ const _bracket = { lo: 0, hi: 0, frac: 0 };
 
 /**
  * find the two ring entries bracketing `renderTime` and the fraction between them,
- * written into the shared `_bracket`. ring is time-ordered oldest→newest. normally
- * `frac ∈ [0,1]`; past the newest keyframe with ≥2 entries it returns the two newest
- * with `frac > 1` (a capped extrapolation — the buffer ran dry, continue the last
- * velocity rather than freeze). other edges collapse to a single-entry hold
- * (`lo === hi`, `frac 0`): before the oldest (only right after join → hold oldest),
- * or a lone entry (nothing to extrapolate from → hold it).
+ * written into the shared `_bracket`. ring is time-ordered oldest→newest. `frac ∈
+ * [0,1]`. edges collapse to a single-entry hold (`lo === hi`, `frac 0`): past the
+ * newest keyframe (buffer ran dry → hold the newest; a dry buffer means the entity
+ * stopped, so its final keyframe is the correct pose to hold), before the oldest
+ * (only right after join → hold oldest), or a lone entry.
  */
 function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
     const cap = time.length;
@@ -299,19 +291,10 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     const oldest = (head - count + 1 + cap) % cap;
 
     if (count === 1 || renderTime >= time[newest]!) {
-        // dry buffer with history: extrapolate off the two newest (frac > 1, capped).
-        if (count >= 2 && renderTime > time[newest]!) {
-            const prev = (newest - 1 + cap) % cap;
-            const span = time[newest]! - time[prev]!;
-            if (span > 0) {
-                const frac = (renderTime - time[prev]!) / span;
-                const fracMax = 1 + MAX_EXTRAPOLATION / span;
-                _bracket.lo = prev;
-                _bracket.hi = newest;
-                _bracket.frac = frac < fracMax ? frac : fracMax;
-                return;
-            }
-        }
+        // dry buffer: hold at the newest keyframe. on reliable+ordered transport a
+        // dry buffer means the entity actually stopped (its final settle keyframe IS
+        // the newest), where holding is exact; coasting the last velocity would drive
+        // a just-landed body past its true rest pose (e.g. sinking into the ground).
         _bracket.lo = _bracket.hi = newest;
         _bracket.frac = 0;
         return;
@@ -339,8 +322,7 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     _bracket.frac = 0;
 }
 
-/** sample the interpolated local position at `renderTime` into `out`. `frac > 1`
- *  (dry buffer) extrapolates the last-known velocity, the lerp form handles it as-is. */
+/** sample the interpolated local position at `renderTime` into `out`. */
 export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void {
     findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
     const lo = _bracket.lo * 3;
@@ -374,10 +356,7 @@ export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, 
     _rotHi[1] = snaps.rot[hi + 1]!;
     _rotHi[2] = snaps.rot[hi + 2]!;
     _rotHi[3] = snaps.rot[hi + 3]!;
-    // clamp to the newest on a dry buffer (frac > 1): position extrapolates, but
-    // extrapolating the rotation arc reads as jitter, so hold the last-known facing.
-    const f = _bracket.frac > 1 ? 1 : _bracket.frac;
-    quat.slerp(out, _rotLo, _rotHi, f);
+    quat.slerp(out, _rotLo, _rotHi, _bracket.frac);
 }
 
 /* ── controls (editor + persistence) ── */
@@ -423,13 +402,15 @@ sync(TransformTrait, 'teleport', {
 });
 
 /**
- * position + quaternion as two independent owner-authority slices, both
- * threshold-gated (emit only once the value moves ≥ threshold by its metric since
- * the last emit, sub-threshold drift accumulates, a resting body goes silent).
- * kept separate (not a combined pose tuple) so a node whose position changes every
- * tick but whose rotation is static, or vice versa, only re-emits the slice that
- * actually changed. `setPosition` / `setQuaternion` dirty just their own slice;
- * `markTransformDirty` (physics, animator, compound/world writes) dirties both.
+ * position + quaternion as two independent owner-authority slices, both emitted on
+ * byte change (`diff`) and capped at 20/s. a resting body writes byte-stable
+ * values (physics sleeps, controllers clamp to zero) so its slice goes silent, and
+ * the settle-to-rest is just the last byte change — it lands like any other keyframe,
+ * no separate "came to rest" signal needed. kept separate (not a combined pose tuple)
+ * so a node whose position changes every tick but whose rotation is static, or vice
+ * versa, only re-emits the slice that actually changed. `setPosition` /
+ * `setQuaternion` dirty just their own slice; `markTransformDirty` (physics, animator,
+ * compound/world writes) dirties both.
  *
  * receiving side copies the value into the live field (world caches invalidated
  * for matrix/raycast/debug readers) and, client-side, appends a timestamped
@@ -449,7 +430,7 @@ const transformPositionSync = sync(TransformTrait, 'position', {
         if (runtime?.client) pushPositionSnapshot(t, runtime.clock.serverLatest, p);
     },
     authority: 'owner',
-    dirty: dirty.distance(0.05), // 5cm counts as a change
+    dirty: dirty.diff(), // any change to the packed pose; byte-stable at rest → silent
     rate: rate.hz(20), // ≤20/s: keyframes ~50ms apart, interpolation fills the gaps
 });
 
@@ -463,7 +444,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
         if (runtime?.client) pushRotationSnapshot(t, runtime.clock.serverLatest, q);
     },
     authority: 'owner',
-    dirty: dirty.angle(0.02), // ~1.1° counts as a change
+    dirty: dirty.diff(), // matched to position
     rate: rate.hz(20), // ≤20/s, matched to position
 });
 

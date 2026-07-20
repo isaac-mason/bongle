@@ -716,8 +716,8 @@ sync(PlayerStateTrait, 'score', {
     },
 });
 
-// `aimX` is written by the node's owning client (authority: 'owner'), and marked
-// dirty on a distance threshold so it only re-emits once it has moved 0.1 units.
+// `aimX` is written by the node's owning client (authority: 'owner') and capped to
+// 20 sends/sec; byte-diff (the default) keeps it off the wire while the value holds.
 sync(PlayerStateTrait, 'aimX', {
     schema: pack.float32(),
     pack: (t) => t.aimX,
@@ -725,7 +725,7 @@ sync(PlayerStateTrait, 'aimX', {
         t.aimX = value;
     },
     authority: 'owner',
-    dirty: dirty.distance(0.1),
+    rate: rate.hz(20),
 });
 ```
 

@@ -1,34 +1,36 @@
-// ── performance: translucent blocks ─────────────────────────────────
+// performance: translucent blocks.
 //
-// Worst-case stress world for the translucent GPU pipeline (global stable
-// radix sort + alpha-blended draw). Four stations, each targeting a different
-// cost centre:
+// A worst-case stress world for the translucent GPU pipeline (global stable
+// radix sort plus alpha-blended draw). Four stations, each targeting a
+// different cost centre:
 //
-//   A. SOLID CHECKER MONOLITH — 3D checkerboard of two alternating glass
-//      colours. CullType.SELF only culls same-type neighbours, so EVERY
-//      internal face survives on BOTH sides: size³ × 6 quads (48³ ≈ 660k),
-//      none greedy-mergeable (alternating textures), ~24k quads per section.
-//      Stresses: expand + radix N, coincident-interface tie-breaking at scale,
-//      fill-rate/overdraw (dozens of blended layers per pixel).
+//   A. Solid checker monolith. A 3D checkerboard of two alternating glass
+//      colours. CullType.SELF only culls same-type neighbours, so every
+//      internal face survives on both sides: size cubed times 6 quads (48
+//      cubed is about 660k), none greedy-mergeable because the textures
+//      alternate, about 24k quads per section. This stresses expand and
+//      radix N, coincident-interface tie-breaking at scale, and fill-rate
+//      overdraw with dozens of blended layers per pixel.
 //
-//   B. SPARSE LATTICE — glass at every other cell, air between. No coincident
-//      faces at all; every quad sits at a distinct depth: size³/2 × 6 quads.
-//      Stresses: pure sort ordering + blend churn without ties.
+//   B. Sparse lattice. Glass at every other cell with air between. No
+//      coincident faces at all; every quad sits at a distinct depth: size
+//      cubed over 2, times 6 quads. This stresses pure sort ordering and
+//      blend churn without ties.
 //
-//   C. OCEAN + GLASS FOREST — a broad two-level water pool with a grid of
+//   C. Ocean and glass forest. A broad two-level water pool with a grid of
 //      glass pillars standing in it. Big greedy-merged surface quads, a
-//      step-down riser seam, and the water|glass coincident-interface case
-//      (the historical flicker reproducer) at scale.
+//      step-down riser seam, and the water-to-glass coincident-interface
+//      case (the historical flicker reproducer) at scale.
 //
-//   D. NESTED SHELLS — concentric alternating-colour hollow shells: deep
+//   D. Nested shells. Concentric alternating-colour hollow shells: deep
 //      stacks of parallel translucent layers along every view ray.
 //
-// The CHURN trait (off by default) recolours random monolith cells every tick:
-// continuous remesh + translucent arena churn ⇒ the sort's arena-dirty gate
-// fires every frame even with a static camera. Crank it to profile the gated
-// path under sustained invalidation.
+// The churn trait (off by default) recolours random monolith cells every tick.
+// Continuous remesh plus translucent arena churn makes the sort's arena-dirty
+// gate fire every frame even with a static camera. Crank it to profile the
+// gated path under sustained invalidation.
 //
-// Size controls apply on room restart (generation runs in onInit).
+// Size controls apply on room restart, since generation runs in onInit.
 
 import {
     block,
@@ -52,16 +54,13 @@ import {
 } from 'bongle';
 import { blockSoundPresets, blocks } from 'bongle/kit';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 4 });
 
 const { stone: Stone, water: Water } = blocks;
 const stoneKey = Stone.defaultKey();
 
-// ── translucent stained glass (same recipe as examples/blocks) ──────
-// alpha-BLENDED cubes; CullType.SELF so only same-colour neighbours cull.
-
+// Translucent stained glass, the same recipe as examples/blocks. These are
+// alpha-blended cubes, and CullType.SELF so only same-colour neighbours cull.
 const stainedGlass = (id: string, r: number, g: number, b: number) => {
     const tex = blockTexture(id, {
         src: draw(
@@ -99,17 +98,14 @@ const blueKey = GlassBlue.defaultKey();
 const greenKey = GlassGreen.defaultKey();
 const amberKey = GlassAmber.defaultKey();
 
-// ── station layout (world XZ, spawn at the origin) ──────────────────
-//
-//   A monolith:  x ∈ [−size/2, size/2), z ∈ [40, 40+size)
-//   B lattice:   x ∈ [−size/2, size/2), z ∈ [−40−size, −40)
+// Station layout in world XZ, with spawn at the origin.
+//   A monolith:  x in [-size/2, size/2), z in [40, 40+size)
+//   B lattice:   x in [-size/2, size/2), z in [-40-size, -40)
 //   C ocean:     centred on x = +120
-//   D shells:    centred on x = −120
+//   D shells:    centred on x = -120
 
 const OCEAN_X = 120;
 const SHELLS_X = -120;
-
-// ── ground ──────────────────────────────────────────────────────────
 
 const GroundTrait = trait('ground', {
     /** half-extent of the central stone floor slab */
@@ -134,10 +130,9 @@ script(GroundTrait, 'generate', (ctx) => {
     });
 });
 
-// ── A: solid checker monolith ───────────────────────────────────────
-
+// A: solid checker monolith.
 const MonolithTrait = trait('monolith', {
-    /** cube edge length in blocks. quads ≈ size³ × 6 (48 ⇒ ~660k). */
+    /** cube edge length in blocks. quads are about size cubed times 6 (48 gives about 660k). */
     size: 48,
 });
 
@@ -165,10 +160,9 @@ script(MonolithTrait, 'generate', (ctx) => {
     });
 });
 
-// ── B: sparse lattice ───────────────────────────────────────────────
-
+// B: sparse lattice.
 const LatticeTrait = trait('lattice', {
-    /** cube edge length in blocks. quads ≈ size³/2 × 6 (48 ⇒ ~330k). */
+    /** cube edge length in blocks. quads are about size cubed over 2, times 6 (48 gives about 330k). */
     size: 48,
 });
 
@@ -198,14 +192,13 @@ script(LatticeTrait, 'generate', (ctx) => {
     });
 });
 
-// ── C: ocean + glass forest ─────────────────────────────────────────
-
+// C: ocean and glass forest.
 const OceanTrait = trait('ocean', {
-    /** half-extent of the pool on X/Z (final span 2×half) */
+    /** half-extent of the pool on X/Z, so the final span is 2*half */
     half: 48,
     /** water depth in blocks */
     depth: 4,
-    /** glass pillar grid pitch (blocks); 0 disables the forest */
+    /** glass pillar grid pitch in blocks; 0 disables the forest */
     pillarPitch: 6,
 });
 
@@ -236,8 +229,8 @@ script(OceanTrait, 'generate', (ctx) => {
         for (let x = -half; x < half; x++) {
             for (let z = -half; z < half; z++) {
                 const wx = OCEAN_X + x;
-                // two surface levels split down the middle → a step-down riser
-                // seam across the whole pool; full-height water below.
+                // Two surface levels split down the middle give a step-down
+                // riser seam across the whole pool, with full-height water below.
                 const surface = z < 0 ? Water.level(8) : Water.level(4);
                 for (let y = 1; y <= depth; y++) {
                     setBlock(ctx.voxels, wx, y, z, y === depth ? surface : Water.level(8));
@@ -245,8 +238,8 @@ script(OceanTrait, 'generate', (ctx) => {
             }
         }
         if (pitch > 0) {
-            // glass pillars standing through the water: submerged coincident
-            // water|glass interfaces + pillars breaking the merged surface.
+            // Glass pillars standing through the water: submerged coincident
+            // water-to-glass interfaces, and pillars breaking the merged surface.
             for (let x = -half + 2; x < half - 1; x += pitch) {
                 for (let z = -half + 2; z < half - 1; z += pitch) {
                     for (let y = 1; y <= depth + 2; y++) {
@@ -258,10 +251,9 @@ script(OceanTrait, 'generate', (ctx) => {
     });
 });
 
-// ── D: nested shells ────────────────────────────────────────────────
-
+// D: nested shells.
 const ShellsTrait = trait('shells', {
-    /** number of concentric hollow shells (radii 2, 4, 6, …) */
+    /** number of concentric hollow shells, with radii 2, 4, 6, and so on */
     count: 10,
 });
 
@@ -297,12 +289,11 @@ script(ShellsTrait, 'generate', (ctx) => {
     });
 });
 
-// ── churn: continuous translucent invalidation ──────────────────────
-
+// Churn: continuous translucent invalidation.
 const ChurnTrait = trait('churn', {
-    /** monolith cells recoloured per tick (0 = off). each swap dirties its
-     *  chunk → remesh → translucent arena churn → the sort's arena-dirty gate
-     *  fires every frame even with a static camera. */
+    /** monolith cells recoloured per tick (0 = off). Each swap dirties its
+     *  chunk, forcing a remesh and translucent arena churn, so the sort's
+     *  arena-dirty gate fires every frame even with a static camera. */
     swapsPerTick: 0,
 });
 
@@ -320,8 +311,8 @@ script(ChurnTrait, 'tick', (ctx) => {
     onTick(ctx, () => {
         const k = ctx.trait.swapsPerTick;
         if (k <= 0) return;
-        // recolour random cells inside the monolith footprint (keeps the quad
-        // count roughly stable while forcing remesh + arena realloc).
+        // Recolour random cells inside the monolith footprint. This keeps the
+        // quad count roughly stable while forcing a remesh and arena realloc.
         const size = 48;
         const half = size >> 1;
         for (let i = 0; i < k; i++) {
@@ -332,8 +323,6 @@ script(ChurnTrait, 'tick', (ctx) => {
         }
     });
 });
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 

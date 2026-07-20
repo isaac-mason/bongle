@@ -296,6 +296,12 @@ export const TRANSFORM_DIRTY_INTERPOLATED_TRS;
 export const TRANSFORM_DIRTY_INTERPOLATED_MATRIX;
 ```
 
+#### `TRANSFORM_DIRTY_WORLD_CHUNK`
+
+```ts
+export const TRANSFORM_DIRTY_WORLD_CHUNK;
+```
+
 #### `TRANSFORM_DIRTY_ALL`
 
 ```ts
@@ -382,8 +388,7 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
 #### `samplePositionSnapshot`
 
 ```ts
-/** sample the interpolated local position at `renderTime` into `out`. `frac > 1`
- *  (dry buffer) extrapolates the last-known velocity, the lerp form handles it as-is. */
+/** sample the interpolated local position at `renderTime` into `out`. */
 export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void;
 ```
 
@@ -585,6 +590,19 @@ export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec
 ```ts
 /** get world-space position, decomposing from worldMatrix if needed. */
 export function getWorldPosition(t: TransformTrait): Vec3;
+```
+
+#### `getWorldChunk`
+
+```ts
+/**
+ * get the integer chunk coord (cx,cy,cz) containing this transform's world
+ * position. lazy: recomputes from worldPosition only when the WORLD_CHUNK bit
+ * is set (every world-transform invalidation re-flags it), so a stationary
+ * transform computes it once and a never-queried transform never computes it
+ * at all. the returned Vec3 is the cached instance, do not mutate.
+ */
+export function getWorldChunk(t: TransformTrait): Vec3;
 ```
 
 #### `getWorldQuaternion`
@@ -905,15 +923,12 @@ Define traits and the schemas behind editor controls (`prop`) and network packin
 
 ```ts
 /**
- * `dirty` policy constructors — what counts as a change worth sending. the metric
- * variants bake their metric so it can't be mismatched with the value, and read as
- * English at the call site: `dirty: dirty.distance(0.05)`.
+ * `dirty` policy constructors — what counts as a change worth sending. byte-diff is
+ * the default; producers that don't reliably byte-change (set-once fields) opt into
+ * `explicit` and mark themselves dirty via `SyncHandle.dirty()`.
  */
 export const dirty: {
-    distance: (threshold: number) => DirtyThreshold;
-    angle: (threshold: number) => DirtyThreshold;
-    scalar: (threshold: number) => DirtyThreshold;
-    onChange: () => "onChange";
+    diff: () => "diff";
     explicit: () => "explicit";
 };
 ```
@@ -932,22 +947,6 @@ export const rate: {
 };
 ```
 
-#### `syncMetric`
-
-```ts
-/**
- * change metrics for `DirtyThreshold`. each receives the previously-emitted value
- * and the current one (the field's own value, not bytes), returning a magnitude
- * the diff compares against the rate's `threshold`. body-agnostic: a node moved by
- * a rigid body, an AABB body, a script, or an animation all measure the same way.
- */
-export const syncMetric: {
-    distance(a: ArrayLike<number>, b: ArrayLike<number>): number;
-    angle(a: ArrayLike<number>, b: ArrayLike<number>): number;
-    scalar(a: number, b: number): number;
-};
-```
-
 #### `ControlDef`
 
 ```ts
@@ -961,26 +960,11 @@ export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBo
 /**
  * DIRTINESS policy: what counts as a change worth sending. orthogonal to `rate`
  * (how often) — nothing un-dirty ever sends, regardless of rate.
- * - 'onChange' (default), dirty whenever the packed bytes differ.
+ * - 'diff' (default), dirty whenever the packed bytes differ.
  * - 'explicit', never auto-dirty; only `SyncHandle.dirty()` marks it (set-once
  *   fields whose value the byte-diff can't be trusted to catch cheaply).
- * - DirtyThreshold, dirty only on a significant value change (movement/rotation/…).
  */
-export type DirtyConfig = 'onChange' | 'explicit' | DirtyThreshold;
-```
-
-#### `DirtyThreshold`
-
-```ts
-/** threshold dirtiness: the value counts as changed only once `metric(previous,
- *  current)` reaches `threshold` since the last emit. sub-threshold changes
- *  accumulate against the last emitted value, so slow drift still reconciles.
- *  body-agnostic, it reads the field's own value, so it works for any field and any
- *  driver (rigid body, AABB body, script, animation). */
-export type DirtyThreshold = {
-    threshold: number;
-    metric: SyncMetric;
-};
+export type DirtyConfig = 'diff' | 'explicit';
 ```
 
 #### `RateConfig`
@@ -1019,15 +1003,6 @@ export type SyncHandle<T extends TraitBase = TraitBase> = {
     readonly index: number;
     dirty(instance: T): void;
 };
-```
-
-#### `SyncMetric`
-
-```ts
-/** measures how much a sync value changed, receives the previously-emitted value
- *  and the current one, returns a magnitude compared against a `DirtyThreshold`'s
- *  `threshold`. `dirty.{distance,angle,scalar}` cover the common shapes. */
-export type SyncMetric = (previous: any, current: any) => number;
 ```
 
 #### `TraitBase`

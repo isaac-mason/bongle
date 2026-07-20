@@ -23,11 +23,7 @@ import { blocks } from 'bongle/kit';
 
 const stoneKey = blocks.stone.defaultKey();
 
-// ── models ──────────────────────────────────────────────────────────
-
 const SphereModel = model('sphere', { src: 'assets/models/sphere.gltf' });
-
-// ── terrain ─────────────────────────────────────────────────────────
 
 const TerrainTrait = trait('terrain');
 
@@ -46,8 +42,6 @@ script(TerrainTrait, 'generate', (ctx) => {
         }
     });
 });
-
-// ── example ─────────────────────────────────────────────────────────
 
 const ExampleTrait = trait('example', {
     /** how many bodies are alive */
@@ -93,10 +87,10 @@ script(ExampleTrait, 'pool', (ctx) => {
     const randJitter = () => (Math.random() - 0.5) * SPAWN_JITTER;
     const randVel = () => (Math.random() - 0.5) * SPAWN_LATERAL_V;
 
-    // teleport pose + initial velocity. setting `t.linearVelocity` in the same
-    // tick as the position change tells physics.ts to apply it after the
-    // teleport-zero — random scatter keeps the pile from collapsing into
-    // a single stack and makes broadphase work meaningful.
+    // Teleport pose plus initial velocity. Setting `t.linearVelocity` in the
+    // same tick as the position change tells physics.ts to apply it after the
+    // teleport-zero. Random scatter keeps the pile from collapsing into a
+    // single stack and keeps the broadphase work meaningful.
     const dropAt = (p: Pooled, i: number) => {
         setPosition(p.transform, [randJitter(), SPAWN_Y + (i % 16) * 0.6, randJitter()]);
         p.body.linearVelocity = [randVel(), 0, randVel()];
@@ -142,8 +136,6 @@ script(ExampleTrait, 'pool', (ctx) => {
     });
 });
 
-// ── gameplay ────────────────────────────────────────────────────────
-
 const GameplayTrait = trait('gameplay');
 
 script(GameplayTrait, 'session', (ctx) => {
@@ -152,6 +144,5 @@ script(GameplayTrait, 'session', (ctx) => {
     onJoin(ctx, ({ playerNode }) => {
         const transform = getTrait(playerNode, TransformTrait)!;
         setPosition(transform, [0, 5, 0]);
-
     });
 });

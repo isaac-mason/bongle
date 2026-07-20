@@ -74,27 +74,14 @@ export type ControlBody<T extends TraitBase = TraitBase, V = unknown> = {
 /** stored ControlDef. body + `{ traitId, controlId }`. */
 export type ControlDef<T extends TraitBase = TraitBase, V = unknown> = ControlBody<T, V> & TraitChildStamp<'controlId'>;
 
-/** measures how much a sync value changed, receives the previously-emitted value
- *  and the current one, returns a magnitude compared against a `DirtyThreshold`'s
- *  `threshold`. `dirty.{distance,angle,scalar}` cover the common shapes. */
-export type SyncMetric = (previous: any, current: any) => number;
-
-/** threshold dirtiness: the value counts as changed only once `metric(previous,
- *  current)` reaches `threshold` since the last emit. sub-threshold changes
- *  accumulate against the last emitted value, so slow drift still reconciles.
- *  body-agnostic, it reads the field's own value, so it works for any field and any
- *  driver (rigid body, AABB body, script, animation). */
-export type DirtyThreshold = { threshold: number; metric: SyncMetric };
-
 /**
  * DIRTINESS policy: what counts as a change worth sending. orthogonal to `rate`
  * (how often) — nothing un-dirty ever sends, regardless of rate.
- * - 'onChange' (default), dirty whenever the packed bytes differ.
+ * - 'diff' (default), dirty whenever the packed bytes differ.
  * - 'explicit', never auto-dirty; only `SyncHandle.dirty()` marks it (set-once
  *   fields whose value the byte-diff can't be trusted to catch cheaply).
- * - DirtyThreshold, dirty only on a significant value change (movement/rotation/…).
  */
-export type DirtyConfig = 'onChange' | 'explicit' | DirtyThreshold;
+export type DirtyConfig = 'diff' | 'explicit';
 
 /**
  * RATE policy: the maximum send cadence for a dirty value. orthogonal to `dirty`.
@@ -109,7 +96,7 @@ export type SyncBody<T extends TraitBase = TraitBase, S = unknown> = {
     schema: pack.Schema;
     pack: (instance: T) => S;
     unpack: (value: S, instance: T) => void;
-    /** what counts as a change worth sending. default 'onChange' (byte-diff). */
+    /** what counts as a change worth sending. default 'diff' (byte-diff). */
     dirty?: DirtyConfig;
     /** max send cadence for a dirty value. default 'realtime'. */
     rate?: RateConfig;
@@ -146,8 +133,6 @@ export type TraitSyncState = {
     dirty: Uint32Array;
     /** [i] = last-emitted serialized bytes for slice i (the byte-diff snapshot). */
     bytes: Array<Uint8Array | undefined>;
-    /** [i] = last-emitted value for slice i, DirtyThreshold slices only. */
-    values: unknown[];
     /** [i] = monotonic replication version for slice i. f64 because the version
      *  counter grows unbounded and must not wrap an int32. */
     versions: Float64Array;
@@ -445,13 +430,12 @@ export function buildTraitInstance(def: TraitDef, overrides?: Record<string, unk
     }
 
     // per-instance sync working-state: one dirty bit per slice (Uint32 words,
-    // realistic counts < 32 fit a single word) + the diff snapshot arrays
-    // (bytes/values), indexed by slice.
+    // realistic counts < 32 fit a single word) + the byte-diff snapshot array
+    // (bytes), indexed by slice.
     if (def.sync.length > 0) {
         instance._sync = {
             dirty: new Uint32Array(Math.ceil(def.sync.length / 32)),
             bytes: new Array(def.sync.length),
-            values: new Array(def.sync.length),
             versions: new Float64Array(def.sync.length),
             traitVersion: 0,
         };

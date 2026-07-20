@@ -19,8 +19,7 @@ export function Presence() {
     if (status !== 'open') return null;
 
     return (
-        <div className="flex flex-col items-center gap-1.5 pt-1.5">
-            <div className="h-px w-6 bg-border" />
+        <div className="flex flex-col items-center gap-1.5">
             {participants.length === 0 ? (
                 // no guests yet: a single "live" beacon rather than tiny wrapped
                 // text (the readable status lives in the editing window). The dot

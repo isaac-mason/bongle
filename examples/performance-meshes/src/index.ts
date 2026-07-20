@@ -17,13 +17,9 @@ import {
 import { models } from 'bongle/kit';
 import { quat } from 'mathcat';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 4 });
 
 const SparkModel = models.spark;
-
-// ── meshes ──────────────────────────────────────────────────────────
 
 const MeshesTrait = trait('meshes');
 

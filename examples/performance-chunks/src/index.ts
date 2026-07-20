@@ -17,16 +17,13 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 4 });
 
 const stoneKey = blocks.stone.defaultKey();
 
-// ── ground (flat baseline so the player has somewhere to stand) ─────
-
+// Flat ground baseline so the player has somewhere to stand.
 const GroundTrait = trait('ground', {
-    /** half-extent of the floor slab (final width is 2*half+1) */
+    /** half-extent of the floor slab, so the final width is 2*half+1 */
     half: 64,
 });
 
@@ -43,10 +40,9 @@ script(GroundTrait, 'generate', (ctx) => {
     });
 });
 
-// ── storm: random toggles spread across many chunks every tick ──────
-
+// Storm: random voxel toggles spread across many chunks every tick.
 const StormTrait = trait('storm', {
-    /** how many voxel toggles per tick (flips air ↔ stone) */
+    /** how many voxel toggles per tick, each flipping air to stone or back */
     togglesPerTick: 200,
     /** half-extent on X/Z of the toggle volume (chunk = 16, so this covers many chunks) */
     half: 64,
@@ -103,8 +99,6 @@ script(StormTrait, 'tick', (ctx) => {
         }
     });
 });
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 

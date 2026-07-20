@@ -78,10 +78,9 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: stri
             for (let i = 0; i < codecs.length; i++) {
                 if (def.sync[i].authority !== 'owner') continue;
 
-                // shared cold path: byte-diff or DirtyThreshold metric. the client
-                // uploads a first-seen owned slice (the server needs the initial
-                // value), so emitOnFirstSeen = true.
-                if (diffSync(def.sync[i], codecs[i], instance, node, i, sync, true)) {
+                // byte-diff. the client uploads a first-seen owned slice (the server
+                // needs the initial value), so emitOnFirstSeen = true.
+                if (diffSync(codecs[i], instance, node, i, sync, true)) {
                     changedFields.push({ index: i, data: sync.bytes[i]! });
                 }
             }
@@ -108,6 +107,5 @@ function resetOwnerSnapshot(node: Node): void {
         const sync = instance._sync;
         if (!sync) continue;
         sync.bytes.fill(undefined);
-        sync.values.fill(undefined);
     }
 }

@@ -1,11 +1,11 @@
 // Demo: persistent player progress backed by bongle's storage API.
 //
-//   userStorage  → each player's lifetime spark count (private)
-//   projectStorage  → all-time project-wide spark count (shared)
+//   userStorage      each player's lifetime spark count (private)
+//   projectStorage   all-time project-wide spark count (shared)
 //
-// Walk over a spark to collect it. Both counters CAS-increment with a
-// small retry budget; the spark hides for 5s then respawns. On join,
-// the server logs your persisted score and the global total.
+// Walk over a spark to collect it. Both counters CAS-increment with a small
+// retry budget, and the spark hides briefly then respawns. On join the server
+// logs your persisted score and the global total.
 
 import {
     addChild,
@@ -43,8 +43,6 @@ import {
 } from 'bongle';
 import { blocks, models } from 'bongle/kit';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 4 });
 
 const Grass = blocks.grass;
@@ -52,16 +50,11 @@ const SparkModel = models.spark;
 
 const CollectableTrait = trait('collectable', {}, { persist: false });
 
-// ── hud sync commands ───────────────────────────────────────────────
-//
-// score is private (sent only to the matching client); total is shared
-// (broadcast to everyone whenever it changes).
-
+// HUD sync commands. Score is private, sent only to the matching client; total
+// is shared, broadcast to everyone whenever it changes.
 const ScoreUpdate = command('persistent_data.score', SERVER_TO_CLIENT, pack.object({ score: pack.varuint() }));
 
 const TotalUpdate = command('persistent_data.total', SERVER_TO_CLIENT, pack.object({ total: pack.varuint() }));
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 
@@ -152,7 +145,7 @@ script(
                     'pointer-events: none',
                     'white-space: pre',
                 ].join('; ');
-                hud.textContent = 'score: —\ntotal: —';
+                hud.textContent = 'score: -\ntotal: -';
                 viewport.appendChild(hud);
 
                 let score = 0;
@@ -226,10 +219,8 @@ script(
     },
 );
 
-// ── storage helpers ─────────────────────────────────────────────────
-
 async function greetPlayer(ctx: ScriptContext, client: ClientId, userId: string, username: string): Promise<void> {
-    log(ctx, `reading persisted state for ${username}…`);
+    log(ctx, `reading persisted state for ${username}...`);
     const [scoreEntry, totalEntry] = await Promise.all([
         userStorage.get(ctx, userId, 'score'),
         projectStorage.get(ctx, 'total_sparks'),
@@ -246,9 +237,9 @@ async function greetPlayer(ctx: ScriptContext, client: ClientId, userId: string,
 }
 
 async function onCollect(ctx: ScriptContext, client: ClientId, userId: string, username: string): Promise<void> {
-    log(ctx, `${username} collected a spark — persisting…`);
+    log(ctx, `${username} collected a spark, persisting...`);
     const [score, total] = await Promise.all([casIncrementUser(ctx, userId, 'score'), casIncrementGame(ctx, 'total_sparks')]);
-    log(ctx, `+1 ${username} — score: ${score} | total sparks ever: ${total}`);
+    log(ctx, `+1 ${username}, score: ${score} | total sparks ever: ${total}`);
     // private update for the collector; global update for everyone.
     send(ctx, ScoreUpdate, { score }, client);
     broadcast(ctx, TotalUpdate, { total });
@@ -263,7 +254,7 @@ async function casIncrementUser(ctx: ScriptContext, userId: string, key: string)
         if (result.code !== 'version_conflict') {
             throw new Error(`userStorage.set failed: ${result.code}`);
         }
-        warn(ctx, `CAS conflict on userStorage[${userId}, ${key}] — retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
+        warn(ctx, `CAS conflict on userStorage[${userId}, ${key}], retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
     }
     throw new Error('CAS retry budget exceeded for userStorage');
 }
@@ -277,7 +268,7 @@ async function casIncrementGame(ctx: ScriptContext, key: string): Promise<number
         if (result.code !== 'version_conflict') {
             throw new Error(`projectStorage.set failed: ${result.code}`);
         }
-        warn(ctx, `CAS conflict on projectStorage[${key}] — retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
+        warn(ctx, `CAS conflict on projectStorage[${key}], retrying (attempt ${attempt + 1}/${CAS_RETRIES})`);
     }
     throw new Error('CAS retry budget exceeded for projectStorage');
 }

@@ -50,7 +50,15 @@ export function MultiplayerMenu() {
     const participants = useMultiplayer((s) => s.participants);
     const error = useMultiplayer((s) => s.error);
     const [open, setOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
+
+    // clear the transient "Copied" tick after a moment.
+    useEffect(() => {
+        if (!copied) return;
+        const t = setTimeout(() => setCopied(false), 1800);
+        return () => clearTimeout(t);
+    }, [copied]);
 
     useEffect(() => {
         if (!open) return;
@@ -111,8 +119,12 @@ export function MultiplayerMenu() {
                                     value={shareUrl}
                                     onFocus={(e) => e.currentTarget.select()}
                                 />
-                                <button type="button" className={BTN} onClick={() => void navigator.clipboard?.writeText(shareUrl)}>
-                                    Copy invite link
+                                <button
+                                    type="button"
+                                    className={BTN}
+                                    onClick={() => void navigator.clipboard?.writeText(shareUrl).then(() => setCopied(true))}
+                                >
+                                    {copied ? 'Copied ✓' : 'Copy invite link'}
                                 </button>
                                 <button type="button" className={STOP_BTN} onClick={() => useMultiplayer.getState().close()}>
                                     Stop multiplayer

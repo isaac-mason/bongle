@@ -54,7 +54,6 @@ export default defineConfig({
                 // break base-avatar's player.glb ref → builtin:avatar fails to load).
                 'avatar-rig': entry('src/core/avatar/rig.ts'),
                 kit: entry('src/kit/index.ts'),
-                icons: entry('src/icons/index.tsx'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry
             },
@@ -108,7 +107,7 @@ export default defineConfig({
                         { name: 'builtins', test: /\/lib\/src\/builtins\// },
                         { name: 'client', test: /\/lib\/src\/client\// },
                         { name: 'editor', test: /\/lib\/src\/editor\// },
-                        { name: 'icons', test: /\/lib\/src\/icons\// },
+                        { name: 'icons', test: /\/lib\/icons\// },
                         { name: 'migrations', test: /\/lib\/src\/migrations\// },
                         { name: 'render', test: /\/lib\/src\/render\// },
                         { name: 'server', test: /\/lib\/src\/server\// },

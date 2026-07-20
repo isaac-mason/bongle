@@ -1,21 +1,19 @@
-/**
- * audio example — showcases the script-facing audio API:
- *
- *   1) `playMono`            non-positional one-shot (UI ding, music)
- *   2) `playMono` + detune   pitch-shift a clip with a single opt
- *   3) `playOnNode` + loop   spatial source that follows a moving node;
- *                            panner refreshes every frame from the node's
- *                            world transform
- *   4) PlaybackHandle        imperative handle for setVolume / stop(fade)
- *
- * No user-supplied audio assets — every clip comes from `sounds.*` in
- * `bongle/kit` (Minetest CC BY-SA 3.0). Same for the Stone block
- * and Spark model used as the orbiter visual.
- *
- * Browser tab must be focused + clicked once before audio plays —
- * AudioContext requires a user gesture before it can output anything.
- * The runtime resumes it on the first play call.
- */
+// audio example: the script-facing audio API.
+//
+//   1. playMono            non-positional one-shot, like a UI ding or music.
+//   2. playMono + detune   pitch-shift a clip with a single option.
+//   3. playOnNode + loop   spatial source that follows a moving node; the
+//                          panner refreshes every frame from the node's
+//                          world transform.
+//   4. PlaybackHandle      imperative handle for setVolume and stop with fade.
+//
+// Every clip comes from sounds.* in bongle/kit, so the example ships no audio
+// assets of its own. Same for the Stone block and Spark model used as the
+// orbiter visual.
+//
+// The browser tab must be focused and clicked once before audio plays, because
+// AudioContext needs a user gesture before it can output anything. The runtime
+// resumes it on the first play call.
 
 import {
     addChild,
@@ -49,20 +47,13 @@ import { blocks, models, sounds } from 'bongle/kit';
 
 matchmaking({ maxPlayers: 1 });
 
-// ── terrain ─────────────────────────────────────────────────────────
-// minimal stone floor so the character has somewhere to stand. Stone +
-// Spark come from bongle/kit so the example doesn't ship its own
-// texture/model assets.
-
-// ── trait + server bootstrap ────────────────────────────────────────
-
 const ExampleTrait = trait('example');
 
 script(ExampleTrait, 'spawn', (ctx) => {
     if (!env.server) return;
 
     onInit(ctx, () => {
-        // 32×32 stone slab around spawn — wide enough to walk away from the
+        // 32 by 32 stone slab around spawn, wide enough to walk away from the
         // orbiter and hear the panning shift.
         const half = 16;
         for (let wx = -half; wx <= half; wx++) {
@@ -79,22 +70,20 @@ script(ExampleTrait, 'spawn', (ctx) => {
         const t = getTrait(playerNode, TransformTrait)!;
         setPosition(t, [0, 1, 0]);
         const cc = getTrait(playerNode, CharacterControllerTrait)!;
-        // theta=π → face +Z so the orbiter at (0,2,4) is straight ahead.
+        // A look angle of PI faces +Z, so the orbiter at (0, 2, 4) is straight ahead.
         setCharacterLook(cc, Math.PI);
     });
 });
 
-// ── client demo ─────────────────────────────────────────────────────
-
-/** cycles through detune values (in cents) on each press of key `2`. */
+/** cycles through detune values, in cents, on each press of key `2`. */
 const DETUNE_STEPS = [0, 700, 1200, -700, -1200] as const;
 
-/** orbit parameters for the moving spatial source (key `3`). */
+/** orbit parameters for the moving spatial source, driven by key `3`. */
 const ORBIT_RADIUS = 6;
-const ORBIT_SPEED = 0.6; // rad/sec
+const ORBIT_SPEED = 0.6; // radians per second
 const ORBIT_Y = 2;
 
-/** fixed-position spatial source — sits at scene origin, slightly elevated. */
+/** fixed-position spatial source. Sits at the scene origin, slightly elevated. */
 const STATIC_POS: [number, number, number] = [0, 3, 0];
 
 script(ExampleTrait, 'demo', (ctx) => {
@@ -108,11 +97,11 @@ script(ExampleTrait, 'demo', (ctx) => {
     let staticHandle: PlaybackHandle | null = null;
 
     onInit(ctx, () => {
-        // moving spatial source — `playOnNode` ties the panner to this
-        // node's interpolated world transform, refreshed every frame by
-        // the audio coordinator. clone the spark gltf so the source has
-        // a visual you can track as it orbits. attach as a child of the
-        // root so it shares the scene's lifecycle but not a player's.
+        // Moving spatial source. playOnNode ties the panner to this node's
+        // interpolated world transform, refreshed every frame by the audio
+        // coordinator. Clone the spark gltf so the source has a visual you can
+        // track as it orbits, and attach it as a child of the root so it shares
+        // the scene's lifecycle but not a player's.
         orbiterNode = cloneModel(models.spark.scene);
         orbiterNode.name = 'orbiter';
         orbiterNode.persist = false;
@@ -120,20 +109,19 @@ script(ExampleTrait, 'demo', (ctx) => {
         setPosition(t, [ORBIT_RADIUS, ORBIT_Y, 0]);
         addChild(ctx.node, orbiterNode);
 
-        // looped, spatial, mid-volume so it doesn't drown out the
-        // one-shots. the cool-lava clip is a short tonal loop — fine
-        // for demo purposes even though it wasn't designed to loop.
+        // Looped, spatial, mid-volume so it doesn't drown out the one-shots.
+        // The cool-lava clip is a short tonal loop, fine for a demo even though
+        // it wasn't designed to loop.
         orbitHandle = playOnNode(ctx, sounds.coolLava1, orbiterNode, {
             loop: true,
             volume: 0.4,
             falloff: { ref: 2, max: 30, model: 'inverse', rolloff: 1.2 },
         });
 
-        // stationary spatial source — `playAt` snapshots the position
-        // once; the panner doesn't refresh, so walking around it produces
-        // the inverse pan/attenuation of the orbiter (you move, source
-        // stays put). different clip so it's easy to distinguish from
-        // the orbiting one in the mix.
+        // Stationary spatial source. playAt snapshots the position once and the
+        // panner never refreshes, so walking around it produces the inverse pan
+        // and attenuation of the orbiter: you move, the source stays put. A
+        // different clip makes it easy to tell apart from the orbiting one.
         staticHandle = playAt(ctx, sounds.furnaceActive, STATIC_POS, {
             loop: true,
             volume: 0.5,
@@ -144,9 +132,9 @@ script(ExampleTrait, 'demo', (ctx) => {
     });
 
     onDispose(ctx, () => {
-        // stop the loops explicitly — the audio runtime's per-frame reaper
-        // would catch the node removal, but being explicit means no clip
-        // tail hangs around past teardown.
+        // Stop the loops explicitly. The audio runtime's per-frame reaper would
+        // catch the node removal, but being explicit means no clip tail hangs
+        // around past teardown.
         orbitHandle?.stop();
         orbitHandle = null;
         staticHandle?.stop();
@@ -154,8 +142,8 @@ script(ExampleTrait, 'demo', (ctx) => {
     });
 
     onFrame(ctx, ({ delta }) => {
-        // animate the orbiter — panner position refreshes from the
-        // node's world transform every frame, so this drives the audio.
+        // Animate the orbiter. The panner position refreshes from the node's
+        // world transform every frame, so this drives the audio.
         if (orbiterNode) {
             orbitTime += delta;
             const x = Math.cos(orbitTime * ORBIT_SPEED) * ORBIT_RADIUS;
@@ -167,32 +155,30 @@ script(ExampleTrait, 'demo', (ctx) => {
         const mk = ctx.client?.input?.mouseKeyboard;
         if (!mk) return;
 
-        // ── 1: non-positional one-shot ──────────────────────────────
-        // playMono goes straight to master gain, no panner. UI feel.
+        // 1: non-positional one-shot. playMono goes straight to master gain
+        // with no panner.
         if (isKeyJustDown(mk, 'Digit1')) {
             playMono(ctx, sounds.chestOpen);
         }
 
-        // ── 2: pitch-shift via detune ───────────────────────────────
-        // detune is in cents; 100c = 1 semitone, 1200c = octave. cycling
-        // makes the same source clip read very differently.
+        // 2: pitch-shift via detune. Detune is in cents: 100 is one semitone,
+        // 1200 is an octave. Cycling makes the same clip read very differently.
         if (isKeyJustDown(mk, 'Digit2')) {
             const cents = DETUNE_STEPS[detuneIdx]!;
             detuneIdx = (detuneIdx + 1) % DETUNE_STEPS.length;
             playMono(ctx, sounds.digCracky1, { detune: cents });
         }
 
-        // ── 3: mute/unmute the looped spatial source ────────────────
-        // setVolume on a captured handle — instant, no re-trigger.
+        // 3: mute or unmute the looped spatial source. setVolume on a captured
+        // handle is instant, with no re-trigger.
         if (isKeyJustDown(mk, 'Digit3')) {
             orbitMuted = !orbitMuted;
             orbitHandle?.setVolume(orbitMuted ? 0 : 0.4);
         }
 
-        // ── 4: fade-stop + restart the orbiter loop ─────────────────
-        // stop({ fade }) ramps the gain to zero over `fade` seconds and
-        // releases the source. demonstrates handle ownership — once
-        // stopped, the old handle is inert and a fresh play is needed.
+        // 4: fade-stop and restart the orbiter loop. stop({ fade }) ramps the
+        // gain to zero over `fade` seconds and releases the source. Once
+        // stopped the old handle is inert, so a fresh play is needed.
         if (isKeyJustDown(mk, 'Digit4')) {
             if (orbitHandle?.isPlaying) {
                 orbitHandle.stop({ fade: 0.8 });
@@ -207,10 +193,8 @@ script(ExampleTrait, 'demo', (ctx) => {
     });
 });
 
-// ── HUD ─────────────────────────────────────────────────────────────
-// screen-anchored panel with the key bindings. HtmlTrait in `screen`
-// mode keeps it fixed in the corner regardless of camera movement.
-
+// Screen-anchored panel with the key bindings. HtmlTrait in `screen` mode keeps
+// it fixed in the corner regardless of camera movement.
 function showHud(ctx: ScriptContext): void {
     const node = createNode({ name: 'audio-hud', persist: false });
     setPosition(addTrait(node, TransformTrait), [0, 0, 0]);
@@ -239,7 +223,7 @@ function showHud(ctx: ScriptContext): void {
             <div><b>3</b> &nbsp; mute/unmute looped source</div>
             <div><b>4</b> &nbsp; fade-stop / restart orbit loop</div>
             <div style="margin-top:6px; opacity:0.6;">
-                spark = orbiting source · center @ y=3 = furnace loop<br/>
+                spark = orbiting source, center @ y=3 = furnace loop<br/>
                 walk around to hear panning + falloff
             </div>
         </div>

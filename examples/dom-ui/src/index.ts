@@ -1,14 +1,14 @@
-// dom-ui example — showcases the variants of the two UI traits:
-// HtmlTrait, CanvasTrait.
+// dom-ui example: the variants of the two UI traits, HtmlTrait and CanvasTrait.
 //
-// Editor-only: a single persistent runner trait on the scene root spawns
-// a grid of transient panels via `{ editor: true }` so they appear
-// straight in the scene editor preview. Each spawned node is
-// `persist: false` (transient — never baked into the .nodes.json).
+// This is editor-only. A single persistent runner trait on the scene root
+// spawns a grid of transient panels via `{ editor: true }` so they show up in
+// the scene editor preview. Each spawned node is `persist: false`, so it is
+// never baked into the .nodes.json.
 //
-// Layout (spread across ~20 world units wide):
-//   row y=6 — HtmlTrait    (screen / screen+distance / billboard / world / y-billboard / interactive)
-//   row y=0 — CanvasTrait  (billboard-animated / world-static / procedural-noise)
+// Layout, spread across about 20 world units wide:
+//   row y=6   HtmlTrait    screen, screen with distance, billboard, world,
+//                          y-billboard, interactive
+//   row y=0   CanvasTrait  billboard-animated, world-static, procedural-noise
 
 import {
     addChild,
@@ -34,11 +34,9 @@ import { blocks } from 'bongle/kit';
 matchmaking({ maxPlayers: 1 });
 scene('main');
 
-// scene's voxel palette references `kit:stone` — `use()` keeps the
-// declaration in the bundle so the registration fires at module-eval.
+// The scene's voxel palette references `kit:stone`. use() keeps the declaration
+// in the bundle so the registration fires at module-eval.
 use(blocks.stone);
-
-// ── runner ──────────────────────────────────────────────────────────
 
 const DomUiDemoTrait = trait('dom-ui-demo', {}, { persist: true });
 
@@ -52,7 +50,6 @@ script(
         const teardown: Array<() => void> = [];
 
         onInit(ctx, () => {
-            // HtmlTrait row
             spawnHtmlScreen(ctx, teardown);
             spawnHtmlScreenDistance(ctx, teardown);
             spawnHtmlBillboard(ctx, teardown);
@@ -60,7 +57,6 @@ script(
             spawnHtmlYBillboard(ctx, teardown);
             spawnHtmlInteractive(ctx, teardown);
 
-            // CanvasTrait row
             spawnCanvasBillboard(ctx, teardown);
             spawnCanvasWorld(ctx, teardown);
             spawnCanvasNoise(ctx, teardown);
@@ -72,8 +68,6 @@ script(
     },
     { editor: true },
 );
-
-// ── shared styling helpers ──────────────────────────────────────────
 
 const PANEL_BORDER = '2px solid #000';
 const PANEL_FONT = 'ui-monospace, monospace';
@@ -96,17 +90,16 @@ function panelHtml(title: string, subtitle: string, accent = '#fff'): string {
     `;
 }
 
-// ── HtmlTrait demos ─────────────────────────────────────────────────
-// `screen`-mode anchors to projected position; size is constant CSS
-// pixels (or scaled by distanceFactor). World/billboard/y-billboard use
-// 3D matrix3d transforms and scale by `worldScale`.
+// HtmlTrait `screen` mode anchors to the projected position and its size is a
+// constant number of CSS pixels, or scaled by distanceFactor. World, billboard
+// and y-billboard use 3D matrix3d transforms and scale by `worldScale`.
 
 function spawnHtmlScreen(ctx: ScriptContext, teardown: Array<() => void>): void {
     const node = createNode({ name: 'html-screen', persist: false });
     setPosition(addTrait(node, TransformTrait), [-10, 6, 0]);
     const html = addTrait(node, HtmlTrait, { mode: 'screen', center: true, pointerEvents: false });
     addChild(ctx.node, node);
-    html.element!.innerHTML = panelHtml('HtmlTrait', 'screen · constant size');
+    html.element!.innerHTML = panelHtml('HtmlTrait', 'screen, constant size');
     teardown.push(() => { html.element!.innerHTML = ''; });
 }
 
@@ -120,7 +113,7 @@ function spawnHtmlScreenDistance(ctx: ScriptContext, teardown: Array<() => void>
         distanceFactor: 8,
     });
     addChild(ctx.node, node);
-    html.element!.innerHTML = panelHtml('HtmlTrait', 'screen · distanceFactor=8', '#ffe');
+    html.element!.innerHTML = panelHtml('HtmlTrait', 'screen, distanceFactor=8', '#ffe');
     teardown.push(() => { html.element!.innerHTML = ''; });
 }
 
@@ -134,7 +127,7 @@ function spawnHtmlBillboard(ctx: ScriptContext, teardown: Array<() => void>): vo
         worldScale: 1 / 220,
     });
     addChild(ctx.node, node);
-    html.element!.innerHTML = panelHtml('HtmlTrait', 'billboard · faces camera', '#eef');
+    html.element!.innerHTML = panelHtml('HtmlTrait', 'billboard, faces camera', '#eef');
     teardown.push(() => { html.element!.innerHTML = ''; });
 }
 
@@ -148,7 +141,7 @@ function spawnHtmlWorld(ctx: ScriptContext, teardown: Array<() => void>): void {
         worldScale: 1 / 220,
     });
     addChild(ctx.node, node);
-    html.element!.innerHTML = panelHtml('HtmlTrait', 'world · 3D rotation', '#efe');
+    html.element!.innerHTML = panelHtml('HtmlTrait', 'world, 3D rotation', '#efe');
     teardown.push(() => { html.element!.innerHTML = ''; });
 }
 
@@ -162,7 +155,7 @@ function spawnHtmlYBillboard(ctx: ScriptContext, teardown: Array<() => void>): v
         worldScale: 1 / 220,
     });
     addChild(ctx.node, node);
-    html.element!.innerHTML = panelHtml('HtmlTrait', 'y-billboard · yaw only', '#fef');
+    html.element!.innerHTML = panelHtml('HtmlTrait', 'y-billboard, yaw only', '#fef');
     teardown.push(() => { html.element!.innerHTML = ''; });
 }
 
@@ -184,7 +177,7 @@ function spawnHtmlInteractive(ctx: ScriptContext, teardown: Array<() => void>): 
             text-align:center;
         ">
             <div style="font-weight:700;margin-bottom:4px;">HtmlTrait</div>
-            <div style="opacity:0.7;margin-bottom:6px;">interactive · DOM events</div>
+            <div style="opacity:0.7;margin-bottom:6px;">interactive, DOM events</div>
             <button data-role="btn" style="
                 font-family:${PANEL_FONT};
                 font-size:11px;
@@ -201,9 +194,8 @@ function spawnHtmlInteractive(ctx: ScriptContext, teardown: Array<() => void>): 
     teardown.push(() => { btn.removeEventListener('click', onClick); el.innerHTML = ''; });
 }
 
-// ── CanvasTrait demos ───────────────────────────────────────────────
-// Bring-your-own pixels — paint directly into the OffscreenCanvas. No
-// DOM, no rasterization.
+// CanvasTrait demos paint directly into the OffscreenCanvas: bring your own
+// pixels, with no DOM and no rasterization.
 
 function spawnCanvasBillboard(ctx: ScriptContext, teardown: Array<() => void>): void {
     const node = createNode({ name: 'canvas-billboard', persist: false });
@@ -233,7 +225,7 @@ function spawnCanvasBillboard(ctx: ScriptContext, teardown: Array<() => void>): 
         c.fillText('CanvasTrait', 10, 22);
         c.font = '11px ui-monospace, monospace';
         c.fillStyle = '#666';
-        c.fillText('billboard · sine wave', 10, 38);
+        c.fillText('billboard, sine wave', 10, 38);
 
         c.beginPath();
         c.strokeStyle = '#000';
@@ -265,7 +257,7 @@ function spawnCanvasWorld(ctx: ScriptContext, teardown: Array<() => void>): void
     const W = offscreen.width;
     const H = offscreen.height;
 
-    // Static gradient checker, painted once.
+    // Static gradient, painted once.
     const grad = c.createLinearGradient(0, 0, W, H);
     grad.addColorStop(0, '#fff');
     grad.addColorStop(1, '#ddd');
@@ -279,8 +271,8 @@ function spawnCanvasWorld(ctx: ScriptContext, teardown: Array<() => void>): void
     c.fillText('CanvasTrait', 10, 22);
     c.font = '11px ui-monospace, monospace';
     c.fillStyle = '#666';
-    c.fillText('world · static gradient', 10, 38);
-    // Tiny checker.
+    c.fillText('world, static gradient', 10, 38);
+
     const cell = 12;
     for (let y = 56; y < H - 8; y += cell) {
         for (let x = 10; x < W - 10; x += cell) {
@@ -309,7 +301,7 @@ function spawnCanvasNoise(ctx: ScriptContext, teardown: Array<() => void>): void
     let frame = 0;
 
     const off = onFrame(ctx, () => {
-        // Throttle — rewriting 256×128 RGBA each frame is cheap but the
+        // Throttle. Rewriting 256 by 128 RGBA each frame is cheap, but the
         // texture upload isn't free.
         frame++;
         if (frame % 4 !== 0) return;

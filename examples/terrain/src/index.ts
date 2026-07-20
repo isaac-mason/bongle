@@ -38,19 +38,15 @@ import {
 import { blocks, models } from 'bongle/kit';
 import { quat } from 'mathcat';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 4 });
-
-// ── models --────────────────────────────────────────────────────────
 
 const TestModel = model('testmodel', { src: 'assets/models/test.gltf' });
 
 const PenguinModel = models.peng;
 
-// play 'waddle' on every penguin instance in play mode. attached to the
-// cloned model root, which is the rig parent — animator walks descendants
-// and binds by node name.
+// Play 'waddle' on every penguin instance in play mode. Attached to the cloned
+// model root, which is the rig parent. The animator walks descendants and binds
+// by node name.
 const PenguinWaddleTrait = trait('penguin-waddle', {}, { persist: false });
 
 script(PenguinWaddleTrait, 'waddle', (ctx) => {
@@ -73,12 +69,8 @@ const PenguinModelPrefab = prefab('penguin_model', {
     },
 });
 
-// ── scenes ──────────────────────────────────────────────────────────
-
 const PenguinScene = scene('penguin');
 const HouseScene = scene('house');
-
-// ── prefabs ─────────────────────────────────────────────────────────
 
 const PenguinPrefab = prefab('penguin', {
     type: 'nodes',
@@ -98,26 +90,10 @@ const HousePrefab = prefab('house', {
     },
 });
 
-// const LevelTrait = trait('level', {
-//     level: field(0, { sync: pack.uint8(), prop: prop.number() }),
-// });
-
-// const TemplatedPenguinPrefab = prefab('conditional_penguin', {
-//     scene: 'penguin',
-//     template: {
-//         args: prop.object({
-//             level: prop.number(),
-//         }),
-//         apply: (ctx, { level }) => {},
-//     },
-// });
-
-// ── blocks ──────────────────────────────────────────────────────────
-// Stone/Dirt/Grass/Stairs/Flower/Leaves come from bongle/kit. The
-// cube-block Lava + Water variants and the four lamps are example-
-// specific (non-collidable cubes / unique animated textures / per-channel
-// light emission) and stay declared locally.
-
+// Stone, Dirt, Grass, Stairs, Flower and Leaves come from bongle/kit. The
+// cube-block Lava and Water variants and the four lamps are example-specific
+// (non-collidable cubes, unique animated textures, per-channel light emission)
+// and stay declared locally.
 const Stone = blocks.stone;
 const Dirt = blocks.dirt;
 const Grass = blocks.grass;
@@ -125,9 +101,9 @@ const StoneStairs = blocks.stoneStairs;
 const Flower = blocks.mushroomRed;
 const OakLeaves = blocks.oakLeaves;
 
-// animated texture demos — cycling through different existing pngs to
-// exercise the multi-frame pipeline end-to-end. semantically nonsense
-// but visually proves animation works.
+// Animated texture demos, cycling through different existing pngs to exercise
+// the multi-frame pipeline end to end. Semantically nonsense but visually
+// proves animation works.
 const LavaTex = blockTexture('lava', {
     src: [
         'assets/textures/stone_coal.png',
@@ -157,8 +133,6 @@ const Water = block('water', {
     collision: false,
 });
 
-// ── light-emitting blocks ───────────────────────────────────────────
-
 const Glowstone = block('glowstone', {
     model: () => ({ type: 'cube', textures: { all: { texture: WaterTex } } }),
     lightEmission: [15, 12, 8],
@@ -183,7 +157,7 @@ const GreenLamp = block('green_lamp', {
     emissive: true,
 });
 
-// ── voxel terrain (server-authoritative) ────────────────────────────
+// Voxel terrain, server-authoritative.
 
 // light toggle box constants
 const showcaseX = 2;

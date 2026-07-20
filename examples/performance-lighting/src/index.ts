@@ -18,10 +18,8 @@ import {
 } from 'bongle';
 import { blocks, blockTextures } from 'bongle/kit';
 
-// ── blocks ──────────────────────────────────────────────────────────
-// stone comes from the kit pack; the rgb emitters are example-local
-// because they only exist to drive the lighting stress demo.
-
+// Stone comes from the kit pack. The rgb emitters are example-local because
+// they only exist to drive the lighting stress demo.
 const RedEmitter = block('emitter_r', {
     model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
     lightEmission: [15, 0, 0],
@@ -39,8 +37,6 @@ const BlueEmitter = block('emitter_b', {
 
 const stoneKey = blocks.stone.defaultKey();
 const emitterKeys = [RedEmitter.defaultKey(), GreenEmitter.defaultKey(), BlueEmitter.defaultKey()];
-
-// ── lighting stress trait ───────────────────────────────────────────
 
 const LightingTrait = trait('lighting', {
     /** ticks between emitter swaps */
@@ -76,20 +72,20 @@ script(LightingTrait, 'cycle', (ctx) => {
 
     const voxels = ctx.voxels;
 
-    // interior dimensions (resolved at onInit so editor changes apply on next room start)
+    // Interior dimensions, resolved at onInit so editor changes apply on the next room start.
     let half = ctx.trait.half;
     let height = ctx.trait.height;
     const floorY = 0;
     let ceilingY = floorY + 1 + height;
 
-    // ── emitter cycle: a fixed grid of "lamp slots" inside the room.
-    // each tick step toggles the slot at cursor: place a colored emitter,
-    // then on its second visit clear back to air. r/g/b cycle by index.
+    // Emitter cycle: a fixed grid of "lamp slots" inside the room. Each tick
+    // step toggles the slot at the cursor, placing a colored emitter and
+    // clearing it back to air on the second visit. r/g/b cycle by index.
     const emitterSlots: Array<[number, number, number]> = [];
     let emitterCursor = 0;
     let emitterTick = 0;
 
-    // ── ceiling cycle: every slot in the ceiling, toggled in/out to let sky in.
+    // Ceiling cycle: every slot in the ceiling, toggled in and out to let sky in.
     const ceilingSlots: Array<[number, number, number]> = [];
     let ceilingCursor = 0;
     let ceilingTick = 0;
@@ -169,8 +165,6 @@ script(LightingTrait, 'cycle', (ctx) => {
         }
     });
 });
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 

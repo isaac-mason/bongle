@@ -5,17 +5,16 @@
 //   - server diff (discovery.ts), server-authority broadcast
 //   - client upload (replication.ts), owner-authority send
 //
-// keeping one implementation means the byte-diff and the DirtyThreshold metric
-// behave identically on both ends, no drift between mirror copies.
+// keeping one implementation means the byte-diff behaves identically on both ends,
+// no drift between mirror copies.
 //
-// the per-slice snapshot (last-emitted bytes + value) lives on the trait
-// instance's `_sync` arrays, indexed by slice, so this is array indexing, not
-// keyed side-map lookups.
+// the per-slice snapshot (last-emitted bytes) lives on the trait instance's `_sync`
+// arrays, indexed by slice, so this is array indexing, not keyed side-map lookups.
 
 import { bytesEqualPrefix } from '../../utils/bytes';
 import type { Node } from '../scene-tree';
 import type { SyncCodec } from '../packcat-bridge';
-import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
+import type { TraitBase, TraitSyncState } from '../traits';
 
 // reusable scratch for the byte-diff path. `packInto` writes here instead of
 // allocating a fresh Uint8Array per slice per tick, we only copy out (alloc)
@@ -23,22 +22,6 @@ import type { SyncDef, TraitBase, TraitSyncState } from '../traits';
 // stays put. the diff is sequential + single-threaded, so one shared buffer is
 // safe across every slice.
 let scratch = new Uint8Array(256);
-
-/**
- * snapshot a DirtyThreshold slice's last-emitted `value`. `value` is a live
- * reference, so it must be copied, reusing `prev`'s buffer when shape-compatible
- * (zero-alloc steady state), cloning otherwise. scalars store directly.
- */
-export function captureValue(prev: unknown, value: unknown): unknown {
-    if (typeof value !== 'object' || value === null) return value;
-    const v = value as ArrayLike<number>;
-    if ((Array.isArray(prev) || ArrayBuffer.isView(prev)) && (prev as ArrayLike<number>).length === v.length) {
-        const p = prev as { [i: number]: number };
-        for (let i = 0; i < v.length; i++) p[i] = v[i]!;
-        return prev;
-    }
-    return Array.isArray(v) ? (v as number[]).slice() : (v as Float32Array).slice();
-}
 
 /**
  * pack `instance`'s slice into the shared scratch, growing it once to the exact
@@ -87,23 +70,19 @@ export function writeSnapshot(codec: SyncCodec, instance: TraitBase, node: Node,
 }
 
 /**
- * decide whether `syncDef`'s slice `i` on `instance` should emit this tick,
- * updating the byte snapshot (+ the value snapshot for DirtyThreshold) to the
- * emitted value when so. after a `true` return the freshly packed bytes are in
- * `sync.bytes[i]`, ready for the caller to send.
+ * decide whether slice `i` on `instance` should emit this tick by byte-diffing the
+ * packed value against the last-emitted snapshot, updating the snapshot when it
+ * differs. after a `true` return the freshly packed bytes are in `sync.bytes[i]`,
+ * ready for the caller to send.
  *
- * - DirtyThreshold → emits once `metric(lastEmitted, current) ≥ threshold`; the
- *   value snapshot only advances on emit, so sub-threshold drift accumulates.
- * - else ('onChange'/'explicit') → byte-diff: emits when the packed bytes differ.
- *   ('explicit' fields are kept off the diff pass by the caller; here they byte-
- *   diff like 'onChange', matching the prior 'dirty'-rate handling.)
+ * byte-diff: emits when the packed bytes differ. ('explicit' fields are kept off the
+ * diff pass by the caller; if one reaches here it byte-diffs like 'diff'.)
  *
  * `emitOnFirstSeen`, what to do the very first time a slice is seen: the client
  * upload emits it (the server needs the initial owned value); the server diff
  * seeds silently (the trait's initial version already covers it).
  */
 export function diffSync(
-    syncDef: SyncDef,
     codec: SyncCodec,
     instance: TraitBase,
     node: Node,
@@ -111,19 +90,6 @@ export function diffSync(
     sync: TraitSyncState,
     emitOnFirstSeen: boolean,
 ): boolean {
-    const dirty = syncDef.dirty;
-
-    if (typeof dirty === 'object' && dirty !== null) {
-        const value = syncDef.pack(instance);
-        const prev = sync.values[i];
-        // sub-threshold: leave both snapshots untouched so the change accumulates.
-        if (prev !== undefined && dirty.metric(prev, value) < dirty.threshold) return false;
-        sync.values[i] = captureValue(prev, value);
-        const tn = packToScratch(codec, instance, node);
-        if (tn > 0) storeSnapshot(sync, i, tn);
-        return prev !== undefined || emitOnFirstSeen;
-    }
-
     const n = packToScratch(codec, instance, node);
     if (n <= 0) return false; // no serdes, nothing to diff or send
     const previous = sync.bytes[i];

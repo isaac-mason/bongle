@@ -220,7 +220,7 @@ sync(RigidBodyTrait, 'linear-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
-    dirty: dirty.distance(0.1), // resting bodies go silent
+    dirty: dirty.diff(), // byte-stable when the body sleeps → silent
     rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
 });
 
@@ -230,6 +230,6 @@ sync(RigidBodyTrait, 'angular-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.angularVelocity, v as Vec3);
     },
-    dirty: dirty.distance(0.1), // resting bodies go silent
+    dirty: dirty.diff(), // byte-stable when the body sleeps → silent
     rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
 });

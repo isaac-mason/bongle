@@ -2,7 +2,7 @@
 // wires the project session: engine externals (workspace source here; a CDN
 // dist in the deployed website), the bundler, and flush→bake.
 
-import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
+import { Code, Files, Hammer, MonitorPlay, Server } from "../icons";
 import { createRoot } from 'react-dom/client';
 import './editor.css';
 
@@ -10,20 +10,21 @@ import './editor.css';
 // Blockbench opens on an editable character rig, not an empty scene. `?raw`
 // inlines the .bbmodel JSON into the editor bundle.
 import starterCharacterBbmodel from '../blockbench/starter/character.bbmodel?raw';
+import { useSession } from './backend';
 import { createBootTimer } from './boot-timing';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
-import type { FsChange } from './fs';
+import type { Filesystem, FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
-import { joinGuestSession } from './net/guest-session';
+import { createGuestSession } from './net/guest-session';
 import { runSave, saveAvatar } from './platform/actions';
 import { initAutosave } from './platform/autosave';
 import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
 import { importProjectSave } from './project-save';
 import { registerProjectFsWorker } from './project-url';
-import { createClientHost } from './realms/client/client-host';
+import { createClientHost, localConnector } from './realms/client/client-host';
 import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
 import { createServerManager } from './realms/server/server-manager';
 import { useBoot } from './stores/boot';
@@ -102,21 +103,37 @@ async function boot(): Promise<void> {
         log(`platform ${r.of}: ${r.ok ? 'ok' : 'failed'}${r.message ? ` — ${r.message}` : ''}`);
     });
 
-    // GUEST: joining someone else's session. Run ONLY a client iframe pointed at
-    // the host over the relay — no server/bundler/pipeline workers, no local
-    // project. The full-viewport client covers the (unused) desktop underneath.
+    // GUEST: joining someone else's session. Run the FULL editor against the host's
+    // project over the relay — no local server/bundler/pipeline workers. The editor's
+    // fs is the host's tree (remote fs); the play-preview window rides the relay too.
     if (intent?.kind === 'joinEdit') {
         const guestLog = logger('client');
         bootLog('joining a multiplayer edit session…');
-        joinGuestSession({
-            url: intent.url,
-            clientPath: `${import.meta.env.BASE_URL}realms/client/index.html`,
-            log: (m) => guestLog(`[guest] ${m}`),
+        const session = createGuestSession({ url: intent.url, log: (m) => guestLog(`[guest] ${m}`) });
+        useSession.getState().setHost(false); // gate off host-only actions
+        const clientHost = createClientHost({
+            connector: session.connector,
+            projectName: PROJECT,
+            log: (id, m) => guestLog(`[${id}] ${m}`),
         });
-        useBoot.getState().setReady(); // guest client covers the viewport itself
+        useClients.getState().setHost(clientHost);
+        renderApp(session.fs); // same Desktop, guest fs
+        // Monaco: whole-project models + types over the relay fs, and the fs.watch
+        // reconciler that reloads a file when another participant saves it (unless
+        // this guest has unsaved edits — last-writer-wins). Same code as the host.
+        void loadEngineTypes(session.fs);
+        void syncProjectModels(session.fs);
+        // one play-preview window (the relay lanes are singular), snapped full.
+        const id = useClients.getState().open();
+        if (id) useWindows.getState().snapTo(id, 'full');
+        useBoot.getState().setReady();
         bootTimer.summary();
         return; // skip the host stack entirely
     }
+
+    // HOST: mount the Desktop on the local OPFS project (BootScreen still covers it
+    // until the session is live). host is the default session mode.
+    renderApp(editor.fs);
 
     // the avatar the local player wears in the running editor session (see
     // startEditorServer). avatar mode = the edited glb; game mode = our account
@@ -263,8 +280,7 @@ async function boot(): Promise<void> {
     // "+ client" button opens more (multiplayer-in-a-tab). They open OPFS too.
     const clientLog = logger('client');
     const clientHost = createClientHost({
-        serverHost,
-        connectRealm,
+        connector: localConnector(serverHost, connectRealm),
         projectName: PROJECT,
         log: (id, m) => clientLog(`[${id}] ${m}`),
     });
@@ -342,53 +358,70 @@ async function boot(): Promise<void> {
 const BOTTOM_ROW_H = 190;
 const BOTTOM_ROW_Y = Math.max(24, window.innerHeight - BOTTOM_ROW_H - 12);
 
-const windows: WindowDef[] = [
-    {
-        id: 'files',
-        title: 'files',
-        glyph: <Files size={18} />,
-        initial: { x: 60, y: 24, w: 220, h: 320 },
-        content: <FileTree fs={editor.fs} pane={MAIN_PANE} />,
-    },
-    {
-        id: 'code',
-        title: 'code',
-        glyph: <Code size={18} />,
-        initial: { x: 300, y: 24, w: 1240, h: 920 },
-        content: <CodePane fs={editor.fs} pane={MAIN_PANE} />,
-    },
-    // build + server + client are matching log windows, sat next to each other
-    // in a row along the bottom-left (build flush to the left edge, under the
-    // file tree). The row is anchored to the viewport bottom so it lands on-screen
-    // at any height.
-    {
-        id: 'build',
-        title: 'build logs',
-        glyph: <Hammer size={18} />,
-        initial: { x: 60, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-        content: <LogView stream="build" />,
-    },
-    {
-        id: 'server',
-        title: 'server',
-        glyph: <Server size={18} />,
-        initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-        content: <ServerPanel />,
-    },
-    {
-        id: 'client',
-        title: 'client logs',
-        glyph: <MonitorPlay size={18} />,
-        initial: { x: 700, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-        content: <LogView stream="client" />,
-    },
-    // client windows are dynamic (opened by the "+ client" button, one iframe
-    // realm each) — see stores/clients + Desktop.
-];
+// the fixed windows, built against the session's Filesystem (OPFS for the host, the
+// remote fs for a guest) — so a guest's file tree + code editor drive the host's
+// project over the relay, same components, no fork.
+function buildWindows(fs: Filesystem): WindowDef[] {
+    return [
+        {
+            id: 'files',
+            title: 'files',
+            glyph: <Files size={18} />,
+            initial: { x: 60, y: 24, w: 220, h: 320 },
+            content: <FileTree fs={fs} pane={MAIN_PANE} />,
+        },
+        {
+            id: 'code',
+            title: 'code',
+            glyph: <Code size={18} />,
+            initial: { x: 300, y: 24, w: 1240, h: 920 },
+            content: <CodePane fs={fs} pane={MAIN_PANE} />,
+        },
+        // build + server + client are matching log windows, sat next to each other
+        // in a row along the bottom-left (build flush to the left edge, under the
+        // file tree). The row is anchored to the viewport bottom so it lands on-screen
+        // at any height.
+        {
+            id: 'build',
+            title: 'build logs',
+            glyph: <Hammer size={18} />,
+            initial: { x: 60, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            content: <LogView stream="build" />,
+        },
+        {
+            id: 'server',
+            title: 'server',
+            glyph: <Server size={18} />,
+            initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            content: <ServerPanel />,
+        },
+        {
+            id: 'client',
+            title: 'client logs',
+            glyph: <MonitorPlay size={18} />,
+            initial: { x: 700, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            content: <LogView stream="client" />,
+        },
+        // client windows are dynamic (opened by the "+ client" button, one iframe
+        // realm each) — see stores/clients + Desktop.
+    ];
+}
 
-// default layout: boot straight into the game client (snapped full once the
-// server is live). Every fixed panel starts closed — reopen from the taskbar.
-for (const w of windows) useSystemWindows.getState().close(w.id);
+// mount the Desktop once boot knows the session fs (host OPFS | guest remote fs).
+// BootScreen renders from the start; this swaps in the Desktop underneath it.
+const root = createRoot(document.getElementById('root')!);
+root.render(<BootScreen />);
+function renderApp(fs: Filesystem): void {
+    const windows = buildWindows(fs);
+    // default layout: every fixed panel starts closed — reopen from the taskbar.
+    for (const w of windows) useSystemWindows.getState().close(w.id);
+    root.render(
+        <>
+            <Desktop windows={windows} fs={fs} />
+            <BootScreen />
+        </>,
+    );
+}
 
 // keep the browser from zooming the whole page — the desktop is a fixed-scale
 // surface, and apps (e.g. the paint canvas) own their own zoom. Blocks trackpad
@@ -405,10 +438,4 @@ window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
 });
 
-createRoot(document.getElementById('root')!).render(
-    <>
-        <Desktop windows={windows} fs={editor.fs} />
-        <BootScreen />
-    </>,
-);
 void boot();

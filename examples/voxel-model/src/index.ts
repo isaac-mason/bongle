@@ -27,27 +27,21 @@ import {
 import * as crashcat from 'crashcat';
 import type { Vec3 } from 'mathcat';
 
-// ── scenes ──────────────────────────────────────────────────────────
-// the `model` scene is authored in the editor — drop blocks into it and
-// they become the rigid body's voxel model. loaded on both sides so
-// client and server can each construct their own VoxelModel + shape.
+// The `model` scene is authored in the editor: drop blocks into it and they
+// become the rigid body's voxel model. Loaded on both sides so client and
+// server can each construct their own VoxelModel and shape.
 const ModelScene = scene('model');
-
-// ── blocks ──────────────────────────────────────────────────────────
 
 const stoneKey = blocks.stone.defaultKey();
 const waterKey = blocks.water.max();
 
-// ── pool dimensions ─────────────────────────────────────────────────
-// basin spans [-POOL_HALF, POOL_HALF] in x/z. floor at y=0, walls rise
-// POOL_WALL_H above. water fills the basin to the brim (y=POOL_WALL_H).
-// outer perimeter floor at y=POOL_WALL_H gives the player a walkway
-// around the pool, extending OUTER_PAD cells beyond the wall.
+// Pool dimensions. The basin spans [-POOL_HALF, POOL_HALF] in x/z, with the
+// floor at y=0 and walls rising POOL_WALL_H above. Water fills the basin to the
+// brim (y=POOL_WALL_H). An outer perimeter floor at y=POOL_WALL_H gives the
+// player a walkway around the pool, extending OUTER_PAD cells beyond the wall.
 const POOL_HALF = 12;
 const POOL_WALL_H = 8;
 const OUTER_PAD = 12;
-
-// ── terrain ─────────────────────────────────────────────────────────
 
 const TerrainTrait = trait('terrain');
 
@@ -71,7 +65,7 @@ script(TerrainTrait, 'generate', (ctx) => {
                 setBlock(ctx.voxels, POOL_HALF, y, i, stoneKey);
             }
         }
-        // water fill — interior of the basin to the brim
+        // water fill: interior of the basin to the brim
         for (let y = 1; y <= POOL_WALL_H; y++) {
             for (let x = -POOL_HALF + 1; x < POOL_HALF; x++) {
                 for (let z = -POOL_HALF + 1; z < POOL_HALF; z++) {
@@ -79,7 +73,7 @@ script(TerrainTrait, 'generate', (ctx) => {
                 }
             }
         }
-        // outer perimeter walkway at wall height — skips the pool interior
+        // outer perimeter walkway at wall height, skipping the pool interior
         // so the basin remains open from above.
         const outer = POOL_HALF + OUTER_PAD;
         for (let x = -outer; x <= outer; x++) {
@@ -91,14 +85,12 @@ script(TerrainTrait, 'generate', (ctx) => {
     });
 });
 
-// ── voxel-drop trait ────────────────────────────────────────────────
-// installs a VoxelMeshTrait on the client (visuals) and a RigidBodyTrait
-// on the server (collision + buoyancy). both sides build a VoxelModel
-// from the same ModelScene voxels.
-
+// Voxel-drop trait. Installs a VoxelMeshTrait on the client for visuals and a
+// RigidBodyTrait on the server for collision and buoyancy. Both sides build a
+// VoxelModel from the same ModelScene voxels.
 const VoxelDropTrait = trait('voxel-drop', {}, { persist: false });
 
-// shared model+shape per process. every instance of VoxelDropTrait
+// Shared model and shape per process. Every instance of VoxelDropTrait
 // references the same VoxelModel, and the server reuses the same shape.
 let sharedModel: VoxelModel | null = null;
 let sharedShape: ReturnType<typeof createVoxelModelShape> = null;
@@ -117,9 +109,9 @@ function ensureShared(): boolean {
     return true;
 }
 
-// model-local half-height in y, used to find the boat's bottom face
-// in world space. DOFs lock pitch/roll so the body's local y stays
-// aligned with world y — no rotation math needed.
+// Model-local half-height in y, used to find the boat's bottom face in world
+// space. DOFs lock pitch/roll so the body's local y stays aligned with world y,
+// so no rotation math is needed.
 function modelHalfHeight(model: VoxelModel): number {
     return (model.boundsMax[1] - model.boundsMin[1]) / 2;
 }
@@ -136,18 +128,17 @@ script(VoxelDropTrait, 'drop', (ctx) => {
     const force: Vec3 = [0, 0, 0];
     const impulse: Vec3 = [0, 0, 0];
 
-    // tuning — these are knobs you'd typically expose as controls.
+    // Tuning knobs you'd typically expose as controls.
     const G = 9.81;
-    // spring-like buoyancy. equilibrium is when buoyancy = gravity:
-    //   mass * G = mass * G * STIFFNESS * depth  →  depth = 1/STIFFNESS
-    // so STIFFNESS=1.25 means the boat's bottom rests 0.8 below the
-    // waterline.
+    // Spring-like buoyancy. Equilibrium is when buoyancy equals gravity:
+    //   mass * G = mass * G * STIFFNESS * depth, so depth = 1/STIFFNESS.
+    // STIFFNESS=1.25 means the boat's bottom rests 0.8 below the waterline.
     const STIFFNESS = 1.25;
     const LINEAR_DRAG = 6.0; // per-second velocity damping in water
 
-    // scripted nudges — every IMPULSE_INTERVAL_STEPS physics steps, push
-    // the boat in a random horizontal direction. counted in steps rather
-    // than seconds to avoid needing dt; @60Hz physics, 180 ≈ 3 seconds.
+    // Scripted nudges: every IMPULSE_INTERVAL_STEPS physics steps, push the boat
+    // in a random horizontal direction. Counted in steps rather than seconds to
+    // avoid needing dt; at 60Hz physics, 180 is about 3 seconds.
     const IMPULSE_INTERVAL_STEPS = 180;
     const IMPULSE_MAGNITUDE = 8.0; // m/s velocity kick at unit mass
     let stepsUntilImpulse = IMPULSE_INTERVAL_STEPS;
@@ -193,8 +184,8 @@ script(VoxelDropTrait, 'drop', (ctx) => {
                 userData: ctx.node.id,
                 friction: 0.5,
                 restitution: 0.2,
-                // boat-style DOFs — translate freely, rotate only around Y (yaw).
-                // locking pitch/roll keeps the body upright so the AABB-corner
+                // Boat-style DOFs: translate freely, rotate only around Y (yaw).
+                // Locking pitch/roll keeps the body upright so the AABB-corner
                 // submersion estimate stays well-conditioned and the body settles
                 // flat on the water instead of tumbling.
                 allowedDegreesOfFreedom: crashcat.dof(true, true, true, false, true, false),
@@ -205,12 +196,12 @@ script(VoxelDropTrait, 'drop', (ctx) => {
             installed = true;
         }
 
-        // ── server-side buoyancy ────────────────────────────────────
-        // continuous depth model. find the water surface y in the column
-        // directly under the boat by walking up from the bottom face until
-        // we leave liquid; the spring force is proportional to how far the
-        // boat's bottom sits below that surface. smooth (unlike a corner-
-        // count fraction) so STIFFNESS gives clean control over ride height.
+        // Server-side buoyancy: a continuous depth model. Find the water
+        // surface y in the column directly under the boat by walking up from
+        // the bottom face until we leave liquid; the spring force is
+        // proportional to how far the boat's bottom sits below that surface.
+        // Smooth, unlike a corner-count fraction, so STIFFNESS gives clean
+        // control over ride height.
         if (!serverRb) return;
         const body = serverRb.body;
         if (!body) return;
@@ -248,15 +239,15 @@ script(VoxelDropTrait, 'drop', (ctx) => {
         force[2] = 0;
         crashcat.rigidBody.addForce(ctx.physics.rigid.world, body, force, true);
 
-        // linear drag — F = -v * k * m, only while in water
+        // linear drag: F = -v * k * m, only while in water
         const v = body.motionProperties.linearVelocity;
         force[0] = -v[0] * LINEAR_DRAG * mass;
         force[1] = -v[1] * LINEAR_DRAG * mass;
         force[2] = -v[2] * LINEAR_DRAG * mass;
         crashcat.rigidBody.addForce(ctx.physics.rigid.world, body, force, false);
 
-        // periodic horizontal nudge — applied as an impulse (instantaneous
-        // velocity kick) in a random xz direction. scale by mass so the
+        // Periodic horizontal nudge, applied as an impulse (an instantaneous
+        // velocity kick) in a random xz direction. Scale by mass so the
         // resulting speed change is constant across boat sizes.
         stepsUntilImpulse--;
         if (stepsUntilImpulse <= 0) {
@@ -269,8 +260,6 @@ script(VoxelDropTrait, 'drop', (ctx) => {
         }
     });
 });
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 

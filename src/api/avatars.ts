@@ -24,6 +24,11 @@ import type { ScriptContext } from '../core/scene/scripts';
 // it here as part of the script-facing API.
 export { assignAvatar } from '../core/avatar/model';
 
+// Rig contract (bone names, required/attach node lists, validator). Also reachable
+// via the `bongle/avatar/rig` subpath; surfaced here so scripts can resolve bones by
+// name (`findByName(playerNode, RIG_6BONE_HAND_RIGHT)`) straight off bare `bongle`.
+export * from 'bongle/avatar/rig';
+
 /**
  * Pull a batch of avatars for populating NPCs. Opaque + unordered + non-stable,
  * the host owns what's in it and may return fewer than you'd like (or none).

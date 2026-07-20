@@ -2,7 +2,7 @@
 // phase checklist while rolldown bundles, then the result (size + download) or the
 // error. Driven by stores/build-progress (runBuild in Desktop feeds it).
 
-import { AlertCircle, Check, Hammer, Loader2, X } from 'bongle/icons';
+import { AlertCircle, Check, Hammer, Loader2, X } from "../../../icons";
 import { useBuildProgress } from '../../stores/build-progress';
 
 export function BuildModal() {

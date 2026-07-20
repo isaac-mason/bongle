@@ -4,8 +4,9 @@
 // away from the platform's Save / "Build & publish" so a local download is never
 // confused with uploading to bongle. Shown in every mode.
 
-import { Wrench } from 'bongle/icons';
+import { Wrench } from "../../../icons";
 import { useEffect, useRef, useState } from 'react';
+import { useSession } from '../../backend';
 import type { Filesystem } from '../../fs';
 import { downloadProdBundle } from '../../platform/actions';
 import { downloadProjectSave, pickAndImportProjectSave } from '../../project-save';
@@ -14,6 +15,9 @@ const BTN = 'w-full cursor-pointer border border-border bg-surface px-2 py-1.5 t
 
 export function AdvancedMenu({ fs }: { fs: Filesystem }) {
     const [open, setOpen] = useState(false);
+    // guests can download (a local backup) but not load-over/build — those need the
+    // host's project authority + pipeline. See backend.ts.
+    const host = useSession((s) => s.host);
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -59,7 +63,7 @@ export function AdvancedMenu({ fs }: { fs: Filesystem }) {
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-fg-muted">Advanced</span>
                         <p className="text-[10px] leading-snug text-fg-muted">
                             For keeping your work on your own computer, separate from bongle. Download the project to back it
-                            up, load one back to restore it, or build a bundle .zip you can host yourself.
+                            up{host ? ', load one back to restore it, or build a bundle .zip you can host yourself.' : '.'}
                         </p>
                         <button
                             type="button"
@@ -71,26 +75,30 @@ export function AdvancedMenu({ fs }: { fs: Filesystem }) {
                         >
                             Download project (.zip)
                         </button>
-                        <button
-                            type="button"
-                            className={BTN}
-                            onClick={() => {
-                                setOpen(false);
-                                pickAndImportProjectSave(fs);
-                            }}
-                        >
-                            Load project (.zip)…
-                        </button>
-                        <button
-                            type="button"
-                            className={BTN}
-                            onClick={() => {
-                                setOpen(false);
-                                void downloadProdBundle();
-                            }}
-                        >
-                            Build bundle (.zip)
-                        </button>
+                        {host && (
+                            <>
+                                <button
+                                    type="button"
+                                    className={BTN}
+                                    onClick={() => {
+                                        setOpen(false);
+                                        pickAndImportProjectSave(fs);
+                                    }}
+                                >
+                                    Load project (.zip)…
+                                </button>
+                                <button
+                                    type="button"
+                                    className={BTN}
+                                    onClick={() => {
+                                        setOpen(false);
+                                        void downloadProdBundle();
+                                    }}
+                                >
+                                    Build bundle (.zip)
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

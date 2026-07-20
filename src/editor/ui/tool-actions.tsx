@@ -1,4 +1,4 @@
-import * as Icons from 'bongle/icons';
+import * as Icons from "../../../icons";
 import { useCallback, useMemo, useState } from 'react';
 import * as Selection from '../../core/scene/selection';
 import type { TransformMode } from '../edit-room-store';

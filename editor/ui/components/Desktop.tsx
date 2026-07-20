@@ -2,8 +2,9 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { BookOpen, Code, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw } from 'bongle/icons';
+import { BookOpen, Code, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw } from "../../../icons";
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useSession } from '../../backend';
 import type { Filesystem } from '../../fs';
 import { usePlatform } from '../../stores/platform';
 import { useBoot } from '../../stores/boot';
@@ -177,7 +178,10 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     // embedded on a project (not avatar, which is Blockbench-only). It rides the
     // platform bridge, so it's embedded-only, same as where it lived before.
     const intent = usePlatform((s) => s.intent);
-    const showMultiplayer = embedded && !!intent && intent.kind !== 'avatar';
+    // the host-side "open to multiplayer" control — host only (a guest is already
+    // in someone's session; a guest-side "connected/leave" view is a later polish).
+    const host = useSession((s) => s.host);
+    const showMultiplayer = host && embedded && !!intent && intent.kind !== 'avatar';
 
     const windowPanes = useEditor((s) => s.windowPanes);
     const panes = useEditor((s) => s.panes);
@@ -229,8 +233,11 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                   glyph: <MonitorPlay size={16} />,
                   menu: [
                       show(w.id),
-                      { label: 'New client window', onClick: openClient },
-                      ...(clients.length > 1
+                      // guests get ONE play window — the relay game/bundler lanes are
+                      // singular, so a second would collide. Reopening when none are
+                      // open (the launcher below) is fine.
+                      ...(host ? [{ label: 'New client window', onClick: openClient }] : []),
+                      ...(host && clients.length > 1
                           ? [
                                 {
                                     label: 'Close all clients',
@@ -379,13 +386,18 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 <Taskbar
                     items={items}
                     footer={syncFooter}
-                    footerExtra={
-                        <>
-                            {showMultiplayer && <MultiplayerMenu />}
-                            <AdvancedMenu fs={fs} />
-                        </>
+                    footerExtra={<AdvancedMenu fs={fs} />}
+                    presence={
+                        // multiplayer is its own footer section: the open/stop control
+                        // sits right above the guest presence dots, divided off from the
+                        // utility tools above.
+                        showMultiplayer ? (
+                            <div className="flex flex-col items-center gap-1.5 border-t border-border pt-1.5">
+                                <MultiplayerMenu />
+                                <Presence />
+                            </div>
+                        ) : null
                     }
-                    presence={<Presence />}
                 />
             )}
             <SyncChooser fs={fs} />

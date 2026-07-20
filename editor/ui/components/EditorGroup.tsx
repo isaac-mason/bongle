@@ -3,7 +3,7 @@
 // a pane renders a row of them; a torn-off window hosts one pane of them. While a
 // tab is dragging, the editor area shows a left/right split drop zone.
 
-import { Code, Eye } from 'bongle/icons';
+import { Code, Eye } from "../../../icons";
 import { useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useEditor } from '../../stores/editor';

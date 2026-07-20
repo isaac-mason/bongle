@@ -9,7 +9,7 @@
 // Dragging near a desktop edge/corner previews + commits an Aero-style snap
 // (full / half / quarter); dragging a snapped window peels it back to floating.
 
-import { Maximize2, Minimize2, Minus, X } from 'bongle/icons';
+import { Maximize2, Minimize2, Minus, X } from "../../../icons";
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { MIN_H, MIN_W, type SnapZone, useSnapPreview, useWindows, zoneAt } from '../../stores/windows';
 

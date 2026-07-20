@@ -1,4 +1,4 @@
-import * as Icons from 'bongle/icons';
+import * as Icons from "../../../../icons";
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
 

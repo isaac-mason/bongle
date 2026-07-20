@@ -83,12 +83,6 @@
             "import": "./dist/kit.js",
             "default": "./dist/kit.js"
         },
-        "./icons": {
-            "source": "./src/icons/index.tsx",
-            "types": "./dist/types/src/icons/index.d.ts",
-            "import": "./dist/icons.js",
-            "default": "./dist/icons.js"
-        },
         "./package.json": "./package.json"
     },
     "files": [

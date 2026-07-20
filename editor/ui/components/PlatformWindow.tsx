@@ -6,6 +6,7 @@
 // the platform over the bridge. A taskbar entry keeps it reachable if minimized.
 
 import { useEffect, useState } from 'react';
+import { useSession } from '../../backend';
 import type { Filesystem } from '../../fs';
 import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/actions';
 import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
@@ -27,6 +28,9 @@ const PLATFORM_H = 240;
 export function PlatformWindow({ fs }: { fs: Filesystem }) {
     const intent = usePlatform((s) => s.intent);
     const embedded = usePlatform((s) => s.embedded);
+    // build/publish + save are host-only (they need the pipeline + platform
+    // identity); a guest edits the host's project and persists via the host.
+    const host = useSession((s) => s.host);
     const register = useWindows((s) => s.register);
 
     useEffect(() => {
@@ -58,7 +62,7 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                     >
                         Save avatar to bongle
                     </button>
-                ) : (
+                ) : host ? (
                     <>
                         <button type="button" className={BTN} onClick={() => void runBuild(fs)}>
                             Build &amp; publish
@@ -70,6 +74,12 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                             <SaveSizeIndicator fs={fs} />
                         </section>
                     </>
+                ) : (
+                    // guest: no build/publish/save — the host owns those. Edits land on
+                    // the host's project live and persist through the host.
+                    <p className="text-[10px] leading-snug text-fg-muted">
+                        You're editing as a guest. Your changes save to the host's project live.
+                    </p>
                 )}
                 {/* leave the editor — common to every intent. Confirms first. */}
                 <button type="button" className={`${BTN} mt-0.5 text-fg-muted`} onClick={backToBongle}>

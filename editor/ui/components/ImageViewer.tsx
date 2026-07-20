@@ -2,7 +2,7 @@
 // file and live-refreshes when it changes on disk (e.g. saved from the paint
 // editor). The toolbar's "edit" button opens the same file in the pixel editor.
 
-import { Paintbrush } from 'bongle/icons';
+import { Paintbrush } from "../../../icons";
 import { useEffect, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { projectUrl } from '../../project-url';

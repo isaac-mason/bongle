@@ -1,32 +1,36 @@
 // editor/net/guest-session.ts — the guest counterpart to host-session.
 //
-// A guest tab runs NONE of the host stack (no server/bundler/pipeline workers,
-// no OPFS project). It dials the host's relay room and boots exactly ONE thing:
-// a client iframe whose three lanes point at the host over the relay —
-//   game    → the host's server worker
-//   bundler → the host's DevServer (transforms; the guest only evaluates)
-//   fsrpc   → the host's OPFS (read-through)
-// The iframe is the same realms/client/index.html the host uses locally; only its
-// Source differs (relay lanes + a remote fs, keyed by the fsrpc port being
-// present). We bridge each relay PortLike to a MessageChannel transferred into
-// the iframe (an iframe can't receive a PortLike, only a real transferable port).
+// A guest runs the FULL editor (Desktop, file tree, code + apps) against the host's
+// project over the relay — no local server/bundler/pipeline workers. This builds the
+// guest's backend pieces:
+//   - the relay link (one socket, channel-muxed: game / bundler / fsrpc / control)
+//   - a remote Filesystem over the fsrpc lane (the editor's `fs`)
+//   - a ClientConnector that wires each play-preview iframe: game/bundler bridged to
+//     the host over the relay, and fsrpc served LOCALLY from the guest's remote fs
+//     (the editor owns the single relay fsrpc lane; the iframe proxies through it).
+// It also owns a persistent disconnect overlay — if the host stops multiplayer (or
+// the socket drops) the guest gets a clear, blocking "reconnect" surface instead of
+// a live-looking but dead editor.
 
-import { Channel, createRelayLink, type PortLike } from '../../build';
+import { Channel, createRelayLink, type PortLike, type RelayLink } from '../../build';
+import type { Filesystem } from '../fs';
+import type { ClientConnector } from '../realms/client/client-host';
 import { connectRelaySocket } from './gatho-socket';
+import { createRemoteFilesystem, serveFilesystemOverPort } from './remote-fs';
 
-export type GuestSession = { close(): void };
+export type GuestSession = {
+    /** the relay link (game/bundler/fsrpc lanes to the host). */
+    link: RelayLink;
+    /** the host's project as a Filesystem — the editor's `fs`. */
+    fs: Filesystem;
+    /** wires each play-preview iframe to the host over the relay. */
+    connector: ClientConnector;
+    dispose(): void;
+};
 
 export type GuestSessionOptions = {
     /** relay ws url + token from /api/edit/join. */
     url: string;
-    /** same-origin path to the client document (realms/client/index.html), as the host
-     *  uses for its own client windows. */
-    clientPath: string;
-    /** the project entry to evaluate (resolved over the bundler lane from the
-     *  host's DevServer). */
-    entry?: string;
-    /** where to mount the full-viewport client iframe (defaults to document.body). */
-    mount?: HTMLElement;
     log?: (msg: string) => void;
 };
 
@@ -36,83 +40,110 @@ function bridge(port: MessagePort, relay: PortLike): void {
     relay.onmessage = (e) => port.postMessage(e.data);
 }
 
-export function joinGuestSession(opts: GuestSessionOptions): GuestSession {
-    const { url, clientPath, entry = 'src/index.ts', mount = document.body, log = () => {} } = opts;
-    const targetOrigin = window.location.origin;
+/** wrap a MessagePort as a PortLike (structurally typed for the fs codec). */
+function asPortLike(mp: MessagePort): PortLike {
+    const p: PortLike = { onmessage: null, postMessage: (d) => mp.postMessage(d), close: () => mp.close() };
+    mp.onmessage = (e) => p.onmessage?.({ data: e.data });
+    return p;
+}
 
-    // a visible status line ABOVE the client iframe (which covers the editor UI,
-    // so log windows are hidden). Green once joined, red if the relay drops.
-    const banner = document.createElement('div');
-    banner.style.cssText =
-        'position:fixed;top:0;left:0;right:0;z-index:2147483600;font:12px/1.6 monospace;text-align:center;padding:4px 8px;color:#fff;background:#334;';
-    const setBanner = (text: string, color: string) => {
-        banner.textContent = text;
-        banner.style.background = color;
-    };
-    setBanner('connecting to host…', '#334');
-
-    const say = (m: string) => {
-        console.log(`[mp:guest] ${m}`);
-        log(m);
-    };
-    say(`dialing relay ${url}`);
-
-    const socket = connectRelaySocket(url, {
-        onOpen: () => {
-            say('relay socket open');
-            setBanner('connected to relay — joining session…', '#446');
-        },
-        onClose: () => {
-            say('relay closed — session ended');
-            setBanner('disconnected from host session', '#833');
-        },
-        onError: () => {
-            say('relay socket error');
-            setBanner('relay connection error', '#833');
-        },
-    });
-    const link = createRelayLink(socket);
-
-    const iframe = document.createElement('iframe');
-    iframe.src = clientPath;
-    iframe.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;background:#000;z-index:2147483000';
-    iframe.allow = 'clipboard-read; clipboard-write; fullscreen; autoplay';
-
-    const onMessage = (e: MessageEvent) => {
-        if (e.origin !== targetOrigin || e.source !== iframe.contentWindow) return;
-        const msg = e.data as { type?: string; message?: string };
-        if (msg.type === 'client-ready') {
-            say('client iframe ready — bridging the three relay lanes');
-            // three lanes → three MessageChannels transferred into the iframe.
+/** the guest's play-preview connector: game/bundler bridged to the host over the
+ *  relay, fsrpc served from the guest's remote fs. The relay lanes are singular, so
+ *  a guest opens ONE play window. */
+function relayConnector(link: RelayLink, fs: Filesystem): ClientConnector {
+    return {
+        connect() {
             const game = new MessageChannel();
             const bundler = new MessageChannel();
             const fsrpc = new MessageChannel();
             bridge(game.port1, link.port(Channel.game));
             bridge(bundler.port1, link.port(Channel.bundler));
-            bridge(fsrpc.port1, link.port(Channel.fsrpc));
-            iframe.contentWindow?.postMessage({ type: 'client-init', projectName: '', entry }, targetOrigin, [
-                game.port2,
-                bundler.port2,
-                fsrpc.port2,
-            ]);
-            say('client-init sent (game/bundler/fsrpc)');
-            setBanner('in session — loading the host world…', '#264');
-            // dim the banner once we're presumably rendering.
-            setTimeout(() => banner.remove(), 6000);
-        } else if (msg.type === 'client-error') {
-            say(`client error: ${msg.message ?? 'unknown'}`);
-            setBanner(`client error: ${msg.message ?? 'unknown'}`, '#833');
-        }
+            // the iframe's fs proxies THROUGH the editor's remote fs (which owns the
+            // single relay fsrpc lane) — one in-process hop to the host.
+            const serve = serveFilesystemOverPort(fs, asPortLike(fsrpc.port1));
+            return { ports: [game.port2, bundler.port2, fsrpc.port2], dispose: () => serve.close() };
+        },
     };
-    window.addEventListener('message', onMessage);
-    mount.appendChild(banner);
-    mount.appendChild(iframe);
+}
+
+export function createGuestSession(opts: GuestSessionOptions): GuestSession {
+    const { url, log = () => {} } = opts;
+    const say = (m: string) => {
+        console.log(`[mp:guest] ${m}`);
+        log(m);
+    };
+
+    // full-viewport overlay: blocks the editor until connected, and surfaces a
+    // relay drop (host stopped, or the network died) with a Reconnect that reloads.
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+        'position:fixed;inset:0;z-index:2147483601;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.72);font:13px/1.6 monospace;color:#fff;';
+    const card = document.createElement('div');
+    card.style.cssText = 'max-width:340px;border:1px solid #555;background:#1a1a1a;padding:16px 18px;text-align:center;';
+    overlay.appendChild(card);
+    const status = (title: string, detail?: string, reconnect = false) => {
+        card.replaceChildren();
+        const h = document.createElement('div');
+        h.style.cssText = 'font-weight:bold;margin-bottom:6px;';
+        h.textContent = title;
+        card.append(h);
+        if (detail) {
+            const p = document.createElement('div');
+            p.style.cssText = 'color:#aaa;margin-bottom:12px;';
+            p.textContent = detail;
+            card.append(p);
+        }
+        if (reconnect) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'Reconnect';
+            btn.style.cssText = 'cursor:pointer;border:1px solid #666;background:#333;color:#fff;padding:6px 14px;font:inherit;';
+            btn.onclick = () => location.reload();
+            card.append(btn);
+        }
+        overlay.style.display = 'flex';
+    };
+    status('Connecting to host…');
+
+    let opened = false;
+    let closedByUs = false;
+    say(`dialing relay ${url}`);
+    const socket = connectRelaySocket(url, {
+        onOpen: () => {
+            opened = true;
+            overlay.style.display = 'none';
+            say('relay socket open');
+        },
+        onClose: () => {
+            if (closedByUs) return;
+            say('relay closed — session ended');
+            status(
+                opened ? 'Disconnected from the session' : 'Could not join the session',
+                opened
+                    ? 'The host may have stopped multiplayer, or your connection dropped. Reconnect to try again.'
+                    : 'The host session may have ended or the invite link expired.',
+                true,
+            );
+        },
+        onError: () => {
+            if (closedByUs) return;
+            say('relay socket error');
+            status('Connection lost', 'There was a connection error reaching the host. Reconnect to try again.', true);
+        },
+    });
+
+    const link = createRelayLink(socket);
+    const fs = createRemoteFilesystem(link.port(Channel.fsrpc));
+    const connector = relayConnector(link, fs);
+    document.body.appendChild(overlay);
 
     return {
-        close() {
-            window.removeEventListener('message', onMessage);
-            iframe.remove();
-            banner.remove();
+        link,
+        fs,
+        connector,
+        dispose() {
+            closedByUs = true;
+            overlay.remove();
             link.close();
         },
     };

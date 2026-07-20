@@ -23,11 +23,7 @@ import { blocks } from 'bongle/kit';
 
 const stoneKey = blocks.stone.defaultKey();
 
-// ── models ──────────────────────────────────────────────────────────
-
 const SphereModel = model('sphere', { src: asset('../assets/models/sphere.gltf', import.meta.url) });
-
-// ── terrain ─────────────────────────────────────────────────────────
 
 const TerrainTrait = trait('terrain');
 
@@ -45,8 +41,6 @@ script(TerrainTrait, 'generate', (ctx) => {
         }
     });
 });
-
-// ── example ─────────────────────────────────────────────────────────
 
 const ExampleTrait = trait('example', {
     /** how many spheres are alive */
@@ -124,8 +118,8 @@ script(ExampleTrait, 'pool', (ctx) => {
 
         if (pool.length === 0) return;
 
-        // round-robin: every `respawnIntervalTicks` ticks, teleport one sphere
-        // back to the drop point. velocities are auto-zeroed by physics.ts
+        // Round-robin: every `respawnIntervalTicks` ticks, teleport one sphere
+        // back to the drop point. Velocities are auto-zeroed by physics.ts
         // when it detects the transform was moved externally.
         tickAccum++;
         if (tickAccum >= ctx.trait.respawnIntervalTicks) {
@@ -135,8 +129,6 @@ script(ExampleTrait, 'pool', (ctx) => {
         }
     });
 });
-
-// ── gameplay ────────────────────────────────────────────────────────
 
 const GameplayTrait = trait('gameplay');
 

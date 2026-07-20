@@ -4,7 +4,7 @@
 // the project fs — which live-refreshes the image viewer. Rudimentary by
 // design: one canvas is the source of truth, undo is a bounded ImageData stack.
 
-import { Eraser, Grid3x3, type IconComponent, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from 'bongle/icons';
+import { Eraser, Grid3x3, type IconComponent, PaintBucket, Pencil, Pipette, Save, Undo2, ZoomIn, ZoomOut } from "../../../icons";
 import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useLaunched } from '../../stores/launched';

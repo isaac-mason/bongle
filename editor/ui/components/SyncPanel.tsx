@@ -2,7 +2,7 @@
 // opened by clicking the (spinning) taskbar sync icon. Shows what's bound and
 // offers Close (keep syncing) or Stop syncing (disconnect).
 
-import { RefreshCw } from 'bongle/icons';
+import { RefreshCw } from "../../../icons";
 import { useSync } from '../../stores/sync';
 import { disconnect } from '../../sync/folder-sync';
 

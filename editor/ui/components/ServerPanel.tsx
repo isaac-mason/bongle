@@ -2,7 +2,7 @@
 // server actions. Restart reboots the worker (flushing edits to disk first) and
 // reconnects any open client windows to the fresh worker.
 
-import { RefreshCw } from 'bongle/icons';
+import { RefreshCw } from "../../../icons";
 import { useMultiplayer } from '../../stores/multiplayer';
 import { useServer } from '../../stores/server';
 import { LogView } from './LogView';

@@ -21,15 +21,11 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-// ── matchmaking ─────────────────────────────────────────────────────
-
 matchmaking({ maxPlayers: 8 });
 
-// ── scenes ──────────────────────────────────────────────────────────
-// 'main' and 'other' load on both sides (server seeds + mirrors). 'local'
-// is client-only — no server room is ever made; each client spins up
-// its own ClientRoom via rooms.create(ctx, 'local').
-
+// 'main' and 'other' load on both sides (server seeds and mirrors). 'local' is
+// client-only: no server room is ever made, and each client spins up its own
+// ClientRoom via rooms.create(ctx, 'local').
 scene('main');
 scene('other');
 scene('local', { server: false });
@@ -38,12 +34,10 @@ const stoneKey = blocks.stone.defaultKey();
 const dirtKey = blocks.dirt.defaultKey();
 const grassKey = blocks.grass.defaultKey();
 
-// ── seed trait (editor-time terrain) ───────────────────────────────
-// Attach `seed` to a scene root in the editor and a small platform
-// bakes into the scene's voxels — save the scene and the result lands
-// in <scene>.voxels.json. Pick whichever block matches the sceneId.
-// Once you've painted the real environment, detach the trait.
-
+// Seed trait for editor-time terrain. Attach `seed` to a scene root in the
+// editor and a small platform bakes into the scene's voxels. Save the scene
+// and the result lands in <scene>.voxels.json. Pick whichever block matches
+// the sceneId. Once you've painted the real environment, detach the trait.
 function seedPlatform(ctx: ScriptContext, primaryKey: string): void {
     const SIZE = 10;
     const Y = 4;
@@ -75,8 +69,6 @@ script(
     { editor: true },
 );
 
-// ── nav RPC ─────────────────────────────────────────────────────────
-
 type GotoTarget = 'main' | 'other';
 
 const gotoCmd = command(
@@ -85,11 +77,9 @@ const gotoCmd = command(
     pack.object({ target: pack.string() }),
 );
 
-// ── HUD helpers ─────────────────────────────────────────────────────
 // Each room's client-side nav-trait instance mounts its own HUD into
-// ctx.client.viewport, which the engine auto-hides/shows with the
-// active room. No global singleton needed.
-
+// ctx.client.viewport, which the engine auto-hides and shows with the active
+// room. No global singleton needed.
 function mountHud(ctx: ScriptContext): () => void {
     const viewport = ctx.client?.viewport;
     if (!viewport) return () => {};
@@ -141,8 +131,7 @@ function requestGotoLocal(ctx: ScriptContext): void {
     rooms.activate(ctx, localId);
 }
 
-// ── nav trait (runtime: HUD + RPC + spawn + eager-create) ──────────
-
+// Nav trait at runtime: HUD, RPC, spawn, and eager room creation.
 const NavTrait = trait('nav', {}, { persist: true });
 
 script(NavTrait, 'nav', (ctx) => {

@@ -1,12 +1,10 @@
-export { dirty, rate, syncMetric } from '../core/scene/sync/sync-rate';
+export { dirty, rate } from '../core/scene/sync/sync-rate';
 export type {
     ControlDef,
     DirtyConfig,
-    DirtyThreshold,
     RateConfig,
     SyncDef,
     SyncHandle,
-    SyncMetric,
     TraitBase,
     TraitBody,
     TraitDef,

@@ -10,7 +10,7 @@
 // viewport) are not represented here, surfaces compose them around the
 // shared entries inline.
 
-import * as Icons from 'bongle/icons';
+import * as Icons from "../../../icons";
 import type { Node } from '../../core/scene/scene-tree';
 
 export type NodeMenuItem = {

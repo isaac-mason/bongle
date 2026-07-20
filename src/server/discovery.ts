@@ -22,7 +22,7 @@ import {
     rootsInChunk,
     type SceneTree,
 } from '../core/scene/scene-tree';
-import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
+import { diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
 import { encodeChunk, encodeLight, type Zstd } from '../core/voxels/chunk-codec';
@@ -79,10 +79,13 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
             const bit = 1 << (i & 31);
             if ((sync.dirty[word] & bit) !== 0) {
                 sync.dirty[word] &= ~bit;
-                // threshold-dirty slices consume the dirty bit but do NOT emit on it,
-                // the threshold branch below decides if the change is big enough.
-                // (else setPosition / physics dirtying would bypass the threshold.)
-                if (typeof def.sync[i].dirty !== 'object') {
+                // only 'explicit' slices emit purely on the dirty bit — that's their
+                // contract (SyncHandle.dirty() is the sole change signal). 'diff'
+                // and threshold slices consume the bit but still verify below, because
+                // setPosition / physics set the bit unconditionally every tick (even
+                // when the packed value is byte-identical), so trusting it here would
+                // re-emit a resting entity at the tick rate.
+                if (def.sync[i].dirty === 'explicit') {
                     writeSnapshot(codec, instance, node, i, sync);
                     bumpFieldVersion(sceneTree, node, instance, i);
                     continue;
@@ -96,7 +99,7 @@ function diffNode(sceneTree: SceneTree, node: Node): void {
             // shared cold path: byte-diff or threshold metric. the server seeds
             // a first-seen slice silently (its initial version already covers it),
             // so emitOnFirstSeen = false.
-            if (diffSync(def.sync[i], codec, instance, node, i, sync, false)) {
+            if (diffSync(codec, instance, node, i, sync, false)) {
                 bumpFieldVersion(sceneTree, node, instance, i);
             }
         }
@@ -550,13 +553,6 @@ export function acceptOwnerFields(
         //    buffer per owner field, owner writes land every tick for
         //    player-controlled entities.
         writeSnapshot(codec, instance, node, i, sync);
-
-        // for a threshold-dirty slice, keep the value snapshot in lockstep with the
-        // bytes so the next diffNode measures against this just-applied value and
-        // doesn't re-emit it.
-        if (typeof syncDef.dirty === 'object' && syncDef.dirty !== null) {
-            sync.values[i] = captureValue(sync.values[i], syncDef.pack(instance));
-        }
 
         // 3. bump the field version once, here. broadcasts to non-owners
         //    via the per-client knowledge diff in buildSceneSyncUpdates;

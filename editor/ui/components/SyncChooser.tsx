@@ -2,7 +2,7 @@
 // binding a folder. Each button is a user gesture, so it can open the folder
 // picker directly (which the File System Access API requires).
 
-import { FolderInput, FolderOutput } from 'bongle/icons';
+import { FolderInput, FolderOutput } from "../../../icons";
 import type { Filesystem } from '../../fs';
 import { useSync } from '../../stores/sync';
 import { connect, type SyncDirection } from '../../sync/folder-sync';

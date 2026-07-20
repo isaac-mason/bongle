@@ -1,4 +1,4 @@
-import { Grid3x3 } from 'bongle/icons';
+import { Grid3x3 } from "../../../icons";
 import { useState } from 'react';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
