@@ -21,6 +21,11 @@ export async function start(opts: StartClientOptions): Promise<void> {
     env.server = false;
     env.editor = true;
     await opts.userEntry();
+    // the baked barrel patches model handles with their bin paths (mirrors the
+    // editor realm importing src/generated/models.ts). Without it, `model()`
+    // handles keep their cold-start placeholder and render as placeholder nodes.
+    // @ts-expect-error — a Vite resolve.alias (→ <projectDir>/src/generated/models.ts), not resolvable by tsgo.
+    await import('bongle-project-models');
 
     const driver: ClientDriver = {
         matchmake() {},

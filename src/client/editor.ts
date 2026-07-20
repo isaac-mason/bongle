@@ -15,7 +15,6 @@
  */
 import { CameraTrait } from '../builtins/camera';
 import { FlyControllerTrait } from '../builtins/fly-controller';
-import { mat4, quat } from 'mathcat';
 import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
 import * as Rpc from '../core/rpc';
@@ -105,22 +104,13 @@ export function enterLocalEditorView(room: ClientRoom): void {
     SceneTree.addTrait(cameraNode, CameraTrait);
     SceneTree.addChild(room.nodes.root, cameraNode);
 
-    // seed lens camera pose from the outgoing view so entry is seamless.
-    // When no prior view exists (fresh scene), start at (5,5,5) looking at origin.
+    // seed lens camera pose from the outgoing view so entry is seamless. Play
+    // rooms always have a live render camera, so srcPos/srcQuat exist; if they
+    // somehow don't, the lens camera just stays at its default pose.
     const cameraTransform = getTrait(cameraNode, TransformTrait)!;
     if (srcPos && srcQuat) {
         setWorldPosition(cameraTransform, srcPos);
         setWorldQuaternion(cameraTransform, srcQuat);
-    } else {
-        const eye: [number, number, number] = [5, 5, 5];
-        const target: [number, number, number] = [0, 0, 0];
-        const up: [number, number, number] = [0, 1, 0];
-        const m = mat4.create();
-        mat4.targetTo(m, eye, target, up);
-        const q = quat.create();
-        quat.fromMat4(q, m);
-        setWorldPosition(cameraTransform, eye);
-        setWorldQuaternion(cameraTransform, q);
     }
 
     const editorNode = SceneTree.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });

@@ -12,6 +12,7 @@
 import type { BinaryField, BinaryTrait, PackedNode, RoomMode, SceneSyncUpdate } from '../protocol';
 import { packPackedSceneTree, unpackPackedSceneTree } from '../protocol';
 import { registry, resolveTraitWireRef, type WireIndex } from '../registry';
+import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
 import {
     addChild,
     addTraitBySlot,
@@ -22,15 +23,14 @@ import {
     encodePrefabConfig,
     getNodeById,
     type Node,
-    type SceneTree,
     type Realm,
     removeTraitBySlot,
     reorderChild,
     reparent,
+    type SceneTree,
     setOwner,
     setPrefab,
 } from './scene-tree';
-import { getControlCodecs, getSyncCodecs } from './packcat-bridge';
 import { disposeScriptInstance, type SceneTreeContext } from './scripts';
 import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
 
@@ -46,47 +46,54 @@ import { buildTraitInstance, type TraitBase, type TraitDef } from './traits';
  * mode: 'edit' includes node.prefab in packed data. 'play' omits it,
  * play mode instantiates children server-side, clients just see normal nodes.
  */
-export function packSceneTree(sceneTree: SceneTree, mode: RoomMode): Uint8Array {
+export function packSceneTree(sceneTree: SceneTree, mode: RoomMode, prune?: (node: Node) => boolean): Uint8Array {
     const root = sceneTree.root;
     const wireIndex = registry.traitWireIndex;
 
     // pack all nodes in parent-first order (root first). in play mode prunes
     // non-shared subtrees, those are server- or client-local and never
-    // replicated. edit mode includes everything for the editor.
+    // replicated. edit mode includes everything for the editor. `prune` (AOI join)
+    // additionally omits chunk-streamed transform-root subtrees.
     const nodes: PackedNode[] = [];
-    walkReplicable(root, mode, 'shared', (node) => {
-        const parentId = node.parent?.id ?? 0;
-        const index = node.parent ? node.parent.children.indexOf(node) : 0;
+    walkReplicable(
+        root,
+        mode,
+        'shared',
+        (node) => {
+            const parentId = node.parent?.id ?? 0;
+            const index = node.parent ? node.parent.children.indexOf(node) : 0;
 
-        const traits: BinaryTrait[] = [];
-        for (const [traitSlot, instance] of node._traits) {
-            const def = registry.traitsBySlot.get(traitSlot);
-            if (!def) continue;
-            traits.push({
-                netIndex: wireIndex.idToIndex.get(def.id),
-                id: undefined,
-                fields: packAllControls(def, instance, node),
-                syncs: packAllSyncs(def, instance, node),
+            const traits: BinaryTrait[] = [];
+            for (const [traitSlot, instance] of node._traits) {
+                const def = registry.traitsBySlot.get(traitSlot);
+                if (!def) continue;
+                traits.push({
+                    netIndex: wireIndex.idToIndex.get(def.id),
+                    id: undefined,
+                    fields: packAllControls(def, instance, node),
+                    syncs: packAllSyncs(def, instance, node),
+                });
+            }
+            // include unresolved traits (round-trip preservation, no field data).
+            // these never have a wire index (no local def), so always emit the
+            // string id fallback.
+            for (const [id] of node._unresolvedTraits) {
+                traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
+            }
+
+            nodes.push({
+                id: node.id,
+                name: node.name,
+                parentId,
+                index: Math.max(0, index),
+                persist: node.persist ? undefined : false,
+                owner: node.owner ?? undefined,
+                traits,
+                prefab: mode === 'edit' && node.prefab ? encodePrefabConfig(node.prefab) : undefined,
             });
-        }
-        // include unresolved traits (round-trip preservation, no field data).
-        // these never have a wire index (no local def), so always emit the
-        // string id fallback.
-        for (const [id] of node._unresolvedTraits) {
-            traits.push({ netIndex: undefined, id, fields: [], syncs: [] });
-        }
-
-        nodes.push({
-            id: node.id,
-            name: node.name,
-            parentId,
-            index: Math.max(0, index),
-            persist: node.persist ? undefined : false,
-            owner: node.owner ?? undefined,
-            traits,
-            prefab: mode === 'edit' && node.prefab ? encodePrefabConfig(node.prefab) : undefined,
-        });
-    });
+        },
+        prune,
+    );
 
     return packPackedSceneTree({ nodes });
 }
@@ -105,7 +112,12 @@ export function packSceneTree(sceneTree: SceneTree, mode: RoomMode): Uint8Array 
  * and passes it here. callers without a peer (in-process pack/unpack in
  * tests) omit it and the runtime's local table is used.
  */
-export function unpackSceneTree(sceneTree: SceneTree, runtime: SceneTreeContext, data: Uint8Array, traitWireIndex?: WireIndex): void {
+export function unpackSceneTree(
+    sceneTree: SceneTree,
+    runtime: SceneTreeContext,
+    data: Uint8Array,
+    traitWireIndex?: WireIndex,
+): void {
     const unpacked = unpackPackedSceneTree(data);
     const root = sceneTree.root;
     const wireIndex = traitWireIndex ?? registry.traitWireIndex;
@@ -309,15 +321,23 @@ export function applySceneSyncUpdate(
  * walk a node tree in parent-first (pre-order) order. in play mode prunes
  * subtrees whose effective realm isn't `'shared'`. `inheritedRealm` is the
  * effective realm of the parent (root callers pass `'shared'`); `'inherit'`
- * nodes resolve to that value. iterative, no recursion, no stack growth on
- * deep trees.
+ * nodes resolve to that value. `prune`, if given, skips a node + its subtree
+ * (used by the AOI-aware join to omit chunk-streamed transform-root subtrees).
+ * iterative, no recursion, no stack growth on deep trees.
  */
-function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callback: (node: Node) => void): void {
+function walkReplicable(
+    node: Node,
+    mode: RoomMode,
+    inheritedRealm: Realm,
+    callback: (node: Node) => void,
+    prune?: (node: Node) => boolean,
+): void {
     const stack: Array<{ node: Node; inherited: Realm }> = [{ node, inherited: inheritedRealm }];
     while (stack.length > 0) {
         const { node: cur, inherited } = stack.pop()!;
         const effective = cur.realm === 'inherit' ? inherited : cur.realm;
         if (mode === 'play' && effective !== 'shared') continue;
+        if (prune?.(cur)) continue;
         callback(cur);
         // push children in reverse so they pop in original order
         for (let i = cur.children.length - 1; i >= 0; i--) {

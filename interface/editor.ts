@@ -134,7 +134,16 @@ export type PlatformMessage =
           message?: string;
           versionId?: string;
           rev?: number;
+          /** On a successful `of: 'build'`: the minted build's id + an absolute link to
+           *  the platform's builds dashboard, so the editor confirms the publish with
+           *  ids + a "view builds" link instead of a bare "downloaded". */
+          buildId?: string;
+          dashboardUrl?: string;
       }
+    /** ask the editor to run its Save-version action now (export the source → hand it
+     *  back as `bongle:version`). Lets the platform drive a prominent "save this to
+     *  bongle" CTA from outside the iframe (e.g. on an anonymous local-only draft). */
+    | { type: 'bongle:request-save' }
     /** answer to open-multiplayer: the relay ws url the host connects to + the
      *  ready-to-share invite link. */
     | { type: 'bongle:multiplayer-opened'; url: string; shareUrl: string }
@@ -149,4 +158,7 @@ export type PlatformResult = {
     message?: string;
     versionId?: string;
     rev?: number;
+    /** Successful `of: 'build'`: minted build id + builds-dashboard link (see above). */
+    buildId?: string;
+    dashboardUrl?: string;
 };

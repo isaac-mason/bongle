@@ -41,6 +41,13 @@ export { particle } from './core/particles/particles';
 // other script apis; these are the raw underlying functions, suitable
 // for module-scope codegen that operates on detached nodes.
 export { addChild, addTrait, createNode } from './core/scene/scene-tree';
+// registration primitives for the generated codegen barrels: stamp a per-entry
+// handle/payload into the singleton registry. Called DIRECTLY by the generated
+// model/scene/sound barrels (real imports, like the detached-node primitives
+// above), see src/asset-pipeline/bake/{models,scenes,audio}.ts.
+export { _registerModelHandle as registerModel } from './core/models/models';
+export { _registerScenePayload as registerScene } from './api/scenes';
+export { _registerSoundHandle as registerSound } from './core/sounds/sounds';
 export type { SceneHandle } from './core/scene/scene-handle';
 export { extractScenePrefabDeps } from './core/scene/scene-handle';
 export type { SoundHandle, SoundOptions } from './core/sounds/sounds';

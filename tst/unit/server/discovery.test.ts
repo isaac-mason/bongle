@@ -1,4 +1,3 @@
-import { block } from 'bongle';
 import type { Client } from 'bongle/interface';
 import { describe, expect, it } from 'vitest';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
@@ -6,6 +5,7 @@ import * as Debug from '../../../src/core/debug';
 import { unpackPackedSceneTree, unpackServerMessage } from '../../../src/core/protocol';
 import * as Resources from '../../../src/core/resources';
 import { addChild, addTrait, createNode, destroyNode, getNodeById, reparent, setRealm } from '../../../src/core/scene/scene-tree';
+import { block } from '../../../src/core/voxels/blocks';
 import { setBlock } from '../../../src/core/voxels/voxels';
 import { nodeZstd } from '../../../src/node/zstd';
 import * as Discovery from '../../../src/server/discovery';

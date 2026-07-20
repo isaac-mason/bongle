@@ -58,14 +58,14 @@ export function LibraryOverlay() {
         // floating panel, positioned, no full-screen backdrop, doesn't block
         // clicks on the rest of the editor (canvas + hotbar remain interactive).
         <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
-            <div className="bg-white shadow-xl border border-neutral-200 w-[640px] max-w-[90vw] max-h-[70vh] flex flex-col">
+            <div className="bg-surface shadow-xl border border-border w-[640px] max-w-[90vw] max-h-[70vh] flex flex-col">
                 {/* header */}
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-200">
-                    <span className="text-sm font-mono text-neutral-700 flex-1">library</span>
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+                    <span className="text-sm font-mono text-fg flex-1">library</span>
                     <button
                         type="button"
                         onClick={() => close(false)}
-                        className="p-1 hover:bg-neutral-100 text-neutral-500 cursor-pointer"
+                        className="p-1 hover:bg-surface-muted text-fg-muted cursor-pointer"
                         title="close (esc)"
                     >
                         <Icons.X size={14} />
@@ -73,7 +73,7 @@ export function LibraryOverlay() {
                 </div>
 
                 {/* top-level tab strip */}
-                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-neutral-100">
+                <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border-subtle">
                     <TopTab label="inventory" active={tab === 'inventory'} onClick={() => setTab('inventory')} />
                     <TopTab label="scenes" active={tab === 'scenes'} onClick={() => setTab('scenes')} />
                 </div>
@@ -90,7 +90,7 @@ function TopTab({ label, active, onClick }: { label: string; active: boolean; on
             type="button"
             onClick={onClick}
             className={`text-[12px] font-mono px-3 py-1 cursor-pointer ${
-                active ? 'bg-neutral-800 text-white' : 'bg-white text-neutral-600 hover:bg-neutral-100'
+                active ? 'bg-accent text-on-accent' : 'bg-surface text-fg hover:bg-surface-muted'
             }`}
         >
             {label}
@@ -122,7 +122,7 @@ function InventoryTab() {
     return (
         <>
             {/* filter + search */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-100">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
                 <FilterTab label="all" active={filter === 'all'} onClick={() => setFilter('all')} />
                 <FilterTab label="blocks" active={filter === 'bongle'} onClick={() => setFilter('bongle')} />
                 <FilterTab label="prefabs" active={filter === 'prefabs'} onClick={() => setFilter('prefabs')} />
@@ -132,14 +132,14 @@ function InventoryTab() {
                     value={search}
                     onChange={(e) => setSearch(e.currentTarget.value)}
                     placeholder="search…"
-                    className="flex-1 text-[12px] font-mono bg-neutral-50 border border-neutral-200 px-2 py-1 outline-none focus:border-neutral-400 placeholder:text-neutral-300"
+                    className="flex-1 text-[12px] font-mono bg-surface-muted border border-border px-2 py-1 outline-none focus:border-fg-muted placeholder:text-fg-muted"
                 />
             </div>
 
             {/* grid */}
             <div className="overflow-y-auto p-2 flex-1">
                 {filtered.length === 0 ? (
-                    <div className="text-[12px] font-mono text-neutral-400 px-2 py-4 text-center">no items</div>
+                    <div className="text-[12px] font-mono text-fg-muted px-2 py-4 text-center">no items</div>
                 ) : (
                     <div
                         className="grid gap-1.5"
@@ -179,16 +179,16 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
                     }}
                     className={`flex flex-col items-center justify-center gap-1 p-1 cursor-pointer transition-colors ${
                         isCarried
-                            ? 'bg-blue-100 ring-2 ring-blue-400'
-                            : 'bg-neutral-50 hover:bg-neutral-100 hover:ring-1 hover:ring-neutral-300'
+                            ? 'bg-accent/20 ring-2 ring-accent'
+                            : 'bg-surface-muted hover:bg-border hover:ring-1 hover:ring-fg-muted'
                     }`}
                     title={`${display.title}${carried ? '' : ' — left-click pick up, right-click info'}`}
                     style={{ minHeight: ITEM_SIZE }}
                 >
                     <InventoryItemIcon item={item} size={ICON_SIZE} />
-                    <span className="text-[10px] text-neutral-700 truncate max-w-full">{display.name}</span>
+                    <span className="text-[10px] text-fg truncate max-w-full">{display.name}</span>
                     {display.id !== display.name && (
-                        <span className="text-[8px] font-mono text-neutral-400 truncate max-w-full -mt-0.5">{display.id}</span>
+                        <span className="text-[8px] font-mono text-fg-muted truncate max-w-full -mt-0.5">{display.id}</span>
                     )}
                 </button>
             </PopoverTrigger>
@@ -208,8 +208,8 @@ function InventoryItemInfo({ item }: { item: InventoryItem }) {
             <div className="flex items-center gap-2">
                 <InventoryItemIcon item={item} size={32} />
                 <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-[12px] text-neutral-800 truncate">{display.name}</span>
-                    <span className="text-[10px] font-mono text-neutral-400 uppercase">{item.kind}</span>
+                    <span className="text-[12px] text-fg truncate">{display.name}</span>
+                    <span className="text-[10px] font-mono text-fg-muted uppercase">{item.kind}</span>
                 </div>
             </div>
             <InfoRow label="id" value={display.id} />
@@ -246,17 +246,17 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     };
     return (
         <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-mono text-neutral-400 uppercase w-10 shrink-0">{label}</span>
-            <code className="flex-1 min-w-0 text-[11px] font-mono text-neutral-800 bg-neutral-50 border border-neutral-200 px-1.5 py-0.5 truncate select-all">
+            <span className="text-[9px] font-mono text-fg-muted uppercase w-10 shrink-0">{label}</span>
+            <code className="flex-1 min-w-0 text-[11px] font-mono text-fg bg-surface-muted border border-border px-1.5 py-0.5 truncate select-all">
                 {value}
             </code>
             <button
                 type="button"
                 onClick={copy}
                 title="copy"
-                className="h-6 w-6 inline-flex items-center justify-center text-neutral-500 hover:text-neutral-800 hover:bg-neutral-100 cursor-pointer"
+                className="h-6 w-6 inline-flex items-center justify-center text-fg-muted hover:text-fg hover:bg-surface-muted cursor-pointer"
             >
-                {copied ? <Icons.Check size={12} className="text-green-600" /> : <Icons.Copy size={12} />}
+                {copied ? <Icons.Check size={12} className="text-success" /> : <Icons.Copy size={12} />}
             </button>
         </div>
     );
@@ -268,7 +268,7 @@ function FilterTab({ label, active, onClick }: { label: string; active: boolean;
             type="button"
             onClick={onClick}
             className={`text-[11px] font-mono px-2 py-1 cursor-pointer ${
-                active ? 'bg-neutral-800 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                active ? 'bg-accent text-on-accent' : 'bg-surface-muted text-fg hover:bg-border'
             }`}
         >
             {label}
@@ -340,7 +340,7 @@ function ScenesTab() {
             {/* scene list */}
             <div className="overflow-y-auto py-1 flex-1">
                 {sortedScenes.length === 0 ? (
-                    <div className="text-[12px] font-mono text-neutral-400 px-2 py-4 text-center">no scenes</div>
+                    <div className="text-[12px] font-mono text-fg-muted px-2 py-4 text-center">no scenes</div>
                 ) : (
                     <div className="flex flex-col gap-px">
                         {sortedScenes.map((sceneId) => (
@@ -360,7 +360,7 @@ function ScenesTab() {
             </div>
 
             {/* create new */}
-            <div className="px-3 py-2 border-t border-neutral-200">
+            <div className="px-3 py-2 border-t border-border">
                 <div className="flex items-center gap-1">
                     <input
                         type="text"
@@ -370,12 +370,12 @@ function ScenesTab() {
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') handleCreate();
                         }}
-                        className="flex-1 min-w-0 h-7 px-1.5 text-[11px] font-mono text-neutral-700 border border-neutral-200 bg-white outline-none focus:border-neutral-400"
+                        className="flex-1 min-w-0 h-7 px-1.5 text-[11px] font-mono text-fg border border-border bg-surface outline-none focus:border-fg-muted"
                     />
                     <button
                         type="button"
                         onClick={handleCreate}
-                        className="h-7 w-7 inline-flex items-center justify-center border border-neutral-200 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 cursor-pointer"
+                        className="h-7 w-7 inline-flex items-center justify-center border border-border text-fg-muted hover:bg-surface-muted hover:text-fg cursor-pointer"
                         title="create scene"
                     >
                         <Icons.Plus size={12} />
@@ -435,7 +435,7 @@ function SceneRow({
     return (
         <div
             className={`group relative flex items-center gap-1 h-7 px-2 cursor-pointer transition-colors ${
-                isActive ? 'bg-neutral-800' : 'bg-neutral-50 hover:bg-neutral-100'
+                isActive ? 'bg-accent' : 'bg-surface-muted hover:bg-border'
             }`}
         >
             {/* name / rename (scenes have no icon — plain row) */}
@@ -452,14 +452,14 @@ function SceneRow({
                             setEditing(false);
                         }
                     }}
-                    className="flex-1 min-w-0 px-1 py-0.5 text-[11px] font-mono text-neutral-800 bg-white border border-blue-400 outline-none"
+                    className="flex-1 min-w-0 px-1 py-0.5 text-[11px] font-mono text-fg bg-surface border border-accent outline-none"
                 />
             ) : (
                 <button
                     type="button"
                     onClick={() => onOpen(sceneId)}
                     className={`flex-1 min-w-0 text-[11px] font-mono text-left truncate cursor-pointer ${
-                        isActive ? 'text-white' : 'text-neutral-700'
+                        isActive ? 'text-on-accent' : 'text-fg'
                     }`}
                     title={sceneId}
                 >
@@ -473,7 +473,7 @@ function SceneRow({
                     {isPrefabSource && (
                         <span
                             className={`inline-flex items-center px-1 py-0.5 text-[9px] font-mono ${
-                                isActive ? 'text-cyan-200 bg-cyan-900/60' : 'text-cyan-700 bg-cyan-50'
+                                isActive ? 'text-cyan-100 bg-cyan-500/30' : 'text-cyan-300 bg-cyan-500/15'
                             }`}
                             title="referenced by prefab()"
                         >
@@ -489,8 +489,8 @@ function SceneRow({
                         }}
                         className={`h-5 w-5 inline-flex items-center justify-center cursor-pointer ${
                             isActive
-                                ? 'bg-neutral-700 text-neutral-300 hover:text-white'
-                                : 'bg-white border border-neutral-200 text-neutral-500 hover:text-neutral-800'
+                                ? 'bg-surface/20 text-on-accent hover:text-on-accent'
+                                : 'bg-surface border border-border text-fg-muted hover:text-fg'
                         }`}
                         title="rename"
                     >
@@ -504,8 +504,8 @@ function SceneRow({
                         }}
                         className={`h-5 w-5 inline-flex items-center justify-center cursor-pointer ${
                             isActive
-                                ? 'bg-neutral-700 text-neutral-300 hover:text-red-300'
-                                : 'bg-white border border-neutral-200 text-neutral-500 hover:text-red-500'
+                                ? 'bg-surface/20 text-on-accent hover:text-danger'
+                                : 'bg-surface border border-border text-fg-muted hover:text-danger'
                         }`}
                         title="delete"
                     >

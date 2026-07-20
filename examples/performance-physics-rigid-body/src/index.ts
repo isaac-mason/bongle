@@ -4,6 +4,7 @@ import {
     cloneModel,
     control,
     type createNode,
+    asset,
     env,
     getTrait,
     model,
@@ -24,7 +25,7 @@ const stoneKey = blocks.stone.defaultKey();
 
 // ── models ──────────────────────────────────────────────────────────
 
-const SphereModel = model('sphere', { src: 'assets/models/sphere.gltf' });
+const SphereModel = model('sphere', { src: asset('../assets/models/sphere.gltf', import.meta.url) });
 
 // ── terrain ─────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ script(ExampleTrait, 'pool', (ctx) => {
         node.name = `sphere-${i}`;
         node.persist = false;
 
-        const transform = getTrait(node, TransformTrait)!;
+        const transform = addTrait(node, TransformTrait);
         dropAt(transform, i);
 
         const rb = addTrait(node, RigidBodyTrait);

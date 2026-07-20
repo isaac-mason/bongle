@@ -6,8 +6,8 @@
 // falls back to the default sample project. After init, the editor hands finished
 // payloads back (save/build/avatar-export) and receives result acks.
 
-import { EDITOR_INTERFACE_VERSION, editorInterfaceCompatible } from './contract';
 import type { EditorMessage, PlatformIntent, PlatformMessage, PlatformResult } from './contract';
+import { EDITOR_INTERFACE_VERSION, editorInterfaceCompatible } from './contract';
 
 /** how long to wait for the platform's init before assuming we're standalone.
  *  NOT a timing hack: it's the only way to distinguish "platform will answer" from
@@ -24,6 +24,9 @@ export type PlatformBridge = {
     send: (msg: EditorMessage) => void;
     /** subscribe to platform result acks; returns an unsubscribe fn. */
     onResult: (cb: (r: PlatformResult) => void) => () => void;
+    /** subscribe to the platform's "save now" request (its CTA to persist the current
+     *  draft as a version); returns an unsubscribe fn. */
+    onRequestSave: (cb: () => void) => () => void;
     /** ask the platform to open this session to multiplayer — it calls
      *  /api/edit/host and resolves with the relay url + share link. Rejects when
      *  standalone (no platform to make the authenticated call). */
@@ -33,6 +36,7 @@ export type PlatformBridge = {
 export function createPlatformBridge(): PlatformBridge {
     const parent = window.parent !== window ? window.parent : null;
     const resultCbs = new Set<(r: PlatformResult) => void>();
+    const requestSaveCbs = new Set<() => void>();
     // in-flight open-multiplayer request (one at a time — the host opens once).
     let multiplayerPending: { resolve: (v: { url: string; shareUrl: string }) => void; reject: (e: Error) => void } | null = null;
     let embedded = false;
@@ -60,6 +64,8 @@ export function createPlatformBridge(): PlatformBridge {
                 resolve(m.intent);
             } else if (m.type === 'bongle:result') {
                 for (const cb of resultCbs) cb(m);
+            } else if (m.type === 'bongle:request-save') {
+                for (const cb of requestSaveCbs) cb();
             } else if (m.type === 'bongle:multiplayer-opened') {
                 multiplayerPending?.resolve({ url: m.url, shareUrl: m.shareUrl });
                 multiplayerPending = null;
@@ -97,6 +103,10 @@ export function createPlatformBridge(): PlatformBridge {
         onResult: (cb) => {
             resultCbs.add(cb);
             return () => resultCbs.delete(cb);
+        },
+        onRequestSave: (cb) => {
+            requestSaveCbs.add(cb);
+            return () => requestSaveCbs.delete(cb);
         },
         requestMultiplayer: (region) =>
             new Promise((resolve, reject) => {

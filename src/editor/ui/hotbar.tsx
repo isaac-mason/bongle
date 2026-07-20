@@ -25,7 +25,7 @@ export function Hotbar() {
     const room = useEditor((s) => s.room);
     return (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
-            <div className="flex gap-1 bg-white/90 border border-neutral-200 rounded-sm shadow-md p-1 backdrop-blur-sm">
+            <div className="flex gap-1 bg-surface/90 border border-border rounded-sm shadow-md p-1 backdrop-blur-sm">
                 {hotbar.map((slot, i) => (
                     <Slot
                         // biome-ignore lint/suspicious/noArrayIndexKey: hotbar slots are positional (slot index is the identity)
@@ -72,10 +72,10 @@ function Slot({ index, slot, room, active, carrying, onClick, onClear }: SlotPro
             }}
             className={`relative flex items-center justify-center rounded-sm cursor-pointer transition-colors ${
                 active
-                    ? 'bg-neutral-500 ring-1 ring-neutral-600'
+                    ? 'bg-surface-muted ring-2 ring-accent'
                     : carrying
-                      ? 'bg-blue-50 ring-1 ring-blue-300 hover:bg-blue-100'
-                      : 'bg-neutral-100 hover:bg-neutral-200'
+                      ? 'bg-accent/20 ring-1 ring-accent hover:bg-accent/30'
+                      : 'bg-surface-muted hover:bg-border'
             }`}
             style={{ width: SLOT_SIZE, height: SLOT_SIZE }}
             title={slot ? inventoryItemDisplay(slot, room).title : `slot ${index + 1} (empty)`}
@@ -83,7 +83,7 @@ function Slot({ index, slot, room, active, carrying, onClick, onClear }: SlotPro
             {slot && <InventoryItemIcon item={slot} size={ICON_SIZE} />}
             <span
                 className={`absolute top-0.5 left-1 text-[9px] font-mono leading-none pointer-events-none ${
-                    active ? 'text-white/90' : 'text-neutral-400'
+                    active ? 'text-fg' : 'text-fg-muted'
                 }`}
             >
                 {index + 1}

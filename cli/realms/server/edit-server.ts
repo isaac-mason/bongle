@@ -53,6 +53,11 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     env.server = true;
     env.editor = true;
     await userEntry();
+    // the baked barrel patches model handles with their bin paths (mirrors the
+    // editor realm importing src/generated/models.ts) so the server registry
+    // matches the client's — without it models stay cold-start placeholders.
+    // @ts-expect-error — a Vite resolve.alias (→ <projectDir>/src/generated/models.ts), not resolvable by tsgo.
+    await import('bongle-project-models');
 
     await initZstd();
     const scenesDir = path.join(projectDir, SCENES_DIR);

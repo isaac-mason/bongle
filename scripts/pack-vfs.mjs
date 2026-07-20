@@ -14,7 +14,7 @@
 // vite lib build → dist/, gather-lib-runtime → vendor/, build-deps → deps-dist/,
 // tsgo → dist/types/) so all inputs exist.
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,6 +86,31 @@ for (const lib of VENDOR_LIBS) {
     addTree(`${lib}/dist`, join(d, 'dist'), (abs) => abs.endsWith('.js') || abs.endsWith('.d.ts'));
 }
 
+// ── examples/ (source only) → node_modules/bongle/examples/<name> ────────────
+// seed the first-party example projects as free, in-editor reference code (the
+// file tree grays node_modules + Monaco opens it read-only, so they read like a
+// bundled reference). performance-* benchmarks are dev noise — skipped. Build
+// output + deps + baked resources are excluded: just the authored src/content.
+const EXAMPLE_SKIP_DIRS = new Set(['node_modules', 'dist', 'resources']);
+const addExampleTree = (zipPrefix, absDir) => {
+    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+        if (entry.name === '.DS_Store') continue;
+        const abs = join(absDir, entry.name);
+        const zp = `${zipPrefix}/${entry.name}`;
+        if (entry.isDirectory()) {
+            if (EXAMPLE_SKIP_DIRS.has(entry.name)) continue;
+            addExampleTree(zp, abs);
+        } else addFile(zp, abs);
+    }
+};
+const examplesRoot = join(ROOT, 'examples');
+if (existsSync(examplesRoot)) {
+    for (const entry of readdirSync(examplesRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name.startsWith('performance-')) continue;
+        addExampleTree(`bongle/examples/${entry.name}`, join(examplesRoot, entry.name));
+    }
+}
+
 // ── @webgpu/types — ambient GPU* globals for Monaco (types-only package) ─────
 const webgpuDir = dirname(require.resolve('@webgpu/types/package.json'));
 addFile('@webgpu/types/package.json', join(webgpuDir, 'package.json'));
@@ -94,4 +119,6 @@ addTree('@webgpu/types', webgpuDir, (abs) => abs.endsWith('.d.ts'));
 const zip = zipSync(files, { level: 6 });
 const out = join(ROOT, 'editor/editor-node-modules.zip');
 writeFileSync(out, zip);
-console.log(`packed ${Object.keys(files).length} files → editor/editor-node-modules.zip (${(zip.length / 1024 / 1024).toFixed(2)} MB)`);
+console.log(
+    `packed ${Object.keys(files).length} files → editor/editor-node-modules.zip (${(zip.length / 1024 / 1024).toFixed(2)} MB)`,
+);

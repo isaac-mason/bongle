@@ -82,10 +82,10 @@ function ControlModeWidget() {
 
     return (
         <div className="absolute top-2 right-2 z-10 pointer-events-auto">
-            <div className="flex bg-white border border-neutral-200 rounded-sm shadow-sm text-xs overflow-hidden">
+            <div className="flex bg-surface border border-border rounded-sm shadow-sm text-xs overflow-hidden">
                 <button
                     type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'fly' ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
+                    className={`px-2 py-1.5 ${controlMode === 'fly' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
                     onClick={() => setControlMode('fly')}
                     title="fly"
                 >
@@ -93,7 +93,7 @@ function ControlModeWidget() {
                 </button>
                 <button
                     type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'orbit' ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
+                    className={`px-2 py-1.5 ${controlMode === 'orbit' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
                     onClick={() => setControlMode('orbit')}
                     title="orbit"
                 >
@@ -101,7 +101,7 @@ function ControlModeWidget() {
                 </button>
                 <button
                     type="button"
-                    className={`px-2 py-1.5 ${controlMode === 'character' ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
+                    className={`px-2 py-1.5 ${controlMode === 'character' ? 'bg-accent text-on-accent' : 'text-fg-muted hover:bg-surface-muted'}`}
                     onClick={() => setControlMode('character')}
                     title="character"
                 >
@@ -336,7 +336,7 @@ function CarriedItemCursor() {
     if (!carried || !pos) return null;
     return (
         <div className="fixed pointer-events-none z-50" style={{ left: pos.x + 12, top: pos.y + 12 }}>
-            <div className="bg-white/90 rounded shadow-md border border-neutral-200 p-1">
+            <div className="bg-surface/95 rounded shadow-md border border-border p-1">
                 <InventoryItemIcon item={carried} size={32} />
             </div>
         </div>

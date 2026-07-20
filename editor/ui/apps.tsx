@@ -106,6 +106,17 @@ export function appById(id: string): AppDef | undefined {
     return APPS.find((a) => a.id === id);
 }
 
+/** force a file into the code editor as text, regardless of its default app —
+ *  e.g. inspect a .bbmodel's JSON. This is `openPath`'s fallback, exposed so the
+ *  tree's "Open in code editor" action can override the extension routing. */
+export function openInCode(path: string, pane: string): void {
+    useEditor.getState().open(pane, path);
+    // the main pane lives in the closable 'code' system window; opening a file
+    // while it's closed would drop the tab into an invisible window, so reopen
+    // (+ raise) it. Torn-off panes render their own always-visible windows.
+    if (pane === MAIN_PANE) useSystemWindows.getState().open('code');
+}
+
 /** open a file from a pane's tree: hand it to its app (own window), or open a
  *  code-editor tab in that pane's active group. */
 export function openPath(path: string, pane: string): void {
@@ -117,9 +128,5 @@ export function openPath(path: string, pane: string): void {
         if (app.singleton) useBlockbench.getState().open(path);
         return;
     }
-    useEditor.getState().open(pane, path);
-    // the main pane lives in the closable 'code' system window; opening a file
-    // while it's closed would drop the tab into an invisible window, so reopen
-    // (+ raise) it. Torn-off panes render their own always-visible windows.
-    if (pane === MAIN_PANE) useSystemWindows.getState().open('code');
+    openInCode(path, pane);
 }

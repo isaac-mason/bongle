@@ -17,9 +17,11 @@
  *   editor -> iframe: { type: 'bongle:hello' }                            re-request ready
  *   editor -> iframe: { type: 'bongle:open', path, bbmodel }             open (or focus) a file
  *   editor -> iframe: { type: 'bongle:save-active' }                     trigger a save of the active project
+ *   editor -> iframe: { type: 'bongle:autosave-request' }                serialize the source (no glb) for a silent draft
  *   editor -> iframe: { type: 'bongle:assign-path', uuid, path }         resolve a save-as
  *   iframe -> editor: { type: 'bongle:save', path, glb, bbmodel, name, warnings }
  *   iframe -> editor: { type: 'bongle:save-as', uuid, glb, bbmodel, name, warnings }
+ *   iframe -> editor: { type: 'bongle:autosave', path, bbmodel }
  *   iframe -> editor: { type: 'bongle:save-failed', errors }
  *   iframe -> editor: { type: 'bongle:dirty', path, saved }
  *   iframe -> editor: { type: 'bongle:open-failed', path, error }
@@ -76,6 +78,23 @@
 		}
 	}
 
+	// serialize the ACTIVE project's .bbmodel source and hand it back as a silent
+	// draft snapshot — source only (no glb compile), and it does NOT touch the
+	// saved/dirty state, so the editor's local crash-net can capture in-progress
+	// work without a real Ctrl+S. No-op for an untitled project (no mapped path).
+	function snapshotActive() {
+		const project = typeof Project !== 'undefined' ? Project : null;
+		if (!project || !project.bongle_fs_path) return;
+		const B = api();
+		let bbmodel;
+		try {
+			bbmodel = B.serializeBbmodel();
+		} catch {
+			return; // can't serialize yet — skip this tick, the next edit re-arms it
+		}
+		post({ type: 'bongle:autosave', path: project.bongle_fs_path, bbmodel });
+	}
+
 	function openFile(path, bbmodel) {
 		const existing = projectForPath(path);
 		if (existing) {
@@ -111,6 +130,9 @@
 				return;
 			case 'bongle:save-active':
 				void saveActive();
+				return;
+			case 'bongle:autosave-request':
+				snapshotActive();
 				return;
 			case 'bongle:assign-path': {
 				const p = projectByUuid(data.uuid);

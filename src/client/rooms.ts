@@ -1,8 +1,9 @@
 import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
+import { mat4, quat } from 'mathcat';
 import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
-import { TransformTrait } from '../builtins/transform';
+import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { attachWorldTrait } from '../builtins/world';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
@@ -798,7 +799,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // builtin controllers (orbit / fly / player) write to this each frame
     // instead of creating their own. recreated on resyncRoom because
     // unpackSceneTree wipes root's children.
-    const cameraNode = createDefaultCameraNode(nodes, playerNode);
+    const cameraNode = createDefaultCameraNode(nodes, playerNode, playerMode);
 
     // the single client state. scriptRuntime.client and room.client both
     // reference this one object; subject / camera are plain fields mutated in
@@ -978,7 +979,7 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
     room.playerNode = playerNode;
     // unpackSceneTree wiped the default camera node along with the rest of
     // root's children, re-create it.
-    room.cameraNode = createDefaultCameraNode(room.nodes, playerNode);
+    room.cameraNode = createDefaultCameraNode(room.nodes, playerNode, room.playerMode);
     // re-seat the client state to the fresh nodes. plain writes to the one
     // client object, observed everywhere.
     room.client.subject = playerNode;
@@ -996,11 +997,32 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
  * build the per-room default camera node. used at room creation and again
  * on resync (since unpackSceneTree clears the existing tree).
  */
-function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTree.Node): SceneTree.Node {
+function createDefaultCameraNode(
+    nodes: SceneTree.SceneTree,
+    playerNode: SceneTree.Node,
+    playerMode: PlayerMode,
+): SceneTree.Node {
     const node = SceneTree.createNode({ name: `${playerNode.name}:camera`, persist: false });
     SceneTree.addTrait(node, TransformTrait);
     SceneTree.addTrait(node, CameraTrait);
     SceneTree.addChild(nodes.root, node);
+    // Edit rooms drive this camera via the fly controller, which starts from
+    // whatever pose the node holds. Seed it above the origin looking down at
+    // (0,0,0) so a fresh edit session opens overlooking the scene rather than
+    // sitting inside it. Play rooms overwrite this each frame from the player
+    // controller, so their camera pose here doesn't matter.
+    if (playerMode === 'edit') {
+        const transform = SceneTree.getTrait(node, TransformTrait)!;
+        const eye: [number, number, number] = [5, 5, 5];
+        const target: [number, number, number] = [0, 0, 0];
+        const up: [number, number, number] = [0, 1, 0];
+        const m = mat4.create();
+        mat4.targetTo(m, eye, target, up);
+        const q = quat.create();
+        quat.fromMat4(q, m);
+        setWorldPosition(transform, eye);
+        setWorldQuaternion(transform, q);
+    }
     return node;
 }
 

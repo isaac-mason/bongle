@@ -2,7 +2,8 @@
 //
 // reads the captured `module.scenes` (declared via `scene('<id>')` in user
 // code) and emits `src/generated/scenes.ts`. the barrel static-imports each
-// scene's `.scene.json` and calls `__bongle.registerScene` at module-eval.
+// scene's `.scene.json` and calls `registerScene` (imported from
+// `bongle/internal`) at module-eval.
 // each call stashes the payload into an engine-side map. `EngineClient.load`
 // / `EngineServer.load` walk that map after `Project.load` and apply each
 // payload via `populateScene`.
@@ -89,16 +90,12 @@ export async function buildScenes(module: ModuleVersion, opts: BuildScenesOption
         lines.push(`import _scene_${i} from '${entries[i]!.sceneRel}';`);
     }
     lines.push(``);
-    // `__bongle` is injected in module scope by the dev capture-transform's prelude
-    // (build/dev/transform.ts); re-importing it would collide with that top-level
-    // `import { __bongle }`. Declare it TYPE-ONLY so the barrel typechecks —
-    // `declare` emits nothing, so there's no runtime collision.
-    lines.push(`declare const __bongle: typeof import('bongle/internal').__bongle;`);
+    lines.push(`import { registerScene } from 'bongle/internal';`);
     lines.push(``);
     for (let i = 0; i < entries.length; i++) {
         const e = entries[i]!;
         lines.push(
-            `__bongle.registerScene(${JSON.stringify(e.id)}, { nodes: _scene_${i}.nodes, voxels: _scene_${i}.chunks ? { chunks: _scene_${i}.chunks } : null });`,
+            `registerScene(${JSON.stringify(e.id)}, { nodes: _scene_${i}.nodes, voxels: _scene_${i}.chunks ? { chunks: _scene_${i}.chunks } : null });`,
         );
     }
     lines.push(``);

@@ -73,9 +73,10 @@
         "./avatar/rig": {
             "source": "./src/core/avatar/rig.ts",
             "types": "./dist/types/src/core/avatar/rig.d.ts",
-            "import": "./dist/avatar/rig.js",
-            "default": "./dist/avatar/rig.js"
+            "import": "./dist/avatar-rig.js",
+            "default": "./dist/avatar-rig.js"
         },
+        "./bongle.css": "./dist/bongle.css",
         "./kit": {
             "source": "./src/kit/index.ts",
             "types": "./dist/types/src/kit/index.d.ts",

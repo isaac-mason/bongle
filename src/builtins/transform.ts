@@ -16,13 +16,14 @@
 
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { mat4, quat, vec3 } from 'mathcat';
-import type { Node, SceneTree } from '../core/scene/scene-tree';
-import { getTrait } from '../core/scene/scene-tree';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
+import type { Node, SceneTree } from '../core/scene/scene-tree';
+import { getTrait } from '../core/scene/scene-tree';
 import { dirty, rate } from '../core/scene/sync/sync-rate';
 import { control, sync, type TraitType, trait } from '../core/scene/traits';
 import { traverse } from '../core/scene/traverse';
+import { toChunkCoord } from '../core/voxels/voxels';
 
 // ── dirty bitmask ───────────────────────────────────────────────────────
 //
@@ -40,16 +41,21 @@ import { traverse } from '../core/scene/traverse';
 //                                   write interpolatedWorldMatrix without mirroring
 //                                   the decomposed TRS, e.g. publishToTraits
 //                                   or `interpolate()`'s nested-Interp branch).
+//   TRANSFORM_DIRTY_WORLD_CHUNK, t.worldChunk (chunk coord of worldPosition) stale. part of
+//                                ALL so every world-transform invalidation re-flags it; cleared
+//                                only by getWorldChunk, which recomputes lazily from worldPosition.
 
 export const TRANSFORM_DIRTY_WORLD_MATRIX = 1;
 export const TRANSFORM_DIRTY_WORLD_TRS = 2;
 export const TRANSFORM_DIRTY_INTERPOLATED_TRS = 4;
 export const TRANSFORM_DIRTY_INTERPOLATED_MATRIX = 8;
+export const TRANSFORM_DIRTY_WORLD_CHUNK = 16;
 export const TRANSFORM_DIRTY_ALL =
     TRANSFORM_DIRTY_WORLD_MATRIX |
     TRANSFORM_DIRTY_WORLD_TRS |
     TRANSFORM_DIRTY_INTERPOLATED_TRS |
-    TRANSFORM_DIRTY_INTERPOLATED_MATRIX;
+    TRANSFORM_DIRTY_INTERPOLATED_MATRIX |
+    TRANSFORM_DIRTY_WORLD_CHUNK;
 
 // ── trait definition ────────────────────────────────────────────────────
 
@@ -92,6 +98,10 @@ export const TransformTrait = trait('transform', {
     worldQuaternion: quat.create(),
     worldScale: vec3.fromValues(1, 1, 1),
     worldMatrix: mat4.create(),
+
+    // integer chunk coord of worldPosition (cx,cy,cz), lazily recomputed by
+    // getWorldChunk. holds small ints, exactly representable in f32.
+    worldChunk: vec3.create(),
 
     // ── visual world-space (runtime-only, lazy recompute) ─────────────
     // parallel chain to worldMatrix used by all rendering consumers.
@@ -1061,6 +1071,24 @@ export function getWorldPosition(t: TransformTrait): Vec3 {
         t._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
     }
     return t.worldPosition;
+}
+
+/**
+ * get the integer chunk coord (cx,cy,cz) containing this transform's world
+ * position. lazy: recomputes from worldPosition only when the WORLD_CHUNK bit
+ * is set (every world-transform invalidation re-flags it), so a stationary
+ * transform computes it once and a never-queried transform never computes it
+ * at all. the returned Vec3 is the cached instance, do not mutate.
+ */
+export function getWorldChunk(t: TransformTrait): Vec3 {
+    if (t._dirty & TRANSFORM_DIRTY_WORLD_CHUNK) {
+        const p = getWorldPosition(t);
+        t.worldChunk[0] = toChunkCoord(Math.floor(p[0]));
+        t.worldChunk[1] = toChunkCoord(Math.floor(p[1]));
+        t.worldChunk[2] = toChunkCoord(Math.floor(p[2]));
+        t._dirty &= ~TRANSFORM_DIRTY_WORLD_CHUNK;
+    }
+    return t.worldChunk;
 }
 
 /** get world-space quaternion, decomposing from worldMatrix if needed. */

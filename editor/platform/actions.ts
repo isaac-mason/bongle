@@ -11,6 +11,7 @@ import { useBuildMeta } from '../stores/build-meta';
 import { useBuildProgress } from '../stores/build-progress';
 import { logger } from '../stores/logs';
 import { usePlatform } from '../stores/platform';
+import type { PlatformResult } from './contract';
 
 /** run the prod build in a Worker (@rolldown/browser's threaded wasm can't run
  *  on the main thread — Atomics.wait). Returns the zip; progress streams back. */
@@ -43,6 +44,16 @@ function buildInWorker(maxPlayers: number, onProgress: (label: string) => void):
     });
 }
 
+/** trigger a browser download of a built zip. */
+function downloadZip(zip: Uint8Array, name: string): void {
+    const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 /** build the prod bundle. Embedded → hand to the platform; standalone → download.
  *  Progress shows in the BuildModal; a summary lands in the build log. */
 export async function runBuild(fs: Filesystem): Promise<void> {
@@ -54,22 +65,59 @@ export async function runBuild(fs: Filesystem): Promise<void> {
         const t0 = performance.now();
         const zip = await buildInWorker(useBuildMeta.getState().maxPlayers, (l) => useBuildProgress.getState().step(l));
         if (embedded) {
-            // ship the source alongside the built bundle so the platform can
-            // snapshot it as a project_version + record the build's provenance.
+            // ship the source alongside the built bundle so the platform can snapshot it
+            // as a project_version + record the build's provenance, then WAIT for the
+            // platform's publish result (bongle:result of:'build') so the modal confirms
+            // with the minted ids + a dashboard link instead of finishing on the zip.
             const source = await exportProjectSave(fs);
-            usePlatform.getState().send({ type: 'bongle:build', payload: zip, source });
+            useBuildProgress.getState().step('Publishing to bongle…');
+            const platform = usePlatform.getState();
+            const result = await new Promise<PlatformResult>((resolve) => {
+                const off = platform.bridge?.onResult((r) => {
+                    if (r.of !== 'build') return;
+                    off?.();
+                    resolve(r);
+                });
+                platform.send({ type: 'bongle:build', payload: zip, source });
+            });
+            if (result.ok) {
+                useBuildProgress.getState().finishPublish({
+                    buildId: result.buildId,
+                    versionId: result.versionId,
+                    dashboardUrl: result.dashboardUrl,
+                });
+                log(`published build ${result.buildId ?? '?'} from version ${result.versionId?.slice(0, 8) ?? '?'}`);
+            } else {
+                useBuildProgress.getState().failPublish(result.message ?? 'publish failed');
+                log(`publish failed: ${result.message ?? 'unknown error'}`);
+            }
         } else {
-            const url = URL.createObjectURL(new Blob([zip as BlobPart], { type: 'application/zip' }));
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'bundle.zip';
-            a.click();
-            URL.revokeObjectURL(url);
+            downloadZip(zip, 'bundle.zip');
+            progress.finish(zip.length);
+            log(`bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(zip.length / 1024).toFixed(0)}KB, downloaded`);
         }
+    } catch (err) {
+        progress.fail((err as Error).message);
+        log(`build failed: ${(err as Error).message}`);
+        console.error(err);
+    }
+}
+
+/** build the prod bundle and DOWNLOAD it as bundle.zip — always local, it never
+ *  publishes. This is deliberately separate from runBuild's embedded "Build &
+ *  publish": the Advanced fold-out uses this in every mode, so "build + download a
+ *  zip" is never confused with uploading a build to the platform. Progress shows
+ *  in the BuildModal; a summary lands in the build log. */
+export async function downloadProdBundle(): Promise<void> {
+    const progress = useBuildProgress.getState();
+    const log = logger('build');
+    progress.begin();
+    try {
+        const t0 = performance.now();
+        const zip = await buildInWorker(useBuildMeta.getState().maxPlayers, (l) => useBuildProgress.getState().step(l));
+        downloadZip(zip, 'bundle.zip');
         progress.finish(zip.length);
-        log(
-            `bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(zip.length / 1024).toFixed(0)}KB, ${embedded ? 'sent to platform' : 'downloaded'}`,
-        );
+        log(`bundle.zip built in ${(performance.now() - t0).toFixed(0)}ms — ${(zip.length / 1024).toFixed(0)}KB, downloaded`);
     } catch (err) {
         progress.fail((err as Error).message);
         log(`build failed: ${(err as Error).message}`);

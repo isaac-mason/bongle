@@ -32,7 +32,7 @@ export function NumberInput({ value, onChange, min, max, step = 1, width = 'sm' 
                 if (max !== undefined) n = Math.min(max, n);
                 onChange(n);
             }}
-            className={`${w} bg-neutral-800 text-neutral-200 text-[10px] font-mono px-1 py-0.5 rounded border border-neutral-700`}
+            className={`${w} bg-surface-muted text-fg text-[10px] font-mono px-1 py-0.5 rounded border border-border`}
         />
     );
 }

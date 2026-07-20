@@ -11,11 +11,22 @@ export function BuildModal() {
     const steps = useBuildProgress((s) => s.steps);
     const error = useBuildProgress((s) => s.error);
     const sizeBytes = useBuildProgress((s) => s.sizeBytes);
+    const published = useBuildProgress((s) => s.published);
+    const errorKind = useBuildProgress((s) => s.errorKind);
     if (!open) return null;
 
     const done = status !== 'running';
     const close = () => useBuildProgress.getState().close();
-    const title = status === 'done' ? 'Build complete' : status === 'error' ? 'Build failed' : 'Building bundle';
+    const title =
+        status === 'done'
+            ? published
+                ? 'Published to bongle'
+                : 'Build complete'
+            : status === 'error'
+              ? errorKind === 'publish'
+                  ? 'Publish failed'
+                  : 'Build failed'
+              : 'Building bundle';
 
     return (
         // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop.
@@ -40,6 +51,20 @@ export function BuildModal() {
                     ))}
                 </div>
 
+                {status === 'done' && published && (
+                    <div className="mt-3 flex flex-col gap-1 text-xs">
+                        <div className="text-fg-muted">
+                            version {published.versionId?.slice(0, 8) ?? '?'} · build {published.buildId?.slice(0, 8) ?? '?'}
+                        </div>
+                        {published.dashboardUrl && (
+                            // target=_top: navigate the platform (parent) to the dashboard,
+                            // not the editor iframe.
+                            <a href={published.dashboardUrl} target="_top" rel="noreferrer" className="underline">
+                                View in builds dashboard →
+                            </a>
+                        )}
+                    </div>
+                )}
                 {status === 'done' && sizeBytes != null && (
                     <div className="mt-3 text-xs text-fg-muted">bundle.zip — {(sizeBytes / 1024).toFixed(0)} KB, downloaded</div>
                 )}

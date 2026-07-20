@@ -1,15 +1,31 @@
 // editor/ui/markdown.ts — a small, dependency-free Markdown -> HTML renderer for
 // the code editor's .md preview. Covers the common README subset: headings,
-// fenced code, inline code, bold/italic, links, images, ul/ol lists,
-// blockquotes, hr, paragraphs, and RAW HTML passthrough (so `<table>`, `<img>`,
-// `<details>` etc. render). NOT full CommonMark (no nested lists). Rendering
-// local, user-authored files: only `<script>` and `javascript:` urls are
-// stripped; other HTML is trusted.
+// fenced code, inline code, bold/italic, links, images, ul/ol lists, GFM pipe
+// tables, blockquotes, hr, paragraphs, and RAW HTML passthrough (so `<table>`,
+// `<img>`, `<details>` etc. render). NOT full CommonMark (no nested lists).
+// Rendering local, user-authored files: only `<script>` and `javascript:` urls
+// are stripped; other HTML is trusted.
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const safeUrl = (url: string): string => (/^\s*javascript:/i.test(url) ? '#' : url);
 const headingSlug = (text: string): string =>
     text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+/** a heading in reading order, for the table-of-contents sidebar. */
+export type TocEntry = { level: number; text: string; id: string };
+
+/** strip inline markdown syntax down to plain text (for TOC labels). */
+const inlineToText = (text: string): string =>
+    text
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+
+// heading-collection state threaded through the top-level render; nested renders
+// (blockquotes) pass null so their headings stay out of the document TOC.
+type TocContext = { toc: TocEntry[]; seen: Map<string, number> };
 
 const S0 = '';
 const S1 = ''; // private-use sentinels for extracted code spans
@@ -36,7 +52,51 @@ function inline(text: string): string {
     return t.replace(/(\d+)/g, (_m, i: string) => codes[Number(i)]);
 }
 
+// ── GFM pipe tables ──────────────────────────────────────────────────────────
+// split a `| a | b |` row into trimmed cells; leading/trailing pipes optional,
+// `\|` is a literal pipe inside a cell.
+const splitRow = (row: string): string[] =>
+    row
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split(/(?<!\\)\|/)
+        .map((c) => c.trim().replace(/\\\|/g, '|'));
+
+// the row under the header: every cell is `---`, `:--`, `--:`, or `:-:`. Requires
+// a pipe so a bare `-----` (an hr) after a `|`-bearing line isn't misread.
+const isTableDelimiter = (row: string): boolean => row.includes('|') && splitRow(row).every((c) => /^:?-+:?$/.test(c));
+
+const cellAlign = (c: string): string => {
+    const l = c.startsWith(':');
+    const r = c.endsWith(':');
+    return l && r ? 'center' : r ? 'right' : l ? 'left' : '';
+};
+const alignAttr = (a: string): string => (a ? ` style="text-align:${a}"` : '');
+
+const renderTable = (header: string[], aligns: string[], body: string[][]): string => {
+    const head = header.map((c, k) => `<th${alignAttr(aligns[k])}>${inline(c)}</th>`).join('');
+    const rows = body
+        .map((cells) => {
+            // GFM pads short rows / ignores extra cells against the header width.
+            const tds = header.map((_h, k) => `<td${alignAttr(aligns[k])}>${inline(cells[k] ?? '')}</td>`).join('');
+            return `<tr>${tds}</tr>`;
+        })
+        .join('');
+    return `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+};
+
+/** render Markdown to HTML and collect the heading outline in one pass. */
+export function renderMarkdownWithToc(src: string): { html: string; toc: TocEntry[] } {
+    const ctx: TocContext = { toc: [], seen: new Map() };
+    return { html: renderBlocks(src, ctx), toc: ctx.toc };
+}
+
 export function renderMarkdown(src: string): string {
+    return renderBlocks(src, null);
+}
+
+function renderBlocks(src: string, ctx: TocContext | null): string {
     const lines = src.replace(/\r\n?/g, '\n').split('\n');
     const out: string[] = [];
     let para: string[] = [];
@@ -75,12 +135,35 @@ export function renderMarkdown(src: string): string {
             continue;
         }
 
+        // GFM pipe table: a header row + a delimiter row (`--- | :--:`). Detected
+        // via the delimiter so a lone `|` in prose isn't misread as a table.
+        if (line.includes('|') && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+            flushPara();
+            const header = splitRow(line);
+            const aligns = splitRow(lines[i + 1]).map(cellAlign);
+            i += 2;
+            const body: string[][] = [];
+            while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '' && !/^```/.test(lines[i])) {
+                body.push(splitRow(lines[i++]));
+            }
+            out.push(renderTable(header, aligns, body));
+            continue;
+        }
+
         const heading = /^(#{1,6})\s+(.*)$/.exec(line);
         if (heading) {
             flushPara();
             const lvl = heading[1].length;
             const text = heading[2].replace(/\s+#*\s*$/, '').trim();
-            out.push(`<h${lvl} id="${headingSlug(text)}">${inline(text)}</h${lvl}>`);
+            let id = headingSlug(text);
+            if (ctx) {
+                // suffix repeats so anchors stay unique and the TOC links resolve.
+                const n = ctx.seen.get(id) ?? 0;
+                ctx.seen.set(id, n + 1);
+                if (n) id = `${id}-${n}`;
+                ctx.toc.push({ level: lvl, text: inlineToText(text), id });
+            }
+            out.push(`<h${lvl} id="${id}">${inline(text)}</h${lvl}>`);
             i++;
             continue;
         }
@@ -96,7 +179,7 @@ export function renderMarkdown(src: string): string {
             flushPara();
             const buf: string[] = [];
             while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ''));
-            out.push(`<blockquote>${renderMarkdown(buf.join('\n'))}</blockquote>`);
+            out.push(`<blockquote>${renderBlocks(buf.join('\n'), null)}</blockquote>`);
             continue;
         }
 

@@ -30,7 +30,7 @@ function ToastRow({ toast }: { toast: Toast }) {
 
     return (
         <div
-            className="bg-white border border-neutral-900 px-2 py-1 text-[11px] font-mono text-neutral-900 transition-opacity"
+            className="bg-surface-muted border border-border px-2 py-1 text-[11px] font-mono text-fg transition-opacity"
             style={{ opacity: visible ? 1 : 0, transitionDuration: `${FADE_MS}ms` }}
         >
             {toast.message}

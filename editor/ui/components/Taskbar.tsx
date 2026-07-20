@@ -24,7 +24,18 @@ export type TaskbarItem = {
     menu?: MenuItem[];
 };
 
-export function Taskbar({ items, footer, presence }: { items: TaskbarItem[]; footer?: TaskbarItem[]; presence?: ReactNode }) {
+export function Taskbar({
+    items,
+    footer,
+    footerExtra,
+    presence,
+}: {
+    items: TaskbarItem[];
+    footer?: TaskbarItem[];
+    /** custom footer node (e.g. a fold-out menu) rendered below the footer icons. */
+    footerExtra?: ReactNode;
+    presence?: ReactNode;
+}) {
     const geom = useWindows((s) => s.geom);
     const focused = useWindows((s) => s.focused);
     const { focus, setMode } = useWindows.getState();
@@ -71,9 +82,10 @@ export function Taskbar({ items, footer, presence }: { items: TaskbarItem[]; foo
             style={{ width: TASKBAR_W }}
         >
             {items.map(renderItem)}
-            {(footer?.length || presence) && (
+            {(footer?.length || footerExtra || presence) && (
                 <div className="mt-auto flex flex-col gap-1.5">
                     {footer?.map(renderItem)}
+                    {footerExtra}
                     {presence}
                 </div>
             )}

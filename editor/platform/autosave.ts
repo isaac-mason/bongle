@@ -7,6 +7,10 @@
 // and never touches storage itself — it emits bytes + the opaque baseVersion/rev
 // tokens and lets the platform decide durability.
 //
+// Two session kinds ride the SAME draft stream (the payload is opaque to the
+// platform): a PROJECT emits its source zip; an AVATAR emits its .bbmodel source
+// text (Blockbench autosaves it into the fs on a debounce — see Blockbench.tsx).
+//
 // Safety property (the "un-scary" half): autosave ARMS on a real fs edit only.
 // Load / open-version / restore write into the fs before this module subscribes
 // (or produce no genuine mutation), so browsing an old version emits zero edits
@@ -18,6 +22,9 @@ import { useAutosave } from '../stores/autosave';
 import type { PlatformBridge } from './bridge';
 import type { PlatformIntent, PlatformResult } from './contract';
 
+// the avatar source the crash-net snapshots — matches main.tsx's avatar boot path.
+const AVATAR_SOURCE_PATH = 'avatar.bbmodel';
+
 /** idle window before a pending autosave fires (debounce trailing edge). */
 const IDLE_MS = 10_000;
 /** floor between two consecutive fires, so a steady stream of edits can't drive
@@ -27,6 +34,9 @@ const MIN_INTERVAL_MS = 10_000;
 type State = {
     fs: Filesystem;
     bridge: PlatformBridge;
+    /** which session this is — decides how a draft payload is built (project source
+     *  zip vs avatar .bbmodel source) and which fs edits arm it. */
+    kind: 'project' | 'avatar';
     /** the version the current draft descends from (opaque round-trip token).
      *  null for anonymous. Advances to the minted head on a successful save. */
     baseVersion: string | null;
@@ -43,15 +53,18 @@ type State = {
  *  (nothing to persist to) — the caller still calls this; it just parks. Returns a
  *  disposer that drops the fs subscription. */
 export function initAutosave(fs: Filesystem, bridge: PlatformBridge, intent: PlatformIntent | null): () => void {
-    // standalone (no platform) or a non-project intent: nothing to autosave into.
-    if (!bridge.embedded() || intent?.kind !== 'project') return () => {};
+    // standalone (no platform) or a join-guest session: nothing to autosave into.
+    if (!bridge.embedded() || (intent?.kind !== 'project' && intent?.kind !== 'avatar')) return () => {};
 
     const state: State = {
         fs,
         bridge,
-        baseVersion: intent.baseVersion ?? null,
+        kind: intent.kind,
+        // avatars are always anonymous local drafts for now (owned-avatar server sync
+        // is a later tier); a project carries its opaque base-version token.
+        baseVersion: intent.kind === 'project' ? (intent.baseVersion ?? null) : null,
         // resume ABOVE the opened slot's stored rev; fresh slots start at 0.
-        rev: intent.rev ?? 0,
+        rev: intent.kind === 'project' ? (intent.rev ?? 0) : 0,
         pending: null,
         lastFireAt: Number.NEGATIVE_INFINITY,
     };
@@ -75,9 +88,12 @@ export function initAutosave(fs: Filesystem, bridge: PlatformBridge, intent: Pla
     };
 }
 
-/** a flushed batch of fs changes. Any real change (re)arms the debounced fire. */
+/** a flushed batch of fs changes. Any real change (re)arms the debounced fire.
+ *  An avatar session only cares about its .bbmodel source — ignore the derived
+ *  glb writes (and everything else) so a save's glb doesn't re-emit the same source. */
 function onEdit(state: State, changes: FsChange[]): void {
-    if (changes.length === 0) return;
+    const relevant = state.kind === 'avatar' ? changes.filter((c) => c.path === AVATAR_SOURCE_PATH) : changes;
+    if (relevant.length === 0) return;
     state.rev += 1; // monotonic per genuine edit batch
     arm(state);
 }
@@ -106,12 +122,23 @@ async function flushNow(state: State): Promise<void> {
     await fire(state);
 }
 
-/** export the current source + hand it back as an autosave snapshot. */
+/** export the current source + hand it back as an autosave snapshot. A project
+ *  ships its source zip; an avatar ships its raw .bbmodel source bytes (the
+ *  platform stores the payload opaquely and reseeds it on restore). */
 async function fire(state: State): Promise<void> {
     state.lastFireAt = performance.now();
-    // exportProjectSave() is a level-0 (STORE) zip — fast enough inline at this
-    // cadence. If it ever janks the editor, move it to a worker (measure first).
-    const payload = await exportProjectSave(state.fs);
+    let payload: Uint8Array;
+    if (state.kind === 'avatar') {
+        try {
+            payload = new TextEncoder().encode(await state.fs.readText(AVATAR_SOURCE_PATH));
+        } catch {
+            return; // source not written yet — nothing to snapshot this tick
+        }
+    } else {
+        // exportProjectSave() is a level-0 (STORE) zip — fast enough inline at this
+        // cadence. If it ever janks the editor, move it to a worker (measure first).
+        payload = await exportProjectSave(state.fs);
+    }
     state.bridge.send({ type: 'bongle:draft', payload, baseVersion: state.baseVersion, rev: state.rev });
 }
 

@@ -41,11 +41,11 @@ export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, chil
     const resizable = defaultHeight !== undefined;
 
     return (
-        <div className="flex flex-col border-b border-neutral-300 last:border-b-0">
+        <div className="flex flex-col border-b border-border last:border-b-0">
             <button
                 type="button"
                 onClick={() => setOpen((v) => !v)}
-                className="flex items-center justify-between px-2 py-1.5 text-[10px] font-mono font-semibold text-neutral-500 uppercase tracking-wide hover:bg-neutral-100 cursor-pointer select-none flex-shrink-0 bg-neutral-50"
+                className="flex items-center justify-between px-2 py-1.5 text-[10px] font-mono font-semibold text-fg-muted uppercase tracking-wide hover:bg-surface-muted cursor-pointer select-none flex-shrink-0 bg-surface-muted"
             >
                 {title}
                 {open ? <Icons.ChevronDown size={11} /> : <Icons.ChevronRight size={11} />}
@@ -60,7 +60,7 @@ export function CollapsiblePane({ title, defaultOpen = true, defaultHeight, chil
                         <div
                             onPointerDown={onPointerDown}
                             onPointerMove={onPointerMove}
-                            className="absolute bottom-0 left-0 right-0 h-1 cursor-row-resize hover:bg-blue-400 hover:opacity-60 z-10"
+                            className="absolute bottom-0 left-0 right-0 h-1 cursor-row-resize hover:bg-accent hover:opacity-60 z-10"
                         />
                     )}
                 </div>

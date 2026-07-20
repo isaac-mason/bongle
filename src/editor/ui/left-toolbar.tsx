@@ -33,15 +33,15 @@ function ToolButton({
                 title={showSlot ? `${def.label}  (${categoryKeyLabel}·${slotDigit})` : `${def.label}  (${categoryKeyLabel})`}
                 className={`relative w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
                     active
-                        ? 'bg-neutral-800 text-white border-neutral-800'
-                        : 'text-neutral-500 border-neutral-300 hover:bg-neutral-200 hover:text-neutral-700'
+                        ? 'bg-accent text-on-accent border-accent'
+                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
                 }`}
             >
                 <Icon size={15} />
                 {showSlot && (
                     <span
                         className={`absolute bottom-0.5 right-0.5 text-[8px] font-mono leading-none select-none pointer-events-none ${
-                            active ? 'text-white' : 'text-neutral-400'
+                            active ? 'text-on-accent' : 'text-fg-muted'
                         }`}
                     >
                         {slotDigit}
@@ -52,20 +52,20 @@ function ToolButton({
             {/* hover popover */}
             {hovered && (
                 <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 pointer-events-none select-none">
-                    <div className="bg-neutral-900 text-white rounded-md px-2 py-1.5 shadow-lg whitespace-nowrap">
+                    <div className="bg-surface-muted text-fg border border-border rounded-md px-2 py-1.5 shadow-lg whitespace-nowrap">
                         <div className="flex items-center gap-2">
                             <div className="text-[11px] font-mono font-semibold">{def.label}</div>
                             <div className="flex items-center gap-0.5">
                                 <Kbd size="sm">{categoryKeyLabel}</Kbd>
                                 {showSlot && (
                                     <>
-                                        <span className="text-[10px] text-neutral-500">+</span>
+                                        <span className="text-[10px] text-fg-muted">+</span>
                                         <Kbd size="sm">{slotDigit}</Kbd>
                                     </>
                                 )}
                             </div>
                         </div>
-                        <div className="text-[10px] font-mono text-neutral-400 mt-0.5">{def.hint}</div>
+                        <div className="text-[10px] font-mono text-fg-muted mt-0.5">{def.hint}</div>
                     </div>
                 </div>
             )}
@@ -80,7 +80,7 @@ function InventoryButton() {
 
     return (
         <div className="mt-auto flex flex-col items-center gap-1 pt-1">
-            <div className="w-6 h-px bg-neutral-300 mb-1" />
+            <div className="w-6 h-px bg-border mb-1" />
             {/* control indicator: the key that toggles the inventory */}
             <Kbd size="xs">{keyLabel}</Kbd>
             <button
@@ -89,8 +89,8 @@ function InventoryButton() {
                 title={`inventory  (${keyLabel})`}
                 className={`w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
                     libraryOpen
-                        ? 'bg-neutral-800 text-white border-neutral-800'
-                        : 'text-neutral-500 border-neutral-300 hover:bg-neutral-200 hover:text-neutral-700'
+                        ? 'bg-accent text-on-accent border-accent'
+                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
                 }`}
             >
                 <Grid3x3 size={15} />
@@ -104,7 +104,7 @@ export function LeftToolbar() {
     const setActiveTool = useEditRoom((s) => s.setActiveTool);
 
     return (
-        <div className="w-12 flex-shrink-0 flex flex-col items-center pt-2 pb-2 bg-neutral-100 border-r border-neutral-200">
+        <div className="w-12 flex-shrink-0 flex flex-col items-center pt-2 pb-2 bg-surface border-r border-border">
             {/* tools, grouped by category. each group has a small header like
                 "scene v", the category name plus its hotkey. per-tool slot
                 digits appear in the bottom-right corner of each icon. */}
@@ -113,12 +113,12 @@ export function LeftToolbar() {
                     const CategoryIcon = category.icon;
                     return (
                         <div key={category.id} className="flex flex-col items-center gap-1">
-                            {ci > 0 && <div className="w-6 h-px bg-neutral-300 my-1" />}
+                            {ci > 0 && <div className="w-6 h-px bg-border my-1" />}
                             <div
                                 className="flex flex-row items-center gap-1 select-none mb-1"
                                 title={`category: ${category.label} (${formatKeyLabel(category.key)})`}
                             >
-                                <CategoryIcon size={12} className="text-neutral-500" />
+                                <CategoryIcon size={12} className="text-fg" />
                                 <Kbd size="xs">{formatKeyLabel(category.key)}</Kbd>
                             </div>
                             {category.tools.map((def, ti) => (

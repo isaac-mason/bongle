@@ -392,7 +392,7 @@ export function HierarchyPanel() {
     if (!sceneTree) {
         return (
             <div className="flex flex-col">
-                <div className="p-2 text-[10px] text-neutral-400 font-mono">no scene loaded</div>
+                <div className="p-2 text-[10px] text-fg-muted font-mono">no scene loaded</div>
             </div>
         );
     }
@@ -402,20 +402,20 @@ export function HierarchyPanel() {
 
     return (
         <div className="flex flex-col h-full">
-            <div className="p-1 border-b border-neutral-200 flex items-center gap-1">
-                <Icons.Search size={12} className="text-neutral-400 shrink-0" />
+            <div className="p-1 border-b border-border flex items-center gap-1">
+                <Icons.Search size={12} className="text-fg-muted shrink-0" />
                 <input
                     type="text"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     placeholder="filter nodes…"
-                    className="flex-1 min-w-0 bg-white border border-neutral-200 rounded px-1 py-0.5 text-[10px] font-mono text-neutral-700 outline-none focus:border-blue-400"
+                    className="flex-1 min-w-0 bg-surface border border-border rounded px-1 py-0.5 text-[10px] font-mono text-fg outline-none focus:border-accent"
                 />
                 {filter.length > 0 && (
                     <button
                         type="button"
                         onClick={() => setFilter('')}
-                        className="text-neutral-400 hover:text-neutral-600 cursor-pointer bg-transparent border-none p-0.5"
+                        className="text-fg-muted hover:text-fg cursor-pointer bg-transparent border-none p-0.5"
                         aria-label="clear filter"
                     >
                         <Icons.X size={12} />
@@ -582,7 +582,7 @@ export function HierarchyPanel() {
                 )}
             </ContextMenu>
 
-            <div className="p-1 border-t border-neutral-200">
+            <div className="p-1 border-t border-border">
                 <button
                     type="button"
                     onClick={() => {
@@ -591,7 +591,7 @@ export function HierarchyPanel() {
                         const parent = selectedNode ?? sceneTree.root;
                         createNode(parent.id, parent.children.length, 'New Node');
                     }}
-                    className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-mono bg-neutral-50 border border-neutral-200 rounded text-neutral-600 hover:bg-neutral-100 cursor-pointer"
+                    className="w-full flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-mono bg-surface-muted border border-border rounded text-fg hover:bg-surface-muted cursor-pointer"
                 >
                     <Icons.Plus size={12} /> Node
                 </button>

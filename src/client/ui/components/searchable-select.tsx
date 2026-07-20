@@ -124,11 +124,11 @@ export function SearchableSelect<T extends string | number = string>({
                         }
                     }}
                     placeholder={placeholder}
-                    className="shrink-0 w-full mb-1 bg-neutral-50 border border-neutral-200 rounded px-1.5 py-0.5 text-[11px] font-mono text-neutral-700 outline-none focus:border-neutral-400"
+                    className="shrink-0 w-full mb-1 bg-surface-muted border border-border rounded px-1.5 py-0.5 text-[11px] font-mono text-fg outline-none focus:border-fg-muted"
                 />
                 <div className="max-h-40 overflow-y-auto">
                     {filtered.length === 0 ? (
-                        <div className="px-2 py-1 text-[10px] font-mono text-neutral-400 italic">no matches</div>
+                        <div className="px-2 py-1 text-[10px] font-mono text-fg-muted italic">no matches</div>
                     ) : (
                         filtered.map((it, i) => {
                             const isActive = i === activeIndex;
@@ -141,17 +141,17 @@ export function SearchableSelect<T extends string | number = string>({
                                     onClick={() => !it.disabled && choose(it.id)}
                                     onMouseEnter={() => setActiveIndex(i)}
                                     className={`flex items-center gap-2 w-full text-left px-2 py-1 text-[11px] font-mono cursor-pointer ${
-                                        it.disabled ? 'text-neutral-300 cursor-not-allowed' : 'text-neutral-700'
-                                    } ${isActive ? 'bg-neutral-100' : 'hover:bg-neutral-100'} ${isSelected ? 'font-semibold' : ''}`}
+                                        it.disabled ? 'text-fg-muted opacity-50 cursor-not-allowed' : 'text-fg'
+                                    } ${isActive ? 'bg-accent/20' : 'hover:bg-surface-muted'} ${isSelected ? 'font-semibold' : ''}`}
                                 >
                                     {it.leading}
                                     <span className="flex flex-col min-w-0 flex-1">
                                         <span className="truncate">{it.label}</span>
                                         {it.sublabel && (
-                                            <span className="truncate text-[9px] text-neutral-400">{it.sublabel}</span>
+                                            <span className="truncate text-[9px] text-fg-muted">{it.sublabel}</span>
                                         )}
                                     </span>
-                                    {it.badge && <span className="ml-auto text-[10px] text-neutral-400">{it.badge}</span>}
+                                    {it.badge && <span className="ml-auto text-[10px] text-fg-muted">{it.badge}</span>}
                                 </button>
                             );
                         })
@@ -168,10 +168,10 @@ const DefaultSelectTrigger = forwardRef<HTMLButtonElement, ComponentProps<'butto
             ref={ref}
             type="button"
             {...props}
-            className={`flex items-center justify-between gap-1 w-full bg-neutral-50 border border-neutral-200 rounded px-1.5 py-0.5 text-[10px] font-mono text-neutral-700 outline-none hover:border-neutral-400 cursor-pointer ${className ?? ''}`}
+            className={`flex items-center justify-between gap-1 w-full bg-surface-muted border border-border rounded px-1.5 py-0.5 text-[10px] font-mono text-fg outline-none hover:border-fg-muted cursor-pointer ${className ?? ''}`}
         >
             <span className="truncate">{label}</span>
-            <ChevronDown size={10} className="shrink-0 text-neutral-400" />
+            <ChevronDown size={10} className="shrink-0 text-fg-muted" />
         </button>
     ),
 );

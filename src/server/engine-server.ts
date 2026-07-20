@@ -107,10 +107,12 @@ export function init(opts: InitOptions) {
                         return new Uint8Array(await r.arrayBuffer());
                     });
                 }
-                // absolute local file (the editor's edited avatar, file:///avatar.glb)
-                // — hand it to loadResource as-is; re-rooting under resourcesDir
-                // would mangle it. loadResource decodes the file: scheme.
-                if (url.startsWith('file:')) return opts.loadResource(url);
+                // absolute local file — the editor's edited avatar (file:///avatar.glb)
+                // or the dev fallback avatars driver's on-disk example .glb (an
+                // absolute path). Hand it to loadResource as-is; re-rooting under
+                // resourcesDir would mangle it. Baked model bins are relative
+                // (SERVER_URL_PREFIX), so a leading `/` or `file:` is unambiguous.
+                if (url.startsWith('file:') || url.startsWith('/')) return opts.loadResource(url);
                 return opts.loadResource(ResourceManager.resolveModelBin(resourceManager, url));
             },
         },

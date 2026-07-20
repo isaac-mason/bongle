@@ -48,11 +48,11 @@ export function ControlHints() {
 
     return (
         <div className="absolute bottom-2 right-2 z-10 pointer-events-none select-none">
-            <div className="flex flex-col gap-1 border border-neutral-200 bg-white/90 px-2 py-1.5">
+            <div className="flex flex-col gap-1 border border-border bg-surface/90 px-2 py-1.5">
                 {hints.map((h) => (
                     <div key={h.label} className="flex items-center justify-between gap-3 text-[10px] font-mono">
                         <span className="flex items-center gap-0.5">{h.keys}</span>
-                        <span className="text-neutral-500">{h.label}</span>
+                        <span className="text-fg-muted">{h.label}</span>
                     </div>
                 ))}
             </div>

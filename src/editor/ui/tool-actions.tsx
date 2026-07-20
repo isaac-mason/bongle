@@ -198,15 +198,15 @@ function ActionBtn({
                 onClick={onClick}
                 className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono shadow-sm border transition-colors ${
                     disabled
-                        ? 'bg-white border-neutral-200 text-neutral-300 cursor-default'
-                        : 'bg-white border-neutral-300 text-neutral-700 hover:bg-neutral-100 cursor-pointer'
+                        ? 'bg-surface border-border text-fg-muted opacity-50 cursor-default'
+                        : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
                 }`}
             >
                 <Icon size={12} />
                 {label}
             </button>
             {hovered && slashCmd && (
-                <div className="absolute left-0 top-full mt-1 z-20 pointer-events-none bg-white border border-neutral-900 px-2 py-1 text-[11px] font-mono text-neutral-900 whitespace-nowrap shadow-sm">
+                <div className="absolute left-0 top-full mt-1 z-20 pointer-events-none bg-surface-muted border border-border px-2 py-1 text-[11px] font-mono text-fg whitespace-nowrap shadow-sm">
                     {slashCmd}
                 </div>
             )}
@@ -238,10 +238,10 @@ function GizmoModeBtn({
             onClick={() => onClick(mode)}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono shadow-sm border transition-colors ${
                 disabled
-                    ? 'bg-neutral-100 border-neutral-200 text-neutral-400 cursor-not-allowed'
+                    ? 'bg-surface-muted border-border text-fg-muted opacity-50 cursor-not-allowed'
                     : active
-                      ? 'bg-neutral-800 border-neutral-800 text-white cursor-pointer'
-                      : 'bg-white border-neutral-300 text-neutral-700 hover:bg-neutral-100 cursor-pointer'
+                      ? 'bg-accent border-accent text-on-accent cursor-pointer'
+                      : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
             }`}
         >
             <Icon size={12} />

@@ -20,7 +20,7 @@ export function FlySpeedIndicator() {
 
     return (
         <div
-            className="absolute bottom-20 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-neutral-900/80 text-white text-[11px] font-mono pointer-events-none transition-opacity"
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-desktop/80 text-fg text-[11px] font-mono pointer-events-none transition-opacity"
             style={{ opacity: visible ? 1 : 0, transitionDuration: `${FADE_MS}ms` }}
         >
             fly speed: {flySpeed.toFixed(1)}

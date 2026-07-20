@@ -17,7 +17,7 @@ const SIZE_CLASSES: Record<KbdSize, string> = {
 export function Kbd({ children, size = 'sm', className = '' }: { children: ReactNode; size?: KbdSize; className?: string }) {
     return (
         <kbd
-            className={`inline-flex items-center justify-center font-mono leading-none border border-neutral-400 bg-white text-neutral-700 shadow-[0_1px_0_0_rgba(0,0,0,0.15)] select-none ${SIZE_CLASSES[size]} ${className}`}
+            className={`inline-flex items-center justify-center font-mono leading-none border border-border bg-surface-muted text-fg shadow-[0_1px_0_0_rgba(0,0,0,0.4)] select-none ${SIZE_CLASSES[size]} ${className}`}
         >
             {children}
         </kbd>

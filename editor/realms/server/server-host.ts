@@ -17,8 +17,16 @@ export type ServerHost = {
     leaveClient(connectionId: number): void;
     /** signal a changed path — the worker re-reads the shared OPFS (no bytes). */
     relayFsChange(path: string): void;
-    dispose(): void;
+    /** graceful teardown: ask the worker to flush + drain its saves to OPFS,
+     *  wait for its `disposed` ack (or a timeout), THEN terminate it. Awaiting
+     *  this before respawning guarantees the fresh worker reads current bytes. */
+    dispose(): Promise<void>;
 };
+
+/** cap on how long we wait for the worker's `disposed` ack before terminating
+ *  anyway — a hung/crashed worker must not wedge a restart. Saves are small and
+ *  incremental, so a clean flush lands in well under this. */
+const DISPOSE_ACK_TIMEOUT_MS = 5000;
 
 export type SpawnServerWorkerOptions = {
     /** connect the worker's bundler conduit to the bundler worker (env 'server');
@@ -41,6 +49,11 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
         resolveReady = r;
     });
 
+    let resolveDisposed!: () => void;
+    const disposed = new Promise<void>((r) => {
+        resolveDisposed = r;
+    });
+
     worker.onmessage = (e: MessageEvent) => {
         const msg = e.data as { type: string; msg?: string };
         if (msg.type === 'worker-ready') {
@@ -54,6 +67,9 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
         else if (msg.type === 'ready') {
             console.log('[boot] server: worker reported ready');
             resolveReady();
+        } else if (msg.type === 'disposed') {
+            // the worker finished flushing + draining its saves to OPFS.
+            resolveDisposed();
         }
     };
     worker.onerror = (e) => log(`worker crashed: ${e.message}`);
@@ -70,8 +86,12 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
         relayFsChange(path) {
             worker.postMessage({ type: 'fs-change', path });
         },
-        dispose() {
+        async dispose() {
             worker.postMessage({ type: 'dispose' });
+            // wait for the worker's flush+drain ack so saved bytes land before we
+            // kill it; a timeout guards against a hung/crashed worker wedging us.
+            const timeout = new Promise<void>((r) => setTimeout(r, DISPOSE_ACK_TIMEOUT_MS));
+            await Promise.race([disposed, timeout]);
             worker.terminate();
         },
     };

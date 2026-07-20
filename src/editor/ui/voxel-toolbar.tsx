@@ -68,18 +68,18 @@ export function VoxelActions() {
                         onClick={() => {
                             if (on) a.run();
                         }}
-                        className={`flex items-center justify-between gap-3 px-2.5 py-1.5 text-[11px] font-mono rounded border shadow-sm bg-white ${
+                        className={`flex items-center justify-between gap-3 px-2.5 py-1.5 text-[11px] font-mono rounded border shadow-sm bg-surface ${
                             on
-                                ? 'border-neutral-200 text-neutral-700 hover:bg-neutral-50 cursor-pointer'
-                                : 'border-neutral-100 text-neutral-300 cursor-not-allowed'
+                                ? 'border-border text-fg hover:bg-surface-muted cursor-pointer'
+                                : 'border-border-subtle text-fg-muted opacity-50 cursor-not-allowed'
                         }`}
                     >
                         <span>{a.label}</span>
                         <kbd
                             className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
                                 on
-                                    ? 'border-neutral-300 text-neutral-400 bg-neutral-50'
-                                    : 'border-neutral-200 text-neutral-300 bg-white'
+                                    ? 'border-border text-fg-muted bg-surface-muted'
+                                    : 'border-border text-fg-muted bg-surface'
                             }`}
                         >
                             {a.kbd}

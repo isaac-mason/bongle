@@ -4,6 +4,10 @@
 // evaluate in the right env. The dynamic import is the HMR boundary: capture
 // self-accepts settle inside the user graph, they don't cascade into the shell.
 
+// the engine UI styles. bongle resolves to its built dist, whose JS has the
+// `.css` imports stripped (extracted to dist/bongle.css) — so load that sheet
+// explicitly, the same styles the deployed client ships as client/index.css.
+import 'bongle/bongle.css';
 import { start } from '../../realms/client/edit-client';
 
 start({

@@ -73,8 +73,13 @@ export function defineBongleDevConfig(opts: BongleDevConfigOptions): UserConfig 
         },
         resolve: {
             preserveSymlinks: false,
-            // the shell imports the user's entry by this specifier.
-            alias: { 'bongle-project-entry': path.join(projectDir, 'src/index.ts') },
+            // the shell + realms import the user's entry and the baked models barrel
+            // by these specifiers (the barrel patches model handles with their baked
+            // bin paths — mirrors the editor realms importing src/generated/models.ts).
+            alias: {
+                'bongle-project-entry': path.join(projectDir, 'src/index.ts'),
+                'bongle-project-models': path.join(projectDir, 'src/generated/models.ts'),
+            },
         },
         optimizeDeps: {
             // Point the scanner at bongle's own client source + the project src so it

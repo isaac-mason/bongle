@@ -41,7 +41,11 @@ export type EditorServer = {
      *  live preview after a Blockbench save rewrites avatar.glb. No-op unless a
      *  localAvatarUrl was set (avatar/game intent with an avatar). */
     reloadAvatar: () => void;
-    stop: () => void;
+    /** graceful teardown: flush the final dirty-room save, WAIT for those OPFS
+     *  writes to land, then dispose the engine. Async because persist writes are
+     *  fire-and-forget — a restart reloads from disk, so unflushed bytes would be
+     *  lost if we tore down before they settled. Resolves once disk is current. */
+    stop: () => Promise<void>;
 };
 
 export type StartEditorServerOptions = {
@@ -64,6 +68,19 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // zstd compressor for the voxel wire codec (client decodes with fzstd).
     await initZstd();
 
+    // in-flight OPFS persist writes. content-manager's persist hook is
+    // fire-and-forget (it never awaits, so the async fs never leaks into the sync
+    // engine), so we track each write here and expose a drain: a graceful stop
+    // flushes then waits for these to land before the worker is torn down.
+    const pendingWrites = new Set<Promise<unknown>>();
+    const trackWrite = (p: Promise<unknown>): void => {
+        pendingWrites.add(p);
+        void p.catch(() => {}).finally(() => pendingWrites.delete(p));
+    };
+    const drainWrites = async (): Promise<void> => {
+        while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites]);
+    };
+
     // seed the scene store from the project fs (content-manager is in-memory
     // sync; the host does the async read).
     const scenes: Record<string, string> = {};
@@ -83,8 +100,8 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         content: {
             scenes,
             persist: {
-                write: (sceneId, content) => void fs.write(`${SCENES_DIR}/${sceneId}${SCENE_EXT}`, content),
-                delete: (sceneId) => void fs.remove(`${SCENES_DIR}/${sceneId}${SCENE_EXT}`),
+                write: (sceneId, content) => trackWrite(fs.write(`${SCENES_DIR}/${sceneId}${SCENE_EXT}`, content)),
+                delete: (sceneId) => trackWrite(fs.remove(`${SCENES_DIR}/${sceneId}${SCENE_EXT}`)),
             },
         },
         resourcesDir: 'resources/server',
@@ -182,9 +199,14 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         app,
         resolveAvatar,
         reloadAvatar,
-        stop: () => {
+        stop: async () => {
             unregister();
+            // dispose runs the final flushDirty, which enqueues the last save via
+            // the (fire-and-forget) persist hook — trackWrite captured those, so
+            // drain now waits for the bytes to actually reach OPFS before we let
+            // the worker die and a fresh one reload from disk.
             EngineServer.dispose(state);
+            await drainWrites();
         },
     };
 }

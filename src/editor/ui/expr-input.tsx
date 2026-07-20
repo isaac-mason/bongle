@@ -122,7 +122,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                 autoCorrect="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                className="w-full bg-neutral-800 text-neutral-200 text-[10px] font-mono px-1 py-0.5 rounded border border-neutral-700"
+                className="w-full bg-surface-muted text-fg text-[10px] font-mono px-1 py-0.5 rounded border border-border"
                 onChange={(e) => {
                     onChange(e.target.value);
                     setCursor(e.target.selectionStart ?? e.target.value.length);
@@ -171,7 +171,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                             // focus on open and steals the caret.
                             initialFocus={false}
                             finalFocus={false}
-                            className="z-50 max-h-48 overflow-y-auto bg-neutral-900 border border-neutral-700 text-[10px] font-mono shadow-lg"
+                            className="z-50 max-h-48 overflow-y-auto bg-surface border border-border text-[10px] font-mono shadow-lg"
                             style={{ width: 'var(--anchor-width)' }}
                         >
                             {suggestions.map((sug, i) => (
@@ -180,8 +180,8 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                     key={sug.text}
                                     className={`w-full flex items-baseline justify-between text-left px-1.5 py-0.5 cursor-pointer ${
                                         i === selectedIndex
-                                            ? 'bg-neutral-700 text-white'
-                                            : 'text-neutral-300 hover:bg-neutral-800'
+                                            ? 'bg-accent text-on-accent'
+                                            : 'text-fg hover:bg-surface-muted'
                                     }`}
                                     onMouseDown={(e) => {
                                         // mousedown (not click) so the input keeps focus
@@ -192,7 +192,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                                 >
                                     <span>{sug.label ?? sug.text}</span>
                                     {sug.detail && (
-                                        <span className={i === selectedIndex ? 'text-neutral-300 ml-2' : 'text-neutral-500 ml-2'}>
+                                        <span className={i === selectedIndex ? 'text-on-accent/80 ml-2' : 'text-fg-muted ml-2'}>
                                             {sug.detail}
                                         </span>
                                     )}
@@ -202,7 +202,7 @@ export function ExprInput({ value, placeholder, suggest, onChange, error }: Prop
                     </Popover.Positioner>
                 </Popover.Portal>
             </Popover.Root>
-            {error && <div className="text-[10px] font-mono text-red-400 mt-0.5">{error}</div>}
+            {error && <div className="text-[10px] font-mono text-danger mt-0.5">{error}</div>}
         </div>
     );
 }

@@ -38,7 +38,7 @@ function ResizeHandle({ onResize }: ResizeHandleProps) {
         <div
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 hover:opacity-60 z-20"
+            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent hover:opacity-60 z-20"
         />
     );
 }
@@ -60,7 +60,7 @@ export function RightPanel({ width, onResize }: RightPanelProps) {
     return (
         <div
             style={{ width }}
-            className="relative flex-shrink-0 flex flex-col overflow-y-auto bg-white border-l border-neutral-200 text-sm"
+            className="relative flex-shrink-0 flex flex-col overflow-y-auto bg-surface border-l border-border text-sm"
         >
             <ResizeHandle onResize={onResize} />
 

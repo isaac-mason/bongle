@@ -5,21 +5,27 @@
 import { Code, Files, Hammer, MonitorPlay, Server } from 'bongle/icons';
 import { createRoot } from 'react-dom/client';
 import './editor.css';
+
+// the starter humanoid seeded for a NEW avatar (no platform-supplied source) so
+// Blockbench opens on an editable character rig, not an empty scene. `?raw`
+// inlines the .bbmodel JSON into the editor bundle.
+import starterCharacterBbmodel from '../blockbench/starter/character.bbmodel?raw';
 import { createBootTimer } from './boot-timing';
-import { createClientHost } from './realms/client/client-host';
 import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
 import type { FsChange } from './fs';
 import { openOpfsFilesystem } from './fs-opfs';
-import { importProjectSave } from './project-save';
 import { joinGuestSession } from './net/guest-session';
-import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
+import { runSave, saveAvatar } from './platform/actions';
 import { initAutosave } from './platform/autosave';
 import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
+import { importProjectSave } from './project-save';
 import { registerProjectFsWorker } from './project-url';
-import { spawnServerWorker } from './realms/server/server-host';
+import { createClientHost } from './realms/client/client-host';
+import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
+import { createServerManager } from './realms/server/server-manager';
 import { useBoot } from './stores/boot';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
@@ -27,22 +33,19 @@ import { MAIN_PANE, useEditor } from './stores/editor';
 import { logger } from './stores/logs';
 import { useMultiplayer } from './stores/multiplayer';
 import { usePlatform } from './stores/platform';
+import { useServer } from './stores/server';
 import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
 import { openPath } from './ui/apps';
-import { CodePane } from './ui/components/CodePane';
 import { BootScreen } from './ui/components/BootScreen';
+import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
+import { ServerPanel } from './ui/components/ServerPanel';
 import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
 import { PLATFORM_WINDOW_ID } from './ui/components/PlatformWindow';
 import { TASKBAR_W } from './ui/components/Taskbar';
-
-// the starter humanoid seeded for a NEW avatar (no platform-supplied source) so
-// Blockbench opens on an editable character rig, not an empty scene. `?raw`
-// inlines the .bbmodel JSON into the editor bundle.
-import starterCharacterBbmodel from '../blockbench/starter/character.bbmodel?raw';
 
 // the working copy is OPFS — shared across the main doc, server worker, and
 // client iframes (same origin), so realms open it directly instead of syncing a
@@ -245,7 +248,11 @@ async function boot(): Promise<void> {
     // the server, off-thread in its own realm (own registry). It opens the SAME
     // OPFS project directly — no snapshot.
     const serverLog = logger('server');
-    const serverHost = spawnServerWorker({ connectRealm, projectName: PROJECT, log: serverLog, localAvatarUrl });
+    // a manager, not a bare worker host: it wraps the worker in a stable facade
+    // (handed to clients / multiplayer / fs fan-out below) and can reboot it in
+    // place via the server window's Restart action.
+    const serverHost = createServerManager({ connectRealm, projectName: PROJECT, log: serverLog, localAvatarUrl });
+    useServer.getState().init(serverHost);
 
     // multiplayer editing (opt-in): wire the host subsystems so the "Open to
     // multiplayer" action can dial the relay and accept guests. Nothing connects
@@ -294,6 +301,14 @@ async function boot(): Promise<void> {
     // `bongle:draft` hand-back. Wired AFTER load/seed so those writes never
     // arm it. No-op when standalone or non-project.
     initAutosave(editor.fs, platform, intent);
+
+    // the platform can drive a "save this to bongle" CTA from outside the iframe (e.g.
+    // on an anonymous draft/avatar) — run the right save action for the session: an
+    // avatar exports its glb+bbmodel (avatar-export flow), a project saves a version.
+    platform.onRequestSave(() => {
+        if (intent?.kind === 'avatar') void saveAvatar(editor.fs, intent.name ?? 'avatar', intent.canEdit ?? false);
+        else void runSave(editor.fs);
+    });
 
     // once the server is live (join before the sim exists would be dropped), lay
     // out the session. game/standalone opens a client that fills the screen.
@@ -355,10 +370,10 @@ const windows: WindowDef[] = [
     },
     {
         id: 'server',
-        title: 'server logs',
+        title: 'server',
         glyph: <Server size={18} />,
         initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-        content: <LogView stream="server" />,
+        content: <ServerPanel />,
     },
     {
         id: 'client',

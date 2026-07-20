@@ -87,14 +87,6 @@ export default server({
 // sound / texture is served from the baked atlas/bin the pipeline produced, and the
 // `asset()` href sits unused in the shipped registry. No stripping needed.
 
-/** user src (incl. generated barrels) calls `__bongle.registerScene/…` as a free
- *  var; make it resolve by importing it (mirrors the dev capture-import). Stopgap:
- *  the dev path does the equivalent via capture-deps/wrapModuleDeps — unifying the
- *  two is the dev/build DepGraph parity follow-up. */
-function injectBonglePrelude(code: string, id: string): string {
-    return id.startsWith('src/') && /\.tsx?$/.test(id) ? `import { __bongle } from 'bongle/internal';\n${code}` : code;
-}
-
 /** the per-target entry: side-effect-import every existing generated barrel +
  *  user src (registries populate), then the play-* adapter as default. */
 async function entrySource(fs: BuildFs, target: Target): Promise<string> {
@@ -108,15 +100,14 @@ async function entrySource(fs: BuildFs, target: Target): Promise<string> {
 
 // Module resolution + load + env-bake is the shared createBonglePlugin (resolve.ts-
 // backed). The build only supplies the per-target specifics: the virtual play
-// entry, the sharp external (server), and the __bongle-prelude injection for user src
-// barrels.
+// entry and the sharp external (server). Generated barrels import their registry
+// primitives (registerModel/…) from bongle/internal directly, so no prelude.
 function buildTargetPlugin(fs: BuildFs, target: Target, entry: string, workers: Map<string, string>) {
     return createBonglePlugin(fs, {
         env: envFor(target),
         entry: { id: ENTRY_ID, code: entry },
         external: (source) => target === 'server' && source === 'sharp',
         workers,
-        transformExtra: (code, id) => injectBonglePrelude(code, id),
     });
 }
 

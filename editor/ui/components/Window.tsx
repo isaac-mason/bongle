@@ -154,8 +154,8 @@ export function Window({
             <div
                 onPointerDown={startMove}
                 onDoubleClick={() => toggleMax(id)}
-                className={`flex h-[26px] cursor-move select-none items-center gap-1.5 border-b border-border px-1.5 font-mono text-xs leading-none ${
-                    focused ? 'bg-accent text-on-accent' : 'bg-surface text-fg'
+                className={`flex h-[26px] cursor-move select-none items-center gap-1.5 border-b border-border px-2 font-mono text-xs leading-none ${
+                    focused ? 'bg-surface-muted text-fg' : 'bg-surface text-fg-muted'
                 }`}
             >
                 <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{title}</span>

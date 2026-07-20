@@ -23,9 +23,14 @@ type Incoming =
     | { type: 'bongle:ready' }
     | { type: 'bongle:save'; path: string; glb: ArrayBuffer | null; bbmodel: string; name: string; warnings: string[] }
     | { type: 'bongle:save-as'; uuid: string; glb: ArrayBuffer | null; bbmodel: string; name: string; warnings: string[] }
+    | { type: 'bongle:autosave'; path: string; bbmodel: string }
     | { type: 'bongle:dirty'; path: string; saved: boolean }
     | { type: 'bongle:save-failed'; errors: string[] }
     | { type: 'bongle:open-failed'; path: string; error: string };
+
+// idle window after the last edit before we ask Blockbench for a silent source
+// snapshot (matches the platform autosave debounce — no point flushing faster).
+const AUTOSAVE_IDLE_MS = 8_000;
 
 /** the compiled .glb sits beside the source (character.bbmodel -> character.glb). */
 function glbPathFor(bbmodelPath: string): string {
@@ -38,6 +43,8 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
     const openReq = useBlockbench((s) => s.openReq);
     const dirtyMap = useBlockbench((s) => s.dirty);
     const lastSeq = useRef(-1);
+    // debounce handle for the silent source-snapshot request (crash-net autosave).
+    const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // reflect "any open file unsaved" onto the window chrome (title-bar dot).
     useEffect(() => {
@@ -46,6 +53,16 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
 
     useEffect(() => {
         const post = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, window.location.origin);
+        // (re)arm the debounced snapshot request: after the edits settle, ask
+        // Blockbench for the current .bbmodel source so the platform's autosave can
+        // capture it — no user Ctrl+S required.
+        const armAutosave = () => {
+            if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
+            autosaveTimer.current = setTimeout(() => {
+                autosaveTimer.current = null;
+                post({ type: 'bongle:autosave-request' });
+            }, AUTOSAVE_IDLE_MS);
+        };
         const onMessage = (e: MessageEvent) => {
             if (e.source !== iframeRef.current?.contentWindow || e.origin !== window.location.origin) return;
             const data = e.data as Incoming | undefined;
@@ -60,6 +77,12 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                         if (data.glb) await fs.write(glbPathFor(data.path), new Uint8Array(data.glb));
                         useBlockbench.getState().setDirty(data.path, false);
                         break;
+                    case 'bongle:autosave':
+                        // Silent source snapshot: write ONLY the .bbmodel (no glb), and
+                        // leave the dirty flag alone — the work is still unsaved to bongle.
+                        // The fs write is what the platform autosave watcher picks up.
+                        await fs.write(data.path, data.bbmodel);
+                        break;
                     case 'bongle:save-as': {
                         const chosen = window.prompt('Save as (path in project):', `${data.name || 'untitled'}.bbmodel`);
                         if (!chosen) return;
@@ -72,6 +95,8 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                     }
                     case 'bongle:dirty':
                         useBlockbench.getState().setDirty(data.path, !data.saved);
+                        // an unsaved edit → schedule a silent source snapshot (crash-net).
+                        if (!data.saved) armAutosave();
                         break;
                     case 'bongle:save-failed':
                         console.warn('[blockbench] save failed:', data.errors.join('; '));
@@ -83,7 +108,10 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
             })();
         };
         window.addEventListener('message', onMessage);
-        return () => window.removeEventListener('message', onMessage);
+        return () => {
+            window.removeEventListener('message', onMessage);
+            if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
+        };
     }, [fs]);
 
     // deliver the pending open request once Blockbench is ready (and on each new one).

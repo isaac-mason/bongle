@@ -69,6 +69,10 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     if (renderable.length === 0) return EMPTY_ATLAS;
 
     await voxelResources.atlasReady;
+    // the offline render dispatches the shared voxel computes directly; wait for
+    // their pipelines to compile (init() assigns voxelResources before load()
+    // compiles them) or setPipeline binds a null pipeline.
+    await voxelResources.computeReady;
 
     const cols = Math.ceil(Math.sqrt(renderable.length));
     const rows = Math.ceil(renderable.length / cols);

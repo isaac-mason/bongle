@@ -49,9 +49,6 @@ export type BonglePluginOptions = {
     entry?: { id: string; code: string };
     /** bare specifiers to externalize beyond node: (e.g. sharp for the server). */
     external?: (source: string) => boolean;
-    /** caller-specific transform run AFTER env replacement (e.g. build.ts's __bongle
-     *  injection for user src + asset-url stripping). */
-    transformExtra?: (code: string, id: string) => string;
     /** PRE-BUILT `?worker` bundles (entry id → self-contained code). Required for
      *  any `?worker` in the graph: @rolldown/browser can't bundle a nested build
      *  from inside a plugin hook (main-thread Atomics.wait), so workers are built
@@ -105,8 +102,7 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
         },
         transform(code, id) {
             if (opts.entry && id === opts.entry.id) return null;
-            let out = replaceEnv(code, opts.env);
-            if (opts.transformExtra) out = opts.transformExtra(out, id);
+            const out = replaceEnv(code, opts.env);
             return out === code ? null : out;
         },
     };

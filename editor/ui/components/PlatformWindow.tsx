@@ -10,7 +10,6 @@ import type { Filesystem } from '../../fs';
 import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/actions';
 import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
 import { useAutosave } from '../../stores/autosave';
-import { useMultiplayer } from '../../stores/multiplayer';
 import { usePlatform } from '../../stores/platform';
 import { useWindows } from '../../stores/windows';
 import { TASKBAR_W } from './Taskbar';
@@ -20,10 +19,10 @@ export const PLATFORM_WINDOW_ID = 'platform';
 
 const BTN = 'w-full cursor-pointer border border-border bg-surface px-2 py-1.5 text-left text-xs hover:bg-hover';
 
-// bigger footprint now that the window carries build/save + the multiplayer
-// control (which grows a share-link block when a session is open).
+// sized for the build + save block; multiplayer moved to the sidebar's
+// MultiplayerMenu fold-out.
 const PLATFORM_W = 300;
-const PLATFORM_H = 260;
+const PLATFORM_H = 240;
 
 export function PlatformWindow({ fs }: { fs: Filesystem }) {
     const intent = usePlatform((s) => s.intent);
@@ -70,7 +69,6 @@ export function PlatformWindow({ fs }: { fs: Filesystem }) {
                             <SaveButton fs={fs} />
                             <SaveSizeIndicator fs={fs} />
                         </section>
-                        <MultiplayerControl />
                     </>
                 )}
                 {/* leave the editor — common to every intent. Confirms first. */}
@@ -192,41 +190,3 @@ function SaveSizeIndicator({ fs }: { fs: Filesystem }) {
     );
 }
 
-const BTN2 = 'w-full cursor-pointer border border-border bg-surface px-2 py-1.5 text-left text-xs hover:bg-hover';
-
-/** Open-to-multiplayer button + share link. Solo until pressed. */
-function MultiplayerControl() {
-    const status = useMultiplayer((s) => s.status);
-    const shareUrl = useMultiplayer((s) => s.shareUrl);
-    const error = useMultiplayer((s) => s.error);
-
-    if (status === 'open' && shareUrl) {
-        return (
-            <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-muted">Share this link to co-edit:</span>
-                <input
-                    readOnly
-                    className="w-full border border-border bg-surface px-1.5 py-1 text-[10px]"
-                    value={shareUrl}
-                    onFocus={(e) => e.currentTarget.select()}
-                />
-                <button type="button" className={BTN2} onClick={() => void navigator.clipboard?.writeText(shareUrl)}>
-                    Copy invite link
-                </button>
-            </div>
-        );
-    }
-    return (
-        <>
-            <button
-                type="button"
-                className={BTN2}
-                disabled={status === 'opening'}
-                onClick={() => void useMultiplayer.getState().open()}
-            >
-                {status === 'opening' ? 'Opening…' : 'Open to multiplayer'}
-            </button>
-            {status === 'error' && <span className="text-[10px] text-red-500">{error}</span>}
-        </>
-    );
-}

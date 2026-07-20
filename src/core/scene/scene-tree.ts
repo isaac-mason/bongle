@@ -1,5 +1,5 @@
+import { getWorldChunk, markAncestryChanged, TransformTrait } from '../../builtins/transform';
 import { env } from '../../env';
-import { markAncestryChanged, TransformTrait } from '../../builtins/transform';
 import type { PlayerId } from '../client';
 import * as Debug from '../debug';
 import { registry } from '../registry';
@@ -7,6 +7,7 @@ import type { Bitset } from '../utils/bitset';
 import * as bitset from '../utils/bitset';
 import { type Topic, topic } from '../utils/topic';
 import type { Voxels } from '../voxels/voxels';
+import { chunkKey } from '../voxels/voxels';
 import { getControlCodecs } from './packcat-bridge';
 import { formatIssuePath, type Issue, validate } from './prop';
 import type { ValidationIssue } from './prop/validate';
@@ -287,6 +288,30 @@ export type SceneTree = {
     dirtyNodes: Set<Node>;
 
     /**
+     * server-side chunk index of transform roots, for chunk-tied AOI (see
+     * `isTransformRoot`). `chunkToRoots` maps a chunk key → the roots currently
+     * filed in it (the reverse lookup the per-player discovery consumes);
+     * `rootToChunk` maps a root → the chunk key it is filed under (so a mover can be
+     * pulled from its stale bucket, and so its current chunk is an O(1) lookup).
+     * Maintained by `reconcileRootChunks` off `dirtyNodes` each tick, gated
+     * `!env.client` like `dirtyNodes` itself, so both stay empty in the client
+     * bundle. The filed-root set is exactly `rootToChunk`'s keys, so there is no
+     * separate membership set.
+     */
+    chunkToRoots: Map<string, Set<Node>>;
+    rootToChunk: Map<Node, string>;
+
+    /**
+     * transform-root chunk transitions produced by `reconcileRootChunks` this tick:
+     * a root that was filed, unfiled, or moved between chunks. `from`/`to` are chunk
+     * keys, `null` meaning "not filed" (newly eligible, or destroyed/shadowed). The
+     * per-player AOI presence pass reads this to (re)evaluate a moved root's presence
+     * against each client's region without ever climbing the tree. Cleared + refilled
+     * each `reconcileRootChunks`, consumed by the same tick's scene fan-out.
+     */
+    rootChunkChanges: RootChunkChange[];
+
+    /**
      * optional runtime reference. when set, registerSubtree creates script instances,
      * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
      * set this after createSceneTree, before adding live nodes.
@@ -309,6 +334,9 @@ export function createSceneTree(): SceneTree {
         _transformDirty: new Set(),
         _interpolating: new Set(),
         dirtyNodes: new Set(),
+        chunkToRoots: new Map(),
+        rootToChunk: new Map(),
+        rootChunkChanges: [],
         runtime: undefined,
     };
 
@@ -453,6 +481,78 @@ export function isLocalNode(node: Node): boolean {
 }
 
 /**
+ * True iff `node` is a *transform root*: the topmost `TransformTrait` node in its
+ * chain (has a transform, no ancestor has one), and is live + replicable. Transform
+ * roots are the unit of chunk-tied AOI: a root's world chunk gates the
+ * presence of its whole subtree on a client, and nested transforms ride their root.
+ * Derived on demand (no maintained set), reconciled per tick off `dirtyNodes`.
+ */
+export function isTransformRoot(node: Node): boolean {
+    return node.scene !== null && isReplicable(node) && hasTrait(node, TransformTrait) && findTransformAncestor(node) === null;
+}
+
+/* ── transform-root chunk index (server-side AOI) ─────────────────────── */
+
+/** a transform root's chunk transition this tick. `from`/`to` are chunk keys,
+ *  `null` = not filed (newly eligible → `from: null`; destroyed or shadowed →
+ *  `to: null`). moved-within-chunks produces no entry. */
+export type RootChunkChange = { root: Node; from: string | null; to: string | null };
+
+function fileRoot(sceneTree: SceneTree, node: Node, key: string): void {
+    let set = sceneTree.chunkToRoots.get(key);
+    if (!set) {
+        set = new Set();
+        sceneTree.chunkToRoots.set(key, set);
+    }
+    set.add(node);
+    sceneTree.rootToChunk.set(node, key);
+}
+
+function unfileRoot(sceneTree: SceneTree, node: Node, key: string): void {
+    const set = sceneTree.chunkToRoots.get(key);
+    if (set) {
+        set.delete(node);
+        // delete-on-empty: the world is streaming-infinite, never accumulate empty buckets.
+        if (set.size === 0) sceneTree.chunkToRoots.delete(key);
+    }
+    sceneTree.rootToChunk.delete(node);
+}
+
+/** the transform roots currently filed in a chunk, or undefined if none. read by
+ *  the per-player AOI discovery to turn a chunk transition into node create/destroy. */
+export function rootsInChunk(sceneTree: SceneTree, key: string): Set<Node> | undefined {
+    return sceneTree.chunkToRoots.get(key);
+}
+
+/**
+ * reconcile the chunk index against this tick's `dirtyNodes`: file newly-eligible
+ * transform roots, unfile ones that stopped being roots (lost the trait, got shadowed
+ * by an ancestor transform, or were destroyed → `scene === null`), and re-bucket movers
+ * whose world chunk changed. Records every transition in `rootChunkChanges` so the
+ * per-player presence pass can re-evaluate moved roots without climbing the tree.
+ * O(`dirtyNodes`). Call once per room per tick, after scripts + physics and before the
+ * per-player AOI discovery reads the index.
+ */
+export function reconcileRootChunks(sceneTree: SceneTree): void {
+    sceneTree.rootChunkChanges.length = 0;
+    for (const node of sceneTree.dirtyNodes) {
+        const filed = sceneTree.rootToChunk.get(node);
+        if (isTransformRoot(node)) {
+            const t = getTrait(node, TransformTrait)!;
+            const c = getWorldChunk(t);
+            const key = chunkKey(c[0], c[1], c[2]);
+            if (filed === key) continue; // already filed here, nothing moved
+            if (filed !== undefined) unfileRoot(sceneTree, node, filed);
+            fileRoot(sceneTree, node, key);
+            sceneTree.rootChunkChanges.push({ root: node, from: filed ?? null, to: key });
+        } else if (filed !== undefined) {
+            unfileRoot(sceneTree, node, filed);
+            sceneTree.rootChunkChanges.push({ root: node, from: filed, to: null });
+        }
+    }
+}
+
+/**
  * destroy a node: dispose scripts, remove from parent, recursively
  * destroy children, remove from all queries, and detach from the scene tree.
  *
@@ -545,6 +645,14 @@ function updateChildTransformPointers(node: Node, ancestor: TransformTrait | nul
         if (t) {
             t._parent = ancestor;
             markAncestryChanged(child);
+            // this branch-topmost transform's nearest transform ancestor just changed,
+            // which can flip its AOI transform-root status (`isTransformRoot`).
+            // markAncestryChanged deliberately stays out of `dirtyNodes` (no replication
+            // retransmit), so signal a revisit explicitly. markNodeDirty (not
+            // bumpNodeVersion): nothing client-visible changed, the scene diff will find
+            // no field/structure delta and emit nothing; this only re-runs the
+            // entity-index reconcile against the node's new root status.
+            if (child.scene) markNodeDirty(child.scene, child);
         } else {
             updateChildTransformPointers(child, ancestor);
         }

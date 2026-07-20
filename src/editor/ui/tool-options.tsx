@@ -42,10 +42,10 @@ function ToggleBtn({
             disabled={disabled}
             className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
                 disabled
-                    ? 'text-neutral-600 cursor-not-allowed'
+                    ? 'text-fg-muted opacity-50 cursor-not-allowed'
                     : active
-                      ? 'bg-neutral-700 text-white'
-                      : 'text-neutral-400 hover:text-neutral-200'
+                      ? 'bg-accent text-on-accent'
+                      : 'text-fg hover:text-fg'
             }`}
         >
             {children}
@@ -56,7 +56,7 @@ function ToggleBtn({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="flex items-center gap-1">
-            <span className="text-[10px] font-mono text-neutral-500 w-16 shrink-0">{label}</span>
+            <span className="text-[10px] font-mono text-fg w-16 shrink-0">{label}</span>
             {children}
         </div>
     );
@@ -149,7 +149,7 @@ function SelectionSummary({ idle }: { idle?: string } = {}) {
         const [bx, by, bz] = progress.cornerB;
         const [dx, dy, dz] = progress.dimensions;
         return (
-            <div className="text-[10px] font-mono text-neutral-400 flex flex-col gap-0.5">
+            <div className="text-[10px] font-mono text-fg flex flex-col gap-0.5">
                 <div>
                     (A: {ax}, {ay}, {az}) → (B: {bx}, {by}, {bz})
                 </div>
@@ -167,7 +167,7 @@ function SelectionSummary({ idle }: { idle?: string } = {}) {
         if (voxelCount > 0) parts.push(`${voxelCount.toLocaleString()} voxel${voxelCount !== 1 ? 's' : ''}`);
 
         return (
-            <div className="text-[10px] font-mono text-neutral-400 flex flex-col gap-0.5">
+            <div className="text-[10px] font-mono text-fg flex flex-col gap-0.5">
                 {bounds && (
                     <div>
                         (min: {bounds.min[0]}, {bounds.min[1]}, {bounds.min[2]}) → (max: {bounds.max[0]}, {bounds.max[1]},{' '}
@@ -188,7 +188,7 @@ function SelectionSummary({ idle }: { idle?: string } = {}) {
     }
 
     if (idle) {
-        return <div className="text-[10px] font-mono text-neutral-500 italic">{idle}</div>;
+        return <div className="text-[10px] font-mono text-fg-muted italic">{idle}</div>;
     }
 
     return null;
@@ -411,11 +411,11 @@ export function BuildOptions() {
 
     return (
         <div className="flex flex-col gap-1 px-2 py-1.5">
-            <div className="text-[10px] font-mono text-neutral-400">left click to break</div>
+            <div className="text-[10px] font-mono text-fg-muted">left click to break</div>
             {activeBlockKey ? (
-                <div className="text-[10px] font-mono text-neutral-400">right click to place</div>
+                <div className="text-[10px] font-mono text-fg-muted">right click to place</div>
             ) : (
-                <div className="text-[10px] font-mono text-neutral-500 italic">select a block from the palette to place</div>
+                <div className="text-[10px] font-mono text-fg-muted italic">select a block from the palette to place</div>
             )}
             <SelectorModeRow />
         </div>
@@ -666,7 +666,7 @@ function FalloffButton({
             type="button"
             onClick={onClick}
             className={`flex flex-col items-center gap-0.5 px-1 py-1 rounded transition-colors ${
-                active ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
+                active ? 'bg-accent text-on-accent' : 'text-fg hover:bg-surface-muted'
             }`}
         >
             <span className="text-[10px] font-mono leading-none">{label}</span>
@@ -804,7 +804,7 @@ export function ElevationOptions() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
-                    className="px-2 py-0.5 text-[10px] font-mono rounded text-neutral-400 hover:text-neutral-200"
+                    className="px-2 py-0.5 text-[10px] font-mono rounded text-fg hover:text-fg"
                 >
                     {loading ? 'loading…' : heightmap ? heightmap.name : 'load…'}
                 </button>
@@ -812,14 +812,14 @@ export function ElevationOptions() {
                     <button
                         type="button"
                         onClick={() => setElevationOptions({ heightmap: null, heightmapError: null })}
-                        className="px-1.5 py-0.5 text-[10px] font-mono rounded text-neutral-500 hover:text-neutral-200"
+                        className="px-1.5 py-0.5 text-[10px] font-mono rounded text-fg-muted hover:text-fg"
                         title="clear heightmap"
                     >
                         ×
                     </button>
                 )}
             </Row>
-            {heightmapError && <div className="text-[10px] font-mono text-red-400 pl-16">{heightmapError}</div>}
+            {heightmapError && <div className="text-[10px] font-mono text-danger pl-16">{heightmapError}</div>}
             <Row label="pattern">
                 <ExprInput
                     value={patternText}
@@ -870,7 +870,7 @@ function PivotRow() {
                 title={`pivot ${label} (${hint})`}
                 onClick={() => setPreset(preset)}
                 className={`px-2 py-0.5 text-[10px] font-mono rounded transition-colors ${
-                    active ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-neutral-200'
+                    active ? 'bg-accent text-on-accent' : 'text-fg hover:text-fg'
                 }`}
             >
                 {label}
@@ -936,7 +936,7 @@ export function TransformOptions() {
                     title={enabled ? 'disable snap' : 'enable snap'}
                     onClick={() => onChange(enabled ? null : defaultOn)}
                     className={`w-5 h-4 rounded text-[9px] font-mono border transition-colors shrink-0 ${
-                        enabled ? 'bg-blue-600 border-blue-500 text-white' : 'bg-neutral-800 border-neutral-700 text-neutral-500'
+                        enabled ? 'bg-accent border-accent text-on-accent' : 'bg-surface-muted border-border text-fg-muted'
                     }`}
                 >
                     {enabled ? '✓' : '–'}
@@ -954,7 +954,7 @@ export function TransformOptions() {
         <div className="flex flex-col gap-1 px-2 py-1.5">
             <SelectionSummary />
             {placementActive && (
-                <div className="text-[10px] font-mono text-neutral-500 italic">enter to commit · esc to cancel</div>
+                <div className="text-[10px] font-mono text-fg-muted italic">enter to commit · esc to cancel</div>
             )}
             <Row label="mode">
                 {modeBtn('translate', 'translate')}
@@ -964,7 +964,7 @@ export function TransformOptions() {
                 {modeBtn('grab', 'grab')}
             </Row>
             {transformMode === 'grab' && (
-                <div className="text-[10px] font-mono text-neutral-500 italic">
+                <div className="text-[10px] font-mono text-fg-muted italic">
                     click + hold a node to grab · scroll to adjust distance
                 </div>
             )}
@@ -1004,7 +1004,7 @@ export function ToolOptions() {
     const activeTool = useEditRoom((s) => s.activeTool);
 
     return (
-        <div className="flex flex-col border-t border-neutral-200">
+        <div className="flex flex-col border-t border-border">
             {activeTool === 'inspect' && <InspectOptions />}
             {activeTool === 'transform' && <TransformOptions />}
             {activeTool === 'build' && <BuildOptions />}

@@ -2,11 +2,9 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { BookOpen, Code, Download, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw, Upload } from 'bongle/icons';
+import { BookOpen, Code, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw } from 'bongle/icons';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Filesystem } from '../../fs';
-import { pickAndImportProjectSave } from '../../project-save';
-import { runBuild, runSave } from '../../platform/actions';
 import { usePlatform } from '../../stores/platform';
 import { useBoot } from '../../stores/boot';
 import { useClients } from '../../stores/clients';
@@ -27,6 +25,8 @@ import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
 import { Presence } from './Presence';
+import { AdvancedMenu } from './AdvancedMenu';
+import { MultiplayerMenu } from './MultiplayerMenu';
 import { TASKBAR_W, Taskbar, type TaskbarItem } from './Taskbar';
 import { Window } from './Window';
 
@@ -169,39 +169,15 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         : [];
 
     // when embedded under a platform, the "editing X" window (PlatformWindow) owns
-    // the save/build actions; standalone gets the footer download dev-tools.
+    // the save/build+publish actions. The LOCAL, computer-file tools (download /
+    // load / build a .zip you keep) live in the AdvancedMenu fold-out in every mode,
+    // kept separate so a local download is never confused with uploading to bongle.
     const embedded = usePlatform((s) => s.embedded);
-
-    // project saves: download the source set as a zip / load one back / build — the
-    // standalone dev tools (embedded routes these through the platform window).
-    const saveFooter: TaskbarItem[] = embedded
-        ? []
-        : [
-        {
-            id: 'save-download',
-            title: 'download project save (.zip)',
-            glyph: <Download size={18} />,
-            running: false,
-            onClick: () => void runSave(fs),
-            menu: [{ label: 'Download project save (.zip)', onClick: () => void runSave(fs) }],
-        },
-        {
-            id: 'save-load',
-            title: 'load project save (.zip), replaces project + reloads',
-            glyph: <Upload size={18} />,
-            running: false,
-            onClick: () => pickAndImportProjectSave(fs),
-            menu: [{ label: 'Load project save (.zip)…', onClick: () => pickAndImportProjectSave(fs) }],
-        },
-        {
-            id: 'build',
-            title: 'build prod bundle (.zip)',
-            glyph: <Hammer size={18} />,
-            running: false,
-            onClick: () => void runBuild(fs),
-            menu: [{ label: 'Build prod bundle (.zip)', onClick: () => void runBuild(fs) }],
-        },
-    ];
+    // multiplayer co-editing applies to a shared game/project scene — offered when
+    // embedded on a project (not avatar, which is Blockbench-only). It rides the
+    // platform bridge, so it's embedded-only, same as where it lived before.
+    const intent = usePlatform((s) => s.intent);
+    const showMultiplayer = embedded && !!intent && intent.kind !== 'avatar';
 
     const windowPanes = useEditor((s) => s.windowPanes);
     const panes = useEditor((s) => s.panes);
@@ -399,7 +375,19 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             ))}
             <SnapOverlay />
             <PlatformWindow fs={fs} />
-            {bootReady && <Taskbar items={items} footer={[...saveFooter, ...syncFooter]} presence={<Presence />} />}
+            {bootReady && (
+                <Taskbar
+                    items={items}
+                    footer={syncFooter}
+                    footerExtra={
+                        <>
+                            {showMultiplayer && <MultiplayerMenu />}
+                            <AdvancedMenu fs={fs} />
+                        </>
+                    }
+                    presence={<Presence />}
+                />
+            )}
             <SyncChooser fs={fs} />
             <SyncPanel />
             {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}

@@ -14,7 +14,7 @@ export function HistoryPane() {
     const isEmpty = undoStack.length === 0 && redoStack.length === 0;
 
     if (isEmpty) {
-        return <div className="px-2 py-2 text-[10px] font-mono text-neutral-400 italic">no history</div>;
+        return <div className="px-2 py-2 text-[10px] font-mono text-fg-muted italic">no history</div>;
     }
 
     // undo stack displayed newest-first: index (len-1) is the top
@@ -33,7 +33,7 @@ export function HistoryPane() {
                         // walk back i+1 steps
                         for (let n = 0; n <= i; n++) undo();
                     }}
-                    className="text-left px-3 py-0.5 text-[10px] font-mono text-neutral-600 hover:bg-neutral-100 cursor-pointer"
+                    className="text-left px-3 py-0.5 text-[10px] font-mono text-fg hover:bg-surface-muted cursor-pointer"
                 >
                     {a.label}
                 </button>
@@ -41,9 +41,9 @@ export function HistoryPane() {
 
             {/* current position marker */}
             <div className="flex items-center gap-2 px-3 py-0.5 my-0.5">
-                <div className="flex-1 h-px bg-neutral-300" />
-                <span className="text-[9px] font-mono text-neutral-400 shrink-0">now</span>
-                <div className="flex-1 h-px bg-neutral-300" />
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-[9px] font-mono text-fg-muted shrink-0">now</span>
+                <div className="flex-1 h-px bg-border" />
             </div>
 
             {redoItems.map((a, i) => (
@@ -55,7 +55,7 @@ export function HistoryPane() {
                         // walk forward i+1 steps
                         for (let n = 0; n <= i; n++) redo();
                     }}
-                    className="text-left px-3 py-0.5 text-[10px] font-mono text-neutral-400 hover:bg-neutral-100 cursor-pointer"
+                    className="text-left px-3 py-0.5 text-[10px] font-mono text-fg-muted hover:bg-surface-muted cursor-pointer"
                 >
                     {a.label}
                 </button>

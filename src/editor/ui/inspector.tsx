@@ -50,7 +50,7 @@ function StringEditor({ value, onChange }: { value: string; onChange: (v: string
 }
 
 function BooleanEditor({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-    return <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} className="accent-blue-500" />;
+    return <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} className="accent-accent" />;
 }
 
 /* ── Quaternion editor (Blender-style mode toggle) ──────────────── */
@@ -136,7 +136,7 @@ function EulerInputs({ value, order, onChange }: { value: number[]; order: Euler
         <div className="flex gap-1">
             {(['X', 'Y', 'Z'] as const).map((label, i) => (
                 <div key={label} className="flex items-center gap-0.5 flex-1 min-w-0">
-                    <span className="text-[10px] font-mono text-neutral-400 shrink-0">{label}</span>
+                    <span className="text-[10px] font-mono text-fg shrink-0">{label}</span>
                     <Input
                         type="number"
                         value={draft[i]}
@@ -176,7 +176,7 @@ function VectorEditor({ value, onChange, labels }: { value: number[]; onChange: 
         <div className="flex gap-1">
             {labels.map((label, i) => (
                 <div key={label} className="flex items-center gap-0.5 flex-1 min-w-0">
-                    <span className="text-[10px] font-mono text-neutral-400 shrink-0">{label}</span>
+                    <span className="text-[10px] font-mono text-fg shrink-0">{label}</span>
                     <Input
                         type="number"
                         value={value[i] ?? 0}
@@ -222,7 +222,7 @@ function TupleEditor({
         <div className="space-y-1">
             {schema.of.map((itemSchema, i) => (
                 <div key={String(i)} className="flex items-center gap-1">
-                    <span className="text-[10px] font-mono text-neutral-400 w-4 shrink-0">{i}:</span>
+                    <span className="text-[10px] font-mono text-fg-muted w-4 shrink-0">{i}:</span>
                     <PropertyEditor
                         schema={itemSchema}
                         value={value[i]}
@@ -248,10 +248,10 @@ function ObjectEditor({
     onChange: (v: Record<string, unknown>) => void;
 }) {
     return (
-        <div className="space-y-1 pl-2 border-l border-neutral-200">
+        <div className="space-y-1 pl-2 border-l border-border">
             {Object.entries(schema.fields).map(([key, fieldSchema]) => (
                 <div key={key}>
-                    <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">{key}</span>
+                    <span className="block text-[10px] font-mono text-fg mb-0.5">{key}</span>
                     <PropertyEditor
                         schema={fieldSchema}
                         value={value?.[key]}
@@ -278,7 +278,7 @@ function ListEditor({
         <div className="space-y-1">
             {value.map((item, i) => (
                 <div key={String(i)} className="flex items-center gap-1">
-                    <span className="text-[10px] font-mono text-neutral-400 w-4 shrink-0">{i}</span>
+                    <span className="text-[10px] font-mono text-fg-muted w-4 shrink-0">{i}</span>
                     <div className="flex-1 min-w-0">
                         <PropertyEditor
                             schema={schema.of}
@@ -304,7 +304,7 @@ function ListEditor({
             <button
                 type="button"
                 onClick={() => onChange([...value, null])}
-                className="flex items-center gap-1 text-[10px] font-mono text-neutral-500 hover:text-neutral-700"
+                className="flex items-center gap-1 text-[10px] font-mono text-fg hover:text-fg"
             >
                 <Icons.Plus size={10} /> Add
             </button>
@@ -364,12 +364,12 @@ function UnionEditor({
                 placeholder="search variants…"
             />
             {selectedVariant && (
-                <div className="pl-2 border-l border-neutral-200">
+                <div className="pl-2 border-l border-border">
                     {Object.entries(selectedVariant.fields)
                         .filter(([k]) => k !== schema.key)
                         .map(([key, fieldSchema]) => (
                             <div key={key}>
-                                <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">{key}</span>
+                                <span className="block text-[10px] font-mono text-fg mb-0.5">{key}</span>
                                 <PropertyEditor
                                     schema={fieldSchema}
                                     value={value?.[key]}
@@ -451,7 +451,7 @@ function OptionalEditor({
 
     return (
         <div className="space-y-1">
-            <label className="flex items-center gap-1 text-[10px] font-mono text-neutral-500">
+            <label className="flex items-center gap-1 text-[10px] font-mono text-fg">
                 <input
                     type="checkbox"
                     checked={hasValue}
@@ -462,12 +462,12 @@ function OptionalEditor({
                             onChange(schema.type === 'nullable' ? null : undefined);
                         }
                     }}
-                    className="accent-blue-500"
+                    className="accent-accent"
                 />
                 {label}
             </label>
             {hasValue && (
-                <div className="pl-2 border-l border-neutral-200">
+                <div className="pl-2 border-l border-border">
                     <PropertyEditor schema={schema.of} value={value} onChange={onChange} />
                 </div>
             )}
@@ -591,7 +591,7 @@ function BlockRefEditor({ value, onChange }: { value: string; schema: BlockRefSc
 }
 
 function LiteralEditor({ value }: { value: unknown }) {
-    return <span className="text-[10px] font-mono text-neutral-400">{String(value)}</span>;
+    return <span className="text-[10px] font-mono text-fg">{String(value)}</span>;
 }
 
 function RecordEditor({
@@ -609,7 +609,7 @@ function RecordEditor({
         <div className="space-y-1">
             {entries.map(([k, v]) => (
                 <div key={k} className="flex items-center gap-1">
-                    <span className="text-[10px] font-mono text-neutral-400 w-16 truncate shrink-0">{k}</span>
+                    <span className="text-[10px] font-mono text-fg w-16 truncate shrink-0">{k}</span>
                     <div className="flex-1 min-w-0">
                         <PropertyEditor
                             schema={schema.field}
@@ -637,7 +637,7 @@ function RecordEditor({
                     const newKey = `key${Object.keys(value ?? {}).length}`;
                     onChange({ ...value, [newKey]: null });
                 }}
-                className="flex items-center gap-1 text-[10px] font-mono text-neutral-500 hover:text-neutral-700"
+                className="flex items-center gap-1 text-[10px] font-mono text-fg hover:text-fg"
             >
                 <Icons.Plus size={10} /> Add
             </button>
@@ -692,7 +692,7 @@ function PropertyEditor({ schema, value, onChange }: { schema: Schema; value: un
         case 'block':
             return <BlockRefEditor value={(value as string) ?? ''} schema={schema} onChange={onChange} />;
         default:
-            return <span className="text-[10px] font-mono text-neutral-400 break-all">{JSON.stringify(value)}</span>;
+            return <span className="text-[10px] font-mono text-fg break-all">{JSON.stringify(value)}</span>;
     }
 }
 
@@ -721,10 +721,10 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
     const isEditorOwned = def.id === 'editor' || def.id.startsWith('editor.');
 
     return (
-        <div className="border border-neutral-200 rounded">
-            <div className="flex items-center justify-between px-2 py-1 bg-neutral-50">
-                <span className="text-[11px] font-mono font-semibold text-neutral-600">{def.id}</span>
-                {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-neutral-400" />}
+        <div className="border border-border rounded">
+            <div className="flex items-center justify-between px-2 py-1 bg-surface-muted">
+                <span className="text-[11px] font-mono font-semibold text-fg">{def.id}</span>
+                {node.scene && isEditorOwned && <Icons.Lock size={11} className="text-fg-muted" />}
                 {node.scene && !isEditorOwned && (
                     <IconButton
                         variant="danger"
@@ -737,12 +737,12 @@ function TraitSection({ node, traitSlot }: { node: Node; traitSlot: number }) {
                 )}
             </div>
             {propertyEntries.length === 0 ? (
-                <div className="px-2 py-1 text-[10px] font-mono text-neutral-400 italic">no editable properties</div>
+                <div className="px-2 py-1 text-[10px] font-mono text-fg-muted italic">no editable properties</div>
             ) : (
                 <div className="px-2 py-1.5 space-y-1.5">
                     {propertyEntries.map(({ key, reg, value }) => (
                         <div key={key}>
-                            <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">{reg.label ?? key}</span>
+                            <span className="block text-[10px] font-mono text-fg mb-0.5">{reg.label ?? key}</span>
                             <PropertyEditor
                                 schema={reg.schema}
                                 value={value}
@@ -771,18 +771,18 @@ function UnresolvedTraitSection({
 }) {
     const removeTrait = useEditRoom((s) => s.removeTrait);
     return (
-        <div className="border border-amber-300 rounded bg-amber-50/50">
-            <div className="flex items-center gap-1 px-2 py-1 bg-amber-100/60">
-                <Icons.TriangleAlert size={12} className="text-amber-500 shrink-0" />
-                <span className="text-[11px] font-mono font-semibold text-amber-700">{traitId}</span>
-                <span className="text-[10px] font-mono text-amber-500 ml-auto">unresolved</span>
+        <div className="border border-warn/40 rounded bg-warn/10">
+            <div className="flex items-center gap-1 px-2 py-1 bg-warn/15">
+                <Icons.TriangleAlert size={12} className="text-warn shrink-0" />
+                <span className="text-[11px] font-mono font-semibold text-warn">{traitId}</span>
+                <span className="text-[10px] font-mono text-warn ml-auto">unresolved</span>
                 {node.scene && (
                     <IconButton variant="danger" onClick={() => removeTrait(node.id, traitId)}>
                         <Icons.X size={12} />
                     </IconButton>
                 )}
             </div>
-            <div className="px-2 py-1 text-[10px] font-mono text-amber-600">
+            <div className="px-2 py-1 text-[10px] font-mono text-warn">
                 {data.json ? (
                     <pre className="whitespace-pre-wrap break-all">{JSON.stringify(data.json, null, 2)}</pre>
                 ) : data.binary ? (
@@ -830,8 +830,8 @@ function AddTraitAction({ node }: { node: Node }) {
 function SectionDivider({ label, action }: { label: string; action?: ReactNode }) {
     return (
         <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-mono font-semibold text-neutral-400 uppercase tracking-wide shrink-0">{label}</span>
-            <div className="flex-1 h-px bg-neutral-100" />
+            <span className="text-[10px] font-mono font-semibold text-fg-muted uppercase tracking-wide shrink-0">{label}</span>
+            <div className="flex-1 h-px bg-surface-muted" />
             {action && <div className="shrink-0">{action}</div>}
         </div>
     );
@@ -848,8 +848,8 @@ const SectionAddButton = forwardRef<HTMLButtonElement, ComponentProps<'button'>>
         disabled={disabled}
         className={`shrink-0 flex items-center justify-center w-5 h-5 rounded border ${
             disabled
-                ? 'text-neutral-300 border-neutral-200 bg-neutral-50 cursor-not-allowed'
-                : 'text-neutral-600 border-neutral-300 bg-white hover:bg-neutral-100 hover:border-neutral-400 cursor-pointer'
+                ? 'text-fg-muted border-border bg-surface-muted cursor-not-allowed'
+                : 'text-fg border-border bg-surface hover:bg-surface-muted hover:border-fg-muted cursor-pointer'
         } ${className ?? ''}`}
         {...props}
     >
@@ -869,7 +869,7 @@ const AddPrefabTriggerButton = forwardRef<HTMLButtonElement, ComponentProps<'but
     <button
         ref={ref}
         type="button"
-        className={`flex items-center gap-1 px-1.5 h-5 text-[10px] font-mono text-neutral-600 bg-white border border-neutral-300 rounded hover:bg-neutral-100 hover:border-neutral-400 cursor-pointer ${className ?? ''}`}
+        className={`flex items-center gap-1 px-1.5 h-5 text-[10px] font-mono text-fg bg-surface border border-border rounded hover:bg-surface-muted hover:border-fg-muted cursor-pointer ${className ?? ''}`}
         {...props}
     >
         <Icons.Layers size={11} />
@@ -946,7 +946,7 @@ function PrefabSection({ node }: { node: Node }) {
 
             {/* prefab picker */}
             <div>
-                <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">prefabId</span>
+                <span className="block text-[10px] font-mono text-fg mb-0.5">prefabId</span>
                 <SearchableSelect<string>
                     items={items}
                     value={config.prefabId}
@@ -963,12 +963,12 @@ function PrefabSection({ node }: { node: Node }) {
                 />
             </div>
 
-            {def && <div className="text-[10px] font-mono text-neutral-400">type: {def.type}</div>}
+            {def && <div className="text-[10px] font-mono text-fg">type: {def.type}</div>}
 
             {def ? (
                 def.args ? (
                     <div>
-                        <span className="block text-[10px] font-mono text-neutral-400 mb-0.5">args</span>
+                        <span className="block text-[10px] font-mono text-fg mb-0.5">args</span>
                         <PropertyEditor
                             schema={def.args.schema}
                             value={config.args ?? def.args.default}
@@ -979,7 +979,7 @@ function PrefabSection({ node }: { node: Node }) {
                     </div>
                 ) : null
             ) : (
-                <div className="text-[10px] font-mono text-amber-600">prefab def missing</div>
+                <div className="text-[10px] font-mono text-warn">prefab def missing</div>
             )}
         </div>
     );
@@ -1002,7 +1002,7 @@ export function InspectorPanel() {
     void sceneRevision;
 
     if (!room) {
-        return <div className="p-2 text-[10px] text-neutral-400 font-mono">no scene loaded</div>;
+        return <div className="p-2 text-[10px] text-fg-muted font-mono">no scene loaded</div>;
     }
 
     // ── voxel inspect ────────────────────────────────────────────────
@@ -1017,9 +1017,9 @@ export function InspectorPanel() {
             return (
                 <div className="p-2 space-y-1">
                     <SectionDivider label="voxel" />
-                    <div className="text-[10px] font-mono text-neutral-400 break-all">{key}</div>
-                    <div className="text-[10px] font-mono text-amber-500 italic">unknown block</div>
-                    <div className="text-[10px] font-mono text-neutral-500">
+                    <div className="text-[10px] font-mono text-fg break-all">{key}</div>
+                    <div className="text-[10px] font-mono text-warn italic">unknown block</div>
+                    <div className="text-[10px] font-mono text-fg-muted">
                         {wx}, {wy}, {wz}
                     </div>
                 </div>
@@ -1051,13 +1051,13 @@ export function InspectorPanel() {
                     action={
                         <div className="flex items-center gap-1.5">
                             {hasIcon && <div className="rounded-sm overflow-hidden" style={iconStyle} />}
-                            <span className="text-[10px] font-mono text-neutral-600 font-semibold">{def.id}</span>
+                            <span className="text-[10px] font-mono text-fg font-semibold">{def.id}</span>
                         </div>
                     }
                 />
 
                 {/* coords */}
-                <div className="text-[10px] font-mono text-neutral-400">
+                <div className="text-[10px] font-mono text-fg-muted">
                     {wx}, {wy}, {wz}
                 </div>
 
@@ -1081,7 +1081,7 @@ export function InspectorPanel() {
 
                             return (
                                 <div key={propName}>
-                                    <span className="block text-[10px] font-mono text-neutral-500 mb-0.5">{propName}</span>
+                                    <span className="block text-[10px] font-mono text-fg mb-0.5">{propName}</span>
                                     <div className="flex flex-wrap gap-1">
                                         {values.map((v) => {
                                             const active = String(currentVal) === v;
@@ -1117,8 +1117,8 @@ export function InspectorPanel() {
                                                     }}
                                                     className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors ${
                                                         active
-                                                            ? 'bg-neutral-200 text-neutral-700 cursor-default'
-                                                            : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200 cursor-pointer'
+                                                            ? 'bg-accent text-on-accent cursor-default'
+                                                            : 'bg-surface-muted text-fg hover:bg-border cursor-pointer'
                                                     }`}
                                                 >
                                                     {v}
@@ -1137,20 +1137,20 @@ export function InspectorPanel() {
 
     // ── node inspect ─────────────────────────────────────────────────
     if (selectedNodeIds.size === 0 && voxelCount === 0) {
-        return <div className="p-2 text-[10px] text-neutral-400 font-mono italic">nothing selected</div>;
+        return <div className="p-2 text-[10px] text-fg-muted font-mono italic">nothing selected</div>;
     }
 
     if (selectedNodeIds.size !== 1) {
         const parts: string[] = [];
         if (selectedNodeIds.size > 0) parts.push(`${selectedNodeIds.size} node${selectedNodeIds.size !== 1 ? 's' : ''}`);
         if (voxelCount > 0) parts.push(`${voxelCount.toLocaleString()} voxel${voxelCount !== 1 ? 's' : ''}`);
-        return <div className="p-2 text-[10px] text-neutral-400 font-mono italic">{parts.join(' + ')} selected</div>;
+        return <div className="p-2 text-[10px] text-fg-muted font-mono italic">{parts.join(' + ')} selected</div>;
     }
 
     const selectedNodeId = selectedNodeIds.values().next().value!;
     const node = getNodeById(room.nodes, selectedNodeId);
     if (!node) {
-        return <div className="p-2 text-[10px] text-neutral-400 font-mono italic">node not found</div>;
+        return <div className="p-2 text-[10px] text-fg-muted font-mono italic">node not found</div>;
     }
 
     const traitSlots = Array.from(node._traits.keys());
@@ -1167,14 +1167,14 @@ export function InspectorPanel() {
                     {/* realm, root is always 'shared', no editor */}
                     {node.parent && (
                         <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-mono text-neutral-400 shrink-0 w-12">realm</span>
+                            <span className="text-[10px] font-mono text-fg shrink-0 w-12">realm</span>
                             <RealmEditor node={node} />
                         </div>
                     )}
 
-                    <div className="text-[10px] font-mono text-neutral-400">
+                    <div className="text-[10px] font-mono text-fg-muted">
                         id: {node.id}
-                        {!node.persist && <span className="ml-2 text-amber-500">non-persistent</span>}
+                        {!node.persist && <span className="ml-2 text-warn">non-persistent</span>}
                     </div>
                 </div>
 
@@ -1185,7 +1185,7 @@ export function InspectorPanel() {
                 <div className="space-y-1.5">
                     <SectionDivider label="traits" action={<AddTraitAction node={node} />} />
                     {traitSlots.length === 0 && node._unresolvedTraits.size === 0 ? (
-                        <div className="text-[10px] font-mono text-neutral-400 italic">no traits</div>
+                        <div className="text-[10px] font-mono text-fg-muted italic">no traits</div>
                     ) : (
                         <>
                             {traitSlots.map((index) => (
@@ -1240,8 +1240,8 @@ function RealmEditor({ node }: { node: Node }) {
                         onClick={() => setRealm(node.id, opt.value)}
                         className={`flex-1 px-1 py-0.5 text-[10px] font-mono cursor-pointer border ${
                             active
-                                ? 'bg-neutral-800 text-white border-neutral-800'
-                                : 'bg-white text-neutral-500 border-neutral-200 hover:bg-neutral-100 hover:text-neutral-700'
+                                ? 'bg-accent text-on-accent border-accent'
+                                : 'bg-surface text-fg border-border hover:bg-surface-muted hover:text-fg'
                         } ${i === 0 ? 'rounded-l' : '-ml-px'} ${i === REALM_OPTIONS.length - 1 ? 'rounded-r' : ''}`}
                     >
                         {opt.value}

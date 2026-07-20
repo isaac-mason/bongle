@@ -36,12 +36,15 @@ type HostMessage =
     | { type: 'client-leave'; connectionId: number }
     | { type: 'dispose' };
 
-function stop() {
+async function stop() {
     if (timer !== null) clearInterval(timer);
     timer = null;
     transport?.close();
     transport = null;
-    server?.stop();
+    // server.stop() flushes dirty rooms AND awaits the OPFS writes landing, so
+    // once this resolves disk is current — safe for the host to terminate us and
+    // reload a fresh worker from the same project.
+    await server?.stop();
     server = null;
 }
 
@@ -125,7 +128,10 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             // live-swap it onto the local player (fresh model id → rig re-mounts).
             if (msg.path === 'avatar.glb') server?.reloadAvatar();
         } else if (msg.type === 'dispose') {
-            stop();
+            // graceful: flush + drain to OPFS, THEN ack so the host waits for the
+            // save to land before terminating us (a restart reloads from disk).
+            await stop();
+            self.postMessage({ type: 'disposed' });
         }
     } catch (err) {
         log(`worker error: ${(err as Error).message}`);

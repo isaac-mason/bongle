@@ -22,7 +22,12 @@ export function Presence() {
         <div className="flex flex-col items-center gap-1.5 pt-1.5">
             <div className="h-px w-6 bg-border" />
             {participants.length === 0 ? (
-                <span className="text-center text-[8px] leading-tight text-muted">waiting for guests</span>
+                // no guests yet: a single "live" beacon rather than tiny wrapped
+                // text (the readable status lives in the editing window). The dot
+                // sits centred in the 44px taskbar column; tooltip spells it out.
+                <div className="grid h-8 w-8 place-items-center" title="Live · waiting for guests…">
+                    <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-green-500" />
+                </div>
             ) : (
                 participants.map((p) => (
                     <div

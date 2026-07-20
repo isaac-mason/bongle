@@ -18,6 +18,27 @@ function watchEngineZip(): Plugin {
     };
 }
 
+// `vite build --watch` dumps the full chunk listing on EVERY rebuild, which
+// floods the dev.sh logs. dev.sh runs it at `--logLevel warn` to silence that
+// info spew (build errors still print in full), and this plugin restores a
+// single terse success line per rebuild — so a green build is one line and a
+// broken one is the whole stack. Watch-mode only; a one-shot prod build stays
+// silent-on-success as before.
+function quietWatchLog(): Plugin {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return {
+        name: 'bongle:quiet-watch-log',
+        closeBundle() {
+            if (!this.meta.watchMode) return;
+            // debounce: closeBundle can fire more than once per rebuild; collapse
+            // the burst into one line. The first (cold) build logs too — a ready
+            // signal that /editor has stopped 404ing.
+            clearTimeout(timer);
+            timer = setTimeout(() => console.log('rebuilt ✓'), 150);
+        },
+    };
+}
+
 // The one vite setup for the editor. `pnpm exec vite` from lib/editor runs it
 // standalone (local dev); the website imports the same `mountEditor` entry.
 //
@@ -36,7 +57,7 @@ export default defineConfig(({ command }) => ({
     // BASE_URL to match — see client/client-host.ts.
     base: command === 'build' ? '/static/bongle-editor/' : '/',
     // tailwind only needs the main document build; workers render no CSS.
-    plugins: [watchEngineZip(), tailwindcss(), envPlugin(SERVER_ENV)],
+    plugins: [watchEngineZip(), quietWatchLog(), tailwindcss(), envPlugin(SERVER_ENV)],
     // worker.plugins is BLANKET (applies to every worker bundle — vite has no
     // per-worker granularity). Safe here because EVERY worker is server-env:
     // the server worker, and later the pipeline worker (server:true,

@@ -24,6 +24,11 @@ export type ClientHost = {
     createClient(): ClientConnection;
     /** Signal a changed path to every live client (they re-read shared OPFS). */
     relayFsChange(path: string): void;
+    /** Re-handshake every live client against the current server worker — call
+     *  after a server restart, whose new worker knows nothing of the old
+     *  connections (their transports died with it). Reloading the iframe re-fires
+     *  its `client-ready` ping, which re-runs the join brokering below. */
+    rejoinAll(): void;
     dispose(): void;
 };
 
@@ -117,6 +122,14 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
             for (const c of live) {
                 c.iframe.contentWindow?.postMessage({ type: 'fs-change', path }, targetOrigin);
             }
+        },
+
+        rejoinAll() {
+            // reload each iframe (same-origin, so allowed): on load it posts
+            // `client-ready` again, and the persistent `onMessage` handler mints a
+            // fresh game/bundler channel pair against whatever server host is
+            // current — reconnecting the client to the freshly restarted worker.
+            for (const c of live) c.iframe.contentWindow?.location.reload();
         },
 
         dispose() {

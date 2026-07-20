@@ -56,7 +56,7 @@ export function PopoverContent({ children, className, align = 'start', sideOffse
     return (
         <BasePopover.Portal>
             <BasePopover.Positioner align={align} sideOffset={sideOffset}>
-                <BasePopover.Popup className={`z-50 bg-white border border-neutral-200 rounded shadow-lg ${className ?? ''}`}>
+                <BasePopover.Popup className={`z-50 bg-surface border border-border rounded shadow-lg ${className ?? ''}`}>
                     {children}
                 </BasePopover.Popup>
             </BasePopover.Positioner>

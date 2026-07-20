@@ -1906,6 +1906,14 @@ export type VoxelResources = {
     atlasReady: Promise<void>;
     /** @internal, settled by VoxelResources.load() once atlas pixels finish uploading. */
     _resolveAtlasReady: () => void;
+    /** resolves when the cull/emit/finalize (+ translucent-sort) compute
+     *  pipelines have finished compiling. `state.voxelResources` is assigned at
+     *  `init()` — before `load()` compiles these — so anything that dispatches
+     *  the voxel computes off the main render loop (offline icon renders) must
+     *  await this first, or `setPipeline` binds a still-null cached pipeline. */
+    computeReady: Promise<void>;
+    /** @internal, settled by VoxelResources.load() once the compute pipelines compile. */
+    _resolveComputeReady: () => void;
     /** atlas manifest hash this struct was built against (null if the
      *  manifest fetch failed). */
     atlasHash: string | null;
@@ -1936,6 +1944,7 @@ export function init(registry: BlockRegistry, env: EnvironmentResources, budget:
     const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
 
     const { promise: atlasReady, resolve: _resolveAtlasReady } = Promise.withResolvers<void>();
+    const { promise: computeReady, resolve: _resolveComputeReady } = Promise.withResolvers<void>();
 
     const quadMaterials: Record<VoxelPass, Material> = {
         opaque: createQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque' }),
@@ -2082,6 +2091,8 @@ export function init(registry: BlockRegistry, env: EnvironmentResources, budget:
         geometries,
         atlasReady,
         _resolveAtlasReady,
+        computeReady,
+        _resolveComputeReady,
         atlasHash: null,
         texAnimData: registry.texAnimData,
         meshDispatcher: null,
@@ -2224,6 +2235,7 @@ export async function load(
     }
 
     await computeReady;
+    res._resolveComputeReady();
 }
 
 /** Build new resources, or reuse `prev` if the atlas + animation metadata

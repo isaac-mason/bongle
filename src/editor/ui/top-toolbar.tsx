@@ -39,10 +39,10 @@ function MenuItem({
             }}
             className={`block w-full text-left px-3 py-1 text-[11px] font-mono ${
                 disabled
-                    ? 'text-neutral-300 cursor-not-allowed'
+                    ? 'text-fg-muted opacity-50 cursor-not-allowed'
                     : danger
-                      ? 'text-red-600 hover:bg-red-50 cursor-pointer'
-                      : 'text-neutral-700 hover:bg-neutral-100 cursor-pointer'
+                      ? 'text-danger hover:bg-danger/15 cursor-pointer'
+                      : 'text-fg hover:bg-surface-muted cursor-pointer'
             }`}
         >
             {label}
@@ -82,7 +82,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
     return (
         <div
             ref={ref}
-            className="fixed z-50 bg-white border border-neutral-200 shadow min-w-[160px]"
+            className="fixed z-50 bg-surface border border-border shadow min-w-[160px]"
             style={{ left: menu.x, top: menu.y }}
         >
             <MenuItem
@@ -103,7 +103,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
             )}
             {supportsDebug && (
                 <>
-                    <div className="border-t border-neutral-100" />
+                    <div className="border-t border-border-subtle" />
                     <MenuItem
                         label={inspectClientOn ? 'Stop inspecting client' : 'Inspect client'}
                         onClose={onClose}
@@ -124,7 +124,7 @@ function RoomTabContextMenu({ menu, onClose }: { menu: TabContextMenu; onClose: 
                     />
                 </>
             )}
-            <div className="border-t border-neutral-100" />
+            <div className="border-t border-border-subtle" />
             <MenuItem
                 label={isMainEdit ? 'Leave' : 'Leave room'}
                 danger
@@ -273,10 +273,10 @@ function RoomTab({
     // editor lens (inspect client), near-black for any other edit POV
     // (solo edit or sibling edit ClientRoom / inspect server).
     const activeBg = lensBacked
-        ? 'bg-blue-900 text-white border-blue-900'
+        ? 'bg-tab-lens text-white border-tab-lens'
         : isPlay
-          ? 'bg-red-900 text-white border-red-900'
-          : 'bg-neutral-900 text-white border-neutral-900';
+          ? 'bg-tab-play text-white border-tab-play'
+          : 'bg-tab-edit text-white border-tab-edit';
 
     return (
         <div className="flex items-stretch h-6">
@@ -289,7 +289,7 @@ function RoomTab({
                     className={`flex items-center px-1.5 text-[10px] font-mono cursor-pointer border border-r-0 rounded-l ${
                         isActive
                             ? activeBg
-                            : 'bg-white text-neutral-500 border-neutral-200 hover:bg-neutral-100 hover:text-neutral-700'
+                            : 'bg-surface text-fg-muted border-border hover:bg-surface-muted hover:text-fg'
                     }`}
                 >
                     {pillLabel}
@@ -301,13 +301,13 @@ function RoomTab({
                     onContextMenu={onContextMenu}
                     title={`${info.sceneId} [${tabMode}] (namespace '${info.namespace}')`}
                     className={`flex items-center gap-1 text-[11px] font-mono cursor-pointer border border-l-2 ${
-                        isPlay ? 'border-l-neutral-400' : 'border-l-amber-500'
+                        isPlay ? 'border-l-tab-play' : 'border-l-tab-edit'
                     } ${
                         isActive
                             ? activeBg
                             : view
-                              ? 'bg-neutral-50 text-neutral-600 border-neutral-200 hover:bg-neutral-100'
-                              : 'bg-white text-neutral-300 border-dashed border-neutral-200 hover:text-neutral-400 hover:bg-neutral-50'
+                              ? 'bg-surface text-fg-muted border-border hover:bg-surface-muted'
+                              : 'bg-surface text-fg-muted border-dashed border-border hover:text-fg hover:bg-surface-muted'
                     } ${canClose ? 'pl-2 pr-1.5 rounded-l border-r-0' : 'px-2 rounded'}`}
                 >
                     {isPlay ? <Icons.Play size={10} /> : <Icons.Wrench size={10} />}
@@ -321,9 +321,11 @@ function RoomTab({
                     onClick={onClose}
                     onContextMenu={onContextMenu}
                     className={`flex items-center px-1 text-[11px] rounded-r border border-l-0 cursor-pointer ${
-                        isPlay
-                            ? 'bg-white text-neutral-400 border-neutral-200 hover:text-red-500 hover:bg-red-50'
-                            : 'bg-white text-neutral-400 border-neutral-200 hover:text-neutral-600 hover:bg-neutral-50'
+                        isActive
+                            ? `${activeBg} hover:opacity-80`
+                            : isPlay
+                              ? 'bg-surface text-fg-muted border-border hover:text-danger hover:bg-danger/15'
+                              : 'bg-surface text-fg-muted border-border hover:text-fg hover:bg-surface-muted'
                     }`}
                     title={
                         !view
@@ -399,7 +401,7 @@ function RoomTabs() {
         <div className="flex items-center gap-4">
             {groups.map((group, gi) => (
                 <div key={group.namespace} className="flex items-center gap-1">
-                    {gi > 0 && <div className="h-4 w-px bg-neutral-300 mx-2" />}
+                    {gi > 0 && <div className="h-4 w-px bg-border mx-2" />}
                     {group.tabs.map((tab) => (
                         <RoomTab key={tab.id} tab={tab} inGroup={tab.hasRoomSibling} onOpenMenu={openMenu} />
                     ))}
@@ -428,7 +430,7 @@ function PlaySection() {
                 onClick={() => {
                     if (roomId) stopRoom?.(roomId);
                 }}
-                className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 cursor-pointer"
+                className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-danger/40 bg-danger/15 text-danger hover:bg-danger/25 cursor-pointer"
             >
                 <Icons.Square size={12} />
                 Stop session
@@ -440,7 +442,7 @@ function PlaySection() {
         <button
             type="button"
             onClick={() => play?.()}
-            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-green-200 bg-green-50 text-green-600 hover:bg-green-100 cursor-pointer"
+            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-success/40 bg-success/15 text-success hover:bg-success/25 cursor-pointer"
         >
             <Icons.Play size={12} />
             Play
@@ -470,11 +472,11 @@ function ModePill() {
     return (
         <span
             className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border ${
-                isEdit ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-neutral-50 text-neutral-600 border-neutral-200'
+                isEdit ? 'bg-tab-edit/15 text-tab-edit border-tab-edit/40' : 'bg-tab-play/15 text-tab-play border-tab-play/40'
             }`}
         >
             {mode}
-            {suffix && <span className="text-neutral-400">· {suffix}</span>}
+            {suffix && <span className="text-fg-muted">· {suffix}</span>}
         </span>
     );
 }
@@ -483,7 +485,7 @@ function ModePill() {
 
 export function TopToolbar() {
     return (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-white border-b border-neutral-200">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface border-b border-border">
             {/* room tabs */}
             <div className="flex-1 flex items-center gap-2">
                 <RoomTabs />

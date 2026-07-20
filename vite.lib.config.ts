@@ -48,7 +48,11 @@ export default defineConfig({
                 'engine-asset-pipeline': entry('src/asset-pipeline/index.ts'),
                 env: entry('src/env.ts'),
                 internal: entry('src/internal.ts'),
-                'avatar/rig': entry('src/core/avatar/rig.ts'),
+                // flat key (NOT 'avatar/rig') so it emits dist/avatar-rig.js at the
+                // dist ROOT — the asset-rewrite assumes every output sits at root so
+                // `./assets/` resolves to dist/assets/ (a dist/avatar/ subdir would
+                // break base-avatar's player.glb ref → builtin:avatar fails to load).
+                'avatar-rig': entry('src/core/avatar/rig.ts'),
                 kit: entry('src/kit/index.ts'),
                 icons: entry('src/icons/index.tsx'),
                 interface: entry('interface/index.ts'), // its own top-level dir

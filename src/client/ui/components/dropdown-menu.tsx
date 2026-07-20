@@ -45,7 +45,7 @@ export function DropdownMenuContent({ children, className, align = 'start', side
         <Menu.Portal>
             <Menu.Positioner align={align} sideOffset={sideOffset}>
                 <Menu.Popup
-                    className={`z-50 min-w-[120px] py-0.5 bg-white border border-neutral-200 rounded shadow-md ${className ?? ''}`}
+                    className={`z-50 min-w-[120px] py-0.5 bg-surface border border-border rounded shadow-md ${className ?? ''}`}
                 >
                     {children}
                 </Menu.Popup>
@@ -64,10 +64,10 @@ interface DropdownMenuItemProps {
 
 export function DropdownMenuItem({ children, onSelect, className, variant = 'default', disabled }: DropdownMenuItemProps) {
     const variantClasses = disabled
-        ? 'text-neutral-300 cursor-not-allowed'
+        ? 'text-fg-muted opacity-50 cursor-not-allowed'
         : variant === 'danger'
-          ? 'text-red-600 hover:bg-red-50'
-          : 'text-neutral-700 hover:bg-neutral-100';
+          ? 'text-danger hover:bg-danger/15'
+          : 'text-fg hover:bg-surface-muted';
     return (
         <Menu.Item
             onClick={onSelect ? () => onSelect() : undefined}
@@ -80,5 +80,5 @@ export function DropdownMenuItem({ children, onSelect, className, variant = 'def
 }
 
 export function DropdownMenuSeparator() {
-    return <Menu.Separator className="my-0.5 border-t border-neutral-200" />;
+    return <Menu.Separator className="my-0.5 border-t border-border" />;
 }

@@ -110,9 +110,9 @@ export const TreeItem = memo(function TreeItem({
             ref={ref}
             data-node-id={item.nodeId}
             className={`
-                absolute left-0 right-0 flex items-center gap-1 py-0.5 pr-1 rounded select-none font-mono text-[10px] outline-none focus:ring-1 focus:ring-blue-300
+                absolute left-0 right-0 flex items-center gap-1 py-0.5 pr-1 rounded select-none font-mono text-[10px] outline-none focus:ring-1 focus:ring-accent
                 ${isDragSource ? 'opacity-40' : ''}
-                ${isSelected ? 'bg-neutral-100' : 'hover:bg-neutral-50'}
+                ${isSelected ? 'bg-accent/25' : 'hover:bg-surface-muted'}
             `}
             style={{ top: virtualStart, paddingLeft: item.depth * INDENTATION + 4, contain: 'layout style paint' }}
             onClick={handleClick}
@@ -124,7 +124,7 @@ export const TreeItem = memo(function TreeItem({
             tabIndex={0}
         >
             {/* drag handle */}
-            <span ref={handleRef} className="cursor-grab active:cursor-grabbing text-neutral-500 shrink-0 select-none px-0.5">
+            <span ref={handleRef} className="cursor-grab active:cursor-grabbing text-fg-muted shrink-0 select-none px-0.5">
                 <Icons.GripVertical size={12} />
             </span>
 
@@ -133,7 +133,7 @@ export const TreeItem = memo(function TreeItem({
                 <button
                     type="button"
                     onClick={handleToggle}
-                    className="w-3.5 flex items-center justify-center shrink-0 cursor-pointer text-neutral-500 bg-transparent border-none p-0"
+                    className="w-3.5 flex items-center justify-center shrink-0 cursor-pointer text-fg-muted bg-transparent border-none p-0"
                 >
                     {item.collapsed ? <Icons.ChevronRight size={12} /> : <Icons.ChevronDown size={12} />}
                 </button>
@@ -160,17 +160,17 @@ export const TreeItem = memo(function TreeItem({
                         e.stopPropagation();
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-white border border-neutral-300 rounded px-1 py-0 text-[10px] font-mono text-neutral-700 outline-none focus:border-blue-400"
+                    className="flex-1 min-w-0 bg-surface border border-border rounded px-1 py-0 text-[10px] font-mono text-fg outline-none focus:border-accent"
                 />
             ) : (
-                <span className={`truncate ${item.effectivePersist ? 'text-neutral-700' : 'text-neutral-400 italic'}`}>
+                <span className={`truncate ${item.effectivePersist ? 'text-fg' : 'text-fg-muted italic'}`}>
                     {item.node.name || `Node ${item.nodeId}`}
                 </span>
             )}
 
             {/* child count badge when collapsed */}
             {item.collapsed && item.childCount > 0 && (
-                <span className="text-[10px] text-neutral-400 bg-neutral-100 rounded px-1">{item.childCount}</span>
+                <span className="text-[10px] text-fg-muted bg-surface-muted rounded px-1">{item.childCount}</span>
             )}
 
             {/* delete button */}
@@ -187,13 +187,13 @@ export const TreeItem = memo(function TreeItem({
 
 export function TreeItemOverlay({ item, childCount }: { item: FlattenedNode; childCount: number }) {
     return (
-        <div className="relative flex items-center gap-1 py-0.5 px-2 bg-white border border-neutral-200 rounded shadow-lg font-mono text-[10px] w-max">
-            <Icons.GripVertical size={12} className="text-neutral-300" />
-            <span className={item.effectivePersist ? 'text-neutral-700' : 'text-neutral-400 italic'}>
+        <div className="relative flex items-center gap-1 py-0.5 px-2 bg-surface border border-border rounded shadow-lg font-mono text-[10px] w-max">
+            <Icons.GripVertical size={12} className="text-fg-muted" />
+            <span className={item.effectivePersist ? 'text-fg' : 'text-fg-muted italic'}>
                 {item.node.name || `Node ${item.nodeId}`}
             </span>
             {childCount > 0 && (
-                <span className="absolute -top-2 -right-2 flex items-center justify-center w-5 h-5 rounded-full bg-blue-500 text-white text-[10px] font-semibold">
+                <span className="absolute -top-2 -right-2 flex items-center justify-center w-5 h-5 rounded-full bg-accent text-on-accent text-[10px] font-semibold">
                     {childCount}
                 </span>
             )}

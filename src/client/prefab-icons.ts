@@ -50,6 +50,9 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     if (!def) return null;
 
     await deps.voxelResources.atlasReady;
+    // wait for the shared voxel compute pipelines to compile before the offline
+    // render dispatches them (see block-icons for the same guard).
+    await deps.voxelResources.computeReady;
 
     const room = createRenderRoom(deps);
     Environment.applyConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);

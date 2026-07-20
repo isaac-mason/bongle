@@ -13,15 +13,19 @@ import {
     encodePrefabConfig,
     getNodeById,
     getTrait,
+    hasTrait,
     isReplicable,
+    isTransformRoot,
     type Node,
     type Realm,
+    reconcileRootChunks,
+    rootsInChunk,
     type SceneTree,
 } from '../core/scene/scene-tree';
 import { captureValue, diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
 import * as SyncRate from '../core/scene/sync/sync-rate';
 import type { TraitBase, TraitDef } from '../core/scene/traits';
-import { type Zstd, encodeChunk, encodeLight } from '../core/voxels/chunk-codec';
+import { encodeChunk, encodeLight, type Zstd } from '../core/voxels/chunk-codec';
 import {
     CHUNK_VOLUME,
     type Chunk,
@@ -172,6 +176,15 @@ type ClientVoxelKnowledge = {
      *  freeing a slot. disjoint from pendingFull (ship moves the key across)
      *  and a subset of knownChunks. pure pacing, TCP handles delivery. */
     inFlightFull: Set<string>;
+    /** per-tick region deltas for chunk-tied node AOI: chunk keys that entered the
+     *  discovered region this tick (announced empty, or shipped as chunk_full) and
+     *  keys evicted this tick. cleared-then-filled each tick in flushVoxelsForPlayer;
+     *  consumed by the scene phase (buildSceneSyncUpdates) to turn a chunk transition
+     *  into subtree create/destroy for the transform roots filed in it. NOT touched by
+     *  chunk_full promotion (a re-send is not an eviction), so a re-shipped chunk under
+     *  a known node doesn't flicker it. */
+    entered: Set<string>;
+    left: Set<string>;
 };
 
 /* ── per-client scene graph knowledge ── */
@@ -341,6 +354,8 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
         pendingLight: new Set(),
         pendingFull: new Set(),
         inFlightFull: new Set(),
+        entered: new Set(),
+        left: new Set(),
     });
 
     // Catch this client up on any runtime model entries that exist now,
@@ -352,8 +367,19 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
         Net.send(net, player.client, msg);
     }
 
+    // AOI-aware join: when this player streams chunks, omit transform-root subtrees
+    // from the packed scene (they're created later via the AOI presence pass as the
+    // player's region discovers), EXCEPT the player's own node subtree, which is the
+    // always-visible anchor. the SAME predicate feeds snapshotAllNodeKnowledge below so
+    // the marked-known set is exactly the packed set.
+    const ownPlayerNode = room.playerNodes.get(player.id);
+    const transformRootPrune =
+        player.mode === 'play' && room.voxels.authority
+            ? (node: Node) => node !== ownPlayerNode && isTransformRoot(node)
+            : undefined;
+
     const packT0 = performance.now();
-    const packedNodes = packSceneTree(room.nodes, player.mode);
+    const packedNodes = packSceneTree(room.nodes, player.mode, transformRootPrune);
     const packMs = performance.now() - packT0;
     Net.send(net, player.client, {
         type: 'join_room',
@@ -370,7 +396,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
 
     // snapshot every node so the same-tick scene_sync diff finds no changes
     const snapT0 = performance.now();
-    snapshotAllNodeKnowledge(room.nodes, nodeKnowledge, player.mode);
+    snapshotAllNodeKnowledge(room.nodes, nodeKnowledge, player.mode, transformRootPrune);
     const snapMs = performance.now() - snapT0;
     console.log(
         `[room-start]     invalidatePlayer packSceneTree=${packMs.toFixed(1)} ` +
@@ -586,7 +612,36 @@ export function flush(
     }
     Debug.end(metrics, 'discovery/diff');
 
-    // --- phase 2: per-client knowledge diff + message generation ---
+    // --- phase 2: voxel chunk streaming + transform-root chunk-index reconcile ---
+    // runs BEFORE the scene phase (approach B): chunk knowledge is the region
+    // authority, so it must be current when scene sync gates node presence, and the
+    // per-player entered/left region deltas captured here are consumed same-tick by
+    // the scene phase below. (was phase 3, after scene.)
+    Debug.begin(metrics, 'discovery/voxels');
+    for (const room of rooms.rooms.values()) {
+        // reconcile the transform-root chunk index off this tick's dirtyNodes so
+        // rootsInChunk is current for the scene phase. runs for every room (even
+        // ones without voxel authority); it's O(dirtyNodes) and touches nothing else.
+        reconcileRootChunks(room.nodes);
+        const auth = room.voxels.authority;
+        if (!auth) continue;
+        flushVoxelsForRoom(state, rooms, room, out);
+        clearVoxelChanges(auth.changes);
+        // clear lightDirty flags after all clients have absorbed into their
+        // per-client pendingLight queues. compressedLight stays cached across
+        // ticks, writeChunkLight / markChunkDirty (light.ts) null it on the
+        // next actual change. dirty.light is reset so next tick starts empty.
+        // mask + count are NOT cleared here, dispatchLight already cleared
+        // them for shipped chunks; unshipped (cap-exhausted) chunks keep
+        // their accumulated delta info for next tick.
+        for (const chunk of room.voxels.dirty.light) {
+            chunk.lightDirty = false;
+        }
+        room.voxels.dirty.light.clear();
+    }
+    Debug.end(metrics, 'discovery/voxels');
+
+    // --- phase 3: per-client scene sync (consumes this tick's chunk region) ---
     Debug.begin(metrics, 'discovery/scene');
 
     // build room list lazily (only if at least one client needs it)
@@ -630,6 +685,12 @@ export function flush(
             const nodeSyncKnowledge = cs.nodeSyncKnowledge.get(player.id);
             if (!nodeSyncKnowledge) continue;
 
+            // AOI region for chunk-tied node presence: present only when the room
+            // streams chunks. undefined → no chunk gating (all replicable nodes
+            // visible, the pre-AOI behaviour) for edit players and non-voxel rooms.
+            const aoi = player.mode === 'play' && room.voxels.authority ? cs.voxelKnowledge.get(player.id) : undefined;
+            const ownRootId = aoi ? room.playerNodes.get(player.id)?.id : undefined;
+
             const updates = buildSceneSyncUpdates(
                 room.nodes,
                 nodeKnowledge,
@@ -637,6 +698,8 @@ export function flush(
                 room.tick,
                 player.mode,
                 player.id,
+                aoi,
+                ownRootId,
             );
             if (updates.length > 0) {
                 out.push([
@@ -663,37 +726,16 @@ export function flush(
         }
     }
 
-    // clear the per-room dirty set now that every client has diffed against it
-    // this tick. next tick starts empty; nodes that don't change contribute
-    // nothing. (also drops refs to destroyed nodes that were parked here.) nodes
-    // still owed to a client after a rate-throttle are carried per-client in
-    // ClientState.pendingNodes, not here — this set is server-side change only.
+    // clear the per-room dirty set now that every client has diffed against it AND
+    // this tick's reconcileRootChunks consumed it. cleared here (end of the scene
+    // phase, which now runs LAST): the voxel phase's reconcile + the scene fan-out
+    // both read dirtyNodes, so clearing any earlier would strand one of them. nodes
+    // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
     for (const room of rooms.rooms.values()) {
         if (room.nodes.dirtyNodes.size > 0) room.nodes.dirtyNodes.clear();
     }
 
     Debug.end(metrics, 'discovery/scene');
-
-    // --- phase 3: voxel chunk streaming ---
-    Debug.begin(metrics, 'discovery/voxels');
-    for (const room of rooms.rooms.values()) {
-        const auth = room.voxels.authority;
-        if (!auth) continue;
-        flushVoxelsForRoom(state, rooms, room, out);
-        clearVoxelChanges(auth.changes);
-        // clear lightDirty flags after all clients have absorbed into their
-        // per-client pendingLight queues. compressedLight stays cached across
-        // ticks, writeChunkLight / markChunkDirty (light.ts) null it on the
-        // next actual change. dirty.light is reset so next tick starts empty.
-        // mask + count are NOT cleared here, dispatchLight already cleared
-        // them for shipped chunks; unshipped (cap-exhausted) chunks keep
-        // their accumulated delta info for next tick.
-        for (const chunk of room.voxels.dirty.light) {
-            chunk.lightDirty = false;
-        }
-        room.voxels.dirty.light.clear();
-    }
-    Debug.end(metrics, 'discovery/voxels');
 
     return out;
 }
@@ -713,6 +755,29 @@ function nodeDepth(node: Node): number {
         p = p.parent;
     }
     return d;
+}
+
+/* ── chunk-tied node AOI helpers ── */
+
+/** the transform root gating `node`'s AOI presence: the topmost `TransformTrait`
+ *  node in its chain, or null if no ancestor-or-self has a transform (a node with
+ *  no transform root, always visible). only used on the cold create path for a
+ *  not-yet-known node; movers never climb (the presence pass iterates roots). */
+function transformRootOf(node: Node): Node | null {
+    let cur: Node | null = node;
+    let root: Node | null = null;
+    while (cur) {
+        if (hasTrait(cur, TransformTrait)) root = cur;
+        cur = cur.parent;
+    }
+    return root;
+}
+
+/** is a chunk currently in this client's AOI region? `knownChunks ∪ knownEmptyChunks`
+ *  is the shipped region; `pendingFull` is included so a chunk mid-(re)ship doesn't
+ *  flicker a node whose presence is being re-evaluated. */
+function chunkInRegion(aoi: ClientVoxelKnowledge, key: string): boolean {
+    return aoi.knownChunks.has(key) || aoi.knownEmptyChunks.has(key) || aoi.pendingFull.has(key);
 }
 
 /**
@@ -736,18 +801,81 @@ function buildSceneSyncUpdates(
     currentTick: number,
     mode: RoomMode,
     playerId: PlayerId,
+    aoi: ClientVoxelKnowledge | undefined,
+    ownRootId: number | undefined,
 ): SceneSyncUpdate[] {
-    const creates: Node[] = [];
+    const creates = new Set<Node>();
     const updateList: SceneSyncUpdate[] = [];
     const destroys: SceneSyncUpdate[] = [];
+    // node ids whose presence the AOI pass already settled (created or destroyed) this
+    // tick, so the dirtyNodes loop skips them (it owns field updates, not presence).
+    const presenceSettled = new Set<number>();
 
+    // subtree-coherent create/destroy for a transform root: a bulk-in static subtree
+    // has descendants that aren't individually in dirtyNodes, so we expand the whole
+    // subtree at the root. walkReplicable prunes non-shared subtrees in play mode
+    // (matching what was/would be created); the root's ancestry is all shared
+    // (isTransformRoot ⇒ isReplicable), so 'shared' is the right inherited realm.
+    const createSubtree = (root: Node): void => {
+        walkReplicable(root, mode, 'shared', (n) => {
+            // only settle nodes we actually create. an already-known node in this subtree
+            // may carry a pending field update in dirtyNodes — leave it for the diff path.
+            if (!nodeKnowledge.has(n.id)) {
+                creates.add(n);
+                presenceSettled.add(n.id);
+            }
+        });
+    };
+    const destroySubtree = (root: Node): void => {
+        walkReplicable(root, mode, 'shared', (n) => {
+            if (nodeKnowledge.has(n.id)) {
+                destroys.push({ type: 'node_destroyed', id: n.id });
+                nodeKnowledge.delete(n.id);
+                nodeSyncKnowledge.delete(n.id);
+            }
+            presenceSettled.add(n.id);
+        });
+    };
+
+    // --- AOI presence pass (play + voxel rooms) ---
+    // presence of a transform root = its chunk ∈ region. it flips when EITHER the
+    // region moved (this player's entered/left chunk deltas) OR the root moved/spawned/
+    // despawned (the room's rootChunkChanges). we gather those candidate roots and, for
+    // each, compare want (current filed chunk ∈ region) vs have (known) — iterating
+    // ROOTS, so we never climb the tree. destruction of an actually-destroyed root
+    // (scene === null) is left to the dirtyNodes loop; here we handle live AOI in/out.
+    if (aoi) {
+        const candidates = new Set<Node>();
+        for (const key of aoi.left) {
+            const roots = rootsInChunk(sceneTree, key);
+            if (roots) for (const r of roots) candidates.add(r);
+        }
+        for (const key of aoi.entered) {
+            const roots = rootsInChunk(sceneTree, key);
+            if (roots) for (const r of roots) candidates.add(r);
+        }
+        for (const ch of sceneTree.rootChunkChanges) candidates.add(ch.root);
+
+        for (const root of candidates) {
+            // the own-player subtree is the always-visible anchor, never chunk-gated.
+            if (root.id === ownRootId || root.scene === null) continue;
+            const filed = sceneTree.rootToChunk.get(root); // current chunk, O(1); undefined if unfiled
+            const want = filed !== undefined && chunkInRegion(aoi, filed);
+            const have = nodeKnowledge.has(root.id);
+            if (want && !have) createSubtree(root);
+            else if (!want && have) destroySubtree(root);
+            // want === have: no presence change; field updates flow through dirtyNodes.
+        }
+    }
+
+    // --- dirtyNodes: field updates for present nodes, incremental adds, destruction,
+    //     and (non-voxel / non-transform) realm-gated create/destroy ---
     for (const node of sceneTree.dirtyNodes) {
+        if (presenceSettled.has(node.id)) continue; // AOI pass already created/destroyed it
         const known = nodeKnowledge.get(node.id);
 
-        // detached at flush = destroyed this tick. (a node destroyed then re-added
-        // the same tick is live again here, node.scene is set, so it flows to the
-        // create/update path below, never here. that makes add→remove→add correct
-        // with no id bookkeeping.)
+        // detached at flush = destroyed this tick. (destroyed-then-re-added the same
+        // tick is live here, node.scene set, so it flows to create/update below.)
         if (node.scene === null) {
             if (known) {
                 destroys.push({ type: 'node_destroyed', id: node.id });
@@ -757,27 +885,49 @@ function buildSceneSyncUpdates(
             continue;
         }
 
-        // relevance: edit sees everything; play sees only replicable subtrees.
-        // (this is the seam AOI extends later, `&& inAOI(...)`.)
-        const visible = mode === 'edit' || isReplicable(node);
-        if (visible) {
-            if (!known) creates.push(node);
-            // diffNodeKnowledge updates knowledge in-place; per-field rate gating
-            // lives inside it, and it (un)tracks the node in nodeSyncKnowledge.
-            else diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
-        } else if (known) {
-            // node left this client's relevance (realm hid it) → destroy.
-            destroys.push({ type: 'node_destroyed', id: node.id });
-            nodeKnowledge.delete(node.id);
-            nodeSyncKnowledge.delete(node.id);
+        // a present (known) node changed. no CHUNK re-check: a node that left its client's
+        // region was already pulled from knowledge by the AOI presence pass, so if it's
+        // still known here its chunk is still present (hot path for movers). but REALM
+        // relevance is orthogonal to chunks and still gates here: a known node flipped to a
+        // non-shared realm must be destroyed (a transform-root flip is caught by the
+        // presence pass via reconcile unfiling it; this handles the rest, per-node).
+        if (known) {
+            if (mode === 'edit' || isReplicable(node)) {
+                diffNodeKnowledge(sceneTree, node, known, updateList, mode, currentTick, playerId, nodeSyncKnowledge);
+            } else {
+                destroys.push({ type: 'node_destroyed', id: node.id });
+                nodeKnowledge.delete(node.id);
+                nodeSyncKnowledge.delete(node.id);
+            }
+            continue;
         }
+
+        // not known → decide creation. edit sees everything; play needs replicable.
+        if (mode === 'edit') {
+            creates.add(node);
+            continue;
+        }
+        if (!isReplicable(node)) continue;
+        // a node with no transform root (or a non-voxel room) is not chunk-gated → visible.
+        const root = aoi ? transformRootOf(node) : null;
+        if (root === null) {
+            creates.add(node);
+            continue;
+        }
+        // a chunk-gated node became newly relevant (spawned, or added under a present
+        // subtree): create from its root iff that root is in region — createSubtree walks
+        // only the not-yet-known nodes, so an incremental add under a present root emits
+        // just the new nodes, and a spawn out of region waits for the AOI pass.
+        const filed = sceneTree.rootToChunk.get(root);
+        if (root.id === ownRootId || (filed !== undefined && chunkInRegion(aoi!, filed))) createSubtree(root);
     }
 
     // carry-over: nodes that still owe this client a rate-throttled sync() field but
     // are NOT in dirtyNodes because their source settled. re-diff each to retry the
     // throttled field once its cadence allows; diffNodeKnowledge clears it from
-    // nodeSyncKnowledge when the client finally catches up. snapshot first — the diff
-    // mutates the set. skip nodes already handled via dirtyNodes above.
+    // nodeSyncKnowledge when the client catches up. these are already-known nodes, so
+    // region membership is current (eviction/exit already removed them here). snapshot
+    // first — the diff mutates the set. skip nodes already handled via dirtyNodes above.
     for (const nodeId of [...nodeSyncKnowledge]) {
         const node = getNodeById(sceneTree, nodeId);
         if (!node || node.scene === null || sceneTree.dirtyNodes.has(node)) continue;
@@ -791,8 +941,9 @@ function buildSceneSyncUpdates(
 
     // assemble parent-first creates → updates → destroys.
     const updates: SceneSyncUpdate[] = [];
-    if (creates.length > 1) creates.sort((a, b) => nodeDepth(a) - nodeDepth(b));
-    for (const node of creates) {
+    const createArr = [...creates];
+    if (createArr.length > 1) createArr.sort((a, b) => nodeDepth(a) - nodeDepth(b));
+    for (const node of createArr) {
         updates.push(buildNodeCreatedUpdate(node, mode));
         snapshotNodeKnowledge(nodeKnowledge, node, currentTick);
     }
@@ -808,12 +959,19 @@ function buildSceneSyncUpdates(
  * nodes resolve to that value. iterative, no recursion, no stack growth on
  * deep trees.
  */
-function walkReplicable(node: Node, mode: RoomMode, inheritedRealm: Realm, callback: (node: Node) => void): void {
+function walkReplicable(
+    node: Node,
+    mode: RoomMode,
+    inheritedRealm: Realm,
+    callback: (node: Node) => void,
+    prune?: (node: Node) => boolean,
+): void {
     const stack: Array<{ node: Node; inherited: Realm }> = [{ node, inherited: inheritedRealm }];
     while (stack.length > 0) {
         const { node: cur, inherited } = stack.pop()!;
         const effective = cur.realm === 'inherit' ? inherited : cur.realm;
         if (mode === 'play' && effective !== 'shared') continue;
+        if (prune?.(cur)) continue;
         callback(cur);
         // push children in reverse so they pop in original order
         for (let i = cur.children.length - 1; i >= 0; i--) {
@@ -1201,16 +1359,31 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
 /**
  * snapshot every (replicable) node in the scene tree into a knowledge map.
  * in play mode skips non-shared subtrees, those are never replicated and
- * should not appear in client knowledge.
+ * should not appear in client knowledge. `prune` must MATCH the one passed to
+ * `packSceneTree` at join, so the knowledge marked-known is exactly the packed
+ * set: a transform root omitted from the pack is left unknown and is created
+ * via the AOI presence pass, and (crucially) nothing packed is left unknown
+ * (which would emit a redundant node_created next tick).
  */
-function snapshotAllNodeKnowledge(sceneTree: SceneTree, nodeKnowledge: Map<number, ClientNodeKnowledge>, mode: RoomMode): void {
+function snapshotAllNodeKnowledge(
+    sceneTree: SceneTree,
+    nodeKnowledge: Map<number, ClientNodeKnowledge>,
+    mode: RoomMode,
+    prune?: (node: Node) => boolean,
+): void {
     // include root: it's sent to the client as part of the packed scene
     // at join_room, so we must mark it known. otherwise the next diff loop
     // will see no knowledge entry and emit a redundant node_created.
     // root traits/scripts still diff normally on subsequent flushes.
-    walkReplicable(sceneTree.root, mode, 'shared', (node) => {
-        snapshotNodeKnowledge(nodeKnowledge, node);
-    });
+    walkReplicable(
+        sceneTree.root,
+        mode,
+        'shared',
+        (node) => {
+            snapshotNodeKnowledge(nodeKnowledge, node);
+        },
+        prune,
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1302,6 +1475,8 @@ export function resetAllVoxelKnowledge(state: Discovery): void {
             k.pendingLight.clear();
             k.pendingFull.clear();
             k.inFlightFull.clear();
+            k.entered.clear();
+            k.left.clear();
         }
     }
 }
@@ -1458,6 +1633,8 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
                 pendingLight: new Set(),
                 pendingFull: new Set(),
                 inFlightFull: new Set(),
+                entered: new Set(),
+                left: new Set(),
             };
             cs.voxelKnowledge.set(player.id, knowledge);
         }
@@ -1599,6 +1776,7 @@ function dispatchFull(
             ]);
             knowledge.knownChunks.add(c.key);
             knowledge.inFlightFull.add(c.key);
+            knowledge.entered.add(c.key); // node AOI: chunk terrain shipped → its roots stream in this tick
         },
         { max: MAX_IN_FLIGHT_FULL, select: (k) => k.inFlightFull },
     );
@@ -1699,6 +1877,7 @@ function evictOutOfRange(
         const dz = cz - pcz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
         out.push([client, { type: 'voxel_chunk_del', playerId, cx, cy, cz }]);
+        knowledge.left.add(key); // node AOI: transform roots here leave this client's region
         knowledge.knownChunks.delete(key);
         knowledge.pendingLight.delete(key);
         // in-flight keys are a subset of knownChunks; drop the slot. a late ack
@@ -1714,6 +1893,7 @@ function evictOutOfRange(
         const dy = cy - pcy;
         const dz = cz - pcz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
+        knowledge.left.add(key); // node AOI: air-chunk roots leave the region too
         knowledge.knownEmptyChunks.delete(key);
     }
     // pendingFull entries are neither known nor empty yet, drop any that
@@ -1728,6 +1908,7 @@ function evictOutOfRange(
         const dy = cy - pcy;
         const dz = cz - pcz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
+        knowledge.left.add(key); // node AOI: a mover created against this pending chunk must leave too
         knowledge.pendingFull.delete(key);
     }
 }
@@ -1741,6 +1922,12 @@ function flushVoxelsForPlayer(
     out: Array<[Client, ServerMessage]>,
 ): void {
     const client = player.client;
+
+    // clear-then-fill the per-tick node-AOI region deltas. last tick's values were
+    // already consumed by last tick's scene phase (which runs after this voxel phase),
+    // so starting empty here is correct; the walk / evict / dispatchFull below refill them.
+    knowledge.entered.clear();
+    knowledge.left.clear();
 
     // 0. light epoch check, if server did a full recompute, reset client
     //    knowledge. clear the discovery queue too: pendingFull holds chunks
@@ -1832,6 +2019,7 @@ function flushVoxelsForPlayer(
             }
             pendingEmpty.push({ cx, cy, cz });
             knowledge.knownEmptyChunks.add(key);
+            knowledge.entered.add(key); // node AOI: air chunk discovered → its roots can stream in
         }
     }
     if (pendingEmpty.length > 0) {
