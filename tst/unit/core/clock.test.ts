@@ -165,34 +165,35 @@ describe('Clock adaptive transform interp margin', () => {
         for (let i = 0; i < 300; i++) Clock.transformRenderTime(clock, 1 / 60);
     }
 
-    it('stays at 0 when reserve + jitter fits inside the fixed 50ms buffer', () => {
+    it('settles to the fixed send-rate floor on a zero-jitter link', () => {
         const clock = Clock.init(0);
-        // 0 spread — reserve (0.05) alone equals the fixed buffer, so no extra margin.
+        // 0 spread → margin settles to the fixed floor, INTERP_BASE_BEHIND − fixed
+        // buffer = (4 × 1/30) − 0.05 ≈ 0.0833, i.e. total render-behind ≈ INTERP_BASE_BEHIND.
         feed(
             clock,
             Array.from({ length: 16 }, () => 1.0),
         );
         expect(clock.sync.latencyJitter).toBeCloseTo(0, 6);
         settleMargin(clock);
-        expect(clock.sync.interpMargin).toBeCloseTo(0, 4);
+        expect(clock.sync.interpMargin).toBeCloseTo(0.0833, 3);
     });
 
-    it('widens to cover reserve + jitter spread beyond the fixed buffer', () => {
+    it('widens beyond the floor to cover the jitter spread', () => {
         const clock = Clock.init(0);
-        // 20ms spread. target = reserve + spread − fixed buffer = 0.05 + 0.02 − 0.05.
+        // 20ms spread. target = INTERP_BASE_BEHIND + spread − fixed buffer ≈ 0.0833 + 0.02.
         feed(
             clock,
             Array.from({ length: 16 }, (_, i) => 1.0 + (i % 2) * 0.02),
         );
         expect(clock.sync.latencyJitter).toBeCloseTo(0.02, 6);
         settleMargin(clock);
-        expect(clock.sync.interpMargin).toBeCloseTo(0.02, 3);
+        expect(clock.sync.interpMargin).toBeCloseTo(0.1033, 3);
     });
 
     it('clamps the margin to the max render-behind on a very jittery link', () => {
         const clock = Clock.init(0);
-        // half fast (offset 1.0), half slow (0.7): 300ms spread. reserve + spread −
-        // buffer = 0.30 exceeds MAX_INTERP_MARGIN (0.2), so it clamps.
+        // half fast (offset 1.0), half slow (0.7): 300ms spread. floor + spread −
+        // buffer ≈ 0.0833 + 0.30 far exceeds MAX_INTERP_MARGIN (0.2), so it clamps.
         feed(
             clock,
             Array.from({ length: 16 }, (_, i) => (i < 8 ? 1.0 : 0.7)),
@@ -214,10 +215,11 @@ describe('Clock adaptive transform interp margin', () => {
 
     it('render time is monotonic across a backward snap of clock.server', () => {
         const clock = Clock.init(0);
-        Clock.observeSample(clock, 0, 0); // synced, jitter 0 → margin 0
+        Clock.observeSample(clock, 0, 0); // synced, jitter 0
         clock.serverSmoothed = 100;
+        // margin grows toward the floor at 0.6/s, so one 1/60s step adds 0.01: r1 = 100 − 0.01.
         const r1 = Clock.transformRenderTime(clock, 1 / 60);
-        expect(r1).toBeCloseTo(100, 6);
+        expect(r1).toBeCloseTo(99.99, 6);
         clock.serverSmoothed = 90; // refocused-tab style backward snap
         const r2 = Clock.transformRenderTime(clock, 1 / 60);
         expect(r2).toBeGreaterThanOrEqual(r1); // clamp holds, no rewind

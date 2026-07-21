@@ -993,8 +993,8 @@ function fireContactHooks(
     contactSettings: ContactSettings,
 ): void {
     const args: PhysicsContactArgs = { bodyA, bodyB, manifold, settings: contactSettings };
-    if (!sceneTree.runtime) return;
-    for (const nodeInstances of sceneTree.runtime.instances.values()) {
+    if (!sceneTree.context) return;
+    for (const nodeInstances of sceneTree.context.instances.values()) {
         for (const instance of nodeInstances.values()) {
             const set = event === 'added' ? instance.onPhysicsContactAdded : instance.onPhysicsContactPersisted;
             const hookName = event === 'added' ? 'onPhysicsContactAdded' : 'onPhysicsContactPersisted';
@@ -1010,8 +1010,8 @@ function fireContactHooks(
 }
 
 function fireValidateHooks(sceneTree: SceneTree, bodyA: RigidBody, bodyB: RigidBody): boolean {
-    if (!sceneTree.runtime) return true;
-    for (const nodeInstances of sceneTree.runtime.instances.values()) {
+    if (!sceneTree.context) return true;
+    for (const nodeInstances of sceneTree.context.instances.values()) {
         for (const instance of nodeInstances.values()) {
             for (const fn of instance.onPhysicsBodyPairValidate) {
                 try {

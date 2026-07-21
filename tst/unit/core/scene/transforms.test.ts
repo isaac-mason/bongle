@@ -1,6 +1,6 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { registry, reindex } from '../../../../src/core/registry';
+import { registry, reindexRegistry } from '../../../../src/core/registry';
 import {
     computeWorldTransforms,
     getVisualWorldPosition,
@@ -43,7 +43,7 @@ import {
 
 // builtin TransformTrait is registered at import; rebuild the derived index
 // fields (slotToTrait) a boot would, so deserializeNode can resolve it.
-beforeEach(() => reindex(registry));
+beforeEach(() => reindexRegistry(registry));
 
 function setup() {
     return createSceneTree();

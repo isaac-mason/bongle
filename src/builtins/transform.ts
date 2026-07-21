@@ -419,7 +419,7 @@ const transformPositionSync = sync(TransformTrait, 'position', {
     unpack: (p, t) => {
         vec3.copy(t.position, p);
         markWorldDirty(t);
-        const runtime = t._node?.scene?.runtime;
+        const runtime = t._node?.scene?.context;
         if (runtime?.client) pushPositionSnapshot(t, runtime.clock.serverLatest, p);
     },
     authority: 'owner',
@@ -433,7 +433,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
     unpack: (q, t) => {
         quat.copy(t.quaternion, q);
         markWorldDirty(t);
-        const runtime = t._node?.scene?.runtime;
+        const runtime = t._node?.scene?.context;
         if (runtime?.client) pushRotationSnapshot(t, runtime.clock.serverLatest, q);
     },
     authority: 'owner',

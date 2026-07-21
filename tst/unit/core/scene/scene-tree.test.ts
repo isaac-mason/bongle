@@ -123,7 +123,7 @@ script(TrackedTwice, 'track', (ctx) => {
 /* ── capture test module ── */
 
 const server = createTestServer();
-const TEST_SCRIPT_RUNTIME = server.runtime;
+const TEST_SCRIPT_RUNTIME = server.context;
 
 /* ── helpers ── */
 

@@ -41,7 +41,7 @@
 import { env } from 'bongle';
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, type RegistryStore, logPendingChanges, registry, reindex } from '../core/registry';
+import { bumpVersion, type RegistryStore, logPendingChanges, registry, reindexRegistry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -106,7 +106,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // `blockRegistry` / `slotToTrait` / `protocol`. the client's manifest
     // re-send rides the update loop (gated on `registry.id`, bumped below), so
     // no explicit wire_table emit here.
-    reindex(registry);
+    reindexRegistry(registry);
 
     // block textures feed BlockRegistry (textures + texAnimData) AND drive the
     // GPU atlas, refresh() short-circuits on hash + texAnimData equality, so
@@ -154,12 +154,12 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     //     swap targeting only the affected script ids.
     if (registry.traits.pendingChanges.length > 0) {
         for (const room of state.rooms.rooms.values()) {
-            applyTraitSwap(room.scriptRuntime);
+            applyTraitSwap(room.context);
         }
         registry.traits.pendingChanges.length = 0;
     } else if (dirtyScriptIds.size > 0) {
         for (const room of state.rooms.rooms.values()) {
-            applyTraitSwap(room.scriptRuntime, dirtyScriptIds);
+            applyTraitSwap(room.context, dirtyScriptIds);
         }
     }
 

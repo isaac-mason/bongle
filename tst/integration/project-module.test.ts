@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { registry, reindex } from '../../src/core/registry';
+import { registry, reindexRegistry } from '../../src/core/registry';
 import { CLIENT_TO_SERVER, command } from '../../src/core/rpc';
 import { addChild, addTrait, createNode } from '../../src/core/scene/scene-tree';
 import { pack } from '../../src/core/scene/pack';
@@ -90,7 +90,7 @@ describe('project-module — deterministic wire indices', () => {
         // b-prefix entries. `trait()` upserts into the registry, bumping the
         // traits store revision and invalidating the cached `traitWireIndex`.
         const TraitBA = trait('wire-test-b/a-earliest', { value: 0 });
-        reindex(registry); // outside a flush; refresh derived tables as the dispatch would
+        reindexRegistry(registry); // outside a flush; refresh derived tables as the dispatch would
 
         const traitsAfter = entriesUnderPrefix(registry.protocol.traits.indexToId, 'wire-test-b/');
         expect(traitsAfter).toEqual(['wire-test-b/a-earliest', 'wire-test-b/c-mid', 'wire-test-b/m-middle']);
@@ -123,12 +123,12 @@ describe('project-module — deterministic wire indices', () => {
         // simulate the HMR drift race: a new trait sorts BEFORE m-middle so
         // m-middle's wire index shifts up by 1 on the next module refresh.
         trait('wire-test-c/b-prepended', { value: 0 });
-        reindex(registry); // outside a flush; refresh derived tables as the dispatch would
+        reindexRegistry(registry); // outside a flush; refresh derived tables as the dispatch would
         expect(registry.protocol.traits.idToIndex.get('wire-test-c/m-middle')!).toBeGreaterThan(indexAtPack!);
 
         const receiver = createTestServer();
 
-        unpackSceneTree(receiver.room.nodes, receiver.runtime, snapshot);
+        unpackSceneTree(receiver.room.nodes, receiver.context, snapshot);
 
         const decodedNode = receiver.room.nodes._idToNode.get(7777);
         expect(decodedNode).toBeDefined();

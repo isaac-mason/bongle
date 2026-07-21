@@ -316,7 +316,7 @@ export type SceneTree = {
      * unregisterSubtree disposes them, and reparent fires enter/exit hooks automatically.
      * set this after createSceneTree, before adding live nodes.
      */
-    runtime: SceneTreeContext | undefined;
+    context: SceneTreeContext | undefined;
 };
 
 export function createSceneTree(): SceneTree {
@@ -337,7 +337,7 @@ export function createSceneTree(): SceneTree {
         chunkToRoots: new Map(),
         rootToChunk: new Map(),
         rootChunkChanges: [],
-        runtime: undefined,
+        context: undefined,
     };
 
     // create root node, always present, cannot be destroyed.
@@ -576,13 +576,13 @@ export function destroyNode(sceneTree: SceneTree, node: Node): void {
     }
 
     // dispose all script instances from runtime
-    if (sceneTree.runtime) {
-        const nodeInstances = sceneTree.runtime.instances.get(node.id);
+    if (sceneTree.context) {
+        const nodeInstances = sceneTree.context.instances.get(node.id);
         if (nodeInstances) {
             for (const instance of nodeInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            sceneTree.runtime.instances.delete(node.id);
+            sceneTree.context.instances.delete(node.id);
         }
     }
     node._unresolvedTraits.clear();
@@ -723,8 +723,8 @@ export function addTrait<T extends TraitBase>(node: Node, handle: TraitHandle<T>
     if (scene) {
         bumpNodeVersion(scene, node);
         reindex(scene, node);
-        if (scene.runtime) {
-            const created = instantiateTraitScripts(scene.runtime, node, instance, handle._def);
+        if (scene.context) {
+            const created = instantiateTraitScripts(scene.context, node, instance, handle._def);
             for (const i of created) initScriptInstance(i);
             if (node.parent) {
                 for (const i of created) {
@@ -814,7 +814,7 @@ export function removeTrait(node: Node, handle: TraitHandle): void {
     if (bitset.has(node._bitset, traitSlot)) {
         // dispose scripts before clearing trait state, onExit fires while
         // the trait value is still resolvable.
-        if (scene?.runtime) disposeTraitScripts(scene.runtime, node, handle._def);
+        if (scene?.context) disposeTraitScripts(scene.context, node, handle._def);
 
         // maintain parent transform pointers, children that pointed to this
         // transform now inherit this transform's own parent
@@ -856,9 +856,9 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
     const scene = node.scene;
 
     if (bitset.has(node._bitset, traitSlot)) {
-        if (scene?.runtime) {
+        if (scene?.context) {
             const def = registry.slotToTrait.get(traitSlot);
-            if (def) disposeTraitScripts(scene.runtime, node, def);
+            if (def) disposeTraitScripts(scene.context, node, def);
         }
 
         // maintain parent transform pointers
@@ -913,8 +913,8 @@ export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<str
         reindex(scene, node);
     }
 
-    if (scene?.runtime) {
-        const created = instantiateTraitScripts(scene.runtime, node, instance, def);
+    if (scene?.context) {
+        const created = instantiateTraitScripts(scene.context, node, instance, def);
         for (const i of created) initScriptInstance(i);
         if (node.parent) {
             for (const i of created) {
@@ -1007,7 +1007,7 @@ export function refreshTraitIssues(node: Node, def: TraitDef, instance: TraitBas
  * used by the client after unpackSceneTree + room wiring, before the first tick.
  */
 export function initSceneTree(sceneTree: SceneTree): void {
-    if (!sceneTree.runtime) return;
+    if (!sceneTree.context) return;
 
     // pass 1: create instances for any node-trait pairs that don't have one
     // (e.g. the client unpack path: unpackSceneTree runs without runtime, then
@@ -1016,12 +1016,12 @@ export function initSceneTree(sceneTree: SceneTree): void {
         for (const [traitSlot, trait] of node._traits) {
             const def = registry.slotToTrait.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
-            instantiateTraitScripts(sceneTree.runtime, node, trait, def);
+            instantiateTraitScripts(sceneTree.context, node, trait, def);
         }
     }
 
     // pass 2: init all instances that haven't been initialized
-    for (const nodeInstances of sceneTree.runtime.instances.values()) {
+    for (const nodeInstances of sceneTree.context.instances.values()) {
         for (const instance of nodeInstances.values()) {
             if (!instance.initialized) initScriptInstance(instance);
         }
@@ -1029,7 +1029,7 @@ export function initSceneTree(sceneTree: SceneTree): void {
 
     // pass 3: fire enter hooks after all inits
     for (const node of sceneTree.nodes) {
-        if (node.parent) fireEnterHooks(sceneTree.runtime, node, node.parent);
+        if (node.parent) fireEnterHooks(sceneTree.context, node, node.parent);
     }
 }
 
@@ -1107,8 +1107,8 @@ export function reparent(node: Node, newParent: Node): void {
     const oldParent = node.parent;
 
     // fire onExit before detaching, old parent is still set
-    if (oldParent && node.scene !== null && scene.runtime) {
-        fireExitHooks(scene.runtime, node, oldParent);
+    if (oldParent && node.scene !== null && scene.context) {
+        fireExitHooks(scene.context, node, oldParent);
     }
 
     if (node.parent) {
@@ -1122,7 +1122,7 @@ export function reparent(node: Node, newParent: Node): void {
         registerSubtree(scene, node);
     } else {
         // already in-tree reparent: fire onEnter with the new parent.
-        if (scene.runtime) fireEnterHooks(scene.runtime, node, newParent);
+        if (scene.context) fireEnterHooks(scene.context, node, newParent);
         // mark the whole moved subtree for discovery: reparenting can flip
         // effective relevance (e.g. moving under a non-shared parent), and
         // descendants inherit it, the per-client fan-out must re-evaluate them.
@@ -1245,11 +1245,11 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         }
 
         // create script instances for every trait on this node
-        if (sceneTree.runtime) {
+        if (sceneTree.context) {
             for (const [traitSlot, trait] of n._traits) {
                 const def = registry.slotToTrait.get(traitSlot);
                 if (!def || def.scripts.length === 0) continue;
-                const created = instantiateTraitScripts(sceneTree.runtime, n, trait, def);
+                const created = instantiateTraitScripts(sceneTree.context, n, trait, def);
                 for (const i of created) newScriptInstances.push(i);
             }
         }
@@ -1261,10 +1261,10 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
     }
 
     // pass 3: fire onEnter on each node that has a parent (all nodes in the subtree do)
-    if (sceneTree.runtime) {
+    if (sceneTree.context) {
         for (const n of subtree) {
             if (n.parent) {
-                fireEnterHooks(sceneTree.runtime, n, n.parent);
+                fireEnterHooks(sceneTree.context, n, n.parent);
             }
         }
     }
@@ -1281,19 +1281,19 @@ function unregisterSubtree(sceneTree: SceneTree, node: Node): void {
     }
 
     // fire onExit before disposing, parent is still set here
-    if (sceneTree.runtime && node.parent) {
-        fireExitHooks(sceneTree.runtime, node, node.parent);
+    if (sceneTree.context && node.parent) {
+        fireExitHooks(sceneTree.context, node, node.parent);
     }
 
     // dispose all script instances from runtime, scripts re-instantiate
     // from traits when the subtree re-registers, so we drop the lot here.
-    if (sceneTree.runtime) {
-        const nodeInstances = sceneTree.runtime.instances.get(node.id);
+    if (sceneTree.context) {
+        const nodeInstances = sceneTree.context.instances.get(node.id);
         if (nodeInstances) {
             for (const instance of nodeInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            sceneTree.runtime.instances.delete(node.id);
+            sceneTree.context.instances.delete(node.id);
         }
     }
 
@@ -1367,8 +1367,8 @@ function runHook<A>(
     hook: string,
     select: (i: ScriptInstance) => Iterable<(a: A) => void>,
 ): void {
-    if (!sceneTree.runtime) return;
-    for (const nodeInstances of sceneTree.runtime.instances.values()) {
+    if (!sceneTree.context) return;
+    for (const nodeInstances of sceneTree.context.instances.values()) {
         for (const instance of nodeInstances.values()) {
             if (!instance.initialized) continue;
             for (const fn of select(instance)) {
@@ -1723,13 +1723,13 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     }
 
     // clear existing root scripts (data + instances)
-    if (sceneTree.runtime) {
-        const rootInstances = sceneTree.runtime.instances.get(root.id);
+    if (sceneTree.context) {
+        const rootInstances = sceneTree.context.instances.get(root.id);
         if (rootInstances) {
             for (const instance of rootInstances.values()) {
                 disposeScriptInstance(instance);
             }
-            sceneTree.runtime.instances.delete(root.id);
+            sceneTree.context.instances.delete(root.id);
         }
     }
     root._traits.clear();
@@ -1761,11 +1761,11 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     }
 
     // root scripts ride on traits, instantiate per trait if runtime present
-    if (sceneTree.runtime) {
+    if (sceneTree.context) {
         for (const [traitSlot, trait] of root._traits) {
             const def = registry.slotToTrait.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
-            const created = instantiateTraitScripts(sceneTree.runtime, root, trait, def);
+            const created = instantiateTraitScripts(sceneTree.context, root, trait, def);
             for (const i of created) initScriptInstance(i);
         }
     }

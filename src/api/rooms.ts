@@ -238,7 +238,7 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
         const target = ServerRooms.getRoom(ctx.server.state.rooms, roomId);
         if (!target) return null;
         if (target.namespace !== callerNamespace(ctx)) return null;
-        const rt = target.scriptRuntime;
+        const rt = target.context;
         return {
             mode: target.mode,
             clock: target.clock,
@@ -266,7 +266,7 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
         }
         if (!target) return null;
         if (target.namespace !== callerNamespace(ctx)) return null;
-        const rt = target.scriptRuntime;
+        const rt = target.context;
         return {
             mode: target.playerMode,
             clock: target.clock,

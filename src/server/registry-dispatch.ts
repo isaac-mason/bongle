@@ -39,7 +39,7 @@
 
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, logPendingChanges, protocolManifest, registry, reindex } from '../core/registry';
+import { bumpVersion, logPendingChanges, protocolManifest, registry, reindexRegistry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -90,7 +90,7 @@ export function applyRegistryChanges(state: EngineServer): void {
     // the pre-flush lists to decide whether to re-broadcast our manifest.
     const prevTraitIds = registry.protocol.traits.indexToId;
     const prevCommandIds = registry.protocol.commands.indexToId;
-    reindex(registry);
+    reindexRegistry(registry);
 
     // block textures feed into BlockRegistry (textures map + texAnimData), so
     // either queue draining requires a wholesale rebuild + per-room rewire.
@@ -139,12 +139,12 @@ export function applyRegistryChanges(state: EngineServer): void {
     //     swap targeting only the affected script ids.
     if (registry.traits.pendingChanges.length > 0) {
         for (const room of state.rooms.rooms.values()) {
-            applyTraitSwap(room.scriptRuntime);
+            applyTraitSwap(room.context);
         }
         registry.traits.pendingChanges.length = 0;
     } else if (dirtyScriptIds.size > 0) {
         for (const room of state.rooms.rooms.values()) {
-            applyTraitSwap(room.scriptRuntime, dirtyScriptIds);
+            applyTraitSwap(room.context, dirtyScriptIds);
         }
     }
 

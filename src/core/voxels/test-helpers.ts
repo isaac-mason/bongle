@@ -6,7 +6,7 @@
 // state encoding). `resetVoxelRegistry()` clears the affected KindStores
 // in `beforeEach` so test files don't cross-pollute.
 
-import { registry, reindex } from '../registry';
+import { registry, reindexRegistry } from '../registry';
 import type { Blocks } from './block-registry';
 import type { BlockStateDef, PropsDef } from './block-state';
 import { type BlockHandle, type BlockOptions, block, blockTexture } from './blocks';
@@ -39,7 +39,7 @@ export function resetVoxelRegistry(): void {
     clearStore(registry.particles as unknown as AnyStore);
     // these clears bypass the registration path, so rebuild the derived index
     // fields to reflect the now-empty stores (mirrors a real boot/flush).
-    reindex(registry);
+    reindexRegistry(registry);
 }
 
 // biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default (matches block()'s signature)
@@ -72,6 +72,6 @@ export function buildTestRegistry(specs: TestBlockSpec[]): Blocks {
     // registrations bypass a boot/flush here; rebuild derived fields so the
     // returned BlockRegistry (and any later `registry.blockRegistry` read)
     // reflects the just-declared blocks.
-    reindex(registry);
+    reindexRegistry(registry);
     return registry.blockRegistry;
 }

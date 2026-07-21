@@ -2,13 +2,13 @@
 //
 // lightweight server-side integration test utility. creates a real Room
 // via Rooms.createRoom() — real physics, real voxels, real block registry,
-// and a complete ScriptRuntime. no stubs, no hand-rolling.
+// and a complete SceneTreeContext. no stubs, no hand-rolling.
 //
 // traits/scripts must be declared at module scope (via trait() / script()
 // calls) BEFORE calling this — they upsert into the engine-global
 // `registry` singleton, which `Rooms.createRoom` reads from directly.
 
-import { registry, reindex } from '../../src/core/registry';
+import { registry, reindexRegistry } from '../../src/core/registry';
 import * as Resources from '../../src/core/resources';
 import * as Rpc from '../../src/core/rpc';
 import type { SerializedSceneTree } from '../../src/core/scene/scene-tree';
@@ -22,11 +22,11 @@ export type TestServer = {
     /** the rooms registry */
     rooms: Rooms.Rooms;
 
-    /** the default room — has .nodes, .scriptRuntime, .voxels, .physics */
+    /** the default room — has .nodes, .context, .voxels, .physics */
     room: Rooms.Room;
 
-    /** shorthand for room.scriptRuntime */
-    runtime: SceneTreeContext;
+    /** shorthand for room.context */
+    context: SceneTreeContext;
 
     /** destroy the room and clean up */
     dispose(): void;
@@ -46,7 +46,7 @@ export function createTestServer(opts: TestServerOptions = {}): TestServer {
     // module-scope trait/command/block declarations have registered by now;
     // rebuild the derived index fields as a real server boot would, so
     // Rooms.createRoom + wire encoding read live `blockRegistry` / `protocol`.
-    reindex(registry);
+    reindexRegistry(registry);
 
     const rooms = Rooms.init();
     const rpc = Rpc.init({
@@ -67,7 +67,7 @@ export function createTestServer(opts: TestServerOptions = {}): TestServer {
     return {
         rooms,
         room,
-        runtime: room.scriptRuntime,
+        context: room.context,
         dispose() {
             Rooms.destroyRoom(rooms, room.id);
         },

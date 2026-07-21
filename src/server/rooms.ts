@@ -90,8 +90,8 @@ export type Room = {
     /** Play rooms: which edit room they were created from. */
     sourceRoomId: string | null;
 
-    /** Runtime env for scripts in this room */
-    scriptRuntime: SceneTreeContext;
+    /** Scene tree context */
+    context: SceneTreeContext;
 
     /** PlayerId → in-scene node bearing PlayerTrait. one body per Player. */
     playerNodes: Map<PlayerId, Node>;
@@ -314,7 +314,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
         logs: createLogs(),
         tick: 0,
         namespace,
-        scriptRuntime: {
+        context: {
             roomId: id,
             playerMode: opts.kind,
             roomMode: opts.kind,
@@ -331,13 +331,13 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     };
 
     // wire the runtime into the scene graph so addTrait/registerSubtree can instantiate
-    sceneGraph.runtime = room.scriptRuntime;
+    sceneGraph.context = room.context;
 
     state.rooms.set(id, room);
 
     // NOTE: the WorldTrait (system host) + editor trait are attached in
     // initializeRoom, NOT here. Attaching them here fires their scripts' onInit
-    // while scriptRuntime.server is still undefined (it's wired at the top of
+    // while context.server is still undefined (it's wired at the top of
     // initializeRoom) — a system's onInit reaching for ctx.server would blow up.
     // Every createRoom caller runs initializeRoom immediately after, so nothing
     // observes the root without these traits. Attaching once there — after the
@@ -365,7 +365,7 @@ export function destroyRoom(state: Rooms, roomId: string): void {
         const player = state.players.get(id);
         if (!player) continue;
         const playerNode = room.playerNodes.get(id);
-        if (playerNode) Scripts.fireLeaveHooks(room.scriptRuntime, player.client, playerNode);
+        if (playerNode) Scripts.fireLeaveHooks(room.context, player.client, playerNode);
         destroyPlayerNode(room, id);
     }
 
@@ -664,7 +664,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const t0 = performance.now();
     // wire server context before loading the scene so onInit handlers can
     // safely access ctx.server.state and ctx.server.room
-    room.scriptRuntime.server = {
+    room.context.server = {
         state,
         room,
         get options() {
@@ -729,10 +729,10 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     const physT0 = performance.now();
     room.physics = Physics.init(room.nodes, room.voxels, registry.blockRegistry);
     const physMs = performance.now() - physT0;
-    room.scriptRuntime.physics = room.physics;
+    room.context.physics = room.physics;
 
     // Attach the WorldTrait (system host) + editor trait HERE — the single point,
-    // reached after scriptRuntime.server is wired (top of this fn) and after
+    // reached after context.server is wired (top of this fn) and after
     // loadSceneTree. So each system's factory + onInit fires exactly once, with
     // ctx.server live. (loadSceneTree wouldn't carry these anyway: persist: false.)
     attachWorldTrait(room.nodes.root);
@@ -789,7 +789,7 @@ export function addClientToRoom(
     const avatarMs = performance.now() - avatarT0;
     const joinHooksT0 = performance.now();
     Scripts.fireJoinHooks(
-        room.scriptRuntime,
+        room.context,
         client,
         user,
         joinData ?? {},
@@ -983,7 +983,7 @@ export function leaveClientFromRoom(state: EngineServer, playerId: PlayerId): vo
                 const playerNode = createPlayerNode(state, def, fp);
                 // stamp avatar before join hooks (see addClientToRoom)
                 Avatars.enqueuePlayer(state, def, fp);
-                Scripts.fireJoinHooks(def.scriptRuntime, client, user, {}, playerNode, Avatars.clientAvatarIdentity(cs));
+                Scripts.fireJoinHooks(def.context, client, user, {}, playerNode, Avatars.clientAvatarIdentity(cs));
                 Chat.broadcast(def.chat, {
                     from: 'system',
                     text: `${user.username || 'anon'} joined`,

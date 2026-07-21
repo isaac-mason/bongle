@@ -111,7 +111,7 @@ export type ClientRoom = {
     overlayScene: Scene;
 
     /** the scripting runtime for this room */
-    scriptRuntime: SceneTreeContext;
+    context: SceneTreeContext;
 
     /** snapshot of the last scene graph state we sent to the server, for replication diffing. */
     syncSnapshots: ReturnType<typeof Replication.createSyncSnapshots>;
@@ -162,7 +162,7 @@ export type ClientRoom = {
 
     /**
      * this room's client state, the single mutable ClientContext every script
-     * in the room sees as `ctx.client` (same object as `scriptRuntime.client`).
+     * in the room sees as `ctx.client` (same object as `context.client`).
      * room-layer code reads the live POV / active camera / defaults off it
      * (`room.client.subject`, `room.client.camera`); scripts swap them via
      * `setSubject` / `setCamera`. no boxing, no duplicated pointers, one object.
@@ -370,7 +370,7 @@ export type RenderRoom = {
     voxels: Voxels.Voxels;
     physics: Physics.Physics;
     clock: Clock.Clock;
-    scriptRuntime: SceneTreeContext;
+    context: SceneTreeContext;
     scene: Scene;
     voxelVisuals: VoxelVisuals.VoxelVisuals;
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
@@ -398,14 +398,14 @@ export type RenderRoomDeps = {
 };
 
 export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
-    const { nodes, voxels, physics, clock, scriptRuntime } = newRoomCore({
+    const { nodes, voxels, physics, clock, context } = newRoomCore({
         resources: deps.resources,
         rpc: deps.rpc,
         roomId: `${LOCAL_ROOM_PREFIX}render`,
         playerMode: 'play',
         roomMode: 'play',
     });
-    nodes.runtime = scriptRuntime;
+    nodes.context = context;
 
     const scene = new Scene();
     const envResources = deps.renderer.environmentResources;
@@ -423,7 +423,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         voxels,
         physics,
         clock,
-        scriptRuntime,
+        context: context,
         scene,
         voxelVisuals,
         voxelMeshVisuals,
@@ -574,7 +574,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, packedNodes } = message;
     const { inbound } = opts;
 
-    const { nodes, voxels, physics, clock, chat, scriptRuntime } = newRoomCore({
+    const { nodes, voxels, physics, clock, chat, context } = newRoomCore({
         resources: opts.resources,
         rpc: opts.rpc,
         roomId,
@@ -585,7 +585,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
 
     // server-driven path: unpack the wire payload into the fresh scene
     // graph. voxels arrive separately via voxel chunk messages.
-    unpackSceneTree(nodes, scriptRuntime, packedNodes, inbound);
+    unpackSceneTree(nodes, context, packedNodes, inbound);
     const playerNode = findPlayerNode(nodes, playerId, roomId);
 
     return createRoomCore({
@@ -615,7 +615,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         physics,
         clock,
         chat,
-        scriptRuntime,
+        context,
         playerNode,
     });
 }
@@ -643,7 +643,7 @@ type CreateRoomCoreOptions = {
     shadowResources: ShadowResourcesNs.ShadowResources;
     audioResources: Audio.AudioResources;
     /**
-     * pre-populated room core, sceneGraph, voxels, physics, scriptRuntime
+     * pre-populated room core, sceneGraph, voxels, physics, context
      * built by `newRoomCore` and populated by the caller (wire-unpack,
      * SceneHandle clone, or synthetic), plus the owned player node.
      * createRoomCore wires the post-populate state (CameraTrait, pov,
@@ -654,7 +654,7 @@ type CreateRoomCoreOptions = {
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: SceneTreeContext;
+    context: SceneTreeContext;
     playerNode: SceneTree.Node;
 };
 
@@ -665,7 +665,7 @@ type CreateRoomCoreOptions = {
  * node), then hand the bag, plus the discovered/synthesized playerNode,
  * into `createRoomCore` for final assembly.
  *
- * `scriptRuntime.client` is left undefined here; `createRoomCore` fills it
+ * `context.client` is left undefined here; `createRoomCore` fills it
  * after the canvas + scene + pov are constructed. Nothing in the
  * populate step reads `.client`.
  */
@@ -684,7 +684,7 @@ function newRoomCore(opts: {
     physics: Physics.Physics;
     clock: Clock.Clock;
     chat: ChatClient;
-    scriptRuntime: SceneTreeContext;
+    context: SceneTreeContext;
 } {
     const blocks = registry.blockRegistry;
     const voxels = Voxels.createVoxels(blocks);
@@ -692,7 +692,7 @@ function newRoomCore(opts: {
     const physics = Physics.init(nodes, voxels, blocks);
     const clock = Clock.init(opts.clockSeed);
     const chat = Chat.init();
-    const scriptRuntime: SceneTreeContext = {
+    const context: SceneTreeContext = {
         roomId: opts.roomId,
         playerMode: opts.playerMode,
         roomMode: opts.roomMode,
@@ -706,7 +706,7 @@ function newRoomCore(opts: {
         blocks,
         instances: new Map(),
     };
-    return { nodes, voxels, physics, clock, chat, scriptRuntime };
+    return { nodes, voxels, physics, clock, chat, context };
 }
 
 /**
@@ -738,7 +738,7 @@ function findPlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, roomId: 
 
 function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, local } = opts;
-    const { nodes, voxels, physics, clock, chat, scriptRuntime, playerNode } = opts;
+    const { nodes, voxels, physics, clock, chat, context, playerNode } = opts;
     const { renderer } = opts;
 
     const input = Input.createInput();
@@ -785,9 +785,9 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     const disposeCanvasTouchListeners = Input.installCanvasTouchListeners(canvas, input);
 
-    // wire scriptRuntime so addChild/addTrait calls inside createDefaultCameraNode
+    // wire context so addChild/addTrait calls inside createDefaultCameraNode
     // see the runtime (createNode / addTrait register against it).
-    nodes.runtime = scriptRuntime;
+    nodes.context = context;
 
     // default camera node, TransformTrait + CameraTrait at the scene root.
     // builtin controllers (orbit / fly / player) write to this each frame
@@ -795,7 +795,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // unpackSceneTree wipes root's children.
     const cameraNode = createDefaultCameraNode(nodes, playerNode, playerMode);
 
-    // the single client state. scriptRuntime.client and room.client both
+    // the single client state. context.client and room.client both
     // reference this one object; subject / camera are plain fields mutated in
     // place, so scripts (ctx.client) and room-layer code (room.client) observe
     // swaps without re-seating. subject is seeded to the player node post-populate.
@@ -812,7 +812,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         defaultSubject: playerNode,
         defaultCamera: cameraNode,
     };
-    scriptRuntime.client = client;
+    context.client = client;
 
     // Per-room sky + sun/moon/stars/clouds (mesh + per-room CPU
     // shadow). the env GPU buffers in `environmentResources` are engine-
@@ -883,7 +883,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         nodes,
         scene,
         overlayScene,
-        scriptRuntime,
+        context: context,
         syncSnapshots,
         voxels,
         physics,
@@ -934,7 +934,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * hold (e.g. after an `invalidatePlayer` on the server resyncs the room).
  *
  * preserves: scene, canvas (incl. renderer-bound camera on the engine-global pipeline),
- * viewport, voxels, voxelVisuals, physics, scriptRuntime. replaces: the
+ * viewport, voxels, voxelVisuals, physics, context. replaces: the
  * scene graph contents and the playerNode (CameraTrait is re-attached on
  * the fresh playerNode).
  *
@@ -942,7 +942,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * instances before rebuilding.
  */
 export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inbound: InboundProtocol): void {
-    unpackSceneTree(room.nodes, room.scriptRuntime, message.packedNodes, inbound);
+    unpackSceneTree(room.nodes, room.context, message.packedNodes, inbound);
 
     // unpackSceneTree clears root._traits and rebuilds from the wire,
     // which never carries WorldTrait (persist: false). re-attach so the
@@ -1020,7 +1020,7 @@ export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
  * canvas target. camera projection is *not* updated here, the renderer
  * pulls viewport size from canvasTarget each frame in `bindRenderCamera`
  * and writes aspect into the active POV camera. caller is responsible
- * for wiring `room.scriptRuntime.client.state`/`.room` and calling
+ * for wiring `room.context.client.state`/`.room` and calling
  * `SceneTree.initSceneTree(room.nodes)` after mount.
  */
 export function mountRoomViewport(room: ClientRoom, pixelRatio: number): void {
@@ -1076,7 +1076,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     const playerId: PlayerId = -(localId + 1);
     const namespace = opts.namespace ?? 'main';
 
-    const { nodes, voxels, physics, clock, scriptRuntime, chat } = newRoomCore({
+    const { nodes, voxels, physics, clock, context, chat } = newRoomCore({
         resources: state.resources,
         rpc: state.rpc,
         roomId,
@@ -1129,15 +1129,15 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         voxels,
         physics,
         clock,
-        scriptRuntime,
+        context: context,
         chat,
         playerNode,
     });
 
     mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
-    if (room.scriptRuntime.client) {
-        room.scriptRuntime.client.state = state;
-        room.scriptRuntime.client.room = room;
+    if (room.context.client) {
+        room.context.client.state = state;
+        room.context.client.room = room;
     }
     // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
     attachWorldTrait(room.nodes.root);
@@ -1264,7 +1264,7 @@ export function setActivePlayer(
     // route DOM input events into the new active room's Input. Inactive
     // rooms see no events, this is what makes inactive scripts read zero
     // input structurally rather than relying on opt-in gates.
-    const engineState = room.scriptRuntime.client?.state;
+    const engineState = room.context.client?.state;
     if (engineState) {
         Input.setInputManagerTarget(engineState.inputManager, room.input);
     }

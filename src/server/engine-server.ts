@@ -6,7 +6,7 @@ import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
-import { buildInboundProtocol, clearPendingChanges, localInbound, matchmakingConfig, protocolManifest, registry, reindex, touch } from '../core/registry';
+import { buildInboundProtocol, clearPendingChanges, localInbound, matchmakingConfig, protocolManifest, registry, reindexRegistry, touch } from '../core/registry';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
@@ -235,7 +235,7 @@ export function onClientLeave(state: EngineServer, clientId: Client) {
         const room = Rooms.getRoom(state.rooms, player.roomId);
         if (!room) continue;
         const playerNode = room.playerNodes.get(player.id);
-        if (playerNode) Scripts.fireLeaveHooks(room.scriptRuntime, clientId, playerNode);
+        if (playerNode) Scripts.fireLeaveHooks(room.context, clientId, playerNode);
         Chat.broadcast(room.chat, {
             from: 'system',
             text: `${leavingName} left`,
@@ -372,7 +372,7 @@ export async function load(state: EngineServer) {
     // editor imported just above). build the derived index fields once so scene
     // population + room creation below read a live `blockRegistry` / `protocol`.
     // in dev the flush handler reindexes again on every HMR.
-    reindex(registry);
+    reindexRegistry(registry);
 
     // seed Resources.models from the registry. lazy systems (renderer,
     // animator, auto-collider) trigger ensureModel on first reference.
@@ -757,7 +757,7 @@ export function update(state: EngineServer, delta: number) {
 
         // tick prefab system, discovers and re-instantiates stale prefab nodes
         Debug.begin(room.metrics, 'prefab');
-        Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'server');
+        Prefab.tick(room.nodes, room.context, state.resources, room.voxels, 'server');
         Debug.end(room.metrics, 'prefab');
 
         Debug.begin(room.metrics, 'physics/pre');

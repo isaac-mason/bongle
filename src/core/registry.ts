@@ -628,7 +628,7 @@ export function matchmakingConfig(reg: Registry): MatchmakingConfig {
  * flush. Registrations only change at those two moments, so plain fields
  * refreshed here need no getter, revision key, or per-read check.
  */
-export function reindex(reg: Registry): void {
+export function reindexRegistry(reg: Registry): void {
     const slotToTrait = new Map<number, TraitDef>();
     for (const [, def] of reg.traits.byId) slotToTrait.set(def.slot, def);
     reg.slotToTrait = slotToTrait;
@@ -680,11 +680,11 @@ export type Registry = {
     matchmaking: RegistryStore<MatchmakingConfig>;
 
     /** runtime block lookup; derived from `blocks` + `blockTextures`.
-     *  rebuilt by `reindex()` at boot + each dev flush — a plain field. */
+     *  rebuilt by `reindexRegistry()` at boot + each dev flush — a plain field. */
     blockRegistry: Blocks;
-    /** slot → trait def for O(1) runtime lookup. rebuilt by `reindex()`. */
+    /** slot → trait def for O(1) runtime lookup. rebuilt by `reindexRegistry()`. */
     slotToTrait: Map<number, TraitDef>;
-    /** sort-by-id wire tables for the network protocol. rebuilt by `reindex()`. */
+    /** sort-by-id wire tables for the network protocol. rebuilt by `reindexRegistry()`. */
     protocol: { traits: ProtocolTable; commands: ProtocolTable };
 
     /** tests only, wipes every KindStore. */
@@ -883,7 +883,7 @@ export function init(): Registry {
         sprites,
         particles,
         matchmaking,
-        // derived index fields — start empty; `reindex()` fills them at engine
+        // derived index fields — start empty; `reindexRegistry()` fills them at engine
         // boot (after user modules register) and at each dev flush. NOT built
         // here: `buildBlockRegistry` reaches into sibling modules that may not
         // have initialized yet at registry module-load (circular init / TDZ).
@@ -921,7 +921,7 @@ export function init(): Registry {
             s.revision = 0;
         }
         reg.version = 0;
-        reindex(reg);
+        reindexRegistry(reg);
     };
 
     return reg;

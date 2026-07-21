@@ -42,7 +42,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
         else if (!enabled && room.editor) exitLocalEditorView(room);
         return;
     }
-    const { rpc, roomId } = room.scriptRuntime;
+    const { rpc, roomId } = room.context;
     if (enabled) {
         Rpc.send(
             rpc,

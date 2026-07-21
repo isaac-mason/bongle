@@ -9,7 +9,7 @@ import * as Physics from '../core/physics/physics';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
-import { buildInboundProtocol, type InboundProtocol, localInbound, protocolManifest, registry, reindex } from '../core/registry';
+import { buildInboundProtocol, type InboundProtocol, localInbound, protocolManifest, registry, reindexRegistry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
@@ -281,7 +281,7 @@ export async function load(state: EngineClient) {
     // user modules have registered (loadModule ran before this). build the
     // derived index fields once so boot reads a live `blockRegistry` /
     // `slotToTrait` / `protocol`; the dev flush reindexes again on each HMR.
-    reindex(registry);
+    reindexRegistry(registry);
 
     // seed with our local registry so any sync field decode that fires
     // before the server's first `wire_table` lands has a table to use.
@@ -670,9 +670,9 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
 
     // populate ctx.client.state and ctx.client.room now that both exist,
     // then fire onInit hooks, order matters: hooks may access client.room
-    if (room.scriptRuntime.client) {
-        room.scriptRuntime.client.state = state;
-        room.scriptRuntime.client.room = room;
+    if (room.context.client) {
+        room.context.client.state = state;
+        room.context.client.room = room;
     }
     // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
     attachWorldTrait(room.nodes.root);
@@ -737,7 +737,7 @@ function processSceneSync(state: EngineClient, message: Protocol.SceneSync): voi
     const room = state.rooms.rooms.get(message.playerId);
     if (!room) return;
     for (const update of message.updates) {
-        applySceneSyncUpdate(room.nodes, room.scriptRuntime, update, state.inbound);
+        applySceneSyncUpdate(room.nodes, room.context, update, state.inbound);
     }
     if (room.playerId === state.rooms.activePlayerId) {
         room.editorStore?.getState().markDirty();
@@ -1197,7 +1197,7 @@ export function update(state: EngineClient, delta: number) {
             SceneTree.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
 
             // tick prefab system, discovers and re-instantiates stale prefab nodes
-            Prefab.tick(room.nodes, room.scriptRuntime, state.resources, room.voxels, 'client');
+            Prefab.tick(room.nodes, room.context, state.resources, room.voxels, 'client');
 
             Debug.begin(room.clientMetrics, 'physics');
             Physics.preStep(room.physics, room.nodes, state.resources, room.playerId, room.playerMode === 'play');

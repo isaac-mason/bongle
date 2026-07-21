@@ -766,7 +766,7 @@ script(
             }
 
             // update prefab ghost voxels for nodes whose def produces voxels
-            PrefabVisuals.update(prefabVisuals, room.nodes, room.scriptRuntime, ctx.voxels.registry);
+            PrefabVisuals.update(prefabVisuals, room.nodes, room.context, ctx.voxels.registry);
 
             const { activeTool } = store.getState();
 
