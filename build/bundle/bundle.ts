@@ -10,9 +10,9 @@
 // passes node `rolldown`. Same graph, same output.
 //
 // The bundle is byte-shaped for the platform's ingest (client/index.js +
-// server/index.js + bongle.json required). The server bundle isn't yet
-// runtime-wired to the refactored EngineServer (deferred play-infra touch) — it
-// builds with the play-server shape, enough to prove + persist the artifact.
+// server/index.js + bongle.json required). The server entry (PLAY_SERVER) wires
+// the refactored EngineServer: node zstd, a node-fs loadResource rooted at the
+// unpacked bundle, and scenes seeded from content/.
 
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
@@ -60,15 +60,53 @@ export default client({
 
 const PLAY_SERVER = `
 import { fileURLToPath } from 'node:url';
+import { readdirSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { env } from 'bongle';
 import { server } from 'bongle/interface';
 import { EngineServer } from 'bongle/engine-server';
+import { nodeZstd } from 'bongle/engine-server-node';
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// authored scenes: content/scenes/*.scene.json → { sceneId: rawJson }. Read
+// synchronously (init() is sync + returns the state) — a one-time boot read.
+function seedScenes() {
+    const dir = path.join(here, 'content', 'scenes');
+    const scenes = {};
+    let names;
+    try { names = readdirSync(dir); } catch { return scenes; }
+    for (const name of names) {
+        if (!name.endsWith('.scene.json')) continue;
+        scenes[name.slice(0, -'.scene.json'.length)] = readFileSync(path.join(dir, name), 'utf8');
+    }
+    return scenes;
+}
+
 export default server({
     init: (opts) => {
         env.client = false; env.server = true; env.editor = false;
-        return EngineServer.init({ mode: 'play', contentDir: path.join(here, 'content'), resourcesDir: path.join(here, 'resources'), options: opts.options, driver: opts.driver });
+        return EngineServer.init({
+            mode: 'play',
+            // deployed play server: scene content is read-only.
+            content: { scenes: seedScenes(), persist: { write: () => {}, delete: () => {} } },
+            // model bins live at <here>/resources/models/<id>; loadResource joins.
+            resourcesDir: 'resources',
+            loadResource: async (p) => {
+                if (p.startsWith('http:') || p.startsWith('https:')) {
+                    const r = await fetch(p);
+                    if (!r.ok) throw new Error('fetch ' + p + ': ' + r.status);
+                    return new Uint8Array(await r.arrayBuffer());
+                }
+                if (p.startsWith('file:')) return new Uint8Array(await readFile(new URL(p)));
+                if (p.startsWith('/')) return new Uint8Array(await readFile(p));
+                return new Uint8Array(await readFile(path.join(here, p)));
+            },
+            // native node zstd (node:zlib) for the voxel wire codec.
+            zstd: nodeZstd,
+            options: opts.options,
+            driver: opts.driver,
+        });
     },
     load: async (state) => { await EngineServer.load(state); },
     update: (state, dt) => EngineServer.update(state, dt),

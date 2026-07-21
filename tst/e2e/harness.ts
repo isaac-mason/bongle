@@ -35,6 +35,7 @@ import type * as ClientRooms from '../../src/client/rooms';
 import { registry } from '../../src/core/registry';
 import * as SceneTree from '../../src/core/scene/scene-tree';
 import { createFallbackAvatarsDriver } from '../../src/node/sample-avatars-driver';
+import { nodeZstd } from '../../src/node/zstd';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
@@ -237,8 +238,17 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
     // ── 5. boot server ──────────────────────────────────────────
     const server = EngineServerModule.init({
         mode: 'play',
-        contentDir,
+        content: {
+            scenes: Object.fromEntries(
+                fs
+                    .readdirSync(scenesDir)
+                    .filter((n) => n.endsWith('.scene.json'))
+                    .map((n) => [n.slice(0, -'.scene.json'.length), fs.readFileSync(path.join(scenesDir, n), 'utf8')]),
+            ),
+        },
         resourcesDir,
+        loadResource: async (p) => new Uint8Array(fs.readFileSync(p.startsWith('file:') ? new URL(p) : p)),
+        zstd: nodeZstd,
         driver: {
             storage: createInMemoryStorageDriver(),
             avatars: createFallbackAvatarsDriver(),

@@ -130,7 +130,7 @@ async function fetchManifest(loader: ResourceLoader): Promise<AudioManifest | nu
         const bytes = await loader.loadBytes('audio-manifest.json');
         return JSON.parse(new TextDecoder().decode(bytes)) as AudioManifest;
     } catch (err) {
-        console.log('[audio-debug] fetchManifest FAILED to load/parse audio-manifest.json:', err);
+        console.log('[audio] fetchManifest FAILED to load/parse audio-manifest.json:', err);
         return null;
     }
 }
@@ -188,18 +188,14 @@ export async function loadResources(loader: ResourceLoader): Promise<AudioResour
         window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
 
     const manifest = await fetchManifest(loader);
-    console.log('[audio-debug] loadResources: manifest =', manifest ? { sampleRate: manifest.sampleRate, atlas: manifest.atlas.length, standalone: manifest.standalone.length } : null);
     // no manifest = no sounds declared. fine, return a live but empty resources
     // object so `play(unknownId, ...)` still no-ops cleanly.
     if (!manifest) {
-        const empty = makeResources(new Ctx(), new Map(), null);
-        console.log('[audio-debug] loadResources: NO MANIFEST -> 0 clips; context.state =', empty.context.state);
-        return empty;
+        return makeResources(new Ctx(), new Map(), null);
     }
 
     const context = new Ctx({ sampleRate: manifest.sampleRate });
     const clips = await buildClips(context, manifest, loader);
-    console.log('[audio-debug] loadResources: built', clips.size, 'clips; context.state =', context.state, 'ctx.sampleRate =', context.sampleRate);
     return makeResources(context, clips, manifest.hash);
 }
 
@@ -226,7 +222,6 @@ export async function loadResources(loader: ResourceLoader): Promise<AudioResour
 export function installGestureUnlock(resources: AudioResources): void {
     if (typeof window === 'undefined') return;
     const { context } = resources;
-    console.log('[audio-debug] installGestureUnlock: context.state =', context.state, 'sampleRate =', context.sampleRate);
 
     // capture phase (like howler): a game-canvas / UI handler that
     // stopPropagation()s must not be able to starve the unlock.
@@ -235,8 +230,7 @@ export function installGestureUnlock(resources: AudioResources): void {
     const detach = () => {
         for (const type of events) window.removeEventListener(type, onGesture, true);
     };
-    const onGesture = (e: Event) => {
-        console.log('[audio-debug] gesture unlock fired:', e.type, '| context.state =', context.state);
+    const onGesture = () => {
         if (context.state === 'running') return detach();
         // iOS: resume() alone isn't enough; synchronously starting a silent
         // one-sample source inside the gesture is what actually unlocks the
@@ -248,18 +242,14 @@ export function installGestureUnlock(resources: AudioResources): void {
             source.buffer = context.createBuffer(1, 1, 22050);
             source.connect(context.destination);
             source.onended = () => {
-                console.log('[audio-debug] gesture unlock: silent buffer onended -> unlocked; context.state =', context.state);
                 source.disconnect(0);
                 detach();
             };
             source.start(0);
-        } catch (err) {
-            console.log('[audio-debug] gesture unlock: silent buffer start threw:', err);
+        } catch {
+            // silent buffer start can throw on some browsers; resume() below still runs.
         }
-        void context.resume().then(
-            () => console.log('[audio-debug] gesture unlock: resume() resolved; context.state =', context.state),
-            (err) => console.log('[audio-debug] gesture unlock: resume() REJECTED:', err),
-        );
+        void context.resume();
     };
     for (const type of events) window.addEventListener(type, onGesture, listenerOpts);
 
@@ -459,7 +449,6 @@ function startPlayback(
     const { resources } = audio;
 
     const clip = resources.clips.get(soundId);
-    console.log('[audio-debug] startPlayback:', soundId, '| clip found =', !!clip, '| clips in map =', resources.clips.size, '| context.state =', resources.context.state, '| outputMuted =', resources.muted);
     if (!clip) return null;
 
     // browsers gate playback on user gesture, resume here. If we're not
@@ -467,11 +456,7 @@ function startPlayback(
     // context wakes (see installGestureUnlock). fire-and-forget. `!== running`
     // (not `=== suspended`) also catches iOS's non-standard 'interrupted'.
     if (resources.context.state !== 'running' && resources.context.state !== 'closed') {
-        console.log('[audio-debug] startPlayback: context not running, calling resume()');
-        void resources.context.resume().then(
-            () => console.log('[audio-debug] resume() from play resolved; context.state =', resources.context.state),
-            (err) => console.log('[audio-debug] resume() from play REJECTED:', err),
-        );
+        void resources.context.resume();
     }
 
     const ctx = resources.context;

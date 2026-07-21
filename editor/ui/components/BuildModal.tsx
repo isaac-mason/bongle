@@ -17,19 +17,15 @@ export function BuildModal() {
 
     const done = status !== 'running';
     const close = () => useBuildProgress.getState().close();
-    const title =
-        status === 'done'
-            ? published
-                ? 'Published to bongle'
-                : 'Build complete'
-            : status === 'error'
-              ? errorKind === 'publish'
-                  ? 'Publish failed'
-                  : 'Build failed'
-              : 'Building bundle';
+
+    let title = 'Building';
+    if (status === 'done') {
+        title = published ? 'Published to bongle' : 'Build complete';
+    } else if (status === 'error') {
+        title = errorKind === 'publish' ? 'Publish failed' : 'Build failed';
+    }
 
     return (
-        // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop.
         <div className="fixed inset-0 z-[2000000] grid place-items-center bg-black/40" onPointerDown={close}>
             <div
                 className="w-[380px] border border-border bg-surface p-4 font-mono text-fg shadow-[4px_4px_0_rgba(0,0,0,0.5)]"
