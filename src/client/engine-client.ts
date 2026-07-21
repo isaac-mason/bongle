@@ -1364,9 +1364,8 @@ export function update(state: EngineClient, delta: number) {
 
     /* render, only the active room renders to the GPU each frame */
     if (activeRoom) {
-        // TODO: be smarter :)
-        activeRoom.scene.updateWorldMatrix();
-
+        // scene world-matrix flushes happen in Renderer.render (setActiveScene),
+        // where both the main and overlay scenes are bound for the pass.
         const activeCamera = Rooms.getRenderCamera(activeRoom);
 
         Debug.begin(activeRoom.clientMetrics, 'render');

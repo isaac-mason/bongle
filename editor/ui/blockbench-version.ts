@@ -2,4 +2,4 @@
 // Content hash of the assembled Blockbench bundle. The editor embeds it in
 // the iframe URL (static/blockbench/<hash>/) so the internally-unhashed
 // bundle can be served immutable; a changed bundle rotates the hash.
-export const BLOCKBENCH_VERSION = 'e6ab5e62d38410eb';
+export const BLOCKBENCH_VERSION = '01d797fc7ecada1d';

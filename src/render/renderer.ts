@@ -267,10 +267,21 @@ export function syncRenderCamera(pipeline: EngineRenderPipeline, cameraTrait: Ca
 
 /**
  * point the persistent passes at the active room's scenes (main 3D scene +
- * overlay scene). `PassNode.scene` is `readonly` in TS but read fresh each
- * frame in `updateBefore`, so the runtime resolves the swap on the next render.
+ * overlay scene) and flush their world matrices. `PassNode.scene` is `readonly`
+ * in TS but read fresh each frame in `updateBefore`, so the runtime resolves the
+ * swap on the next render.
+ *
+ * gpucat never auto-updates matrices, so a scene must be flushed each frame or
+ * anything posed since the last render (editor gizmos, dom-ui quads) draws with
+ * a stale/identity `matrixWorld`. Doing it here — at the single point where a
+ * scene is bound for rendering — means you can't add a rendered scene without
+ * it being made current (`renderRoomToTarget` self-flushes the same way for the
+ * offscreen capture path). Cost is one matrix compose per direct child; both
+ * scenes are flat batches, so it's negligible.
  */
 function setActiveScene(pipeline: EngineRenderPipeline, scene: Scene, overlayScene: Scene): void {
+    scene.updateWorldMatrix();
+    overlayScene.updateWorldMatrix();
     (pipeline.passNode as { scene: Scene }).scene = scene;
     (pipeline.overlayPassNode as { scene: Scene }).scene = overlayScene;
 }

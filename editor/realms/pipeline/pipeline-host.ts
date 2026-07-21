@@ -2,10 +2,9 @@
 //
 // Spawns pipeline-worker.ts, connects its bundler conduit to the bundler
 // worker (env 'pipeline'), and surfaces bake results: 'baked' signals a completed
-// bake (optional callback), 'fs-changed' relays the worker's bake writes, 'log' →
-// the build log stream. Mirrors server-host.ts; the main doc only brokers + relays.
-
-import type { FsChange } from '../../fs';
+// bake (optional callback), 'log' → the build log stream. The worker's bake WRITES
+// reach the main doc through the OPFS impl's cross-context mirror (editor.fs.watch),
+// not this channel. Mirrors server-host.ts; the main doc only brokers.
 
 export type PipelineHost = {
     /** resolves once the worker has run its first bake. */
@@ -24,13 +23,10 @@ export type SpawnPipelineWorkerOptions = {
     /** the realm's current matchmaking.maxPlayers, reported after each bake — the
      *  prod build reads it (it can't evaluate user code to see the registry). */
     onMatchmaking?: (maxPlayers: number) => void;
-    /** the worker's bake writes (OPFS has no cross-context events) — the main doc
-     *  HMRs the generated barrel + refreshes baked resources in the other realms. */
-    onFsChanged?: (changes: FsChange[]) => void;
 };
 
 export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineHost {
-    const { connectRealm, projectName, log = () => {}, onBaked, onMatchmaking, onFsChanged } = opts;
+    const { connectRealm, projectName, log = () => {}, onBaked, onMatchmaking } = opts;
 
     const worker = new Worker(new URL('./pipeline-worker.ts', import.meta.url), { type: 'module' });
 
@@ -40,7 +36,7 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
     });
 
     worker.onmessage = (e: MessageEvent) => {
-        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; maxPlayers?: number; changes?: FsChange[] };
+        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; maxPlayers?: number };
         if (msg.type === 'worker-ready') {
             // the worker is live — NOW wire its bundler conduit + post init (with the
             // transferred port). Posting at spawn drops it in vite's dep-optimize
@@ -53,8 +49,7 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
         else if (msg.type === 'baked') {
             onBaked?.(!!msg.atlasChanged);
             if (typeof msg.maxPlayers === 'number') onMatchmaking?.(msg.maxPlayers);
-        } else if (msg.type === 'fs-changed') onFsChanged?.(msg.changes ?? []);
-        else if (msg.type === 'ready') {
+        } else if (msg.type === 'ready') {
             console.log('[boot] pipeline: worker reported ready (first bake done)');
             resolveReady();
         }

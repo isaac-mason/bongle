@@ -6,10 +6,10 @@
 // AssetPipeline the user declarations registered into. HMR re-evals re-fire the
 // flush → re-bake; results post back to the main doc for the atlas view + logs.
 
+import { createPortBridge } from '../../../build';
 import { createBrowserRaster } from '../../../src/asset-pipeline/bake/raster-browser';
 import { createBrowserDecodeAudio } from '../../../src/asset-pipeline/decode-audio-browser';
 import { createBakeLoader, createClientResourceLoader } from '../../../src/asset-pipeline/loader';
-import { createPortBridge } from '../../../build';
 import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
 import { openOpfsFilesystem } from '../../fs-opfs';
@@ -17,6 +17,7 @@ import { openOpfsFilesystem } from '../../fs-opfs';
 const bt = createBootTimer('pipeline');
 
 type InitMsg = { type: 'init'; projectName: string };
+type WorkerMsg = InitMsg | { type: 'dispose' };
 
 const post = (msg: unknown) => self.postMessage(msg);
 const log = (m: string) => post({ type: 'log', msg: m });
@@ -28,10 +29,8 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     const fs = await openOpfsFilesystem(projectName);
     bt.mark('opfs open');
 
-    // the bake writes through THIS fs handle; OPFS has no cross-context change
-    // events, so relay those writes to the main doc, which HMRs the generated
-    // barrel (bin paths → server/client) + refreshes baked resources.
-    fs.watch((changes) => post({ type: 'fs-changed', changes }));
+    // the bake's writes reach the main doc (barrel HMR + baked-resource refresh) via
+    // the OPFS cross-context mirror — no explicit relay from here.
 
     // evaluate user code via a ModuleRunner bridged to the bundler worker (it
     // transforms; this realm evaluates → its own engine registry).
@@ -70,7 +69,8 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     bt.mark('import engine barrels');
 
     // the baker reads inputs through the loader (project-relative → fs, absolute
-    // + file:// → fetch/vfs) and decodes audio via OfflineAudioContext.
+    // + file:// → fetch/vfs) and decodes audio via mediabunny + WebCodecs (worker-
+    // safe, unlike OfflineAudioContext — see decode-audio-browser.ts).
     const loader = createBakeLoader(fs);
     // icons read baked client assets (atlas, model bins) back out of the fs; those
     // live under resources/client/, not at the project root the bake loader reads.
@@ -88,8 +88,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // Render block (and later prefab) icons for the current registry + baked
     // atlas and write them as first-class client assets under resources/client/
     // (voxels-icons.png + sidecar json) — shipped alongside the atlas so gameplay
-    // (inventory/hotbar) and the editor both read them from the same place. The
-    // main doc picks up the write via the existing fs-changed relay. Fully
+    // (inventory/hotbar) and the editor both read them from the same place. Fully
     // isolated: an icon failure logs and never disturbs the bake. Instrumented
     // per step so a break in the worker render path is pinpointable.
     async function renderIcons(): Promise<void> {
@@ -138,34 +137,54 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
         }
     }
 
+    // one bake pass against the current registry + asset bytes. Resolves when the
+    // outputs (atlas / manifest / generated barrels) are written — boot awaits the
+    // first one (bake-then-run) so the realms don't read a missing audio-manifest.json
+    // etc. The `baking` guard drops triggers that land mid-bake; a later edit re-bakes.
+    let baking = false;
+    const runBake = async (): Promise<void> => {
+        if (baking) return;
+        baking = true;
+        try {
+            const t0 = performance.now();
+            const r = await AssetPipeline.run(pipeline, {});
+            log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
+            // report matchmaking (singleton id 'main') so the prod build has a current
+            // maxPlayers without evaluating user code itself.
+            const maxPlayers = registry.matchmaking.byId.get('main')?.payload?.maxPlayers;
+            post({ type: 'baked', atlasChanged: r.atlasChanged, maxPlayers });
+        } catch (err) {
+            log(`bake error: ${(err as Error).message}`);
+        } finally {
+            baking = false;
+        }
+        // icons render after the bake — own error boundary, and deliberately NOT awaited:
+        // a GPU handshake shouldn't gate the bake result or `ready`.
+        void renderIcons();
+    };
     // declarations settle → bake. Registered on THIS realm's __bongle, so its flush
     // (initial + every HMR re-eval) runs the bake against the registry the user
     // code populated.
-    let baking = false;
-    __bongle.registerFlush(() => {
-        if (baking) return;
-        baking = true;
-        void (async () => {
-            try {
-                const t0 = performance.now();
-                const r = await AssetPipeline.run(pipeline, {});
-                log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-                // report matchmaking (singleton id 'main') so the prod build has a
-                // current maxPlayers without evaluating user code itself.
-                const maxPlayers = registry.matchmaking.byId.get('main')?.payload?.maxPlayers;
-                post({ type: 'baked', atlasChanged: r.atlasChanged, maxPlayers });
-            } catch (err) {
-                log(`bake error: ${(err as Error).message}`);
-            } finally {
-                baking = false;
-            }
-            // icons after the bake (own error boundary; never blocks the bake result).
-            await renderIcons();
-        })();
+    __bongle.registerFlush(runBake);
+    // asset-file edits don't re-eval code, so no flush fires — watch for them (from
+    // any context; the fs is cross-context) and rebake, mirroring the CLI's node
+    // asset watcher (cli/dev/start.ts). Exclude the derived dirs: our own bake outputs
+    // (resources/*.png|flac) match ASSET_RE, and would otherwise re-trigger us.
+    const ASSET_RE = /\.(png|jpe?g|glb|gltf|ogg|wav|mp3|flac)$/i;
+    let bakeTimer: ReturnType<typeof setTimeout> | undefined;
+    fs.watch((changes) => {
+        const hit = changes.some((c) => ASSET_RE.test(c.path) && !/(^|\/)(resources|node_modules|dist)(\/|$)/.test(c.path));
+        if (!hit) return;
+        clearTimeout(bakeTimer);
+        bakeTimer = setTimeout(() => void runBake(), 150);
     });
     bt.mark('pipeline init');
-    __bongle.flush(); // initial bake + registry apply (bake runs async — timed via its own `bake Nms` log)
-    bt.mark('initial flush dispatched');
+    // the first bake, awaited (bake-then-run): its outputs must exist before the realms
+    // boot. registerFlush drives later HMR re-evals, but the flush event is microtask-
+    // debounced (core/capture/flush.ts), so run the first bake directly for a promise to
+    // await — __bongle.flush() would return before the bake even starts.
+    await runBake();
+    bt.mark('initial bake done');
     bt.summary();
     post({ type: 'ready' });
 }
@@ -185,7 +204,7 @@ async function encodeRgbaPng(pixels: Uint8Array, width: number, height: number):
 
 let booted = false;
 self.addEventListener('message', (e: MessageEvent) => {
-    const msg = e.data as InitMsg;
+    const msg = e.data as WorkerMsg;
     console.log('[boot] pipeline-worker: message received:', msg?.type);
     if (msg?.type !== 'init' || booted) return;
     booted = true;

@@ -65,6 +65,9 @@ importers:
       mathcat:
         specifier: github:isaac-mason/mathcat#dev
         version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/f6e0cfff0587eefe2e8d2159b3a24c30d6a0b8f4
+      mediabunny:
+        specifier: ^1.50.8
+        version: 1.50.8
       meshoptimizer:
         specifier: ^0.25.0
         version: 0.25.0
@@ -1011,6 +1014,12 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/dom-mediacapture-transform@0.1.12':
+    resolution: {integrity: sha512-d7/QsLRwF864A5mgIM/YrfiglHoYn7zgCcAoJgW404r+2DwnNr7EBbLnCWpmOMgH8y0te73L1AV6H1bmauaWFw==}
+
+  '@types/dom-webcodecs@0.1.13':
+    resolution: {integrity: sha512-O5hkiFIcjjszPIYyUSyvScyvrBoV3NOEEZx/pMlsu44TKzWNkLVBBxnxJz42in5n3QIolYOcBYFCPZZ0h8SkwQ==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -1737,6 +1746,9 @@ packages:
   mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/f6e0cfff0587eefe2e8d2159b3a24c30d6a0b8f4:
     resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/f6e0cfff0587eefe2e8d2159b3a24c30d6a0b8f4}
     version: 0.0.14
+
+  mediabunny@1.50.8:
+    resolution: {integrity: sha512-LgykLyQzhdpo0V2yw3UXmOpj+b4JAGdpHBwsPE6kjSt8Za0d1VllD+FV7EGHBcdV4+oHUAo+yrqbVAWxNSDCPQ==}
 
   meshoptimizer@0.25.0:
     resolution: {integrity: sha512-ewwuAo3ujPZ7T3Y2oTkEoLlXvNOqnr0cjyAxfv5djXJqwD9QlxDDO0qGtsqB4Z9QUVvhruKXg9q/xfK9I5S1xQ==}
@@ -2843,6 +2855,12 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/dom-mediacapture-transform@0.1.12':
+    dependencies:
+      '@types/dom-webcodecs': 0.1.13
+
+  '@types/dom-webcodecs@0.1.13': {}
+
   '@types/estree@1.0.8': {}
 
   '@types/jsesc@2.5.1': {}
@@ -3439,6 +3457,11 @@ snapshots:
   mathcat@0.0.13: {}
 
   mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/f6e0cfff0587eefe2e8d2159b3a24c30d6a0b8f4: {}
+
+  mediabunny@1.50.8:
+    dependencies:
+      '@types/dom-mediacapture-transform': 0.1.12
+      '@types/dom-webcodecs': 0.1.13
 
   meshoptimizer@0.25.0: {}
 

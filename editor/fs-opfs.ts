@@ -8,9 +8,15 @@
 // pipeline worker's sync reads.
 //
 // Change events: OPFS has no native watcher, so writes THROUGH this instance
-// emit synthetically. Cross-context change propagation (host → guest, or a
-// linked-folder mirror) is the caller's concern (BroadcastChannel), not this
-// leaf driver's.
+// emit synthetically. To make the fs behave like a real one — a write in ANY
+// context is visible (and observable) in every other — each instance mirrors its
+// writes over a per-project BroadcastChannel and delivers ones it receives to its
+// own watchers. So `editor.fs.watch` fires for the pipeline worker's bake writes,
+// a guest's edits, etc., with no bespoke relay wiring at the call sites. Watchers
+// that mean "the USER edited source" (autosave) filter by PATH (derived outputs
+// under resources/ + src/generated/), not by which context wrote — the correct
+// axis. OPFS reads are already live cross-context; only the notification was
+// missing, which is all the channel carries (change records, never file bytes).
 
 import { createMemoryFilesystem, type Filesystem, type FilesystemSnapshot, type FsChange, type FsPath, type FsStat } from './fs';
 
@@ -27,7 +33,14 @@ function split(path: FsPath): { dirs: string[]; name: string } {
 export async function openOpfsFilesystem(projectName: string): Promise<Filesystem> {
     const opfsRoot = await navigator.storage.getDirectory();
     const root = await opfsRoot.getDirectoryHandle(projectName, { create: true });
-    return new OpfsFilesystem(root);
+    return new OpfsFilesystem(root, projectName);
+}
+
+/** parent directory of a path ('' for a root-level entry). */
+function parentDir(path: FsPath): string {
+    const p = normalize(path);
+    const i = p.lastIndexOf('/');
+    return i < 0 ? '' : p.slice(0, i);
 }
 
 class OpfsFilesystem implements Filesystem {
@@ -38,14 +51,26 @@ class OpfsFilesystem implements Filesystem {
     //   - dirCache: dir path → its handle, so reads skip the traversal.
     //   - entryCache: dir path → {name→kind} of its immediate children, so
     //     existence/resolution is an in-memory map lookup, not N OPFS `stat`s.
-    // Invalidated on structural writes THROUGH this instance (create/delete/
-    // move). Cross-INSTANCE coherence (another thread's write) rides the change
-    // stream — see the fs-change unification; until then this is safe for the
-    // immutable seed + this instance's own writes.
+    // Invalidated on structural writes THROUGH this instance (create/delete/move)
+    // AND on structural changes broadcast by another context (receiveRemote), so a
+    // sibling thread's create/delete stays coherent here. Content reads are always
+    // live (no byte cache), so 'modified' needs no eviction.
     private dirCache = new Map<string, FileSystemDirectoryHandle>();
     private entryCache = new Map<string, Map<string, 'file' | 'dir'>>();
 
-    constructor(private root: FileSystemDirectoryHandle) {}
+    // Cross-context change mirror. A post reaches every OTHER instance on the named
+    // channel, never the sender — so there's no echo to de-dupe.
+    private channel: BroadcastChannel | null = null;
+
+    constructor(
+        private root: FileSystemDirectoryHandle,
+        projectName: string,
+    ) {
+        if (typeof BroadcastChannel !== 'undefined') {
+            this.channel = new BroadcastChannel(`bongle-fs:${projectName}`);
+            this.channel.onmessage = (e: MessageEvent) => this.receiveRemote(e.data as FsChange[]);
+        }
+    }
 
     /** resolve a dir path to its handle, caching every level so siblings +
      *  descendants reuse the walk. */
@@ -91,8 +116,24 @@ class OpfsFilesystem implements Filesystem {
         }
     }
 
+    // a local write: fire our watchers, then mirror to the other contexts.
     private emit(changes: FsChange[]): void {
         if (changes.length === 0) return;
+        for (const cb of this.watchers) cb(changes);
+        this.channel?.postMessage(changes);
+    }
+
+    // a write from another context. Evict caches for structural changes (a sibling's
+    // create/delete/move alters a dir's children; 'modified' touches only bytes,
+    // which we never cache), then fire our watchers — never re-broadcast, or two
+    // instances ping-pong forever.
+    private receiveRemote(changes: FsChange[]): void {
+        if (!changes?.length) return;
+        for (const c of changes) {
+            if (c.type === 'modified') continue;
+            this.invalidateSubtree(parentDir(c.path));
+            if (c.type === 'moved' && c.from) this.invalidateSubtree(parentDir(c.from));
+        }
         for (const cb of this.watchers) cb(changes);
     }
 

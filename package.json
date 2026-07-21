@@ -123,6 +123,7 @@
         "gpucat": "github:isaac-mason/gpucat#8dae93190e99c91c810fd772a3239279b18c5153",
         "magic-string": "^0.30.21",
         "mathcat": "github:isaac-mason/mathcat#dev",
+        "mediabunny": "^1.50.8",
         "meshoptimizer": "^0.25.0",
         "monaco-editor": "^0.55.1",
         "node-web-audio-api": "^2.0.0",

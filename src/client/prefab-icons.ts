@@ -36,8 +36,6 @@ const CAM_DIST = 128;
 const FRAME_MARGIN = 1.05;
 const WAIT_TIMEOUT_MS = 5000;
 const WAIT_STEP_MS = 16;
-/** post-upload settle for image decode + atlas patch. */
-const TEXTURE_SETTLE_MS = 300;
 /** safety cap on the prefab-drain loop, far above any real nesting depth. */
 const MAX_PREFAB_TICKS = 16;
 
@@ -94,7 +92,10 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
                 for (const k of meshKeys) if (meshInfoIndexOf(deps.modelResources.meshInfo, k) === null) return false;
                 return true;
             });
-            await sleep(TEXTURE_SETTLE_MS);
+            // wait for each model's textures to actually land in the atlas (decode
+            // + blit + UV patch) before rendering, or the icon captures the
+            // placeholder full-UV that `update` wrote synchronously.
+            await Promise.all([...modelIds].map((id) => ModelResources.modelTexturesReady(deps.modelResources, id)));
         }
 
         // ── world transforms (via interpolation, held at alpha=1) ──

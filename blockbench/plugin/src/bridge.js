@@ -20,9 +20,10 @@
  *   editor -> iframe: { type: 'bongle:autosave-request' }                serialize the source (no glb) for a silent draft
  *   editor -> iframe: { type: 'bongle:assign-path', uuid, path }         resolve a save-as
  *   iframe -> editor: { type: 'bongle:save', path, glb, bbmodel, name, warnings }
- *   iframe -> editor: { type: 'bongle:save-as', uuid, glb, bbmodel, name, warnings }
+ *   iframe -> editor: { type: 'bongle:save-as', uuid, glb, bbmodel, name, warnings, path }
  *   iframe -> editor: { type: 'bongle:autosave', path, bbmodel }
  *   iframe -> editor: { type: 'bongle:opened', path }                     model finished loading (lifts the editor's loading cover)
+ *   iframe -> editor: { type: 'bongle:open-request' }                     File > Open Model → show the editor's file picker
  *   iframe -> editor: { type: 'bongle:save-failed', errors }
  *   iframe -> editor: { type: 'bongle:dirty', path, saved }
  *   iframe -> editor: { type: 'bongle:open-failed', path, error }
@@ -48,7 +49,7 @@
     // The .bbmodel source is the source of truth and ALWAYS saves; the glb is a
     // best-effort derived artefact (an empty/WIP model can't export one, and that
     // must not block saving the source).
-    async function saveActive() {
+    async function saveActive(forceSaveAs = false) {
         const project = typeof Project !== 'undefined' ? Project : null;
         if (!project) return;
         const B = api();
@@ -70,12 +71,14 @@
         }
         const path = project.bongle_fs_path;
         const transfer = glb ? [glb] : [];
-        if (path) {
+        if (path && !forceSaveAs) {
             post({ type: 'bongle:save', path, glb, bbmodel, name, warnings }, transfer);
             project.saved = true; // optimistic — the editor's OPFS write is reliable
         } else {
-            // untitled: the editor picks a path, then replies bongle:assign-path.
-            post({ type: 'bongle:save-as', uuid: project.uuid, glb, bbmodel, name, warnings }, transfer);
+            // untitled, OR an explicit File > Save As: the editor shows its file picker,
+            // then replies bongle:assign-path. `path` seeds the picker — the current
+            // location for Save As, null for a never-saved project.
+            post({ type: 'bongle:save-as', uuid: project.uuid, glb, bbmodel, name, warnings, path: path || null }, transfer);
         }
     }
 
@@ -160,6 +163,15 @@
             for (const id of ['export_over', 'save_project']) {
                 if (BarItems[id]) BarItems[id].click = () => void saveActive();
             }
+            // File > Save As (and its Ctrl+Alt+Shift+S) natively triggers a browser
+            // download. Route it to the editor's file picker instead — force a path
+            // pick even when the project already maps to one. (Its keybind uses Alt,
+            // so the parent's plain Ctrl/Cmd+S capture handler leaves it alone.)
+            if (BarItems.save_project_as) BarItems.save_project_as.click = () => void saveActive(true);
+            // File > Open Model (also Ctrl+O and the start-screen button, both of which
+            // trigger this action) natively opens an OS file dialog that can't see the
+            // editor's OPFS. Route it to the editor's own file picker instead.
+            if (BarItems.open_model) BarItems.open_model.click = () => post({ type: 'bongle:open-request' });
             // The standalone "Export Bongle glTF" file-download is confusing in the
             // embed (saving goes through the editor) — the generic plugin adds it.
             if (BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) BarItems.bongle_export_gltf.delete();

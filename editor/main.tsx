@@ -27,7 +27,6 @@ import { registerProjectFsWorker } from './project-url';
 import { createClientHost, localConnector } from './realms/client/client-host';
 import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
 import { createServerManager } from './realms/server/server-manager';
-import { useBlockbench } from './stores/blockbench';
 import { useBoot } from './stores/boot';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
@@ -263,16 +262,13 @@ async function boot(): Promise<void> {
                 void loadEngineTypes(editor.fs);
                 void syncProjectModels(editor.fs);
 
-                // relay the pipeline's bake writes to the realms (OPFS has no cross-context
-                // events). Set once server/client exist; the FIRST bake fires during
-                // `await pipelineHost.ready`, before they're spawned, so a no-op then is right.
-                let relayBakeChange: (changes: FsChange[]) => void = () => {};
+                // the worker bakes into the SAME OPFS project; its writes reach the main doc
+                // via the OPFS cross-context mirror (editor.fs.watch), so no relay is wired.
                 bootLog('baking assets…');
                 const pipelineHost = spawnPipelineWorker({
                     connectRealm,
                     projectName: PROJECT,
                     log,
-                    onFsChanged: (changes) => relayBakeChange(changes),
                     // the prod build reads maxPlayers here (it can't evaluate user code itself).
                     onMatchmaking: (maxPlayers) => useBuildMeta.getState().setMaxPlayers(maxPlayers),
                 });
@@ -319,8 +315,9 @@ async function boot(): Promise<void> {
                 });
 
                 // fan fs changes to the realms: bundler re-transforms + HMRs source/barrels;
-                // server/client re-read baked resources. Drives main-doc edits AND relayed
-                // bake writes.
+                // server/client re-read baked resources. Fires for main-doc edits AND, via the
+                // OPFS cross-context mirror, the worker's bake outputs — which is how those
+                // reach the realms.
                 const fanOutChange = (changes: FsChange[]) => {
                     bundlerWorker.postMessage({ type: 'fs-change', changes });
                     for (const c of changes) {
@@ -329,7 +326,6 @@ async function boot(): Promise<void> {
                         clientHost.relayFsChange(c.path);
                     }
                 };
-                relayBakeChange = fanOutChange;
                 editor.fs.watch(fanOutChange);
 
                 await serverHost.ready;
@@ -344,11 +340,10 @@ async function boot(): Promise<void> {
     useServer.getState().setStarter(startRealms);
 
     if (intent?.kind === 'avatar') {
-        // Blockbench is usable NOW — frame it (empty, covered by a boot-style "loading
-        // avatar…" overlay) and mark the boot done. The realm stack (game preview) starts
-        // only when asked (Start server / "+ client"). The source arrives out-of-band
-        // (bongle:source) so a slow download never blocks reaching Blockbench.
-        useBlockbench.getState().setSourceLoading(true);
+        // Blockbench is usable NOW — frame it and mark the boot done. The realm stack
+        // (game preview) starts only when asked (Start server / "+ client"). The source
+        // arrives out-of-band (bongle:source) so a slow download never blocks reaching
+        // Blockbench; the model pops in when it lands.
         useLaunched.getState().launch(blockbenchApp, 'avatar.bbmodel'); // frames the window (empty)
         const W = useWindows.getState();
         const deskW = window.innerWidth - TASKBAR_W;
@@ -361,8 +356,7 @@ async function boot(): Promise<void> {
         bootTimer.summary();
 
         // load the model when the platform resolves it (a local draft resolves fast, a
-        // remixed/edited version after a download). null → the bundled starter rig. The
-        // Blockbench cover lifts when the plugin acks the model is in (bongle:opened).
+        // remixed/edited version after a download). null → the bundled starter rig.
         platform.onSource((bbmodel, name) => {
             if (name) avatarName = name;
             void editor.fs

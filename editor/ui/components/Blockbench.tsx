@@ -16,6 +16,8 @@ import { useBlockbench } from '../../stores/blockbench';
 import { useLaunched } from '../../stores/launched';
 import { useWindows } from '../../stores/windows';
 import { BLOCKBENCH_VERSION } from '../blockbench-version';
+import { OpenDialog } from './OpenDialog';
+import { SaveAsDialog } from './SaveAsDialog';
 
 // base-relative so it resolves at dev root AND under the deployed subpath
 // (/static/bongle-editor/static/blockbench/…) — see editor/vite.config's base.
@@ -26,10 +28,21 @@ const BLOCKBENCH_SRC = `${import.meta.env.BASE_URL}static/blockbench/${BLOCKBENC
 type Incoming =
     | { type: 'bongle:ready' }
     | { type: 'bongle:save'; path: string; glb: ArrayBuffer | null; bbmodel: string; name: string; warnings: string[] }
-    | { type: 'bongle:save-as'; uuid: string; glb: ArrayBuffer | null; bbmodel: string; name: string; warnings: string[] }
+    | {
+          type: 'bongle:save-as';
+          uuid: string;
+          glb: ArrayBuffer | null;
+          bbmodel: string;
+          name: string;
+          warnings: string[];
+          // the project's current fs path, if any — seeds the picker for File > Save
+          // As; null for a never-saved project.
+          path: string | null;
+      }
     | { type: 'bongle:autosave'; path: string; bbmodel: string }
     | { type: 'bongle:dirty'; path: string; saved: boolean }
-    | { type: 'bongle:opened'; path: string }
+    // the plugin intercepted File > Open Model — show the editor's file picker.
+    | { type: 'bongle:open-request' }
     | { type: 'bongle:save-failed'; errors: string[] }
     | { type: 'bongle:open-failed'; path: string; error: string };
 
@@ -47,11 +60,20 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
     const [ready, setReady] = useState(false);
     const openReq = useBlockbench((s) => s.openReq);
     const dirtyMap = useBlockbench((s) => s.dirty);
-    const sourceLoading = useBlockbench((s) => s.sourceLoading);
     const lastSeq = useRef(-1);
     // debounce handle for the silent source-snapshot request (crash-net autosave).
     const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // a pending Save As: the plugin handed us the artefacts and wants a path. We
+    // hold them while the file picker is open, then write + reply bongle:assign-path.
+    const [saveAs, setSaveAs] = useState<{
+        uuid: string;
+        defaultPath: string;
+        glb: ArrayBuffer | null;
+        bbmodel: string;
+    } | null>(null);
     // a transient "wrote …" confirmation, shown over the iframe after a save.
+    // the Open Model picker (shown when the plugin intercepts File > Open Model).
+    const [openPicker, setOpenPicker] = useState(false);
     const [savedToast, setSavedToast] = useState<string | null>(null);
     const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const flashSaved = useCallback((wrote: string) => {
@@ -59,6 +81,24 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
         if (toastTimer.current !== null) clearTimeout(toastTimer.current);
         toastTimer.current = setTimeout(() => setSavedToast(null), 2500);
     }, []);
+
+    // the user picked a path in the Save As dialog: write the source (+ derived glb),
+    // tell the plugin which fs path this project now maps to, and clear dirty state.
+    const confirmSaveAs = useCallback(
+        async (path: string) => {
+            if (!saveAs) return;
+            await fs.write(path, saveAs.bbmodel);
+            if (saveAs.glb) await fs.write(glbPathFor(path), new Uint8Array(saveAs.glb));
+            iframeRef.current?.contentWindow?.postMessage(
+                { type: 'bongle:assign-path', uuid: saveAs.uuid, path },
+                window.location.origin,
+            );
+            useBlockbench.getState().setDirty(path, false);
+            flashSaved(saveAs.glb ? `"${path}" + "${glbPathFor(path)}"` : `"${path}" (glb skipped)`);
+            setSaveAs(null);
+        },
+        [saveAs, fs, flashSaved],
+    );
 
     // reflect "any open file unsaved" onto the window chrome (title-bar dot).
     useEffect(() => {
@@ -105,11 +145,6 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                     case 'bongle:ready':
                         setReady(true);
                         break;
-                    case 'bongle:opened':
-                        // the model finished loading in Blockbench — lift the "loading
-                        // avatar…" cover (avatar mode boots covered until the model is in).
-                        useBlockbench.getState().setSourceLoading(false);
-                        break;
                     case 'bongle:save':
                         await fs.write(data.path, data.bbmodel);
                         if (data.glb) await fs.write(glbPathFor(data.path), new Uint8Array(data.glb));
@@ -122,21 +157,25 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                         // The fs write is what the platform autosave watcher picks up.
                         await fs.write(data.path, data.bbmodel);
                         break;
-                    case 'bongle:save-as': {
-                        const chosen = window.prompt('Save as (path in project):', `${data.name || 'untitled'}.bbmodel`);
-                        if (!chosen) return;
-                        const path = chosen.replace(/^\/+/, '');
-                        await fs.write(path, data.bbmodel);
-                        if (data.glb) await fs.write(glbPathFor(path), new Uint8Array(data.glb));
-                        post({ type: 'bongle:assign-path', uuid: data.uuid, path });
-                        useBlockbench.getState().setDirty(path, false);
-                        flashSaved(data.glb ? `"${path}" + "${glbPathFor(path)}"` : `"${path}" (glb skipped)`);
+                    case 'bongle:save-as':
+                        // open the file picker over the iframe; the fs write + the
+                        // bongle:assign-path reply happen when the user confirms a path
+                        // (see confirmSaveAs). Hold the artefacts on state until then.
+                        setSaveAs({
+                            uuid: data.uuid,
+                            defaultPath: data.path || `${data.name || 'untitled'}.bbmodel`,
+                            glb: data.glb,
+                            bbmodel: data.bbmodel,
+                        });
                         break;
-                    }
                     case 'bongle:dirty':
                         useBlockbench.getState().setDirty(data.path, !data.saved);
                         // an unsaved edit → schedule a silent source snapshot (crash-net).
                         if (!data.saved) armAutosave();
+                        break;
+                    case 'bongle:open-request':
+                        // Blockbench's native "Open Model" can't see OPFS — show our picker.
+                        setOpenPicker(true);
                         break;
                     case 'bongle:save-failed':
                         console.warn('[blockbench] save failed:', data.errors.join('; '));
@@ -185,15 +224,29 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                 allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen"
                 className="block h-full w-full border-none"
             />
-            {sourceLoading && (
-                <div className="bb-loading">
-                    <div className="bb-loading-mark">bongle</div>
-                    <div className="bb-loading-label">loading avatar…</div>
-                </div>
+            {saveAs && (
+                <SaveAsDialog
+                    fs={fs}
+                    defaultPath={saveAs.defaultPath}
+                    onConfirm={confirmSaveAs}
+                    onCancel={() => setSaveAs(null)}
+                />
+            )}
+            {openPicker && (
+                <OpenDialog
+                    fs={fs}
+                    onConfirm={(path) => {
+                        // reuse the file-tree open pipeline: sets openReq → posts bongle:open.
+                        useBlockbench.getState().open(path);
+                        setOpenPicker(false);
+                    }}
+                    onCancel={() => setOpenPicker(false)}
+                />
             )}
             {savedToast && (
-                <div className="pointer-events-none absolute bottom-2 right-2 border border-border bg-background px-2 py-1 text-xs">
-                    <span className="font-semibold">Saved</span> <span className="font-mono text-muted">wrote {savedToast}</span>
+                <div className="pointer-events-none absolute right-2 bottom-2 z-10 flex items-baseline gap-1.5 border border-border bg-surface px-2.5 py-1.5 text-xs text-fg shadow-[3px_3px_0_rgba(0,0,0,0.4)]">
+                    <span className="font-semibold">Saved</span>
+                    <span className="font-mono text-fg-muted">wrote {savedToast}</span>
                 </div>
             )}
         </div>

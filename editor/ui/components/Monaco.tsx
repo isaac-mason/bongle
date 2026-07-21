@@ -6,7 +6,7 @@
 
 import * as monaco from 'monaco-editor';
 import { useCallback, useEffect, useRef } from 'react';
-import type { Filesystem } from '../../fs';
+import type { Filesystem, FsChange } from '../../fs';
 import { isIgnored } from '../../ignored';
 import { useEditor } from '../../stores/editor';
 import { installMonacoWorkers } from './monaco-env';
@@ -130,18 +130,23 @@ export async function syncProjectModels(fs: Filesystem): Promise<void> {
     } catch {
         /* no src yet */
     }
-    fs.watch((changes) => {
-        for (const c of changes) {
-            if (!isSrc(c.path)) continue;
-            if (c.type === 'deleted') {
-                models.get(c.path)?.dispose();
-                models.delete(c.path);
-                savedText.delete(c.path);
-            } else {
-                void refreshModel(fs, c.path);
-            }
+    fs.watch((changes) => applyFsChangesToModels(fs, changes));
+}
+
+/** Reconcile Monaco models with a batch of fs changes: drop deleted src files,
+ *  refresh (or lazily create) the rest. `fs.watch` is cross-context, so this also
+ *  picks up the pipeline worker's bake writes (e.g. src/generated/models.ts). */
+function applyFsChangesToModels(fs: Filesystem, changes: FsChange[]): void {
+    for (const c of changes) {
+        if (!isSrc(c.path)) continue;
+        if (c.type === 'deleted') {
+            models.get(c.path)?.dispose();
+            models.delete(c.path);
+            savedText.delete(c.path);
+        } else {
+            void refreshModel(fs, c.path);
         }
-    });
+    }
 }
 
 /** create a newly-added src model, or refresh a CLEAN one whose disk copy drifted

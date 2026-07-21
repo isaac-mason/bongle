@@ -415,6 +415,11 @@ type UploadRecord = {
     meshNames: string[];
     /** image count from the model, used to release atlas regions. */
     imageCount: number;
+    /** resolves once every image for this model has decoded, blitted into the
+     *  atlas, and patched its meshes' UVs. Meshes upload synchronously but their
+     *  textures land async (see `upload`), so one-shot offscreen renders (icons)
+     *  must await this before drawing or they capture placeholder UVs. */
+    texturesReady: Promise<void>;
 };
 
 export type ModelResources = {
@@ -489,6 +494,14 @@ export function update(modelResources: ModelResources, resources: Resources): vo
     }
 }
 
+/** Resolves once `modelId`'s textures are resident in the atlas (or immediately
+ *  if the model is untextured / not yet uploaded). One-shot offscreen renders
+ *  await this after `update` so they don't capture placeholder UVs; the live
+ *  loop ignores it (textures pop in within a frame or two, invisibly). */
+export function modelTexturesReady(modelResources: ModelResources, modelId: string): Promise<void> {
+    return modelResources.uploaded.get(modelId)?.texturesReady ?? Promise.resolve();
+}
+
 export function dispose(modelResources: ModelResources): void {
     ModelAtlas.dispose(modelResources.atlas);
     disposeGeometryPool(modelResources.geometry);
@@ -533,9 +546,11 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
     }
 
     const images = model.images;
-    resources.uploaded.set(modelId, { meshNames, imageCount: images.length });
 
-    if (images.length === 0) return;
+    if (images.length === 0) {
+        resources.uploaded.set(modelId, { meshNames, imageCount: 0, texturesReady: Promise.resolve() });
+        return;
+    }
 
     // decode + blit images in parallel, then patch UVs of meshes whose
     // image ref points at this entry.
@@ -571,33 +586,47 @@ function upload(resources: ModelResources, loader: ResourceLoader, modelId: stri
         }
     };
 
+    // each chain resolves once its image has been placed (decoded, blitted, UVs
+    // patched); a decode failure resolves too (logged, mesh keeps the white
+    // fallback) so `texturesReady` never hangs the render on a bad image.
+    const decodeChains: Promise<void>[] = [];
     for (let i = 0; i < images.length; i++) {
         const img = images[i]!;
         const atlasKey = `${modelId}/img/${i}`;
         const decodeImage = loader.decodeImage;
         if (decodeImage) {
             // asset pipeline: injected decoder (sharp) → RGBA, blit raw bytes.
-            decodeImage(img.bytes, img.mimeType)
-                .then(({ width, height, rgba }) => {
-                    place(img, atlasKey, width, height, (region) => blitRgbaToAtlas(resources.atlas, region, rgba));
-                })
-                .catch((err) => {
-                    console.error(`[ModelResources] decodeImage failed for "${modelId}" image ${i}:`, err);
-                });
+            decodeChains.push(
+                decodeImage(img.bytes, img.mimeType)
+                    .then(({ width, height, rgba }) => {
+                        place(img, atlasKey, width, height, (region) => blitRgbaToAtlas(resources.atlas, region, rgba));
+                    })
+                    .catch((err) => {
+                        console.error(`[ModelResources] decodeImage failed for "${modelId}" image ${i}:`, err);
+                    }),
+            );
         } else {
             const blob = new Blob([img.bytes as BlobPart], { type: img.mimeType });
-            createImageBitmap(blob)
-                .then((bitmap) => {
-                    place(img, atlasKey, bitmap.width, bitmap.height, (region) =>
-                        blitBitmapToAtlas(resources.atlas, region, bitmap),
-                    );
-                    bitmap.close();
-                })
-                .catch((err) => {
-                    console.error(`[ModelResources] image decode failed for "${modelId}" image ${i}:`, err);
-                });
+            decodeChains.push(
+                createImageBitmap(blob)
+                    .then((bitmap) => {
+                        place(img, atlasKey, bitmap.width, bitmap.height, (region) =>
+                            blitBitmapToAtlas(resources.atlas, region, bitmap),
+                        );
+                        bitmap.close();
+                    })
+                    .catch((err) => {
+                        console.error(`[ModelResources] image decode failed for "${modelId}" image ${i}:`, err);
+                    }),
+            );
         }
     }
+
+    resources.uploaded.set(modelId, {
+        meshNames,
+        imageCount: images.length,
+        texturesReady: Promise.all(decodeChains).then(() => {}),
+    });
 }
 
 function release(resources: ModelResources, modelId: string): void {

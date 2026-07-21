@@ -113,7 +113,10 @@ body.window-dragging iframe {
     justify-content: center;
     pointer-events: none;
     user-select: none;
-    font: 400 clamp(64px, 16vw, 240px) / 1 "Geist Pixel", ui-monospace, monospace;
+    font:
+        400 clamp(64px, 16vw, 240px) / 1 "Geist Pixel",
+        ui-monospace,
+        monospace;
     color: color-mix(in srgb, var(--color-fg) 50%, transparent);
 }
 
@@ -148,7 +151,10 @@ body.window-dragging iframe {
     pointer-events: none;
 }
 .boot-wordmark {
-    font: 400 clamp(44px, 11vw, 128px) / 1 "Geist Pixel", ui-monospace, monospace;
+    font:
+        400 clamp(44px, 11vw, 128px) / 1 "Geist Pixel",
+        ui-monospace,
+        monospace;
     background-image: linear-gradient(90deg, #ff3ea5, #ffd23f, #3fa7ff, #8a2be2, #ff3ea5);
     background-size: 200% auto;
     -webkit-background-clip: text;
@@ -160,39 +166,6 @@ body.window-dragging iframe {
     .boot-wordmark {
         animation: none;
     }
-}
-
-/* Blockbench avatar cover — the boot-style loading state shown OVER the raw iframe
-   while the model resolves + loads (stores/blockbench sourceLoading), so the user
-   never sees the iframe warm up or empty Blockbench flash. Lifts on bongle:opened. */
-.bb-loading {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    background: var(--color-desktop);
-}
-.bb-loading-mark {
-    font: 400 clamp(28px, 7vw, 64px) / 1 "Geist Pixel", ui-monospace, monospace;
-    background-image: linear-gradient(90deg, #ff3ea5, #ffd23f, #3fa7ff, #8a2be2, #ff3ea5);
-    background-size: 200% auto;
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    animation: bongle-rainbow-slide 2s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-    .bb-loading-mark {
-        animation: none;
-    }
-}
-.bb-loading-label {
-    font: 400 12px / 1 ui-monospace, monospace;
-    color: var(--color-fg-muted, #8a8a8a);
 }
 
 /* a little terminal box under the wordmark: square, bordered, title bar with
