@@ -163,13 +163,10 @@ export const RigidBodyTrait = trait('rigidbody', {
      */
     prediction: true,
 
-    /**
-     * canonical velocity. pre-tick trait→body push + post-tick body→trait
-     * pull. doubles as the pre-body inbox: network unpack writes here, and
-     * the first pre-tick push after the body comes online applies the
-     * buffered value.
-     */
+    /** canonical linear velocity. */
     linearVelocity: vec3.create() as Vec3,
+
+    /** canonical angular velocity. */
     angularVelocity: vec3.create() as Vec3,
 });
 
@@ -221,6 +218,7 @@ sync(RigidBodyTrait, 'linear-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
+    authority: 'owner',
     dirty: dirty.diff(), // byte-stable when the body sleeps → silent
     rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
 });
@@ -231,6 +229,7 @@ sync(RigidBodyTrait, 'angular-velocity', {
     unpack: (v, t) => {
         vec3.copy(t.angularVelocity, v as Vec3);
     },
+    authority: 'owner',
     dirty: dirty.diff(), // byte-stable when the body sleeps → silent
     rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
 });
