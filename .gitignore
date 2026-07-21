@@ -10,6 +10,11 @@ vendor
 editor-node-modules.zip
 .tsbuild-cache
 
+# `bongle build` output (default bundle.zip) + `bongle start`'s unpacked bundle,
+# produced in whatever project dir the CLI runs from (e.g. a game under games/).
+bundle.zip
+.bongle-run
+
 .DS_Store
 **/.DS_Store
 
