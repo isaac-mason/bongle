@@ -11,6 +11,7 @@ import { useBlockbench } from '../stores/blockbench';
 import { MAIN_PANE, useEditor } from '../stores/editor';
 import { useLaunched } from '../stores/launched';
 import { useSystemWindows } from '../stores/system-windows';
+import { BLOCKBENCH_VERSION } from './blockbench-version';
 import { AUDIO_EXTS } from './audio-mime';
 import { AudioPlayer } from './components/AudioPlayer';
 import { Blockbench } from './components/Blockbench';
@@ -86,7 +87,7 @@ export const blockbenchApp: AppDef = {
     title: 'blockbench',
     // the real Blockbench logo from the embedded static build (base-relative so it
     // resolves under the deployed /static/bongle-editor/ subpath too).
-    glyph: <img src={`${import.meta.env.BASE_URL}static/blockbench/favicon.png`} alt="" className="h-[18px] w-[18px]" />,
+    glyph: <img src={`${import.meta.env.BASE_URL}static/blockbench/${BLOCKBENCH_VERSION}/favicon.png`} alt="" className="h-[18px] w-[18px]" />,
     handles: ['bbmodel'],
     initial: { w: 960, h: 640 },
     singleton: true,

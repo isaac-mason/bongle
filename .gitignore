@@ -15,3 +15,8 @@ editor-node-modules.zip
 
 # World C dependency prebundle (build artifact, seeded into editor vfs)
 deps-dist/
+
+# Assembled Blockbench bundle (build output of `pnpm run blockbench:build`).
+# Rebuilt in dev.sh + the website Dockerfile — NOT committed (the hashed asset
+# tree would bloat history).
+editor/public/static/blockbench/

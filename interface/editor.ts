@@ -22,7 +22,7 @@
  *  INTERFACE_VERSION — they evolve independently). The editor announces its
  *  value in `bongle:ready`; the platform announces its own in `bongle:init`, so
  *  either side can warn / degrade when the peer's major differs. */
-export const EDITOR_INTERFACE_VERSION = '1.1.0';
+export const EDITOR_INTERFACE_VERSION = '1.2.0';
 
 /** whether two EDITOR_INTERFACE_VERSION values can bridge. The contract has
  *  stabilised to same-major-compatible per rule #1: minor/patch changes are
@@ -122,6 +122,14 @@ export type PlatformMessage =
     /** configure the editor for its purpose. `version` is the platform's
      *  EDITOR_INTERFACE_VERSION (optional until wired). */
     | { type: 'bongle:init'; version?: string; intent: PlatformIntent }
+    /** a cheap "hold on" ack, sent the moment the platform sees `bongle:ready` and
+     *  BEFORE it has resolved the intent — resolving it can need a network fetch (an
+     *  avatar remix downloads its .bbmodel source first), which may outlast the
+     *  editor's standalone-fallback timeout. It tells the editor a real platform IS
+     *  answering, so the editor stops that timer and waits for the (possibly slow)
+     *  `bongle:init` rather than booting standalone. Optional: an editor bundle that
+     *  predates it just ignores it and keeps the timeout. */
+    | { type: 'bongle:init-pending' }
     /** outcome of the editor's last hand-back (version/build/avatar-export). A save
      *  (`of: 'version'`) AND a build (`of: 'build'`) both mint a manual version and
      *  carry its `versionId`/`rev`, so the editor rebases its draft to
@@ -140,6 +148,12 @@ export type PlatformMessage =
           buildId?: string;
           dashboardUrl?: string;
       }
+    /** deliver an avatar's source AFTER a `bongle:init { kind:'avatar' }`, so the editor
+     *  can boot Blockbench immediately and load the model when it arrives (resolving the
+     *  source can need a download — a remixed/edited version). `bbmodel` null = there's
+     *  no source, use the editor's bundled starter rig. `name` is the avatar's display
+     *  name, used to seed the Save dialog. Sent exactly once per avatar session. */
+    | { type: 'bongle:source'; bbmodel: string | null; name?: string }
     /** ask the editor to run its Save-version action now (export the source → hand it
      *  back as `bongle:version`). Lets the platform drive a prominent "save this to
      *  bongle" CTA from outside the iframe (e.g. on an anonymous local-only draft). */

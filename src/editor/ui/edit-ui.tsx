@@ -232,7 +232,10 @@ function EditUI() {
     }, []);
 
     return (
-        <div className="fixed inset-0 flex flex-col">
+        // color-scheme: dark makes native scrollbars (and form controls)
+        // render dark to match the editor theme; it inherits to every
+        // scroll container mounted below this root.
+        <div className="fixed inset-0 flex flex-col" style={{ colorScheme: 'dark' }}>
             <TopToolbar />
 
             {/* content area, fills remaining height */}

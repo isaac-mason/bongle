@@ -40,7 +40,13 @@ export async function start(opts: StartPipelineOptions): Promise<PipelineBootRes
     env.client = false;
     env.server = true;
     env.editor = true;
-    await opts.userEntry();
+    // Resilience: a user module that throws at eval must NOT abort the bake — the
+    // atlas / models / audio still generate from whatever registered before the throw.
+    try {
+        await opts.userEntry();
+    } catch (err) {
+        console.error(`[dev:pipeline] user code threw at eval — baking what registered so far: ${(err as Error).message}`);
+    }
 
     const fs = openNodeFs(opts.projectDir);
     const pipeline = AssetPipeline.init({

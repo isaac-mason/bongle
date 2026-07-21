@@ -372,6 +372,11 @@ export async function load(state: EngineClient) {
     const [audioResources] = await Promise.all([audioPromise, spriteLoadPromise, voxelLoadPromise]);
 
     state.audioResources = audioResources!;
+    // the AudioContext is built suspended and browsers only start it after a
+    // user gesture; wake it on the first pointer/key/touch so world-load
+    // ambience and programmatically-triggered sounds (e.g. the editor preview
+    // boot inside the same-origin iframe) aren't silently dropped.
+    Audio.installGestureUnlock(state.audioResources);
 
     // Both extruded-sprite and particle materials captured a TextureNode
     // against `state.spriteResources.atlas` *as it was during init()*,

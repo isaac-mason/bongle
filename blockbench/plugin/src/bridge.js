@@ -22,178 +22,183 @@
  *   iframe -> editor: { type: 'bongle:save', path, glb, bbmodel, name, warnings }
  *   iframe -> editor: { type: 'bongle:save-as', uuid, glb, bbmodel, name, warnings }
  *   iframe -> editor: { type: 'bongle:autosave', path, bbmodel }
+ *   iframe -> editor: { type: 'bongle:opened', path }                     model finished loading (lifts the editor's loading cover)
  *   iframe -> editor: { type: 'bongle:save-failed', errors }
  *   iframe -> editor: { type: 'bongle:dirty', path, saved }
  *   iframe -> editor: { type: 'bongle:open-failed', path, error }
  */
 (() => {
-	const IS_EMBEDDED = typeof window !== 'undefined' && window.parent && window.parent !== window;
-	if (!IS_EMBEDDED) return;
+    const IS_EMBEDDED = typeof window !== 'undefined' && window.parent && window.parent !== window;
+    if (!IS_EMBEDDED) return;
 
-	const ORIGIN = window.location.origin;
-	const post = (msg, transfer) => window.parent.postMessage(msg, ORIGIN, transfer);
-	const api = () => (typeof window !== 'undefined' ? window.Bongle : undefined);
-	const projects = () => (typeof ModelProject !== 'undefined' ? ModelProject.all : []);
+    const ORIGIN = window.location.origin;
+    const post = (msg, transfer) => window.parent.postMessage(msg, ORIGIN, transfer);
+    const api = () => (typeof window !== 'undefined' ? window.Bongle : undefined);
+    const projects = () => (typeof ModelProject !== 'undefined' ? ModelProject.all : []);
 
-	function projectForPath(path) {
-		return projects().find((p) => p.bongle_fs_path === path);
-	}
-	function projectByUuid(uuid) {
-		return projects().find((p) => p.uuid === uuid);
-	}
+    function projectForPath(path) {
+        return projects().find((p) => p.bongle_fs_path === path);
+    }
+    function projectByUuid(uuid) {
+        return projects().find((p) => p.uuid === uuid);
+    }
 
-	// compile the ACTIVE project -> { glb, bbmodel, name, warnings } or { errors }.
-	// save the ACTIVE project: to its mapped path, or ask the editor for one.
-	// The .bbmodel source is the source of truth and ALWAYS saves; the glb is a
-	// best-effort derived artefact (an empty/WIP model can't export one, and that
-	// must not block saving the source).
-	async function saveActive() {
-		const project = typeof Project !== 'undefined' ? Project : null;
-		if (!project) return;
-		const B = api();
-		let glb = null;
-		let bbmodel;
-		let name;
-		let warnings = [];
-		try {
-			const art = await B.compileArtifacts(); // { glb, bbmodel, name, warnings }
-			glb = art.glb;
-			bbmodel = art.bbmodel;
-			name = art.name;
-			warnings = art.warnings || [];
-		} catch (err) {
-			// glb export failed (e.g. no geometry yet) — save the source anyway.
-			bbmodel = B.serializeBbmodel();
-			name = project.name || 'model';
-			warnings = [`glb export skipped: ${String((err && err.message) || err)}`];
-		}
-		const path = project.bongle_fs_path;
-		const transfer = glb ? [glb] : [];
-		if (path) {
-			post({ type: 'bongle:save', path, glb, bbmodel, name, warnings }, transfer);
-			project.saved = true; // optimistic — the editor's OPFS write is reliable
-		} else {
-			// untitled: the editor picks a path, then replies bongle:assign-path.
-			post({ type: 'bongle:save-as', uuid: project.uuid, glb, bbmodel, name, warnings }, transfer);
-		}
-	}
+    // compile the ACTIVE project -> { glb, bbmodel, name, warnings } or { errors }.
+    // save the ACTIVE project: to its mapped path, or ask the editor for one.
+    // The .bbmodel source is the source of truth and ALWAYS saves; the glb is a
+    // best-effort derived artefact (an empty/WIP model can't export one, and that
+    // must not block saving the source).
+    async function saveActive() {
+        const project = typeof Project !== 'undefined' ? Project : null;
+        if (!project) return;
+        const B = api();
+        let glb = null;
+        let bbmodel;
+        let name;
+        let warnings = [];
+        try {
+            const art = await B.compileArtifacts(); // { glb, bbmodel, name, warnings }
+            glb = art.glb;
+            bbmodel = art.bbmodel;
+            name = art.name;
+            warnings = art.warnings || [];
+        } catch (err) {
+            // glb export failed (e.g. no geometry yet) — save the source anyway.
+            bbmodel = B.serializeBbmodel();
+            name = project.name || 'model';
+            warnings = [`glb export skipped: ${String((err && err.message) || err)}`];
+        }
+        const path = project.bongle_fs_path;
+        const transfer = glb ? [glb] : [];
+        if (path) {
+            post({ type: 'bongle:save', path, glb, bbmodel, name, warnings }, transfer);
+            project.saved = true; // optimistic — the editor's OPFS write is reliable
+        } else {
+            // untitled: the editor picks a path, then replies bongle:assign-path.
+            post({ type: 'bongle:save-as', uuid: project.uuid, glb, bbmodel, name, warnings }, transfer);
+        }
+    }
 
-	// serialize the ACTIVE project's .bbmodel source and hand it back as a silent
-	// draft snapshot — source only (no glb compile), and it does NOT touch the
-	// saved/dirty state, so the editor's local crash-net can capture in-progress
-	// work without a real Ctrl+S. No-op for an untitled project (no mapped path).
-	function snapshotActive() {
-		const project = typeof Project !== 'undefined' ? Project : null;
-		if (!project || !project.bongle_fs_path) return;
-		const B = api();
-		let bbmodel;
-		try {
-			bbmodel = B.serializeBbmodel();
-		} catch {
-			return; // can't serialize yet — skip this tick, the next edit re-arms it
-		}
-		post({ type: 'bongle:autosave', path: project.bongle_fs_path, bbmodel });
-	}
+    // serialize the ACTIVE project's .bbmodel source and hand it back as a silent
+    // draft snapshot — source only (no glb compile), and it does NOT touch the
+    // saved/dirty state, so the editor's local crash-net can capture in-progress
+    // work without a real Ctrl+S. No-op for an untitled project (no mapped path).
+    function snapshotActive() {
+        const project = typeof Project !== 'undefined' ? Project : null;
+        if (!project || !project.bongle_fs_path) return;
+        const B = api();
+        let bbmodel;
+        try {
+            bbmodel = B.serializeBbmodel();
+        } catch {
+            return; // can't serialize yet — skip this tick, the next edit re-arms it
+        }
+        post({ type: 'bongle:autosave', path: project.bongle_fs_path, bbmodel });
+    }
 
-	function openFile(path, bbmodel) {
-		const existing = projectForPath(path);
-		if (existing) {
-			existing.select();
-			return;
-		}
-		const name = path.split('/').pop();
-		api().loadBbmodel(bbmodel, name); // creates + selects a new project (tab)
-		if (typeof Project !== 'undefined' && Project) {
-			Project.bongle_fs_path = path;
-			Project.name = name;
-			Project.saved = true;
-		}
-	}
+    function openFile(path, bbmodel) {
+        const existing = projectForPath(path);
+        if (existing) {
+            existing.select();
+            // ack so the editor can lift its "loading avatar…" cover (it boots Blockbench
+            // covered, then loads the model when the platform resolves the source).
+            post({ type: 'bongle:opened', path });
+            return;
+        }
+        const name = path.split('/').pop();
+        api().loadBbmodel(bbmodel, name); // creates + selects a new project (tab)
+        if (typeof Project !== 'undefined' && Project) {
+            Project.bongle_fs_path = path;
+            Project.name = name;
+            Project.saved = true;
+        }
+        post({ type: 'bongle:opened', path });
+    }
 
-	function handle(event) {
-		if (event.source !== window.parent || event.origin !== ORIGIN) return;
-		const data = event.data;
-		if (!data || typeof data !== 'object') return;
-		if (data.type === 'bongle:hello') {
-			announceWhenReady();
-			return;
-		}
-		const B = api();
-		if (!B || !B.ready) return; // pre-ready commands are a race we ignore
-		switch (data.type) {
-			case 'bongle:open':
-				try {
-					openFile(data.path, data.bbmodel);
-				} catch (err) {
-					post({ type: 'bongle:open-failed', path: data.path, error: String((err && err.message) || err) });
-				}
-				return;
-			case 'bongle:save-active':
-				void saveActive();
-				return;
-			case 'bongle:autosave-request':
-				snapshotActive();
-				return;
-			case 'bongle:assign-path': {
-				const p = projectByUuid(data.uuid);
-				if (p) {
-					p.bongle_fs_path = data.path;
-					p.name = data.path.split('/').pop();
-					p.saved = true;
-				}
-				return;
-			}
-		}
-	}
+    function handle(event) {
+        if (event.source !== window.parent || event.origin !== ORIGIN) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'bongle:hello') {
+            announceWhenReady();
+            return;
+        }
+        const B = api();
+        if (!B || !B.ready) return; // pre-ready commands are a race we ignore
+        switch (data.type) {
+            case 'bongle:open':
+                try {
+                    openFile(data.path, data.bbmodel);
+                } catch (err) {
+                    post({ type: 'bongle:open-failed', path: data.path, error: String((err && err.message) || err) });
+                }
+                return;
+            case 'bongle:save-active':
+                void saveActive();
+                return;
+            case 'bongle:autosave-request':
+                snapshotActive();
+                return;
+            case 'bongle:assign-path': {
+                const p = projectByUuid(data.uuid);
+                if (p) {
+                    p.bongle_fs_path = data.path;
+                    p.name = data.path.split('/').pop();
+                    p.saved = true;
+                }
+                return;
+            }
+        }
+    }
 
-	// ── save interception + dirty tracking ──────────────────────────────────
-	let wired = false;
-	function wire() {
-		if (wired) return;
-		// Ctrl+S (export_over) and File > Save (save_project) both route to us.
-		if (typeof BarItems !== 'undefined') {
-			for (const id of ['export_over', 'save_project']) {
-				if (BarItems[id]) BarItems[id].click = () => void saveActive();
-			}
-			// The standalone "Export Bongle glTF" file-download is confusing in the
-			// embed (saving goes through the editor) — the generic plugin adds it.
-			if (BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) BarItems.bongle_export_gltf.delete();
-		}
-		if (typeof Blockbench !== 'undefined' && Blockbench.on) {
-			Blockbench.on('saved_state_changed', ({ project, saved }) => {
-				if (project && project.bongle_fs_path) post({ type: 'bongle:dirty', path: project.bongle_fs_path, saved });
-			});
-		}
-		// Robust Ctrl/Cmd+S: overriding the export_over/save_project actions above
-		// only works if Blockbench's own keybind fires — which can miss (Cmd vs
-		// Ctrl on macOS, or the format's export condition), letting the browser's
-		// "save page" dialog through. Capture the shortcut ourselves (capture phase,
-		// so it beats both Blockbench and the browser) and route to the editor save.
-		window.addEventListener(
-			'keydown',
-			(e) => {
-				if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
-					e.preventDefault();
-					e.stopPropagation();
-					void saveActive();
-				}
-			},
-			true,
-		);
-		wired = true;
-	}
+    // ── save interception + dirty tracking ──────────────────────────────────
+    let wired = false;
+    function wire() {
+        if (wired) return;
+        // Ctrl+S (export_over) and File > Save (save_project) both route to us.
+        if (typeof BarItems !== 'undefined') {
+            for (const id of ['export_over', 'save_project']) {
+                if (BarItems[id]) BarItems[id].click = () => void saveActive();
+            }
+            // The standalone "Export Bongle glTF" file-download is confusing in the
+            // embed (saving goes through the editor) — the generic plugin adds it.
+            if (BarItems.bongle_export_gltf && BarItems.bongle_export_gltf.delete) BarItems.bongle_export_gltf.delete();
+        }
+        if (typeof Blockbench !== 'undefined' && Blockbench.on) {
+            Blockbench.on('saved_state_changed', ({ project, saved }) => {
+                if (project && project.bongle_fs_path) post({ type: 'bongle:dirty', path: project.bongle_fs_path, saved });
+            });
+        }
+        // Robust Ctrl/Cmd+S: overriding the export_over/save_project actions above
+        // only works if Blockbench's own keybind fires — which can miss (Cmd vs
+        // Ctrl on macOS, or the format's export condition), letting the browser's
+        // "save page" dialog through. Capture the shortcut ourselves (capture phase,
+        // so it beats both Blockbench and the browser) and route to the editor save.
+        window.addEventListener(
+            'keydown',
+            (e) => {
+                if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void saveActive();
+                }
+            },
+            true,
+        );
+        wired = true;
+    }
 
-	function announceWhenReady() {
-		const B = api();
-		if (B && B.ready) {
-			wire();
-			post({ type: 'bongle:ready' });
-			return;
-		}
-		setTimeout(announceWhenReady, 60); // window.Bongle not live yet — poll briefly
-	}
+    function announceWhenReady() {
+        const B = api();
+        if (B && B.ready) {
+            wire();
+            post({ type: 'bongle:ready' });
+            return;
+        }
+        setTimeout(announceWhenReady, 60); // window.Bongle not live yet — poll briefly
+    }
 
-	window.addEventListener('message', handle);
-	if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', announceWhenReady);
-	else announceWhenReady();
+    window.addEventListener('message', handle);
+    if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', announceWhenReady);
+    else announceWhenReady();
 })();

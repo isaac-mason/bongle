@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import type { ClientConnection, ClientHost } from '../realms/client/client-host';
+import { useServer } from './server';
 import { useWindows } from './windows';
 
 export type ClientWindow = { id: string; title: string; connection: ClientConnection };
@@ -26,7 +27,16 @@ export const useClients = create<ClientsStore>((set, get) => ({
     setHost: (host) => set({ host }),
     open: () => {
         const host = get().host;
-        if (!host) return '';
+        if (!host) {
+            // Avatar mode, pre-preview: the realm stack isn't up yet. Start it, then
+            // open once the server + client host exist. (Cross-store call at run time,
+            // not module-eval, so the server↔clients import cycle is fine.)
+            void useServer
+                .getState()
+                .start()
+                .then(() => get().open());
+            return '';
+        }
         const connection = host.createClient();
         const id = `client:${connection.connectionId}`;
         const off = (count++ % 6) * 28;

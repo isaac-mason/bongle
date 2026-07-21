@@ -27,6 +27,10 @@ export type PlatformBridge = {
     /** subscribe to the platform's "save now" request (its CTA to persist the current
      *  draft as a version); returns an unsubscribe fn. */
     onRequestSave: (cb: () => void) => () => void;
+    /** subscribe to the avatar source delivered after `bongle:init` (an avatar session
+     *  boots Blockbench first, then loads the model when it arrives). `bbmodel` null =
+     *  no source → use the bundled starter. Returns an unsubscribe fn. */
+    onSource: (cb: (bbmodel: string | null, name?: string) => void) => () => void;
     /** ask the platform to open this session to multiplayer — it calls
      *  /api/edit/host and resolves with the relay url + share link. Rejects when
      *  standalone (no platform to make the authenticated call). */
@@ -37,6 +41,10 @@ export function createPlatformBridge(): PlatformBridge {
     const parent = window.parent !== window ? window.parent : null;
     const resultCbs = new Set<(r: PlatformResult) => void>();
     const requestSaveCbs = new Set<() => void>();
+    const sourceCbs = new Set<(bbmodel: string | null, name?: string) => void>();
+    // the last source the platform sent, so a subscriber that attaches AFTER it arrived
+    // (a fast local source can beat the boot's onSource wiring) still gets it.
+    let latestSource: { bbmodel: string | null; name?: string } | undefined;
     // in-flight open-multiplayer request (one at a time — the host opens once).
     let multiplayerPending: { resolve: (v: { url: string; shareUrl: string }) => void; reject: (e: Error) => void } | null = null;
     let embedded = false;
@@ -49,6 +57,9 @@ export function createPlatformBridge(): PlatformBridge {
             return;
         }
         let settled = false;
+        // a platform has acked `ready` (bongle:init-pending) but hasn't sent its intent
+        // yet — it's fetching the source. While true, we DON'T fall back to standalone.
+        let platformAnswering = false;
         window.addEventListener('message', (e: MessageEvent) => {
             const m = e.data as PlatformMessage | undefined;
             if (!m || typeof m.type !== 'string' || !m.type.startsWith('bongle:')) return;
@@ -62,8 +73,16 @@ export function createPlatformBridge(): PlatformBridge {
                 settled = true;
                 embedded = true;
                 resolve(m.intent);
+            } else if (m.type === 'bongle:init-pending') {
+                // A real platform IS answering — its intent just needs a moment (an
+                // avatar remix fetching its .bbmodel source can exceed INIT_TIMEOUT_MS).
+                // Hold for the real init instead of racing it to standalone.
+                platformAnswering = true;
             } else if (m.type === 'bongle:result') {
                 for (const cb of resultCbs) cb(m);
+            } else if (m.type === 'bongle:source') {
+                latestSource = { bbmodel: m.bbmodel, name: m.name };
+                for (const cb of sourceCbs) cb(m.bbmodel, m.name);
             } else if (m.type === 'bongle:request-save') {
                 for (const cb of requestSaveCbs) cb();
             } else if (m.type === 'bongle:multiplayer-opened') {
@@ -83,6 +102,13 @@ export function createPlatformBridge(): PlatformBridge {
         const started = performance.now();
         const beat = setInterval(() => {
             if (settled) {
+                clearInterval(beat);
+                return;
+            }
+            // a platform acked → it's resolving our intent; stop pinging and wait for
+            // `bongle:init` (which the platform always sends, even on a fetch error) —
+            // never fall back to standalone once we know one is there.
+            if (platformAnswering) {
                 clearInterval(beat);
                 return;
             }
@@ -107,6 +133,11 @@ export function createPlatformBridge(): PlatformBridge {
         onRequestSave: (cb) => {
             requestSaveCbs.add(cb);
             return () => requestSaveCbs.delete(cb);
+        },
+        onSource: (cb) => {
+            sourceCbs.add(cb);
+            if (latestSource) cb(latestSource.bbmodel, latestSource.name);
+            return () => sourceCbs.delete(cb);
         },
         requestMultiplayer: (region) =>
             new Promise((resolve, reject) => {

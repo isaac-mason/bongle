@@ -36,17 +36,27 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // evaluate user code via a ModuleRunner bridged to the bundler worker (it
     // transforms; this realm evaluates → its own engine registry).
     const runner = makeRunner(createPortBridge(bundlerPort));
-    // runtime env flags before user/engine eval (mirrors the realm boot entry).
-    // client=true so this realm can build the client render stack for in-worker
-    // icon rendering (experiment — watch for DOM-assuming client-only code that
-    // breaks in a worker with no document/window).
+    // runtime env flags before user/engine eval. NOT env.client: this is a bake +
+    // icon-render worker with no document/window. The icon render stack is
+    // canvas-less (headless-render builds OffscreenCanvas directly, with no
+    // env.client gate), so it doesn't need it — and env.client=true would make user
+    // scripts' `if (!env.client) return` gameplay guards PASS, running DOM-assuming
+    // gameplay here → it throws. Matches the cli pipeline realm.
     bt.mark('runner built');
     const { env } = await runner.import('bongle/env'); // first bundler fetch
     bt.mark('import bongle/env');
-    env.client = true;
+    env.client = false;
     env.server = true;
     env.editor = true;
-    await runner.import('src/index.ts'); // user declarations register into this realm's engine (full graph)
+    // Resilience: a user module that throws at eval (unguarded top-level DOM, or
+    // gameplay that assumes a running engine) must NOT abort the bake — the atlas /
+    // models / audio still generate from whatever registered before the throw.
+    try {
+        await runner.import('src/index.ts'); // user declarations register into this realm's engine (full graph)
+    } catch (err) {
+        log(`user code threw at eval — baking what registered so far: ${(err as Error).message}`);
+        console.error('[pipeline-worker] user eval failed', err);
+    }
     bt.mark('import src/index.ts (full graph)');
     // registry is populated by the import above — the prod build reads matchmaking
     // off it (see below), since the build itself never evaluates user code.

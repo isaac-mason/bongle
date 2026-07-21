@@ -196,6 +196,72 @@ export async function loadResources(loader: ResourceLoader): Promise<AudioResour
     return makeResources(context, clips, manifest.hash);
 }
 
+/** Wake the AudioContext on the first user gesture, and keep it awake across
+ *  iOS interruptions. Browsers construct the context `suspended` and refuse to
+ *  start any source until a `resume()` runs in (or after) a user gesture.
+ *  `startPlayback` resumes fire-and-forget, but that only lands when the FIRST
+ *  sound is triggered directly by a gesture — world-load ambience, scripted
+ *  plays, and the editor's programmatic preview boot all fire off-gesture,
+ *  leaving the context asleep and the game silent (most visibly inside the
+ *  same-origin editor iframe).
+ *
+ *  iOS/Safari specifics this handles:
+ *   - `resume()` alone doesn't always start the context; synchronously starting
+ *     a one-sample silent BufferSource *inside* the gesture is the reliable
+ *     unlock (the trick howler/tone use). We do both.
+ *   - the context drops into a non-standard `'interrupted'` state when the tab
+ *     backgrounds / a call arrives / the app is swiped away; we re-resume on
+ *     `visibilitychange`/`pageshow`. (`'interrupted'` isn't in the TS
+ *     `AudioContextState` union, hence the `!== 'running' && !== 'closed'`
+ *     checks rather than naming it.)
+ *
+ *  Call once per load; a no-op under SSR / node bake (no `window`). */
+export function installGestureUnlock(resources: AudioResources): void {
+    if (typeof window === 'undefined') return;
+    const { context } = resources;
+
+    // capture phase (like howler): a game-canvas / UI handler that
+    // stopPropagation()s must not be able to starve the unlock.
+    const listenerOpts = { capture: true, passive: true } as const;
+    const events = ['pointerdown', 'touchstart', 'touchend', 'mousedown', 'keydown', 'click'] as const;
+    const detach = () => {
+        for (const type of events) window.removeEventListener(type, onGesture, true);
+    };
+    const onGesture = () => {
+        if (context.state === 'running') return detach();
+        // iOS: resume() alone isn't enough; synchronously starting a silent
+        // one-sample source inside the gesture is what actually unlocks the
+        // graph. resume() covers every other browser. We detach only once the
+        // buffer's `onended` fires — proof the graph really ran (howler's
+        // signal), not just that resume()'s promise settled.
+        try {
+            const source = context.createBufferSource();
+            source.buffer = context.createBuffer(1, 1, 22050);
+            source.connect(context.destination);
+            source.onended = () => {
+                source.disconnect(0);
+                detach();
+            };
+            source.start(0);
+        } catch {
+            /* context closed mid-gesture — nothing to unlock */
+        }
+        void context.resume().catch(() => {});
+    };
+    for (const type of events) window.addEventListener(type, onGesture, listenerOpts);
+
+    // iOS parks the context in 'interrupted' on background/call/app-switch;
+    // wake it when we return to the foreground so already-playing loops resume
+    // without waiting for the next play() call. Lives for the context lifetime
+    // (engine-global), so no teardown.
+    const onForeground = () => {
+        if (document.visibilityState !== 'visible') return;
+        if (context.state !== 'running' && context.state !== 'closed') void context.resume();
+    };
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('pageshow', onForeground);
+}
+
 /** Re-fetch the manifest + atlas and rebuild the clips map IN PLACE, so every
  *  room (each holds the same `resources` ref via `Audio.init`) picks up the new
  *  buffers without a reboot. Returns true when the audio actually moved (the
@@ -383,9 +449,10 @@ function startPlayback(
     if (!clip) return null;
 
     // browsers gate playback on user gesture, resume here. If we're not
-    // called from a gesture this no-ops silently and the source plays
-    // when the context auto-resumes later. fire-and-forget.
-    if (resources.context.state === 'suspended') {
+    // called from a gesture this no-ops silently and the source plays when the
+    // context wakes (see installGestureUnlock). fire-and-forget. `!== running`
+    // (not `=== suspended`) also catches iOS's non-standard 'interrupted'.
+    if (resources.context.state !== 'running' && resources.context.state !== 'closed') {
         void resources.context.resume();
     }
 

@@ -10,14 +10,18 @@
 // Saving is Blockbench-native, so there's no editor chrome here — just the iframe.
 // The iframe side is lib/blockbench's merged plugin.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Filesystem } from '../../fs';
 import { useBlockbench } from '../../stores/blockbench';
 import { useLaunched } from '../../stores/launched';
+import { useWindows } from '../../stores/windows';
+import { BLOCKBENCH_VERSION } from '../blockbench-version';
 
 // base-relative so it resolves at dev root AND under the deployed subpath
 // (/static/bongle-editor/static/blockbench/…) — see editor/vite.config's base.
-const BLOCKBENCH_SRC = `${import.meta.env.BASE_URL}static/blockbench/index.html`;
+// The version segment is a content hash of the bundle (build stamps it): a
+// changed bundle lands at a new path so the whole thing can be cached immutable.
+const BLOCKBENCH_SRC = `${import.meta.env.BASE_URL}static/blockbench/${BLOCKBENCH_VERSION}/index.html`;
 
 type Incoming =
     | { type: 'bongle:ready' }
@@ -25,6 +29,7 @@ type Incoming =
     | { type: 'bongle:save-as'; uuid: string; glb: ArrayBuffer | null; bbmodel: string; name: string; warnings: string[] }
     | { type: 'bongle:autosave'; path: string; bbmodel: string }
     | { type: 'bongle:dirty'; path: string; saved: boolean }
+    | { type: 'bongle:opened'; path: string }
     | { type: 'bongle:save-failed'; errors: string[] }
     | { type: 'bongle:open-failed'; path: string; error: string };
 
@@ -42,14 +47,42 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
     const [ready, setReady] = useState(false);
     const openReq = useBlockbench((s) => s.openReq);
     const dirtyMap = useBlockbench((s) => s.dirty);
+    const sourceLoading = useBlockbench((s) => s.sourceLoading);
     const lastSeq = useRef(-1);
     // debounce handle for the silent source-snapshot request (crash-net autosave).
     const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // a transient "wrote …" confirmation, shown over the iframe after a save.
+    const [savedToast, setSavedToast] = useState<string | null>(null);
+    const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const flashSaved = useCallback((wrote: string) => {
+        setSavedToast(wrote);
+        if (toastTimer.current !== null) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setSavedToast(null), 2500);
+    }, []);
 
     // reflect "any open file unsaved" onto the window chrome (title-bar dot).
     useEffect(() => {
         useLaunched.getState().setDirty(windowId, Object.values(dirtyMap).some(Boolean));
     }, [dirtyMap, windowId]);
+
+    // Robust Ctrl/Cmd+S when the Blockbench WINDOW is active but DOM focus sits in the
+    // parent doc (its title bar, the desktop) rather than inside the iframe. There the
+    // plugin's own in-iframe handler never sees the key, so the browser's "save page"
+    // dialog would fire. Catch it here (capture, so it beats the browser) and ask the
+    // iframe to save the active project. Focus INSIDE the iframe stays the plugin's job
+    // — the parent never receives that keydown, so there's no double-save.
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (!(e.ctrlKey || e.metaKey) || e.altKey || (e.key !== 's' && e.key !== 'S')) return;
+            if (useWindows.getState().focused !== windowId) return;
+            e.preventDefault();
+            iframeRef.current?.contentWindow?.postMessage({ type: 'bongle:save-active' }, window.location.origin);
+        };
+        window.addEventListener('keydown', onKeyDown, true);
+        return () => window.removeEventListener('keydown', onKeyDown, true);
+    }, [windowId]);
+
+    useEffect(() => () => void (toastTimer.current !== null && clearTimeout(toastTimer.current)), []);
 
     useEffect(() => {
         const post = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, window.location.origin);
@@ -72,10 +105,16 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                     case 'bongle:ready':
                         setReady(true);
                         break;
+                    case 'bongle:opened':
+                        // the model finished loading in Blockbench — lift the "loading
+                        // avatar…" cover (avatar mode boots covered until the model is in).
+                        useBlockbench.getState().setSourceLoading(false);
+                        break;
                     case 'bongle:save':
                         await fs.write(data.path, data.bbmodel);
                         if (data.glb) await fs.write(glbPathFor(data.path), new Uint8Array(data.glb));
                         useBlockbench.getState().setDirty(data.path, false);
+                        flashSaved(data.glb ? `"${data.path}" + "${glbPathFor(data.path)}"` : `"${data.path}" (glb skipped)`);
                         break;
                     case 'bongle:autosave':
                         // Silent source snapshot: write ONLY the .bbmodel (no glb), and
@@ -91,6 +130,7 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                         if (data.glb) await fs.write(glbPathFor(path), new Uint8Array(data.glb));
                         post({ type: 'bongle:assign-path', uuid: data.uuid, path });
                         useBlockbench.getState().setDirty(path, false);
+                        flashSaved(data.glb ? `"${path}" + "${glbPathFor(path)}"` : `"${path}" (glb skipped)`);
                         break;
                     }
                     case 'bongle:dirty':
@@ -112,7 +152,7 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
             window.removeEventListener('message', onMessage);
             if (autosaveTimer.current !== null) clearTimeout(autosaveTimer.current);
         };
-    }, [fs]);
+    }, [fs, flashSaved]);
 
     // deliver the pending open request once Blockbench is ready (and on each new one).
     useEffect(() => {
@@ -133,16 +173,29 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
     }, [ready, openReq, fs]);
 
     return (
-        <iframe
-            ref={iframeRef}
-            src={BLOCKBENCH_SRC}
-            title="Blockbench"
-            // Blockbench uses a SharedArrayBuffer worker while processing a model,
-            // so this nested iframe needs cross-origin isolation delegated too
-            // (only bites in avatar mode, which auto-loads a .bbmodel — a blank
-            // Blockbench never touches SAB).
-            allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen"
-            className="block h-full w-full border-none"
-        />
+        <div className="relative h-full w-full">
+            <iframe
+                ref={iframeRef}
+                src={BLOCKBENCH_SRC}
+                title="Blockbench"
+                // Blockbench uses a SharedArrayBuffer worker while processing a model,
+                // so this nested iframe needs cross-origin isolation delegated too
+                // (only bites in avatar mode, which auto-loads a .bbmodel — a blank
+                // Blockbench never touches SAB).
+                allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen"
+                className="block h-full w-full border-none"
+            />
+            {sourceLoading && (
+                <div className="bb-loading">
+                    <div className="bb-loading-mark">bongle</div>
+                    <div className="bb-loading-label">loading avatar…</div>
+                </div>
+            )}
+            {savedToast && (
+                <div className="pointer-events-none absolute bottom-2 right-2 border border-border bg-background px-2 py-1 text-xs">
+                    <span className="font-semibold">Saved</span> <span className="font-mono text-muted">wrote {savedToast}</span>
+                </div>
+            )}
+        </div>
     );
 }
