@@ -146,7 +146,7 @@ export async function buildAudio(soundsRegistry: KindStore<SoundHandle>, opts: B
     // partition sources, sorted by id for deterministic order (the atlas
     // concatenation order — and thus its offsets — follows this).
     const all = [...soundsRegistry.byId.entries()]
-        .map(([id, h]) => ({ id, src: h.payload.src, long: h.payload.long }))
+        .map(([id, h]) => ({ id, src: h.src, long: h.long }))
         .sort((a, b) => a.id.localeCompare(b.id));
 
     if (all.length === 0) {

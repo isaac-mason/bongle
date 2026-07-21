@@ -411,6 +411,15 @@ export const WireTable = pack.object({
     traits: pack.list(pack.string()),
     /** command ids in sort-by-id order. */
     commands: pack.list(pack.string()),
+    /**
+     * per-trait sync ids in the sender's own slot order, parallel to `traits`
+     * (`syncs[i]` describes `traits[i]`). the sender packs sync slices keyed by
+     * its LOCAL slot; the receiver uses this to map each slot back to its sync
+     * id and thence to its own local slot, so a differing sync subset/order
+     * between the two bundles can't misalign fields. `controls` likewise.
+     */
+    syncs: pack.list(pack.list(pack.string())),
+    controls: pack.list(pack.list(pack.string())),
 });
 
 export type WireTable = pack.SchemaType<typeof WireTable>;

@@ -857,7 +857,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 
     if (bitset.has(node._bitset, traitSlot)) {
         if (scene?.runtime) {
-            const def = registry.traitsBySlot.get(traitSlot);
+            const def = registry.slotToTrait.get(traitSlot);
             if (def) disposeTraitScripts(scene.runtime, node, def);
         }
 
@@ -888,7 +888,7 @@ export function removeTraitBySlot(node: Node, traitSlot: number): void {
 export function addTraitBySlot(node: Node, traitSlot: number, props?: Record<string, unknown>): TraitBase | null {
     const scene = node.scene;
 
-    const def = registry.traitsBySlot.get(traitSlot);
+    const def = registry.slotToTrait.get(traitSlot);
     if (!def) return null;
 
     const instance = buildTraitInstance(def, props);
@@ -1014,7 +1014,7 @@ export function initSceneTree(sceneTree: SceneTree): void {
     // engine-client sets sceneTree.runtime and calls initSceneTree to instantiate)
     for (const node of sceneTree.nodes) {
         for (const [traitSlot, trait] of node._traits) {
-            const def = registry.traitsBySlot.get(traitSlot);
+            const def = registry.slotToTrait.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
             instantiateTraitScripts(sceneTree.runtime, node, trait, def);
         }
@@ -1247,7 +1247,7 @@ function registerSubtree(sceneTree: SceneTree, node: Node): void {
         // create script instances for every trait on this node
         if (sceneTree.runtime) {
             for (const [traitSlot, trait] of n._traits) {
-                const def = registry.traitsBySlot.get(traitSlot);
+                const def = registry.slotToTrait.get(traitSlot);
                 if (!def || def.scripts.length === 0) continue;
                 const created = instantiateTraitScripts(sceneTree.runtime, n, trait, def);
                 for (const i of created) newScriptInstances.push(i);
@@ -1474,7 +1474,7 @@ export type SerializedNode = {
  * only `control()`-decorated fields are serialized. tag traits get `controls: undefined`.
  */
 function serializeTrait(traitSlot: number, instance: TraitBase, options?: SerializeOptions): SerializedTrait | null {
-    const def = registry.traitsBySlot.get(traitSlot);
+    const def = registry.slotToTrait.get(traitSlot);
     if (!def) return null;
     if (options?.persistOnly && !def.persist) return null;
 
@@ -1563,7 +1563,7 @@ export function deserializeNode(data: SerializedNode): Node {
     node.realm = data.realm;
 
     for (const st of data.traits) {
-        const def = registry.traits.byId.get(st.id)?.payload;
+        const def = registry.traits.byId.get(st.id);
         if (!def) {
             console.warn(`[bongle] unresolved trait "${st.id}" on node "${data.name ?? '(unnamed)'}" — preserving raw data`);
             // clone, _unresolvedTraits is read back on re-serialization;
@@ -1743,7 +1743,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     // restore root traits
     if (rootData.traits) {
         for (const st of rootData.traits) {
-            const def = registry.traits.byId.get(st.id)?.payload;
+            const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root node — preserving raw data`);
                 root._unresolvedTraits.set(st.id, { json: st.controls as Record<string, unknown> | undefined });
@@ -1763,7 +1763,7 @@ export function loadSceneTree(sceneTree: SceneTree, data: SerializedSceneTree): 
     // root scripts ride on traits, instantiate per trait if runtime present
     if (sceneTree.runtime) {
         for (const [traitSlot, trait] of root._traits) {
-            const def = registry.traitsBySlot.get(traitSlot);
+            const def = registry.slotToTrait.get(traitSlot);
             if (!def || def.scripts.length === 0) continue;
             const created = instantiateTraitScripts(sceneTree.runtime, root, trait, def);
             for (const i of created) initScriptInstance(i);

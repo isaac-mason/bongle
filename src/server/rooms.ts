@@ -423,14 +423,14 @@ const EDITOR_SERVER_TRAIT_ID = 'editor.server';
 const EDITOR_STATE_TRAIT_ID = 'editor.state';
 
 function attachEditorServerTrait(room: Room): void {
-    const handle = registry.traits.byId.get(EDITOR_SERVER_TRAIT_ID)?.payload.handle;
+    const handle = registry.traits.byId.get(EDITOR_SERVER_TRAIT_ID)?.handle;
     if (!handle) return;
     if (hasTrait(room.nodes.root, handle)) return;
     addTrait(room.nodes.root, handle);
 }
 
 function attachEditorStateTrait(node: Node): void {
-    const handle = registry.traits.byId.get(EDITOR_STATE_TRAIT_ID)?.payload.handle;
+    const handle = registry.traits.byId.get(EDITOR_STATE_TRAIT_ID)?.handle;
     if (!handle) return;
     if (hasTrait(node, handle)) return;
     addTrait(node, handle);

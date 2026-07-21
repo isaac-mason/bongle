@@ -8,7 +8,7 @@
 // Both `createRenderRoom` consumers — the live client and this — go through the
 // same `RenderRoomDeps` seam, so block/prefab icon rendering is identical code.
 
-import { registry } from '../core/registry';
+import { registry, reindex } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
@@ -66,6 +66,10 @@ export async function buildRenderDeps(
     ctx: HeadlessRenderContext,
     loader: ResourceLoader,
 ): Promise<{ deps: RenderRoomDeps; dispose: () => void }> {
+    // this path doesn't call engine-client.load(), so rebuild the derived index
+    // fields from the (baked) registrations before reading `blockRegistry`.
+    reindex(registry);
+
     const resources = Resources.init(loader, 'client');
     // no net in a headless render room; scriptRuntime only stores this, and a
     // `local:` room's send no-ops anyway. static handles satisfy the driver shape.

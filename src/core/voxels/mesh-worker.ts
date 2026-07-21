@@ -34,7 +34,7 @@
 // resource. It can be unit-tested by importing this module's `handleMessage`
 // directly with a stub `post` function, see mesh-dispatcher.test.ts.
 
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';
 import { buildMeshInput, type ChunkMeshResult, type MeshOutput, meshChunk } from './chunk-mesher';
 import { unpackMeshTasks } from './mesh-tasks';
@@ -69,7 +69,7 @@ export type MeshWorkerOutMsg =
  *  can call into it after `self.onmessage` dispatches a message. Tests
  *  call `handleMessage` directly with a private `WorkerState`. */
 export type WorkerState = {
-    registry: BlockRegistry | null;
+    registry: Blocks | null;
     registryVersion: number;
     /** persistent chunk mirror the mesher reads — a real `Voxels`, kept current by
      *  packet set/delete (`loadChunk`/`removeChunk`). null until the first
@@ -93,7 +93,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         // table meshChunk reads. The mesher's destructure-then-read
         // pattern at chunk-mesher.ts:1484 is the contract, unset fields
         // (physics, handles) are never accessed.
-        state.registry = decoded as unknown as BlockRegistry;
+        state.registry = decoded as unknown as Blocks;
         state.registryVersion = msg.version;
         // the mirror is a real Voxels; createVoxels needs the registry, so it's
         // built here on first init (kept across rebuilds so the cache survives).

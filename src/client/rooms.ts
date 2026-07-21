@@ -1,6 +1,6 @@
 import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
-import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { mat4, quat } from 'mathcat';
+import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
 import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
@@ -10,7 +10,7 @@ import * as Clock from '../core/clock';
 import * as Debug from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
-import { registry, type WireIndex } from '../core/registry';
+import { registry, type InboundProtocol } from '../core/registry';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import { unpackSceneTree } from '../core/scene/scene-pack';
@@ -22,7 +22,6 @@ import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import { useEditor } from '../editor/editor-store';
 import type * as CloudResourcesNs from '../render/cloud-resources';
 import * as Environment from '../render/environment';
-import * as Interpolation from '../render/interpolation';
 import * as ModelLighting from '../render/model-lighting';
 import type * as ModelResourcesNs from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
@@ -50,8 +49,8 @@ import type { EngineClient } from './engine-client';
 import * as Input from './input';
 import * as Net from './net';
 import * as Replication from './replication';
-import { useClient } from './ui/client-store';
 import { UILayer } from './ui-layers';
+import { useClient } from './ui/client-store';
 
 /* ── ClientRoom ─────────────────────────────────────────────────── */
 
@@ -239,11 +238,6 @@ export type ClientRoom = {
      *  after `Visibility.update` so off-screen models skip the sample. */
     modelLighting: ModelLighting.ModelLighting;
 
-    /** per-room interpolation state, owns the scratch buffers used by
-     *  `Interpolation.snapshot` / `Interpolation.interpolate`. participants
-     *  are managed via `setInterpolation(node, on)`. */
-    interpolation: Interpolation.Interpolation;
-
     /** per-room animation state, caches the [AnimatorTrait] query consumed by
      *  `Animation.tick`. */
     animations: Animation.Animations;
@@ -360,7 +354,7 @@ export function unpinRoom(voxelResources: VoxelResourcesNs.VoxelResources, room:
 /** synthetic player id for a headless render room. interpolation needs one, but
  *  no node is owned by it, so every node interpolates uniformly — fine for a
  *  static offscreen frame. */
-const RENDER_ROOM_PLAYER_ID = -1 as PlayerId;
+export const RENDER_ROOM_PLAYER_ID = -1 as PlayerId;
 
 /**
  * A client-only room with the simulation core (`newRoomCore`) + render visuals
@@ -382,7 +376,6 @@ export type RenderRoom = {
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
     modelVisuals: ModelVisuals.ModelVisuals;
     visibility: Visibility.Visibility;
-    interpolation: Interpolation.Interpolation;
     environment: Environment.Environment;
     /** this room's arena tag; its chunks coexist with the world's (index 0). */
     roomLocalIndex: number;
@@ -420,7 +413,6 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, deps.voxelMeshResources, envResources);
     const modelVisuals = ModelVisuals.init(scene, nodes, deps.modelResources, envResources);
     const visibility = Visibility.init();
-    const interpolation = Interpolation.init(nodes, RENDER_ROOM_PLAYER_ID);
     const environment = Environment.init(scene, envResources, ENVIRONMENT_DEFAULT, deps.cloudResources);
 
     // host trait at the root; its env onInit no-ops with no live scene init.
@@ -437,7 +429,6 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         voxelMeshVisuals,
         modelVisuals,
         visibility,
-        interpolation,
         environment,
         roomLocalIndex: deps.allocRoomIndex(),
     };
@@ -575,13 +566,13 @@ export type CreateRoomOptions = {
     audioResources: Audio.AudioResources;
     /** inbound trait wire-index for decoding `packedNodes`, server's
      *  outbound table, mirrored on this client. */
-    inboundTraitWireIndex: WireIndex;
+    inbound: InboundProtocol;
 };
 
 export function createRoom(opts: CreateRoomOptions): ClientRoom {
     const { message } = opts;
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, packedNodes } = message;
-    const { inboundTraitWireIndex } = opts;
+    const { inbound } = opts;
 
     const { nodes, voxels, physics, clock, chat, scriptRuntime } = newRoomCore({
         resources: opts.resources,
@@ -594,7 +585,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
 
     // server-driven path: unpack the wire payload into the fresh scene
     // graph. voxels arrive separately via voxel chunk messages.
-    unpackSceneTree(nodes, scriptRuntime, packedNodes, inboundTraitWireIndex);
+    unpackSceneTree(nodes, scriptRuntime, packedNodes, inbound);
     const playerNode = findPlayerNode(nodes, playerId, roomId);
 
     return createRoomCore({
@@ -749,13 +740,16 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, local } = opts;
     const { nodes, voxels, physics, clock, chat, scriptRuntime, playerNode } = opts;
     const { renderer } = opts;
-    const input: Input.Input = Input.createInput();
+
+    const input = Input.createInput();
 
     const scene = new Scene();
+
     // crisp post-fxaa overlay content (CanvasTrait, world-space HUD). rendered
     // by the engine overlay pass, which shares this room's main-scene depth
     // read-only for occlusion. see Renderer.EngineRenderPipeline.overlayPassNode.
     const overlayScene = new Scene();
+
     // env buffers are engine-global (owned by Renderer); per-room env state
     // lives in its own CPU shadow on `Environment` (below) and only flushes
     // to these buffers when this room is the active one.
@@ -824,12 +818,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // shadow). the env GPU buffers in `environmentResources` are engine-
     // global; this Environment's `applyTime`/`applyConfig` mutate the
     // shadow only and flush to GPU when the room is active.
-    const environment: Environment.Environment = Environment.init(
-        scene,
-        environmentResources,
-        ENVIRONMENT_DEFAULT,
-        opts.cloudResources,
-    );
+    const environment = Environment.init(scene, environmentResources, ENVIRONMENT_DEFAULT, opts.cloudResources);
 
     // per-room audio coordinator. master gain + active-playback set are
     // owned by the room (disposeRoom tears them down); the underlying
@@ -846,9 +835,11 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     const syncSnapshots = Replication.createSyncSnapshots();
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, opts.voxelResources);
+
     // metrics seed from the current debugOpen so rooms created mid-session pick
     // up the right state; engine-client's subscription flips them on later toggles.
     const metricsEnabled = useClient.getState().debugOpen;
+
     const clientMetrics = Debug.createMetrics(metricsEnabled);
     const serverMetrics = Debug.createMetrics(metricsEnabled);
     const clientLogs = Debug.createLogs();
@@ -861,36 +852,20 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
     // panels are DOM and unaffected by the scene argument. the scene depth node
     // lets canvas materials discard fragments occluded by world geometry.
-    const domUi: DomUi.DomUi = DomUi.init(overlayScene, viewport, nodes, renderer.pipeline.sceneDepthNode);
+    const domUi = DomUi.init(overlayScene, viewport, nodes, renderer.pipeline.sceneDepthNode);
 
     // append touchOverlay after DomUi.init created the html overlay; their
     // paint order is set by UILayer z-index, not by DOM order.
     viewport.appendChild(touchOverlay);
 
-    const spriteVisuals: SpriteVisuals.SpriteVisuals = SpriteVisuals.init(
-        scene,
-        nodes,
-        opts.spriteResources,
-        environmentResources,
-    );
-    const extrudedSpriteVisuals: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals = ExtrudedSpriteVisuals.init(
-        scene,
-        nodes,
-        opts.extrudedSpriteResources,
-        environmentResources,
-    );
-    const shadowVisuals: ShadowVisuals.ShadowVisuals = ShadowVisuals.init(scene, nodes, opts.shadowResources);
+    const spriteVisuals = SpriteVisuals.init(scene, nodes, opts.spriteResources, environmentResources);
+    const extrudedSpriteVisuals = ExtrudedSpriteVisuals.init(scene, nodes, opts.extrudedSpriteResources, environmentResources);
+    const shadowVisuals = ShadowVisuals.init(scene, nodes, opts.shadowResources);
     const particles = Particles.init();
-    const particleVisuals: ParticleVisuals.ParticleVisuals = ParticleVisuals.init(
-        scene,
-        opts.spriteResources,
-        opts.particleResources,
-        environmentResources,
-    );
+    const particleVisuals = ParticleVisuals.init(scene, opts.spriteResources, opts.particleResources, environmentResources);
 
     const visibility = Visibility.init();
     const modelLighting = ModelLighting.init(nodes);
-    const interpolation = Interpolation.init(nodes, playerId);
     const animations = Animation.init(nodes);
 
     const room: ClientRoom = {
@@ -938,7 +913,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         particleVisuals,
         visibility,
         modelLighting,
-        interpolation,
         animations,
         input,
         canvas,
@@ -967,8 +941,8 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * relies on `unpackSceneTree` clearing existing children + script
  * instances before rebuilding.
  */
-export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inboundTraitWireIndex: WireIndex): void {
-    unpackSceneTree(room.nodes, room.scriptRuntime, message.packedNodes, inboundTraitWireIndex);
+export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inbound: InboundProtocol): void {
+    unpackSceneTree(room.nodes, room.scriptRuntime, message.packedNodes, inbound);
 
     // unpackSceneTree clears root._traits and rebuilds from the wire,
     // which never carries WorldTrait (persist: false). re-attach so the
@@ -997,11 +971,7 @@ export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message
  * build the per-room default camera node. used at room creation and again
  * on resync (since unpackSceneTree clears the existing tree).
  */
-function createDefaultCameraNode(
-    nodes: SceneTree.SceneTree,
-    playerNode: SceneTree.Node,
-    playerMode: PlayerMode,
-): SceneTree.Node {
+function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTree.Node, playerMode: PlayerMode): SceneTree.Node {
     const node = SceneTree.createNode({ name: `${playerNode.name}:camera`, persist: false });
     SceneTree.addTrait(node, TransformTrait);
     SceneTree.addTrait(node, CameraTrait);
@@ -1088,7 +1058,7 @@ export type StartLocalRoomOptions = {
  */
 export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     const { state, sceneId, playerMode, roomMode, clientId } = opts;
-    const handle = registry.scenes.byId.get(sceneId)?.payload;
+    const handle = registry.scenes.byId.get(sceneId);
     if (!handle) {
         throw new Error(`[bongle] startLocalRoom: scene '${sceneId}' is not declared`);
     }

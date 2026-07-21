@@ -190,17 +190,17 @@ export async function runAssetPipelinePass(
         const defs = new Map<string, BlockDef>();
         const handles = new Map<string, BlockHandle>();
         for (const [id, h] of registry.blocks.byId) {
-            handles.set(id, h.payload);
-            defs.set(id, h.payload._def);
+            handles.set(id, h);
+            defs.set(id, h._def);
         }
         const blockTextures = new Map<string, BlockTextureDef>();
-        for (const [id, h] of registry.blockTextures.byId) blockTextures.set(id, h.payload);
+        for (const [id, h] of registry.blockTextures.byId) blockTextures.set(id, h);
         const models = new Map<string, ModelHandle>();
-        for (const [id, h] of registry.models.byId) models.set(id, h.payload);
+        for (const [id, h] of registry.models.byId) models.set(id, h);
 
         const blocks = internal.buildBlockRegistry(defs, handles, blockTextures);
         const scenes = new Map<string, SceneHandle>();
-        for (const [id, h] of registry.scenes.byId) scenes.set(id, h.payload);
+        for (const [id, h] of registry.scenes.byId) scenes.set(id, h);
         moduleView = { blocks, blockTextures, models, scenes };
     }
 
@@ -256,7 +256,7 @@ export async function runAssetPipelinePass(
         // caller to read; dev pipeline reads the same registry directly off
         // bongle/internal.
         const matchmakingEntry = registry.matchmaking.byId.get('main');
-        state.matchmakingConfig = matchmakingEntry?.payload ?? { maxPlayers: 10 };
+        state.matchmakingConfig = matchmakingEntry ?? { maxPlayers: 10 };
     }
 
     state.blocks = blocksRev;

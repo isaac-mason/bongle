@@ -6,14 +6,14 @@
  * shape. user-facing APIs (`block()`, `trait()`, …) upsert into the
  * relevant per-kind `KindStore` via the primitives in this file; engine
  * consumers read `registry.blocks.byId.get(id)`, `registry.blockRegistry`,
- * `registry.commandWireIndex`, etc. dispatch (`client/registry-dispatch.ts`,
- * `server/registry-dispatch.ts`) drains each store's `pendingChanges` and
- * calls `Registry.bumpVersion(registry)` once at the end of each flush.
+ * `registry.protocol.commands`, etc.
  *
- * derived views (`blockRegistry`, `traitsBySlot`, `commandWireIndex`,
- * `traitWireIndex`) memoise against the source kind's `revision` and
- * recompute lazily on next read. there is no `ProjectModule` snapshot,
- * the singleton itself is the read surface.
+ * the derived index fields (`blockRegistry`, `slotToTrait`, `protocol`) are
+ * PLAIN DATA rebuilt by `reindex(registry)` — once at engine boot (after user
+ * modules register, before runtime) and again at the end of each dev flush
+ * (`client/registry-dispatch.ts`, `server/registry-dispatch.ts`, which also
+ * drain `pendingChanges` + `bumpVersion`). registrations only change at those
+ * two moments, so plain fields refreshed there need no getter or revision key.
  */
 
 import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
@@ -29,35 +29,36 @@ import type { ScriptDef } from './scene/scripts';
 import type { ControlDef, SyncDef, TraitDef } from './scene/traits';
 import type { SoundHandle } from './sounds/sounds';
 import type { SpriteHandle } from './sprites/sprites';
-import { type BlockRegistry, buildBlockRegistry } from './voxels/block-registry';
+import { type Blocks, buildBlockRegistry } from './voxels/block-registry';
 import { type BlockDef, type BlockHandle, type BlockModel, type BlockTextureDef, collectModelTextureIds } from './voxels/blocks';
 
 /* ── primitive types ────────────────────────────────────────────── */
 
-export type Handle<T> = {
-    readonly id: string;
-    readonly module: string;
-    payload: T;
+/** HMR bookkeeping for one entry, parallel to `byId`. Only the reload path
+ *  (change detection + passive deletion) reads it; runtime reads `byId`
+ *  directly. `module` = owning module; `version` bumps per content change;
+ *  `hash` is the last content fingerprint. */
+export type EntryMeta = {
+    module: string;
     version: number;
     hash: string;
 };
 
-export type Change<T> =
-    | { kind: 'added'; handle: Handle<T> }
-    | { kind: 'changed'; handle: Handle<T> }
-    | { kind: 'removed'; handle: Handle<T> };
+export type Change<T> = { kind: 'added' | 'changed' | 'removed'; id: string; payload: T };
 
 /**
  * per-kind storage. one of these per declared kind on the unified
- * `Registry`. carries its own byId map, ownership bookkeeping,
- * pending-change queue, monotonic revision counter, and the kind-specific
- * `hash` / `diff` / `extractDeps` functions.
+ * `Registry`. `byId` maps id → payload DIRECTLY (dumb data, the runtime read
+ * surface); `meta` holds the parallel HMR bookkeeping. carries ownership
+ * bookkeeping, a pending-change queue, a monotonic revision counter, and the
+ * kind-specific `hash` / `diff` / `extractDeps` functions.
  */
-export type KindStore<T> = {
-    readonly name: string;
-    byId: Map<string, Handle<T>>;
-    byModule: Map<string, Set<string>>;
-    pending: Map<string, Set<string>>;
+export type RegistryStore<T> = {
+    name: string;
+    byId: Map<string, T>;
+    meta: Map<string, EntryMeta>;
+    moduleToIds: Map<string, Set<string>>;
+    seen: Map<string, Set<string>>;
     pendingChanges: Array<Change<T>>;
     /**
      * monotonic counter bumped every time a change is appended to
@@ -86,18 +87,7 @@ export type KindStore<T> = {
      * invisible to `Function.prototype.toString()`). called on every
      * add/change so the DepGraph reflects the current reality.
      */
-    extractDeps?: (payload: T) => DepKey[];
-    /**
-     * when true, every `upsert` call overwrites `byId.<id>.payload` with
-     * the freshly-passed payload, even when the hash is unchanged (no
-     * `changed` event fires in that case). used by stores whose payload
-     * carries mutable sibling collections, TraitDef's controls / sync /
-     * scripts arrays are repopulated on every module re-eval by the
-     * per-kind registrars; without identity replacement, the registry
-     * would keep returning the previous-run def with stale collections
-     * while user-code variables hold the freshly-built one.
-     */
-    replaceIdentity?: boolean;
+    deps?: (payload: T) => DepKey[];
 };
 
 export type KindStoreOptions<T> = {
@@ -105,7 +95,6 @@ export type KindStoreOptions<T> = {
     diff?: (a: T, b: T) => boolean;
     hash: (t: T) => string;
     extractDeps?: (payload: T) => DepKey[];
-    replaceIdentity?: boolean;
 };
 
 /* ── hashing ────────────────────────────────────────────────────── */
@@ -165,18 +154,18 @@ function wholesaleDiff<T>(hash: (t: T) => string): (a: T, b: T) => boolean {
 
 /* ── kind store construction ────────────────────────────────────── */
 
-function createKindStore<T>(opts: KindStoreOptions<T>): KindStore<T> {
-    const store: KindStore<T> = {
+function createRegistryStore<T>(opts: KindStoreOptions<T>): RegistryStore<T> {
+    const store: RegistryStore<T> = {
         name: opts.name,
         byId: new Map(),
-        byModule: new Map(),
-        pending: new Map(),
+        meta: new Map(),
+        moduleToIds: new Map(),
+        seen: new Map(),
         pendingChanges: [],
         revision: 0,
         diff: opts.diff,
         hash: opts.hash,
-        extractDeps: opts.extractDeps,
-        replaceIdentity: opts.replaceIdentity,
+        deps: opts.extractDeps,
     };
 
     onModulePush((moduleId) => {
@@ -193,33 +182,34 @@ function createKindStore<T>(opts: KindStoreOptions<T>): KindStore<T> {
  * clears the per-module pending set so passive removal can detect
  * vanished ids at endModuleRun. called via the module-scope push hook.
  */
-function beginModuleRun<T>(store: KindStore<T>, moduleId: string): void {
-    store.pending.set(moduleId, new Set());
+function beginModuleRun<T>(store: RegistryStore<T>, moduleId: string): void {
+    store.seen.set(moduleId, new Set());
 }
 
 /**
  * any id this module owned previously but didn't re-declare this run
  * fires `removed`. called via the module-scope pop hook.
  */
-function endModuleRun<T>(store: KindStore<T>, moduleId: string): void {
-    const seen = store.pending.get(moduleId);
+function endModuleRun<T>(store: RegistryStore<T>, moduleId: string): void {
+    const seen = store.seen.get(moduleId);
     if (!seen) return;
-    const owned = store.byModule.get(moduleId);
+    const owned = store.moduleToIds.get(moduleId);
     if (!owned) {
-        store.pending.delete(moduleId);
+        store.seen.delete(moduleId);
         return;
     }
     for (const id of owned) {
         if (seen.has(id)) continue;
-        const handle = store.byId.get(id);
-        if (!handle) continue;
+        const payload = store.byId.get(id);
+        if (payload === undefined) continue;
         store.byId.delete(id);
+        store.meta.delete(id);
         owned.delete(id);
-        store.pendingChanges.push({ kind: 'removed', handle });
+        store.pendingChanges.push({ kind: 'removed', id, payload });
         store.revision++;
-        if (store.extractDeps) clearDeps({ registry: store.name, id });
+        if (store.deps) clearDeps({ registry: store.name, id });
     }
-    store.pending.delete(moduleId);
+    store.seen.delete(moduleId);
 }
 
 /* ── writes ─────────────────────────────────────────────────────── */
@@ -236,42 +226,37 @@ function endModuleRun<T>(store: KindStore<T>, moduleId: string): void {
  */
 export const PLACEHOLDER_OWNER = '__placeholder__';
 
-export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T> {
+export function upsert<T>(store: RegistryStore<T>, id: string, payload: T): T {
     const module = owningModule();
-    const pending = store.pending.get(module);
+    const pending = store.seen.get(module);
     pending?.add(id);
 
     const existing = store.byId.get(id);
+    const existingMeta = store.meta.get(id);
 
-    if (!existing) {
-        const handle: Handle<T> = {
-            id,
-            module,
-            payload,
-            version: 0,
-            hash: store.hash(payload),
-        };
-        store.byId.set(id, handle);
+    if (existing === undefined || existingMeta === undefined) {
+        store.byId.set(id, payload);
+        store.meta.set(id, { module, version: 0, hash: store.hash(payload) });
         addOwnership(store, module, id);
-        store.pendingChanges.push({ kind: 'added', handle });
+        store.pendingChanges.push({ kind: 'added', id, payload });
         store.revision++;
-        if (store.extractDeps) {
-            setDeps({ registry: store.name, id }, store.extractDeps(payload));
+        if (store.deps) {
+            setDeps({ registry: store.name, id }, store.deps(payload));
         }
-        return handle;
+        return payload;
     }
 
-    if (existing.module !== module) {
+    if (existingMeta.module !== module) {
         // PLACEHOLDER_OWNER entries are claimed via `claimOwnership` +
         // mutate-in-place, not via upsert, so any module-mismatch here
         // is a genuine redeclaration conflict.
-        throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`);
+        throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existingMeta.module}`);
     }
 
     // when `diff` is omitted, any re-upsert is a change, module
     // re-evaluation produced a fresh payload, that's the only way we got
     // here (cf. react-refresh, which also doesn't compare bodies).
-    const changed = store.diff ? store.diff(existing.payload, payload) : true;
+    const changed = store.diff ? store.diff(existing, payload) : true;
 
     // refresh deps and capture whether the dep set differs from before.
     // closure-bound producers (e.g. BlockDef.model factory closing over a
@@ -279,30 +264,25 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
     // can short-circuit even when the consumer's effective producer set
     // moved. when that happens we elevate to a synthetic `changed` event
     // so dispatch reacts.
-    const depsChanged = store.extractDeps ? setDeps({ registry: store.name, id }, store.extractDeps(payload)) : false;
+    const depsChanged = store.deps ? setDeps({ registry: store.name, id }, store.deps(payload)) : false;
 
     if (!changed && !depsChanged) {
-        if (store.replaceIdentity) {
-            // payload identity moved even though content hash didn't,
-            // derived caches keyed on `revision` (e.g. `traitsBySlot`) hold
-            // refs to the prior payload and would return a stale def.
-            existing.payload = payload;
-            store.revision++;
-        }
-        return existing;
+        // content unchanged, but still overwrite `byId` with the freshly-eval'd
+        // payload. some payloads (TraitDef) carry mutable sibling collections
+        // (controls/sync/scripts) filled in AFTER creation by later calls, and
+        // consumers key caches on payload identity (the packcat codec WeakMaps),
+        // so the registry must track the exact object user code holds. no
+        // `changed` event fires — a no-op re-eval stays silent to dispatch.
+        store.byId.set(id, payload);
+        store.revision++;
+        return payload;
     }
 
-    const handle: Handle<T> = {
-        id,
-        module,
-        payload,
-        version: existing.version + 1,
-        hash: store.hash(payload),
-    };
-    store.byId.set(id, handle);
-    store.pendingChanges.push({ kind: 'changed', handle });
+    store.byId.set(id, payload);
+    store.meta.set(id, { module, version: existingMeta.version + 1, hash: store.hash(payload) });
+    store.pendingChanges.push({ kind: 'changed', id, payload });
     store.revision++;
-    return handle;
+    return payload;
 }
 
 /**
@@ -321,39 +301,38 @@ export function upsert<T>(store: KindStore<T>, id: string, payload: T): Handle<T
  * No-op when the store has no entry for `id`. Caller's responsibility to
  * mutate the payload before calling.
  */
-export function touch<T>(store: KindStore<T>, id: string): void {
-    const existing = store.byId.get(id);
-    if (!existing) return;
+export function touch<T>(store: RegistryStore<T>, id: string): void {
+    const payload = store.byId.get(id);
+    const meta = store.meta.get(id);
+    if (payload === undefined || meta === undefined) return;
 
-    const newHash = store.hash(existing.payload);
-    const hashChanged = newHash !== existing.hash;
-    const depsChanged = store.extractDeps ? setDeps({ registry: store.name, id }, store.extractDeps(existing.payload)) : false;
+    const newHash = store.hash(payload);
+    const hashChanged = newHash !== meta.hash;
+    const depsChanged = store.deps ? setDeps({ registry: store.name, id }, store.deps(payload)) : false;
 
     if (!hashChanged && !depsChanged) return;
 
-    existing.hash = newHash;
-    existing.version++;
-    store.pendingChanges.push({ kind: 'changed', handle: existing });
+    meta.hash = newHash;
+    meta.version++;
+    store.pendingChanges.push({ kind: 'changed', id, payload });
     store.revision++;
 }
 
-function addOwnership<T>(store: KindStore<T>, module: string, id: string): void {
-    let owned = store.byModule.get(module);
+function addOwnership<T>(store: RegistryStore<T>, module: string, id: string): void {
+    let owned = store.moduleToIds.get(module);
     if (!owned) {
         owned = new Set();
-        store.byModule.set(module, owned);
+        store.moduleToIds.set(module, owned);
     }
     owned.add(id);
 }
 
-function removeOwnership<T>(store: KindStore<T>, module: string, id: string): void {
-    const owned = store.byModule.get(module);
+function removeOwnership<T>(store: RegistryStore<T>, module: string, id: string): void {
+    const owned = store.moduleToIds.get(module);
     if (!owned) return;
     owned.delete(id);
-    if (owned.size === 0) store.byModule.delete(module);
+    if (owned.size === 0) store.moduleToIds.delete(module);
 }
-
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /**
  * Register an entry without claiming module-scope ownership, for cases
@@ -367,25 +346,19 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
  * payload directly instead of replacing it, so user-held references
  * stay valid).
  */
-export function upsertPlaceholder<T>(store: KindStore<T>, id: string, payload: T): Handle<T> {
+export function upsertPlaceholder<T>(store: RegistryStore<T>, id: string, payload: T): T {
     const existing = store.byId.get(id);
-    if (existing) return existing;
+    if (existing !== undefined) return existing;
 
-    const handle: Handle<T> = {
-        id,
-        module: PLACEHOLDER_OWNER,
-        payload,
-        version: 0,
-        hash: store.hash(payload),
-    };
-    store.byId.set(id, handle);
+    store.byId.set(id, payload);
+    store.meta.set(id, { module: PLACEHOLDER_OWNER, version: 0, hash: store.hash(payload) });
     addOwnership(store, PLACEHOLDER_OWNER, id);
-    store.pendingChanges.push({ kind: 'added', handle });
+    store.pendingChanges.push({ kind: 'added', id, payload });
     store.revision++;
-    if (store.extractDeps) {
-        setDeps({ registry: store.name, id }, store.extractDeps(payload));
+    if (store.deps) {
+        setDeps({ registry: store.name, id }, store.deps(payload));
     }
-    return handle;
+    return payload;
 }
 
 /**
@@ -405,29 +378,25 @@ export function upsertPlaceholder<T>(store: KindStore<T>, id: string, payload: T
  * catches duplicate `model('id', ...)` / `block('id', ...)` declarations
  * across files, same as `upsert`'s mismatch guard.
  */
-export function claimOwnership<T>(store: KindStore<T>, id: string): void {
-    const existing = store.byId.get(id);
-    if (!existing) return;
+export function claimOwnership<T>(store: RegistryStore<T>, id: string): void {
+    const meta = store.meta.get(id);
+    if (!meta) return;
     const module = owningModule();
-    store.pending.get(module)?.add(id);
+    store.seen.get(module)?.add(id);
 
-    if (existing.module === module) return;
-    if (existing.module === PLACEHOLDER_OWNER) {
+    if (meta.module === module) return;
+    if (meta.module === PLACEHOLDER_OWNER) {
         removeOwnership(store, PLACEHOLDER_OWNER, id);
         addOwnership(store, module, id);
-        (existing as Mutable<Handle<T>>).module = module;
+        meta.module = module;
         return;
     }
-    throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${existing.module}`);
+    throw new Error(`[registry:${store.name}] '${id}' redeclared by ${module}, owned by ${meta.module}`);
 }
 
 /* ── reads ──────────────────────────────────────────────────────── */
 
-export function get<T>(store: KindStore<T>, id: string): T | undefined {
-    return store.byId.get(id)?.payload;
-}
-
-export function getHandle<T>(store: KindStore<T>, id: string): Handle<T> | undefined {
+export function get<T>(store: RegistryStore<T>, id: string): T | undefined {
     return store.byId.get(id);
 }
 
@@ -440,7 +409,7 @@ export function getHandle<T>(store: KindStore<T>, id: string): Handle<T> | undef
  * live registry directly, so those events are redundant and would
  * otherwise drown out the actual first edit in the dispatch log.
  */
-export function clearPendingChanges(stores: ReadonlyArray<KindStore<any>>): void {
+export function clearPendingChanges(stores: ReadonlyArray<RegistryStore<any>>): void {
     for (const store of stores) store.pendingChanges.length = 0;
 }
 
@@ -450,7 +419,7 @@ export function clearPendingChanges(stores: ReadonlyArray<KindStore<any>>): void
  * top of each `applyRegistryChanges*` so devs can see what hot reloaded
  * without instrumenting the rest of the pipeline.
  */
-export function logPendingChanges(side: 'client' | 'server', stores: ReadonlyArray<KindStore<any>>): void {
+export function logPendingChanges(side: 'client' | 'server', stores: ReadonlyArray<RegistryStore<any>>): void {
     const lines: string[] = [];
     const directProducers: DepKey[] = [];
     const directConsumerKeys = new Set<string>();
@@ -460,11 +429,11 @@ export function logPendingChanges(side: 'client' | 'server', stores: ReadonlyArr
         const changed: string[] = [];
         const removed: string[] = [];
         for (const ch of store.pendingChanges) {
-            if (ch.kind === 'added') added.push(ch.handle.id);
-            else if (ch.kind === 'removed') removed.push(ch.handle.id);
-            else changed.push(ch.handle.id);
-            directProducers.push({ registry: store.name, id: ch.handle.id });
-            directConsumerKeys.add(`${store.name}:${ch.handle.id}`);
+            if (ch.kind === 'added') added.push(ch.id);
+            else if (ch.kind === 'removed') removed.push(ch.id);
+            else changed.push(ch.id);
+            directProducers.push({ registry: store.name, id: ch.id });
+            directConsumerKeys.add(`${store.name}:${ch.id}`);
         }
         const parts: string[] = [];
         if (added.length) parts.push(`+${added.join(',')}`);
@@ -538,22 +507,19 @@ export function depId(dep: DepHandle): string {
     return dep.dependency.id;
 }
 
-/* ── wire-index helpers ─────────────────────────────────────────── */
+/* ── network protocol tables ────────────────────────────────────── */
 
 /**
- * sort-by-id wire-index table over a kind store. encode via `idToIndex`,
- * decode via `indexToId`. recomputed lazily per `registry.<kind>.revision`.
- * both peers derive identical tables from their own store mirrors, no
- * handshake.
+ * sort-by-id table for one id space (traits or commands). encode a ref via
+ * `idToIndex`, decode via `indexToId`. both peers derive identical tables from
+ * their own registrations; the manifest reconciles any set difference by id.
  */
-export type WireIndex = { idToIndex: Map<string, number>; indexToId: string[] };
+export type ProtocolTable = { idToIndex: Map<string, number>; indexToId: string[] };
 
-/** build a `WireIndex` from an id set (sort-by-id). also used by inbound-
- *  table rebuilds in engine-server/engine-client when a `wire_swap` message
- *  arrives, the incoming id list is already sorted by the sender, but we
- *  re-sort here to keep the helper a single canonical place where
- *  wire-index shape is established. */
-export function buildWireIndex(ids: Iterable<string>): WireIndex {
+/** build a `ProtocolTable` from an id set (sort-by-id). also rebuilds an
+ *  inbound table from a peer's manifest id list (already sorted by the sender;
+ *  we re-sort so this stays the single canonical place table shape is set). */
+export function buildProtocolTable(ids: Iterable<string>): ProtocolTable {
     const indexToId = [...ids].sort();
     const idToIndex = new Map<string, number>();
     for (let i = 0; i < indexToId.length; i++) idToIndex.set(indexToId[i], i);
@@ -561,30 +527,138 @@ export function buildWireIndex(ids: Iterable<string>): WireIndex {
 }
 
 /**
- * resolve a wire trait ref (netIndex preferred, id string as fallback) to
- * a trait id. takes a `WireIndex` directly (not the registry) so callers
- * can pass an inbound wire-index table, the one received via `wire_swap`
- * from the sending peer, rather than the local outbound table.
+ * resolve a wire trait ref (netIndex preferred, id string as fallback) to a
+ * trait id. takes a `ProtocolTable` directly so callers can pass the INBOUND
+ * table (the peer's, from its manifest) rather than the local one.
  */
 export function resolveTraitWireRef(
-    traitWireIndex: WireIndex,
+    table: ProtocolTable,
     netIndex: number | undefined,
     id: string | undefined,
 ): string | undefined {
-    if (netIndex !== undefined) return traitWireIndex.indexToId[netIndex];
+    if (netIndex !== undefined) return table.indexToId[netIndex];
     return id;
+}
+
+/**
+ * The full id manifest one peer publishes so the other can decode its traffic
+ * by id, never by a coincidental local slot. `traits`/`commands` are sort-by-id
+ * (the sender encodes trait/command refs against these positions); `syncs` and
+ * `controls` are parallel to `traits` and list each trait's sync/control ids in
+ * the SENDER's own slot order (the order it packs field slices in).
+ */
+export type ProtocolManifest = {
+    traits: string[];
+    commands: string[];
+    syncs: string[][];
+    controls: string[][];
+};
+
+/** Build this side's manifest from the registry. Cheap; sent once per
+ *  connection and again whenever the registrations change (dev flush). */
+export function protocolManifest(reg: Registry): ProtocolManifest {
+    const traits = [...reg.traits.byId.keys()].sort();
+    const syncs: string[][] = [];
+    const controls: string[][] = [];
+    for (const id of traits) {
+        const def = reg.traits.byId.get(id)!;
+        syncs.push(def.sync.map((s) => s.syncId));
+        controls.push(def.controls.map((c) => c.controlId));
+    }
+    return { traits, commands: [...reg.commands.byId.keys()].sort(), syncs, controls };
+}
+
+/** Per-trait map from a peer's field slot (the slot on the wire) to OUR local
+ *  slot. A slot the peer has but we don't is `undefined` — that one field is
+ *  dropped, neighbours unaffected. */
+export type SlotRemap = (number | undefined)[];
+
+/**
+ * A resolved inbound decode context for one peer: the peer's trait/command
+ * tables plus, per trait id, the sync/control slot maps. Every trait the peer
+ * published (that we also have a def for) has an entry, so a resolved trait
+ * always yields a concrete remap — callers never branch on its presence.
+ */
+export type InboundProtocol = {
+    traits: ProtocolTable;
+    commands: ProtocolTable;
+    syncRemap: Map<string, SlotRemap>;
+    controlRemap: Map<string, SlotRemap>;
+};
+
+/** Build an `InboundProtocol` from a peer's manifest, resolving its per-trait
+ *  sync and control slots against OUR local trait defs by id. */
+export function buildInboundProtocol(manifest: ProtocolManifest, reg: Registry): InboundProtocol {
+    const syncRemap = new Map<string, SlotRemap>();
+    const controlRemap = new Map<string, SlotRemap>();
+    for (let i = 0; i < manifest.traits.length; i++) {
+        const traitId = manifest.traits[i];
+        const def = reg.traits.byId.get(traitId);
+        if (!def) continue; // peer trait we lack; its refs drop at trait resolve, never remapped
+        syncRemap.set(traitId, (manifest.syncs[i] ?? []).map((sid) => def.syncById.get(sid)?.index));
+        controlRemap.set(traitId, (manifest.controls[i] ?? []).map((cid) => def.controlsById.get(cid)?.index));
+    }
+    return {
+        traits: buildProtocolTable(manifest.traits),
+        commands: buildProtocolTable(manifest.commands),
+        syncRemap,
+        controlRemap,
+    };
+}
+
+/** The identity `InboundProtocol` for our OWN registry — the decode context for
+ *  in-process (no peer) callers, so decode paths always receive a concrete
+ *  context. Cheap; callers that have it hot can hold the result. */
+export function localInbound(reg: Registry): InboundProtocol {
+    return buildInboundProtocol(protocolManifest(reg), reg);
+}
+
+/**
+ * matchmaking config; single-keyed (id 'main'), falls back to the default when
+ * the user didn't call `matchmaking()`.
+ */
+export function matchmakingConfig(reg: Registry): MatchmakingConfig {
+    return reg.matchmaking.byId.get('main') ?? DEFAULT_MATCHMAKING_CONFIG;
+}
+
+/**
+ * Rebuild the registry's derived index fields (`slotToTrait`, `blockRegistry`,
+ * `protocol`) from the source stores. Called once at engine boot (after user
+ * modules have registered, before runtime reads) and at the end of each dev
+ * flush. Registrations only change at those two moments, so plain fields
+ * refreshed here need no getter, revision key, or per-read check.
+ */
+export function reindex(reg: Registry): void {
+    const slotToTrait = new Map<number, TraitDef>();
+    for (const [, def] of reg.traits.byId) slotToTrait.set(def.slot, def);
+    reg.slotToTrait = slotToTrait;
+
+    const defs = new Map<string, BlockDef>();
+    const handles = new Map<string, BlockHandle>();
+    for (const [id, h] of reg.blocks.byId) {
+        handles.set(id, h);
+        defs.set(id, h._def);
+    }
+    const textures = new Map<string, BlockTextureDef>();
+    for (const [id, h] of reg.blockTextures.byId) textures.set(id, h);
+    reg.blockRegistry = buildBlockRegistry(defs, handles, textures);
+
+    reg.protocol = {
+        traits: buildProtocolTable(reg.traits.byId.keys()),
+        commands: buildProtocolTable(reg.commands.byId.keys()),
+    };
 }
 
 /* ── unified registry ───────────────────────────────────────────── */
 
 export type Registry = {
     /** monotonic id bumped once per dispatch drain via `bumpVersion()`. */
-    id: number;
+    version: number;
 
-    blockTextures: KindStore<BlockTextureDef>;
-    blocks: KindStore<BlockHandle>;
-    models: KindStore<ModelHandle>;
-    traits: KindStore<TraitDef>;
+    blockTextures: RegistryStore<BlockTextureDef>;
+    blocks: RegistryStore<BlockHandle>;
+    models: RegistryStore<ModelHandle>;
+    traits: RegistryStore<TraitDef>;
     /**
      * per-trait control registrations, keyed `${traitId}.${controlId}`. one
      * entry per `control()` call. lets HMR diff individual controls without
@@ -592,35 +666,28 @@ export type Registry = {
      * only, so re-eval that flips a single control body fires here, not on
      * `registry.traits`.
      */
-    controls: KindStore<ControlDef>;
+    controls: RegistryStore<ControlDef>;
     /** per-trait sync registrations, keyed `${traitId}.${syncId}`. */
-    sync: KindStore<SyncDef>;
+    sync: RegistryStore<SyncDef>;
     /** per-trait script registrations, keyed `${traitId}.${scriptId}` (same as `ScriptDef.key`). */
-    scripts: KindStore<ScriptDef>;
-    commands: KindStore<CommandDef>;
-    scenes: KindStore<SceneHandle>;
-    prefabs: KindStore<PrefabDef>;
-    sounds: KindStore<SoundHandle>;
-    sprites: KindStore<SpriteHandle>;
-    particles: KindStore<ParticleHandle>;
-    matchmaking: KindStore<MatchmakingConfig>;
+    scripts: RegistryStore<ScriptDef>;
+    commands: RegistryStore<CommandDef>;
+    scenes: RegistryStore<SceneHandle>;
+    prefabs: RegistryStore<PrefabDef>;
+    sounds: RegistryStore<SoundHandle>;
+    sprites: RegistryStore<SpriteHandle>;
+    particles: RegistryStore<ParticleHandle>;
+    matchmaking: RegistryStore<MatchmakingConfig>;
 
-    /** runtime block lookup; derived from `blocks` + `blockTextures`. */
-    readonly blockRegistry: BlockRegistry;
-    /** slot → trait def for O(1) lookup at runtime. */
-    readonly traitsBySlot: Map<number, TraitDef>;
-    /** sort-by-id wire-index over commands. */
-    readonly commandWireIndex: WireIndex;
-    /** sort-by-id wire-index over traits. */
-    readonly traitWireIndex: WireIndex;
-    /**
-     * matchmaking config, `matchmakingRegistry` is single-keyed (id
-     * 'main'); falls back to `DEFAULT_MATCHMAKING_CONFIG` when the user
-     * didn't call `matchmaking()`.
-     */
-    readonly matchmakingConfig: MatchmakingConfig;
+    /** runtime block lookup; derived from `blocks` + `blockTextures`.
+     *  rebuilt by `reindex()` at boot + each dev flush — a plain field. */
+    blockRegistry: Blocks;
+    /** slot → trait def for O(1) runtime lookup. rebuilt by `reindex()`. */
+    slotToTrait: Map<number, TraitDef>;
+    /** sort-by-id wire tables for the network protocol. rebuilt by `reindex()`. */
+    protocol: { traits: ProtocolTable; commands: ProtocolTable };
 
-    /** tests only, wipes every KindStore + derived-view cache. */
+    /** tests only, wipes every KindStore. */
     _reset(): void;
 };
 
@@ -725,40 +792,33 @@ const soundHash = (s: SoundHandle) => structuralHash({ soundId: s.soundId, src: 
 /* ── singleton ──────────────────────────────────────────────────── */
 
 export function init(): Registry {
-    const blockTextures = createKindStore<BlockTextureDef>({
+    const blockTextures = createRegistryStore<BlockTextureDef>({
         name: 'blockTextures',
         hash: blockTextureHash,
         diff: wholesaleDiff(blockTextureHash),
     });
-    const blocks = createKindStore<BlockHandle>({
+    const blocks = createRegistryStore<BlockHandle>({
         name: 'blocks',
         hash: blockHash,
         diff: wholesaleDiff(blockHash),
         extractDeps: extractBlockDeps,
     });
-    const models = createKindStore<ModelHandle>({
+    const models = createRegistryStore<ModelHandle>({
         name: 'models',
         hash: modelHash,
         diff: wholesaleDiff(modelHash),
     });
-    const traits = createKindStore<TraitDef>({
+    const traits = createRegistryStore<TraitDef>({
         name: 'traits',
         hash: traitHash,
         diff: wholesaleDiff(traitHash),
-        // every trait() call constructs a fresh TraitDef with empty
-        // controls / sync / scripts collections; control() / sync() /
-        // script() populate those collections on the freshly-built def.
-        // when the body is unchanged the `change` event is suppressed, but
-        // byId must still point at the new def so runtime lookups see the
-        // freshly-populated collections.
-        replaceIdentity: true,
     });
-    const controls = createKindStore<ControlDef>({
+    const controls = createRegistryStore<ControlDef>({
         name: 'controls',
         hash: controlHash,
         diff: wholesaleDiff(controlHash),
     });
-    const sync = createKindStore<SyncDef>({
+    const sync = createRegistryStore<SyncDef>({
         name: 'sync',
         hash: syncHash,
         diff: wholesaleDiff(syncHash),
@@ -766,63 +826,49 @@ export function init(): Registry {
     // no `diff`, script factories close over arbitrary module-scope refs
     // that `Function.prototype.toString()` can't see. lean on "module
     // re-evaluated → fresh closure → swap", same approach as react-refresh.
-    const scripts = createKindStore<ScriptDef>({
+    const scripts = createRegistryStore<ScriptDef>({
         name: 'scripts',
         hash: scriptHash,
     });
-    const commands = createKindStore<CommandDef>({
+    const commands = createRegistryStore<CommandDef>({
         name: 'commands',
         hash: commandHash,
         diff: wholesaleDiff(commandHash),
     });
-    const scenes = createKindStore<SceneHandle>({
+    const scenes = createRegistryStore<SceneHandle>({
         name: 'scenes',
         hash: sceneHash,
         diff: wholesaleDiff(sceneHash),
     });
-    const prefabs = createKindStore<PrefabDef>({
+    const prefabs = createRegistryStore<PrefabDef>({
         name: 'prefabs',
         hash: prefabHash,
         diff: wholesaleDiff(prefabHash),
         extractDeps: extractPrefabDeps,
     });
-    const sounds = createKindStore<SoundHandle>({
+    const sounds = createRegistryStore<SoundHandle>({
         name: 'sounds',
         hash: soundHash,
         diff: wholesaleDiff(soundHash),
     });
-    const sprites = createKindStore<SpriteHandle>({
+    const sprites = createRegistryStore<SpriteHandle>({
         name: 'sprites',
         hash: spriteHash,
         diff: wholesaleDiff(spriteHash),
     });
-    const particles = createKindStore<ParticleHandle>({
+    const particles = createRegistryStore<ParticleHandle>({
         name: 'particles',
         hash: particleHash,
         diff: wholesaleDiff(particleHash),
     });
-    const matchmaking = createKindStore<MatchmakingConfig>({
+    const matchmaking = createRegistryStore<MatchmakingConfig>({
         name: 'matchmaking',
         hash: matchmakingHash,
         diff: wholesaleDiff(matchmakingHash),
     });
 
-    /* ── derived view caches (lazy, keyed on source revision) ─── */
-
-    let blockRegistryCache: BlockRegistry | null = null;
-    let blockRegistryKey: { blocks: number; blockTextures: number } | null = null;
-
-    let traitsBySlotCache: Map<number, TraitDef> | null = null;
-    let traitsBySlotKey = -1;
-
-    let commandWireCache: WireIndex | null = null;
-    let commandWireKey = -1;
-
-    let traitWireCache: WireIndex | null = null;
-    let traitWireKey = -1;
-
     const reg = {
-        id: 0,
+        version: 0,
         blockTextures,
         blocks,
         models,
@@ -837,84 +883,20 @@ export function init(): Registry {
         sprites,
         particles,
         matchmaking,
+        // derived index fields — start empty; `reindex()` fills them at engine
+        // boot (after user modules register) and at each dev flush. NOT built
+        // here: `buildBlockRegistry` reaches into sibling modules that may not
+        // have initialized yet at registry module-load (circular init / TDZ).
+        slotToTrait: new Map(),
+        blockRegistry: null! as Blocks,
+        protocol: { traits: buildProtocolTable([]), commands: buildProtocolTable([]) },
     } as Registry;
 
-    Object.defineProperty(reg, 'blockRegistry', {
-        enumerable: true,
-        get() {
-            const bRev = blocks.revision;
-            const tRev = blockTextures.revision;
-            if (
-                blockRegistryCache &&
-                blockRegistryKey &&
-                blockRegistryKey.blocks === bRev &&
-                blockRegistryKey.blockTextures === tRev
-            ) {
-                return blockRegistryCache;
-            }
-            const defs = new Map<string, BlockDef>();
-            const handles = new Map<string, BlockHandle>();
-            for (const [id, h] of blocks.byId) {
-                handles.set(id, h.payload);
-                defs.set(id, h.payload._def);
-            }
-            const textures = new Map<string, BlockTextureDef>();
-            for (const [id, h] of blockTextures.byId) textures.set(id, h.payload);
-            blockRegistryCache = buildBlockRegistry(defs, handles, textures);
-            blockRegistryKey = { blocks: bRev, blockTextures: tRev };
-            return blockRegistryCache;
-        },
-    });
-
-    Object.defineProperty(reg, 'traitsBySlot', {
-        enumerable: true,
-        get() {
-            if (traitsBySlotCache && traitsBySlotKey === traits.revision) {
-                return traitsBySlotCache;
-            }
-            const map = new Map<number, TraitDef>();
-            for (const [, h] of traits.byId) map.set(h.payload.slot, h.payload);
-            traitsBySlotCache = map;
-            traitsBySlotKey = traits.revision;
-            return map;
-        },
-    });
-
-    Object.defineProperty(reg, 'commandWireIndex', {
-        enumerable: true,
-        get() {
-            if (commandWireCache && commandWireKey === commands.revision) {
-                return commandWireCache;
-            }
-            commandWireCache = buildWireIndex(commands.byId.keys());
-            commandWireKey = commands.revision;
-            return commandWireCache;
-        },
-    });
-
-    Object.defineProperty(reg, 'traitWireIndex', {
-        enumerable: true,
-        get() {
-            if (traitWireCache && traitWireKey === traits.revision) {
-                return traitWireCache;
-            }
-            traitWireCache = buildWireIndex(traits.byId.keys());
-            traitWireKey = traits.revision;
-            return traitWireCache;
-        },
-    });
-
-    Object.defineProperty(reg, 'matchmakingConfig', {
-        enumerable: true,
-        get() {
-            return matchmaking.byId.get('main')?.payload ?? DEFAULT_MATCHMAKING_CONFIG;
-        },
-    });
-
-    // tests only, wipes every KindStore and derived-view cache so the next
-    // test's setup starts from a virgin registry. used by tst/e2e/harness.ts.
+    // tests only, wipes every KindStore so the next test's setup starts from a
+    // virgin registry, then rebuilds the (now empty) derived indexes. used by
+    // tst/e2e/harness.ts.
     reg._reset = () => {
-        const stores: KindStore<unknown>[] = [
+        const stores: RegistryStore<unknown>[] = [
             blockTextures,
             blocks,
             models,
@@ -929,23 +911,17 @@ export function init(): Registry {
             sprites,
             particles,
             matchmaking,
-        ] as KindStore<unknown>[];
+        ] as RegistryStore<unknown>[];
         for (const s of stores) {
             s.byId.clear();
-            s.byModule.clear();
-            s.pending.clear();
+            s.meta.clear();
+            s.moduleToIds.clear();
+            s.seen.clear();
             s.pendingChanges.length = 0;
             s.revision = 0;
         }
-        blockRegistryCache = null;
-        blockRegistryKey = null;
-        traitsBySlotCache = null;
-        traitsBySlotKey = -1;
-        commandWireCache = null;
-        commandWireKey = -1;
-        traitWireCache = null;
-        traitWireKey = -1;
-        reg.id = 0;
+        reg.version = 0;
+        reindex(reg);
     };
 
     return reg;
@@ -957,7 +933,7 @@ export function init(): Registry {
  * frames (e.g. cached views) see one increment per HMR cycle.
  */
 export function bumpVersion(reg: Registry): void {
-    reg.id++;
+    reg.version++;
 }
 
 /** module-scope singleton, every declarative API upserts into this. */

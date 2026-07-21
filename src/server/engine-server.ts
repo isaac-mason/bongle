@@ -6,7 +6,7 @@ import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
-import { buildWireIndex, clearPendingChanges, registry, touch } from '../core/registry';
+import { buildInboundProtocol, clearPendingChanges, localInbound, matchmakingConfig, protocolManifest, registry, reindex, touch } from '../core/registry';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
@@ -182,18 +182,13 @@ export function onClientJoin(
     // both peers built from the same source, so the client's outbound
     // tables match ours at connect time. subsequent `wire_table` messages
     // from this client refresh these as its HMR cycles diverge ours.
-    Clients.onJoin(state.clients, clientId, user, registry.traitWireIndex, registry.commandWireIndex);
+    Clients.onJoin(state.clients, clientId, user, localInbound(registry));
 
-    // sync wire tables before any packed payload reaches the client.
-    // client and server build their `traitWireIndex` from module-load
-    // order, which can diverge across builds, we can't rely on the
-    // optimistic "both peers built from the same source" assumption
-    // at first connect.
-    Net.send(state.net, clientId, {
-        type: 'wire_table',
-        traits: registry.traitWireIndex.indexToId,
-        commands: registry.commandWireIndex.indexToId,
-    });
+    // publish our protocol manifest before any packed payload reaches the
+    // client, so it decodes our traits/commands/sync-slots by id. both peers
+    // build tables from module-load order, which can diverge across bundles;
+    // the manifest reconciles that by id rather than by coincidental position.
+    Net.send(state.net, clientId, { type: 'wire_table', ...protocolManifest(registry) });
 
     // Record the resolved avatar identity (or builtin, dev/edit) and
     // kick its payload load, BEFORE the player nodes are created below,
@@ -209,7 +204,7 @@ export function onClientJoin(
     // is a single-user editor; the cap doesn't apply. by this point
     // ClientState already includes the new client, so compare against `>`.
     if (state.mode === 'play') {
-        const cap = registry.matchmakingConfig.maxPlayers;
+        const cap = matchmakingConfig(registry).maxPlayers;
         if (state.clients.connected.size > cap) {
             console.warn(`[engine-server] rejecting client ${clientId}: room at maxPlayers (${cap})`);
             Clients.onLeave(state.clients, clientId);
@@ -270,7 +265,7 @@ function seedModels(state: EngineServer): void {
     state.resources.modelPayloads.clear();
     state.resources.models.clear();
     for (const [id, h] of registry.models.byId) {
-        const handle = h.payload;
+        const handle = h;
         Resources.setModel(state.resources, id, {
             clientUrl: handle.bin.client,
             serverUrl: handle.bin.server,
@@ -373,6 +368,12 @@ export async function load(state: EngineServer) {
         g._api = api;
     }
 
+    // user + editor modules have registered by now (loadModule ran before this,
+    // editor imported just above). build the derived index fields once so scene
+    // population + room creation below read a live `blockRegistry` / `protocol`.
+    // in dev the flush handler reindexes again on every HMR.
+    reindex(registry);
+
     // seed Resources.models from the registry. lazy systems (renderer,
     // animator, auto-collider) trigger ensureModel on first reference.
     seedModels(state);
@@ -385,7 +386,7 @@ export async function load(state: EngineServer) {
     // but has no file on disk yet, the codegen layer already warned at build
     // time; handle stays empty.
     for (const [sceneId, h] of registry.scenes.byId) {
-        const handle = h.payload;
+        const handle = h;
         if (!handle._payload) continue;
         applyScenePayload(state, sceneId, handle._payload);
     }
@@ -427,7 +428,7 @@ export async function load(state: EngineServer) {
  *   - the server registry-dispatch scenes branch for `added` / `changed`.
  */
 export function applyScenePayload(state: EngineServer, id: string, payload: Content.ScenePayload): void {
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (!handle) return;
     handle._payload = payload;
     ContentManager.seedLastWrittenRaw(state.contentManager, id, ContentManager.serializeScenePayload(payload));
@@ -441,7 +442,7 @@ export function applyScenePayload(state: EngineServer, id: string, payload: Cont
  * deletion) and the server registry-dispatch scenes branch for `removed`.
  */
 export function clearScene(state: EngineServer, id: string): void {
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (handle) handle._payload = null;
     Content.clearScene(state.content, id, 'server');
     touch(registry.scenes, id);
@@ -538,15 +539,14 @@ export function processInbox(state: EngineServer) {
                     case 'net_message': {
                         const cs = state.clients.connected.get(client);
                         if (!cs) break;
-                        Rpc.dispatchNetMessage(state.rpc, cs.inboundCommandWireIndex, message, client);
+                        Rpc.dispatchNetMessage(state.rpc, cs.inbound.commands, message, client);
                         break;
                     }
 
                     case 'wire_table': {
                         const cs = state.clients.connected.get(client);
                         if (!cs) break;
-                        cs.inboundTraitWireIndex = buildWireIndex(message.traits);
-                        cs.inboundCommandWireIndex = buildWireIndex(message.commands);
+                        cs.inbound = buildInboundProtocol(message, registry);
                         break;
                     }
 
@@ -561,9 +561,9 @@ export function processInbox(state: EngineServer) {
 
                         const cs = state.clients.connected.get(client);
                         if (!cs) break;
-                        const traitId = cs.inboundTraitWireIndex.indexToId[message.traitNetIndex];
+                        const traitId = cs.inbound.traits.indexToId[message.traitNetIndex];
                         if (traitId === undefined) break;
-                        const def = registry.traits.byId.get(traitId)?.payload;
+                        const def = registry.traits.byId.get(traitId);
                         if (!def) break;
 
                         const instance = node._traits.get(def.slot);
@@ -581,6 +581,7 @@ export function processInbox(state: EngineServer) {
                             instance,
                             message.fields,
                             room.mode,
+                            cs.inbound.syncRemap.get(traitId),
                         );
 
                         break;

@@ -22,7 +22,7 @@ import type { Quat, Vec3 } from 'mathcat';
 import type { Input } from '../../client/input';
 import { isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { parseKey } from '../../core/voxels/block-registry';
 import type { PlaceIO } from '../../core/voxels/blocks';
 import type { Voxels } from '../../core/voxels/voxels';
@@ -164,7 +164,7 @@ function resolvePlacement(
     targetY: number,
     targetZ: number,
     voxels: Voxels,
-    registry: BlockRegistry,
+    registry: Blocks,
 ): { fwd: Op[]; rev: Op[] } | null {
     const parsed = parseKey(activeBlockKey);
     const def = parsed ? registry.idToDef.get(parsed.blockId) : null;

@@ -23,7 +23,7 @@
 // a 5-10× reduction on disk and over HMR.
 
 import { gunzipSync, gzipSync } from 'fflate';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { resolveKey } from './block-registry';
 import { CullType } from './blocks';
 import {
@@ -187,7 +187,7 @@ export function seedVoxelSaveCache(voxels: Voxels, saved: SavedVoxels): VoxelSav
  * existing chunks on the instance. the registry is used to resolve
  * string keys to runtime numeric ids.
  */
-export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: BlockRegistry): void {
+export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks): void {
     if (!saved.chunks) return;
 
     voxels.chunks.clear();

@@ -83,7 +83,7 @@ export function inventoryItemDisplay(item: InventoryItem, room: ClientRoom | nul
         case 'prefab': {
             const id = item.prefabId;
             if (!room) return { name: id, id, title: id };
-            const def = registry.prefabs.byId.get(id)?.payload;
+            const def = registry.prefabs.byId.get(id);
             const name = def?.name ?? id;
             return { name, id, title: name === id ? id : `${name} (${id})` };
         }

@@ -199,7 +199,7 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
                         const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                         addChild(parent, n);
                         for (const st of args.traits) {
-                            const def = registry.traits.byId.get(st.id)?.payload;
+                            const def = registry.traits.byId.get(st.id);
                             if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
                         }
                         reorderChild(parent, n, args.index);
@@ -523,7 +523,7 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
                 const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                 addChild(parent, n);
                 for (const st of args.traits) {
-                    const def = registry.traits.byId.get(st.id)?.payload;
+                    const def = registry.traits.byId.get(st.id);
                     if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
                 }
                 reorderChild(parent, n, args.index);
@@ -573,7 +573,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
                     const n = createNode({ id: a.id, name: a.name, persist: a.persist });
                     addChild(parent, n);
                     for (const st of a.traits) {
-                        const def = registry.traits.byId.get(st.id)?.payload;
+                        const def = registry.traits.byId.get(st.id);
                         if (def) addTraitBySlot(n, def.slot, st.controls as Record<string, unknown>);
                     }
                     reorderChild(parent, n, a.index);
@@ -752,7 +752,7 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
         do() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId)?.payload;
+            const def = registry.traits.byId.get(traitId);
             if (def) addTraitBySlot(n, def.slot);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: undefined });
             state.markDirty();
@@ -760,7 +760,7 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
         undo() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId)?.payload;
+            const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
             state.markDirty();
@@ -779,7 +779,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
         do() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId)?.payload;
+            const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
             else n._unresolvedTraits.delete(traitId);
             send(ctx, RemoveTraitCommand, { id: nodeId, traitId });
@@ -788,7 +788,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
         undo() {
             const n = getNodeById(ctx.nodes, nodeId);
             if (!n) return;
-            const def = registry.traits.byId.get(traitId)?.payload;
+            const def = registry.traits.byId.get(traitId);
             if (def) addTraitBySlot(n, def.slot, prevProps ?? undefined);
             send(ctx, AddTraitCommand, { id: nodeId, traitId, props: prevProps ? JSON.stringify(prevProps) : undefined });
             state.markDirty();
@@ -830,7 +830,7 @@ function captureNode(node: Node, out: CreateArgs[]): void {
 }
 
 function captureTraitProps(node: Node, traitId: string): Record<string, unknown> | null {
-    const def = registry.traits.byId.get(traitId)?.payload;
+    const def = registry.traits.byId.get(traitId);
     if (!def) {
         const json = node._unresolvedTraits.get(traitId)?.json;
         return json ? structuredClone(json) : null;
@@ -849,7 +849,7 @@ function captureTraitProps(node: Node, traitId: string): Record<string, unknown>
 }
 
 export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string, props: Record<string, unknown>): void {
-    const def = registry.traits.byId.get(traitId)?.payload;
+    const def = registry.traits.byId.get(traitId);
     if (!def) {
         const unresolved = node._unresolvedTraits.get(traitId);
         if (unresolved) unresolved.json = { ...unresolved.json, ...props };

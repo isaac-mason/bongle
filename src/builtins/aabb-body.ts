@@ -1,4 +1,5 @@
 import { type Vec3, vec3 } from 'mathcat';
+import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../api/pack';
 import { prop } from '../api/prop';
 import { control, dirty, rate, sync, type TraitType, trait } from '../api/traits';
@@ -150,7 +151,7 @@ sync(AabbBodyTrait, 'linearVelocity', {
         vec3.copy(t.linearVelocity, v as Vec3);
     },
     dirty: dirty.diff(), // byte-stable when the body sleeps → silent
-    rate: rate.hz(20), // ≤20/s, matched to the transform broadcast cap
+    rate: rate.hz(TRANSFORM_SEND_HZ), // matched to the transform broadcast cadence (core/clock)
 });
 
 sync(AabbBodyTrait, 'gravityFactor', {

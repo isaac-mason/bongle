@@ -35,7 +35,7 @@ import {
     transformFaceWithMat4RotationTranslation,
 } from 'crashcat';
 import { type Box3, box3, mat4, quat, type Vec3, vec3 } from 'mathcat';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { AIR, BLOCK_FLAG_COLLISION, MISSING, MODEL_NONE } from './block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';
 import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
@@ -45,13 +45,13 @@ import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './vox
 export type VoxelPhysicsShape = {
     type: ShapeType.USER_1;
     voxels: Voxels;
-    registry: BlockRegistry;
+    registry: Blocks;
     aabb: Box3;
     centerOfMass: Vec3;
     volume: number;
 };
 
-export function createVoxelPhysicsShape(voxels: Voxels, registry: BlockRegistry, aabb: Box3): VoxelPhysicsShape {
+export function createVoxelPhysicsShape(voxels: Voxels, registry: Blocks, aabb: Box3): VoxelPhysicsShape {
     return {
         type: ShapeType.USER_1,
         voxels,
@@ -420,7 +420,7 @@ function setMergedBoxHalfExtents(hx: number, hy: number, hz: number): void {
 type MergedRejectState = {
     outer: CollideShapeCollector | null;
     voxels: Voxels | null;
-    registry: BlockRegistry | null;
+    registry: Blocks | null;
     minX: number;
     minY: number;
     minZ: number;
@@ -651,7 +651,7 @@ function getStateId(voxels: Voxels, wx: number, wy: number, wz: number): number 
 // cube behind a face makes that face internal. non-cube solids (slabs, hulls) fill their
 // cell partially, so they never back a neighbour's face — a cube face against them is a
 // real geometric transition (matches voxel-active-edges' cube-vs-custom rule).
-function isBackingCube(voxels: Voxels, registry: BlockRegistry, wx: number, wy: number, wz: number): boolean {
+function isBackingCube(voxels: Voxels, registry: Blocks, wx: number, wy: number, wz: number): boolean {
     const stateId = getStateId(voxels, wx, wy, wz);
     if (stateId === AIR || stateId === MISSING) return false;
     if (!(registry.flags[stateId]! & BLOCK_FLAG_COLLISION)) return false;

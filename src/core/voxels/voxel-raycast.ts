@@ -1,5 +1,5 @@
 import { castRayVsShape, createClosestCastRayCollector, createDefaultCastRaySettings } from 'crashcat';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { AIR, MISSING } from './block-registry';
 import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
 
@@ -91,7 +91,7 @@ const _raySettings = createDefaultCastRaySettings();
 export function raycastVoxels(
     out: VoxelRaycastResult,
     voxels: Voxels,
-    registry: BlockRegistry,
+    registry: Blocks,
     ox: number,
     oy: number,
     oz: number,

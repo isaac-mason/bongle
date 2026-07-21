@@ -34,7 +34,7 @@
 //   - In-flight old-version jobs complete normally; caller's gen guard
 //     handles whether to apply them.
 
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { serializeBlockRegistryForWorker } from '../../core/voxels/block-registry-serde';
 import { type ChunkMeshResult, MAX_QUADS_PER_PASS, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { MESH_TASKS_SCRATCH_BYTES, type MeshTaskSet, packMeshTasks } from '../../core/voxels/mesh-tasks';
@@ -283,7 +283,7 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
     }
 }
 
-export function setMeshRegistry(d: MeshDispatcher, reg: BlockRegistry): void {
+export function setMeshRegistry(d: MeshDispatcher, reg: Blocks): void {
     d.registryVersion += 1;
     const version = d.registryVersion;
     d.registryBuf = serializeBlockRegistryForWorker(reg, version);

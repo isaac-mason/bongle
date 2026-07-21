@@ -252,7 +252,7 @@ export function snapshotDepGraph(): DepGraphSnapshot {
  */
 export type DispatchRegistry = {
     name: string;
-    pendingChanges: ReadonlyArray<{ handle: { id: string } }>;
+    pendingChanges: ReadonlyArray<{ id: string }>;
 };
 export function collectDirtyByRegistry(regs: ReadonlyArray<DispatchRegistry>): Map<string, Set<string>> {
     const out = new Map<string, Set<string>>();
@@ -265,8 +265,8 @@ export function collectDirtyByRegistry(regs: ReadonlyArray<DispatchRegistry>): M
                 set = new Set();
                 out.set(reg.name, set);
             }
-            set.add(ch.handle.id);
-            directProducers.push({ registry: reg.name, id: ch.handle.id });
+            set.add(ch.id);
+            directProducers.push({ registry: reg.name, id: ch.id });
         }
     }
     if (directProducers.length === 0) return out;

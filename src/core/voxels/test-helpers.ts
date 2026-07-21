@@ -6,23 +6,25 @@
 // state encoding). `resetVoxelRegistry()` clears the affected KindStores
 // in `beforeEach` so test files don't cross-pollute.
 
-import { registry } from '../registry';
-import type { BlockRegistry } from './block-registry';
+import { registry, reindex } from '../registry';
+import type { Blocks } from './block-registry';
 import type { BlockStateDef, PropsDef } from './block-state';
 import { type BlockHandle, type BlockOptions, block, blockTexture } from './blocks';
 
 type AnyStore = {
     byId: Map<unknown, unknown>;
-    byModule: Map<unknown, unknown>;
-    pending: Map<unknown, unknown>;
+    meta: Map<unknown, unknown>;
+    moduleToIds: Map<unknown, unknown>;
+    seen: Map<unknown, unknown>;
     pendingChanges: unknown[];
     revision: number;
 };
 
 function clearStore(store: AnyStore): void {
     store.byId.clear();
-    store.byModule.clear();
-    store.pending.clear();
+    store.meta.clear();
+    store.moduleToIds.clear();
+    store.seen.clear();
     store.pendingChanges.length = 0;
     store.revision++;
 }
@@ -35,6 +37,9 @@ export function resetVoxelRegistry(): void {
     clearStore(registry.blockTextures as unknown as AnyStore);
     clearStore(registry.sprites as unknown as AnyStore);
     clearStore(registry.particles as unknown as AnyStore);
+    // these clears bypass the registration path, so rebuild the derived index
+    // fields to reflect the now-empty stores (mirrors a real boot/flush).
+    reindex(registry);
 }
 
 // biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default (matches block()'s signature)
@@ -62,7 +67,11 @@ export function defineTestBlock<const P extends PropsDef = {}>(spec: TestBlockSp
 
 /** declare a batch and return the resulting BlockRegistry. tests that
  *  don't need the handles individually can use this shorthand. */
-export function buildTestRegistry(specs: TestBlockSpec[]): BlockRegistry {
+export function buildTestRegistry(specs: TestBlockSpec[]): Blocks {
     for (const s of specs) defineTestBlock(s);
+    // registrations bypass a boot/flush here; rebuild derived fields so the
+    // returned BlockRegistry (and any later `registry.blockRegistry` read)
+    // reflects the just-declared blocks.
+    reindex(registry);
     return registry.blockRegistry;
 }

@@ -8,8 +8,8 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { rolldown } from 'rolldown';
 import { buildBundle } from '../build';
-import { openNodeFs } from './node-fs';
 import { bake } from './bake/bake';
+import { openNodeFs } from './node-fs';
 
 export async function buildCommand(projectDir: string, opts: { maxPlayers: number; out: string }): Promise<void> {
     const root = resolve(projectDir);

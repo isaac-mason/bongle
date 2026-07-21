@@ -9,7 +9,7 @@ import * as Physics from '../core/physics/physics';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
-import { buildWireIndex, registry, type WireIndex } from '../core/registry';
+import { buildInboundProtocol, type InboundProtocol, localInbound, protocolManifest, registry, reindex } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
@@ -183,14 +183,15 @@ export function init(opts: InitOptions) {
          *  AudioContext is always live. */
         audioResources: null! as Audio.AudioResources,
         /**
-         * INBOUND wire-index tables for messages received from the server,
-         * the server's outbound tables, mirrored on this side. seeded from
-         * the client's local module at `load()` time (both peers built from
-         * the same source, so they agree at connect) and refreshed by
-         * inbound `wire_table` messages after the server HMRs.
+         * INBOUND decode context for messages from the server — the server's
+         * protocol manifest mirrored here. seeded from our local registry at
+         * `load()` (identity) and replaced by inbound `wire_table` messages, so
+         * we decode traits/commands/sync-slots by the server's id space.
          */
-        inboundTraitWireIndex: null! as WireIndex,
-        inboundCommandWireIndex: null! as WireIndex,
+        inbound: null! as InboundProtocol,
+        /** registry revision last published to the server via `wire_table`;
+         *  -1 forces a send on the first update after (re)join. */
+        lastSentManifestId: -1,
         accumulator: 0,
         /** global metrics (tick timing). starts disabled, flipped on by the
          *  debugOpen subscription in `load()` so per-frame begin/end work is
@@ -266,7 +267,7 @@ function seedModels(state: EngineClient): void {
     state.resources.modelPayloads.clear();
     state.resources.models.clear();
     for (const [id, h] of registry.models.byId) {
-        const handle = h.payload;
+        const handle = h;
         Resources.setModel(state.resources, id, {
             clientUrl: handle.bin.client,
             serverUrl: handle.bin.server,
@@ -277,13 +278,17 @@ function seedModels(state: EngineClient): void {
 }
 
 export async function load(state: EngineClient) {
+    // user modules have registered (loadModule ran before this). build the
+    // derived index fields once so boot reads a live `blockRegistry` /
+    // `slotToTrait` / `protocol`; the dev flush reindexes again on each HMR.
+    reindex(registry);
+
     // seed with our local registry so any sync field decode that fires
     // before the server's first `wire_table` lands has a table to use.
     // server emits `wire_table` immediately on connect (before any
     // packed payload), and again on HMR drift, so this seed is just a
     // safe default, it's overwritten before `join_room` decodes.
-    state.inboundTraitWireIndex = registry.traitWireIndex;
-    state.inboundCommandWireIndex = registry.commandWireIndex;
+    state.inbound = localInbound(registry);
 
     // seed Resources.models from the unified registry. lazy systems
     // (renderer, animator) trigger ensureModel on first reference.
@@ -295,8 +300,8 @@ export async function load(state: EngineClient) {
     // whose payload is set. live updates (dev) flow through
     // `applyScenePayload`/`clearScene` from the boot template's HMR listeners.
     for (const [sceneId, h] of registry.scenes.byId) {
-        if (!h.payload._payload) continue;
-        applyScenePayload(state, sceneId, h.payload._payload);
+        if (!h._payload) continue;
+        applyScenePayload(state, sceneId, h._payload);
     }
 
     // renderer init gates everything that calls into gpucat (material
@@ -568,8 +573,7 @@ function processInbox(state: EngineClient): void {
                     break;
 
                 case 'wire_table':
-                    state.inboundTraitWireIndex = buildWireIndex(message.traits);
-                    state.inboundCommandWireIndex = buildWireIndex(message.commands);
+                    state.inbound = buildInboundProtocol(message, registry);
                     break;
 
                 case 'register_model':
@@ -632,9 +636,13 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     // server re-sends join_room for an already-joined player). repopulate
     // scene graph in place and re-fire onInit, keeps activePlayerId,
     // viewport mount, camera state, and voxel chunk meshes intact.
+    // (re)joined → the server has our ClientState now; force a manifest re-send
+    // next update so it has our protocol table even if the pre-join send raced.
+    state.lastSentManifestId = -1;
+
     const existing = state.rooms.rooms.get(message.playerId);
     if (existing && existing.roomId === message.roomId) {
-        Rooms.resyncRoom(existing, message, state.inboundTraitWireIndex);
+        Rooms.resyncRoom(existing, message, state.inbound);
         SceneTree.initSceneTree(existing.nodes);
         Rooms.syncJoinedPlayers(state.rooms);
         return;
@@ -655,7 +663,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         cloudResources: state.cloudResources,
         shadowResources: state.shadowResources,
         audioResources: state.audioResources,
-        inboundTraitWireIndex: state.inboundTraitWireIndex,
+        inbound: state.inbound,
     });
 
     Rooms.mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
@@ -722,14 +730,14 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
 }
 
 function processNetMessage(state: EngineClient, message: Protocol.NetMessage): void {
-    Rpc.dispatchNetMessage(state.rpc, state.inboundCommandWireIndex, message, undefined);
+    Rpc.dispatchNetMessage(state.rpc, state.inbound.commands, message, undefined);
 }
 
 function processSceneSync(state: EngineClient, message: Protocol.SceneSync): void {
     const room = state.rooms.rooms.get(message.playerId);
     if (!room) return;
     for (const update of message.updates) {
-        applySceneSyncUpdate(room.nodes, room.scriptRuntime, update, state.inboundTraitWireIndex);
+        applySceneSyncUpdate(room.nodes, room.scriptRuntime, update, state.inbound);
     }
     if (room.playerId === state.rooms.activePlayerId) {
         room.editorStore?.getState().markDirty();
@@ -1087,7 +1095,7 @@ function processDebugLogs(state: EngineClient, message: Protocol.DebugLogs): voi
  * ContentManager / disk seed (server-only concern).
  */
 export function applyScenePayload(state: EngineClient, id: string, payload: Content.ScenePayload): void {
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (!handle) return;
     handle._payload = payload;
     Content.populateScene(state.content, registry.blockRegistry, id, payload, 'client');
@@ -1099,7 +1107,7 @@ export function applyScenePayload(state: EngineClient, id: string, payload: Cont
  * template's `bongle:scene-clear` HMR listener.
  */
 export function clearScene(state: EngineClient, id: string): void {
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (handle) handle._payload = null;
     Content.clearScene(state.content, id, 'client');
     Registry.touch(registry.scenes, id);
@@ -1125,6 +1133,16 @@ export function update(state: EngineClient, delta: number) {
 
     /* process inbox */
     processInbox(state);
+
+    // publish our protocol manifest UP to the server (before any command /
+    // sync_update this frame) so it decodes our client→server traffic by id.
+    // (re)sent whenever our registrations change — reset to -1 on join so the
+    // server always has our table once our ClientState exists over there.
+    // ordered transport guarantees it lands before the payloads it describes.
+    if (registry.version !== state.lastSentManifestId) {
+        Net.send(state.net, { type: 'wire_table', ...protocolManifest(registry) });
+        state.lastSentManifestId = registry.version;
+    }
 
     // reconcile audio output mute with ad state, the game is silenced while a
     // portal ad shows (flag set by api/platform). cheap: setOutputMuted no-ops
@@ -1174,7 +1192,7 @@ export function update(state: EngineClient, delta: number) {
 
             Clock.tick(room.clock, timestep);
 
-            Interpolation.snapshot(room.interpolation);
+            Interpolation.snapshot(room.nodes);
 
             SceneTree.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
 
@@ -1225,7 +1243,7 @@ export function update(state: EngineClient, delta: number) {
         // poses they actually sent. the margin widens on jittery links so slow packets
         // stay bracketable instead of snapping; 0 on good ones.
         Debug.begin(room.clientMetrics, 'interpolate');
-        Interpolation.interpolate(room.interpolation, alpha, Clock.transformRenderTime(room.clock, delta));
+        Interpolation.interpolate(room.nodes, room.playerId, alpha, Clock.transformRenderTime(room.clock, delta));
         Debug.end(room.clientMetrics, 'interpolate');
 
         // user frame scripts (camera follow, local player motion, etc.) run

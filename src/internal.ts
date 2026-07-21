@@ -2,12 +2,12 @@
 // exposes engine internals needed by the cli, asset pipeline, and
 // other tooling that runs outside the normal client/server paths.
 
-export type { Handle, KindStore, PrefabDef, Registry } from './core/registry';
+export type { EntryMeta, RegistryStore as KindStore, PrefabDef, Registry } from './core/registry';
 export { registry } from './core/registry';
 
 import type { ModelHandle as ModelHandleType } from './core/models/handle';
 import type { SceneHandle as SceneHandleType } from './core/scene/scene-handle';
-import type { BlockRegistry as BlockRegistryType } from './core/voxels/block-registry';
+import type { Blocks as BlockRegistryType } from './core/voxels/block-registry';
 // Asset-pipeline view: the small slice of registry state the bake
 // builders read. Materialized by `runAssetPipelinePass` from the
 // singleton's per-kind maps before dispatching to the per-asset
@@ -62,7 +62,7 @@ export type {
     SpriteOptions,
 } from './core/sprites/sprites';
 export { draw } from './core/sprites/sprites';
-export type { BlockRegistry } from './core/voxels/block-registry';
+export type { Blocks as BlockRegistry } from './core/voxels/block-registry';
 // block registry builder, pure data computation that takes the raw
 // BlockDef / BlockHandle / BlockTextureDef maps and produces the flat
 // lookup tables consumed by the voxel mesher + ResourceManager. The

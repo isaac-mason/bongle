@@ -28,7 +28,7 @@ import type { Scene } from 'gpucat';
 import { Mesh } from 'gpucat';
 import type { Vec3 } from 'mathcat';
 
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { buildMeshInput, type ChunkMeshResult, meshChunk } from '../../core/voxels/chunk-mesher';
 import {
     CHUNK_SIZE,
@@ -161,7 +161,7 @@ export function update(
     voxelResources: VoxelResources,
     voxels: Voxels,
     room: number,
-    registry: BlockRegistry,
+    registry: Blocks,
     cameraPos: Vec3 | undefined,
     deferIncomplete: boolean,
 ): void {
@@ -333,7 +333,7 @@ export function update(
 function remeshChunk(
     voxelResources: VoxelResources,
     voxels: Voxels,
-    registry: BlockRegistry,
+    registry: Blocks,
     key: string,
     chunk: Chunk,
     room: number,

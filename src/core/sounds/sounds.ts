@@ -209,5 +209,5 @@ export function sound<const Id extends string>(
     const placeholder = createPlaceholderHandle(id, src, long, name);
     const handle = upsert(registry.sounds, id, placeholder);
     recordSound(id);
-    return handle.payload as never;
+    return handle as never;
 }

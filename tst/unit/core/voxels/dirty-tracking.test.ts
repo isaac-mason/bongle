@@ -1,7 +1,7 @@
 // ── dirty tracking tests ────────────────────────────────────────────
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { type BlockRegistry, resolveKey } from '../../../../src/core/voxels/block-registry';
+import { type Blocks, resolveKey } from '../../../../src/core/voxels/block-registry';
 import { CullType } from '../../../../src/core/voxels/blocks';
 import { flushPendingLight, propagateAllLight, updateLightOnBlockChange } from '../../../../src/core/voxels/light';
 import { buildTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
@@ -24,7 +24,7 @@ beforeEach(() => {
     resetVoxelRegistry();
 });
 
-function makeServerVoxels(registry: BlockRegistry) {
+function makeServerVoxels(registry: Blocks) {
     const voxels = createVoxels(registry);
     voxels.authority = createVoxelsAuthority();
     return voxels;

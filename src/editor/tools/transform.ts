@@ -1812,7 +1812,7 @@ export function computeTransformHasVoxels(state: TransformToolState, sceneTree: 
     for (const id of store.selection.nodes) {
         const node = getNodeById(sceneTree, id);
         if (!node) continue;
-        const def = node.prefab ? registry.prefabs.byId.get(node.prefab.prefabId)?.payload : null;
+        const def = node.prefab ? registry.prefabs.byId.get(node.prefab.prefabId) : null;
         if (def && prefabHasVoxels(def)) return true;
     }
     return false;

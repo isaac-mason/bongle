@@ -39,7 +39,7 @@
 
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, logPendingChanges, registry } from '../core/registry';
+import { bumpVersion, logPendingChanges, protocolManifest, registry, reindex } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -80,16 +80,17 @@ export function applyRegistryChanges(state: EngineServer): void {
     // owning trait def here so applyTraitSwap disposes the live instance and
     // instantiateTraitScripts can't resurrect it, see pruneRemovedScript.
     for (const ch of registry.scripts.pendingChanges) {
-        dirtyScriptIds.add(ch.handle.id);
-        if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+        dirtyScriptIds.add(ch.id);
+        if (ch.kind === 'removed') pruneRemovedScript(ch.payload);
     }
 
-    // capture the OLD wire-index id lists before any branch drains. lazy
-    // getters return cached arrays keyed on `revision`; once draining bumps
-    // revision the next read rebuilds a fresh array, so these references
-    // freeze the pre-flush state.
-    const prevTraitIds = registry.traitWireIndex.indexToId;
-    const prevCommandIds = registry.commandWireIndex.indexToId;
+    // snapshot the OLD protocol id lists, then rebuild the derived index fields
+    // from the (already-updated) stores so this flush's reactions read a fresh
+    // `blockRegistry` / `slotToTrait` / `protocol`, and we can compare against
+    // the pre-flush lists to decide whether to re-broadcast our manifest.
+    const prevTraitIds = registry.protocol.traits.indexToId;
+    const prevCommandIds = registry.protocol.commands.indexToId;
+    reindex(registry);
 
     // block textures feed into BlockRegistry (textures map + texAnimData), so
     // either queue draining requires a wholesale rebuild + per-room rewire.
@@ -108,7 +109,7 @@ export function applyRegistryChanges(state: EngineServer): void {
 
     if (registry.models.pendingChanges.length > 0) {
         for (const change of registry.models.pendingChanges) {
-            const id = change.handle.id;
+            const id = change.id;
             if (change.kind === 'removed') {
                 Resources.deleteModel(state.resources, id);
                 Resources.releaseModel(state.resources, id);
@@ -117,10 +118,10 @@ export function applyRegistryChanges(state: EngineServer): void {
                 // drop any stale payload so the next ensureModel() refetches.
                 Resources.releaseModel(state.resources, id);
                 Resources.setModel(state.resources, id, {
-                    clientUrl: change.handle.payload.bin.client,
-                    serverUrl: change.handle.payload.bin.server,
+                    clientUrl: change.payload.bin.client,
+                    serverUrl: change.payload.bin.server,
                     source: 'bundled',
-                    handle: change.handle.payload,
+                    handle: change.payload,
                 });
             }
         }
@@ -154,12 +155,12 @@ export function applyRegistryChanges(state: EngineServer): void {
     // routes through `applyScenePayload` directly.
     if (registry.scenes.pendingChanges.length > 0) {
         for (const change of registry.scenes.pendingChanges) {
-            const sceneId = change.handle.id;
+            const sceneId = change.id;
             if (change.kind === 'removed') {
                 Content.clearScene(state.content, sceneId, 'server');
                 continue;
             }
-            const handle = change.handle.payload;
+            const handle = change.payload;
             const payload = handle._payload;
             if (!payload) {
                 console.warn(
@@ -220,14 +221,10 @@ export function applyRegistryChanges(state: EngineServer): void {
     // before decoding those follow-ups. messages already in the per-client
     // outbox were encoded under the OLD tables and decode correctly on
     // arrival (client's inbound hasn't been updated yet).
-    const nextTraitIds = registry.traitWireIndex.indexToId;
-    const nextCommandIds = registry.commandWireIndex.indexToId;
+    const nextTraitIds = registry.protocol.traits.indexToId;
+    const nextCommandIds = registry.protocol.commands.indexToId;
     if (!idListsEqual(prevTraitIds, nextTraitIds) || !idListsEqual(prevCommandIds, nextCommandIds)) {
-        Net.broadcast(state.net, state.clients, {
-            type: 'wire_table',
-            traits: nextTraitIds,
-            commands: nextCommandIds,
-        });
+        Net.broadcast(state.net, state.clients, { type: 'wire_table', ...protocolManifest(registry) });
     }
 
     bumpVersion(registry);

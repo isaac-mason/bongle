@@ -4,7 +4,7 @@ import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registry } from '../../../../src/core/registry';
 import { stairs } from '../../../../src/core/voxels/block-presets';
-import type { BlockRegistry } from '../../../../src/core/voxels/block-registry';
+import type { Blocks } from '../../../../src/core/voxels/block-registry';
 import { blockTexture, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
 import {
     buildMeshInput,
@@ -59,7 +59,7 @@ function quadCornerLight(p: PassMesh, quadIdx: number, corner: number): number {
 
 /** mesh + light a chunk in one call. post Stage 2b: meshChunk emits
  *  geometry+AO+light in one pass, this wrapper now just delegates. */
-function meshAndLight(voxels: Voxels, chunk: Chunk, reg: BlockRegistry): ChunkMeshResult | null {
+function meshAndLight(voxels: Voxels, chunk: Chunk, reg: Blocks): ChunkMeshResult | null {
     return meshChunk(createMeshOutput(), buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), reg);
 }
 

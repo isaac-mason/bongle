@@ -56,7 +56,7 @@ import { getTrait, query } from '../../scene/scene-tree';
 import { logScriptError } from '../../scene/script-errors';
 import type { PhysicsContactArgs } from '../../scene/scripts';
 import { traverse } from '../../scene/traverse';
-import type { BlockRegistry } from '../../voxels/block-registry';
+import type { Blocks } from '../../voxels/block-registry';
 import { createVoxelPhysicsShape, unpackVoxelHitInfo, type VoxelPhysicsShape } from '../../voxels/voxel-physics-shape';
 import type { Voxels } from '../../voxels/voxels';
 import {
@@ -149,7 +149,7 @@ export type World = {
     _bodyQuery: ReturnType<typeof query<[typeof RigidBodyTrait, typeof TransformTrait]>>;
 };
 
-export function create(sceneTree: SceneTree, voxels: Voxels, registry: BlockRegistry): World {
+export function create(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): World {
     const world = createWorld(settings);
     const terrainShape = createVoxelPhysicsShape(voxels, registry, INFINITE_AABB);
     const terrainBody = rigidBody.create(world, {

@@ -184,5 +184,5 @@ export function model<const Id extends string>(
     const placeholder = createPlaceholderHandle(id, src, name);
     const handle = upsert(registry.models, id, placeholder);
     recordModel(id);
-    return handle.payload as never;
+    return handle as never;
 }

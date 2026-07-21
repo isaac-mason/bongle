@@ -16,6 +16,7 @@
 
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { mat4, quat, vec3 } from 'mathcat';
+import { NET_SNAPSHOT_CAP, TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
@@ -182,15 +183,6 @@ export type TransformTrait = TraitType<typeof TransformTrait>;
  * authoritative server time (`clock.lastServerStamp`) at unpack, NOT arrival time.
  */
 
-/** ring depth (keyframes). must exceed the deepest the render clock ever sits behind
- *  the frontier — `SERVER_CLOCK_INTERP_DELAY + MAX_INTERP_MARGIN` = 0.25s — so render
- *  time never falls before the oldest keyframe (which would freeze the entity at a
- *  stale pose). the binding case is a fast mover at the 20Hz broadcast cap
- *  (`rate.hz(20)`): one keyframe per ~50ms, so 8 spans ~0.4s of history, ~3 keyframes
- *  of headroom past the 0.25s ceiling. slow movers emit sparser keyframes, so their 8
- *  entries span even more time. ~0.35KB/entity, lazily allocated, only for remotes
- *  that actually move — single-digit depth, like Source's time-bounded history. */
-const NET_SNAPSHOT_CAP = 8;
 
 
 export type NetSnapshots = {
@@ -403,7 +395,8 @@ sync(TransformTrait, 'teleport', {
 
 /**
  * position + quaternion as two independent owner-authority slices, both emitted on
- * byte change (`diff`) and capped at 20/s. a resting body writes byte-stable
+ * byte change (`diff`) and capped at `TRANSFORM_SEND_HZ` (core/clock, the same constant
+ * the render-behind buffer sizes off). a resting body writes byte-stable
  * values (physics sleeps, controllers clamp to zero) so its slice goes silent, and
  * the settle-to-rest is just the last byte change — it lands like any other keyframe,
  * no separate "came to rest" signal needed. kept separate (not a combined pose tuple)
@@ -431,7 +424,7 @@ const transformPositionSync = sync(TransformTrait, 'position', {
     },
     authority: 'owner',
     dirty: dirty.diff(), // any change to the packed pose; byte-stable at rest → silent
-    rate: rate.hz(20), // ≤20/s: keyframes ~50ms apart, interpolation fills the gaps
+    rate: rate.hz(TRANSFORM_SEND_HZ), // cadence + render-behind buffer derive from one constant (core/clock)
 });
 
 const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
@@ -445,7 +438,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
     },
     authority: 'owner',
     dirty: dirty.diff(), // matched to position
-    rate: rate.hz(20), // ≤20/s, matched to position
+    rate: rate.hz(TRANSFORM_SEND_HZ), // matched to position
 });
 
 const transformScaleSync = sync(TransformTrait, 'scale', {

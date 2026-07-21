@@ -23,7 +23,7 @@ import { isKeyDown } from '../../client/input';
 import type { SceneTree } from '../../core/scene/scene-tree';
 import { getNodeById, getTrait } from '../../core/scene/scene-tree';
 import * as Selection from '../../core/scene/selection';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../../core/voxels/voxel-raycast';
 import type { Voxels } from '../../core/voxels/voxels';
 import type { EditRoomStoreApi } from '../edit-room-store';
@@ -80,7 +80,7 @@ export function updateLassoSelect(
     input: Input,
     camera: PerspectiveCamera,
     voxels: Voxels,
-    blocks: BlockRegistry,
+    blocks: Blocks,
     nodeBodies: NodeBodies | null,
     sceneTree: SceneTree,
 ): void {
@@ -131,7 +131,7 @@ function commitLasso(
     input: Input,
     camera: PerspectiveCamera,
     voxels: Voxels,
-    blocks: BlockRegistry,
+    blocks: Blocks,
     nodeBodies: NodeBodies | null,
     sceneTree: SceneTree,
 ): void {

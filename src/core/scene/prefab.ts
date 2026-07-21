@@ -163,11 +163,11 @@ export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): Pref
 export function expandPrefab(
     node: Node,
     _runtime: SceneTreeContext,
-    blockRegistry: import('../voxels/block-registry').BlockRegistry | null,
+    blockRegistry: import('../voxels/block-registry').Blocks | null,
 ): Voxels | null {
     const config = node.prefab;
     if (!config) return null;
-    const def = registry.prefabs.byId.get(config.prefabId)?.payload;
+    const def = registry.prefabs.byId.get(config.prefabId);
     if (!def) return null;
 
     // fresh empty canvas for fn to populate. `fn` reads dep handles
@@ -196,7 +196,7 @@ export function expandPrefab(
  */
 export function reconcilePrefabNode(sceneTree: SceneTree, node: Node, runtime: SceneTreeContext, worldVoxels: Voxels | null): void {
     const config = node.prefab!;
-    const def = registry.prefabs.byId.get(config.prefabId)?.payload;
+    const def = registry.prefabs.byId.get(config.prefabId);
 
     // destroy existing prefab children (non-persistent children we placed before)
     const toDestroy = node.children.filter((c) => !c.persist);
@@ -362,7 +362,7 @@ export function tick(
             sceneTree._prefabsDirty.delete(node);
             continue;
         }
-        const def = registry.prefabs.byId.get(node.prefab.prefabId)?.payload;
+        const def = registry.prefabs.byId.get(node.prefab.prefabId);
         if (!def) {
             sceneTree._prefabsDirty.delete(node);
             continue;

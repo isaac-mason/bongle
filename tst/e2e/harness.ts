@@ -87,16 +87,18 @@ export type TestClient = {
 
 type AnyStore = {
     byId: Map<string, unknown>;
-    byModule: Map<string, Set<string>>;
-    pending: Map<string, Set<string>>;
+    meta: Map<string, unknown>;
+    moduleToIds: Map<string, Set<string>>;
+    seen: Map<string, Set<string>>;
     pendingChanges: unknown[];
     revision: number;
 };
 
 type StoreSnap = {
     byId: Map<string, unknown>;
-    byModule: Map<string, Set<string>>;
-    pending: Map<string, Set<string>>;
+    meta: Map<string, unknown>;
+    moduleToIds: Map<string, Set<string>>;
+    seen: Map<string, Set<string>>;
     pendingChanges: unknown[];
     revision: number;
 };
@@ -123,8 +125,9 @@ let baseline: Record<string, StoreSnap> | null = null;
 function snapStore(s: AnyStore): StoreSnap {
     return {
         byId: new Map(s.byId),
-        byModule: new Map([...s.byModule].map(([k, v]) => [k, new Set(v)])),
-        pending: new Map([...s.pending].map(([k, v]) => [k, new Set(v)])),
+        meta: new Map(s.meta),
+        moduleToIds: new Map([...s.moduleToIds].map(([k, v]) => [k, new Set(v)])),
+        seen: new Map([...s.seen].map(([k, v]) => [k, new Set(v)])),
         pendingChanges: [...s.pendingChanges],
         revision: s.revision,
     };
@@ -133,10 +136,12 @@ function snapStore(s: AnyStore): StoreSnap {
 function restoreStore(s: AnyStore, snap: StoreSnap): void {
     s.byId.clear();
     for (const [k, v] of snap.byId) s.byId.set(k, v);
-    s.byModule.clear();
-    for (const [k, v] of snap.byModule) s.byModule.set(k, new Set(v));
-    s.pending.clear();
-    for (const [k, v] of snap.pending) s.pending.set(k, new Set(v));
+    s.meta.clear();
+    for (const [k, v] of snap.meta) s.meta.set(k, v);
+    s.moduleToIds.clear();
+    for (const [k, v] of snap.moduleToIds) s.moduleToIds.set(k, new Set(v));
+    s.seen.clear();
+    for (const [k, v] of snap.seen) s.seen.set(k, new Set(v));
     s.pendingChanges.length = 0;
     s.pendingChanges.push(...snap.pendingChanges);
     s.revision = snap.revision;

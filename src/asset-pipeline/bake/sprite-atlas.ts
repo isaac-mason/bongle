@@ -72,7 +72,7 @@ export async function buildSpriteAtlas(
 ): Promise<boolean> {
     const { bakedDraws, cache, loader, fs, raster } = opts;
 
-    const handles = [...spritesRegistry.byId.values()].map((h) => h.payload);
+    const handles = [...spritesRegistry.byId.values()];
 
     if (handles.length === 0) {
         await fs.remove(ATLAS_PNG);

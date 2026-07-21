@@ -62,6 +62,21 @@ const CORRECTION_HARD_SNAP_THRESHOLD = 2.0;
 /** frames over which to blend a small correction */
 const CORRECTION_BLEND_FRAMES = 6;
 
+// ── TEMP interpolation debug (remove once diagnosed) ─────────────────────
+const DEBUG_INTERPOLATION = true;
+/** throttle the per-room debug dump to at most one line-block per interval. */
+const DEBUG_LOG_INTERVAL_MS = 1000;
+const _debugLastLog = new Map<number, number>();
+
+/** true at most once per DEBUG_LOG_INTERVAL_MS per playerId (room). */
+function shouldDebugLog(playerId: number): boolean {
+    const now = performance.now();
+    const last = _debugLastLog.get(playerId) ?? 0;
+    if (now - last < DEBUG_LOG_INTERVAL_MS) return false;
+    _debugLastLog.set(playerId, now);
+    return true;
+}
+
 // ── scratch (reused to avoid allocation) ────────────────────────────────
 
 const _interpLocalMat: Mat4 = mat4.create();
@@ -71,19 +86,6 @@ const _authWorldMat: Mat4 = mat4.create();
 const _authWorldPos: Vec3 = vec3.create();
 const _authWorldQuat: Quat = quat.create();
 const _authWorldScale: Vec3 = vec3.create();
-
-// ── state ───────────────────────────────────────────────────────────────
-
-export type Interpolation = {
-    _nodes: SceneTree;
-    /** room player id, used per-frame to route owner vs remote path
-     *  for each enrolled transform. fixed for the room's lifetime. */
-    _playerId: PlayerId;
-};
-
-export function init(sceneTree: SceneTree, playerId: PlayerId): Interpolation {
-    return { _nodes: sceneTree, _playerId: playerId };
-}
 
 /* ── snapshot ── */
 
@@ -95,8 +97,8 @@ export function init(sceneTree: SceneTree, playerId: PlayerId): Interpolation {
  * in `_transformDirty`, their `markWorldDirty` lights up the dirty
  * bits but doesn't enroll them in the snapshot set.
  */
-export function snapshot(state: Interpolation): void {
-    const dirty = state._nodes._transformDirty;
+export function snapshot(sceneTree: SceneTree): void {
+    const dirty = sceneTree._transformDirty;
     for (const t of dirty) {
         if (!t.interpolate) continue;
         t.prevPosition[0] = t.position[0];
@@ -131,26 +133,60 @@ export function snapshot(state: Interpolation): void {
  *   - remote (non-owner) → sample the snapshot ring at `renderTime`;
  *     teleport edge collapses the ring to the current pose
  */
-export function interpolate(state: Interpolation, alpha: number, renderTime: number): void {
-    const playerId = state._playerId;
+export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: number, renderTime: number): void {
+    // ── TEMP interpolation debug ──
+    const debug = DEBUG_INTERPOLATION && sceneTree._interpolating.size > 0 && shouldDebugLog(playerId);
+    const debugLines: string[] = [];
 
-    for (const transform of state._nodes._interpolating) {
+    for (const transform of sceneTree._interpolating) {
         const node = transform._node!;
 
         transform._version++;
         transform._interpolated = 1;
 
-        const rb = getTrait(node, RigidBodyTrait);
-        if (rb?.prediction) {
+        const rigidBody = getTrait(node, RigidBodyTrait);
+
+        let branch = '';
+        if (rigidBody?.prediction) {
             applyPredictionInterpolation(transform);
+            branch = 'predict';
         } else if (node.owner === playerId) {
             sampleFixedStepPose(transform, alpha, _interpLocalPos, _interpLocalQuat);
             writeInterpolated(transform, _interpLocalPos, _interpLocalQuat);
+            branch = 'owner-fixedstep';
         } else {
             sampleSnapshotPose(transform, renderTime);
+            branch = 'remote-snapshot';
+        }
+
+        if (debug) {
+            const moved = vec3.distance(transform.prevPosition, transform.position);
+            let ringInfo = `posRing=${transform._netSnapshots?.posCount ?? '-'} rotRing=${transform._netSnapshots?.rotCount ?? '-'}`;
+            const snaps = transform._netSnapshots;
+            if (branch === 'remote-snapshot' && snaps && snaps.posCount > 0) {
+                const cap = snaps.posTime.length;
+                const newest = snaps.posTime[snaps.posHead]!;
+                const oldest = snaps.posTime[(snaps.posHead - snaps.posCount + 1 + cap) % cap]!;
+                // behind<0 = renderTime is inside the ring (good, will interpolate).
+                // behind>=0 = renderTime is at/past the newest keyframe → clamps → steps.
+                ringInfo +=
+                    ` behindNewest=${(renderTime - newest).toFixed(4)}` +
+                    ` ringSpan=${(newest - oldest).toFixed(4)}` +
+                    ` rt=${renderTime.toFixed(4)}`;
+            }
+            debugLines.push(
+                `  ${node.name ?? '<unnamed>'} ${branch} owner=${node.owner} prev→cur=${moved.toFixed(4)} ${ringInfo}`,
+            );
         }
 
         if (node.children.length > 0) markInterpolatedDescendantsDirty(node);
+    }
+
+    if (debug) {
+        // biome-ignore lint/suspicious/noConsole: temporary interpolation debug
+        console.log(
+            `[interp] pid=${playerId} alpha=${alpha.toFixed(3)} enrolled=${sceneTree._interpolating.size}\n${debugLines.join('\n')}`,
+        );
     }
 }
 

@@ -2,7 +2,7 @@ import type { Vec3 } from 'mathcat';
 import { SetBlockFlags } from './block-flags';
 import type { BlockObserverEntry } from './block-hooks';
 import { runBlockEvents, runBlockHooks } from './block-hooks';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { AIR, MISSING, resolveKey } from './block-registry';
 import { CullType } from './blocks';
 
@@ -445,7 +445,7 @@ export function getChunkBlockKey(chunk: Chunk, x: number, y: number, z: number):
 
 /** get-or-allocate the chunk-local palette index for a block key. tier-1
  *  callers grab a slot once, then write `chunkData(chunk)[idx] = slot` directly. */
-export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: BlockRegistry): number {
+export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: Blocks): number {
     let slot = chunk.paletteMap.get(key);
     if (slot === undefined) {
         slot = chunk.paletteKeys.length;
@@ -636,7 +636,7 @@ export function setLight(chunk: Chunk, index: number, value: number): void {
  * O(palette size), typically < 50 entries per chunk.
  * unresolved keys → MISSING. newly resolved keys → live again.
  */
-export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void {
+export function resolveChunk(chunk: Chunk, registry: Blocks): void {
     let nonAirCount = 0;
     let solidCount = 0;
     for (let i = 0; i < chunk.paletteKeys.length; i++) {
@@ -854,13 +854,13 @@ export type Voxels = {
      *  stored here so setBlock/resolveAllChunks don't need a trailing registry arg.
      *  on hot reload, registry-dispatch reassigns this field directly and
      *  calls resolveAllChunks() per room. */
-    registry: BlockRegistry;
+    registry: Blocks;
     /** authoritative-emission bundle. null on read-only mirrors. see
      *  `VoxelsAuthority` doc. */
     authority: VoxelsAuthority | null;
 };
 
-export function createVoxels(registry: BlockRegistry): Voxels {
+export function createVoxels(registry: Blocks): Voxels {
     return {
         chunks: new Map(),
         dirty: { blocks: new Set(), light: new Set() },

@@ -21,7 +21,7 @@ import type { Resources } from '../resources';
 import type { CommandHandle } from '../rpc';
 import * as Rpc from '../rpc';
 import * as blockHooks from '../voxels/block-hooks';
-import type { BlockRegistry } from '../voxels/block-registry';
+import type { Blocks } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
 import * as SceneTree from './scene-tree';
 import { logScriptError } from './script-errors';
@@ -209,7 +209,7 @@ export type SceneTreeContext = {
     clock: Clock;
 
     /** block registry, flat lookup tables for block type/state info */
-    blocks: BlockRegistry;
+    blocks: Blocks;
 
     /** live script instances, keyed by node id → script id → instance.
      *  script id is `${trait._id}#${scriptIndex}` where scriptIndex is the
@@ -259,7 +259,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     clock: Clock;
 
     /** block registry, flat lookup tables for block type/state info */
-    blocks: BlockRegistry;
+    blocks: Blocks;
 
     /** client information, safe to ! bang if env.client is true */
     client?: ClientContext;
@@ -291,8 +291,7 @@ export type ScriptInstance = {
     /** fired once on initial script attach, before the script enters the scene tree */
     onInit: Set<() => void>;
 
-    /** client-only: fires once per frame at the very start, before onUpdate.
-     *  use to consume input (e.g. zero mk._dx/_dy) so later hooks see no input. */
+    /** client-only: fires once per frame at the very start, before onUpdate. */
     onInput: Set<(args: FrameArgs) => void>;
 
     /** fired once per frame, before the tick loop. use for input polling and camera updates. */
@@ -325,8 +324,7 @@ export type ScriptInstance = {
     /** fired after the physics step */
     onPostPhysicsStep: Set<(args: TickArgs) => void>;
 
-    /** fired after animator sampling, before world-matrix recompute. use for
-     *  procedural post-processing (head look-at, spring/damper, etc.). */
+    /** fired after animator sampling, before world-matrix recompute. */
     onPostAnimate: Set<(args: TickArgs) => void>;
 
     /** fired during physics step when a contact is added or persisted */
@@ -837,7 +835,7 @@ export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirectio
 ): void {
     const runtime = ctx._runtime;
     if (!runtime) return;
-    Rpc.send(runtime.rpc, registry.commandWireIndex, handle, data as never, runtime.roomId, client);
+    Rpc.send(runtime.rpc, registry.protocol.commands, handle, data as never, runtime.roomId, client);
 }
 
 export function broadcast(
@@ -847,7 +845,7 @@ export function broadcast(
 ): void {
     const runtime = ctx._runtime;
     if (!runtime) return;
-    Rpc.send(runtime.rpc, registry.commandWireIndex, handle, data, runtime.roomId);
+    Rpc.send(runtime.rpc, registry.protocol.commands, handle, data, runtime.roomId);
 }
 
 export function listen(
@@ -1177,7 +1175,7 @@ export function swapScriptInstance(oldInstance: ScriptInstance, newDef: ScriptDe
  * positional, so rebuild + reindex from the surviving entries.
  */
 export function pruneRemovedScript(def: ScriptDef): void {
-    const traitDef = registry.traits.byId.get(def.traitId)?.payload;
+    const traitDef = registry.traits.byId.get(def.traitId);
     if (!traitDef?.scriptsById.delete(def.scriptId)) return;
     const remaining = [...traitDef.scriptsById.values()].sort((a, b) => a.index - b.index).map((entry) => entry.reg);
     traitDef.scripts = remaining;
@@ -1192,7 +1190,7 @@ export function applyTraitSwap(runtime: SceneTreeContext, dirtyScriptIds: Readon
             if (dirtyScriptIds && !dirtyScriptIds.has(instanceKey)) continue;
             const { traitId, scriptId } = oldInstance.def;
 
-            const newTraitDef = registry.traits.byId.get(traitId)?.payload;
+            const newTraitDef = registry.traits.byId.get(traitId);
             const newDef = newTraitDef?.scriptsById.get(scriptId)?.reg;
 
             if (!newDef) {

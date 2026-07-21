@@ -25,10 +25,10 @@
 //   3  concave 90° interior corner             → true
 //   4  edge entirely interior                  → false
 
-import { AIR, BLOCK_FLAG_COLLISION, type BlockRegistry, MISSING } from './block-registry';
+import { AIR, BLOCK_FLAG_COLLISION, type Blocks, MISSING } from './block-registry';
 import { getBlockState, type Voxels } from './voxels';
 
-function isSolidCube(voxels: Voxels, blocks: BlockRegistry, x: number, y: number, z: number): boolean {
+function isSolidCube(voxels: Voxels, blocks: Blocks, x: number, y: number, z: number): boolean {
     const stateId = getBlockState(voxels, x, y, z);
     if (stateId === AIR || stateId === MISSING) return false;
     if (!(blocks.flags[stateId]! & BLOCK_FLAG_COLLISION)) return false;
@@ -39,7 +39,7 @@ export type EdgeAxis = 0 | 1 | 2;
 
 export function isCubeEdgeActive(
     voxels: Voxels,
-    blocks: BlockRegistry,
+    blocks: Blocks,
     axis: EdgeAxis,
     gx: number,
     gy: number,

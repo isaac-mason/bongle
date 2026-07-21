@@ -62,7 +62,7 @@ export function runDiffDetection(sceneTree: SceneTree): void {
 
 function diffNode(sceneTree: SceneTree, node: Node): void {
     for (const [traitSlot, instance] of node._traits) {
-        const def = registry.traitsBySlot.get(traitSlot);
+        const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
 
         const codecs = getSyncCodecs(def);
@@ -518,6 +518,7 @@ export function acceptOwnerFields(
     instance: TraitBase,
     fields: BinaryField[],
     mode: RoomMode,
+    syncRemap?: (number | undefined)[],
 ): void {
     // play mode: only accept owner fields for replicable nodes. non-shared
     // nodes aren't synced to other clients, so an owner-authority write
@@ -536,7 +537,9 @@ export function acceptOwnerFields(
     const targetPlayers: Player[] = cs ? RoomsModule.getPlayersForClient(rooms, client).filter((p) => p.roomId === roomId) : [];
 
     for (const entry of fields) {
-        const i = entry.index;
+        // `entry.index` is the sending client's sync slot; map it to ours by id.
+        const i = syncRemap ? syncRemap[entry.index] : entry.index;
+        if (i === undefined) continue;
         const codec = codecs[i];
         if (!codec) continue;
         const syncDef = def.sync[i];
@@ -983,7 +986,7 @@ function walkReplicable(
  * packs fresh, controls aren't snapshotted on the instance.
  */
 function readAllFields(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.traitsBySlot.get(traitSlot);
+    const def = registry.slotToTrait.get(traitSlot);
     if (!def) return [];
 
     const codecs = getControlCodecs(def);
@@ -1002,7 +1005,7 @@ function readAllFields(node: Node, traitSlot: number, instance: TraitBase): Bina
  * receiver, pairs with readAllFields (controls).
  */
 function readAllSyncs(node: Node, traitSlot: number, instance: TraitBase): BinaryField[] {
-    const def = registry.traitsBySlot.get(traitSlot);
+    const def = registry.slotToTrait.get(traitSlot);
     if (!def) return [];
 
     const codecs = getSyncCodecs(def);
@@ -1030,7 +1033,7 @@ function readChangedFields(
     sentFields: Array<{ index: number; version: number }>,
     playerId: PlayerId,
 ): BinaryField[] {
-    const def = registry.traitsBySlot.get(traitSlot);
+    const def = registry.slotToTrait.get(traitSlot);
     if (!def) return [];
 
     const codecs = getSyncCodecs(def);
@@ -1092,10 +1095,10 @@ function buildNodeCreatedUpdate(node: Node, mode: RoomMode): SceneSyncUpdate {
     const parentId = node.parent?.id ?? 0;
     const index = node.parent ? node.parent.children.indexOf(node) : 0;
 
-    const wireIndex = registry.traitWireIndex;
+    const wireIndex = registry.protocol.traits;
     const traits: BinaryTrait[] = [];
     for (const [traitSlot, instance] of node._traits) {
-        const def = registry.traitsBySlot.get(traitSlot);
+        const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         traits.push({
             netIndex: wireIndex.idToIndex.get(def.id),
@@ -1169,10 +1172,10 @@ function diffNodeKnowledge(
 
     // trait changes, per-field granularity with per-field rate gating
     const currentTraitIds = new Set<string>();
-    const wireIndex = registry.traitWireIndex;
+    const wireIndex = registry.protocol.traits;
 
     for (const [traitSlot, instance] of node._traits) {
-        const def = registry.traitsBySlot.get(traitSlot);
+        const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         currentTraitIds.add(def.id);
 
@@ -1277,7 +1280,7 @@ function diffNodeKnowledge(
     // field knowledge against the current field versions.
     let allFieldsCurrent = true;
     for (const [traitSlot, instance] of node._traits) {
-        const def = registry.traitsBySlot.get(traitSlot);
+        const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
         const tk = known.traits.get(def.id);
         if (!tk) continue;
@@ -1313,7 +1316,7 @@ export function snapshotNodeKnowledge(nodeKnowledge: Map<number, ClientNodeKnowl
 
     const traits = new Map<string, TraitKnowledge>();
     for (const [traitSlot, instance] of node._traits) {
-        const def = registry.traitsBySlot.get(traitSlot);
+        const def = registry.slotToTrait.get(traitSlot);
         if (!def) continue;
 
         // snapshot per-sync versions for this trait, dense PACKED arrays by field

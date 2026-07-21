@@ -15,11 +15,11 @@ import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 
 function useTraits(): TraitDef[] {
-    return [...registry.traits.byId.values()].map((h) => h.payload);
+    return [...registry.traits.byId.values()];
 }
 
 function useTraitsBySlot(): Map<number, TraitDef> {
-    return registry.traitsBySlot;
+    return registry.slotToTrait;
 }
 
 /* ── Schema-driven property editors ─────────────────────────────── */
@@ -527,7 +527,7 @@ function PrefabRefEditor({ value, onChange }: { value: string; schema: PrefabRef
     const items: SearchableSelectItem<string>[] = [
         { id: '', label: 'none' },
         ...ids.map((id) => {
-            const def = prefabDefs.get(id)?.payload;
+            const def = prefabDefs.get(id);
             const name = def?.name ?? id;
             const leading = (
                 <PrefabThumb key={id} prefabId={id} size={thumbSize} className="rounded-sm overflow-hidden shrink-0" />
@@ -901,7 +901,7 @@ function AddPrefabAction({ node }: { node: Node }) {
             placeholder="search prefabs…"
             trigger={<AddPrefabTriggerButton />}
             onSelect={(id) => {
-                const def = prefabDefs?.get(id)?.payload;
+                const def = prefabDefs?.get(id);
                 if (!def) return;
                 setPrefab(
                     node.id,
@@ -925,7 +925,7 @@ function PrefabSection({ node }: { node: Node }) {
     const config = node.prefab;
     if (!config) return null;
 
-    const def = prefabDefs?.get(config.prefabId)?.payload;
+    const def = prefabDefs?.get(config.prefabId);
 
     const isMissing = !prefabIds.includes(config.prefabId);
     const items: SearchableSelectItem<string>[] = [
@@ -951,7 +951,7 @@ function PrefabSection({ node }: { node: Node }) {
                     items={items}
                     value={config.prefabId}
                     onSelect={(id) => {
-                        const next = prefabDefs?.get(id)?.payload;
+                        const next = prefabDefs?.get(id);
                         if (!next) return;
                         setPrefab(node.id, {
                             ...config,

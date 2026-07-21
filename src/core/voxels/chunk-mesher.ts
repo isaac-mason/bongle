@@ -44,7 +44,7 @@
 //        of GPU bandwidth at the cost of 4-level quantization for the
 //        few mesh-quad paths that previously held a smoother float.
 
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import {
     AIR,
     FACE_DIR_NONE,
@@ -1646,7 +1646,7 @@ export function buildMeshInput(voxels: Voxels, cx: number, cy: number, cz: numbe
  * module-level scratch targets, and the returned ChunkMeshResult slices
  * out only the populated regions.
  */
-export function meshChunk(out: MeshOutput, input: MeshInput, registry: BlockRegistry): ChunkMeshResult | null {
+export function meshChunk(out: MeshOutput, input: MeshInput, registry: Blocks): ChunkMeshResult | null {
     // main-thread invariant: `input.blocks === _slab` and `input.light
     // === _blockLightSlab` (via `buildMeshInput`). Worker stage will
     // swap the module scratch views to the transferred buffers before

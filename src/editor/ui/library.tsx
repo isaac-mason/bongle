@@ -222,7 +222,7 @@ function InventoryItemInfo({ item }: { item: InventoryItem }) {
 function PrefabInfoRows({ prefabId }: { prefabId: string }) {
     const room = useEditor((s) => s.room);
     if (!room) return null;
-    const def = registry.prefabs.byId.get(prefabId)?.payload;
+    const def = registry.prefabs.byId.get(prefabId);
     if (!def) return null;
     return <InfoRow label="type" value={def.type} />;
 }
@@ -304,7 +304,7 @@ function ScenesTab() {
     const prefabSourceScenes = new Set<string>();
     if (room) {
         for (const h of registry.prefabs.byId.values()) {
-            for (const dep of h.payload.deps) {
+            for (const dep of h.deps) {
                 const id = depId(dep);
                 if (registry.scenes.byId.has(id)) prefabSourceScenes.add(id);
             }

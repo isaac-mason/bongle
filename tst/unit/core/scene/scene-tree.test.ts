@@ -820,8 +820,8 @@ describe('script removal on reload', () => {
         // drive the dispatch data path: prune removed defs, then swap.
         const dirty = new Set<string>();
         for (const ch of registry.scripts.pendingChanges) {
-            dirty.add(ch.handle.id);
-            if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+            dirty.add(ch.id);
+            if (ch.kind === 'removed') pruneRemovedScript(ch.payload);
         }
         registry.scripts.pendingChanges.length = 0;
         applyTraitSwap(runtime, dirty);

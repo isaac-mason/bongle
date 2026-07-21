@@ -41,7 +41,7 @@
 import { env } from 'bongle';
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, type KindStore, logPendingChanges, registry } from '../core/registry';
+import { bumpVersion, type RegistryStore, logPendingChanges, registry, reindex } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -58,7 +58,6 @@ import * as VoxelResources from '../render/voxels/voxel-resources';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
-import * as Net from './net';
 
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const allStores = [
@@ -92,22 +91,22 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // owning trait def here so applyTraitSwap disposes the live instance and
     // instantiateTraitScripts can't resurrect it, see pruneRemovedScript.
     for (const ch of registry.scripts.pendingChanges) {
-        dirtyScriptIds.add(ch.handle.id);
-        if (ch.kind === 'removed') pruneRemovedScript(ch.handle.payload);
+        dirtyScriptIds.add(ch.id);
+        if (ch.kind === 'removed') pruneRemovedScript(ch.payload);
     }
 
     // editor HMR toasts, one per kind with pending changes, plus one
     // for script-instance swaps reaching via DepGraph (when trait body
     // didn't change but a producer did). gated on env.editor so shipped
     // builds skip the store churn.
-    if (env.editor) pushHmrToasts(allStores as readonly KindStore<unknown>[], dirtyScriptIds);
+    if (env.editor) pushHmrToasts(allStores as readonly RegistryStore<unknown>[], dirtyScriptIds);
 
-    // capture the OLD wire-index id lists before any branch drains. lazy
-    // getters return cached arrays keyed on `revision`; once draining bumps
-    // revision the next read rebuilds a fresh array, so these references
-    // freeze the pre-flush state.
-    const prevTraitIds = registry.traitWireIndex.indexToId;
-    const prevCommandIds = registry.commandWireIndex.indexToId;
+    // registrations already landed in the stores at module (re)eval; rebuild
+    // the derived index fields so this flush's reactions read fresh
+    // `blockRegistry` / `slotToTrait` / `protocol`. the client's manifest
+    // re-send rides the update loop (gated on `registry.id`, bumped below), so
+    // no explicit wire_table emit here.
+    reindex(registry);
 
     // block textures feed BlockRegistry (textures + texAnimData) AND drive the
     // GPU atlas, refresh() short-circuits on hash + texAnimData equality, so
@@ -123,7 +122,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
 
     if (registry.models.pendingChanges.length > 0) {
         for (const change of registry.models.pendingChanges) {
-            const id = change.handle.id;
+            const id = change.id;
             if (change.kind === 'removed') {
                 Resources.deleteModel(state.resources, id);
                 Resources.releaseModel(state.resources, id);
@@ -132,10 +131,10 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
                 // drop any stale payload so the next ensureModel() refetches.
                 Resources.releaseModel(state.resources, id);
                 Resources.setModel(state.resources, id, {
-                    clientUrl: change.handle.payload.bin.client,
-                    serverUrl: change.handle.payload.bin.server,
+                    clientUrl: change.payload.bin.client,
+                    serverUrl: change.payload.bin.server,
                     source: 'bundled',
-                    handle: change.handle.payload,
+                    handle: change.payload,
                 });
             }
         }
@@ -171,12 +170,12 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     // through applyScenePayload directly.
     if (registry.scenes.pendingChanges.length > 0) {
         for (const change of registry.scenes.pendingChanges) {
-            const sceneId = change.handle.id;
+            const sceneId = change.id;
             if (change.kind === 'removed') {
                 Content.clearScene(state.content, sceneId, 'client');
                 continue;
             }
-            const handle = change.handle.payload;
+            const handle = change.payload;
             const payload = handle._payload;
             if (!payload) continue;
             Content.populateScene(state.content, registry.blockRegistry, sceneId, payload, 'client');
@@ -203,9 +202,9 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
 
     // controls / sync / scripts: per-trait registrations whose runtime
     // effect is consumed via the trait def (controlsById, syncById,
-    // scriptsById). codec WeakMaps keyed on TraitDef are dropped when
-    // the parent trait swaps identity (replaceIdentity on the traits
-    // store), drain so the queue doesn't grow unbounded.
+    // scriptsById). codec WeakMaps keyed on TraitDef are dropped when the
+    // parent trait re-registers (upsert always swaps the TraitDef identity),
+    // drain so the queue doesn't grow unbounded.
     registry.controls.pendingChanges.length = 0;
     registry.sync.pendingChanges.length = 0;
     registry.scripts.pendingChanges.length = 0;
@@ -233,21 +232,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         registry.sprites.pendingChanges.length = 0;
     }
 
-    // emit `wire_table` to the server if our outbound id sets shifted.
-    // messages enqueued AFTER this call (e.g. sync_update / net_message
-    // from the next tick) encode against the new tables; WS ordering means
-    // the server adopts the new inbound mapping for this client before
-    // decoding those follow-ups.
-    const nextTraitIds = registry.traitWireIndex.indexToId;
-    const nextCommandIds = registry.commandWireIndex.indexToId;
-    if (!idListsEqual(prevTraitIds, nextTraitIds) || !idListsEqual(prevCommandIds, nextCommandIds)) {
-        Net.send(state.net, {
-            type: 'wire_table',
-            traits: nextTraitIds,
-            commands: nextCommandIds,
-        });
-    }
-
     bumpVersion(registry);
 
     // broad "registry flush settled" signal for browser consumers. the editor
@@ -256,12 +240,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('bongle:registry-changed'));
     }
-}
-
-function idListsEqual(a: readonly string[], b: readonly string[]): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
 }
 
 /**
@@ -408,11 +386,11 @@ const TOAST_LABELS: Record<string, [singular: string, plural: string]> = {
     particles: ['particle emitter', 'particle emitters'],
 };
 
-function pushHmrToasts(stores: ReadonlyArray<KindStore<unknown>>, dirtyScriptIds: ReadonlySet<string>): void {
+function pushHmrToasts(stores: ReadonlyArray<RegistryStore<unknown>>, dirtyScriptIds: ReadonlySet<string>): void {
     const ed = useEditor.getState();
     for (const store of stores) {
         if (store.pendingChanges.length === 0) continue;
-        const ids = store.pendingChanges.map((ch) => ch.handle.id);
+        const ids = store.pendingChanges.map((ch) => ch.id);
         const allSame = store.pendingChanges.every((ch) => ch.kind === store.pendingChanges[0]!.kind);
         const verb = !allSame
             ? 'updated'
@@ -429,7 +407,7 @@ function pushHmrToasts(stores: ReadonlyArray<KindStore<unknown>>, dirtyScriptIds
     // `scripts:<id>` whose body itself didn't move). suppressed when the
     // trait body OR the script body itself changed, those already
     // toasted under `traits` / `scripts` above.
-    const directScriptIds = new Set(registry.scripts.pendingChanges.map((ch) => ch.handle.id));
+    const directScriptIds = new Set(registry.scripts.pendingChanges.map((ch) => ch.id));
     const propagatedScriptIds = [...dirtyScriptIds].filter((id) => !directScriptIds.has(id));
     if (propagatedScriptIds.length > 0 && registry.traits.pendingChanges.length === 0) {
         const n = propagatedScriptIds.length;

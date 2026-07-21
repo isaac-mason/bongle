@@ -16,7 +16,7 @@ import {
     runOnPostPhysicsStep,
     runOnPrePhysicsStep,
 } from '../scene/scene-tree';
-import type { BlockRegistry } from '../voxels/block-registry';
+import type { Blocks } from '../voxels/block-registry';
 import { flushHitBuffer } from '../voxels/voxel-physics-shape';
 import type { Voxels } from '../voxels/voxels';
 import * as AabbPhysics from './aabb';
@@ -133,7 +133,7 @@ export type VccBodyContact = {
     penetrationDepth: number;
 };
 
-export function init(sceneTree: SceneTree, voxels: Voxels, registry: BlockRegistry): Physics {
+export function init(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): Physics {
     const rigid = RigidPhysics.create(sceneTree, voxels, registry);
     const aabb = AabbPhysics.createWorld(voxels);
     AabbPhysics.bindNodeSync(aabb, sceneTree, AabbBodyTrait);

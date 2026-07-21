@@ -286,7 +286,7 @@ function classifyMeshQuadShape(
     return { shape: SHAPE_IRREGULAR, faceDir: FACE_DIR_NONE, depth: 0 };
 }
 
-export type BlockRegistry = {
+export type Blocks = {
     /** total number of global state ids across all blocks (including air + missing). */
     totalStates: number;
     /** number of registered block types (not counting the implicit missing sentinel). */
@@ -624,7 +624,7 @@ export function buildBlockRegistry(
     defs: Map<string, BlockDef>,
     handles: Map<string, BlockHandle>,
     blockTextures: Map<string, BlockTextureDef>,
-): BlockRegistry {
+): Blocks {
     const orderedDefs: BlockDef[] = [];
     const orderedHandles: BlockHandle[] = [];
     const idToDef = new Map<string, BlockDef>();
@@ -1397,7 +1397,7 @@ export function buildBlockRegistry(
  * than the current def (e.g. "oak_log[axis=y]" where the def now has a "waterlogged"
  * prop too) will still resolve correctly.
  */
-export function resolveKey(registry: BlockRegistry, key: string): number {
+export function resolveKey(registry: Blocks, key: string): number {
     const cached = registry.keyToState.get(key);
     if (cached !== undefined) return cached;
 

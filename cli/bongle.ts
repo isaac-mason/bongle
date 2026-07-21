@@ -3,12 +3,14 @@
 // lib/build + the engine use extensionless bundler-style imports node's own
 // resolver won't follow.
 //
-// Today: `bongle build` (bake + bundle), `bongle bake`, and `bongle dev` (the node
-// local dev host: the lib/build dev-server core served over HTTP/WS, dev.ts).
+// Today: `bongle build` (bake + bundle), `bongle bake`, `bongle dev` (the node
+// local dev host: the lib/build dev-server core served over HTTP/WS, dev.ts), and
+// `bongle start` (run a built bundle standalone: server + served client).
 
+import { bakeCommand } from './bake/bake';
 import { buildCommand } from './build';
 import { devCommand } from './dev/start';
-import { bakeCommand } from './bake/bake';
+import { startCommand } from './start';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name: string): string | undefined => {
@@ -19,7 +21,7 @@ const projectArg = () => rest.find((a) => !a.startsWith('-')) ?? '.';
 
 function usage(): never {
     console.error(
-        'usage:\n  bongle build <project> [--max-players N] [--out bundle.zip]\n  bongle bake <project>\n  bongle dev <project> [--port N]',
+        'usage:\n  bongle build <project> [--max-players N] [--out bundle.zip]\n  bongle bake <project>\n  bongle dev <project> [--port N]\n  bongle start <bundle.zip|dir> [--port N]',
     );
     process.exit(1);
 }
@@ -35,6 +37,10 @@ if (cmd === 'build') {
     exitOneShot();
 } else if (cmd === 'dev') {
     await devCommand(projectArg(), { port: flag('--port') ? Number(flag('--port')) : undefined });
+} else if (cmd === 'start') {
+    // the built bundle (dir or zip), defaulting to `bongle build`'s default output.
+    const bundle = rest.find((a) => !a.startsWith('-')) ?? 'bundle.zip';
+    await startCommand(bundle, { port: flag('--port') ? Number(flag('--port')) : undefined });
 } else {
     usage();
 }

@@ -27,7 +27,7 @@
 // path. all light/state/dirty access goes through the chunk ref directly.
 
 import type { Vec4 } from 'mathcat';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import {
     CHUNK_SIZE,
     type Chunk,
@@ -419,7 +419,7 @@ const _spreadQueue = createBucketQueue();
 
 function unspreadChannel(
     voxels: Voxels,
-    registry: BlockRegistry,
+    registry: Blocks,
     ch: number,
     removalQueue: BucketQueue,
     relightQueue: BucketQueue,
@@ -518,7 +518,7 @@ function unspreadChannel(
 // sky special case: when spreading downward through opacity=0 blocks,
 // sky light doesn't decay (stays at the current level, not level-1).
 
-function spreadChannel(voxels: Voxels, registry: BlockRegistry, ch: number, sourceQueue: BucketQueue): void {
+function spreadChannel(voxels: Voxels, registry: Blocks, ch: number, sourceQueue: BucketQueue): void {
     const { lightOpacity } = registry;
     const isSky = ch === CH_SKY;
     const shift = CHANNEL_SHIFT[ch]!;
@@ -1176,7 +1176,7 @@ function handleChannelChange(
     lx: number,
     ly: number,
     lz: number,
-    registry: BlockRegistry,
+    registry: Blocks,
     ch: number,
     oldOpacity: number,
     newOpacity: number,
@@ -1251,7 +1251,7 @@ function computeNewLevel(
     lx: number,
     ly: number,
     lz: number,
-    registry: BlockRegistry,
+    registry: Blocks,
     ch: number,
     minSafeLight: number,
 ): number {

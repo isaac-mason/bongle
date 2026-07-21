@@ -24,7 +24,7 @@ export * as blockPreset from '../core/voxels/block-presets';
 // door operations (also reachable via blockPreset.*), top-level since they're
 // operations on a placed door, not preset factories.
 export { getDoorOpen, setDoorOpen } from '../core/voxels/block-presets';
-export type { BlockRegistry as BlockRegistryData } from '../core/voxels/block-registry';
+export type { Blocks as BlockRegistryData } from '../core/voxels/block-registry';
 export {
     AIR,
     BLOCK_FLAG_CLIMBABLE,

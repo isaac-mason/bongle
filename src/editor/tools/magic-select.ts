@@ -12,7 +12,7 @@
 import type { Input } from '../../client/input';
 import { isKeyDown } from '../../client/input';
 import * as Selection from '../../core/scene/selection';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { AIR } from '../../core/voxels/block-registry';
 import type { Voxels } from '../../core/voxels/voxels';
 import { getBlockState } from '../../core/voxels/voxels';
@@ -61,7 +61,7 @@ function makeMatchFn(
     opts: MagicSelectOptions,
     seedStateId: number,
     seedBlockTypeId: number,
-    blocks: BlockRegistry,
+    blocks: Blocks,
 ): (stateId: number) => boolean {
     switch (opts.compareType) {
         case 'block':
@@ -81,7 +81,7 @@ function makeMatchFn(
 function runBFS(
     seed: [number, number, number],
     voxels: Voxels,
-    blocks: BlockRegistry,
+    blocks: Blocks,
     opts: MagicSelectOptions,
 ): Selection.Selection {
     const result = Selection.create();
@@ -173,7 +173,7 @@ export function updateMagicSelect(
     pointer: PointerState,
     input: Input,
     voxels: Voxels,
-    blocks: BlockRegistry,
+    blocks: Blocks,
 ): void {
     const justDown = pointerJustDown(pointer, input);
     if (!justDown) return;

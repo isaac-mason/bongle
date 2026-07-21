@@ -11,7 +11,7 @@
 // the layout block, the write block, and the read block. Four edits,
 // all visible in this file.
 
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 
 // stored as unsigned in the Uint32Array slot; compare unsigned-to-unsigned
 // to avoid surprises with high-bit literals (`0xb7e61571 | 0` is negative).
@@ -82,7 +82,7 @@ function copyBytes(dst: Uint8Array, src: ArrayBufferView, dstOffset: number): vo
 
 // ── encode ─────────────────────────────────────────────────────────
 
-export function serializeBlockRegistryForWorker(reg: BlockRegistry, version: number): ArrayBuffer {
+export function serializeBlockRegistryForWorker(reg: Blocks, version: number): ArrayBuffer {
     const totalStates = reg.totalStates;
     const meshCount = reg.meshQuads.length - 1; // slot 0 is sentinel
 
@@ -292,7 +292,7 @@ export function serializeBlockRegistryForWorker(reg: BlockRegistry, version: num
 
 // ── decode ─────────────────────────────────────────────────────────
 
-export type DeserializedBlockRegistry = Partial<BlockRegistry> & {
+export type DeserializedBlockRegistry = Partial<Blocks> & {
     totalStates: number;
     version: number;
 };

@@ -39,7 +39,7 @@ import {
     BLOCK_FLAG_COLLISION,
     BLOCK_FLAG_LIQUID,
     BLOCK_FLAG_SNEAK_GUARD,
-    type BlockRegistry,
+    type Blocks,
     SHAPE_AABBS,
 } from '../core/voxels/block-registry';
 import { unpackVoxelHitInfo } from '../core/voxels/voxel-physics-shape';
@@ -679,7 +679,7 @@ function applyAirWishAccel(vel: Vec3, wishDir: Vec3, airAccel: number, wishSpeed
 // up flags in the registry's Uint32Array.
 
 function sampleEnvironment(cc: CharacterControllerTrait, voxels: Voxels): void {
-    const registry: BlockRegistry = voxels.registry;
+    const registry: Blocks = voxels.registry;
     const flags = registry.flags;
     const viscosity = registry.liquidViscosity;
     const state = cc.state;
@@ -806,7 +806,7 @@ const SNEAK_Y_PULL_BIAS = 0.01;
  *  coords. Matches luanti's `getNodeBoundingBox` (lines 73-86).
  *  Cube fast path (cid===0) returns the unit box without touching
  *  `shapeAabbs`. Non-AABB-shape blocks fall back to the unit box. */
-function blockUnionAabbLocal(registry: BlockRegistry, stateId: number): [number, number, number, number, number, number] {
+function blockUnionAabbLocal(registry: Blocks, stateId: number): [number, number, number, number, number, number] {
     const cid = registry.colliderId[stateId]!;
     if (cid === 0) return [0, 0, 0, 1, 1, 1];
     const kind = registry.shapeKind[cid];
@@ -1559,7 +1559,7 @@ function getBobStatus(cc: CharacterControllerTrait, horizontalSpeed: number): Bo
     return 'idle';
 }
 
-function updateCharacterBob(cc: CharacterControllerTrait, registry: BlockRegistry, dt: number): void {
+function updateCharacterBob(cc: CharacterControllerTrait, registry: Blocks, dt: number): void {
     const state = cc.state;
     const config = cc.config;
     const input = cc.input;

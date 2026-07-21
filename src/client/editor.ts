@@ -46,7 +46,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
     if (enabled) {
         Rpc.send(
             rpc,
-            registry.commandWireIndex,
+            registry.protocol.commands,
             AddTraitCommand,
             {
                 id: room.playerNode.id,
@@ -58,7 +58,7 @@ export function setEditorEnabledForRoom(room: ClientRoom, enabled: boolean): voi
     } else {
         Rpc.send(
             rpc,
-            registry.commandWireIndex,
+            registry.protocol.commands,
             RemoveTraitCommand,
             {
                 id: room.playerNode.id,

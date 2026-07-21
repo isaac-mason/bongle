@@ -85,7 +85,7 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
     }
 
     return {
-        matchmaking: registry.matchmaking.byId.get('main')?.payload ?? null,
+        matchmaking: registry.matchmaking.byId.get('main') ?? null,
         atlasChanged: r.atlasChanged,
         spriteAtlasChanged: r.spriteAtlasChanged,
         audioAtlasChanged: r.audioAtlasChanged,

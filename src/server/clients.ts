@@ -1,20 +1,18 @@
 import type { Client, User } from 'bongle/interface';
 import type { Avatar } from '../core/avatar/avatar';
-import type { WireIndex } from '../core/registry';
+import type { InboundProtocol } from '../core/registry';
 
 export type ClientState = {
     id: Client;
     /** authenticated identity for this connection's lifetime. */
     user: User;
     /**
-     * INBOUND wire-index tables for messages received from this client,
-     * the client's outbound tables, mirrored on this side. seeded from the
-     * server's local module at join time (both sides built from the same
-     * source, so they agree at connect), and refreshed whenever the client
-     * sends a `wire_table` message after its own HMR flush.
+     * INBOUND decode context for messages received from this client — the
+     * client's own protocol manifest, mirrored on this side. Seeded from our
+     * local registry at join (identity), replaced when the client sends its
+     * `wire_table`, so commands + sync_update decode by the client's id space.
      */
-    inboundTraitWireIndex: WireIndex;
-    inboundCommandWireIndex: WireIndex;
+    inbound: InboundProtocol;
 
     /** The user's resolved avatar identity, recorded at join from the
      *  reservation the matchmaker stamped (or the builtin on dev/edit).
@@ -38,18 +36,11 @@ export function init() {
 
 export type Clients = ReturnType<typeof init>;
 
-export function onJoin(
-    state: Clients,
-    clientId: Client,
-    user: User,
-    inboundTraitWireIndex: WireIndex,
-    inboundCommandWireIndex: WireIndex,
-) {
+export function onJoin(state: Clients, clientId: Client, user: User, inbound: InboundProtocol) {
     state.connected.set(clientId, {
         id: clientId,
         user,
-        inboundTraitWireIndex,
-        inboundCommandWireIndex,
+        inbound,
         avatar: null,
         pingMs: 0,
         pingSamples: [],

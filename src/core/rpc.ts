@@ -1,6 +1,6 @@
 import { recordCommand } from './capture/module-scope';
 import type { NetMessage } from './protocol';
-import { get, registry, upsert, type WireIndex } from './registry';
+import { get, registry, upsert, type ProtocolTable } from './registry';
 import { pack } from './scene/pack';
 import { logScriptError } from './scene/script-errors';
 
@@ -45,7 +45,7 @@ export type ListenerEntry = {
  * `listeners` is a per-room registry, entries scoped by roomId, matched
  * against `message.roomId` at dispatch time.
  *
- * the command wire-index table lives on `ProjectModule.commandWireIndex`,
+ * the command wire-index table lives on `ProjectModule.commandProtocolTable`,
  * not here, callers of `send`/`dispatchNetMessage` pass it in. that way
  * one rebuild (`getProjectModule()`) covers every wire-index table the
  * project derives from its registries (commands, traits).
@@ -91,13 +91,13 @@ export function unlisten(rpc: Rpc, commandId: string, entry: ListenerEntry): voi
  * with a `(data) => void` shape and ignore the extra arg). matches entries
  * whose `room` equals the message's roomId.
  *
- * commandIndex → id via `commandWireIndex` (caller passes it from the
+ * commandIndex → id via `commandProtocolTable` (caller passes it from the
  * current ProjectModule); def (serdes) via the live `commandsRegistry`.
  * stale `CommandHandle.serdes` captured in user closures is not consulted
  * on the dispatch path.
  */
-export function dispatchNetMessage(rpc: Rpc, commandWireIndex: WireIndex, message: NetMessage, from: unknown | undefined): void {
-    const commandId = commandWireIndex.indexToId[message.commandIndex];
+export function dispatchNetMessage(rpc: Rpc, commandProtocolTable: ProtocolTable, message: NetMessage, from: unknown | undefined): void {
+    const commandId = commandProtocolTable.indexToId[message.commandIndex];
     if (commandId === undefined) return;
     const def = get(registry.commands, commandId);
     if (!def) return;
@@ -130,20 +130,20 @@ export function dispatchNetMessage(rpc: Rpc, commandWireIndex: WireIndex, messag
  * `client` is the addressee for server-side targeted sends; omit for the
  * broadcast path.
  *
- * commandIndex via `commandWireIndex` (caller passes it from the current
+ * commandIndex via `commandProtocolTable` (caller passes it from the current
  * ProjectModule); serdes via the live `commandsRegistry`. stale
  * `CommandHandle.serdes` captured in user closures is not used, closures
  * resolve fresh serdes on every send.
  */
 export function send<S extends pack.Schema, D extends RpcDirection>(
     rpc: Rpc,
-    commandWireIndex: WireIndex,
+    commandProtocolTable: ProtocolTable,
     handle: CommandHandle<S, D>,
     data: pack.SchemaType<S>,
     roomId: string,
     client?: unknown,
 ): void {
-    const index = commandWireIndex.idToIndex.get(handle.id);
+    const index = commandProtocolTable.idToIndex.get(handle.id);
     if (index === undefined) {
         console.warn(`[rpc] unknown command (not in wire index): ${handle.id}`);
         return;

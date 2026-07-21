@@ -67,7 +67,7 @@ import {
 import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
 import { type Box3, plane3, type Vec3 } from 'mathcat';
 import type { Resources } from '../../core/resources';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import {
     type ChunkMeshResult,
     createMeshOutput,
@@ -1936,7 +1936,7 @@ export type VoxelResources = {
     meshOutput: MeshOutput;
 };
 
-export function init(registry: BlockRegistry, env: EnvironmentResources, budget: VoxelArenaBudget): VoxelResources {
+export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelArenaBudget): VoxelResources {
     console.log(`[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
     const atlas = createVoxelTextureArray(registry.textures.length);
@@ -2145,7 +2145,7 @@ async function writeAtlasPixels(
  *  `load` fetches it itself. Mutates `res` in place. */
 export async function load(
     res: VoxelResources,
-    registry: BlockRegistry,
+    registry: Blocks,
     workerCount: number,
     workerQueueDepth: number,
     resources: Resources,
@@ -2242,7 +2242,7 @@ export async function load(
  *  are unchanged. */
 export async function refresh(
     prev: VoxelResources | null,
-    registry: BlockRegistry,
+    registry: Blocks,
     env: EnvironmentResources,
     budget: VoxelArenaBudget,
     workerCount: number,

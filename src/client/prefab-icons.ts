@@ -28,7 +28,7 @@ import * as ModelVisuals from '../render/models/model-visuals';
 import * as Renderer from '../render/renderer';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import * as VoxelResources from '../render/voxels/voxel-resources';
-import { createRenderRoom, disposeRenderRoom, type RenderRoom, type RenderRoomDeps } from './rooms';
+import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
 
 const ICON_PX = 256;
 const CAM_DIST = 128;
@@ -44,7 +44,7 @@ export type PrefabIcon = { pixels: Uint8Array; pxSize: number };
 /** Render one prefab into an RGBA8 icon tile, in-browser. Returns null when the
  *  prefab id is unknown or the instantiated content is empty (nothing to draw). */
 export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): Promise<PrefabIcon | null> {
-    const def = engineRegistry.prefabs.byId.get(prefabId)?.payload;
+    const def = engineRegistry.prefabs.byId.get(prefabId);
     if (!def) return null;
 
     await deps.voxelResources.atlasReady;
@@ -99,9 +99,9 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // ── world transforms (via interpolation, held at alpha=1) ──
-        Interpolation.snapshot(room.interpolation);
+        Interpolation.snapshot(room.nodes);
         computeWorldTransforms(room.nodes);
-        Interpolation.interpolate(room.interpolation, 1.0, 0);
+        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
         const packer = deps.voxelResources.arenas.packer;

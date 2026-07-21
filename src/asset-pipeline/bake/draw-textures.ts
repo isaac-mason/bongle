@@ -55,10 +55,10 @@ export async function bakeDrawTextures(
 
     const drawFrames: DrawSource[] = [];
     for (const handle of blockTexturesRegistry.byId.values()) {
-        for (const frame of handle.payload.frames) if (isDrawSource(frame)) drawFrames.push(frame);
+        for (const frame of handle.frames) if (isDrawSource(frame)) drawFrames.push(frame);
     }
     for (const handle of spritesRegistry.byId.values()) {
-        const srcs = Array.isArray(handle.payload.src) ? handle.payload.src : [handle.payload.src];
+        const srcs = Array.isArray(handle.src) ? handle.src : [handle.src];
         for (const frame of srcs) if (isDrawSource(frame)) drawFrames.push(frame);
     }
 

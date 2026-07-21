@@ -16,7 +16,7 @@ import { registry as kindRegistry } from '../../core/registry';
 import { addChild, addTrait, createNode, destroyNode, getTrait, type Node, type SceneTree } from '../../core/scene/scene-tree';
 import { prefabHasVoxels } from '../../core/scene/prefab';
 import type { SceneTreeContext } from '../../core/scene/scripts';
-import type { BlockRegistry } from '../../core/voxels/block-registry';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { rotateVoxelsByQuat } from '../../core/voxels/voxel-rotate';
 
 // ── sentinel name ─────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export function dispose(state: PrefabVisuals): void {
 
 // ── per-frame update ──────────────────────────────────────────────
 
-export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: SceneTreeContext, registry: BlockRegistry): void {
+export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: SceneTreeContext, registry: Blocks): void {
     if (runtime.roomMode !== 'edit') return;
 
     for (const node of sceneTree.nodes) {
@@ -53,7 +53,7 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         // clean up: ghost child whose parent no longer wants voxels
         if (node.name === GHOST_NAME) {
             const parentConfig = node.parent?.prefab;
-            const parentDef = parentConfig ? kindRegistry.prefabs.byId.get(parentConfig.prefabId)?.payload : null;
+            const parentDef = parentConfig ? kindRegistry.prefabs.byId.get(parentConfig.prefabId) : null;
             if (!parentDef || !prefabHasVoxels(parentDef)) {
                 destroyNode(sceneTree, node);
             }
@@ -61,7 +61,7 @@ export function update(state: PrefabVisuals, sceneTree: SceneTree, runtime: Scen
         }
 
         if (!config) continue;
-        const def = kindRegistry.prefabs.byId.get(config.prefabId)?.payload;
+        const def = kindRegistry.prefabs.byId.get(config.prefabId);
         if (!def || !prefabHasVoxels(def)) continue;
 
         const generation = node._prefabState?.generation ?? 0;

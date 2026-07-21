@@ -17,7 +17,7 @@ import { registry } from '../registry';
 import { addChild, deserializeNode, type Node, refreshTraitIssues, type SerializedSceneTree } from '../scene/scene-tree';
 import { buildTraitInstance } from '../scene/traits';
 import * as bitset from '../utils/bitset';
-import type { BlockRegistry } from '../voxels/block-registry';
+import type { Blocks } from '../voxels/block-registry';
 import { loadVoxels, type SavedVoxels } from '../voxels/voxel-savefile';
 import { createVoxels } from '../voxels/voxels';
 import type { Content } from './index';
@@ -53,14 +53,14 @@ export type ScenePayload = {
  */
 export function populateScene(
     content: Content,
-    blockRegistry: BlockRegistry,
+    blockRegistry: Blocks,
     id: string,
     raw: ScenePayload,
     side: 'server' | 'client',
 ): void {
     content.payloads.set(id, raw);
 
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (!handle) return;
     if (side === 'server' && !handle.server) return;
     if (side === 'client' && !handle.client) return;
@@ -84,7 +84,7 @@ export function populateScene(
     // `handle.node` see the full authored shape including root traits.
     if (raw.nodes.root.traits) {
         for (const st of raw.nodes.root.traits) {
-            const def = registry.traits.byId.get(st.id)?.payload;
+            const def = registry.traits.byId.get(st.id);
             if (!def) {
                 console.warn(`[bongle] unresolved trait "${st.id}" on root of scene "${id}" — preserving raw data`);
                 handle.node._unresolvedTraits.set(st.id, {
@@ -129,7 +129,7 @@ export function populateScene(
 export function clearScene(content: Content, id: string, side: 'server' | 'client'): void {
     content.payloads.delete(id);
 
-    const handle = registry.scenes.byId.get(id)?.payload;
+    const handle = registry.scenes.byId.get(id);
     if (!handle) return;
     if (side === 'server' && !handle.server) return;
     if (side === 'client' && !handle.client) return;

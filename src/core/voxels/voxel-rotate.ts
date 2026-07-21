@@ -17,7 +17,7 @@
 import type { Quat, Vec3 } from 'mathcat';
 import { vec3 } from 'mathcat';
 import type { RotAxis } from './block-orient';
-import type { BlockRegistry } from './block-registry';
+import type { Blocks } from './block-registry';
 import { rotateBlockKey } from './block-transform';
 import type { Voxels } from './voxels';
 import { BLOCK_AIR, CHUNK_BITS, CHUNK_SIZE, createVoxels, setBlock } from './voxels';
@@ -36,7 +36,7 @@ const _scratch: Vec3 = [0, 0, 0];
  * the snapped rotation as a sequence of 90° single-axis turns through each
  * block's `rotate` hook (or the prop-name convention fallback).
  */
-export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: BlockRegistry): Voxels {
+export function rotateVoxelsByQuat(voxels: Voxels, q: Quat, registry: Blocks): Voxels {
     // basis projection → integer rotation matrix columns
     _scratch[0] = 1;
     _scratch[1] = 0;

@@ -10,7 +10,7 @@
 import { registerAllShapes } from 'crashcat';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { stairs } from '../../../../src/core/voxels/block-presets';
-import type { BlockRegistry } from '../../../../src/core/voxels/block-registry';
+import type { Blocks } from '../../../../src/core/voxels/block-registry';
 import {
     type DeserializedBlockRegistry,
     deserializeBlockRegistryForWorker,
@@ -32,7 +32,7 @@ beforeEach(() => {
 // Build a registry that exercises both the cube path and the mesh
 // path (stairs). The serde must round-trip per-state and per-mesh
 // tables, so we want at least one of each kind.
-function buildMixedRegistry(): BlockRegistry {
+function buildMixedRegistry(): Blocks {
     blockTexture('stone', { src: 'textures/stone.png' });
     stairs('stair', { all: { texture: 'stone' } });
     return buildTestRegistry([
@@ -138,8 +138,8 @@ describe('block-registry-serde', () => {
         // mesher-read subset, but `meshChunk` types its registry param
         // as the full BlockRegistry. The mesher destructures only the
         // populated tables, so this cast is safe for the test.
-        function asReg(decoded: DeserializedBlockRegistry): BlockRegistry {
-            return decoded as unknown as BlockRegistry;
+        function asReg(decoded: DeserializedBlockRegistry): Blocks {
+            return decoded as unknown as Blocks;
         }
 
         function passEqual(a: PassMesh | null, b: PassMesh | null, label: string): void {

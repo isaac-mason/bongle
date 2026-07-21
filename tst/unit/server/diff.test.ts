@@ -1,5 +1,6 @@
 import * as p from 'packcat';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { registry, reindex } from '../../../src/core/registry';
 import { addChild, addTrait, createNode, createSceneTree, destroyNode, getTrait, removeTrait } from '../../../src/core/scene/scene-tree';
 import { prop } from '../../../src/core/scene/prop';
 import { control, sync, trait } from '../../../src/core/scene/traits';
@@ -57,6 +58,10 @@ const DiffTag = trait('diff-tag');
 /* ── tests ── */
 
 describe('diff detection', () => {
+    // module-scope traits are registered; rebuild the derived index fields
+    // (slotToTrait) a boot would, so discovery can resolve trait slots.
+    beforeEach(() => reindex(registry));
+
     it('does not bump versions on first snapshot (initialization)', () => {
         const sg = createSceneTree();
         const node = createNode({ name: 'a' });

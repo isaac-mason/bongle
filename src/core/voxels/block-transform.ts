@@ -10,9 +10,9 @@
 // returns the original key when the hook returns an unregistered stateId.
 
 import type { RotAxis } from './block-orient';
-import { type BlockRegistry, parseKey } from './block-registry';
+import { type Blocks, parseKey } from './block-registry';
 
-export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry: BlockRegistry): string {
+export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry: Blocks): string {
     const parsed = parseKey(key);
     if (!parsed) return key;
     const def = registry.idToDef.get(parsed.blockId);
@@ -23,7 +23,7 @@ export function rotateBlockKey(key: string, axis: RotAxis, cw: boolean, registry
     return registry.stateToKey[rotatedId] ?? key;
 }
 
-export function flipBlockKey(key: string, axis: RotAxis, registry: BlockRegistry): string {
+export function flipBlockKey(key: string, axis: RotAxis, registry: Blocks): string {
     const parsed = parseKey(key);
     if (!parsed) return key;
     const def = registry.idToDef.get(parsed.blockId);

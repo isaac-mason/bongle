@@ -260,7 +260,7 @@ script(
                 addChild(parent, node);
                 const traits: Array<{ id: string; controls?: Record<string, unknown> }> = JSON.parse(args.traits);
                 for (const st of traits) {
-                    const def = registry.traits.byId.get(st.id)?.payload;
+                    const def = registry.traits.byId.get(st.id);
                     if (!def) {
                         node._unresolvedTraits.set(st.id, { json: st.controls });
                         continue;
@@ -371,7 +371,7 @@ script(
                 const sceneTree = room.nodes;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
-                const def = registry.traits.byId.get(args.traitId)?.payload;
+                const def = registry.traits.byId.get(args.traitId);
                 if (!def) {
                     node._unresolvedTraits.set(args.traitId, { json: args.props ? JSON.parse(args.props) : undefined });
                     bumpNodeVersion(sceneTree, node);
@@ -390,7 +390,7 @@ script(
                 const sceneTree = room.nodes;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
-                const def = registry.traits.byId.get(args.traitId)?.payload;
+                const def = registry.traits.byId.get(args.traitId);
                 if (!def) {
                     node._unresolvedTraits.delete(args.traitId);
                     bumpNodeVersion(sceneTree, node);

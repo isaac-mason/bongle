@@ -107,7 +107,7 @@ sync(SyncOnly, 'linearVelocity', {
 
 describe('getSyncCodecs', () => {
     it('builds per-sync codecs', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!.payload;
+        const def = registry.traits.byId.get('bridge-test/position')!;
         const codecs = getSyncCodecs(def);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(3);
@@ -125,12 +125,12 @@ describe('getSyncCodecs', () => {
     });
 
     it('returns null for tag traits (no syncs)', () => {
-        const def = registry.traits.byId.get('bridge-test/tag')!.payload;
+        const def = registry.traits.byId.get('bridge-test/tag')!;
         expect(getSyncCodecs(def)).toBeNull();
     });
 
     it('handles sync-only fields (no control)', () => {
-        const def = registry.traits.byId.get('bridge-test/sync-only')!.payload;
+        const def = registry.traits.byId.get('bridge-test/sync-only')!;
         const codecs = getSyncCodecs(def);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(1);
@@ -147,7 +147,7 @@ describe('getSyncCodecs', () => {
     });
 
     it('uses the explicit sync schema (uint16) not control schema', () => {
-        const def = registry.traits.byId.get('bridge-test/health')!.payload;
+        const def = registry.traits.byId.get('bridge-test/health')!;
         const codecs = getSyncCodecs(def)!;
         const instance = buildTraitInstance(def) as Health;
         instance.current = 42;
@@ -157,14 +157,14 @@ describe('getSyncCodecs', () => {
     });
 
     it('caches codecs across calls', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!.payload;
+        const def = registry.traits.byId.get('bridge-test/position')!;
         const a = getSyncCodecs(def);
         const b = getSyncCodecs(def);
         expect(a).toBe(b);
     });
 
     it('binary comparison detects changes', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!.payload;
+        const def = registry.traits.byId.get('bridge-test/position')!;
         const codecs = getSyncCodecs(def)!;
         const instance = buildTraitInstance(def) as Position;
         instance.x = 5;
@@ -183,19 +183,19 @@ describe('getSyncCodecs', () => {
 
 describe('getControlCodecs', () => {
     it('builds per-control codecs', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!.payload;
+        const def = registry.traits.byId.get('bridge-test/position')!;
         const codecs = getControlCodecs(def);
         expect(codecs).not.toBeNull();
         expect(codecs!.length).toBe(3);
     });
 
     it('returns null for tag traits (no controls)', () => {
-        const def = registry.traits.byId.get('bridge-test/tag')!.payload;
+        const def = registry.traits.byId.get('bridge-test/tag')!;
         expect(getControlCodecs(def)).toBeNull();
     });
 
     it('handles vec3, boolean, string control schemas', () => {
-        const def = registry.traits.byId.get('bridge-test/vec-fields')!.payload;
+        const def = registry.traits.byId.get('bridge-test/vec-fields')!;
         const codecs = getControlCodecs(def);
         expect(codecs).not.toBeNull();
 
@@ -215,7 +215,7 @@ describe('getControlCodecs', () => {
     });
 
     it('caches codecs across calls', () => {
-        const def = registry.traits.byId.get('bridge-test/position')!.payload;
+        const def = registry.traits.byId.get('bridge-test/position')!;
         const a = getControlCodecs(def);
         const b = getControlCodecs(def);
         expect(a).toBe(b);

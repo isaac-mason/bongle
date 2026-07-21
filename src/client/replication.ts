@@ -48,12 +48,12 @@ export function sendOwnerSyncUpdates(net: ClientNet, sg: SceneTree, roomId: stri
 
     if (!owned || owned.size === 0) return;
 
-    const wireIndex = registry.traitWireIndex;
+    const wireIndex = registry.protocol.traits;
     for (const node of owned) {
         let ownsAnySync = false;
 
         for (const [traitSlot, instance] of node._traits) {
-            const def = registry.traitsBySlot.get(traitSlot);
+            const def = registry.slotToTrait.get(traitSlot);
             if (!def) continue;
 
             const codecs = getSyncCodecs(def);

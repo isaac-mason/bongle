@@ -889,7 +889,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
     // the freshly-constructed unpatched one.
     recordBlock(id);
 
-    return stored.payload as BlockHandle<P>;
+    return stored as BlockHandle<P>;
 }
 
 // ── auto-derived block-dust ─────────────────────────────────────────
@@ -941,7 +941,7 @@ function hashStringFnv1a(s: string): number {
  *  doesn't resolve, the deriver silently skips in that case (block
  *  authoring order would have to be wrong for this to fire). */
 function resolveTextureFrame(ref: TextureRef): NormalizedImageSource | null {
-    const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref)?.payload : ref;
+    const def = typeof ref === 'string' ? registry.blockTextures.byId.get(ref) : ref;
     return def?.frames[0] ?? null;
 }
 

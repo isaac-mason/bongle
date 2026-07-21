@@ -19,7 +19,7 @@ import { addTrait, createNode, getNodeById, getTrait, serializeNode } from '../c
 import { expandPrefab } from '../core/scene/prefab';
 import type { SceneTreeContext } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
-import type { BlockRegistry } from '../core/voxels/block-registry';
+import type { Blocks } from '../core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../core/voxels/block-transform';
 import { loadVoxels, type SavedVoxels, saveVoxels } from '../core/voxels/voxel-savefile';
 import type { Voxels } from '../core/voxels/voxels';
@@ -271,7 +271,7 @@ export function selectionToScenePayload(worldVoxels: Voxels, sceneTree: SceneTre
 // shape Blueprint already wants. we just deserialize voxels, scan the
 // AABB for size, and clone children.
 
-export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: BlockRegistry): Blueprint | null {
+export function createSceneBlueprint(sceneId: string, anchor: Vec3, registry: Blocks): Blueprint | null {
     const payload = useEditor.getState().blueprints.get(sceneId);
     if (!payload) return null;
 
@@ -384,9 +384,9 @@ export function createPrefabBlueprint(
     prefabId: string,
     anchor: Vec3,
     runtime: SceneTreeContext,
-    registry: BlockRegistry,
+    registry: Blocks,
 ): Blueprint | null {
-    const def = kindRegistry.prefabs.byId.get(prefabId)?.payload;
+    const def = kindRegistry.prefabs.byId.get(prefabId);
     if (!def) return null;
 
     const config: PrefabConfig = {
@@ -956,7 +956,7 @@ export function toClipboardString(blueprint: Blueprint): string {
  * the registry is needed to rebuild runtime palette ids from the
  * stable string keys stored in the serialized voxel data.
  */
-export function fromClipboardString(text: string, registry: BlockRegistry): Blueprint | null {
+export function fromClipboardString(text: string, registry: Blocks): Blueprint | null {
     let parsed: ClipboardBlueprint;
     try {
         parsed = JSON.parse(text);
