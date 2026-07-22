@@ -38,8 +38,8 @@ export function OpenDialog({
     );
 
     return (
-        // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop.
         <div className="absolute inset-0 z-[100] grid place-items-center bg-black/40" onPointerDown={onCancel}>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: Escape/Enter shortcuts on a modal panel. */}
             <div
                 className="flex w-[440px] flex-col border border-border bg-surface font-mono text-fg shadow-[4px_4px_0_rgba(0,0,0,0.5)]"
                 onPointerDown={(e) => e.stopPropagation()}

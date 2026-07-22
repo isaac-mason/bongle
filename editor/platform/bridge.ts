@@ -48,7 +48,10 @@ export function createPlatformBridge(): PlatformBridge {
     // in-flight open-multiplayer request (one at a time — the host opens once).
     let multiplayerPending: { resolve: (v: { url: string; shareUrl: string }) => void; reject: (e: Error) => void } | null = null;
     let embedded = false;
-
+    // The editor is served cross-origin from its embedder, so it can't name the
+    // parent's origin; it posts to '*'. That only ever reaches window.parent, and
+    // the edge's frame-ancestors (editor.<zone>) guarantees the parent is one of
+    // our pages — so '*' can't leak to a hostile framer.
     const send = (msg: EditorMessage) => parent?.postMessage(msg, '*');
 
     const ready = new Promise<PlatformIntent | null>((resolve) => {

@@ -48,14 +48,14 @@ function quietWatchLog(): Plugin {
 // client iframe (client:true) is a separate realm/build, added later.
 const SERVER_ENV = { client: false, server: true, editor: true };
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(() => ({
     root: fileURLToPath(new URL('.', import.meta.url)),
-    // the deployed editor is served same-origin at /static/bongle-editor/ (mirrors
-    // blockbench). A build-only base re-roots every asset + document URL under that
-    // subpath; dev stays at '/' so `pnpm exec vite` / ./dev.sh are unchanged. The
+    // The editor is served from its own origin root (editor.<zone> in prod, a
+    // localhost port in dev — see dev.sh). base '/' both ways: assets, the two
+    // HTML documents, and the blockbench tree all sit at the origin root. The
     // one runtime-string reference (the client iframe src) reads import.meta.env.
     // BASE_URL to match — see client/client-host.ts.
-    base: command === 'build' ? '/static/bongle-editor/' : '/',
+    base: '/',
     // tailwind only needs the main document build; workers render no CSS.
     plugins: [watchEngineZip(), quietWatchLog(), tailwindcss(), envPlugin(SERVER_ENV)],
     // worker.plugins is BLANKET (applies to every worker bundle — vite has no
@@ -64,7 +64,7 @@ export default defineConfig(({ command }) => ({
     // editor:true). The one client-env realm is an IFRAME (separate document +
     // build), not a worker, so it's unaffected. (The monaco TS worker's
     // diagnostic sanitizing now lives in our ts.worker.ts subclass, not a plugin.)
-    worker: { format: 'es', plugins: () => [envPlugin(SERVER_ENV)] },
+    worker: { format: 'es' as const, plugins: () => [envPlugin(SERVER_ENV)] },
     server: {
         // rolldown-wasm (and later ffmpeg.wasm threads) use SharedArrayBuffer,
         // which requires cross-origin isolation. These headers make
