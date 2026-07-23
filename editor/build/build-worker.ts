@@ -10,7 +10,7 @@
 import { rolldown } from '@rolldown/browser';
 import { type Bundler, buildBundle } from '../../build';
 import { ensureProcessShim } from '../dev/runner';
-import { openOpfsFilesystem } from '../fs-opfs';
+import { openProjectFilesystem } from '../fs-open';
 
 // @rolldown/browser's WASI runtime spawns a nested pool worker and, on a worker
 // fault, calls `window.dispatchEvent(new CustomEvent('napi-rs-worker-error'))`.
@@ -45,7 +45,7 @@ self.onmessage = async (e: MessageEvent<BuildRequest>) => {
     const post = (msg: BuildResponse, transfer?: Transferable[]) => workerSelf.postMessage(msg, transfer);
     try {
         post({ type: 'progress', label: 'Opening project' });
-        const fs = await openOpfsFilesystem(projectName);
+        const fs = await openProjectFilesystem(projectName);
         // a WASI pool-worker fault would otherwise hang the bundle silently — race
         // the build against it so the fault becomes a real, reported error.
         const poolFault = new Promise<never>((_, reject) => {

@@ -12,7 +12,7 @@
 
 import { createBootTimer } from '../boot-timing';
 import type { FsChange } from '../fs';
-import { openOpfsFilesystem } from '../fs-opfs';
+import { openProjectFilesystem } from '../fs-open';
 import { type BundlerHost, createBundlerHost } from './host';
 
 const bt = createBootTimer('bundler');
@@ -31,7 +31,7 @@ self.addEventListener('message', async (e: MessageEvent) => {
     const msg = e.data as InitMsg | ConnectMsg | FsChangeMsg;
     if (msg.type === 'init') {
         bt.mark('init received');
-        const fs = await openOpfsFilesystem(msg.projectName);
+        const fs = await openProjectFilesystem(msg.projectName);
         bt.mark('opfs open');
         // build errors surface to the main doc's build log window.
         host = createBundlerHost(fs, (buildlog) => self.postMessage({ __buildlog: buildlog }));

@@ -124,7 +124,7 @@ describe('snapshot invalidation', () => {
 
         // simulate a cached snapshot
         chunk.compressedSnapshot = new Uint8Array([1, 2, 3]);
-        chunk.snapshotPalette = ['air', 'stone'];
+        chunk.snapshotPalette = [0, 2]; // global state ids (air, stone)
 
         setBlock(voxels, 0, 0, 0, 'stone');
 
@@ -137,7 +137,7 @@ describe('snapshot invalidation', () => {
         const chunk = ensureChunk(voxels, 0, 0, 0);
 
         chunk.compressedSnapshot = new Uint8Array([1, 2, 3]);
-        chunk.snapshotPalette = ['air', 'stone'];
+        chunk.snapshotPalette = [0, 2]; // global state ids (air, stone)
 
         setBlock(voxels, 0, 0, 0, 'stone');
 
@@ -291,7 +291,7 @@ describe('light epoch', () => {
         const chunk = ensureChunk(voxels, 0, 0, 0);
 
         chunk.compressedSnapshot = new Uint8Array([1, 2, 3]);
-        chunk.snapshotPalette = ['air'];
+        chunk.snapshotPalette = [0]; // global state ids (air)
         chunk.compressedLight = { sky: new Uint8Array([4, 5, 6]), rgb: new Uint8Array([4, 5, 6]) };
 
         propagateAllLight(voxels);

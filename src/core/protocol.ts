@@ -542,7 +542,6 @@ export function unpackClientMessage(data: Uint8Array): ClientMessage | null {
     }
 }
 
-
 /* ── Server → Client ────────────────────────────────────────────── */
 
 export const Pong = pack.object({
@@ -671,7 +670,14 @@ export const VoxelChunkFull = pack.object({
     cx: pack.int32(),
     cy: pack.int32(),
     cz: pack.int32(),
-    paletteKeys: pack.list(pack.string()),
+    /**
+     * per-slot global state ids (the shared registry identity, not per-chunk
+     * strings). `compressed` stores local slot indices into this list; the
+     * client maps each id back to a key via `registry.stateToKey` and interns
+     * its own local slot. keeping ids on the wire (vs `stateToKey` strings)
+     * is the egress win — a fence variant is one varuint, not a 40-char key.
+     */
+    palette: pack.list(pack.varuint()),
     /** fflate-compressed RLE of interleaved data+light (uint16) */
     compressed: pack.uint8Array(),
 });
@@ -688,14 +694,23 @@ export const VoxelChunkOps = pack.object({
             cx: pack.int32(),
             cy: pack.int32(),
             cz: pack.int32(),
-            /** full palette keys (may have grown since last send) */
-            paletteKeys: pack.list(pack.string()),
+            /**
+             * incremental block changes reference the shared registry's global
+             * state id directly — no palette rides along. this is the MC
+             * `SectionBlocksUpdate` model: the id is lineage-independent, so a
+             * client whose local palette diverged (e.g. an optimistic hook-free
+             * paste vs the server's hook-run result) reconciles cleanly by
+             * re-interning each id into its own slot space. the old design
+             * shipped the server's whole growing palette by reference and had
+             * the client adopt its slot indices — which crashed the moment the
+             * two palettes were different lineages.
+             */
             changes: pack.list(
                 pack.object({
                     /** flat voxel index (0..4095) */
                     index: pack.uint16(),
-                    /** new local palette index */
-                    data: pack.uint16(),
+                    /** new global state id (registry-wide, shared by both peers) */
+                    stateId: pack.varuint(),
                 }),
             ),
         }),

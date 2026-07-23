@@ -16,7 +16,7 @@ import { Channel, createRelayLink, type PortLike, type RelayLink } from '../../b
 import type { Filesystem } from '../fs';
 import type { ClientConnector } from '../realms/client/client-host';
 import { connectRelaySocket } from './gatho-socket';
-import { createRemoteFilesystem, serveFilesystemOverPort } from './remote-fs';
+import { asPortLike, createRemoteFilesystem, serveFilesystemOverPort } from './remote-fs';
 
 export type GuestSession = {
     /** the relay link (game/bundler/fsrpc lanes to the host). */
@@ -38,13 +38,6 @@ export type GuestSessionOptions = {
 function bridge(port: MessagePort, relay: PortLike): void {
     port.onmessage = (e) => relay.postMessage(e.data);
     relay.onmessage = (e) => port.postMessage(e.data);
-}
-
-/** wrap a MessagePort as a PortLike (structurally typed for the fs codec). */
-function asPortLike(mp: MessagePort): PortLike {
-    const p: PortLike = { onmessage: null, postMessage: (d) => mp.postMessage(d), close: () => mp.close() };
-    mp.onmessage = (e) => p.onmessage?.({ data: e.data });
-    return p;
 }
 
 /** the guest's play-preview connector: game/bundler bridged to the host over the

@@ -182,8 +182,9 @@ export type Chunk = {
     /** cached compressed snapshot for chunk_full encoding. invalidated on any data/light change. */
     compressedSnapshot: Uint8Array | null;
 
-    /** cached palette keys at the time of snapshot. invalidated alongside compressedSnapshot. */
-    snapshotPalette: string[] | null;
+    /** cached per-slot global state ids at the time of snapshot (the wire
+     *  palette for voxel_chunk_full). invalidated alongside compressedSnapshot. */
+    snapshotPalette: number[] | null;
 
     /** cached compressed light streams for chunk_light encoding (sky+rgb split,
      *  each RLE'd then deflated). invalidated when light changes. */

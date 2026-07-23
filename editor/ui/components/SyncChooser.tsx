@@ -4,6 +4,7 @@
 
 import { FolderInput, FolderOutput } from "../../../icons";
 import type { Filesystem } from '../../fs';
+import { usePlatform } from '../../stores/platform';
 import { useSync } from '../../stores/sync';
 import { connect, type SyncDirection } from '../../sync/folder-sync';
 
@@ -12,7 +13,19 @@ export function SyncChooser({ fs }: { fs: Filesystem }) {
     if (phase !== 'choosing') return null;
 
     const cancel = () => useSync.getState().cancel();
-    const choose = (dir: SyncDirection) => void connect(fs, dir);
+    // Embedded (cross-origin iframe): the picker can't run here, so ask the host to
+    // pick + serve the folder; go 'connecting' optimistically (closes this modal,
+    // spins the taskbar) and let the host's port/cancel/failure resolve it. Standalone
+    // (top-level): open the picker directly.
+    const choose = (dir: SyncDirection) => {
+        const bridge = usePlatform.getState().bridge;
+        if (usePlatform.getState().embedded && bridge) {
+            useSync.getState().connecting('…');
+            bridge.requestSyncFolder(dir);
+        } else {
+            void connect(fs, dir);
+        }
+    };
 
     return (
         // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only dismiss backdrop.
@@ -30,7 +43,7 @@ export function SyncChooser({ fs }: { fs: Filesystem }) {
                     <button
                         type="button"
                         className="flex cursor-pointer items-start gap-2.5 border border-border bg-surface p-2.5 text-left hover:bg-hover"
-                        onClick={() => choose('publish')}
+                        onClick={() => choose('editor-to-folder')}
                     >
                         <FolderOutput size={18} className="mt-0.5 shrink-0" />
                         <span>
@@ -44,7 +57,7 @@ export function SyncChooser({ fs }: { fs: Filesystem }) {
                     <button
                         type="button"
                         className="flex cursor-pointer items-start gap-2.5 border border-border bg-surface p-2.5 text-left hover:bg-hover"
-                        onClick={() => choose('import')}
+                        onClick={() => choose('folder-to-editor')}
                     >
                         <FolderInput size={18} className="mt-0.5 shrink-0" />
                         <span>

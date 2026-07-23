@@ -16,7 +16,7 @@ import { exposeDevtools } from './devtools';
 import { seedEngineDist } from './engine-dist';
 import { initEditor } from './entry';
 import type { Filesystem, FsChange } from './fs';
-import { openOpfsFilesystem } from './fs-opfs';
+import { openProjectFilesystem } from './fs-open';
 import { createGuestSession } from './net/guest-session';
 import { runSave, saveAvatar } from './platform/actions';
 import { initAutosave } from './platform/autosave';
@@ -27,6 +27,7 @@ import { registerProjectFsWorker } from './project-url';
 import { createClientHost, localConnector } from './realms/client/client-host';
 import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
 import { createServerManager } from './realms/server/server-manager';
+import { connectViaPort } from './sync/folder-sync';
 import { useBoot } from './stores/boot';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
@@ -36,6 +37,7 @@ import { logger } from './stores/logs';
 import { useMultiplayer } from './stores/multiplayer';
 import { usePlatform } from './stores/platform';
 import { useServer } from './stores/server';
+import { useSync } from './stores/sync';
 import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
 import { blockbenchApp, openPath } from './ui/apps';
@@ -82,6 +84,12 @@ system('setup', (ctx) => {
     });
 });
 `;
+
+// Seeded so a folder-sync'd copy on disk is git-ready. The mirror includes
+// node_modules (engine seed) + resources (bake output) so external tooling resolves,
+// but those are derived — git shouldn't track them. Display-ignored + save-excluded
+// (see ignored.ts / project-save.ts), but folder-sync mirrors it like any managed file.
+const GITIGNORE = 'node_modules\nresources\ndist\n';
 
 // boot progress → both the console (with +delta/total timing) and the BootScreen
 // terminal log (each step shows its own delta).
@@ -130,7 +138,7 @@ const connectRealm = (env: string, port: MessagePort) => {
 };
 
 // (2) Open the main-doc OPFS working copy + editor state (the bundler opens its own).
-const editorReady = openOpfsFilesystem(PROJECT).then((projectFs) => {
+const editorReady = openProjectFilesystem(PROJECT).then((projectFs) => {
     bootTimer.mark('opfs open');
     return initEditor({ fs: projectFs });
 });
@@ -144,6 +152,8 @@ const seedReady = editorReady.then(async (editor) => {
     const seedStart = performance.now();
     await seedEngineDist(editor.fs);
     console.log(`[boot:main] seedEngineDist ${(performance.now() - seedStart).toFixed(0)}ms`);
+    // git-ready seed for a folder-sync'd disk copy (idempotent).
+    await editor.fs.writeIfChanged('.gitignore', GITIGNORE);
     bootLog('engine ready');
 });
 
@@ -197,6 +207,18 @@ async function boot(): Promise<void> {
     // HOST: mount the Desktop on the local OPFS project (BootScreen still covers it
     // until the session's primary surface is up). host is the default session mode.
     renderApp(editor.fs);
+
+    // Folder sync when embedded: the editor can't open the file picker (cross-origin
+    // iframe), so the host picks a folder and serves it over a MessagePort. Drive the
+    // sync loop against it; a dismiss/failure just updates the status. Standalone dev
+    // never fires these (no parent) — it picks locally via connect() instead.
+    platform.onSyncPort((port, direction, folderName) => {
+        void connectViaPort(editor.fs, port, direction, folderName, () => platform.notifySyncStopped());
+    });
+    platform.onSyncResult((r) => {
+        if (r.cancelled) useSync.getState().reset();
+        else useSync.getState().fail(r.message ?? 'could not start folder sync');
+    });
 
     // the avatar the local player wears once the preview runs (see startEditorServer):
     // the edited glb (avatar), our account avatar (project), or a sample (standalone).
@@ -461,4 +483,9 @@ window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
 });
 
-void boot();
+void boot().catch((err) => {
+    // Boot can't proceed without a working fs (e.g. storage fully blocked). Surface
+    // it in the boot log the user is looking at rather than hanging silently.
+    console.error('[boot] fatal', err);
+    useBoot.getState().log(err instanceof Error ? err.message : 'boot failed');
+});

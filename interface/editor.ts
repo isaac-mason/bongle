@@ -17,12 +17,20 @@
 //      bundler, pipeline) lives BELOW this line, inside the versioned artifact.
 //   3. No editor internals leak across the boundary (no engine version, scene
 //      format, bundler flags). Keep the verbs coarse + capability-shaped.
+//
+// This file also carries the FOLDER-SYNC fs channel (bottom of the file): when the
+// platform brokers an on-disk folder (bongle:sync-folder-port), it serves it over the
+// handed-off MessagePort using the small packcat protocol here. It lives in this
+// contract (not editor internals) because both the editor AND the platform host parse
+// it — so it's version-governed by EDITOR_INTERFACE_VERSION like everything else here.
+
+import * as pack from 'packcat';
 
 /** Semver of THIS editor⇄platform contract (distinct from the engine⇄game
  *  INTERFACE_VERSION — they evolve independently). The editor announces its
  *  value in `bongle:ready`; the platform announces its own in `bongle:init`, so
  *  either side can warn / degrade when the peer's major differs. */
-export const EDITOR_INTERFACE_VERSION = '1.2.0';
+export const EDITOR_INTERFACE_VERSION = '1.4.0';
 
 /** whether two EDITOR_INTERFACE_VERSION values can bridge. The contract has
  *  stabilised to same-major-compatible per rule #1: minor/patch changes are
@@ -115,7 +123,15 @@ export type EditorMessage =
     | { type: 'bongle:open-multiplayer'; region?: string }
     /** the user asked to leave the editor. The editor never navigates itself
      *  (it may be a cross-origin iframe); the platform routes back to bongle.io. */
-    | { type: 'bongle:exit' };
+    | { type: 'bongle:exit' }
+    /** start a folder sync. The editor can't open the file picker itself (a
+     *  cross-origin iframe is barred from showDirectoryPicker), so it asks the
+     *  host — which owns the top frame — to pick a folder and hand back a port.
+     *  `direction` is which side seeds the other on the initial reconcile. */
+    | { type: 'bongle:request-sync-folder'; direction: 'editor-to-folder' | 'folder-to-editor' }
+    /** the editor tore down its live folder sync — the host closes its end of the
+     *  fs bridge and releases the directory handle. */
+    | { type: 'bongle:sync-folder-stopped' };
 
 /** platform → editor. */
 export type PlatformMessage =
@@ -161,7 +177,23 @@ export type PlatformMessage =
     /** answer to open-multiplayer: the relay ws url the host connects to + the
      *  ready-to-share invite link. */
     | { type: 'bongle:multiplayer-opened'; url: string; shareUrl: string }
-    | { type: 'bongle:multiplayer-failed'; message: string };
+    | { type: 'bongle:multiplayer-failed'; message: string }
+    /** answer to request-sync-folder: the host picked a folder and is now serving
+     *  it as a remote Filesystem. The MessagePort rides in the postMessage TRANSFER
+     *  LIST (event.ports[0]), NOT this payload — the editor connects its sync loop
+     *  to it. `direction` echoes the request so the editor runs the right reconcile. */
+    | {
+          type: 'bongle:sync-folder-port';
+          direction: 'editor-to-folder' | 'folder-to-editor';
+          /** the picked folder's name, for the editor's sync status display. */
+          folderName: string;
+      }
+    /** the user dismissed the folder picker — the editor falls back to idle with no
+     *  error. Distinct from failed so a plain cancel stays quiet. */
+    | { type: 'bongle:sync-folder-cancelled' }
+    /** the host couldn't start the sync (picker blocked, permission denied, no FS
+     *  Access API). The editor surfaces `message` on its sync status. */
+    | { type: 'bongle:sync-folder-failed'; message: string };
 
 /** the result payload the editor surfaces to the user. Mirrors bongle:result:
  *  `versionId`/`rev` populated on a successful `of: 'version'` OR `of: 'build'` so the
@@ -176,3 +208,227 @@ export type PlatformResult = {
     buildId?: string;
     dashboardUrl?: string;
 };
+
+// ── folder-sync fs channel ──────────────────────────────────────────
+// The platform host (which owns the picked directory handle) serves the folder to the
+// editor over the MessagePort from `bongle:sync-folder-port`, speaking the small packcat
+// protocol below. The editor's sync loop drives it like a local fs. This is a SEPARATE,
+// smaller protocol from the multiplayer relay fs (editor/net/remote-fs): that one needs
+// 1 MiB chunking for the WebSocket's frame budget; a local MessagePort carries a whole
+// file in one message, so this one has no chunking. Same concept, different channel.
+
+/** file size + mtime (ms epoch). mtime is change-detection quality, not ordering. */
+export type SyncStat = { size: number; mtime: number };
+/** a managed file in a `SyncTarget.list()`. */
+export type SyncEntry = { path: string; size: number; mtime: number };
+
+/** the minimal fs surface the folder sync moves over the port: exactly the 5 ops the
+ *  reconcile/poll loop calls on the on-disk side. Disk changes flow back by POLLING
+ *  (the editor re-`list`s + reads what moved); there's no push channel because a
+ *  directory handle has no native change stream. A future watching backing (a node
+ *  host's fs.watch, a FileSystemObserver fast-path) would ADD a `watch`/change frame
+ *  here — additive, so we don't carry the plumbing until it's actually used.
+ *  Paths are POSIX, root-relative. */
+export type SyncTarget = {
+    read(path: string): Promise<Uint8Array>;
+    write(path: string, bytes: Uint8Array): Promise<void>;
+    remove(path: string): Promise<void>;
+    stat(path: string): Promise<SyncStat | null>;
+    /** every managed file (recursive), with size + mtime. */
+    list(): Promise<SyncEntry[]>;
+};
+
+// ── wire protocol (packcat, no chunking) ────────────────────────────
+const syncStatSchema = pack.object({ size: pack.float64(), mtime: pack.float64() });
+const syncEntrySchema = pack.object({ path: pack.string(), size: pack.float64(), mtime: pack.float64() });
+
+const syncCodec = pack.build(
+    pack.union('t', [
+        // requests (consumer → owner)
+        pack.object({ t: pack.literal('read'), id: pack.uint32(), path: pack.string() }),
+        pack.object({ t: pack.literal('write'), id: pack.uint32(), path: pack.string(), bytes: pack.uint8Array() }),
+        pack.object({ t: pack.literal('remove'), id: pack.uint32(), path: pack.string() }),
+        pack.object({ t: pack.literal('stat'), id: pack.uint32(), path: pack.string() }),
+        pack.object({ t: pack.literal('list'), id: pack.uint32() }),
+        // responses (owner → consumer)
+        pack.object({ t: pack.literal('ok:bytes'), id: pack.uint32(), bytes: pack.uint8Array() }),
+        pack.object({ t: pack.literal('ok:void'), id: pack.uint32() }),
+        pack.object({ t: pack.literal('ok:stat'), id: pack.uint32(), stat: pack.nullable(syncStatSchema) }),
+        pack.object({ t: pack.literal('ok:list'), id: pack.uint32(), entries: pack.list(syncEntrySchema) }),
+        pack.object({ t: pack.literal('err'), id: pack.uint32(), error: pack.string() }),
+    ]),
+);
+type SyncFrame = ReturnType<typeof syncCodec.unpack>;
+
+/** consumer side (the editor): a `SyncTarget` whose ops RPC to the owner over `port`. */
+export function consumeFolderSync(port: MessagePort): SyncTarget {
+    const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+    let nextId = 1;
+
+    port.onmessage = (e) => {
+        const msg = syncCodec.unpack(e.data as Uint8Array);
+        const p = pending.get(msg.id);
+        if (!p) return;
+        pending.delete(msg.id);
+        if (msg.t === 'err') p.reject(new Error(msg.error));
+        else p.resolve(syncResultOf(msg));
+    };
+
+    const call = <T>(build: (id: number) => SyncFrame): Promise<T> =>
+        new Promise<T>((resolve, reject) => {
+            const id = nextId++;
+            pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+            port.postMessage(syncCodec.pack(build(id)));
+        });
+
+    return {
+        read: (path) => call<Uint8Array>((id) => ({ t: 'read', id, path })),
+        write: (path, bytes) => call<void>((id) => ({ t: 'write', id, path, bytes })),
+        remove: (path) => call<void>((id) => ({ t: 'remove', id, path })),
+        stat: (path) => call<SyncStat | null>((id) => ({ t: 'stat', id, path })),
+        list: () => call<SyncEntry[]>((id) => ({ t: 'list', id })),
+    };
+}
+
+function syncResultOf(msg: SyncFrame): unknown {
+    switch (msg.t) {
+        case 'ok:bytes':
+            return msg.bytes;
+        case 'ok:stat':
+            return msg.stat as SyncStat | null;
+        case 'ok:list':
+            return msg.entries as SyncEntry[];
+        default:
+            return undefined; // ok:void
+    }
+}
+
+/** owner side (the platform host): answer a consumer's ops from `target`. Returns a
+ *  handle to detach when the sync stops. */
+export function serveFolderSync(target: SyncTarget, port: MessagePort): { close(): void } {
+    const reply = (msg: SyncFrame) => port.postMessage(syncCodec.pack(msg));
+
+    async function handle(req: SyncFrame): Promise<void> {
+        const id = req.id;
+        try {
+            switch (req.t) {
+                case 'read':
+                    return reply({ t: 'ok:bytes', id, bytes: await target.read(req.path) });
+                case 'write':
+                    await target.write(req.path, req.bytes);
+                    return reply({ t: 'ok:void', id });
+                case 'remove':
+                    await target.remove(req.path);
+                    return reply({ t: 'ok:void', id });
+                case 'stat':
+                    return reply({ t: 'ok:stat', id, stat: await target.stat(req.path) });
+                case 'list':
+                    return reply({ t: 'ok:list', id, entries: await target.list() });
+                default:
+                    return; // a response frame reaching the owner — ignore
+            }
+        } catch (err) {
+            reply({ t: 'err', id, error: err instanceof Error ? err.message : String(err) });
+        }
+    }
+
+    port.onmessage = (e) => void handle(syncCodec.unpack(e.data as Uint8Array));
+    return { close: () => port.close() };
+}
+
+// ── the managed set + the browser backing ───────────────────────────
+// Which project paths the folder sync owns (publish + import + delete). Everything NOT
+// excluded here is two-way synced. We mirror almost everything so the on-disk copy is a
+// complete, standalone project — including node_modules (the engine seed), resources
+// (bake output), and src/generated (generated barrels). Only `dist` (the bundler's JS
+// output) is excluded: it's large, fully regenerated, and not useful on disk.
+const IGNORED_SYNC_DIRS = new Set(['dist']);
+
+/** does the folder sync manage this path? False only for `dist`, which it never
+ *  publishes, imports, or deletes on either side. */
+export function syncManaged(path: string): boolean {
+    for (const seg of path.split('/')) if (IGNORED_SYNC_DIRS.has(seg)) return false;
+    return true;
+}
+
+function syncSplit(path: string): { dirs: string[]; name: string } {
+    const parts = path.replace(/^\/+/, '').replace(/\/+$/, '').split('/');
+    return { dirs: parts.slice(0, -1), name: parts[parts.length - 1]! };
+}
+
+type AnyDirHandle = FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> };
+
+/** THE browser backing: expose a picked directory handle (File System Access API) as a
+ *  `SyncTarget`. Chromium-only (`showDirectoryPicker`). The disk walk skips unmanaged
+ *  paths, so a real project's node_modules is never enumerated. A node host would ship
+ *  its own `SyncTarget` over node fs — the loop + wire protocol are backing-agnostic. */
+export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
+    const dirHandle = async (dirs: string[], create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+        let cur = root;
+        for (const d of dirs) {
+            try {
+                cur = await cur.getDirectoryHandle(d, { create });
+            } catch {
+                return null;
+            }
+        }
+        return cur;
+    };
+
+    return {
+        async read(path) {
+            const { dirs, name } = syncSplit(path);
+            const dir = await dirHandle(dirs, false);
+            if (!dir) throw new Error(`[disk] no dir for ${path}`);
+            const f = await (await dir.getFileHandle(name)).getFile();
+            return new Uint8Array(await f.arrayBuffer());
+        },
+        async write(path, bytes) {
+            const { dirs, name } = syncSplit(path);
+            const dir = await dirHandle(dirs, true);
+            if (!dir) throw new Error(`[disk] cannot create dir for ${path}`);
+            const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+            // cast: the DOM lib types a Uint8Array<ArrayBufferLike> as not-quite a
+            // BufferSource, but the bytes write fine.
+            await w.write(bytes as BufferSource);
+            await w.close();
+        },
+        async remove(path) {
+            const { dirs, name } = syncSplit(path);
+            const dir = await dirHandle(dirs, false);
+            if (!dir) return;
+            try {
+                await dir.removeEntry(name, { recursive: true });
+            } catch {
+                /* already gone */
+            }
+        },
+        async stat(path) {
+            const { dirs, name } = syncSplit(path);
+            const dir = await dirHandle(dirs, false);
+            if (!dir) return null;
+            try {
+                const f = await (await dir.getFileHandle(name)).getFile();
+                return { size: f.size, mtime: f.lastModified };
+            } catch {
+                return null;
+            }
+        },
+        async list() {
+            const out: SyncEntry[] = [];
+            const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
+                for await (const [name, h] of (dir as AnyDirHandle).entries()) {
+                    const path = prefix ? `${prefix}/${name}` : name;
+                    if (!syncManaged(path)) continue;
+                    if (h.kind === 'directory') await walk(h as FileSystemDirectoryHandle, path);
+                    else {
+                        const f = await (h as FileSystemFileHandle).getFile();
+                        out.push({ path, size: f.size, mtime: f.lastModified });
+                    }
+                }
+            };
+            await walk(root, '');
+            return out;
+        },
+    };
+}

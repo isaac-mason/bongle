@@ -17,9 +17,8 @@
 // and therefore zero autosaves — nothing older can clobber newer work.
 
 import type { Filesystem, FsChange } from '../fs';
-import { exportProjectSave } from '../project-save';
+import { exportProjectSave, isSourcePath } from '../project-save';
 import { useAutosave } from '../stores/autosave';
-import { syncManaged } from '../sync/policy';
 import type { PlatformBridge } from './bridge';
 import type { PlatformIntent, PlatformResult } from './contract';
 
@@ -92,12 +91,14 @@ export function initAutosave(fs: Filesystem, bridge: PlatformBridge, intent: Pla
 /** a flushed batch of fs changes. Any real SOURCE change (re)arms the debounced
  *  fire. An avatar cares only about its .bbmodel source; a project ignores DERIVED
  *  writes (the bake's barrels + resources, now visible on editor.fs cross-context)
- *  via `syncManaged`, so a bake doesn't re-arm a save of unchanged source. */
+ *  via `isSourcePath` — the SAVE's own source set, so a bake doesn't re-arm a save of
+ *  unchanged source. (This is deliberately NOT the folder-sync mirror's `syncManaged`:
+ *  what mirrors to disk and what belongs in a save are different concerns.) */
 function onEdit(state: State, changes: FsChange[]): void {
     const relevant =
         state.kind === 'avatar'
             ? changes.filter((c) => c.path === AVATAR_SOURCE_PATH)
-            : changes.filter((c) => syncManaged(c.path));
+            : changes.filter((c) => isSourcePath(c.path));
     if (relevant.length === 0) return;
     state.rev += 1; // monotonic per genuine edit batch
     arm(state);

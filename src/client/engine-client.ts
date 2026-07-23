@@ -9,7 +9,14 @@ import * as Physics from '../core/physics/physics';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
 import * as Registry from '../core/registry';
-import { buildInboundProtocol, type InboundProtocol, localInbound, protocolManifest, registry, reindexRegistry } from '../core/registry';
+import {
+    buildInboundProtocol,
+    type InboundProtocol,
+    localInbound,
+    protocolManifest,
+    registry,
+    reindexRegistry,
+} from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
@@ -17,7 +24,7 @@ import * as Animation from '../core/scene/animation';
 import * as Prefab from '../core/scene/prefab';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
-import { AIR, MISSING, resolveKey } from '../core/voxels/block-registry';
+import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
@@ -498,118 +505,13 @@ function processInbox(state: EngineClient): void {
 
             state.net.bytesInByType.set(message.type, (state.net.bytesInByType.get(message.type) ?? 0) + messageBytes.byteLength);
 
-            switch (message.type) {
-                case 'join_room':
-                    processJoinRoom(state, message);
-                    break;
-
-                case 'server_clock': {
-                    // a server-clock push, fold it into the room's estimate. recvTime is
-                    // the room's render clock (`wall`, advanced up front this frame): the
-                    // same base syncServer reads, so the offset is coherent and render-behind.
-                    for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
-                        Clock.observeSample(room.clock, message.serverClock, room.clock.wall);
-                    }
-                    break;
-                }
-
-                case 'net_ping':
-                    // remember the server's stamp to echo back (measures our RTT server-side);
-                    // stash the server's smoothed ping for the net HUD.
-                    state.net.lastServerStamp = message.serverStamp;
-                    state.net.pingMs = message.pingMs;
-                    break;
-
-                case 'activate_room':
-                    processActivateRoom(state, message);
-                    break;
-
-                case 'room_left':
-                    processRoomLeft(state, message);
-                    break;
-
-                case 'net_message':
-                    processNetMessage(state, message);
-                    break;
-
-                case 'scene_sync':
-                    processSceneSync(state, message);
-                    break;
-
-                case 'room_list':
-                    processRoomList(state, message);
-                    break;
-
-                case 'voxel_chunk_full':
-                    processVoxelChunkFull(state, message);
-                    break;
-
-                case 'voxel_chunk_ops':
-                    processVoxelChunkOps(state, message);
-                    break;
-
-                case 'voxel_chunk_light':
-                    processVoxelChunkLight(state, message);
-                    break;
-
-                case 'voxel_chunk_light_delta':
-                    processVoxelChunkLightDelta(state, message);
-                    break;
-
-                case 'voxel_chunk_del':
-                    processVoxelChunkDel(state, message);
-                    break;
-
-                case 'voxel_chunk_empty':
-                    processVoxelChunkEmpty(state, message);
-                    break;
-
-                case 'room_metrics':
-                    processRoomMetrics(state, message);
-                    break;
-
-                case 'debug_logs':
-                    processDebugLogs(state, message);
-                    break;
-
-                case 'wire_table':
-                    state.inbound = buildInboundProtocol(message, registry);
-                    break;
-
-                case 'register_model':
-                    // Server-authoritative runtime model registration. The
-                    // server is the canonical source of truth for which
-                    // runtime models the client should know, refcount
-                    // lives over there. Client gets exactly one register
-                    // per id, paired with one unregister on release.
-                    //
-                    // serverUrl is required by the local `ResourceModel`
-                    // shape but never read on the client (`side` is
-                    // 'client'); stuff in clientUrl so the field exists.
-                    Resources.setModel(state.resources, message.id, {
-                        clientUrl: message.clientUrl,
-                        serverUrl: message.clientUrl,
-                        source: 'runtime',
-                        hash: message.hash,
-                        size: message.size,
-                    });
-                    break;
-
-                case 'unregister_model':
-                    Resources.releaseModel(state.resources, message.id);
-                    Resources.deleteModel(state.resources, message.id);
-                    break;
-
-                case 'chat_broadcast': {
-                    const room = Rooms.findRoomByRoomId(state.rooms, message.roomId);
-                    if (!room) break;
-                    Chat.enqueueBroadcast(room.chat, {
-                        from: message.from,
-                        text: message.text,
-                        kind: message.kind,
-                    });
-                    break;
-                }
+            // one malformed/unexpected message must never take down the whole
+            // tick loop (mirrors the framing-layer guard above). log it, skip
+            // that message, keep draining — rendering/input/net stay alive.
+            try {
+                dispatchInboundMessage(state, message);
+            } catch (err) {
+                console.error(`[bongle] error handling '${message.type}' message, skipping:`, err);
             }
         }
     }
@@ -622,6 +524,122 @@ function processInbox(state: EngineClient): void {
         Net.send(state.net, { type: 'voxel_ack', playerId, full });
     }
     state.voxelAckBuffer.clear();
+}
+
+function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMessage): void {
+    switch (message.type) {
+        case 'join_room':
+            processJoinRoom(state, message);
+            break;
+
+        case 'server_clock': {
+            // a server-clock push, fold it into the room's estimate. recvTime is
+            // the room's render clock (`wall`, advanced up front this frame): the
+            // same base syncServer reads, so the offset is coherent and render-behind.
+            for (const room of Rooms.getRoomsByRoomId(state.rooms, message.roomId)) {
+                Clock.observeSample(room.clock, message.serverClock, room.clock.wall);
+            }
+            break;
+        }
+
+        case 'net_ping':
+            // remember the server's stamp to echo back (measures our RTT server-side);
+            // stash the server's smoothed ping for the net HUD.
+            state.net.lastServerStamp = message.serverStamp;
+            state.net.pingMs = message.pingMs;
+            break;
+
+        case 'activate_room':
+            processActivateRoom(state, message);
+            break;
+
+        case 'room_left':
+            processRoomLeft(state, message);
+            break;
+
+        case 'net_message':
+            processNetMessage(state, message);
+            break;
+
+        case 'scene_sync':
+            processSceneSync(state, message);
+            break;
+
+        case 'room_list':
+            processRoomList(state, message);
+            break;
+
+        case 'voxel_chunk_full':
+            processVoxelChunkFull(state, message);
+            break;
+
+        case 'voxel_chunk_ops':
+            processVoxelChunkOps(state, message);
+            break;
+
+        case 'voxel_chunk_light':
+            processVoxelChunkLight(state, message);
+            break;
+
+        case 'voxel_chunk_light_delta':
+            processVoxelChunkLightDelta(state, message);
+            break;
+
+        case 'voxel_chunk_del':
+            processVoxelChunkDel(state, message);
+            break;
+
+        case 'voxel_chunk_empty':
+            processVoxelChunkEmpty(state, message);
+            break;
+
+        case 'room_metrics':
+            processRoomMetrics(state, message);
+            break;
+
+        case 'debug_logs':
+            processDebugLogs(state, message);
+            break;
+
+        case 'wire_table':
+            state.inbound = buildInboundProtocol(message, registry);
+            break;
+
+        case 'register_model':
+            // Server-authoritative runtime model registration. The
+            // server is the canonical source of truth for which
+            // runtime models the client should know, refcount
+            // lives over there. Client gets exactly one register
+            // per id, paired with one unregister on release.
+            //
+            // serverUrl is required by the local `ResourceModel`
+            // shape but never read on the client (`side` is
+            // 'client'); stuff in clientUrl so the field exists.
+            Resources.setModel(state.resources, message.id, {
+                clientUrl: message.clientUrl,
+                serverUrl: message.clientUrl,
+                source: 'runtime',
+                hash: message.hash,
+                size: message.size,
+            });
+            break;
+
+        case 'unregister_model':
+            Resources.releaseModel(state.resources, message.id);
+            Resources.deleteModel(state.resources, message.id);
+            break;
+
+        case 'chat_broadcast': {
+            const room = Rooms.findRoomByRoomId(state.rooms, message.roomId);
+            if (!room) break;
+            Chat.enqueueBroadcast(room.chat, {
+                from: message.from,
+                text: message.text,
+                kind: message.kind,
+            });
+            break;
+        }
+    }
 }
 
 function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void {
@@ -786,10 +804,14 @@ function processVoxelChunkFull(state: EngineClient, message: Protocol.VoxelChunk
 
     chunk.data = data;
     chunk.light = light;
-    chunk.paletteKeys = message.paletteKeys;
+    // wire carries per-slot global state ids; map each back to its key so the
+    // chunk keeps a string-durable palette (survives registry hot-reload via
+    // resolveChunk). unknown ids (registry skew) fall back to MISSING's key.
+    const stateToKey = room.voxels.registry.stateToKey;
+    chunk.paletteKeys = message.palette.map((id) => stateToKey[id] ?? '');
     chunk.paletteMap = new Map();
-    for (let i = 0; i < message.paletteKeys.length; i++) {
-        chunk.paletteMap.set(message.paletteKeys[i]!, i);
+    for (let i = 0; i < chunk.paletteKeys.length; i++) {
+        chunk.paletteMap.set(chunk.paletteKeys[i]!, i);
     }
 
     Voxels.resolveChunk(chunk, room.voxels.registry);
@@ -819,60 +841,31 @@ function applyVoxelChunkOps(room: Rooms.ClientRoom, message: Protocol.VoxelChunk
         const chunk = room.voxels.chunks.get(key);
         if (!chunk) continue;
 
-        // protocol invariant: chunk_ops palette must be pure-append. shrink
-        // or reorder silently re-aliases every already-set voxel's identity
-        // → wrong-block-type drift on next remesh. server's saveVoxels uses
-        // repackChunkSnapshot to compact the on-disk bytes only; live
-        // chunk.paletteKeys is append-only. throw loud if that ever breaks.
-        {
-            const prevKeys = chunk.paletteKeys;
-            const nextKeys = entry.paletteKeys;
-            let kind: string | null = null;
-            if (nextKeys.length < prevKeys.length) kind = 'shrunk';
-            else {
-                for (let i = 0; i < prevKeys.length; i++) {
-                    if (prevKeys[i] !== nextKeys[i]) {
-                        kind = 'reordered-or-replaced';
-                        break;
-                    }
-                }
-            }
-            if (kind) {
-                throw new Error(
-                    `[voxel-drift][ops-palette] chunk=(${entry.cx},${entry.cy},${entry.cz}) kind=${kind}` +
-                        ` prev=[${prevKeys.join('|')}] next=[${nextKeys.join('|')}]`,
-                );
-            }
-        }
-
-        // update palette (may have grown). resolve only newly-appended
-        // runtime ids, existing entries stay valid by the append-only
-        // invariant asserted above.
-        const oldPaletteLen = chunk.paletteKeys.length;
-        chunk.paletteKeys = entry.paletteKeys;
-        chunk.paletteMap = new Map();
-        for (let i = 0; i < entry.paletteKeys.length; i++) {
-            chunk.paletteMap.set(entry.paletteKeys[i]!, i);
-        }
-        for (let i = oldPaletteLen; i < entry.paletteKeys.length; i++) {
-            chunk.palette[i] = resolveKey(room.voxels.registry, entry.paletteKeys[i]!);
-        }
-
         // COW out of the shared empty-stub data array before mutating,
         // chunks promoted from voxel_chunk_empty alias Voxels.EMPTY_DATA.
         if (chunk.data === Voxels.EMPTY_DATA) chunk.data = new Uint16Array(Voxels.EMPTY_DATA);
 
         // apply block data changes, track which boundary faces are touched,
         // and adjust nonAirCount + solidCount incrementally per change
-        // (mirrors setChunkBlock).
-        const cull = room.voxels.registry.cull;
+        // (mirrors setChunkBlock). each change carries a registry-global state
+        // id; intern it into THIS chunk's own local palette slot. that slot
+        // space is independent of the server's — which is exactly what makes a
+        // client palette that diverged from the server's (e.g. an optimistic
+        // hook-free paste vs the server's hook-run echo) reconcile cleanly
+        // instead of drifting/crashing. superseded local slots simply go unused.
+        const registry = room.voxels.registry;
+        const stateToKey = registry.stateToKey;
+        const cull = registry.cull;
         let faces = 0;
         for (const change of entry.changes) {
             // explicit `: number` annotations cut the inference chain here:
             // `change` is a recursive pack.SchemaType, and letting several
             // locals depend on it trips a tsgo circular-inference bail.
             const oldPaletteIdx: number = chunk.data[change.index]!;
-            const newPaletteIdx: number = change.data;
+            const newStateId: number = change.stateId;
+            // stateToKey → key → own slot; unknown ids (registry skew) map to
+            // MISSING's empty key, which interns a MISSING slot.
+            const newPaletteIdx: number = Voxels.ensureChunkPaletteSlot(chunk, stateToKey[newStateId] ?? '', registry);
             chunk.data[change.index] = newPaletteIdx;
 
             const oldId = chunk.palette[oldPaletteIdx]!;

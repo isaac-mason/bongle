@@ -17,7 +17,7 @@ import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
 import { exposeDevtools } from '../../devtools';
 import type { Filesystem } from '../../fs';
-import { openOpfsFilesystem } from '../../fs-opfs';
+import { openProjectFilesystem } from '../../fs-open';
 import { type EditorServer, startEditorServer } from './server';
 import { type ClientMeta, createPortTransport, type PortTransport } from './transport-server';
 
@@ -55,7 +55,7 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
             bt.mark('init received');
             // open the SAME OPFS project the main doc uses (same origin) — the
             // server reads scenes/resources from it directly, no snapshot.
-            fs = await openOpfsFilesystem(msg.projectName);
+            fs = await openProjectFilesystem(msg.projectName);
             bt.mark('opfs open');
             // the bundler port rides on e.ports[0]; run the user entry through a
             // ModuleRunner bridged to the host DevServer (host does the

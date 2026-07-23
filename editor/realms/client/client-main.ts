@@ -20,7 +20,7 @@ import { createPortBridge } from '../../../build';
 import { makeRunner } from '../../dev/runner';
 import { exposeDevtools } from '../../devtools';
 import type { Filesystem } from '../../fs';
-import { openOpfsFilesystem } from '../../fs-opfs';
+import { openProjectFilesystem } from '../../fs-open';
 import type { PortLike } from '../../../build';
 import { createRemoteFilesystem } from '../../net/remote-fs';
 
@@ -88,7 +88,7 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // the Source seam: a host's own client shares the SAME OPFS project (same
     // origin — no snapshot); a GUEST (another browser) has no shared OPFS, so it
     // reads THROUGH to the host over the relay's fsrpc lane.
-    const fs = fsrpcPort ? createRemoteFilesystem(asPortLike(fsrpcPort)) : await openOpfsFilesystem(msg.projectName);
+    const fs = fsrpcPort ? createRemoteFilesystem(asPortLike(fsrpcPort)) : await openProjectFilesystem(msg.projectName);
     const remote = fsrpcPort !== undefined;
 
     // the engine UI stylesheet (prebundled tailwind, dist/bongle.css) — inject it

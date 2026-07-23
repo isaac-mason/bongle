@@ -35,13 +35,29 @@ export type PlatformBridge = {
      *  /api/edit/host and resolves with the relay url + share link. Rejects when
      *  standalone (no platform to make the authenticated call). */
     requestMultiplayer: (region?: string) => Promise<{ url: string; shareUrl: string }>;
+    /** ask the host to open the folder picker (the iframe can't) and start serving
+     *  the chosen folder. The outcome arrives asynchronously via onSyncPort (started)
+     *  or onSyncResult (cancelled / failed). No-op when standalone. */
+    requestSyncFolder: (direction: SyncDirection) => void;
+    /** tell the host the editor tore down its sync so it releases the handle. */
+    notifySyncStopped: () => void;
+    /** the host picked a folder and is serving it over `port`; the editor connects
+     *  its sync loop. Returns an unsubscribe fn. */
+    onSyncPort: (cb: (port: MessagePort, direction: SyncDirection, folderName: string) => void) => () => void;
+    /** the sync didn't start: `cancelled` for a dismissed picker (stay quiet),
+     *  else `message` explains the failure. Returns an unsubscribe fn. */
+    onSyncResult: (cb: (r: { cancelled: boolean; message?: string }) => void) => () => void;
 };
+
+type SyncDirection = 'editor-to-folder' | 'folder-to-editor';
 
 export function createPlatformBridge(): PlatformBridge {
     const parent = window.parent !== window ? window.parent : null;
     const resultCbs = new Set<(r: PlatformResult) => void>();
     const requestSaveCbs = new Set<() => void>();
     const sourceCbs = new Set<(bbmodel: string | null, name?: string) => void>();
+    const syncPortCbs = new Set<(port: MessagePort, direction: SyncDirection, folderName: string) => void>();
+    const syncResultCbs = new Set<(r: { cancelled: boolean; message?: string }) => void>();
     // the last source the platform sent, so a subscriber that attaches AFTER it arrived
     // (a fast local source can beat the boot's onSource wiring) still gets it.
     let latestSource: { bbmodel: string | null; name?: string } | undefined;
@@ -94,6 +110,14 @@ export function createPlatformBridge(): PlatformBridge {
             } else if (m.type === 'bongle:multiplayer-failed') {
                 multiplayerPending?.reject(new Error(m.message));
                 multiplayerPending = null;
+            } else if (m.type === 'bongle:sync-folder-port') {
+                // the folder handle rides in the transfer list, not the payload.
+                const port = e.ports[0];
+                if (port) for (const cb of syncPortCbs) cb(port, m.direction, m.folderName);
+            } else if (m.type === 'bongle:sync-folder-cancelled') {
+                for (const cb of syncResultCbs) cb({ cancelled: true });
+            } else if (m.type === 'bongle:sync-folder-failed') {
+                for (const cb of syncResultCbs) cb({ cancelled: false, message: m.message });
             }
         });
         // Re-announce `ready` until the parent acks with `init`. A single ping
@@ -152,5 +176,15 @@ export function createPlatformBridge(): PlatformBridge {
                 multiplayerPending = { resolve, reject };
                 send({ type: 'bongle:open-multiplayer', region });
             }),
+        requestSyncFolder: (direction) => send({ type: 'bongle:request-sync-folder', direction }),
+        notifySyncStopped: () => send({ type: 'bongle:sync-folder-stopped' }),
+        onSyncPort: (cb) => {
+            syncPortCbs.add(cb);
+            return () => syncPortCbs.delete(cb);
+        },
+        onSyncResult: (cb) => {
+            syncResultCbs.add(cb);
+            return () => syncResultCbs.delete(cb);
+        },
     };
 }

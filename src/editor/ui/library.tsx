@@ -132,7 +132,7 @@ function InventoryTab() {
                     value={search}
                     onChange={(e) => setSearch(e.currentTarget.value)}
                     placeholder="search…"
-                    className="flex-1 text-[12px] font-mono bg-surface-muted border border-border px-2 py-1 outline-none focus:border-fg-muted placeholder:text-fg-muted"
+                    className="flex-1 text-[12px] font-mono text-fg bg-surface-muted border border-border px-2 py-1 outline-none focus:border-fg-muted placeholder:text-fg-muted"
                 />
             </div>
 

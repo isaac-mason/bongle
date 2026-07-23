@@ -12,7 +12,7 @@ import { createBrowserDecodeAudio } from '../../../src/asset-pipeline/decode-aud
 import { createBakeLoader, createClientResourceLoader } from '../../../src/asset-pipeline/loader';
 import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
-import { openOpfsFilesystem } from '../../fs-opfs';
+import { openProjectFilesystem } from '../../fs-open';
 
 const bt = createBootTimer('pipeline');
 
@@ -26,7 +26,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     bt.mark('boot() start');
     // shared OPFS project (same origin) — baked outputs land here for the main
     // doc's atlas view to re-read; no snapshot.
-    const fs = await openOpfsFilesystem(projectName);
+    const fs = await openProjectFilesystem(projectName);
     bt.mark('opfs open');
 
     // the bake's writes reach the main doc (barrel HMR + baked-resource refresh) via

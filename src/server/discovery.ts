@@ -1524,13 +1524,15 @@ function buildExpansionOrder(radius: number): [number, number, number][] {
 
 /* ── compressed snapshot caching ── */
 
-/** get or build the compressed snapshot for a chunk. caches on the chunk. */
-function getCompressedSnapshot(chunk: Chunk, zstd: Zstd): { compressed: Uint8Array; palette: string[] } {
+/** get or build the compressed snapshot for a chunk. caches on the chunk.
+ *  the wire palette is per-slot global state ids (registry-shared identity),
+ *  not the per-chunk strings — `chunk.palette` is already that mapping. */
+function getCompressedSnapshot(chunk: Chunk, zstd: Zstd): { compressed: Uint8Array; palette: number[] } {
     if (chunk.compressedSnapshot && chunk.snapshotPalette) {
         return { compressed: chunk.compressedSnapshot, palette: chunk.snapshotPalette };
     }
     const compressed = encodeChunk(chunk.data, chunk.light, zstd);
-    const palette = chunk.paletteKeys.slice();
+    const palette = chunk.palette.slice();
     chunk.compressedSnapshot = compressed;
     chunk.snapshotPalette = palette;
     return { compressed, palette };
@@ -1551,8 +1553,11 @@ type CoalescedBlockChunk = {
     cx: number;
     cy: number;
     cz: number;
-    paletteKeys: string[];
-    changes: Map<number, number>; // index → data (last wins)
+    // slot → global state id, for translating each coalesced slot into the
+    // registry-shared id the wire carries. by reference; the live palette is
+    // append-only so slot→id stays stable through the tick.
+    palette: number[];
+    changes: Map<number, number>; // index → local slot (last wins)
 };
 
 /** coalesce block ops by chunk, dedup by voxel index (keep last value). */
@@ -1575,7 +1580,7 @@ function coalesceBlockOps(
                 cx: op.cx,
                 cy: op.cy,
                 cz: op.cz,
-                paletteKeys: chunk.paletteKeys,
+                palette: chunk.palette,
                 changes: new Map(),
             };
             result.set(key, entry);
@@ -1769,7 +1774,7 @@ function dispatchFull(
                     cx: c.chunk.cx,
                     cy: c.chunk.cy,
                     cz: c.chunk.cz,
-                    paletteKeys: palette,
+                    palette,
                     compressed,
                 },
             ]);
@@ -2059,20 +2064,18 @@ function flushVoxelsForPlayer(
                 cx: number;
                 cy: number;
                 cz: number;
-                paletteKeys: string[];
-                changes: Array<{ index: number; data: number }>;
+                changes: Array<{ index: number; stateId: number }>;
             }> = [];
 
             for (const entry of blockChanges.values()) {
-                const changeList: Array<{ index: number; data: number }> = [];
-                for (const [index, data] of entry.changes) {
-                    changeList.push({ index, data });
+                const changeList: Array<{ index: number; stateId: number }> = [];
+                for (const [index, slot] of entry.changes) {
+                    changeList.push({ index, stateId: entry.palette[slot]! });
                 }
                 chunks.push({
                     cx: entry.cx,
                     cy: entry.cy,
                     cz: entry.cz,
-                    paletteKeys: entry.paletteKeys,
                     changes: changeList,
                 });
             }

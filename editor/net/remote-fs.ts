@@ -63,6 +63,20 @@ const codec = pack.build(
 
 type Frame = ReturnType<typeof codec.unpack>;
 
+/** adapt a `MessagePort` to the structural `PortLike` the fs codec speaks. The
+ *  real port forwards to `p.onmessage`, which createRemoteFilesystem /
+ *  serveFilesystemOverPort assign synchronously right after this returns — so the
+ *  port starts before any frame can be dispatched, dropping none. */
+export function asPortLike(mp: MessagePort): PortLike {
+    const p: PortLike = {
+        onmessage: null,
+        postMessage: (data) => mp.postMessage(data),
+        close: () => mp.close(),
+    };
+    mp.onmessage = (e) => p.onmessage?.({ data: e.data });
+    return p;
+}
+
 /** wire form of a write's payload — string inline, or raw bytes inline (tax-free). */
 const dataFrame = (data: Uint8Array | string) =>
     typeof data === 'string' ? ({ d: 'text', text: data } as const) : ({ d: 'bin', bytes: data } as const);

@@ -16,8 +16,12 @@ import type { Filesystem, FsPath } from './fs';
 /** derived/reconstructable trees excluded from a save (dir prefixes). */
 const DERIVED = ['node_modules', 'dist', '.bongle', 'tmp', 'src/generated', 'resources'];
 
+/** editor-managed meta files excluded from a save (auto-seeded, not authored source). */
+const DERIVED_FILES = new Set(['.gitignore']);
+
 /** true when `path` is a derived output, not authored source. */
 function isDerived(path: FsPath): boolean {
+    if (DERIVED_FILES.has(path)) return true;
     return DERIVED.some((d) => path === d || path.startsWith(`${d}/`));
 }
 
