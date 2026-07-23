@@ -20,11 +20,9 @@
 //
 // This file also carries the FOLDER-SYNC fs channel (bottom of the file): when the
 // platform brokers an on-disk folder (bongle:sync-folder-port), it serves it over the
-// handed-off MessagePort using the small packcat protocol here. It lives in this
+// handed-off MessagePort using the small RPC protocol here. It lives in this
 // contract (not editor internals) because both the editor AND the platform host parse
 // it — so it's version-governed by EDITOR_INTERFACE_VERSION like everything else here.
-
-import * as pack from 'packcat';
 
 /** Semver of THIS editor⇄platform contract (distinct from the engine⇄game
  *  INTERFACE_VERSION — they evolve independently). The editor announces its
@@ -211,7 +209,7 @@ export type PlatformResult = {
 
 // ── folder-sync fs channel ──────────────────────────────────────────
 // The platform host (which owns the picked directory handle) serves the folder to the
-// editor over the MessagePort from `bongle:sync-folder-port`, speaking the small packcat
+// editor over the MessagePort from `bongle:sync-folder-port`, speaking the small RPC
 // protocol below. The editor's sync loop drives it like a local fs. This is a SEPARATE,
 // smaller protocol from the multiplayer relay fs (editor/net/remote-fs): that one needs
 // 1 MiB chunking for the WebSocket's frame budget; a local MessagePort carries a whole
@@ -238,27 +236,24 @@ export type SyncTarget = {
     list(): Promise<SyncEntry[]>;
 };
 
-// ── wire protocol (packcat, no chunking) ────────────────────────────
-const syncStatSchema = pack.object({ size: pack.float64(), mtime: pack.float64() });
-const syncEntrySchema = pack.object({ path: pack.string(), size: pack.float64(), mtime: pack.float64() });
-
-const syncCodec = pack.build(
-    pack.union('t', [
-        // requests (consumer → owner)
-        pack.object({ t: pack.literal('read'), id: pack.uint32(), path: pack.string() }),
-        pack.object({ t: pack.literal('write'), id: pack.uint32(), path: pack.string(), bytes: pack.uint8Array() }),
-        pack.object({ t: pack.literal('remove'), id: pack.uint32(), path: pack.string() }),
-        pack.object({ t: pack.literal('stat'), id: pack.uint32(), path: pack.string() }),
-        pack.object({ t: pack.literal('list'), id: pack.uint32() }),
-        // responses (owner → consumer)
-        pack.object({ t: pack.literal('ok:bytes'), id: pack.uint32(), bytes: pack.uint8Array() }),
-        pack.object({ t: pack.literal('ok:void'), id: pack.uint32() }),
-        pack.object({ t: pack.literal('ok:stat'), id: pack.uint32(), stat: pack.nullable(syncStatSchema) }),
-        pack.object({ t: pack.literal('ok:list'), id: pack.uint32(), entries: pack.list(syncEntrySchema) }),
-        pack.object({ t: pack.literal('err'), id: pack.uint32(), error: pack.string() }),
-    ]),
-);
-type SyncFrame = ReturnType<typeof syncCodec.unpack>;
+// ── wire protocol (structured-clone frames over the port, no chunking) ──
+// A MessagePort structured-clones whatever we post — Uint8Array included — so the
+// frames ARE the wire format; no serialization codec. `id` correlates a response to
+// its request. No transfer list: file bytes are copied, not detached, so the owner
+// keeps serving the same handle across calls.
+type SyncFrame =
+    // requests (consumer → owner)
+    | { t: 'read'; id: number; path: string }
+    | { t: 'write'; id: number; path: string; bytes: Uint8Array }
+    | { t: 'remove'; id: number; path: string }
+    | { t: 'stat'; id: number; path: string }
+    | { t: 'list'; id: number }
+    // responses (owner → consumer)
+    | { t: 'ok:bytes'; id: number; bytes: Uint8Array }
+    | { t: 'ok:void'; id: number }
+    | { t: 'ok:stat'; id: number; stat: SyncStat | null }
+    | { t: 'ok:list'; id: number; entries: SyncEntry[] }
+    | { t: 'err'; id: number; error: string };
 
 /** consumer side (the editor): a `SyncTarget` whose ops RPC to the owner over `port`. */
 export function consumeFolderSync(port: MessagePort): SyncTarget {
@@ -266,7 +261,7 @@ export function consumeFolderSync(port: MessagePort): SyncTarget {
     let nextId = 1;
 
     port.onmessage = (e) => {
-        const msg = syncCodec.unpack(e.data as Uint8Array);
+        const msg = e.data as SyncFrame;
         const p = pending.get(msg.id);
         if (!p) return;
         pending.delete(msg.id);
@@ -278,7 +273,7 @@ export function consumeFolderSync(port: MessagePort): SyncTarget {
         new Promise<T>((resolve, reject) => {
             const id = nextId++;
             pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-            port.postMessage(syncCodec.pack(build(id)));
+            port.postMessage(build(id));
         });
 
     return {
@@ -306,7 +301,7 @@ function syncResultOf(msg: SyncFrame): unknown {
 /** owner side (the platform host): answer a consumer's ops from `target`. Returns a
  *  handle to detach when the sync stops. */
 export function serveFolderSync(target: SyncTarget, port: MessagePort): { close(): void } {
-    const reply = (msg: SyncFrame) => port.postMessage(syncCodec.pack(msg));
+    const reply = (msg: SyncFrame) => port.postMessage(msg);
 
     async function handle(req: SyncFrame): Promise<void> {
         const id = req.id;
@@ -332,7 +327,7 @@ export function serveFolderSync(target: SyncTarget, port: MessagePort): { close(
         }
     }
 
-    port.onmessage = (e) => void handle(syncCodec.unpack(e.data as Uint8Array));
+    port.onmessage = (e) => void handle(e.data as SyncFrame);
     return { close: () => port.close() };
 }
 
