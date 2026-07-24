@@ -619,6 +619,7 @@ export type InputManager = {
         wheel: (e: WheelEvent) => void;
         focus: () => void;
         blur: () => void;
+        pointerlockerror: () => void;
     };
 };
 
@@ -805,6 +806,10 @@ export function createInputManager(touch: boolean): InputManager {
             m._focused = false;
             reconcilePointerLock(m);
         },
+        // fires on `document` in browsers that report failure via the event
+        // instead of a rejected promise; the promise path warns in
+        // tryAcquirePointerLock. Both share the once-per-session guard.
+        pointerlockerror: warnPointerLockBlocked,
     };
 
     m._handlers = handlers;
@@ -817,6 +822,7 @@ export function createInputManager(touch: boolean): InputManager {
     window.addEventListener('wheel', handlers.wheel, { passive: false });
     window.addEventListener('focus', handlers.focus);
     window.addEventListener('blur', handlers.blur);
+    document.addEventListener('pointerlockerror', handlers.pointerlockerror);
 
     return m;
 }
@@ -843,6 +849,7 @@ export function disposeInputManager(m: InputManager): void {
     window.removeEventListener('wheel', h.wheel);
     window.removeEventListener('focus', h.focus);
     window.removeEventListener('blur', h.blur);
+    document.removeEventListener('pointerlockerror', h.pointerlockerror);
     m.target = null;
 }
 
@@ -872,9 +879,27 @@ export function reconcilePointerLock(m: InputManager): void {
     document.exitPointerLock();
 }
 
+/** A genuine request failure (as opposed to the benign post-Esc cooldown) usually
+ *  means the embedding blocked capture: a sandboxed/opaque-origin iframe missing
+ *  the `pointer-lock` Permissions-Policy or `allow-pointer-lock` sandbox flag, or a
+ *  hardened browser with pointer lock disabled. Silent failures make these reports
+ *  undiagnosable, so surface one hint. Guarded so we log at most once per session
+ *  (post-Esc reacquire attempts also land here and must not spam). */
+let warnedPointerLockBlocked = false;
+function warnPointerLockBlocked(): void {
+    if (warnedPointerLockBlocked) return;
+    warnedPointerLockBlocked = true;
+    console.warn(
+        'Pointer lock request was blocked. If this persists, the embedding iframe may be missing ' +
+            'the `pointer-lock` Permissions-Policy / `allow-pointer-lock` sandbox flag, or the browser ' +
+            'has pointer lock disabled (e.g. hardened Firefox: full-screen-api.pointer-lock.enabled, ' +
+            'privacy.resistFingerprinting).',
+    );
+}
+
 /** ACQUIRE — call only from a real user gesture. `unadjustedMovement` gives raw,
  *  un-accelerated deltas (better aim); older Safari rejects it, so retry plain,
- *  and always swallow the post-Esc cooldown's rejection. */
+ *  and always swallow the post-Esc cooldown's rejection (logging one hint). */
 export function tryAcquirePointerLock(m: InputManager): void {
     if (!computeShouldBeLocked(m) || document.pointerLockElement) return;
     // prefer the stable container so the lock survives room swaps; fall back to
@@ -884,7 +909,10 @@ export function tryAcquirePointerLock(m: InputManager): void {
     const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
         unadjustedMovement: true,
     });
-    if (p?.catch) p.catch(() => (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(() => {}));
+    if (p?.catch)
+        p.catch(() =>
+            (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(warnPointerLockBlocked),
+        );
 }
 
 /** UI/ad/host surface asks to free the cursor while shown. Releases immediately
