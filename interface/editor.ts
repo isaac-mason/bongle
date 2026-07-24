@@ -56,6 +56,9 @@ function major(version: string): number | undefined {
 export type PlatformIntent =
     | {
           kind: 'project';
+          /** the owned project's slug/display name, for the boot screen ("opening
+           *  project '<name>'"). Absent for a brand-new / anonymous draft. */
+          name?: string;
           /** the project-save source zip to open into OPFS (absent = new/empty project). */
           save?: Uint8Array;
           /** a project file to open in the code editor on boot. */
@@ -168,10 +171,6 @@ export type PlatformMessage =
      *  no source, use the editor's bundled starter rig. `name` is the avatar's display
      *  name, used to seed the Save dialog. Sent exactly once per avatar session. */
     | { type: 'bongle:source'; bbmodel: string | null; name?: string }
-    /** ask the editor to run its Save-version action now (export the source → hand it
-     *  back as `bongle:version`). Lets the platform drive a prominent "save this to
-     *  bongle" CTA from outside the iframe (e.g. on an anonymous local-only draft). */
-    | { type: 'bongle:request-save' }
     /** answer to open-multiplayer: the relay ws url the host connects to + the
      *  ready-to-share invite link. */
     | { type: 'bongle:multiplayer-opened'; url: string; shareUrl: string }

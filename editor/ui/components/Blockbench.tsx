@@ -220,10 +220,8 @@ export function Blockbench({ fs, windowId }: { fs: Filesystem; windowId: string 
                 // Blockbench uses a SharedArrayBuffer worker while processing a model,
                 // so this nested iframe needs cross-origin isolation delegated too
                 // (only bites in avatar mode, which auto-loads a .bbmodel — a blank
-                // Blockbench never touches SAB). pointer-lock is delegated for its
-                // number-slider drag capture (inherited from the editor frame, which
-                // must also grant it since this frame is nested inside that one).
-                allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen; pointer-lock"
+                // Blockbench never touches SAB).
+                allow="cross-origin-isolated; clipboard-read; clipboard-write; fullscreen"
                 className="block h-full w-full border-none"
             />
             {saveAs && (

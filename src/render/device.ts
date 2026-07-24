@@ -1,37 +1,28 @@
 /**
- * One-shot device capability probe. Touch/device class is hardware, it does
- * not change for the session, so we resolve it once at client boot and stash
- * the result on engine-client state. Per-frame predicates (`isTouchDevice`,
- * `isMobile`) read `state.device.*` instead of re-probing every tick.
- *
- * Detection is deliberately viewport-INDEPENDENT and multi-signal: a phone
- * whose host page renders desktop-style (e.g. inside an editor with no mobile
- * viewport meta) still reports ~980px `innerWidth` and can misreport
- * `matchMedia('(pointer: coarse)')`, so we never rely on width alone and OR
- * together the reliable signals (Client Hints `userAgentData.mobile`, a UA
- * regex, `maxTouchPoints`, and the pointer media query).
+ * Static device CAPABILITY probe (resolved once at boot; hardware doesn't change
+ * mid-session). The separate question of which input is being used RIGHT NOW —
+ * the one that gates pointer lock and touch controls — is the live `inputMode` on
+ * the client store (client/ui/client-store), because a single "isTouch" boolean is
+ * a category error on hybrids (a touchscreen laptop has a digitizer AND a mouse).
  */
 
+export type DeviceType = 'mouseOnly' | 'touchOnly' | 'hybrid';
+
 export type Device = {
-    /** has ANY touch capability: `maxTouchPoints > 0` OR a coarse primary
-     *  pointer OR a known mobile device. true on touchscreen laptops too. */
-    touch: boolean;
-    /** touch is the PRIMARY pointer — a phone/tablet, regardless of viewport
-     *  size or a desktop-styled host page. false on a touchscreen laptop driven
-     *  by its trackpad/mouse. this is the "should I show touch controls" signal
-     *  (see `isTouchPrimary`). */
-    touchPrimary: boolean;
+    /** static capability class. `hybrid` = has both a fine pointer and touch
+     *  (touchscreen laptop / Surface). Probed from `any-pointer`/`any-hover`, which
+     *  query EVERY attached pointer (unlike `(pointer: coarse)`, which reports only
+     *  the primary and so can't tell a hybrid from a touch-only tablet). */
+    deviceType: DeviceType;
     /** a phone-class device (Client Hints `userAgentData.mobile`, else a UA
-     *  regex). viewport-independent, so it holds on a phone even when the page
-     *  is rendered desktop-width. drives the compact phone HUD (see `isMobile`). */
+     *  regex). viewport-independent, so it holds on a phone even when the page is
+     *  rendered desktop-width. drives the compact phone HUD (see `isMobile`). */
     mobile: boolean;
 };
 
 export function init(): Device {
     const mobile = detectMobile();
-    // a mobile device is a coarse-primary touchscreen by definition, so let the
-    // robust device signal backstop the (occasionally-misreporting) media query.
-    return { touch: detectTouch() || mobile, touchPrimary: detectCoarsePrimary() || mobile, mobile };
+    return { deviceType: detectDeviceType(mobile), mobile };
 }
 
 type UADataLike = { mobile?: boolean };
@@ -46,14 +37,20 @@ function detectMobile(): boolean {
     return /Android|iPhone|iPod|Windows Phone|IEMobile|BlackBerry|Opera Mini/i.test(navigator.userAgent || '');
 }
 
-function detectCoarsePrimary(): boolean {
-    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-        return window.matchMedia('(pointer: coarse)').matches;
-    }
-    return false;
+/** classify capability from `any-pointer`/`any-hover` (ALL attached pointers, so a
+ *  hybrid is distinguishable from touch-only). `maxTouchPoints`/`mobile` backstop the
+ *  coarse signal; a device with no signal at all (SSR, ancient browser) is mouseOnly. */
+function detectDeviceType(mobile: boolean): DeviceType {
+    const hasFinePointer = matchMediaMatches('(any-pointer: fine)') || matchMediaMatches('(any-hover: hover)');
+    const hasTouchPointer =
+        (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) ||
+        matchMediaMatches('(any-pointer: coarse)') ||
+        mobile;
+    if (hasFinePointer && hasTouchPointer) return 'hybrid';
+    if (hasTouchPointer) return 'touchOnly';
+    return 'mouseOnly';
 }
 
-function detectTouch(): boolean {
-    if (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0) return true;
-    return detectCoarsePrimary();
+function matchMediaMatches(query: string): boolean {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
 }

@@ -6,6 +6,7 @@
 import { type ReactNode, useState } from 'react';
 import { useWindows } from '../../stores/windows';
 import { ContextMenu, type MenuItem } from './ContextMenu';
+import { TOPBAR_H } from './TopBar';
 
 export const TASKBAR_W = 44;
 
@@ -78,8 +79,8 @@ export function Taskbar({
 
     return (
         <div
-            className="absolute top-0 bottom-0 left-0 z-[1000000] flex flex-col gap-1.5 border-r border-border bg-surface p-1.5"
-            style={{ width: TASKBAR_W }}
+            className="absolute bottom-0 left-0 z-[1000000] flex flex-col gap-1.5 border-r border-border bg-surface p-1.5"
+            style={{ width: TASKBAR_W, top: TOPBAR_H }}
         >
             {items.map(renderItem)}
             {(footer?.length || footerExtra || presence) && (

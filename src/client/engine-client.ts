@@ -109,12 +109,22 @@ export function init(opts: InitOptions) {
     const renderer = Renderer.init();
     const net = Net.init();
 
-    // hardware capability probe, resolved once at boot (touch never pointer-locks).
+    // static device capability probe (deviceType / mobile). The live input modality is
+    // the separate concern: its source of truth is `InputManager.inputMode` (written by
+    // the input layer's pointerdown handler, React-free), mirrored one-way into
+    // `useClient.inputMode` each tick for reactive touch UI.
     const device = Device.init();
 
-    // client-level DOM listener layer; routes events into whichever room's
-    // Input is the active target (set by setActivePlayer).
-    const inputManager = Input.createInputManager(device.touch);
+    // pre-first-event guess seeded from the device we just probed (touch-only / phone
+    // starts in touch, a hybrid laptop in mouse). The real pointer events correct it.
+    const initialInputMode = device.deviceType === 'touchOnly' || device.mobile ? 'touch' : 'mouse';
+
+    // client-level DOM listener layer; routes events into whichever room's Input is the
+    // active target (set by setActivePlayer), and owns the input-modality source.
+    const inputManager = Input.createInputManager();
+    inputManager.inputMode = initialInputMode;
+    // seed the mirror too, so touch UI renders correctly before the first tick.
+    useClient.getState().setInputMode(initialInputMode);
 
     const content = Content.init();
 
@@ -1441,6 +1451,14 @@ export function update(state: EngineClient, delta: number) {
     /* derive pointer-lock from the active room's intent + UI/touch/focus. release
        runs here every frame; acquire only fires from user-gesture handlers. */
     Input.reconcilePointerLock(state.inputManager);
+
+    /* project the input modality (source of truth on the InputManager, written by its
+       pointerdown handler) into the React store, so touch UI (chat opener) reacts. The
+       engine reads the source directly; this one-way mirror exists only for React,
+       which can't reach into the React-free input layer. cheap dirty-check. */
+    if (useClient.getState().inputMode !== state.inputManager.inputMode) {
+        useClient.getState().setInputMode(state.inputManager.inputMode);
+    }
 
     /* echo the latest server ping-stamp so the server can measure our RTT — rides this
        tick's packet (Quake-style), no dedicated ping/pong. */

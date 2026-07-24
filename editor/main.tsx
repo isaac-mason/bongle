@@ -18,7 +18,6 @@ import { initEditor } from './entry';
 import type { Filesystem, FsChange } from './fs';
 import { openProjectFilesystem } from './fs-open';
 import { createGuestSession } from './net/guest-session';
-import { runSave, saveAvatar } from './platform/actions';
 import { initAutosave } from './platform/autosave';
 import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
@@ -47,7 +46,6 @@ import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
 import { LogView } from './ui/components/LogView';
 import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
-import { PLATFORM_WINDOW_ID } from './ui/components/PlatformWindow';
 import { ServerPanel } from './ui/components/ServerPanel';
 import { TASKBAR_W } from './ui/components/Taskbar';
 
@@ -121,9 +119,12 @@ bundlerWorker.onerror = (e) => console.error('[bundler-worker] load error', e.me
 bundlerWorker.onmessage = (e: MessageEvent) => {
     const d = e.data as { __buildlog?: string; type?: string };
     if (d?.type === 'worker-ready') {
+        // the ~10MB @rolldown WASM compile starts on init and is the dominant boot
+        // cost — log it as in-progress so the terminal isn't silent during the wait.
+        bootLog('starting code compiler…');
         bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
     } else if (d?.type === 'host-ready') {
-        bootLog('bundler ready');
+        bootLog('code compiler ready');
         bundlerReady = true;
         for (const { env, port } of pendingConnects) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
         pendingConnects.length = 0;
@@ -148,13 +149,13 @@ const editorReady = openProjectFilesystem(PROJECT).then((projectFs) => {
 // downstream. The pipeline (which resolves `bongle` from here) awaits this before it
 // bakes; nothing else does.
 const seedReady = editorReady.then(async (editor) => {
-    bootLog('seeding engine…');
+    bootLog('loading engine…');
     const seedStart = performance.now();
     await seedEngineDist(editor.fs);
     console.log(`[boot:main] seedEngineDist ${(performance.now() - seedStart).toFixed(0)}ms`);
     // git-ready seed for a folder-sync'd disk copy (idempotent).
     await editor.fs.writeIfChanged('.gitignore', GITIGNORE);
-    bootLog('engine ready');
+    bootLog('engine loaded');
 });
 
 // (4) The platform handshake — created now so the parent's intent is already in
@@ -162,7 +163,7 @@ const seedReady = editorReady.then(async (editor) => {
 const platform = createPlatformBridge();
 
 async function boot(): Promise<void> {
-    bootLog('booting dev environment…');
+    bootLog('preparing workspace…');
     // platform bridge + editor (OPFS) were kicked at module load (Phase 0) so their
     // latency overlapped the bundler's WASM compile; collect them now. `intent` is
     // what the embedding platform wants this session to do (null = standalone dev).
@@ -181,7 +182,7 @@ async function boot(): Promise<void> {
         // speculatively spawned in Phase 0 is dead weight here — reclaim it.
         bundlerWorker.terminate();
         const guestLog = logger('client');
-        bootLog('joining a multiplayer edit session…');
+        bootLog('connecting to the live session…');
         const session = createGuestSession({ url: intent.url, log: (m) => guestLog(`[guest] ${m}`) });
         useSession.getState().setHost(false); // gate off host-only actions
         const clientHost = createClientHost({
@@ -224,8 +225,6 @@ async function boot(): Promise<void> {
     // the edited glb (avatar), our account avatar (project), or a sample (standalone).
     // Captured now; read when the realm stack actually starts (which may be deferred).
     let localAvatarUrl: string | undefined;
-    // avatar name for the Save dialog; arrives with the source (see below).
-    let avatarName = intent?.kind === 'avatar' ? intent.name : undefined;
 
     if (intent?.kind === 'avatar') {
         // wear the edited avatar (avatar.glb, written by Blockbench on save) once a
@@ -260,13 +259,9 @@ async function boot(): Promise<void> {
     useEditor.getState().open(MAIN_PANE, 'src/index.ts'); // open it in the code window
 
     // realm-INDEPENDENT wiring (both modes, no preview needed): autosave arms a
-    // throttled `bongle:draft` hand-back off genuine edits; onRequestSave runs the
-    // session's save action from a platform CTA (avatar export vs project version).
+    // throttled `bongle:draft` hand-back off genuine edits. The Save actions are
+    // driven from the editor's own top bar now, not a platform request.
     initAutosave(editor.fs, platform, intent);
-    platform.onRequestSave(() => {
-        if (intent?.kind === 'avatar') void saveAvatar(editor.fs, avatarName ?? 'avatar', intent.canEdit ?? false);
-        else void runSave(editor.fs);
-    });
 
     // ── The realm stack (bundler → pipeline bake → server → clients) as a lazily
     // started, idempotent unit. Project mode starts it at boot (the running game IS the
@@ -286,7 +281,7 @@ async function boot(): Promise<void> {
 
                 // the worker bakes into the SAME OPFS project; its writes reach the main doc
                 // via the OPFS cross-context mirror (editor.fs.watch), so no relay is wired.
-                bootLog('baking assets…');
+                bootLog('baking textures and audio…');
                 const pipelineHost = spawnPipelineWorker({
                     connectRealm,
                     projectName: PROJECT,
@@ -298,8 +293,8 @@ async function boot(): Promise<void> {
                 // fresh-imports the REAL generated barrel (baked model bin paths) at boot,
                 // rather than racing an empty→real HMR that worker realms can't apply cleanly.
                 await pipelineHost.ready;
-                bootLog('assets baked');
-                bootLog('starting server…');
+                bootLog('assets ready');
+                bootLog('starting game server…');
 
                 // the server, off-thread in its own realm (own registry). It opens the SAME
                 // OPFS project directly — no snapshot. A manager (not a bare host) wraps the
@@ -351,7 +346,7 @@ async function boot(): Promise<void> {
                 editor.fs.watch(fanOutChange);
 
                 await serverHost.ready;
-                bootLog('server ready');
+                bootLog('game server ready');
             })().catch((e) => {
                 realmsPromise = null; // let a later "Start server" retry a failed boot
                 throw e;
@@ -373,14 +368,12 @@ async function boot(): Promise<void> {
         const h = Math.round(window.innerHeight * 0.7);
         W.setBox('blockbench', TASKBAR_W + Math.round((deskW - w) / 2), Math.round((window.innerHeight - h) / 2), w, h);
         W.focus('blockbench');
-        W.focus(PLATFORM_WINDOW_ID); // keep the platform widget on top / visible
         useBoot.getState().setReady();
         bootTimer.summary();
 
         // load the model when the platform resolves it (a local draft resolves fast, a
         // remixed/edited version after a download). null → the bundled starter rig.
-        platform.onSource((bbmodel, name) => {
-            if (name) avatarName = name;
+        platform.onSource((bbmodel) => {
             void editor.fs
                 .write('avatar.bbmodel', bbmodel ?? starterCharacterBbmodel)
                 .then(() => openPath('avatar.bbmodel', MAIN_PANE)); // idempotent launch + load
@@ -390,9 +383,9 @@ async function boot(): Promise<void> {
 
     // PROJECT (or standalone): the running game IS the surface, so boot the realms now
     // and open the play client full-screen.
-    bootLog('booting realms…');
+    bootLog('starting the game world…');
     await useServer.getState().start();
-    bootLog('opening client…');
+    bootLog('opening the game…');
     const id = useClients.getState().open();
     if (id) useWindows.getState().snapTo(id, 'full');
     useBoot.getState().setReady();

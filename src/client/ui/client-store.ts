@@ -6,11 +6,17 @@
  */
 
 import { create } from 'zustand';
-import { env } from '../../env';
 import type { PlayerId } from '../../core/client';
 import type * as Debug from '../../core/debug';
+import { env } from '../../env';
 import type { InputManager } from '../input';
 import type { ClientRoom } from '../rooms';
+
+/** which input the user is driving with RIGHT NOW ("last input wins"). Gates pointer
+ *  lock (a finger can't be locked) and on-screen touch controls. Distinct from static
+ *  touch CAPABILITY (`device.deviceType`): a mouse user on a touchscreen laptop is
+ *  `mouse`, and a hybrid flips as they switch. */
+export type InputMode = 'mouse' | 'touch';
 
 /** debug panel tab. 'logs' and 'deps' are editor-only and filtered out of
  *  the tab strip in non-editor builds. 'renderer' shows the gpucat
@@ -35,6 +41,12 @@ export type ClientStore = {
     viewportWidth: number;
     viewportHeight: number;
     setViewportSize: (width: number, height: number) => void;
+
+    /** reactive MIRROR of the input modality for touch UI (the chat opener). The source
+     *  of truth is `InputManager.inputMode` (React-free); engine-client projects it here
+     *  each tick. UI reads this; the engine reads the source directly. */
+    inputMode: InputMode;
+    setInputMode: (mode: InputMode) => void;
 
     // debug panel, backtick toggles `debugOpen`; the panel's top tab strip
     // switches `debugTab`. 'renderer' surfaces the gpucat Inspector overlay
@@ -75,6 +87,11 @@ export const useClient = create<ClientStore>((set) => ({
     viewportWidth: 0,
     viewportHeight: 0,
     setViewportSize: (viewportWidth, viewportHeight) => set({ viewportWidth, viewportHeight }),
+
+    // seeded + kept current by engine-client from the InputManager source; this default
+    // only holds pre-boot.
+    inputMode: 'mouse',
+    setInputMode: (inputMode) => set({ inputMode }),
 
     debugOpen: false,
     setDebugOpen: (debugOpen) => set({ debugOpen }),

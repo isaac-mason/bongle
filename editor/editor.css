@@ -150,6 +150,19 @@ body.window-dragging iframe {
     opacity: 0;
     pointer-events: none;
 }
+/* wordmark + intent subtitle as one group, tightly stacked, so boot-content's
+   larger gap sits between this header and the terminal below. */
+.boot-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+.boot-subtitle {
+    font: 400 clamp(12px, 1.6vw, 14px) / 1.2 ui-monospace, monospace;
+    color: var(--color-fg-muted);
+    letter-spacing: 0.02em;
+}
 .boot-wordmark {
     font:
         400 clamp(44px, 11vw, 128px) / 1 "Geist Pixel",

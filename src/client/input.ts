@@ -595,8 +595,13 @@ export function resetInput(input: Input): void {
 export type InputManager = {
     /** the Input that DOM events currently write into. null = drop events. */
     target: Input | null;
-    /** touch capability, resolved once at boot. touch never pointer-locks. */
-    _touch: boolean;
+    /** live input modality ("last input wins") — the SOURCE OF TRUTH, written by the
+     *  `pointerdown` handler below. Lives here (not the React store) because it's
+     *  authored by a DOM event and its primary readers are React-free: the pointer-lock
+     *  gate (a finger can't be locked) and `isTouchPrimary`, both reachable from
+     *  server-side trait code that must not import React. engine-client mirrors it into
+     *  `useClient.inputMode` for reactive touch UI (chat). */
+    inputMode: 'mouse' | 'touch';
     /** UI / ad / host surfaces holding the cursor free while shown. */
     _lockReleases: Set<string>;
     /** element to pointer-lock; captured from the last canvas mousedown. fallback
@@ -619,14 +624,15 @@ export type InputManager = {
         wheel: (e: WheelEvent) => void;
         focus: () => void;
         blur: () => void;
+        pointerdown: (e: PointerEvent) => void;
         pointerlockerror: () => void;
     };
 };
 
-export function createInputManager(touch: boolean): InputManager {
+export function createInputManager(): InputManager {
     const m: InputManager = {
         target: null,
-        _touch: touch,
+        inputMode: 'mouse',
         _lockReleases: new Set(),
         _lockTargetEl: null,
         _lockEl: typeof document === 'undefined' ? null : document.documentElement,
@@ -806,6 +812,14 @@ export function createInputManager(touch: boolean): InputManager {
             m._focused = false;
             reconcilePointerLock(m);
         },
+        // "last input wins": every real pointer event sets the modality (the source of
+        // truth). Fires BEFORE the compatibility mousedown for the same interaction, so
+        // the acquire path reads the right value. Only a finger is touch; pen/mouse are
+        // fine pointers. This is what makes a hybrid (touchscreen laptop) adapt instead
+        // of being frozen by a boot-time capability guess.
+        pointerdown: (e: PointerEvent) => {
+            m.inputMode = e.pointerType === 'touch' ? 'touch' : 'mouse';
+        },
         // fires on `document` in browsers that report failure via the event
         // instead of a rejected promise; the promise path warns in
         // tryAcquirePointerLock. Both share the once-per-session guard.
@@ -822,6 +836,9 @@ export function createInputManager(touch: boolean): InputManager {
     window.addEventListener('wheel', handlers.wheel, { passive: false });
     window.addEventListener('focus', handlers.focus);
     window.addEventListener('blur', handlers.blur);
+    // capture + passive: see the modality of EVERY interaction (even ones a target
+    // stops from bubbling) without blocking it.
+    window.addEventListener('pointerdown', handlers.pointerdown, { capture: true, passive: true });
     document.addEventListener('pointerlockerror', handlers.pointerlockerror);
 
     return m;
@@ -849,20 +866,22 @@ export function disposeInputManager(m: InputManager): void {
     window.removeEventListener('wheel', h.wheel);
     window.removeEventListener('focus', h.focus);
     window.removeEventListener('blur', h.blur);
+    window.removeEventListener('pointerdown', h.pointerdown, { capture: true } as EventListenerOptions);
     document.removeEventListener('pointerlockerror', h.pointerlockerror);
     m.target = null;
 }
 
 /* ── pointer lock ─────────────────────────────────────────────────────
  * Whether the pointer is locked is a value DERIVED each frame from the active
- * room's intent + UI releases + touch + focus (Quake `IN_Frame`). The web adds
- * one asymmetry over a native grab: releasing works any time, acquiring needs a
- * user gesture — so the reconciler only RELEASES, and acquisition happens from
- * gesture handlers (canvas mousedown, `releasePointer().restore()`). */
+ * room's intent + UI releases + input modality + focus (Quake `IN_Frame`). The
+ * web adds one asymmetry over a native grab: releasing works any time, acquiring
+ * needs a user gesture — so the reconciler only RELEASES, and acquisition happens
+ * from gesture handlers (canvas mousedown, `releasePointer().restore()`). */
 
-/** pure derivation, no side effects. */
+/** pure derivation, no side effects. Gated on the CURRENT modality, not touch
+ *  capability, so a mouse user on a touchscreen laptop still locks. */
 export function computeShouldBeLocked(m: InputManager): boolean {
-    return (m.target?._lockWanted ?? false) && m._lockReleases.size === 0 && !m._touch && m._focused;
+    return (m.target?._lockWanted ?? false) && m._lockReleases.size === 0 && m.inputMode !== 'touch' && m._focused;
 }
 
 /** RELEASE-only. Runs end-of-frame, on target swap/blur, and on release add. */
@@ -875,25 +894,24 @@ export function reconcilePointerLock(m: InputManager): void {
     // following reconcile keeps or releases as it truly wants). only hold when the
     // sole blocker IS the pending intent — a UI release, blur, or touch genuinely
     // wants the cursor free, so those fall through to release.
-    if (m.target && !m.target._lockDeclared && m._lockReleases.size === 0 && m._focused && !m._touch) return;
+    if (m.target && !m.target._lockDeclared && m._lockReleases.size === 0 && m._focused && m.inputMode !== 'touch') return;
     document.exitPointerLock();
 }
 
 /** A genuine request failure (as opposed to the benign post-Esc cooldown) usually
- *  means the embedding blocked capture: a sandboxed/opaque-origin iframe missing
- *  the `pointer-lock` Permissions-Policy or `allow-pointer-lock` sandbox flag, or a
- *  hardened browser with pointer lock disabled. Silent failures make these reports
- *  undiagnosable, so surface one hint. Guarded so we log at most once per session
- *  (post-Esc reacquire attempts also land here and must not spam). */
+ *  means the embedding blocked capture: a sandboxed iframe missing the
+ *  `allow-pointer-lock` sandbox flag, or a hardened browser with pointer lock
+ *  disabled. Silent failures make these reports undiagnosable, so surface one hint.
+ *  Guarded so we log at most once per session (post-Esc reacquire attempts also
+ *  land here and must not spam). */
 let warnedPointerLockBlocked = false;
 function warnPointerLockBlocked(): void {
     if (warnedPointerLockBlocked) return;
     warnedPointerLockBlocked = true;
     console.warn(
         'Pointer lock request was blocked. If this persists, the embedding iframe may be missing ' +
-            'the `pointer-lock` Permissions-Policy / `allow-pointer-lock` sandbox flag, or the browser ' +
-            'has pointer lock disabled (e.g. hardened Firefox: full-screen-api.pointer-lock.enabled, ' +
-            'privacy.resistFingerprinting).',
+            'the `allow-pointer-lock` sandbox flag, or the browser has pointer lock disabled ' +
+            '(e.g. hardened Firefox: full-screen-api.pointer-lock.enabled, privacy.resistFingerprinting).',
     );
 }
 
@@ -909,10 +927,7 @@ export function tryAcquirePointerLock(m: InputManager): void {
     const p = (el.requestPointerLock as (o?: { unadjustedMovement?: boolean }) => Promise<void> | undefined)({
         unadjustedMovement: true,
     });
-    if (p?.catch)
-        p.catch(() =>
-            (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(warnPointerLockBlocked),
-        );
+    if (p?.catch) p.catch(() => (el.requestPointerLock() as Promise<void> | undefined)?.catch?.(warnPointerLockBlocked));
 }
 
 /** UI/ad/host surface asks to free the cursor while shown. Releases immediately

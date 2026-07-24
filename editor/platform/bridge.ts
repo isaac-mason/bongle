@@ -24,9 +24,6 @@ export type PlatformBridge = {
     send: (msg: EditorMessage) => void;
     /** subscribe to platform result acks; returns an unsubscribe fn. */
     onResult: (cb: (r: PlatformResult) => void) => () => void;
-    /** subscribe to the platform's "save now" request (its CTA to persist the current
-     *  draft as a version); returns an unsubscribe fn. */
-    onRequestSave: (cb: () => void) => () => void;
     /** subscribe to the avatar source delivered after `bongle:init` (an avatar session
      *  boots Blockbench first, then loads the model when it arrives). `bbmodel` null =
      *  no source → use the bundled starter. Returns an unsubscribe fn. */
@@ -54,7 +51,6 @@ type SyncDirection = 'editor-to-folder' | 'folder-to-editor';
 export function createPlatformBridge(): PlatformBridge {
     const parent = window.parent !== window ? window.parent : null;
     const resultCbs = new Set<(r: PlatformResult) => void>();
-    const requestSaveCbs = new Set<() => void>();
     const sourceCbs = new Set<(bbmodel: string | null, name?: string) => void>();
     const syncPortCbs = new Set<(port: MessagePort, direction: SyncDirection, folderName: string) => void>();
     const syncResultCbs = new Set<(r: { cancelled: boolean; message?: string }) => void>();
@@ -102,8 +98,6 @@ export function createPlatformBridge(): PlatformBridge {
             } else if (m.type === 'bongle:source') {
                 latestSource = { bbmodel: m.bbmodel, name: m.name };
                 for (const cb of sourceCbs) cb(m.bbmodel, m.name);
-            } else if (m.type === 'bongle:request-save') {
-                for (const cb of requestSaveCbs) cb();
             } else if (m.type === 'bongle:multiplayer-opened') {
                 multiplayerPending?.resolve({ url: m.url, shareUrl: m.shareUrl });
                 multiplayerPending = null;
@@ -156,10 +150,6 @@ export function createPlatformBridge(): PlatformBridge {
         onResult: (cb) => {
             resultCbs.add(cb);
             return () => resultCbs.delete(cb);
-        },
-        onRequestSave: (cb) => {
-            requestSaveCbs.add(cb);
-            return () => requestSaveCbs.delete(cb);
         },
         onSource: (cb) => {
             sourceCbs.add(cb);

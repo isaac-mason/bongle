@@ -2,7 +2,7 @@
 // renders them + any launched app windows + the taskbar. Windows are absolutely
 // positioned over the full desktop; the taskbar overlays the left edge.
 
-import { BookOpen, Code, FolderSync, Hammer, Logs, MonitorPlay, RefreshCw } from "../../../icons";
+import { BookOpen, Code, FolderSync, Logs, MonitorPlay, RefreshCw } from "../../../icons";
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../backend';
 import type { Filesystem } from '../../fs';
@@ -21,7 +21,7 @@ import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
 import { CommandPalette } from './CommandPalette';
-import { PlatformWindow } from './PlatformWindow';
+import { TopBar } from './TopBar';
 import { QuickOpen } from './QuickOpen';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
@@ -169,10 +169,10 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
           ]
         : [];
 
-    // when embedded under a platform, the "editing X" window (PlatformWindow) owns
-    // the save/build+publish actions. The LOCAL, computer-file tools (download /
-    // load / build a .zip you keep) live in the AdvancedMenu fold-out in every mode,
-    // kept separate so a local download is never confused with uploading to bongle.
+    // when embedded under a platform, the persistent TopBar owns the save/build+
+    // publish actions. The LOCAL, computer-file tools (download / load / build a .zip
+    // you keep) live in the AdvancedMenu fold-out in every mode, kept separate so a
+    // local download is never confused with uploading to bongle.
     const embedded = usePlatform((s) => s.embedded);
     // multiplayer co-editing applies to a shared game/project scene — offered when
     // embedded on a project (not avatar, which is Blockbench-only). It rides the
@@ -218,11 +218,6 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     const openBlockbench = () => useLaunched.getState().launch(blockbenchApp, '');
 
     const items: TaskbarItem[] = [
-        // the platform "editing X" window pins first when embedded — clicking
-        // restores it if minimized (it can't be closed).
-        ...(embedded
-            ? [{ id: 'platform', title: 'platform', glyph: <Hammer size={16} />, onClick: () => useWindows.getState().focus('platform') }]
-            : []),
         // game clients come first — the default layout boots straight into one.
         // When none are open, keep one pinned (not-running) launcher so you can
         // still spawn a client.
@@ -381,7 +376,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
                 </Window>
             ))}
             <SnapOverlay />
-            <PlatformWindow fs={fs} />
+            <TopBar fs={fs} />
             {bootReady && (
                 <Taskbar
                     items={items}

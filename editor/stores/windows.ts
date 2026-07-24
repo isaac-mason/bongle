@@ -9,6 +9,7 @@
 
 import { create } from 'zustand';
 import { TASKBAR_W } from '../ui/components/Taskbar';
+import { TOPBAR_H } from '../ui/components/TopBar';
 
 export type WinMode = 'normal' | 'minimized';
 
@@ -40,37 +41,39 @@ const viewportH = (): number => (typeof window === 'undefined' ? 800 : window.in
 
 const clampRange = (v: number, lo: number, hi: number): number => (hi < lo ? lo : Math.min(Math.max(v, lo), hi));
 
-/** push the window fully into the viewport — both edges, right of the taskbar. */
+/** push the window fully into the viewport — right of the taskbar, below the top bar. */
 function rescue(x: number, y: number, w: number, h: number): { x: number; y: number } {
     const viewW = viewportW();
     const viewH = viewportH();
     return {
         x: clampRange(x, TASKBAR_W, Math.max(TASKBAR_W, viewW - w)),
-        y: clampRange(y, 0, Math.max(0, viewH - h)),
+        y: clampRange(y, TOPBAR_H, Math.max(TOPBAR_H, viewH - h)),
     };
 }
 
 /** the pixel rect for a snap zone in the current (or given) viewport. The desktop
- *  area is everything right of the taskbar; halves/quarters tile it, right-anchored
- *  zones hug the right edge so a left+right pair meets with no gap. */
+ *  area is everything right of the taskbar and below the top bar; halves/quarters
+ *  tile it, right/bottom-anchored zones hug those edges so a pair meets with no gap. */
 export function snapRect(zone: SnapZone, vw = viewportW(), vh = viewportH()): Rect {
     const x0 = TASKBAR_W;
+    const y0 = TOPBAR_H;
     const fullW = Math.max(MIN_W, vw - x0);
+    const fullH = Math.max(MIN_H, vh - y0);
     const halfW = Math.max(MIN_W, Math.floor(fullW / 2));
-    const halfH = Math.max(MIN_H, Math.floor(vh / 2));
+    const halfH = Math.max(MIN_H, Math.floor(fullH / 2));
     const rightX = x0 + (fullW - halfW);
-    const botY = vh - halfH;
+    const botY = y0 + (fullH - halfH);
     switch (zone) {
         case 'full':
-            return { x: x0, y: 0, w: fullW, h: vh };
+            return { x: x0, y: y0, w: fullW, h: fullH };
         case 'left':
-            return { x: x0, y: 0, w: halfW, h: vh };
+            return { x: x0, y: y0, w: halfW, h: fullH };
         case 'right':
-            return { x: rightX, y: 0, w: halfW, h: vh };
+            return { x: rightX, y: y0, w: halfW, h: fullH };
         case 'tl':
-            return { x: x0, y: 0, w: halfW, h: halfH };
+            return { x: x0, y: y0, w: halfW, h: halfH };
         case 'tr':
-            return { x: rightX, y: 0, w: halfW, h: halfH };
+            return { x: rightX, y: y0, w: halfW, h: halfH };
         case 'bl':
             return { x: x0, y: botY, w: halfW, h: halfH };
         case 'br':
@@ -85,18 +88,19 @@ export function zoneAt(px: number, py: number, vw = viewportW(), vh = viewportH(
     const EDGE = 26;
     const CORNER = 150;
     const x0 = TASKBAR_W;
-    if (py <= EDGE) {
+    const y0 = TOPBAR_H;
+    if (py <= y0 + EDGE) {
         if (px <= x0 + CORNER) return 'tl';
         if (px >= vw - CORNER) return 'tr';
         return 'full';
     }
     if (px <= x0 + EDGE) {
-        if (py <= CORNER) return 'tl';
+        if (py <= y0 + CORNER) return 'tl';
         if (py >= vh - CORNER) return 'bl';
         return 'left';
     }
     if (px >= vw - EDGE) {
-        if (py <= CORNER) return 'tr';
+        if (py <= y0 + CORNER) return 'tr';
         if (py >= vh - CORNER) return 'br';
         return 'right';
     }

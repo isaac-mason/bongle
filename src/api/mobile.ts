@@ -3,30 +3,32 @@
  * desktop. All three return `false` on the server, so script call sites
  * can write `if (isMobile(ctx)) mountHud()` without a separate env guard.
  *
- * Touch capability is resolved once at client boot (`state.device.touch`);
- * viewport-dependent checks read live since they change on resize/orient.
+ * These split along the two device axes (see render/device.ts): `isTouchDevice`
+ * is static capability, `isTouchPrimary` is the LIVE modality (adapts as the
+ * user switches between touch and mouse on a hybrid), `isMobile` is layout class.
  */
 
 import type { ScriptContext } from '../core/scene/scripts';
 import { env } from '../env';
 
-/** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. true on
- *  touchscreen laptops too, use `isTouchPrimary` to gate touch controls. */
+/** Device is touch-CAPABLE (touch-only or hybrid). true on touchscreen laptops
+ *  too — use `isTouchPrimary` to decide whether touch is actually being used. */
 export function isTouchDevice(ctx: ScriptContext): boolean {
     if (!env.client) return false;
-    return ctx.client?.state?.device.touch ?? false;
+    return ctx.client?.state?.device.deviceType !== 'mouseOnly';
 }
 
 /**
- * Touch is the PRIMARY pointer (matchMedia('(pointer: coarse)')). Unlike
- * `isMobile` this is viewport-INDEPENDENT, so it stays true on a tablet or a
- * phone held in landscape; unlike `isTouchDevice` it's false on a touchscreen
- * laptop driven by its trackpad. This is the "should I show on-screen touch
- * controls (joystick, action buttons)" check. Resolved once at client boot.
+ * Touch is the input being used RIGHT NOW ("last input wins", from real pointer
+ * events). Unlike `isMobile` this is viewport-INDEPENDENT, so it stays true on a
+ * tablet or a phone held in landscape; unlike `isTouchDevice` it's false on a
+ * touchscreen laptop driven by its trackpad, and it flips live when a hybrid user
+ * switches devices. This is the "should I show on-screen touch controls (joystick,
+ * action buttons)" check — gate per-tick so it tracks the current modality.
  */
 export function isTouchPrimary(ctx: ScriptContext): boolean {
     if (!env.client) return false;
-    return ctx.client?.state?.device.touchPrimary ?? false;
+    return ctx.client?.state?.inputManager?.inputMode === 'touch';
 }
 
 const MOBILE_VIEWPORT_BREAKPOINT_PX = 768;

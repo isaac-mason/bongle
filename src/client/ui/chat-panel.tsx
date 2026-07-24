@@ -20,21 +20,20 @@
  * outbox for the next tick to forward to the server.
  */
 
-import { MessageSquare } from "../../../icons";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
+import { MessageSquare } from '../../../icons';
 import type { ParseState, Suggestion } from '../../core/chat-commands';
 import * as ChatCommands from '../../core/chat-commands';
-import * as Device from '../../render/device';
 import type { ChatClient, ChatLine } from '../chat';
 import * as ClientChat from '../chat';
-import { useRoom } from './client-store';
+import { useClient, useRoom } from './client-store';
 
-/** touch-primary (phone/tablet) — reuses the robust boot-time device probe. drives the
- *  on-screen chat opener + bottom-sheet, since the `/`,`t` key openers don't exist there. */
+/** touch-primary (phone/tablet) — drives the on-screen chat opener + bottom-sheet, since
+ *  the `/`,`t` key openers don't exist there. Reactive: reads the live input modality off
+ *  the client store, so a hybrid user switching touch<->mouse gains/loses the opener. */
 function useIsTouch(): boolean {
-    const [device] = useState(() => Device.init());
-    return device.touchPrimary;
+    return useClient((s) => s.inputMode === 'touch');
 }
 
 /** px the soft keyboard covers at the bottom, tracked via visualViewport, so the open

@@ -6,10 +6,27 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useBoot } from '../../stores/boot';
+import { usePlatform } from '../../stores/platform';
+import type { PlatformIntent } from '../../platform/contract';
+
+/** the one-line "what am I opening" subtitle under the wordmark, from the platform
+ *  intent (arrives a beat into boot; null until then / standalone dev). */
+function intentSubtitle(intent: PlatformIntent | null): string | null {
+    if (!intent) return null;
+    switch (intent.kind) {
+        case 'avatar':
+            return intent.name ? `opening avatar '${intent.name}'` : 'creating a new avatar';
+        case 'project':
+            return intent.name ? `opening project '${intent.name}'` : 'starting a new project';
+        case 'joinEdit':
+            return 'joining a live edit session';
+    }
+}
 
 export function BootScreen() {
     const ready = useBoot((s) => s.ready);
     const lines = useBoot((s) => s.lines);
+    const subtitle = usePlatform((s) => intentSubtitle(s.intent));
     // keep the overlay mounted through the fade-out, then drop it.
     const [gone, setGone] = useState(false);
     useEffect(() => {
@@ -31,7 +48,10 @@ export function BootScreen() {
             <div className="boot-content">
                 <span className="boot-notch boot-notch-tl" />
                 <span className="boot-notch boot-notch-br" />
-                <div className="boot-wordmark">bongle</div>
+                <div className="boot-header">
+                    <div className="boot-wordmark">bongle</div>
+                    {subtitle && <div className="boot-subtitle">{subtitle}</div>}
+                </div>
                 <div className="boot-terminal">
                     <div className="boot-terminal-bar">
                         <span className="boot-terminal-dot" />
