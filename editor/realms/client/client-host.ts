@@ -76,8 +76,10 @@ export function createClientHost(opts: CreateClientHostOptions): ClientHost {
             // the client realm shares a SharedArrayBuffer with the bundler worker
             // (port-bridge), so this nested iframe must be cross-origin isolated too —
             // delegate the permission (COEP header alone isn't enough for an embedded
-            // doc; the embedder must grant it).
-            iframe.allow = 'cross-origin-isolated; autoplay';
+            // doc; the embedder must grant it). pointer-lock is delegated for the same
+            // reason: this is where the game canvas runs, so fly/player/build mouse-look
+            // needs the feature cascaded down (editor frame → here) or capture is blocked.
+            iframe.allow = 'cross-origin-isolated; autoplay; pointer-lock';
             iframe.style.cssText = 'border:0;width:100%;height:100%;display:block;background:#000';
 
             // tears down the current connect(); replaced on each client-ready so a
