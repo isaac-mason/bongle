@@ -66,33 +66,93 @@ export function releaseAvatar(ctx: ScriptContext, modelId: string): void {
     if (resources) Resources.releaseRuntimeModel(resources, modelId);
 }
 
-// A small bundled name pool so ambient NPCs read as people, not "Dummy 3".
-// Wholly separate from avatar sourcing, games may use it, ignore it, or bring
-// their own list.
-const DISPLAY_NAMES = [
-    'Ash',
-    'Mara',
-    'Quill',
-    'Dex',
-    'Niko',
-    'Sage',
-    'Bex',
-    'Ivo',
-    'Lux',
-    'Pim',
-    'Rune',
-    'Wren',
-    'Zane',
-    'Cleo',
-    'Fox',
-    'Juno',
-    'Kai',
-    'Nova',
-    'Otis',
-    'Vera',
+// Small bundled word pools so ambient NPCs read as handles, not "Dummy 3".
+// Wholly separate from avatar sourcing, games may use them, ignore them, or
+// bring their own lists.
+const ADJECTIVES = [
+    'Agile', 'Airy', 'Alert', 'Amber', 'Ample', 'Aqua', 'Arctic', 'Ashen',
+    'Autumn', 'Azure', 'Balmy', 'Beaming', 'Blissful', 'Blue', 'Bold', 'Bouncy',
+    'Brave', 'Breezy', 'Bright', 'Brisk', 'Bubbly', 'Bumpy', 'Bushy', 'Buzzy',
+    'Calm', 'Charming', 'Cheeky', 'Cheery', 'Chill', 'Chirpy', 'Chunky', 'Classic',
+    'Clever', 'Cloudy', 'Comfy', 'Cool', 'Coral', 'Cosmic', 'Cozy', 'Craggy',
+    'Creamy', 'Crimson', 'Crisp', 'Curious', 'Curly', 'Dainty', 'Dandy', 'Dapper',
+    'Daring', 'Dashing', 'Dazzling', 'Dewy', 'Dreamy', 'Dusky', 'Eager', 'Earnest',
+    'Easy', 'Emerald', 'Epic', 'Fancy', 'Feisty', 'Fiery', 'Fine', 'Fizzy',
+    'Fleet', 'Fluffy', 'Fond', 'Frosty', 'Fuzzy', 'Gentle', 'Giddy', 'Glad',
+    'Gleaming', 'Glossy', 'Golden', 'Grassy', 'Happy', 'Hardy', 'Hazel', 'Hearty',
+    'Hidden', 'Honest', 'Humble', 'Icy', 'Ideal', 'Ivory', 'Jade', 'Jaunty',
+    'Jolly', 'Jovial', 'Joyful', 'Keen', 'Kind', 'Lanky', 'Lavish', 'Lazy',
+    'Leafy', 'Lemony', 'Lilac', 'Limber', 'Lively', 'Loud', 'Lucky', 'Lush',
+    'Mellow', 'Merry', 'Mighty', 'Mild', 'Minty', 'Misty', 'Modest', 'Mossy',
+    'Muddy', 'Nimble', 'Noble', 'Nutty', 'Olive', 'Perky', 'Placid', 'Plucky',
+    'Plush', 'Polished', 'Prancing', 'Prickly', 'Proud', 'Quick', 'Quiet', 'Quirky',
+    'Radiant', 'Rapid', 'Robust', 'Rosy', 'Ruby', 'Rustic', 'Rusty', 'Sandy',
+    'Scarlet', 'Serene', 'Shady', 'Sharp', 'Shiny', 'Silky', 'Silly', 'Sleek',
+    'Sleepy', 'Smooth', 'Snappy', 'Snowy', 'Soft', 'Solar', 'Sparkly', 'Speedy',
+    'Spicy', 'Spirited', 'Sprightly', 'Spry', 'Sturdy', 'Sunny', 'Swift', 'Tawny',
+    'Teal', 'Tender', 'Thrifty', 'Tidy', 'Tiny', 'Toasty', 'Trusty', 'Twinkly',
+    'Valiant', 'Velvet', 'Vivid', 'Warm', 'Whimsical', 'Windy', 'Wise', 'Witty',
+    'Woolly', 'Zany', 'Zesty', 'Zippy',
 ];
 
-/** A plausible display name for an ambient NPC, drawn from a small bundled pool. */
+const NOUNS = [
+    'Acorn', 'Alpaca', 'Anchor', 'Antelope', 'Apple', 'Apricot', 'Arrow', 'Ash',
+    'Aspen', 'Atlas', 'Aurora', 'Badger', 'Bagel', 'Bamboo', 'Basil', 'Beacon',
+    'Bean', 'Bear', 'Beaver', 'Bell', 'Berry', 'Birch', 'Bird', 'Biscuit',
+    'Bison', 'Bloom', 'Bluejay', 'Bobcat', 'Bolt', 'Boulder', 'Bramble', 'Branch',
+    'Breeze', 'Brick', 'Bronze', 'Brook', 'Bud', 'Bunny', 'Button', 'Cactus',
+    'Cake', 'Camel', 'Canary', 'Candy', 'Canyon', 'Cashew', 'Cat', 'Cave',
+    'Cedar', 'Cheetah', 'Cherry', 'Chime', 'Chipmunk', 'Cider', 'Cinder', 'Cliff',
+    'Cloud', 'Clover', 'Cobalt', 'Cobra', 'Cocoa', 'Coil', 'Comet', 'Compass',
+    'Cookie', 'Copper', 'Coral', 'Cotton', 'Cougar', 'Cove', 'Coyote', 'Crab',
+    'Crane', 'Crayon', 'Creek', 'Cricket', 'Crow', 'Crown', 'Crystal', 'Cub',
+    'Cube', 'Custard', 'Daisy', 'Dawn', 'Deer', 'Delta', 'Dew', 'Dingo',
+    'Dolphin', 'Domino', 'Donkey', 'Donut', 'Dove', 'Dragon', 'Drum', 'Duck',
+    'Dumpling', 'Dune', 'Dusk', 'Eagle', 'Eclipse', 'Eel', 'Egret', 'Elk',
+    'Ember', 'Fable', 'Falcon', 'Fawn', 'Feather', 'Fern', 'Ferret', 'Fig',
+    'Finch', 'Fire', 'Firefly', 'Flame', 'Flamingo', 'Flare', 'Flute', 'Forest',
+    'Fox', 'Frog', 'Frost', 'Galaxy', 'Gale', 'Garnet', 'Gazelle', 'Gecko',
+    'Geyser', 'Ghost', 'Giraffe', 'Glacier', 'Glade', 'Glow', 'Gopher', 'Goose',
+    'Grape', 'Grove', 'Hamster', 'Harbor', 'Hare', 'Hawk', 'Haze', 'Hazel',
+    'Hedgehog', 'Heron', 'Hill', 'Hippo', 'Honey', 'Hornet', 'Hound', 'Ibis',
+    'Ice', 'Iguana', 'Impala', 'Iris', 'Ivy', 'Jackal', 'Jade', 'Jaguar',
+    'Jam', 'Jay', 'Jazz', 'Jelly', 'Jet', 'Jungle', 'Juniper', 'Kelp',
+    'Kestrel', 'Kettle', 'Kite', 'Kitten', 'Koala', 'Ladybug', 'Lagoon', 'Lake',
+    'Lantern', 'Lark', 'Lava', 'Leaf', 'Lemon', 'Lemur', 'Leopard', 'Lily',
+    'Lime', 'Lion', 'Llama', 'Lobster', 'Lotus', 'Lynx', 'Macaw', 'Magpie',
+    'Mango', 'Mantis', 'Maple', 'Marble', 'Marmot', 'Meadow', 'Meerkat', 'Meteor',
+    'Mink', 'Mint', 'Mist', 'Mole', 'Mongoose', 'Moon', 'Moose', 'Mosaic',
+    'Moss', 'Moth', 'Mountain', 'Mouse', 'Muffin', 'Mule', 'Narwhal', 'Nebula',
+    'Neon', 'Nest', 'Newt', 'Noodle', 'Nova', 'Nugget', 'Nutmeg', 'Oak',
+    'Oasis', 'Ocean', 'Ocelot', 'Olive', 'Onyx', 'Opal', 'Orbit', 'Orca',
+    'Orchid', 'Osprey', 'Ostrich', 'Otter', 'Owl', 'Paddle', 'Panda', 'Panther',
+    'Parrot', 'Peach', 'Peacock', 'Peanut', 'Pear', 'Pebble', 'Pecan', 'Pelican',
+    'Penguin', 'Pepper', 'Petal', 'Pheasant', 'Pickle', 'Pigeon', 'Piglet', 'Pine',
+    'Pixel', 'Planet', 'Plum', 'Pluto', 'Pond', 'Pony', 'Popcorn', 'Poppy',
+    'Possum', 'Prairie', 'Prawn', 'Pretzel', 'Prism', 'Puffin', 'Puma', 'Pumpkin',
+    'Puzzle', 'Python', 'Quail', 'Quartz', 'Quasar', 'Rabbit', 'Raccoon', 'Radish',
+    'Rain', 'Raisin', 'Ram', 'Rapids', 'Raven', 'Ray', 'Reed', 'Reef',
+    'Ridge', 'River', 'Robin', 'Rocket', 'Rooster', 'Root', 'Rose', 'Ruby',
+    'Sage', 'Salmon', 'Salt', 'Sand', 'Scout', 'Seal', 'Sequoia', 'Serval',
+    'Shadow', 'Shark', 'Sheep', 'Shell', 'Shore', 'Shrew', 'Silver', 'Skunk',
+    'Sky', 'Sloth', 'Snail', 'Snow', 'Sparrow', 'Spark', 'Sphinx', 'Spice',
+    'Spirit', 'Sprout', 'Spruce', 'Squid', 'Squirrel', 'Star', 'Starling', 'Stingray',
+    'Stoat', 'Stone', 'Stork', 'Storm', 'Stream', 'Sugar', 'Summer', 'Summit',
+    'Sunset', 'Swan', 'Tango', 'Tapir', 'Teal', 'Thicket', 'Thistle', 'Thorn',
+    'Thunder', 'Tide', 'Tiger', 'Timber', 'Toad', 'Topaz', 'Toucan', 'Trout',
+    'Tulip', 'Tundra', 'Turtle', 'Twig', 'Valley', 'Velvet', 'Vine', 'Violet',
+    'Vole', 'Volt', 'Vulture', 'Waffle', 'Wallaby', 'Walnut', 'Walrus', 'Warbler',
+    'Wave', 'Weasel', 'Whale', 'Whisper', 'Willow', 'Winter', 'Wisp', 'Wolf',
+    'Wombat', 'Wonder', 'Woodpecker', 'Wren', 'Yak', 'Yam', 'Zebra', 'Zen',
+];
+
+function pick(words: readonly string[]): string {
+    return words[(Math.random() * words.length) | 0]!;
+}
+
+/** A plausible display name for an ambient NPC, in the shape
+ *  `AdjectiveNoun12345` (e.g. `BluePanda102837`). */
 export function randomDisplayName(): string {
-    return DISPLAY_NAMES[(Math.random() * DISPLAY_NAMES.length) | 0]!;
+    const number = 100000 + ((Math.random() * 900000) | 0);
+    return `${pick(ADJECTIVES)}${pick(NOUNS)}${number}`;
 }

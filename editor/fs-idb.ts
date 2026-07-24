@@ -1,26 +1,25 @@
 // lib/editor/fs-idb.ts — IndexedDB-backed `Filesystem`: the fallback for contexts
-// where OPFS is unavailable. Firefox denies OPFS in private windows and under
-// strict storage settings but STILL provides IndexedDB there, so this keeps the
-// editor bootable (and cloud-savable) where the OPFS working copy can't open.
+// where OPFS is unavailable. Firefox denies OPFS in private windows and under strict
+// storage settings but STILL provides IndexedDB there, so this keeps the editor
+// bootable (and cloud-savable) where the OPFS working copy can't open.
 //
-// Same async `Filesystem` contract as fs-opfs.ts, so every consumer — the main
-// thread plus the bundler / pipeline / server / build workers — runs unchanged
-// once `openProjectFilesystem` (fs-open.ts) hands one back.
+// Same async `Filesystem` contract as fs-opfs.ts, so every consumer — the main thread
+// plus the bundler / pipeline / server / build workers — runs unchanged once
+// `openProjectFilesystem` (fs-open.ts) hands one back. The low-level db layout lives
+// in fs-idb-store.ts (shared with the asset service worker); this file builds the
+// mirror-backed Filesystem on top.
 //
-// Shape: an in-memory mirror (fast reads — exactly the createMemoryFilesystem
-// model, with implicit dirs derived from paths) that write-throughs every mutation
-// to an IndexedDB object store keyed by path. Cross-context coherence rides a
-// per-project BroadcastChannel like the OPFS impl — but because our reads serve the
-// mirror (IDB has no live cross-context read the way OPFS reads live off disk), a
-// RECEIVED change refreshes the affected paths from IDB BEFORE firing watchers, so
-// a consumer reacting to the change record reads fresh bytes. Eventually consistent
-// between a write and a peer's refresh — the same tolerance remote-fs already
-// relies on, and fine for a fallback.
+// Shape: an in-memory mirror (fast reads — exactly the createMemoryFilesystem model,
+// with implicit dirs derived from paths) that write-throughs every mutation to the
+// IndexedDB store. Cross-context coherence rides a per-project BroadcastChannel like
+// the OPFS impl — but because our reads serve the mirror (IDB has no live cross-
+// context read the way OPFS reads live off disk), a RECEIVED change refreshes the
+// affected paths from IDB BEFORE firing watchers, so a consumer reacting to the change
+// reads fresh bytes. Eventually consistent between a write and a peer's refresh — the
+// same tolerance remote-fs already relies on, and fine for a fallback.
 
 import type { Filesystem, FilesystemSnapshot, FsChange, FsPath, FsStat } from './fs';
-
-const STORE = 'files';
-type Row = { bytes: Uint8Array; mtime: number };
+import { FS_STORE, type FsRow, getFileRow, openFsDb } from './fs-idb-store';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -28,13 +27,6 @@ const toBytes = (d: Uint8Array | string): Uint8Array => (typeof d === 'string' ?
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const normalize = (p: FsPath): FsPath => p.replace(/^\/+/, '').replace(/\/+$/, '');
 const inDir = (path: FsPath, dir: FsPath): boolean => dir === '' || path === dir || path.startsWith(`${dir}/`);
-
-function req<T>(r: IDBRequest<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-        r.onsuccess = () => resolve(r.result);
-        r.onerror = () => reject(r.error);
-    });
-}
 
 function txDone(tx: IDBTransaction): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -44,32 +36,19 @@ function txDone(tx: IDBTransaction): Promise<void> {
     });
 }
 
-function openDb(projectName: string): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-        const open = indexedDB.open(`bongle-fs:${projectName}`, 1);
-        open.onupgradeneeded = () => {
-            if (!open.result.objectStoreNames.contains(STORE)) open.result.createObjectStore(STORE);
-        };
-        open.onsuccess = () => resolve(open.result);
-        open.onerror = () => reject(open.error);
-        open.onblocked = () => reject(new Error('[fs-idb] open blocked by another connection'));
-    });
-}
-
 /** Open an IndexedDB-backed `Filesystem` for `projectName`. Throws if IndexedDB
  *  itself is unavailable (fully blocked storage) — the caller owns the fallback. */
 export async function openIdbFilesystem(projectName: string): Promise<Filesystem> {
-    if (typeof indexedDB === 'undefined') throw new Error('[fs-idb] IndexedDB unavailable');
-    const db = await openDb(projectName);
+    const db = await openFsDb(projectName);
     // Load the whole tree into the mirror up front — projects are small and the
     // bundler/pipeline read many files, so a per-read IDB txn each would crawl.
-    const files = new Map<FsPath, Row>();
+    const files = new Map<FsPath, FsRow>();
     await new Promise<void>((resolve, reject) => {
-        const cursor = db.transaction(STORE, 'readonly').objectStore(STORE).openCursor();
+        const cursor = db.transaction(FS_STORE, 'readonly').objectStore(FS_STORE).openCursor();
         cursor.onsuccess = () => {
             const c = cursor.result;
             if (!c) return resolve();
-            files.set(String(c.key), c.value as Row);
+            files.set(String(c.key), c.value as FsRow);
             c.continue();
         };
         cursor.onerror = () => reject(cursor.error);
@@ -84,7 +63,7 @@ class IdbFilesystem implements Filesystem {
     constructor(
         private db: IDBDatabase,
         projectName: string,
-        private files: Map<FsPath, Row>,
+        private files: Map<FsPath, FsRow>,
     ) {
         if (typeof BroadcastChannel !== 'undefined') {
             this.channel = new BroadcastChannel(`bongle-fs:${projectName}`);
@@ -92,13 +71,9 @@ class IdbFilesystem implements Filesystem {
         }
     }
 
-    private get(path: FsPath): Promise<Row | undefined> {
-        return req(this.db.transaction(STORE, 'readonly').objectStore(STORE).get(path)) as Promise<Row | undefined>;
-    }
-
-    private async put(path: FsPath, row: Row): Promise<void> {
-        const tx = this.db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(row, path);
+    private async put(path: FsPath, row: FsRow): Promise<void> {
+        const tx = this.db.transaction(FS_STORE, 'readwrite');
+        tx.objectStore(FS_STORE).put(row, path);
         await txDone(tx);
     }
 
@@ -123,7 +98,7 @@ class IdbFilesystem implements Filesystem {
                 continue;
             }
             if (c.type === 'moved' && c.from) this.files.delete(normalize(c.from));
-            const row = await this.get(path);
+            const row = await getFileRow(this.db, path);
             if (row) this.files.set(path, row);
             else this.files.delete(path);
         }
@@ -229,8 +204,8 @@ class IdbFilesystem implements Filesystem {
             }
         }
         if (gone.length) {
-            const tx = this.db.transaction(STORE, 'readwrite');
-            const store = tx.objectStore(STORE);
+            const tx = this.db.transaction(FS_STORE, 'readwrite');
+            const store = tx.objectStore(FS_STORE);
             for (const g of gone) store.delete(g);
             await txDone(tx);
         }
@@ -241,7 +216,7 @@ class IdbFilesystem implements Filesystem {
         const f = normalize(from);
         const t = normalize(to);
         const changes: FsChange[] = [];
-        const writes: Array<[FsPath, Row]> = [];
+        const writes: Array<[FsPath, FsRow]> = [];
         const gone: FsPath[] = [];
         const direct = this.files.get(f);
         if (direct) {
@@ -263,8 +238,8 @@ class IdbFilesystem implements Filesystem {
             }
         }
         if (writes.length || gone.length) {
-            const tx = this.db.transaction(STORE, 'readwrite');
-            const store = tx.objectStore(STORE);
+            const tx = this.db.transaction(FS_STORE, 'readwrite');
+            const store = tx.objectStore(FS_STORE);
             for (const [p, row] of writes) store.put(row, p);
             for (const g of gone) store.delete(g);
             await txDone(tx);

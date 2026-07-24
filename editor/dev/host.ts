@@ -39,7 +39,7 @@ export function createBundlerHost(fs: Filesystem, reportError?: (msg: string) =>
         // @rolldown/browser for it from THIS worker (which already runs it for the
         // transform) would deadlock on Atomics.wait. On-demand bundleDep is a node-
         // CLI concern (raw pnpm node_modules); see cli/dev + build/dev bundleDep.
-        // `?url` asset imports → the project-fs SW URL (public/sw.js serves OPFS).
+        // `?url` asset imports → the project-fs SW URL (sw.ts serves OPFS/IDB).
         assetUrl: (path) => projectUrl(path),
     });
 

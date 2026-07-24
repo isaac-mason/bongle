@@ -16,7 +16,7 @@ export function ImageViewer({ fs, path }: { fs: Filesystem; path: string }) {
     const [data, setData] = useState<Uint8Array | null>(null);
     const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
     const [missing, setMissing] = useState(false);
-    // the <img> loads from the project-fs SW (public/sw.js) — no blob juggling.
+    // the <img> loads from the project-fs SW (sw.ts) — no blob juggling.
     // `version` cache-busts on edit (the SW sends no-store, but a stable src won't
     // re-fetch on the same element).
     const [version, setVersion] = useState(0);
