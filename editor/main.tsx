@@ -3,7 +3,7 @@
 // dist in the deployed website), the bundler, and flush→bake.
 
 import { createRoot } from 'react-dom/client';
-import { Code, Files, Hammer, MonitorPlay, Server } from '../icons';
+import { Code, Files, Hammer, Layers, MonitorPlay, Server } from '../icons';
 import './editor.css';
 
 // the starter humanoid seeded for a NEW avatar (no platform-supplied source) so
@@ -23,11 +23,13 @@ import { createPlatformBridge } from './platform/bridge';
 import { PROJECT_NAME } from './project';
 import { importProjectSave } from './project-save';
 import { registerProjectFsWorker } from './project-url';
+import { createBundlerManager } from './dev/bundler-manager';
 import { createClientHost, localConnector } from './realms/client/client-host';
-import { spawnPipelineWorker } from './realms/pipeline/pipeline-host';
+import { createPipelineManager } from './realms/pipeline/pipeline-manager';
 import { createServerManager } from './realms/server/server-manager';
 import { connectViaPort } from './sync/folder-sync';
 import { useBoot } from './stores/boot';
+import { useBuild } from './stores/build';
 import { useBuildMeta } from './stores/build-meta';
 import { useClients } from './stores/clients';
 import { MAIN_PANE, useEditor } from './stores/editor';
@@ -41,11 +43,13 @@ import { useSystemWindows } from './stores/system-windows';
 import { useWindows } from './stores/windows';
 import { blockbenchApp, openPath } from './ui/apps';
 import { BootScreen } from './ui/components/BootScreen';
+import { BuildPanel } from './ui/components/BuildPanel';
+import { ClientPanel } from './ui/components/ClientPanel';
 import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
-import { LogView } from './ui/components/LogView';
 import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
+import { PipelinePanel } from './ui/components/PipelinePanel';
 import { ServerPanel } from './ui/components/ServerPanel';
 import { TASKBAR_W } from './ui/components/Taskbar';
 
@@ -118,37 +122,17 @@ window.addEventListener('beforeunload', (e) => {
     }
 });
 
-// (1) The bundler worker. Its ~10MB @rolldown WASM compile is the single dominant
-// boot cost, and it needs only the project NAME — so spawn it FIRST, before OPFS,
-// the platform handshake, or the engine seed, so that compile runs UNDER all of
-// them. A guest session has no local bundler and terminates it (see boot()).
-let bundlerReady = false;
-const pendingConnects: Array<{ env: string; port: MessagePort }> = [];
-const bundlerWorker = new Worker(new URL('./dev/bundler-worker.ts', import.meta.url), { type: 'module' });
-bundlerWorker.onerror = (e) => console.error('[bundler-worker] load error', e.message);
-// handshake: init on `worker-ready`, queue realm connections until `host-ready`,
-// then flush them (a message posted into vite's dep-optimize/reload window is lost).
-bundlerWorker.onmessage = (e: MessageEvent) => {
-    const d = e.data as { __buildlog?: string; type?: string };
-    if (d?.type === 'worker-ready') {
-        // the ~10MB @rolldown WASM compile starts on init and is the dominant boot
-        // cost — log it as in-progress so the terminal isn't silent during the wait.
-        bootLog('starting code compiler…');
-        bundlerWorker.postMessage({ type: 'init', projectName: PROJECT });
-    } else if (d?.type === 'host-ready') {
-        bootLog('code compiler ready');
-        bundlerReady = true;
-        for (const { env, port } of pendingConnects) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
-        pendingConnects.length = 0;
-    }
-    // the worker reports transform / resolution failures back here → build log.
-    else if (d?.__buildlog) log(d.__buildlog);
-};
-// realms hand us a MessagePort to reach the bundler; queue until it's live.
-const connectRealm = (env: string, port: MessagePort) => {
-    if (bundlerReady) bundlerWorker.postMessage({ type: 'connect-realm', env }, [port]);
-    else pendingConnects.push({ env, port });
-};
+// (1) The bundler (code compiler) — a MANAGER so it can be killed + respawned in
+// place (the build window's "restart all"; it's the root of the module graph, so it
+// can't restart alone). Its ~10MB @rolldown WASM compile is the single dominant boot
+// cost, and it needs only the project NAME — so spawn it FIRST, before OPFS, the
+// platform handshake, or the engine seed, so that compile runs UNDER all of them.
+// A guest session has no local bundler and disposes it (see boot()). Its handshake,
+// transform errors, and boot failures stream to the build log.
+const bundlerManager = createBundlerManager(PROJECT, log);
+// realms hand us a MessagePort to reach the bundler; the manager queues each until
+// the current worker is host-ready. Stable across restarts.
+const connectRealm = (env: string, port: MessagePort) => bundlerManager.connectRealm(env, port);
 
 // (2) Open the main-doc OPFS working copy + editor state (the bundler opens its own).
 const editorReady = openProjectFilesystem(PROJECT).then((projectFs) => {
@@ -192,7 +176,7 @@ async function boot(): Promise<void> {
     if (intent?.kind === 'joinEdit') {
         // guest: the host owns the realms over the relay, so the bundler we
         // speculatively spawned in Phase 0 is dead weight here — reclaim it.
-        bundlerWorker.terminate();
+        bundlerManager.dispose();
         const guestLog = logger('client');
         bootLog('connecting to the live session…');
         const session = createGuestSession({ url: intent.url, log: (m) => guestLog(`[guest] ${m}`) });
@@ -294,19 +278,27 @@ async function boot(): Promise<void> {
                 // the worker bakes into the SAME OPFS project; its writes reach the main doc
                 // via the OPFS cross-context mirror (editor.fs.watch), so no relay is wired.
                 bootLog('baking textures and audio…');
-                const pipelineHost = spawnPipelineWorker({
+                useServer.getState().setPhase('baking assets');
+                // pipeline as a MANAGER (stable facade + restart) so the build window can
+                // re-bake it and "restart all" can respawn it against a fresh compiler.
+                const pipelineManager = createPipelineManager({
                     connectRealm,
                     projectName: PROJECT,
-                    log,
+                    // the bake gets its own log stream (the "pipeline" window); the shared
+                    // `log` stays the bundler/compiler's ("build" window).
+                    log: logger('pipeline'),
                     // the prod build reads maxPlayers here (it can't evaluate user code itself).
                     onMatchmaking: (maxPlayers) => useBuildMeta.getState().setMaxPlayers(maxPlayers),
                 });
+                // now both build-side managers exist — wire them for the build window's actions.
+                useBuild.getState().init(bundlerManager, pipelineManager);
                 // bake-then-run (mirrors the build): wait for the first bake so every realm
                 // fresh-imports the REAL generated barrel (baked model bin paths) at boot,
                 // rather than racing an empty→real HMR that worker realms can't apply cleanly.
-                await pipelineHost.ready;
+                await pipelineManager.ready;
                 bootLog('assets ready');
                 bootLog('starting game server…');
+                useServer.getState().setPhase('starting server');
 
                 // the server, off-thread in its own realm (own registry). It opens the SAME
                 // OPFS project directly — no snapshot. A manager (not a bare host) wraps the
@@ -339,7 +331,7 @@ async function boot(): Promise<void> {
                     cat: (path: string) => editor.fs.readText(path),
                     write: (path: string, data: string | Uint8Array) => editor.fs.write(path, data),
                     rm: (path: string, recursive = false) => editor.fs.remove(path, { recursive }),
-                    hosts: { pipeline: pipelineHost, server: serverHost, client: clientHost, bundler: bundlerWorker },
+                    hosts: { pipeline: pipelineManager, server: serverHost, client: clientHost, bundler: bundlerManager },
                     stores: { editor: useEditor, windows: useWindows, clients: useClients, systemWindows: useSystemWindows },
                 });
 
@@ -348,7 +340,7 @@ async function boot(): Promise<void> {
                 // OPFS cross-context mirror, the worker's bake outputs — which is how those
                 // reach the realms.
                 const fanOutChange = (changes: FsChange[]) => {
-                    bundlerWorker.postMessage({ type: 'fs-change', changes });
+                    bundlerManager.relayFsChange(changes);
                     for (const c of changes) {
                         if (c.type === 'deleted') continue;
                         serverHost.relayFsChange(c.path);
@@ -445,30 +437,37 @@ function buildWindows(fs: Filesystem): WindowDef[] {
             initial: { x: 300, y: 24, w: 1240, h: 920 },
             content: <CodePane fs={fs} pane={MAIN_PANE} />,
         },
-        // build + server + client are matching log windows, sat next to each other
-        // in a row along the bottom-left (build flush to the left edge, under the
-        // file tree). The row is anchored to the viewport bottom so it lands on-screen
-        // at any height.
+        // build + pipeline + server + client are matching log windows, sat next to
+        // each other in a row along the bottom-left (build flush to the left edge,
+        // under the file tree). The row is anchored to the viewport bottom so it lands
+        // on-screen at any height.
         {
             id: 'build',
             title: 'build logs',
             glyph: <Hammer size={18} />,
             initial: { x: 60, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-            content: <LogView stream="build" />,
+            content: <BuildPanel />,
+        },
+        {
+            id: 'pipeline',
+            title: 'asset bake',
+            glyph: <Layers size={18} />,
+            initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            content: <PipelinePanel />,
         },
         {
             id: 'server',
             title: 'server',
             glyph: <Server size={18} />,
-            initial: { x: 380, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            initial: { x: 700, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
             content: <ServerPanel />,
         },
         {
             id: 'client',
             title: 'client logs',
             glyph: <MonitorPlay size={18} />,
-            initial: { x: 700, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
-            content: <LogView stream="client" />,
+            initial: { x: 1020, y: BOTTOM_ROW_Y, w: 310, h: BOTTOM_ROW_H },
+            content: <ClientPanel />,
         },
         // client windows are dynamic (opened by the "+ client" button, one iframe
         // realm each) — see stores/clients + Desktop.

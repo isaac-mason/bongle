@@ -43,6 +43,27 @@ type FsChangeMessage = { type: 'fs-change'; path: string };
 
 let booted = false;
 
+/** paint a minimal error card into the iframe when the client realm fails to boot,
+ *  so the window shows what broke instead of a silent black void. Matches the
+ *  editor's square, black-bordered, no-radius style. */
+function showBootError(message: string): void {
+    const el = document.createElement('div');
+    el.style.cssText =
+        'position:fixed;inset:0;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;' +
+        'padding:24px;background:#000;color:#fff;font:13px/1.5 ui-monospace,monospace;text-align:center';
+    const title = document.createElement('div');
+    title.textContent = 'client failed to load';
+    title.style.cssText = 'color:#ff5a5a;font-weight:600';
+    const detail = document.createElement('div');
+    detail.textContent = message;
+    detail.style.cssText = 'max-width:560px;white-space:pre-wrap;word-break:break-word;opacity:.85';
+    const hint = document.createElement('div');
+    hint.textContent = 'fix src/, save, then restart the server.';
+    hint.style.cssText = 'opacity:.6';
+    el.append(title, detail, hint);
+    document.body.appendChild(el);
+}
+
 /** Load bytes from the project fs. Baked client resources live under
  *  resources/client/<rel> (mirrors the deployed bundle layout); runtime-source
  *  avatar urls are absolute http(s) and fetched verbatim. No decodeImage — the
@@ -215,8 +236,12 @@ self.addEventListener('message', (e: MessageEvent) => {
     const [gamePort, bundlerPort, fsrpcPort] = e.ports;
     if (!gamePort || !bundlerPort) throw new Error('client-init needs game + bundler ports');
     void boot(msg, gamePort, bundlerPort, fsrpcPort).catch((err) => {
-        // surface boot failures to the parent for the client window's log.
-        window.parent.postMessage({ type: 'client-error', message: (err as Error).message }, '*');
+        const message = (err as Error).message;
+        // surface boot failures to the parent for the client window's log,
+        window.parent.postMessage({ type: 'client-error', message }, '*');
+        // and paint a visible in-frame error so the window isn't a silent black
+        // void — the user sees what broke without hunting the client log.
+        showBootError(message);
         console.error(err);
     });
 });

@@ -6,8 +6,9 @@
 
 import { create } from 'zustand';
 
-// 'build' carries the bundler (transform) errors + the asset-bake pipeline log.
-export type LogStream = 'build' | 'server' | 'client';
+// 'build' carries the bundler (code compiler) transform + resolution errors;
+// 'pipeline' the asset-bake (textures / audio / models / icons) output.
+export type LogStream = 'build' | 'pipeline' | 'server' | 'client';
 
 const MAX_LINES = 500;
 
@@ -18,7 +19,7 @@ type LogStore = {
 };
 
 export const useLogs = create<LogStore>((set) => ({
-    lines: { build: [], server: [], client: [] },
+    lines: { build: [], pipeline: [], server: [], client: [] },
     appendMany: (stream, msgs) =>
         set((s) => {
             if (msgs.length === 0) return s;

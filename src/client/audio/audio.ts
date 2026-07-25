@@ -679,6 +679,24 @@ function updateListener(audio: Audio, room: ClientRoom): void {
     const fwdY = -matrix[9]!;
     const fwdZ = -matrix[10]!;
 
+    // a transiently-degenerate transform (e.g. an interpolation chain not yet
+    // seeded, or a singular decompose) can yield non-finite basis/position
+    // values. WebAudio throws on a non-finite AudioParam write, which would
+    // kill the whole frame loop, so skip this frame's listener update instead.
+    if (
+        !Number.isFinite(pos[0]) ||
+        !Number.isFinite(pos[1]) ||
+        !Number.isFinite(pos[2]) ||
+        !Number.isFinite(fwdX) ||
+        !Number.isFinite(fwdY) ||
+        !Number.isFinite(fwdZ) ||
+        !Number.isFinite(upX) ||
+        !Number.isFinite(upY) ||
+        !Number.isFinite(upZ)
+    ) {
+        return;
+    }
+
     const listener = audio.resources.context.listener;
     if (listener.positionX) {
         // modern AudioParam interface, Chrome, Firefox. matches three.js:
@@ -759,6 +777,9 @@ function readNodePosition(node: Node): [number, number, number] | null {
 }
 
 function setPannerPosition(panner: PannerNode, pos: readonly [number, number, number]): void {
+    // guard against a non-finite source position (see updateListener); a bad
+    // write throws and kills the frame loop.
+    if (!Number.isFinite(pos[0]) || !Number.isFinite(pos[1]) || !Number.isFinite(pos[2])) return;
     if (panner.positionX) {
         // matches three.js + updateListener: linearRampToValueAtTime,
         // skip when unchanged to avoid automation-event accumulation.

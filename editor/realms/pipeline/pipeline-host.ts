@@ -31,12 +31,17 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
     const worker = new Worker(new URL('./pipeline-worker.ts', import.meta.url), { type: 'module' });
 
     let resolveReady!: () => void;
-    const ready = new Promise<void>((r) => {
-        resolveReady = r;
+    let rejectReady!: (err: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
     });
+    // callers await `ready` lazily (project boot backgrounds it), so a rejection
+    // could land before anyone's watching — sink it here to avoid an unhandledrejection.
+    ready.catch(() => {});
 
     worker.onmessage = (e: MessageEvent) => {
-        const msg = e.data as { type: string; msg?: string; atlasChanged?: boolean; maxPlayers?: number };
+        const msg = e.data as { type: string; msg?: string; message?: string; atlasChanged?: boolean; maxPlayers?: number };
         if (msg.type === 'worker-ready') {
             // the worker is live — NOW wire its bundler conduit + post init (with the
             // transferred port). Posting at spawn drops it in vite's dep-optimize
@@ -52,6 +57,11 @@ export function spawnPipelineWorker(opts: SpawnPipelineWorkerOptions): PipelineH
         } else if (msg.type === 'ready') {
             console.log('[boot] pipeline: worker reported ready (first bake done)');
             resolveReady();
+        } else if (msg.type === 'boot-error') {
+            // the worker's bake infra threw — reject `ready` so the caller surfaces
+            // it + retries, rather than hanging the realm boot before the server.
+            console.log('[boot] pipeline: worker reported boot-error');
+            rejectReady(new Error(msg.message ?? 'pipeline boot failed'));
         }
     };
     worker.onerror = (e) => console.error('[boot] pipeline worker crashed:', e.message);

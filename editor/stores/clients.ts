@@ -19,6 +19,10 @@ type ClientsStore = {
     /** spawn a client window; returns its window id (for e.g. maximizing it). */
     open: () => string;
     close: (id: string) => void;
+    /** reload every open client iframe — respawns each client realm (fresh registry
+     *  + reconnect to the server + bundler). Backs the "reload all" action and the
+     *  post-restart rejoin. */
+    reloadAll: () => void;
 };
 
 export const useClients = create<ClientsStore>((set, get) => ({
@@ -50,4 +54,5 @@ export const useClients = create<ClientsStore>((set, get) => ({
             s.windows.find((w) => w.id === id)?.connection.dispose();
             return { windows: s.windows.filter((w) => w.id !== id) };
         }),
+    reloadAll: () => get().host?.rejoinAll(),
 }));

@@ -213,6 +213,11 @@ self.addEventListener('message', (e: MessageEvent) => {
     void boot(msg.projectName, bundlerPort).catch((err) => {
         log(`pipeline boot failed: ${(err as Error).message}`);
         console.error(err);
+        // report it so the host rejects `ready` instead of hanging (it only
+        // resolves on the first 'ready'). A USER-code error can't reach here —
+        // boot() try/catches the user import and bakes what registered — so this
+        // is a real infra failure (engine-asset-pipeline import, GPU/bake).
+        self.postMessage({ type: 'boot-error', message: (err as Error).message });
     });
 });
 

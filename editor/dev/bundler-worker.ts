@@ -30,16 +30,26 @@ const ready = new Promise<void>((r) => {
 self.addEventListener('message', async (e: MessageEvent) => {
     const msg = e.data as InitMsg | ConnectMsg | FsChangeMsg;
     if (msg.type === 'init') {
-        bt.mark('init received');
-        const fs = await openProjectFilesystem(msg.projectName);
-        bt.mark('opfs open');
-        // build errors surface to the main doc's build log window.
-        host = createBundlerHost(fs, (buildlog) => self.postMessage({ __buildlog: buildlog }));
-        bt.mark('host created');
-        resolveReady();
-        // now safe to accept realm connections — the main doc flushes its queued
-        // connect-realm ports on this.
-        self.postMessage({ type: 'host-ready' });
+        try {
+            bt.mark('init received');
+            const fs = await openProjectFilesystem(msg.projectName);
+            bt.mark('opfs open');
+            // build errors surface to the main doc's build log window.
+            host = createBundlerHost(fs, (buildlog) => self.postMessage({ __buildlog: buildlog }));
+            bt.mark('host created');
+            resolveReady();
+            // now safe to accept realm connections — the main doc flushes its queued
+            // connect-realm ports on this.
+            self.postMessage({ type: 'host-ready' });
+        } catch (err) {
+            // The bundler is the root of the module graph — if it never comes up,
+            // every realm queues for modules forever. Surface it to the build log
+            // AND report boot-error so the manager rejects `ready` (nothing
+            // native-imports the wasm arena, so an onerror won't necessarily fire).
+            self.postMessage({ __buildlog: `[bundler] boot failed: ${(err as Error).message} — restart the compiler.` });
+            self.postMessage({ type: 'boot-error', message: (err as Error).message });
+            console.error(err);
+        }
     } else if (msg.type === 'connect-realm') {
         console.log(`[boot] bundler-worker: connect-realm ${msg.env}`);
         await ready;

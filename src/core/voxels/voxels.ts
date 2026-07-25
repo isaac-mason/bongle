@@ -48,12 +48,12 @@ export function worldToBlockCoord(worldCoord: number): number {
 }
 
 /** world-space point at the center of a block's top face, i.e. where
- *  feet land if standing on top of block `(x, y, z)`. block N occupies
- *  `[N, N+1)`, so the top-center is `(x + 0.5, y + 1, z + 0.5)`. */
-export function blockTopCenter(out: Vec3, x: number, y: number, z: number): Vec3 {
-    out[0] = x + 0.5;
-    out[1] = y + 1;
-    out[2] = z + 0.5;
+ *  feet land if standing on top of block `block`. block N occupies
+ *  `[N, N+1)`, so the top-center is `(block[0] + 0.5, block[1] + 1, block[2] + 0.5)`. */
+export function blockTopCenter(out: Vec3, block: Vec3): Vec3 {
+    out[0] = block[0] + 0.5;
+    out[1] = block[1] + 1;
+    out[2] = block[2] + 0.5;
     return out;
 }
 

@@ -191,15 +191,15 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
         return active ? (active.split('/').pop() ?? 'editor') : 'editor';
     };
 
-    const LOG_IDS = useMemo(() => new Set(['build', 'server', 'client']), []);
+    const LOG_IDS = useMemo(() => new Set(['build', 'pipeline', 'server', 'client']), []);
     const closed = useSystemWindows((s) => s.closed);
     const { open: openSystem, close: closeSystem } = useSystemWindows.getState();
 
     // right-click menu building blocks (show = focus/restore).
     const show = (id: string) => ({ label: 'Show', onClick: () => useWindows.getState().focus(id) });
-    // build + server + client logs are one pinned 'logs' taskbar button; clicking
-    // it opens (or raises) ALL of them, not just one.
-    const LOG_WINDOWS = ['build', 'server', 'client'];
+    // build + pipeline + server + client logs are one pinned 'logs' taskbar button;
+    // clicking it opens (or raises) ALL of them, not just one.
+    const LOG_WINDOWS = ['build', 'pipeline', 'server', 'client'];
     const logsOpen = LOG_WINDOWS.some((id) => !closed[id]);
     // "visible" = open and not minimized; clicking 'logs' toggles all of them.
     const logsVisible = LOG_WINDOWS.some((id) => !closed[id] && geom[id]?.mode !== 'minimized');

@@ -14,6 +14,7 @@ import { backToBongle, runBuild, runSave, saveAvatar } from '../../platform/acti
 import { isSourcePath, SAVE_MAX_BYTES, SAVE_WARN_BYTES, saveSizeBytes } from '../../project-save';
 import { useAutosave } from '../../stores/autosave';
 import { usePlatform } from '../../stores/platform';
+import { PreviewStatusChip } from './PreviewStatusChip';
 
 /** the bar's height, reserved at the top of the window-manager coordinate space
  *  (see stores/windows.ts) so no window title bar can hide under it. */
@@ -43,6 +44,10 @@ export function TopBar({ fs }: { fs: Filesystem }) {
             <span className="select-none font-mono text-[11px] text-fg-muted">
                 {label ? `editing ${label}` : 'bongle'}
             </span>
+
+            {/* the game preview's boot status — the workspace opens before the realm
+                stack is up, so this is the persistent "still coming up" signal. */}
+            <PreviewStatusChip />
 
             {/* the "never saved to bongle" CTA — absolutely centered in the bar so it
                 reads as the primary nudge, independent of the left/right clusters. */}
