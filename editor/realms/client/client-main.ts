@@ -204,7 +204,10 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
             return;
         }
         if (!path.startsWith('resources/client/')) return;
-        if (path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
+        // pipeline-baked voxel icons (block-icon atlas + per-id prefab thumbnails):
+        // a re-read, not a block/atlas rebuild.
+        if (path.includes('voxels-icons') || path.startsWith('resources/client/prefab-icons/')) EngineEditor.reloadBakedIcons();
+        else if (path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
         else if (path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
         else EngineClient.refreshBlockResources(state).catch(console.error);
     };

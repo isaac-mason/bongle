@@ -304,13 +304,10 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
     }
 
     // the refresh blew away the previous arena (the new packer is empty), so
-    // re-mount every resident room — the active one plus any pinned resident
-    // rooms — marking their chunks dirty so the prioritised remesh path refills
-    // the arena over the next few frames.
-    if (voxelResourcesChanged) {
-        for (const r of state.rooms.rooms.values()) {
-            if (r === activeRoom || r.stayRenderable) VoxelVisuals.mountRoom(r.voxelVisuals, r.voxels);
-        }
+    // re-mount the active room, marking its chunks dirty so the prioritised remesh
+    // path refills the arena over the next few frames.
+    if (voxelResourcesChanged && activeRoom) {
+        VoxelVisuals.mountRoom(activeRoom.voxelVisuals, activeRoom.voxels);
     }
 
     // notify browser-side consumers that the block registry / texture atlas

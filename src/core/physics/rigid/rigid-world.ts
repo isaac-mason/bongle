@@ -984,6 +984,56 @@ export function recordBodyContact(
     pair.relativeVelocity[2] = (bLin?.[2] ?? 0) - (aLin?.[2] ?? 0);
 }
 
+/** record a body-vs-voxel contact into the shared stream, so it fans out to the
+ *  body's node `ContactsTrait` as a VoxelContact. used to surface a character
+ *  VCC's terrain contacts: the VCC sweeps voxels itself, outside the solver
+ *  manifold path, so those contacts otherwise never reach the fan-out. `normal`
+ *  is surface->body (VCC convention); the pair stores A->B (body->surface) like
+ *  {@link recordBodyContact}. no-op if the body doesn't resolve to a node. */
+export function recordBodyVoxelContact(
+    world: World,
+    contacts: PhysicsContacts,
+    pool: ContactPairPool,
+    body: RigidBody,
+    voxelX: number,
+    voxelY: number,
+    voxelZ: number,
+    stateId: number,
+    subAabbIndex: number,
+    point: Vec3,
+    normal: Vec3,
+    penetrationDepth: number,
+): void {
+    const kindA = resolveSide(_sideA, world, body, 0);
+    if (kindA !== 'rigidBody') return;
+
+    const key = pairKey(sideKey(_sideA), voxelSideKey(voxelX, voxelY, voxelZ, subAabbIndex));
+    const pair = recordContactPair(contacts, pool, key);
+
+    writePairSide(pair, 'a', _sideA);
+    pair.bKind = 'voxel';
+    pair.bVoxelX = voxelX;
+    pair.bVoxelY = voxelY;
+    pair.bVoxelZ = voxelZ;
+    pair.bStateId = stateId;
+    pair.bSubAabbIndex = subAabbIndex;
+
+    pair.point[0] = point[0];
+    pair.point[1] = point[1];
+    pair.point[2] = point[2];
+    // A is the body; pair convention normal is A->B, opposite the VCC's surface->body.
+    pair.normal[0] = -normal[0];
+    pair.normal[1] = -normal[1];
+    pair.normal[2] = -normal[2];
+    pair.penetrationDepth = penetrationDepth;
+
+    // voxel terrain is static, so relative velocity is just -body velocity.
+    const aLin = body.motionProperties?.linearVelocity;
+    pair.relativeVelocity[0] = -(aLin?.[0] ?? 0);
+    pair.relativeVelocity[1] = -(aLin?.[1] ?? 0);
+    pair.relativeVelocity[2] = -(aLin?.[2] ?? 0);
+}
+
 function fireContactHooks(
     sceneTree: SceneTree,
     event: 'added' | 'persisted',

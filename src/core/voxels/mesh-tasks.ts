@@ -11,8 +11,9 @@
 //             worker mirror after `set`/`delete` apply.
 //
 // Unchanged chunks are never re-sent. Coherency: the worker is a passive store,
-// main is authoritative and tracks a per-worker mirror; a worker crash clears
-// that mirror. See llm/plan-mesh-worker-chunk-cache.md.
+// main is authoritative and tracks a per-worker mirror; a worker crash (or an
+// active-room swap, via `clearCache`) clears that mirror. See
+// llm/plan-mesh-worker-chunk-cache.md.
 
 import { build, int32, list, object, uint16Array, uint32 } from 'packcat';
 import { CHUNK_VOLUME } from './voxels';

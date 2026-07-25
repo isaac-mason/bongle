@@ -91,7 +91,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     // (inventory/hotbar) and the editor both read them from the same place. Fully
     // isolated: an icon failure logs and never disturbs the bake. Instrumented
     // per step so a break in the worker render path is pinpointable.
-    async function renderIcons(): Promise<void> {
+    async function renderIcons(atlasChanged: boolean): Promise<void> {
         if (renderingIcons) return;
         renderingIcons = true;
         try {
@@ -105,27 +105,32 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
             try {
                 log('icons: rendering block atlas…');
                 const atlas = await Icons.renderBlockIconAtlas(deps);
-                if (atlas.atlasWidth === 0 || atlas.atlasHeight === 0) {
-                    log('icons: empty atlas (no renderable blocks) — nothing to write');
-                    return;
+                if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
+                    log(`icons: encoding ${atlas.atlasWidth}x${atlas.atlasHeight} atlas → png…`);
+                    const png = await encodeRgbaPng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
+                    await fs.write('resources/client/voxels-icons.png', png);
+                    await fs.write(
+                        'resources/client/voxels-icons.json',
+                        new TextEncoder().encode(
+                            JSON.stringify({
+                                coords: atlas.coords,
+                                cols: atlas.cols,
+                                rows: atlas.rows,
+                                iconPx: atlas.iconPx,
+                                atlasWidth: atlas.atlasWidth,
+                                atlasHeight: atlas.atlasHeight,
+                            }),
+                        ),
+                    );
+                    log(`icons: wrote resources/client/voxels-icons.png (${(png.byteLength / 1024).toFixed(0)}KB)`);
+                } else {
+                    log('icons: empty block atlas (no renderable blocks)');
                 }
-                log(`icons: encoding ${atlas.atlasWidth}x${atlas.atlasHeight} atlas → png…`);
-                const png = await encodeRgbaPng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
-                await fs.write('resources/client/voxels-icons.png', png);
-                await fs.write(
-                    'resources/client/voxels-icons.json',
-                    new TextEncoder().encode(
-                        JSON.stringify({
-                            coords: atlas.coords,
-                            cols: atlas.cols,
-                            rows: atlas.rows,
-                            iconPx: atlas.iconPx,
-                            atlasWidth: atlas.atlasWidth,
-                            atlasHeight: atlas.atlasHeight,
-                        }),
-                    ),
-                );
-                log(`icons: wrote resources/client/voxels-icons.png (${(png.byteLength / 1024).toFixed(0)}KB)`);
+                const prefabCount = await Icons.bakePrefabIcons(deps, fs, atlasChanged, encodeRgbaPng);
+                if (prefabCount > 0) log(`icons: rendered ${prefabCount} prefab icon(s)`);
+                // no explicit signal needed: these writes land in OPFS and the host's
+                // fs.watch relays each resources/client/ change into the client iframe,
+                // where `applyFsChange` calls `reloadBakedIcons` (same window as the UI).
             } finally {
                 dispose();
             }
@@ -145,9 +150,11 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
     const runBake = async (): Promise<void> => {
         if (baking) return;
         baking = true;
+        let atlasChanged = false;
         try {
             const t0 = performance.now();
             const r = await AssetPipeline.run(pipeline, {});
+            atlasChanged = r.atlasChanged;
             log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
             // report matchmaking (singleton id 'main') so the prod build has a current
             // maxPlayers without evaluating user code itself.
@@ -160,7 +167,7 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
         }
         // icons render after the bake — own error boundary, and deliberately NOT awaited:
         // a GPU handshake shouldn't gate the bake result or `ready`.
-        void renderIcons();
+        void renderIcons(atlasChanged);
     };
     // declarations settle → bake. Registered on THIS realm's __bongle, so its flush
     // (initial + every HMR re-eval) runs the bake against the registry the user

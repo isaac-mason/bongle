@@ -16,6 +16,9 @@ import { mountEditUI } from './editor/ui/edit-ui';
 // Blueprint scene-source wiring for embedders that read scenes from a project fs
 // (the browser editor). refreshBlueprints re-lists; reloadBlueprint re-reads one.
 export { refreshBlueprints, reloadBlueprint, type SceneSource } from './editor/blueprints';
+// Reload the pipeline-baked voxel icons (block atlas + prefab thumbnails). The
+// edit client calls this when a baked icon file changes on the fs.
+export { reloadBakedIcons } from './editor/index';
 // The editor UI store. Re-exported here because engine-editor is the editor's
 // public surface, the edit client reads it for the net-sim toggle.
 export { useEditor } from './editor/editor-store';

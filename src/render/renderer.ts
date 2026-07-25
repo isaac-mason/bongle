@@ -314,22 +314,19 @@ export function createOfflinePipeline(state: Renderer, scene: Scene, camera: Cam
 }
 
 /**
- * Render one room's scene into an offscreen `RenderTarget`, filtering the shared
- * voxel arena to that room's `roomLocalIndex`. This is the reusable core behind
- * every offscreen room render — a portal view sampled by another room, or an
- * icon/thumbnail subject read back to pixels.
- *
- * The room's chunks must already be resident (mounted). `pipeline` is built once
- * per target via `createOfflinePipeline(state, scene, camera)` and reused; the
- * caller owns its lifetime. The renderer's prior render target is restored on
- * exit, so this composes cleanly before/after the main canvas pass.
+ * Render a scene into an offscreen `RenderTarget`. The reusable core behind every
+ * offscreen render — e.g. an icon/thumbnail subject read back to pixels in the
+ * headless pipeline. The scene's chunks must already be resident (mounted) in the
+ * (single-world) arena. `pipeline` is built once per target via
+ * `createOfflinePipeline(state, scene, camera)` and reused; the caller owns its
+ * lifetime. The renderer's prior render target is restored on exit, so this
+ * composes cleanly before/after the main canvas pass.
  */
 export function renderRoomToTarget(
     state: Renderer,
     voxelResources: VoxelResources.VoxelResources,
     scene: Scene,
     camera: Camera,
-    room: number,
     target: RenderTarget,
     pipeline: RenderPipeline,
     voxelViewChunkRadius: number,
@@ -337,8 +334,8 @@ export function renderRoomToTarget(
     const savedTarget = state.renderer.renderTarget;
     state.renderer.renderTarget = target;
     try {
-        // cull the shared arena to this room, run the voxel computes, render.
-        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius, room);
+        // cull the arena + run the voxel computes, render.
+        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius);
         const dispatches: ComputeDispatch[] = [];
         for (const disp of VoxelResources.cullDispatches(voxelResources)) dispatches.push(disp);
         scene.updateWorldMatrix();
@@ -402,7 +399,7 @@ export function render(
         // prepare the GPU cull: pre-shift the frustum planes camera-relative
         // and reset the per-frame cull/emit counters. The cull + per-facing
         // emit computes themselves are queued below via `cullDispatches`.
-        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius, room.roomLocalIndex);
+        VoxelResources.updateCull(voxelResources, camera, voxelViewChunkRadius);
     }
 
     // point the engine-global pass at this room's scene before render,

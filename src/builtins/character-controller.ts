@@ -32,7 +32,7 @@ import { isOwner, onDispose, onFrame, onInit, onTick, script } from '../api/scri
 import { sync, type TraitType, trait } from '../api/traits';
 import { getWorldPosition, setInterpolation, setQuaternion, setWorldPosition } from '../api/transforms';
 import { wrapPi } from '../core/math/angles';
-import { pushVccContact } from '../core/physics/physics';
+import { pushVccRigidContact, pushVccVoxelContact } from '../core/physics/physics';
 import * as vcc from '../core/physics/vcc/vcc';
 import {
     BLOCK_FLAG_CLIMBABLE,
@@ -71,8 +71,8 @@ const _bodyYawQuat = quat.create();
 let _vccListenerIsIntentional = false;
 let _vccListenerTerrainBodyId = -1;
 let _vccListenerBlockRest: Float32Array | null = null;
-// physics coordinator the VCC's body contacts are staged on (see pushVccContact
-// / ingestVccContacts). set before each vcc.move so the listener can record the
+// physics coordinator the VCC's body contacts are staged on (see pushVccRigidContact
+// / ingestVccRigidContacts). set before each vcc.move so the listener can record the
 // bodies the character touched this frame.
 let _vccListenerPhysics: Physics | null = null;
 
@@ -110,9 +110,9 @@ const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 // a fast body (an arrow) that passed "through" the character produces a contact
 // event on both bodies' ContactsTrait. added + persisted both report (a body can
 // linger a frame before the reactor that consumes the hit removes it).
-function recordVccBodyContact(vccInstance: vcc.VCC, body: RigidBody, contactPosition: Vec3, contactNormal: Vec3): void {
+function recordVccRigidContact(vccInstance: vcc.VCC, body: RigidBody, contactPosition: Vec3, contactNormal: Vec3): void {
     if (_vccListenerPhysics === null) return;
-    pushVccContact(
+    pushVccRigidContact(
         _vccListenerPhysics,
         vccInstance.innerBodyId,
         body.id,
@@ -128,10 +128,10 @@ function recordVccBodyContact(vccInstance: vcc.VCC, body: RigidBody, contactPosi
 
 const _vccListener: vcc.VccListener = {
     onContactAdded(vccInstance, body, _subShapeId, contactPosition, contactNormal) {
-        recordVccBodyContact(vccInstance, body, contactPosition, contactNormal);
+        recordVccRigidContact(vccInstance, body, contactPosition, contactNormal);
     },
     onContactPersisted(vccInstance, body, _subShapeId, contactPosition, contactNormal) {
-        recordVccBodyContact(vccInstance, body, contactPosition, contactNormal);
+        recordVccRigidContact(vccInstance, body, contactPosition, contactNormal);
     },
     onContactSolve(
         _vccInstance,
@@ -1295,6 +1295,32 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
     _vccListenerPhysics = physics;
 
     vcc.move(world, voxels, aabbWorld, v, dt, _vccListener);
+
+    // surface the VCC's own terrain contacts to the character node's
+    // ContactsTrait as VoxelContacts. the VCC sweeps voxels outside the solver,
+    // so without this replay its block collisions never reach the contact
+    // fan-out (games can't see which blocks the character is touching). same
+    // filter as deriveStandingStateFromContacts: real, non-discarded voxels.
+    for (let i = 0; i < v.contacts.length; i++) {
+        const c = v.contacts[i]!;
+        if (c.stateId === 0 || !c.hadCollision || c.wasDiscarded) continue;
+        pushVccVoxelContact(
+            physics,
+            v.innerBody.id,
+            c.voxelX,
+            c.voxelY,
+            c.voxelZ,
+            c.stateId,
+            c.subAabbIndex,
+            c.positionX,
+            c.positionY,
+            c.positionZ,
+            c.surfaceNormalX,
+            c.surfaceNormalY,
+            c.surfaceNormalZ,
+            c.overlapDepth,
+        );
+    }
 
     let grounded = v.groundState === vcc.GROUND_STATE_ON_GROUND;
 

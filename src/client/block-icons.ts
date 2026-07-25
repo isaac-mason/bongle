@@ -132,19 +132,18 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             if (!mesh) {
                 // all-air after culling (shouldn't happen for a solid block): drop
                 // any prior slot so the tile renders empty, then skip.
-                if (VoxelResources.packerHas(packer, ICON_CHUNK_KEY, room.roomLocalIndex)) {
-                    VoxelResources.packerEvictChunk(packer, ICON_CHUNK_KEY, room.roomLocalIndex);
+                if (VoxelResources.packerHas(packer, ICON_CHUNK_KEY)) {
+                    VoxelResources.packerEvictChunk(packer, ICON_CHUNK_KEY);
                 }
                 continue;
             }
-            VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh, room.roomLocalIndex);
+            VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh);
 
             Renderer.renderRoomToTarget(
                 deps.renderer,
                 voxelResources,
                 room.scene,
                 camera,
-                room.roomLocalIndex,
                 target,
                 pipeline,
                 Number.POSITIVE_INFINITY,

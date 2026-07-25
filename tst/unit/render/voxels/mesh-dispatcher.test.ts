@@ -127,12 +127,12 @@ describe('mesh-dispatcher', () => {
             setMeshRegistry(d, reg);
 
             // Before ack, enqueue must fail (slot registryVersion !== dispatcher's).
-            const { voxels, chunk } = makeChunkWithOneBlock(reg);
-            expect(queueMesh(d, voxels, chunk, 1)).toBe(false);
+            const { chunk } = makeChunkWithOneBlock(reg);
+            expect(queueMesh(d, chunk, 1)).toBe(false);
 
             // After processing the initRegistry message, the slot should be eligible.
             step([tw]);
-            expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
+            expect(queueMesh(d, chunk, 1)).toBe(true);
             disposeMeshDispatcher(d);
         });
     });
@@ -157,7 +157,7 @@ describe('mesh-dispatcher', () => {
             const { reg, tw, results, d } = bootstrap();
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
 
-            expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
+            expect(queueMesh(d, chunk, 1)).toBe(true);
             expect(isInFlight(d, '0,0,0')).toBe(true);
 
             cycle(d, voxels, [tw]);
@@ -170,20 +170,20 @@ describe('mesh-dispatcher', () => {
             disposeMeshDispatcher(d);
         });
 
-        it('warm cache: re-mesh sends no data (meshes from mirror), mutation re-sends', () => {
+        it('warm cache: re-mesh sends no data (meshes from cache), mutation re-sends', () => {
             const { reg, tw, results, d } = bootstrap();
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
 
             // 1. cold: set carries the chunk; worker caches + meshes (6 faces).
-            expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
+            expect(queueMesh(d, chunk, 1)).toBe(true);
             cycle(d, voxels, [tw]);
             expect(results[0]!.opaque!.quadCount).toBe(6);
 
-            // 2. warm re-mesh, version unchanged → empty set; the worker must
-            //    mesh from its cached mirror alone. identical result proves the
-            //    cache is authoritative (a broken cache → no data → null mesh).
+            // 2. warm re-mesh, version unchanged -> empty set; the worker must
+            //    mesh from its cached world alone. identical result proves the
+            //    cache is authoritative (a broken cache -> no data -> null mesh).
             results.length = 0;
-            expect(queueMesh(d, voxels, chunk, 2)).toBe(true);
+            expect(queueMesh(d, chunk, 2)).toBe(true);
             cycle(d, voxels, [tw]);
             expect(results[0]!.gen).toBe(2);
             expect(results[0]!.opaque).not.toBeNull();
@@ -193,14 +193,14 @@ describe('mesh-dispatcher', () => {
             //    reflects the added block (two non-adjacent blocks → 12 faces).
             setChunkBlock(voxels, chunk, 5, 7, 5, 'stone');
             results.length = 0;
-            expect(queueMesh(d, voxels, chunk, 3)).toBe(true);
+            expect(queueMesh(d, chunk, 3)).toBe(true);
             cycle(d, voxels, [tw]);
             expect(results[0]!.opaque!.quadCount).toBe(12);
 
             disposeMeshDispatcher(d);
         });
 
-        it('LRU: mirror stays within cacheMaxChunks; evicted neighbours re-set on next reference', () => {
+        it('LRU: cache stays within cacheMaxChunks; evicted neighbours re-set on next reference', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
             const results: MeshDispatcherResult[] = [];
@@ -218,8 +218,8 @@ describe('mesh-dispatcher', () => {
             setMeshRegistry(d, reg);
             step(tws);
 
-            // 40 chunks all in region (0,0,0) (cx 0..7, cy 0..4 → coord >> 3 = 0),
-            // so all route to the single worker and accumulate in its mirror.
+            // 40 chunks all in region (0,0,0) (cx 0..7, cy 0..4 -> coord >> 3 = 0),
+            // so all route to the single worker and accumulate in its cached world.
             const voxels = createVoxels(reg);
             for (let cy = 0; cy < 5; cy++) {
                 for (let cx = 0; cx < 8; cx++) {
@@ -231,18 +231,18 @@ describe('mesh-dispatcher', () => {
             for (let cy = 0; cy < 5; cy++) {
                 for (let cx = 0; cx < 8; cx++) {
                     const c = voxels.chunks.get(`${cx},${cy},0`)!;
-                    expect(queueMesh(d, voxels, c, 1)).toBe(true);
+                    expect(queueMesh(d, c, 1)).toBe(true);
                     cycle(d, voxels, tws);
                 }
             }
-            // 40 chunks referenced, budget 30 → mirror must have evicted down.
-            expect(meshQueueStats(d).perSlot[0]!.mirrorSize).toBeLessThanOrEqual(30);
+            // 40 chunks referenced, budget 30 -> cache must have evicted down.
+            expect(meshQueueStats(d).perSlot[0]!.cachedVersionsSize).toBeLessThanOrEqual(30);
 
             // re-mesh chunk (0,0,0) — meshed first, so likely evicted. main re-sets
             // it (and any evicted neighbour), so the worker still meshes correctly.
             results.length = 0;
             const c0 = voxels.chunks.get('0,0,0')!;
-            expect(queueMesh(d, voxels, c0, 2)).toBe(true);
+            expect(queueMesh(d, c0, 2)).toBe(true);
             cycle(d, voxels, tws);
             expect(results[0]!.opaque!.quadCount).toBe(6);
 
@@ -253,14 +253,14 @@ describe('mesh-dispatcher', () => {
             const { reg, tw, d } = bootstrap();
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
 
-            expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
+            expect(queueMesh(d, chunk, 1)).toBe(true);
             // Same key, even at a higher gen, must skip while it's pending/in-flight,
             // caller is expected to wait for the result to land first.
-            expect(queueMesh(d, voxels, chunk, 2)).toBe(false);
+            expect(queueMesh(d, chunk, 2)).toBe(false);
 
             cycle(d, voxels, [tw]);
             // After the result clears the entry, re-enqueue should succeed.
-            expect(queueMesh(d, voxels, chunk, 2)).toBe(true);
+            expect(queueMesh(d, chunk, 2)).toBe(true);
             disposeMeshDispatcher(d);
         });
 
@@ -268,7 +268,7 @@ describe('mesh-dispatcher', () => {
             const { reg, tw, results, d } = bootstrap();
             const { voxels, chunk } = makeChunkWithOneBlock(reg);
 
-            queueMesh(d, voxels, chunk, 5);
+            queueMesh(d, chunk, 5);
             cycle(d, voxels, [tw]);
 
             expect(results.length).toBe(1);
@@ -286,7 +286,7 @@ describe('mesh-dispatcher', () => {
                 const c = createChunk(cx, 0, 0);
                 voxels.chunks.set(`${cx},0,0`, c);
                 setChunkBlock(voxels, c, 5, 5, 5, 'stone');
-                expect(queueMesh(d, voxels, c, 1)).toBe(true);
+                expect(queueMesh(d, c, 1)).toBe(true);
             }
 
             flushMeshQueue(d, voxels);
@@ -323,16 +323,16 @@ describe('mesh-dispatcher', () => {
                 return c;
             };
 
-            queueMesh(d, voxels, mk(0), 1);
-            queueMesh(d, voxels, mk(1), 1);
+            queueMesh(d, mk(0), 1);
+            queueMesh(d, mk(1), 1);
             flushMeshQueue(d, voxels); // posts batch of 2
             expect(tw.inbox.length).toBe(1);
             processWorker(tw); // worker meshes → outbox (inbox drained)
             expect(tw.inbox.length).toBe(0);
 
             // queue two more while the first batch's result is in flight
-            queueMesh(d, voxels, mk(2), 1);
-            queueMesh(d, voxels, mk(3), 1);
+            queueMesh(d, mk(2), 1);
+            queueMesh(d, mk(3), 1);
 
             deliverToMain(tw); // result lands — must NOT eagerly repost
             expect(tw.inbox.length).toBe(0);
@@ -387,9 +387,9 @@ describe('mesh-dispatcher', () => {
             const c1 = addChunk(voxels, 1, 0, 0);
             const c2 = addChunk(voxels, 2, 0, 0);
 
-            expect(queueMesh(d, voxels, c0, 1)).toBe(true);
-            expect(queueMesh(d, voxels, c1, 1)).toBe(true);
-            expect(queueMesh(d, voxels, c2, 1)).toBe(true);
+            expect(queueMesh(d, c0, 1)).toBe(true);
+            expect(queueMesh(d, c1, 1)).toBe(true);
+            expect(queueMesh(d, c2, 1)).toBe(true);
 
             const stats = meshQueueStats(d);
             expect(stats.inFlightTotal).toBe(3);
@@ -406,10 +406,10 @@ describe('mesh-dispatcher', () => {
             const c1 = addChunk(voxels, 1, 0, 0);
             const c2 = addChunk(voxels, 2, 0, 0);
 
-            expect(queueMesh(d, voxels, c0, 1)).toBe(true);
-            expect(queueMesh(d, voxels, c1, 1)).toBe(true);
-            // workerCount=1, queueDepth=2 → 3rd enqueue must fail (pending is full).
-            expect(queueMesh(d, voxels, c2, 1)).toBe(false);
+            expect(queueMesh(d, c0, 1)).toBe(true);
+            expect(queueMesh(d, c1, 1)).toBe(true);
+            // workerCount=1, queueDepth=2 -> 3rd enqueue must fail (pending is full).
+            expect(queueMesh(d, c2, 1)).toBe(false);
             disposeMeshDispatcher(d);
         });
 
@@ -419,16 +419,16 @@ describe('mesh-dispatcher', () => {
             // cx 0..2 share region 0 → same affinity worker; fill it to depth 2.
             const c0 = addChunk(voxels, 0, 0, 0);
             const c1 = addChunk(voxels, 1, 0, 0);
-            expect(queueMesh(d, voxels, c0, 1)).toBe(true);
-            expect(queueMesh(d, voxels, c1, 1)).toBe(true);
+            expect(queueMesh(d, c0, 1)).toBe(true);
+            expect(queueMesh(d, c1, 1)).toBe(true);
             const busySlot = meshQueueStats(d).perSlot.findIndex((p) => p.pending === 2);
             expect(busySlot).toBeGreaterThanOrEqual(0);
 
             // a 3rd same-region chunk: rejected without spill (affinity worker full)...
             const c2 = addChunk(voxels, 2, 0, 0);
-            expect(queueMesh(d, voxels, c2, 1, { allowSpill: false })).toBe(false);
+            expect(queueMesh(d, c2, 1, { allowSpill: false })).toBe(false);
             // ...but with spill it lands on the other (idle) worker.
-            expect(queueMesh(d, voxels, c2, 1, { allowSpill: true })).toBe(true);
+            expect(queueMesh(d, c2, 1, { allowSpill: true })).toBe(true);
             const after = meshQueueStats(d);
             expect(after.inFlightTotal).toBe(3);
             expect(after.perSlot[1 - busySlot]!.pending).toBe(1);
@@ -441,13 +441,13 @@ describe('mesh-dispatcher', () => {
             // fill the single worker's normal queue to depth (both rejected further).
             const c0 = addChunk(voxels, 0, 0, 0);
             const c1 = addChunk(voxels, 1, 0, 0);
-            expect(queueMesh(d, voxels, c0, 1)).toBe(true);
-            expect(queueMesh(d, voxels, c1, 1)).toBe(true);
+            expect(queueMesh(d, c0, 1)).toBe(true);
+            expect(queueMesh(d, c1, 1)).toBe(true);
             const c2 = addChunk(voxels, 2, 0, 0);
-            expect(queueMesh(d, voxels, c2, 1)).toBe(false); // normal: queue full
+            expect(queueMesh(d, c2, 1)).toBe(false); // normal: queue full
 
             // urgent for the same chunk bypasses the queueDepth gate.
-            expect(queueMesh(d, voxels, c2, 9, { urgent: true })).toBe(true);
+            expect(queueMesh(d, c2, 9, { urgent: true })).toBe(true);
             const stats = meshQueueStats(d);
             expect(stats.perSlot[0]!.pendingUrgent).toBe(1);
             expect(stats.perSlot[0]!.pending).toBe(2);
@@ -479,9 +479,9 @@ describe('mesh-dispatcher', () => {
                 return c;
             };
             // two normal, then one urgent — urgent must lead the packet's tasks.
-            queueMesh(d, voxels, mk(0), 1);
-            queueMesh(d, voxels, mk(1), 1);
-            queueMesh(d, voxels, mk(2), 1, { urgent: true });
+            queueMesh(d, mk(0), 1);
+            queueMesh(d, mk(1), 1);
+            queueMesh(d, mk(2), 1, { urgent: true });
 
             flushMeshQueue(d, voxels);
             const posted = tws[0]!.inbox[0]!;
@@ -523,7 +523,7 @@ describe('mesh-dispatcher', () => {
                 const chunk = createChunk(i, 0, 0);
                 voxels.chunks.set(`${i},0,0`, chunk);
                 setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');
-                expect(queueMesh(d, voxels, chunk, 1)).toBe(true);
+                expect(queueMesh(d, chunk, 1)).toBe(true);
             }
             expect(meshQueueStats(d).poolSize).toBe(initialPool);
             flushMeshQueue(d, voxels);
@@ -567,8 +567,8 @@ describe('mesh-dispatcher', () => {
             const c1 = createChunk(1, 0, 0);
             voxels.chunks.set('1,0,0', c1);
             setChunkBlock(voxels, c1, 5, 5, 5, 'stone');
-            expect(queueMesh(d, voxels, c0, 7)).toBe(true);
-            expect(queueMesh(d, voxels, c1, 7)).toBe(true);
+            expect(queueMesh(d, c0, 7)).toBe(true);
+            expect(queueMesh(d, c1, 7)).toBe(true);
             flushMeshQueue(d, voxels);
             expect(meshQueueStats(d).poolSize).toBe(initialPool - 2);
             expect(meshQueueStats(d).inFlightTotal).toBe(2);
@@ -586,9 +586,9 @@ describe('mesh-dispatcher', () => {
 
             // Fresh worker is ineligible for dispatch until its
             // initRegistry ack lands.
-            expect(queueMesh(d, voxels, c0, 8)).toBe(false);
+            expect(queueMesh(d, c0, 8)).toBe(false);
             step([tws[1]!]); // ack the respawned worker
-            expect(queueMesh(d, voxels, c0, 8)).toBe(true);
+            expect(queueMesh(d, c0, 8)).toBe(true);
             disposeMeshDispatcher(d);
         });
 
@@ -613,9 +613,9 @@ describe('mesh-dispatcher', () => {
             voxels.chunks.set('1,0,0', c1);
             setChunkBlock(voxels, c1, 5, 5, 5, 'stone');
 
-            expect(queueMesh(d, voxels, c0, 1)).toBe(true);
-            // queue full (1 pending of depth 1) → false
-            expect(queueMesh(d, voxels, c1, 1)).toBe(false);
+            expect(queueMesh(d, c0, 1)).toBe(true);
+            // queue full (1 pending of depth 1) -> false
+            expect(queueMesh(d, c1, 1)).toBe(false);
             disposeMeshDispatcher(d);
         });
     });

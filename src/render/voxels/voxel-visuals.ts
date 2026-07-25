@@ -39,10 +39,10 @@ import {
     NEIGHBOR_COUNT,
     type Voxels,
 } from '../../core/voxels/voxels';
-import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf } from './mesh-dispatcher';
+import { flushMeshQueue, isInFlight, type MeshPerf, queueMesh, readMeshPerf, resetMeshCaches } from './mesh-dispatcher';
 import type { VoxelPass } from './voxel-material';
 import {
-    forgetRoom,
+    clearArena,
     PASSES,
     packerDrainEvicted,
     packerEvictChunk,
@@ -160,7 +160,6 @@ export function update(
     state: VoxelVisuals,
     voxelResources: VoxelResources,
     voxels: Voxels,
-    room: number,
     registry: Blocks,
     cameraPos: Vec3 | undefined,
     deferIncomplete: boolean,
@@ -168,9 +167,9 @@ export function update(
     const arenas = voxelResources.arenas;
     state.frame++;
 
-    // give the packer this room's camera so eviction measures distance in this
-    // room's coordinate space. null in the offline path (no camera → evict-first).
-    packerSetCameraPos(arenas.packer, room, cameraPos ?? null);
+    // give the packer the camera so eviction measures distance in world space.
+    // null in the offline path (no camera → evict-first).
+    packerSetCameraPos(arenas.packer, cameraPos ?? null);
 
     // drain worker results from last frame. each result carries the
     // meshGen we dispatched at; chunk.meshGen has only stayed equal if
@@ -179,19 +178,19 @@ export function update(
     if (voxelResources.pendingMeshResults.length > 0) {
         const pending = voxelResources.pendingMeshResults;
         for (let i = 0; i < pending.length; i++) {
-            const r = pending[i]!;
-            const chunk = voxels.chunks.get(r.chunkKey);
+            const result = pending[i]!;
+            const chunk = voxels.chunks.get(result.chunkKey);
             if (!chunk) continue;
-            if (chunk.meshGen !== r.gen) continue;
-            writeChunkMesh(voxelResources, r.chunkKey, chunk, r, room);
+            if (chunk.meshGen !== result.gen) continue;
+            writeChunkMesh(voxelResources, result.chunkKey, chunk, result);
         }
         pending.length = 0;
     }
 
-    // drain worker crash recovery: any chunks whose worker died goes
+    // drain worker crash recovery: any chunks whose worker died go
     // back on the dirty list so we re-dispatch next frame. dispatcher
     // already cleared its inFlight tracking + replenished the buffer
-    // pool; we just have to re-flip the dirty bit.
+    // pool; we just have to re-flip the dirty bit. Scoped to this room.
     if (voxelResources.pendingLostChunkKeys.length > 0) {
         const lost = voxelResources.pendingLostChunkKeys;
         for (let i = 0; i < lost.length; i++) {
@@ -212,7 +211,7 @@ export function update(
             const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
             chunk.dirty = false;
             state.dirtyFirstSeen.delete(key);
-            remeshChunk(voxelResources, voxels, registry, key, chunk, room);
+            remeshChunk(voxelResources, voxels, registry, key, chunk);
         }
         voxels.dirty.blocks.clear();
     } else {
@@ -265,7 +264,7 @@ export function update(
                 chunk.dirty = false;
                 voxels.dirty.blocks.delete(chunk);
                 state.dirtyFirstSeen.delete(key);
-                writeChunkMesh(voxelResources, key, chunk, null, room);
+                writeChunkMesh(voxelResources, key, chunk, null);
                 continue;
             }
 
@@ -294,7 +293,7 @@ export function update(
             // worker to any idle one instead of stalling. urgent bypasses the
             // queue gate, so it needs neither spill nor a `continue`-retry.
             const starving = firstSeen !== undefined && state.frame - firstSeen > STARVATION_GRACE_FRAMES;
-            const ok = queueMesh(dispatcher, voxels, chunk, chunk.meshGen, urgent ? { urgent: true } : { allowSpill: starving });
+            const ok = queueMesh(dispatcher, chunk, chunk.meshGen, urgent ? { urgent: true } : { allowSpill: starving });
             if (!ok) continue;
             chunk.dirty = false;
             voxels.dirty.blocks.delete(chunk);
@@ -308,16 +307,16 @@ export function update(
 
     // evict any arena-held chunk the server has dropped from voxels.chunks.
     // (server discovery owns chunk membership; we just mirror it.)
-    for (const key of packerKeys(arenas.packer, room)) {
+    for (const key of packerKeys(arenas.packer)) {
         if (!voxels.chunks.has(key)) {
-            packerEvictChunk(arenas.packer, key, room);
+            packerEvictChunk(arenas.packer, key);
         }
     }
 
-    // self-heal: re-dirty any chunk this room lost to memory pressure (a higher
-    // tier evicted it to stay resident), so it re-meshes instead of leaving a
-    // hole. still-present chunks only; ones genuinely gone stay gone.
-    for (const key of packerDrainEvicted(arenas.packer, room)) {
+    // self-heal: re-dirty any chunk lost to memory pressure so it re-meshes
+    // instead of leaving a hole. still-present chunks only; ones genuinely gone
+    // stay gone.
+    for (const key of packerDrainEvicted(arenas.packer)) {
         const chunk = voxels.chunks.get(key);
         if (chunk) markChunkDirty(voxels, chunk);
     }
@@ -330,44 +329,31 @@ export function update(
 
 /** main-thread remesh: run `meshChunk` against the room's shared
  *  `meshOutput`, then install the result via `writeChunkMesh`. */
-function remeshChunk(
-    voxelResources: VoxelResources,
-    voxels: Voxels,
-    registry: Blocks,
-    key: string,
-    chunk: Chunk,
-    room: number,
-): void {
+function remeshChunk(voxelResources: VoxelResources, voxels: Voxels, registry: Blocks, key: string, chunk: Chunk): void {
     const mesh =
         chunk.nonAirCount === 0 || hasNoVisibleSurface(chunk)
             ? null
             : meshChunk(voxelResources.meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
-    writeChunkMesh(voxelResources, key, chunk, mesh, room);
+    writeChunkMesh(voxelResources, key, chunk, mesh);
 }
 
 /** upsert a mesh result into the engine-global arena packer (or evict
  *  if the chunk is all-air / has no geometry). Shared between the main-
  *  thread `remeshChunk` path and the worker drain path. */
-function writeChunkMesh(
-    voxelResources: VoxelResources,
-    key: string,
-    chunk: Chunk,
-    mesh: ChunkMeshResult | null,
-    room: number,
-): void {
+function writeChunkMesh(voxelResources: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
     const packer = voxelResources.arenas.packer;
     if (mesh === null || chunk.nonAirCount === 0 || mesh.aabb === null) {
-        if (packerHas(packer, key, room)) packerEvictChunk(packer, key, room);
+        if (packerHas(packer, key)) packerEvictChunk(packer, key);
         return;
     }
-    packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh, room);
+    packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
 }
 
 /** Mount a room into the shared arena: mark every non-empty chunk dirty so the
  *  prioritised remesh path meshes it in over the next few frames. Per-room and
  *  additive — does NOT touch any other room's residency (no arena-wide clear).
- *  Call when a room becomes active or is pinned resident (see `stayRenderable`),
- *  or after an arena rebuild. Pairs with `unmountRoom`.
+ *  Call when a room becomes active, or after an arena rebuild. Pairs with
+ *  `unmountRoom`.
  *
  *  (Skips nonAirCount=0 chunks — sparse "discovered empty" stubs pushed by
  *  `voxel_chunk_empty` that have no blocks to mesh and would only pollute
@@ -382,13 +368,18 @@ export function mountRoom(state: VoxelVisuals, voxels: Voxels): void {
     state.roomSwapUrgentBurst = ROOM_SWAP_URGENT_BURST;
 }
 
-/** Unmount a room from the shared arena: evict its chunks and drop its per-room
- *  arena state. The room's voxel DATA survives (`voxels.chunks`), so a later
- *  `mountRoom` simply remeshes it. Pairs with `mountRoom` — both live here
- *  because visuals owns the per-room render lifecycle — and delegates the
- *  engine-global arena teardown to `forgetRoom`, which owns that state. */
-export function unmountRoom(voxelResources: VoxelResources, room: number): void {
-    forgetRoom(voxelResources, room);
+/** Clear the active world from the arena + mesh worker cache. The voxel DATA
+ *  survives (`voxels.chunks`), so a later `mountRoom` simply remeshes it. Pairs
+ *  with `mountRoom` — both live here because visuals owns the render lifecycle.
+ *  Delegates the arena teardown to `clearArena` and the worker-cache teardown to
+ *  `resetMeshCaches`, each of which owns its state. Call on a room swap or
+ *  teardown (the arena/worker hold one world at a time). */
+export function unmountRoom(voxelResources: VoxelResources): void {
+    clearArena(voxelResources);
+    // the mesh worker holds one world at a time; drop its cache + queued results.
+    if (voxelResources.meshDispatcher !== null) resetMeshCaches(voxelResources.meshDispatcher);
+    voxelResources.pendingMeshResults.length = 0;
+    voxelResources.pendingLostChunkKeys.length = 0;
 }
 
 export function dispose(state: VoxelVisuals, scene: Scene): void {

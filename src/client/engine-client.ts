@@ -1013,7 +1013,7 @@ function processVoxelChunkDel(state: EngineClient, message: Protocol.VoxelChunkD
     }
     room.voxels.chunks.delete(key);
     if (room === Rooms.getActiveRoom(state.rooms)) {
-        VoxelResources.removeChunkMesh(state.voxelResources, key, room.roomLocalIndex);
+        VoxelResources.removeChunkMesh(state.voxelResources, key);
     }
 }
 
@@ -1320,7 +1320,6 @@ export function update(state: EngineClient, delta: number) {
                 room.voxelVisuals,
                 state.voxelResources,
                 room.voxels,
-                room.roomLocalIndex,
                 room.voxels.registry,
                 povCamera.position,
                 !room.local,

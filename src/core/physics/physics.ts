@@ -109,13 +109,22 @@ export type Physics = {
      *  it touches and teleport-follows its kinematic inner body, so by the time
      *  the solver steps there's no overlap and no manifold, a fast projectile
      *  would pass straight through with no contact event. these are replayed into
-     *  `contacts` each tick (see {@link ingestVccContacts}) so they reach both
+     *  `contacts` each tick (see {@link ingestVccRigidContacts}) so they reach both
      *  bodies' `ContactsTrait` like any solver contact. staged here (coordinator
      *  level, not on the rigid world) since the producer is the character
-     *  controller and the replay writes the shared stream. `vccContactCount` is
+     *  controller and the replay writes the shared stream. `vccRigidContactCount` is
      *  the live length; records are reused (no per-frame allocation). */
-    vccContacts: VccBodyContact[];
-    vccContactCount: number;
+    vccRigidContacts: VccRigidContact[];
+    vccRigidContactCount: number;
+
+    /** same staging as {@link vccRigidContacts}, for the VCC's *voxel* (terrain)
+     *  contacts. the VCC sweeps voxels itself rather than through the solver,
+     *  so its terrain contacts never form a manifold; replayed each tick (see
+     *  {@link ingestVccVoxelContacts}) so they fan out to the character node's
+     *  `ContactsTrait` as VoxelContacts. `vccVoxelContactCount` is the live
+     *  length; records are reused. */
+    vccVoxelContacts: VccVoxelContact[];
+    vccVoxelContactCount: number;
 
     /** set of nodes that currently hold companion traits (Interpolate, Contacts)
      *  because at least one subsystem has a body for them. diffed each preStep
@@ -123,11 +132,25 @@ export type Physics = {
     _companionNodes: Set<number>;
 };
 
-/** one body contact reported by a character VCC, pending replay into the
+/** one rigid-body contact reported by a character VCC, pending replay into the
  *  contact stream. body ids (not refs) so a body removed mid-tick is skipped. */
-export type VccBodyContact = {
+export type VccRigidContact = {
     innerBodyId: BodyId;
     otherBodyId: BodyId;
+    point: Vec3;
+    normal: Vec3;
+    penetrationDepth: number;
+};
+
+/** one voxel (terrain) contact reported by a character VCC, pending replay into
+ *  the contact stream. */
+export type VccVoxelContact = {
+    innerBodyId: BodyId;
+    voxelX: number;
+    voxelY: number;
+    voxelZ: number;
+    stateId: number;
+    subAabbIndex: number;
     point: Vec3;
     normal: Vec3;
     penetrationDepth: number;
@@ -152,8 +175,10 @@ export function init(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): Ph
         contactPairPool,
         contactsQuery: query(sceneTree, [ContactsTrait]),
         aabbPairSink,
-        vccContacts: [],
-        vccContactCount: 0,
+        vccRigidContacts: [],
+        vccRigidContactCount: 0,
+        vccVoxelContacts: [],
+        vccVoxelContactCount: 0,
         _companionNodes: new Set(),
     };
 }
@@ -167,11 +192,11 @@ export function init(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): Ph
 // event on both bodies' `ContactsTrait`.
 
 /** record a body contact a character VCC saw this frame, to be replayed by
- *  {@link ingestVccContacts}. called from the character controller's VCC
+ *  {@link ingestVccRigidContacts}. called from the character controller's VCC
  *  listener during `runOnTick`. `innerBodyId` is the VCC's kinematic inner body
  *  (maps back to the character node); `otherBodyId` is the body it touched.
- *  `normal` is surface→character (VCC convention). */
-export function pushVccContact(
+ *  `normal` is surface->character (VCC convention). */
+export function pushVccRigidContact(
     physics: Physics,
     innerBodyId: BodyId,
     otherBodyId: BodyId,
@@ -183,10 +208,10 @@ export function pushVccContact(
     normalZ: number,
     penetrationDepth: number,
 ): void {
-    let rec = physics.vccContacts[physics.vccContactCount];
+    let rec = physics.vccRigidContacts[physics.vccRigidContactCount];
     if (!rec) {
         rec = { innerBodyId: -1, otherBodyId: -1, point: vec3.create(), normal: vec3.create(), penetrationDepth: 0 };
-        physics.vccContacts[physics.vccContactCount] = rec;
+        physics.vccRigidContacts[physics.vccRigidContactCount] = rec;
     }
     rec.innerBodyId = innerBodyId;
     rec.otherBodyId = otherBodyId;
@@ -197,7 +222,59 @@ export function pushVccContact(
     rec.normal[1] = normalY;
     rec.normal[2] = normalZ;
     rec.penetrationDepth = penetrationDepth;
-    physics.vccContactCount++;
+    physics.vccRigidContactCount++;
+}
+
+/** record a voxel (terrain) contact a character VCC saw this frame, to be
+ *  replayed by {@link ingestVccVoxelContacts}. called from the character
+ *  controller after `vcc.move`, iterating the VCC's own voxel contacts.
+ *  `innerBodyId` is the VCC's kinematic inner body (maps back to the character
+ *  node); `normal` is surface->character (VCC convention). */
+export function pushVccVoxelContact(
+    physics: Physics,
+    innerBodyId: BodyId,
+    voxelX: number,
+    voxelY: number,
+    voxelZ: number,
+    stateId: number,
+    subAabbIndex: number,
+    pointX: number,
+    pointY: number,
+    pointZ: number,
+    normalX: number,
+    normalY: number,
+    normalZ: number,
+    penetrationDepth: number,
+): void {
+    let rec = physics.vccVoxelContacts[physics.vccVoxelContactCount];
+    if (!rec) {
+        rec = {
+            innerBodyId: -1,
+            voxelX: 0,
+            voxelY: 0,
+            voxelZ: 0,
+            stateId: 0,
+            subAabbIndex: -1,
+            point: vec3.create(),
+            normal: vec3.create(),
+            penetrationDepth: 0,
+        };
+        physics.vccVoxelContacts[physics.vccVoxelContactCount] = rec;
+    }
+    rec.innerBodyId = innerBodyId;
+    rec.voxelX = voxelX;
+    rec.voxelY = voxelY;
+    rec.voxelZ = voxelZ;
+    rec.stateId = stateId;
+    rec.subAabbIndex = subAabbIndex;
+    rec.point[0] = pointX;
+    rec.point[1] = pointY;
+    rec.point[2] = pointZ;
+    rec.normal[0] = normalX;
+    rec.normal[1] = normalY;
+    rec.normal[2] = normalZ;
+    rec.penetrationDepth = penetrationDepth;
+    physics.vccVoxelContactCount++;
 }
 
 /** replay this tick's VCC body contacts into the contact stream, then clear the
@@ -206,10 +283,10 @@ export function pushVccContact(
  *  solver also recorded (a slow body the VCC didn't depenetrate clear of) shares
  *  the same key, so this just refreshes it, no double contact. resolves + records
  *  through the rigid subsystem, whose bodies these contacts involve. */
-function ingestVccContacts(physics: Physics): void {
+function ingestVccRigidContacts(physics: Physics): void {
     const rigid = physics.rigid;
-    for (let i = 0; i < physics.vccContactCount; i++) {
-        const rec = physics.vccContacts[i]!;
+    for (let i = 0; i < physics.vccRigidContactCount; i++) {
+        const rec = physics.vccRigidContacts[i]!;
         const innerBody = rigidBody.get(rigid.world, rec.innerBodyId);
         const otherBody = rigidBody.get(rigid.world, rec.otherBodyId);
         if (!innerBody || !otherBody) continue;
@@ -224,7 +301,34 @@ function ingestVccContacts(physics: Physics): void {
             rec.penetrationDepth,
         );
     }
-    physics.vccContactCount = 0;
+    physics.vccRigidContactCount = 0;
+}
+
+/** replay this tick's character-VCC voxel contacts into the contact stream, then
+ *  clear the buffer. same timing contract as {@link ingestVccRigidContacts}: MUST run
+ *  inside the contacts frame so the pairs diff and fan out like solver contacts. */
+function ingestVccVoxelContacts(physics: Physics): void {
+    const rigid = physics.rigid;
+    for (let i = 0; i < physics.vccVoxelContactCount; i++) {
+        const rec = physics.vccVoxelContacts[i]!;
+        const innerBody = rigidBody.get(rigid.world, rec.innerBodyId);
+        if (!innerBody) continue;
+        RigidPhysics.recordBodyVoxelContact(
+            rigid,
+            physics.contacts,
+            physics.contactPairPool,
+            innerBody,
+            rec.voxelX,
+            rec.voxelY,
+            rec.voxelZ,
+            rec.stateId,
+            rec.subAabbIndex,
+            rec.point,
+            rec.normal,
+            rec.penetrationDepth,
+        );
+    }
+    physics.vccVoxelContactCount = 0;
 }
 
 /** step the physics world. fires pre/post hooks and runs the world update. */
@@ -246,7 +350,8 @@ export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
     // before the solver) into the same stream. without this a VCC depenetrates
     // its character off a fast body and the solver never forms the manifold, so
     // the contact is silently lost (e.g. an arrow passing through a player).
-    ingestVccContacts(physics);
+    ingestVccRigidContacts(physics);
+    ingestVccVoxelContacts(physics);
 
     endPhysicsContactsFrame(physics.contacts);
 

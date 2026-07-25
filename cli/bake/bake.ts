@@ -20,7 +20,7 @@ import type { Filesystem } from '../../src/asset-pipeline/filesystem';
 import { createBakeLoader } from '../../src/asset-pipeline/loader';
 import { openNodeFs } from '../node-fs';
 import { createNodeDecodeAudio } from './decode-audio-node';
-import { renderBlockIcons } from './icons-node';
+import { renderIcons } from './icons-node';
 import { createNodeRaster } from './raster-node';
 
 // Resolve a subpath of the PROJECT's own bongle install. Registry-bearing engine
@@ -76,10 +76,11 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
     });
     const r = await AssetPipeline.run(pipeline, { forceAll: true });
 
-    // GPU icon render (block thumbnails) — optional, after the data bake wrote the
-    // atlas it reads. Own error boundary: an icon failure never fails the bake.
+    // GPU icon render (block atlas + per-id prefab thumbnails) — optional, after the
+    // data bake wrote the atlas it reads. Own error boundary: an icon failure never
+    // fails the bake. one-shot bake always re-renders prefabs (atlasChanged=true).
     try {
-        await renderBlockIcons(fs, Icons);
+        await renderIcons(fs, Icons, r.atlasChanged);
     } catch (err) {
         console.log(`  · icons: render failed (skipped) — ${(err as Error).message}`);
     }

@@ -41,6 +41,13 @@ const MAX_PREFAB_TICKS = 16;
 
 export type PrefabIcon = { pixels: Uint8Array; pxSize: number };
 
+/** resources/client-relative path a prefab's baked icon is written to (and read
+ *  back from). `encodeURIComponent` keeps any prefab id filename-safe; the single
+ *  source of truth so the pipeline writer and the editor reader can't drift. */
+export function prefabIconRelPath(prefabId: string): string {
+    return `prefab-icons/${encodeURIComponent(prefabId)}.png`;
+}
+
 /** Render one prefab into an RGBA8 icon tile, in-browser. Returns null when the
  *  prefab id is unknown or the instantiated content is empty (nothing to draw). */
 export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): Promise<PrefabIcon | null> {
@@ -112,13 +119,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
             if (chunk.nonAirCount === 0) continue;
             const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, chunk.cx, chunk.cy, chunk.cz), room.voxels.registry);
             if (mesh) {
-                VoxelResources.packerUpsertChunk(
-                    packer,
-                    chunkKey(chunk.cx, chunk.cy, chunk.cz),
-                    [chunk.wx, chunk.wy, chunk.wz],
-                    mesh,
-                    room.roomLocalIndex,
-                );
+                VoxelResources.packerUpsertChunk(packer, chunkKey(chunk.cx, chunk.cy, chunk.cz), [chunk.wx, chunk.wy, chunk.wz], mesh);
             }
         }
 
@@ -147,7 +148,6 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
                 deps.voxelResources,
                 room.scene,
                 camera,
-                room.roomLocalIndex,
                 target,
                 pipeline,
                 Number.POSITIVE_INFINITY,

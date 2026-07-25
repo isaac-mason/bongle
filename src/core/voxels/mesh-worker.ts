@@ -2,12 +2,15 @@
 //
 // Web worker that meshes voxel chunks off the main thread. Worker holds:
 //   - one decoded BlockRegistry (re-installed on registry rebuild)
+//   - one persistent chunk cache (a real `Voxels`) kept current by packet
+//     set/delete; a single world is meshed at a time (the active room), reset on
+//     an active-room swap via `clearCache`.
 //   - module-scope slab scratch via chunk-mesher.ts's _slab/_blockLightSlab
 //     (each worker is a separate module instance, so each gets its own
 //      private scratch, no contention with main or other workers)
 //
 // Per batch: main transfers ONE packcat MeshTasks buffer (the batch's set/delete
-// mirror deltas + K task chunks) plus K output quad triples (opaque/transparent/
+// cache deltas + K task chunks) plus K output quad triples (opaque/transparent/
 // translucent). The worker applies the deltas to its chunk cache, then for each
 // task rebuilds the neighbourhood from the cache and runs `buildSlabs` +
 // `meshChunk` — so the strided 18³ slab build happens here, off the main thread —
@@ -16,13 +19,14 @@
 // main return the buffers to its dispatcher pools with zero re-allocation.
 //
 // Protocol:
-//   main → worker
+//   main -> worker
 //     { cmd: 'initRegistry', version: number, buf: ArrayBuffer }
 //         [transfer: buf]
 //     { cmd: 'meshTasks', packetBuf: ArrayBuffer, outBufs: ArrayBuffer[] }
 //         [transfer: packetBuf + every outBufs entry]
 //         (outBufs[i*3 + {0,1,2}] = opaque/transparent/translucent for task i)
-//   worker → main
+//     { cmd: 'clearCache' }   // active-room swap: drop the chunk cache
+//   worker -> main
 //     { cmd: 'initRegistryAck', version: number }
 //     { cmd: 'result', results: MeshWorkerResult[], workUs,
 //       recycle: { packetBuf, outBufs } }
@@ -49,7 +53,10 @@ export type MeshWorkerInMsg =
           // output quad buffers, flat: outBufs[i*3 + {0:opaque,1:transparent,2:translucent}]
           // for tasks[i]. length === 3 × task count.
           outBufs: ArrayBuffer[];
-      };
+      }
+    // active-room swap on main: drop the chunk cache so the next batch reloads the
+    // newly-active world's neighbourhoods from scratch. fire-and-forget.
+    | { cmd: 'clearCache' };
 
 /** one meshed chunk in a result batch. */
 export type MeshWorkerResult = ChunkMeshResult & { chunkKey: string; gen: number };
@@ -71,10 +78,10 @@ export type MeshWorkerOutMsg =
 export type WorkerState = {
     registry: Blocks | null;
     registryVersion: number;
-    /** persistent chunk mirror the mesher reads — a real `Voxels`, kept current by
+    /** persistent chunk cache the mesher reads — a real `Voxels`, kept current by
      *  packet set/delete (`loadChunk`/`removeChunk`). null until the first
-     *  `initRegistry` (createVoxels needs the registry). main tracks a matching
-     *  per-worker mirror. */
+     *  `initRegistry` (createVoxels needs the registry); rebuilt empty on
+     *  `clearCache` (active-room swap). Main tracks a matching per-worker model. */
     voxels: Voxels | null;
 };
 
@@ -95,18 +102,26 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
         // (physics, handles) are never accessed.
         state.registry = decoded as unknown as Blocks;
         state.registryVersion = msg.version;
-        // the mirror is a real Voxels; createVoxels needs the registry, so it's
+        // the cache is a real Voxels; createVoxels needs the registry, so it's
         // built here on first init (kept across rebuilds so the cache survives).
         if (state.voxels === null) state.voxels = createVoxels(state.registry);
         return { cmd: 'initRegistryAck', version: msg.version };
+    }
+    if (msg.cmd === 'clearCache') {
+        // active-room swap on the main thread: rebuild an empty cache so the next
+        // batch reloads the newly-active world's neighbourhoods from scratch. A
+        // chunk the new world lacks (but the old one had) must not linger as a
+        // phantom neighbour and corrupt boundary meshing. Registry is untouched.
+        if (state.registry !== null) state.voxels = createVoxels(state.registry);
+        return null;
     }
     if (msg.cmd === 'meshTasks') {
         const recycle = { packetBuf: msg.packetBuf, outBufs: msg.outBufs };
         const mt = unpackMeshTasks(new Uint8Array(msg.packetBuf));
         const voxels = state.voxels;
-        // apply the mirror deltas FIRST — always, even on the drop path below — so
-        // the worker mirror never diverges from main's per-worker mirror. loadChunk
-        // links new chunks / updates existing in place; removeChunk unlinks.
+        // apply the cache deltas FIRST — always, even on the drop path below — so
+        // the worker cache never diverges from main's model of it. loadChunk links
+        // new chunks / updates existing in place; removeChunk unlinks.
         if (voxels !== null) {
             for (const s of mt.set) loadChunk(voxels, s.cx, s.cy, s.cz, s.version, s.data, s.light, s.palette);
             for (const d of mt.delete) removeChunk(voxels, d.cx, d.cy, d.cz);
@@ -125,7 +140,7 @@ export function handleMessage(state: WorkerState, msg: MeshWorkerInMsg): MeshWor
                     transparent: new Uint32Array(msg.outBufs[i * 3 + 1]!),
                     translucent: new Uint32Array(msg.outBufs[i * 3 + 2]!),
                 };
-                // build the 18³ slab from the worker's mirror (off the main
+                // build the 18³ slab from the worker's cache (off the main
                 // thread) — the neighbourhood is already loaded.
                 const input = buildMeshInput(voxels, task.cx, task.cy, task.cz);
                 result = meshChunk(out, input, state.registry);

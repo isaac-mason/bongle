@@ -4,6 +4,12 @@
 // worker holds its own deserialized BlockRegistry; main thread keeps a
 // canonical serialized buffer and reslices it per worker on rebuild.
 //
+// Single-world: exactly one voxel world is ever meshed at a time (the active
+// room). The dispatcher + worker cache are keyed by bare chunk coordinate; on an
+// active-room swap the caller calls `resetMeshCaches` (clears our model + tells
+// each worker to drop its cache) so the incoming world re-sends from scratch and
+// never reuses the outgoing world's identically-positioned chunks.
+//
 // Scheduling model:
 //   - N workers. queueMesh accumulates chunks into per-slot `pending`; a
 //     frame-end flush drains each slot's pending into ONE batched packet, so a
@@ -14,11 +20,11 @@
 //     backlog. This replaces the old main-thread sync-remesh fast-path.
 //   - Affinity routing: a chunk's jobs always go to `hash(region) % N`, so its
 //     neighbourhood accumulates in that worker's cache and re-meshes hit it.
-//   - Each worker keeps a versioned chunk mirror; main tracks a matching
-//     per-worker mirror (`slot.mirror`) and dispatches only DELTAS: a packet
-//     carries `set` (chunks the worker lacks at the current version) + `delete`
-//     + `tasks` (the batch). Unchanged chunks are never re-sent. See
-//     mesh-tasks.ts and llm/plan-mesh-worker-chunk-cache.md.
+//   - Each worker keeps a versioned chunk cache; main tracks a matching model of
+//     it (`slot.cachedVersions`) and dispatches only DELTAS: a packet carries
+//     `set` (chunks the worker lacks at the current version) + `delete` + `tasks`
+//     (the batch). Unchanged chunks are never re-sent. See mesh-tasks.ts and
+//     llm/plan-mesh-worker-chunk-cache.md.
 //   - inFlightByChunk dedups: a chunk pending or in flight cannot be re-enqueued.
 //   - Buffers come from two pools: `packetPool` (one packet buffer per batch)
 //     and `outputPool` (one 3-buffer quad set per task). Borrowed at flush,
@@ -46,13 +52,13 @@ import { chunkKey } from '../../core/voxels/voxels';
  *  `MessagePort` (used by the in-process test) satisfy this shape.
  *  `onerror` / `onmessageerror` are optional, only real `Worker`s emit
  *  them; the in-process test stubs them out. */
-export interface WorkerLike {
+export type WorkerLike = {
     postMessage(msg: MeshWorkerInMsg, transfer?: Transferable[]): void;
     onmessage: ((e: MessageEvent<MeshWorkerOutMsg>) => void) | null;
     onerror?: ((ev: unknown) => void) | null;
     onmessageerror?: ((ev: unknown) => void) | null;
     terminate?(): void;
-}
+};
 
 /** spawnMeshWorker lives in `mesh-worker-spawn.ts` so the `?worker&inline`
  *  query stays out of mesh-dispatcher's static import graph, Bun's TS
@@ -103,16 +109,17 @@ type WorkerSlot = {
     /** version most recently posted to this slot. Used to detect
      *  "init pending but not yet acked". */
     pendingRegistryVersion: number;
-    /** authoritative mirror of this worker's chunk cache: chunkKey → chunk
-     *  `version`. main diffs each dispatch against it to emit set/delete deltas.
-     *  cleared on crash (the worker's cache is gone with it). */
-    mirror: Map<string, number>;
+    /** main's authoritative model of which chunk versions this worker currently
+     *  holds cached: chunkKey -> chunk `version`. main diffs each dispatch against
+     *  it to emit set/delete deltas. cleared on crash (the worker's cache is gone
+     *  with it) and on `resetMeshCaches` (active-room swap). */
+    cachedVersions: Map<string, number>;
 };
 
 export type MeshDispatcher = {
     slots: WorkerSlot[];
     queueDepth: number;
-    /** chunk key → which slot owns it. Tracks a chunk from enqueue (pending)
+    /** chunk key -> which slot owns it. Tracks a chunk from enqueue (pending)
      *  through in-flight, for dedup and reverse lookup on result. */
     inFlightByChunk: Map<string, { slot: number; gen: number }>;
     /** free packet buffers (one per in-flight batch). */
@@ -132,7 +139,7 @@ export type MeshDispatcher = {
     /** kept for crash recovery, respawn calls this to get a fresh
      *  worker for the same slot index. */
     workerFactory: () => WorkerLike;
-    /** per-worker chunk-cache budget: main evicts LRU mirror entries beyond it. */
+    /** per-worker chunk-cache budget: main evicts LRU cache entries beyond it. */
     cacheMaxChunks: number;
     /** per-frame instrumentation, summed as jobs flow, drained by
      *  `readMeshPerf`. `buildMs`/`postMs` are main-thread slab-pack and
@@ -148,9 +155,9 @@ export type MeshPerf = {
     postMs: number;
     /** worker-reported µs of mesh work (parallel, not main-thread) */
     workUs: number;
-    /** main→worker posts (one per batch — the metric batching drives down) */
+    /** main->worker posts (one per batch — the metric batching drives down) */
     enqueues: number;
-    /** worker→main result messages drained (one per batch) */
+    /** worker->main result messages drained (one per batch) */
     results: number;
 };
 
@@ -208,7 +215,7 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
             inFlightBatches: 0,
             registryVersion: -1,
             pendingRegistryVersion: -1,
-            mirror: new Map(),
+            cachedVersions: new Map(),
         };
         wireWorker(d, i, worker);
         slots.push(slot);
@@ -261,9 +268,9 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
     slot.inFlight.length = 0;
     slot.inFlightBatches = 0;
 
-    // The respawned worker starts with an empty cache, so drop the mirror —
+    // The respawned worker starts with an empty cache, so drop our model of it —
     // subsequent dispatches re-`set` the neighbourhood from scratch.
-    slot.mirror.clear();
+    slot.cachedVersions.clear();
 
     // Tear down the crashed worker and spawn a fresh one. Re-init with
     // the canonical registry buffer if we have one; until ack lands the
@@ -306,6 +313,27 @@ export function isInFlight(d: MeshDispatcher, key: string): boolean {
     return d.inFlightByChunk.has(key);
 }
 
+/** Invalidate every per-worker chunk cache and drop all queued / in-flight
+ *  tracking. Call on an active-room swap: the dispatcher + worker caches are
+ *  keyed by bare chunk coordinate, so a cached entry from the room being left
+ *  would be reused to mesh the newly-active room's chunk at the same coordinate
+ *  (their per-chunk `version` counters collide). Posts `clearCache` to each
+ *  worker — ordered after any in-flight `meshTasks` and before subsequent ones —
+ *  and clears the main-side model + pending queues so the next flush re-sends the
+ *  new world's neighbourhoods from scratch. Batches already in flight still land
+ *  and recycle their buffers (`inFlightBatches` left intact); the cleared
+ *  `inFlightByChunk` + the caller's gen guard drop their now-stale results. */
+export function resetMeshCaches(d: MeshDispatcher): void {
+    for (const slot of d.slots) {
+        slot.pendingUrgent.length = 0;
+        slot.pending.length = 0;
+        slot.inFlight.length = 0;
+        slot.cachedVersions.clear();
+        slot.worker.postMessage({ cmd: 'clearCache' });
+    }
+    d.inFlightByChunk.clear();
+}
+
 // worker affinity: a chunk's tasks always route to the same worker (by region
 // hash), so its neighbourhood accumulates in that worker's cache and re-meshes
 // hit it. deterministic + stable across respawns (slot index is fixed).
@@ -332,7 +360,7 @@ const URGENT_RESERVE_PER_WORKER = 2;
 const _batch: Array<{ chunk: Chunk; gen: number }> = [];
 
 // reused packcat value scratch (avoids allocating it each flush). the set/delete
-// key arrays parallel the entries so the mirror commit can be deferred until
+// key arrays parallel the entries so the cache commit can be deferred until
 // packInto succeeds.
 const _setEntries: MeshTaskSet[] = [];
 const _setKeys: string[] = [];
@@ -361,7 +389,6 @@ function slotAcceptable(d: MeshDispatcher, slot: WorkerSlot): boolean {
  *     the least-committed ready worker (used when the chunk has been starving). */
 export function queueMesh(
     d: MeshDispatcher,
-    _voxels: Voxels,
     chunk: Chunk,
     gen: number,
     opts: { urgent?: boolean; allowSpill?: boolean } = {},
@@ -404,8 +431,8 @@ export function queueMesh(
 }
 
 /** diff the union of the first `batchN` chunks in `_batch` (urgent-first) against
- *  `slot.mirror` → set/delete deltas (into scratch), + LRU eviction, then packInto
- *  `packetBuf`. Does NOT commit the mirror (deferred to `commitBatch` on success).
+ *  `slot.cachedVersions` -> set/delete deltas (into scratch), + LRU eviction, then
+ *  packInto `packetBuf`. Does NOT commit (deferred to `commitBatch` on success).
  *  Returns packcat's {ok, size}. */
 function buildBatchPacket(d: MeshDispatcher, slot: WorkerSlot, voxels: Voxels, batchN: number, packetBuf: ArrayBuffer): boolean {
     _setEntries.length = 0;
@@ -414,7 +441,7 @@ function buildBatchPacket(d: MeshDispatcher, slot: WorkerSlot, voxels: Voxels, b
     _delKeys.length = 0;
     _tasks.length = 0;
     _neighborhoodKeys.clear();
-    const mirror = slot.mirror;
+    const cachedVersions = slot.cachedVersions;
     let newSets = 0;
     for (let t = 0; t < batchN; t++) {
         const { chunk, gen } = _batch[t]!;
@@ -422,64 +449,69 @@ function buildBatchPacket(d: MeshDispatcher, slot: WorkerSlot, voxels: Voxels, b
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dz = -1; dz <= 1; dz++) {
-                    const ncx = chunk.cx + dx;
-                    const ncy = chunk.cy + dy;
-                    const ncz = chunk.cz + dz;
-                    const nk = chunkKey(ncx, ncy, ncz);
-                    if (_neighborhoodKeys.has(nk)) continue; // union dedup across the batch
-                    _neighborhoodKeys.add(nk);
-                    const nc = voxels.chunks.get(nk);
-                    if (nc !== undefined) {
-                        const mv = mirror.get(nk);
-                        if (mv !== nc.version) {
+                    const neighborCx = chunk.cx + dx;
+                    const neighborCy = chunk.cy + dy;
+                    const neighborCz = chunk.cz + dz;
+                    const neighborKey = chunkKey(neighborCx, neighborCy, neighborCz);
+                    if (_neighborhoodKeys.has(neighborKey)) continue; // union dedup across the batch
+                    _neighborhoodKeys.add(neighborKey);
+                    const neighbor = voxels.chunks.get(neighborKey);
+                    if (neighbor !== undefined) {
+                        const cachedVersion = cachedVersions.get(neighborKey);
+                        if (cachedVersion !== neighbor.version) {
                             _setEntries.push({
-                                cx: nc.cx,
-                                cy: nc.cy,
-                                cz: nc.cz,
-                                version: nc.version,
-                                data: nc.data,
-                                light: nc.light,
-                                palette: nc.palette,
+                                cx: neighbor.cx,
+                                cy: neighbor.cy,
+                                cz: neighbor.cz,
+                                version: neighbor.version,
+                                data: neighbor.data,
+                                light: neighbor.light,
+                                palette: neighbor.palette,
                             });
-                            _setKeys.push(nk);
-                            if (mv === undefined) newSets++;
+                            _setKeys.push(neighborKey);
+                            if (cachedVersion === undefined) newSets++;
                         }
-                    } else if (mirror.has(nk)) {
-                        _delEntries.push({ cx: ncx, cy: ncy, cz: ncz });
-                        _delKeys.push(nk);
+                    } else if (cachedVersions.has(neighborKey)) {
+                        _delEntries.push({ cx: neighborCx, cy: neighborCy, cz: neighborCz });
+                        _delKeys.push(neighborKey);
                     }
                 }
             }
         }
     }
 
-    // bound the mirror to the budget: evict oldest entries not in this batch's
+    // bound the cache to the budget: evict oldest entries not in this batch's
     // neighbourhood; evictions ride the delete list.
-    let evict = mirror.size + newSets - _delKeys.length - d.cacheMaxChunks;
-    if (evict > 0) {
-        for (const k of mirror.keys()) {
-            if (evict <= 0) break;
-            if (_neighborhoodKeys.has(k)) continue;
-            const c1 = k.indexOf(',');
-            const c2 = k.indexOf(',', c1 + 1);
-            _delEntries.push({ cx: +k.slice(0, c1), cy: +k.slice(c1 + 1, c2), cz: +k.slice(c2 + 1) });
-            _delKeys.push(k);
-            evict--;
+    let evictBudget = cachedVersions.size + newSets - _delKeys.length - d.cacheMaxChunks;
+    if (evictBudget > 0) {
+        for (const key of cachedVersions.keys()) {
+            if (evictBudget <= 0) break;
+            if (_neighborhoodKeys.has(key)) continue;
+            const firstComma = key.indexOf(',');
+            const secondComma = key.indexOf(',', firstComma + 1);
+            _delEntries.push({
+                cx: +key.slice(0, firstComma),
+                cy: +key.slice(firstComma + 1, secondComma),
+                cz: +key.slice(secondComma + 1),
+            });
+            _delKeys.push(key);
+            evictBudget--;
         }
     }
 
     return packMeshTasks(_packetValue, new Uint8Array(packetBuf), 0).ok;
 }
 
-/** commit the scratch deltas from the last successful `buildBatchPacket` to the
- *  mirror. deletes first, then sets re-inserted at the Map tail for LRU recency. */
+/** commit the scratch deltas from the last successful `buildBatchPacket` to our
+ *  model of the worker cache. deletes first, then sets re-inserted at the Map tail
+ *  for LRU recency. */
 function commitBatch(slot: WorkerSlot): void {
-    const mirror = slot.mirror;
-    for (let i = 0; i < _delKeys.length; i++) mirror.delete(_delKeys[i]!);
+    const cachedVersions = slot.cachedVersions;
+    for (let i = 0; i < _delKeys.length; i++) cachedVersions.delete(_delKeys[i]!);
     for (let i = 0; i < _setKeys.length; i++) {
-        const k = _setKeys[i]!;
-        mirror.delete(k);
-        mirror.set(k, _setEntries[i]!.version);
+        const key = _setKeys[i]!;
+        cachedVersions.delete(key);
+        cachedVersions.set(key, _setEntries[i]!.version);
     }
 }
 
@@ -557,22 +589,22 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
             d.outputPool.push({ opaqueBuf: outBufs[i]!, transparentBuf: outBufs[i + 1]!, translucentBuf: outBufs[i + 2]! });
         }
 
-        for (const r of msg.results) {
+        for (const result of msg.results) {
             // remove the matching in-flight entry + dedup record (splice by key,
             // FIFO usually puts it at 0 but a stale-gen result could differ).
-            const idx = slot.inFlight.findIndex((e) => e.chunkKey === r.chunkKey && e.gen === r.gen);
-            if (idx >= 0) slot.inFlight.splice(idx, 1);
-            const tracked = d.inFlightByChunk.get(r.chunkKey);
-            if (tracked && tracked.gen === r.gen) d.inFlightByChunk.delete(r.chunkKey);
+            const inFlightIndex = slot.inFlight.findIndex((e) => e.chunkKey === result.chunkKey && e.gen === result.gen);
+            if (inFlightIndex >= 0) slot.inFlight.splice(inFlightIndex, 1);
+            const tracked = d.inFlightByChunk.get(result.chunkKey);
+            if (tracked && tracked.gen === result.gen) d.inFlightByChunk.delete(result.chunkKey);
 
             // forward the result; caller's gen guard handles staleness.
             d.onResult({
-                chunkKey: r.chunkKey,
-                gen: r.gen,
-                opaque: r.opaque,
-                transparent: r.transparent,
-                translucent: r.translucent,
-                aabb: r.aabb,
+                chunkKey: result.chunkKey,
+                gen: result.gen,
+                opaque: result.opaque,
+                transparent: result.transparent,
+                translucent: result.translucent,
+                aabb: result.aabb,
             });
         }
 
@@ -592,7 +624,7 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
  *
  *    const p = readMeshPerf(dispatcher);
  *    // p.buildMs + p.postMs = main-thread enqueue cost this frame
- *    // p.enqueues = posts main→worker, p.results = posts worker→main
+ *    // p.enqueues = posts main->worker, p.results = posts worker->main
  *    // p.workUs = parallel worker time (not main-thread)
  */
 export function readMeshPerf(d: MeshDispatcher): MeshPerf {
@@ -625,7 +657,7 @@ export function meshQueueStats(d: MeshDispatcher): {
         inFlight: number;
         registryVersion: number;
         pendingRegistryVersion: number;
-        mirrorSize: number;
+        cachedVersionsSize: number;
     }>;
 } {
     return {
@@ -637,7 +669,7 @@ export function meshQueueStats(d: MeshDispatcher): {
             inFlight: s.inFlight.length,
             registryVersion: s.registryVersion,
             pendingRegistryVersion: s.pendingRegistryVersion,
-            mirrorSize: s.mirror.size,
+            cachedVersionsSize: s.cachedVersions.size,
         })),
     };
 }

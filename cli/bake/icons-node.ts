@@ -19,7 +19,17 @@ import { decodeImageNode } from './decode-image-node';
  *  the data bake — shares the baked atlas + registry). */
 type Icons = typeof import('../../src/asset-pipeline')['Icons'];
 
-export async function renderBlockIcons(fs: Filesystem, Icons: Icons): Promise<boolean> {
+/** RGBA8 pixels → PNG bytes via skia-canvas (node; no OffscreenCanvas). */
+function skiaEncodePng(pixels: Uint8Array, width: number, height: number): Uint8Array {
+    const canvas = new Canvas(width, height);
+    const ctx2d = canvas.getContext('2d');
+    const imageData = ctx2d.createImageData(width, height);
+    imageData.data.set(pixels);
+    ctx2d.putImageData(imageData, 0, 0);
+    return new Uint8Array(canvas.toBufferSync('png'));
+}
+
+export async function renderIcons(fs: Filesystem, Icons: Icons, atlasChanged: boolean): Promise<boolean> {
     let webgpu: typeof import('webgpu');
     try {
         webgpu = await import('webgpu');
@@ -43,29 +53,26 @@ export async function renderBlockIcons(fs: Filesystem, Icons: Icons): Promise<bo
     const { deps, dispose } = await Icons.buildRenderDeps(ctx, iconLoader);
     try {
         const atlas = await Icons.renderBlockIconAtlas(deps);
-        if (atlas.atlasWidth === 0 || atlas.atlasHeight === 0) {
-            console.log('  · icons: no renderable blocks — nothing to write');
-            return false;
+        if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
+            await fs.write('resources/client/voxels-icons.png', skiaEncodePng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight));
+            await fs.write(
+                'resources/client/voxels-icons.json',
+                JSON.stringify({
+                    coords: atlas.coords,
+                    cols: atlas.cols,
+                    rows: atlas.rows,
+                    iconPx: atlas.iconPx,
+                    atlasWidth: atlas.atlasWidth,
+                    atlasHeight: atlas.atlasHeight,
+                }),
+            );
+            console.log('  · icons: wrote voxels-icons.png');
+        } else {
+            console.log('  · icons: no renderable blocks');
         }
-        const canvas = new Canvas(atlas.atlasWidth, atlas.atlasHeight);
-        const ctx2d = canvas.getContext('2d');
-        const imageData = ctx2d.createImageData(atlas.atlasWidth, atlas.atlasHeight);
-        imageData.data.set(atlas.pixels);
-        ctx2d.putImageData(imageData, 0, 0);
-        const png = canvas.toBufferSync('png');
-        await fs.write('resources/client/voxels-icons.png', new Uint8Array(png));
-        await fs.write(
-            'resources/client/voxels-icons.json',
-            JSON.stringify({
-                coords: atlas.coords,
-                cols: atlas.cols,
-                rows: atlas.rows,
-                iconPx: atlas.iconPx,
-                atlasWidth: atlas.atlasWidth,
-                atlasHeight: atlas.atlasHeight,
-            }),
-        );
-        console.log(`  · icons: wrote voxels-icons.png (${(png.length / 1024).toFixed(0)} KB)`);
+        // per-id prefab icons (incremental via the shared manifest).
+        const prefabCount = await Icons.bakePrefabIcons(deps, fs, atlasChanged, async (px, w, h) => skiaEncodePng(px, w, h));
+        if (prefabCount > 0) console.log(`  · icons: wrote ${prefabCount} prefab icon(s)`);
         return true;
     } finally {
         dispose();

@@ -94,7 +94,6 @@ export async function buildRenderDeps(
         voxelMeshResources,
         modelResources,
         cloudResources,
-        allocRoomIndex: () => 0,
     };
     const dispose = (): void => {
         VoxelResources.dispose(voxelResources);
