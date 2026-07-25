@@ -37,7 +37,9 @@ export {
     BLOCK_FLAG_SNEAK_GUARD,
     BLOCK_FLAG_WALL,
     encodeVertexAnimation,
+    keyToBlock,
     MISSING,
+    stateToBlock,
 } from '../core/voxels/block-registry';
 export * as blockState from '../core/voxels/block-state';
 export type {

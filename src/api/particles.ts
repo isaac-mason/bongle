@@ -25,7 +25,7 @@ export type {
     ParticleOptions,
     ParticlePlayback,
     ParticlePool,
-    UpdateFn,
+    ParticleUpdateFn,
 } from '../core/particles/particles';
 export { particle } from '../core/particles/particles';
 export type { SpawnOpts } from '../render/particles/particles';

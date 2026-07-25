@@ -106,6 +106,18 @@ const bootLog = (msg: string): void => {
 const root = createRoot(document.getElementById('root')!);
 root.render(<BootScreen />);
 
+// Guard against a stray Cmd/Ctrl+R nuking in-memory work. Unsaved Monaco buffers
+// live only in the editor model (cleared on Cmd+S → fs write), so a refresh drops
+// them — prompt the browser's "leave site?" dialog while any tab is dirty.
+window.addEventListener('beforeunload', (e) => {
+    const hasUnsaved = Object.values(useEditor.getState().dirty).some(Boolean);
+    if (hasUnsaved) {
+        e.preventDefault();
+        // legacy browsers still need returnValue set to trigger the prompt.
+        e.returnValue = '';
+    }
+});
+
 // (1) The bundler worker. Its ~10MB @rolldown WASM compile is the single dominant
 // boot cost, and it needs only the project NAME — so spawn it FIRST, before OPFS,
 // the platform handshake, or the engine seed, so that compile runs UNDER all of

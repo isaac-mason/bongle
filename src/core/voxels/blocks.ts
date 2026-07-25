@@ -9,7 +9,8 @@ import { sprite } from '../sprites/sprites';
 import type { BlockShape } from './block-collider';
 import { formatKey } from './block-registry';
 import type { BlockStateDef, PropsDef, PropsValues } from './block-state';
-import * as bs from './block-state';
+import * as blockState from './block-state';
+import type { Voxels } from './voxels';
 
 export type BlockTextureOptions = {
     /**
@@ -23,8 +24,10 @@ export type BlockTextureOptions = {
      * installed, and the pipeline reads the resolved path.
      */
     src: ImageSource | ImageSource[];
+
     /** animation speed in frames per second. default 1. ignored if single frame. */
     fps?: number;
+
     /** interpolate between frames (smooth water). default false. */
     interpolate?: boolean;
 };
@@ -32,15 +35,19 @@ export type BlockTextureOptions = {
 export type BlockTextureDef = {
     /** texture string id (e.g. 'lava') */
     id: string;
+
     /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'blockTextures'; id: string };
+
     /** source declarations, post-URL-normalization. each entry is either
      *  a path string or a `DrawSource` descriptor; the asset-pipeline
      *  `draw-textures` pass (step 10) bakes any DrawSource entries to
      *  in-memory canvases before the block atlas builder runs. */
     frames: NormalizedImageSource[];
+
     /** animation speed in frames per second. */
     fps: number;
+
     /** interpolate between frames. */
     interpolate: boolean;
 };
@@ -122,12 +129,16 @@ export type CustomModel = {
 export type BlockQuad = {
     /** 4 vertices in CCW order as [x, y, z] in block-local space [0,1]. */
     verts: [Vec3, Vec3, Vec3, Vec3];
+
     /** face normal as [nx, ny, nz]. */
     normal: Vec3;
+
     /** texture ref for this quad (BlockTextureDef handle or string id). */
     texture: TextureRef;
+
     /** uv coordinates for each vertex. defaults to full-texture [[0,1],[1,1],[1,0],[0,0]]. */
     uvs?: [Vec2, Vec2, Vec2, Vec2];
+
     /**
      * cull face direction. if the neighbor in this direction is a full
      * opaque cube, this quad is hidden. undefined = never culled.
@@ -138,12 +149,14 @@ export type BlockQuad = {
      * occluded by a neighbor.
      */
     cullFace?: 'north' | 'south' | 'east' | 'west' | 'up' | 'down';
+
     /**
      * render pass for this quad. defaults to the block's material.
      * set explicitly for mixed-material custom models (e.g. cauldron
      * with opaque shell + translucent water quad).
      */
     material?: MaterialType;
+
     /**
      * receives smooth-light + AO sampling. defaults to true. set false
      * for quads that should stay flat-lit (emissive sub-quads like a
@@ -248,7 +261,7 @@ export enum VertexAnimation {
 // observer (additive, module scope) hooks.
 
 export type BlockChangeCtx = {
-    voxels: import('./voxels').Voxels;
+    voxels: Voxels;
     worldX: number;
     worldY: number;
     worldZ: number;
@@ -741,7 +754,7 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
     flip?: FlipFn;
 };
 
-// ── block handle (returned to user) ─────────────────────────────────
+// ── block handle ─────────────────────────────────
 //
 // returned by block() at module scope. the registry builder patches
 // _baseStateId and _index at freeze time. user code only calls
@@ -750,22 +763,29 @@ export type BlockDef<P extends PropsDef = PropsDef> = {
 export type BlockHandle<P extends PropsDef = PropsDef> = {
     /** block string id (e.g. 'oak_log') */
     readonly id: string;
+
     /** human-readable display name for editor UIs. always set,
      *  defaults to `id` when the author didn't supply one. */
     readonly name: string;
+
     /** DepGraph dependency, see SceneHandle.dependency. */
     dependency: { registry: 'blocks'; id: string };
+
     /** the block's state schema */
     readonly states: BlockStateDef<P>;
-    /** the block def (internal) */
+
+    /** the block def */
     readonly _def: BlockDef<P>;
 
     /** dense block type index. set by registry builder at freeze time. */
     _index: number;
+
     /** first global state id. set by registry builder at freeze time. */
     _baseStateId: number;
+
     /** total number of states for this block. */
     readonly totalStates: number;
+
     /**
      * bitmask of hooks this block has (intrinsic + any observer handlers
      * registered at module scope). populated by the registry builder at
@@ -798,7 +818,7 @@ export type BlockHandle<P extends PropsDef = PropsDef> = {
 };
 
 // empty states singleton for stateless blocks
-const EMPTY_STATES = bs.create({});
+const EMPTY_STATES = blockState.create({});
 
 /**
  * declare a block type. called at module scope, the definition is
@@ -806,7 +826,6 @@ const EMPTY_STATES = bs.create({});
  *
  * returns a handle used for getting global state ids in gameplay code.
  */
-// biome-ignore lint/complexity/noBannedTypes: {} is the intentional empty-props default, it stays assignable to BlockHandle<PropsDef>, which Record<string, never> does not
 export function block<const P extends PropsDef = {}>(id: string, options: BlockOptions<P> = {}): BlockHandle<P> {
     const states = (options.states ?? EMPTY_STATES) as BlockStateDef<P>;
     const cull = options.cull ?? CullType.SOLID;
@@ -880,6 +899,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
     };
 
     const stored = upsert(registry.blocks, id, handle as BlockHandle);
+
     // presence-only snapshot record. block content changes propagate via
     // the flush path, `applyRegistryChanges` rebuilds BlockRegistry,
     // refreshes the atlas, repoints per-room `voxels.registry`, and

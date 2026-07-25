@@ -47,7 +47,7 @@
 // stamped on the pool) so collision primitives can query the world
 // without the pool carrying a back-ref. pure-motion fns ignore the arg.
 
-import type { ParticleHandle, ParticlePool, UpdateFn } from '../../core/particles/particles';
+import type { ParticleHandle, ParticlePool, ParticleUpdateFn } from '../../core/particles/particles';
 import type { Voxels } from '../../core/voxels/voxels';
 
 export type { ParticlePool } from '../../core/particles/particles';
@@ -64,7 +64,7 @@ export function init(): ParticlePool {
         capacity,
         count: 0,
         handle: new Array<ParticleHandle | null>(capacity).fill(null),
-        updateFn: new Array<UpdateFn | null>(capacity).fill(null),
+        updateFn: new Array<ParticleUpdateFn | null>(capacity).fill(null),
         posX: new Float32Array(capacity),
         posY: new Float32Array(capacity),
         posZ: new Float32Array(capacity),

@@ -1445,6 +1445,26 @@ export function resolveKey(registry: Blocks, key: string): number {
     return globalId;
 }
 
+/**
+ * map a global state id to the block handle that owns it. every state of a
+ * block shares one handle, so `stateToBlock(blocks, s) === Lava` tests block
+ * kind regardless of block-state. pairs with `getBlockState` and raycast hits,
+ * which report the same state id. air and unresolved states resolve to the air
+ * handle, so the result is never null.
+ */
+export function stateToBlock(registry: Blocks, state: number): BlockHandle {
+    return registry.handles[registry.stateToBlockIndex[state] ?? 0]!;
+}
+
+/**
+ * map a block key (e.g. from `getBlock`) to its block handle, ignoring
+ * block-state. unknown keys resolve to the air handle. prefer `stateToBlock`
+ * in hot paths to skip the key-string resolve.
+ */
+export function keyToBlock(registry: Blocks, key: string): BlockHandle {
+    return stateToBlock(registry, resolveKey(registry, key));
+}
+
 // ── helpers ─────────────────────────────────────────────────────────
 
 /** derive the per-block default dust handle set once, from the default

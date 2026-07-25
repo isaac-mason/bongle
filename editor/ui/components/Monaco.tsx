@@ -345,6 +345,23 @@ export function organizeActiveImports(): Promise<void> {
     return applyWorkerTextChanges('organizeImports');
 }
 
+/** true once any editor has held focus — the target for palette-run editor
+ *  actions (the palette itself holds focus while a command runs). */
+export function hasActiveEditor(): boolean {
+    return activeEditor !== null;
+}
+
+/** run a built-in Monaco action (by id) on the most-recently-focused editor.
+ *  Refocuses it first so selection-based actions land where the user can see
+ *  and keep working with the result. `trigger` routes to both core commands
+ *  (e.g. `expandLineSelection`) and registered editor actions. */
+export function runEditorAction(actionId: string): void {
+    const ed = activeEditor;
+    if (!ed) return;
+    ed.focus();
+    ed.trigger('palette', actionId, null);
+}
+
 export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
     const active = useEditor((s) => s.groups[group]?.active ?? null);
     const reveal = useEditor((s) => s.reveal);

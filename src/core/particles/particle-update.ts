@@ -29,7 +29,7 @@ import type { AABB } from '../voxels/block-collider';
 import { BLOCK_FLAG_COLLISION } from '../voxels/block-registry';
 import type { Voxels } from '../voxels/voxels';
 import { getBlockState } from '../voxels/voxels';
-import type { ParticlePool, UpdateFn } from './particles';
+import type { ParticlePool, ParticleUpdateFn } from './particles';
 
 /* ── primitives ── */
 
@@ -377,7 +377,7 @@ function fadeAlpha(pool: ParticlePool, i: number, dt: number, rate: number): voi
 /* ── curated complete update fns ── */
 
 /** drift + drag, falls under gravity, slides along geometry. */
-const dust: UpdateFn = (pool, i, dt, voxels) => {
+const dust: ParticleUpdateFn = (pool, i, dt, voxels) => {
     gravity(pool, i, dt, -20);
     drag(pool, i, dt, 0.92);
     integrate(pool, i, dt);
@@ -385,7 +385,7 @@ const dust: UpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** rises with light buoyancy, drags hard, slides along geometry. */
-const smoke: UpdateFn = (pool, i, dt, voxels) => {
+const smoke: ParticleUpdateFn = (pool, i, dt, voxels) => {
     gravity(pool, i, dt, 0.4);
     drag(pool, i, dt, 0.96);
     integrate(pool, i, dt);
@@ -393,7 +393,7 @@ const smoke: UpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** heavy fall + light drag, bounces off geometry with 40% retention. */
-const spark: UpdateFn = (pool, i, dt, voxels) => {
+const spark: ParticleUpdateFn = (pool, i, dt, voxels) => {
     gravity(pool, i, dt, -8);
     drag(pool, i, dt, 0.98);
     integrate(pool, i, dt);
@@ -401,7 +401,7 @@ const spark: UpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** gentle fall + strong drag, lands on geometry (zero velocity on hit). */
-const snow: UpdateFn = (pool, i, dt, voxels) => {
+const snow: ParticleUpdateFn = (pool, i, dt, voxels) => {
     gravity(pool, i, dt, -0.5);
     drag(pool, i, dt, 0.98);
     integrate(pool, i, dt);
@@ -409,7 +409,7 @@ const snow: UpdateFn = (pool, i, dt, voxels) => {
 };
 
 /** fast fall, no drag, dies on impact. */
-const rain: UpdateFn = (pool, i, dt, voxels) => {
+const rain: ParticleUpdateFn = (pool, i, dt, voxels) => {
     gravity(pool, i, dt, -12);
     integrate(pool, i, dt);
     collideDestroy(pool, i, dt, voxels);

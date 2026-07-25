@@ -1355,7 +1355,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     voxels: Voxels;
     physics: Physics;
     clock: Clock;
-    blocks: BlockRegistry;
+    blocks: Blocks;
     client?: ClientContext;
     server?: ServerContext;
     _instance?: ScriptInstance;
@@ -3046,11 +3046,35 @@ export const BLOCK_FLAG_WALL;
 export function encodeVertexAnimation(va: VertexAnimation | undefined): number;
 ```
 
+#### `keyToBlock`
+
+```ts
+/**
+ * map a block key (e.g. from `getBlock`) to its block handle, ignoring
+ * block-state. unknown keys resolve to the air handle. prefer `stateToBlock`
+ * in hot paths to skip the key-string resolve.
+ */
+export function keyToBlock(registry: Blocks, key: string): BlockHandle;
+```
+
 #### `MISSING`
 
 ```ts
 /** global state id for missing/unresolved blocks. always 1. */
 export const MISSING;
+```
+
+#### `stateToBlock`
+
+```ts
+/**
+ * map a global state id to the block handle that owns it. every state of a
+ * block shares one handle, so `stateToBlock(blocks, s) === Lava` tests block
+ * kind regardless of block-state. pairs with `getBlockState` and raycast hits,
+ * which report the same state id. air and unresolved states resolve to the air
+ * handle, so the result is never null.
+ */
+export function stateToBlock(registry: Blocks, state: number): BlockHandle;
 ```
 
 #### `blockState.BoolPropDef`
@@ -3520,7 +3544,7 @@ export function createVoxelRaycastResult(): VoxelRaycastResult;
  * @param maxDistance - maximum trace distance
  * @param requiredFlags - bitmask of block flags required for a hit. blocks missing any of these flags are skipped. 0 = no filtering.
  */
-export function raycastVoxels(out: VoxelRaycastResult, voxels: Voxels, registry: BlockRegistry, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDistance: number, requiredFlags: number): VoxelRaycastResult;
+export function raycastVoxels(out: VoxelRaycastResult, voxels: Voxels, registry: Blocks, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDistance: number, requiredFlags: number): VoxelRaycastResult;
 ```
 
 #### `Chunk`
@@ -3548,7 +3572,7 @@ export type Chunk = {
     lightDirtyMask: Uint8Array;
     lightDirtyCount: number;
     compressedSnapshot: Uint8Array | null;
-    snapshotPalette: string[] | null;
+    snapshotPalette: number[] | null;
     compressedLight: {
         sky: Uint8Array;
         rgb: Uint8Array;
@@ -3568,7 +3592,7 @@ export type Voxels = {
         light: Set<Chunk>;
     };
     columns: Map<string, Chunk[]>;
-    registry: BlockRegistry;
+    registry: Blocks;
     authority: VoxelsAuthority | null;
 };
 ```
@@ -3818,7 +3842,7 @@ export function getChunkBlockKey(chunk: Chunk, x: number, y: number, z: number):
 ```ts
 /** get-or-allocate the chunk-local palette index for a block key. tier-1
  *  callers grab a slot once, then write `chunkData(chunk)[idx] = slot` directly. */
-export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: BlockRegistry): number;
+export function ensureChunkPaletteSlot(chunk: Chunk, key: string, registry: Blocks): number;
 ```
 
 #### `chunkData`
@@ -3887,7 +3911,7 @@ export function setLight(chunk: Chunk, index: number, value: number): void;
  * O(palette size), typically < 50 entries per chunk.
  * unresolved keys → MISSING. newly resolved keys → live again.
  */
-export function resolveChunk(chunk: Chunk, registry: BlockRegistry): void;
+export function resolveChunk(chunk: Chunk, registry: Blocks): void;
 ```
 
 #### `repackChunkSnapshot`
@@ -4027,7 +4051,7 @@ export function clearVoxelsAuthority(authority: VoxelsAuthority): void;
 #### `createVoxels`
 
 ```ts
-export function createVoxels(registry: BlockRegistry): Voxels;
+export function createVoxels(registry: Blocks): Voxels;
 ```
 
 #### `markChunkDirty`
@@ -4491,11 +4515,11 @@ export const particleUpdate: {
     collideDestroy: (pool: ParticlePool, i: number, _dt: number, voxels: Voxels) => void;
     fadeRgb: (pool: ParticlePool, i: number, dt: number, rate: number) => void;
     fadeAlpha: (pool: ParticlePool, i: number, dt: number, rate: number) => void;
-    dust: UpdateFn;
-    smoke: UpdateFn;
-    spark: UpdateFn;
-    snow: UpdateFn;
-    rain: UpdateFn;
+    dust: ParticleUpdateFn;
+    smoke: ParticleUpdateFn;
+    spark: ParticleUpdateFn;
+    snow: ParticleUpdateFn;
+    rain: ParticleUpdateFn;
 };
 ```
 
@@ -4512,7 +4536,7 @@ export type ParticleHandle = {
     sprite: SpriteHandle;
     playback: ParticlePlayback;
     fps: number;
-    update: UpdateFn;
+    update: ParticleUpdateFn;
     glow: number;
     tint: [
         r: number,
@@ -4531,7 +4555,7 @@ export type ParticleOptions = {
     sprite: SpriteHandle;
     playback: ParticlePlayback;
     fps?: number;
-    update: UpdateFn;
+    update: ParticleUpdateFn;
     glow?: number;
     tint?: [
         r: number,
@@ -4562,7 +4586,7 @@ export type ParticlePool = {
     capacity: number;
     count: number;
     handle: Array<ParticleHandle | null>;
-    updateFn: Array<UpdateFn | null>;
+    updateFn: Array<ParticleUpdateFn | null>;
     posX: Float32Array;
     posY: Float32Array;
     posZ: Float32Array;
@@ -5022,7 +5046,8 @@ export function releaseAvatar(ctx: ScriptContext, modelId: string): void;
 #### `randomDisplayName`
 
 ```ts
-/** A plausible display name for an ambient NPC, drawn from a small bundled pool. */
+/** A plausible display name for an ambient NPC, in the shape
+ *  `AdjectiveNoun12345` (e.g. `BluePanda102837`). */
 export function randomDisplayName(): string;
 ```
 #### `Avatar`
@@ -5826,8 +5851,8 @@ export function wasMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean;
 #### `isTouchDevice`
 
 ```ts
-/** matchMedia('(pointer: coarse)') OR navigator.maxTouchPoints > 0. true on
- *  touchscreen laptops too, use `isTouchPrimary` to gate touch controls. */
+/** Device is touch-CAPABLE (touch-only or hybrid). true on touchscreen laptops
+ *  too — use `isTouchPrimary` to decide whether touch is actually being used. */
 export function isTouchDevice(ctx: ScriptContext): boolean;
 ```
 
@@ -5835,11 +5860,12 @@ export function isTouchDevice(ctx: ScriptContext): boolean;
 
 ```ts
 /**
- * Touch is the PRIMARY pointer (matchMedia('(pointer: coarse)')). Unlike
- * `isMobile` this is viewport-INDEPENDENT, so it stays true on a tablet or a
- * phone held in landscape; unlike `isTouchDevice` it's false on a touchscreen
- * laptop driven by its trackpad. This is the "should I show on-screen touch
- * controls (joystick, action buttons)" check. Resolved once at client boot.
+ * Touch is the input being used RIGHT NOW ("last input wins", from real pointer
+ * events). Unlike `isMobile` this is viewport-INDEPENDENT, so it stays true on a
+ * tablet or a phone held in landscape; unlike `isTouchDevice` it's false on a
+ * touchscreen laptop driven by its trackpad, and it flips live when a hybrid user
+ * switches devices. This is the "should I show on-screen touch controls (joystick,
+ * action buttons)" check — gate per-tick so it tracks the current modality.
  */
 export function isTouchPrimary(ctx: ScriptContext): boolean;
 ```

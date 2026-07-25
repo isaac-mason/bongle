@@ -20,9 +20,8 @@ import { appById, blockbenchApp, openPath } from '../apps';
 import { ClientView } from './ClientView';
 import { CodePane } from './CodePane';
 import { BuildModal } from './BuildModal';
-import { CommandPalette } from './CommandPalette';
 import { TopBar } from './TopBar';
-import { QuickOpen } from './QuickOpen';
+import { type PaletteMode, QuickPalette } from './QuickPalette';
 import { SyncChooser } from './SyncChooser';
 import { SyncPanel } from './SyncPanel';
 import { Presence } from './Presence';
@@ -71,15 +70,15 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
     // Cmd/Ctrl+P → file quick-open, Cmd/Ctrl+Shift+P → command palette. Capture
     // phase so they beat Monaco's own key handling, and preventDefault to swallow
     // the browser print dialog.
-    const [quickOpen, setQuickOpen] = useState(false);
-    const [palette, setPalette] = useState(false);
+    // one palette, two entry points: Cmd+P opens it on files, Cmd+Shift+P opens it
+    // in command mode (`>` pre-typed). null = closed.
+    const [palette, setPalette] = useState<PaletteMode | null>(null);
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (!(e.metaKey || e.ctrlKey) || e.altKey || (e.key !== 'p' && e.key !== 'P')) return;
             e.preventDefault();
             e.stopPropagation();
-            if (e.shiftKey) setPalette(true);
-            else setQuickOpen(true);
+            setPalette(e.shiftKey ? 'commands' : 'files');
         };
         window.addEventListener('keydown', onKey, true);
         return () => window.removeEventListener('keydown', onKey, true);
@@ -397,8 +396,7 @@ export function Desktop({ windows, fs }: { windows: WindowDef[]; fs: Filesystem 
             )}
             <SyncChooser fs={fs} />
             <SyncPanel />
-            {quickOpen && <QuickOpen fs={fs} onClose={() => setQuickOpen(false)} />}
-            {palette && <CommandPalette fs={fs} onClose={() => setPalette(false)} />}
+            {palette && <QuickPalette fs={fs} mode={palette} onClose={() => setPalette(null)} />}
             <BuildModal />
         </div>
     );

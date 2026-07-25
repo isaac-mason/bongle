@@ -1,5 +1,5 @@
-// editor/ui/fuzzy.ts — subsequence fuzzy scorer shared by the file palette
-// (QuickOpen) and the command palette (CommandPalette).
+// editor/ui/fuzzy.ts — subsequence fuzzy scorer for the unified quick-open
+// (QuickPalette), matching both file paths and command titles.
 
 /** subsequence fuzzy score, or null when `q` isn't a subsequence of `text`.
  *  Rewards contiguous runs and matches at word boundaries (start / after a

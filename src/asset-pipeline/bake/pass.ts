@@ -21,7 +21,7 @@ import type { ResourceLoader } from '../../core/resource-loader';
 import type {
     BlockDef,
     BlockHandle,
-    BlockRegistry,
+    Blocks,
     BlockTextureDef,
     ModelHandle,
     ModuleVersion,
@@ -47,7 +47,7 @@ export type PipelineInternal = {
         defs: Map<string, BlockDef>,
         handles: Map<string, BlockHandle>,
         blockTextures: Map<string, BlockTextureDef>,
-    ) => BlockRegistry;
+    ) => Blocks;
 };
 
 export type PipelineOpts = {

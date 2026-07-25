@@ -4,8 +4,10 @@ import {
     __popModule,
     __pushModule,
     _reset,
+    owningModule,
     recordScript,
     recordTrait,
+    resetOwnerStack,
 } from '../../../../src/core/capture/module-scope';
 
 /**
@@ -96,5 +98,31 @@ describe('module-scope — reload decision', () => {
         evaluate(() => recordTrait('mod/a', 'hash-1'));
         evaluate(() => recordTrait('mod/a', 'hash-1'));
         expect(__decideReload(MOD, { config: { some: 'object' } })).toBe('invalidate');
+    });
+});
+
+describe('module-scope — owner stack recovery', () => {
+    beforeEach(() => _reset());
+
+    it('reports __prod__ when the stack is empty', () => {
+        expect(owningModule()).toBe('__prod__');
+    });
+
+    it('drops a module id leaked by a throwing body (push without pop)', () => {
+        // a module body that throws between __pushModule (PRELUDE) and
+        // __popModule (POSTLUDE) never pops — its id leaks on the stack.
+        __pushModule(MOD);
+        expect(owningModule()).toBe(MOD);
+        resetOwnerStack();
+        expect(owningModule()).toBe('__prod__');
+    });
+
+    it('preserves snapshots across a reset (only the stack clears)', () => {
+        // reload decisions key off per-module snapshots, not the stack, so a
+        // reset must not wipe them.
+        evaluate(() => recordTrait('mod/a', 'hash-1'));
+        evaluate(() => recordTrait('mod/a', 'hash-1'));
+        resetOwnerStack();
+        expect(__decideReload(MOD, { A: handle('traits', 'mod/a') })).toBe('patch');
     });
 });

@@ -76,6 +76,25 @@ export function owningModule(): string {
     return stack[stack.length - 1] ?? '__prod__';
 }
 
+/**
+ * Clear the owning-module stack back to the engine (`__prod__`) scope.
+ *
+ * Called at the top of each flush microtask. By the time a flush runs, the
+ * HMR batch's module bodies have all finished, so the stack SHOULD be empty
+ * and `owningModule()` SHOULD be `__prod__`. But `__popModule` (injected as
+ * the POSTLUDE) is NOT exception-safe: if a module body throws between
+ * `__pushModule` (PRELUDE) and the pop, its id leaks on the stack forever.
+ * Every later flush would then stamp engine-derived registrations (e.g. the
+ * block-dust sprites `reindexRegistry` derives) with that stale module as
+ * owner, tripping the registry's redeclaration guard against the `__prod__`
+ * entry created at boot. Resetting here makes flush self-healing and keeps
+ * engine reconciliation at its true `__prod__` scope. Snapshots are left
+ * intact so the reload decision still sees each module's history.
+ */
+export function resetOwnerStack(): void {
+    stack.length = 0;
+}
+
 /* ── lifecycle hooks ────────────────────────────────────────────── */
 
 /**

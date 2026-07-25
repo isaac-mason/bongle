@@ -38,8 +38,8 @@ import type { Voxels } from '../voxels/voxels';
 /* ── pool shape (impl lives in render/particles/particles.ts) ── */
 
 /** Per-room SoA pool. Alive prefix is `[0, count)`; dead slots are
- *  compacted by `Particles.update` (client). The type is declared here
- *  so `UpdateFn` (also here) can name its first param without forcing a
+ *  compacted by `particleUpdate` (client). The type is declared here
+ *  so `ParticleUpdateFn` (also here) can name its first param without forcing a
  *  core→client import; the runtime that allocates / mutates it lives in
  *  client. Both halves agree on the layout via this single declaration. */
 export type ParticlePool = {
@@ -55,7 +55,7 @@ export type ParticlePool = {
      *  redundant with `handle[i].update` but kept as a direct pointer so
      *  the tick loop's inner indirect-call doesn't chase through the
      *  handle struct. null on free slots. */
-    updateFn: Array<UpdateFn | null>;
+    updateFn: Array<ParticleUpdateFn | null>;
 
     posX: Float32Array;
     posY: Float32Array;
@@ -104,7 +104,7 @@ export type ParticlePlayback = 'stretch' | 'loop' | 'once';
  *  to kill from inside the fn. `voxels` is the room's voxel world,
  *  threaded so `collide*` primitives can query `BLOCK_FLAG_COLLISION`
  *  without the pool carrying a back-ref. pure-motion fns ignore it. */
-export type UpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
+export type ParticleUpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
 
 export type ParticleOptions = {
     /** human-readable display name for editor UIs. falls back to the
@@ -123,7 +123,7 @@ export type ParticleOptions = {
     /** per-particle update fn. one indirect call per alive slot per
      *  tick. compose primitives from `particleUpdate.*` or write your
      *  own. */
-    update: UpdateFn;
+    update: ParticleUpdateFn;
     /** spawn-time default for the per-particle glow (self-illumination)
      *  level [0,1]. 0 = fully sample world light (lit like models /
      *  voxel-meshes), 1 = fully lit / shadow-free, matching mesh/sprite
@@ -152,7 +152,7 @@ export type ParticleHandle = {
      *  for `'stretch'` and single-frame sprites. */
     fps: number;
     /** per-particle update fn. */
-    update: UpdateFn;
+    update: ParticleUpdateFn;
     /** resolved spawn-time default for glow [0,1]. */
     glow: number;
     /** resolved spawn-time default RGBA tint multiplier. [1,1,1,1] = none. */

@@ -25,6 +25,8 @@
  * would silently no-op because `pending` stayed `true`).
  */
 
+import { resetOwnerStack } from './module-scope';
+
 type FlushHandler = () => void | Promise<void>;
 
 const handlers = new Set<FlushHandler>();
@@ -51,6 +53,11 @@ export function requestFlush(): void {
     pending = true;
     queueMicrotask(() => {
         pending = false;
+        // Flush handlers are engine-level reconciliation (applyRegistryChanges,
+        // the asset pipeline pass) — they must run at __prod__ scope. Drop any
+        // module id a thrown module body left on the owning-module stack so
+        // reindex-derived upserts aren't misattributed to it. See resetOwnerStack.
+        resetOwnerStack();
         for (const fn of handlers) {
             try {
                 const r = fn();
