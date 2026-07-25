@@ -45,9 +45,14 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
     const worker = new Worker(new URL('./server-worker.ts', import.meta.url), { type: 'module' });
 
     let resolveReady!: () => void;
-    const ready = new Promise<void>((r) => {
-        resolveReady = r;
+    let rejectReady!: (err: Error) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
     });
+    // don't let an unobserved `ready` rejection surface as an unhandledrejection:
+    // callers await it lazily (project boot backgrounds it), so attach a no-op sink.
+    ready.catch(() => {});
 
     let resolveDisposed!: () => void;
     const disposed = new Promise<void>((r) => {
@@ -55,7 +60,7 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
     });
 
     worker.onmessage = (e: MessageEvent) => {
-        const msg = e.data as { type: string; msg?: string };
+        const msg = e.data as { type: string; msg?: string; message?: string };
         if (msg.type === 'worker-ready') {
             // worker is live — NOW wire the bundler conduit + post init (transferred
             // port). A blind init at spawn is dropped in vite's dep-optimize window.
@@ -67,6 +72,11 @@ export function spawnServerWorker(opts: SpawnServerWorkerOptions): ServerHost {
         else if (msg.type === 'ready') {
             console.log('[boot] server: worker reported ready');
             resolveReady();
+        } else if (msg.type === 'boot-error') {
+            // the worker's init boot threw (bad user import, eval error). Reject
+            // `ready` so the caller can surface it + retry, rather than hanging.
+            console.log('[boot] server: worker reported boot-error');
+            rejectReady(new Error(msg.message ?? 'server boot failed'));
         } else if (msg.type === 'disposed') {
             // the worker finished flushing + draining its saves to OPFS.
             resolveDisposed();

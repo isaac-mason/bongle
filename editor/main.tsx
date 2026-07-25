@@ -393,15 +393,32 @@ async function boot(): Promise<void> {
         return;
     }
 
-    // PROJECT (or standalone): the running game IS the surface, so boot the realms now
-    // and open the play client full-screen.
-    bootLog('starting the game world…');
-    await useServer.getState().start();
-    bootLog('opening the game…');
-    const id = useClients.getState().open();
-    if (id) useWindows.getState().snapTo(id, 'full');
+    // PROJECT (or standalone): the running game is the primary surface — but the
+    // WORKSPACE must never wait on it. A user-code error (a bad import, a type slip)
+    // fails the realm boot, and gating the boot screen on that would lock the editor
+    // behind the very error the user opened it to fix. So drop the boot screen as soon
+    // as the workspace is interactive, then boot the realm stack in the BACKGROUND: the
+    // play client snaps in full-screen once the server is up; a boot failure just lands
+    // the user in the workspace with the build + server windows open to see the error
+    // (build log) and retry (server panel).
+    bootLog('opening the workspace…');
     useBoot.getState().setReady();
     bootTimer.summary();
+
+    void useServer
+        .getState()
+        .start() // swallows failures, leaving status 'idle'; success → 'running'
+        .then(() => {
+            if (useServer.getState().status === 'running') {
+                const id = useClients.getState().open();
+                if (id) useWindows.getState().snapTo(id, 'full');
+            } else {
+                // realm boot failed — surface where the user fixes + retries it.
+                log('game server failed to start — see the build log, fix src/, then start server.');
+                useSystemWindows.getState().open('build');
+                useSystemWindows.getState().open('server');
+            }
+        });
 }
 
 // the bottom log-window row (build + server), anchored to the viewport bottom

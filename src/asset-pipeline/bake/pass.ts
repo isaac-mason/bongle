@@ -17,17 +17,13 @@
  * `build.ts` caller reads it directly off pipeline state after the pass.
  */
 
+import type { ModelHandle } from '../../core/models/handle';
+import type { Registry } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
-import type {
-    BlockDef,
-    BlockHandle,
-    Blocks,
-    BlockTextureDef,
-    ModelHandle,
-    ModuleVersion,
-    Registry,
-    SceneHandle,
-} from '../../internal';
+import type { SceneHandle } from '../../core/scene/scene-handle';
+import type { Blocks } from '../../core/voxels/block-registry';
+import type { BlockDef, BlockHandle, BlockTextureDef } from '../../core/voxels/blocks';
+import type { ModuleVersion } from '../../internal';
 import type { Filesystem } from '../filesystem';
 import { buildAudio } from './audio';
 import { buildBlockTextureAtlas } from './block-texture-atlas';

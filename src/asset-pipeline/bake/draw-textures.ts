@@ -13,8 +13,10 @@
 // Output type `BakedDraws = Map<DrawSource, RasterCanvas>` is opaque to callers;
 // both atlas builders draw the canvas directly.
 
+import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
-import type { BlockTextureDef, DrawSource, KindStore, NormalizedImageSource, SpriteHandle } from '../../internal';
+import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
+import type { BlockTextureDef } from '../../core/voxels/blocks';
 import type { Raster, RasterCanvas, RasterContext2D, RasterImage } from './raster';
 
 export type BakedDraws = Map<DrawSource, RasterCanvas>;

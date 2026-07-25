@@ -137,6 +137,12 @@ self.onmessage = async (e: MessageEvent<HostMessage>) => {
         log(`worker error: ${(err as Error).message}`);
         // biome-ignore lint/suspicious/noConsole: worker-side diagnostics.
         console.error(err);
+        // A failed init boot (e.g. a bad import in src/index.ts) must not leave the
+        // host's `ready` promise hanging — it only resolves on 'ready'. Report it so
+        // the host rejects `ready`, the boot screen drops, and the workspace opens for
+        // the user to fix the error. Post-boot message errors (client-join, tick) are
+        // recoverable and just log.
+        if (msg.type === 'init') self.postMessage({ type: 'boot-error', message: (err as Error).message });
     }
 };
 

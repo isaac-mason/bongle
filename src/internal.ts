@@ -6,6 +6,9 @@ import type { SceneHandle } from './core/scene/scene-handle';
 import type { Blocks } from './core/voxels/block-registry';
 import type { BlockTextureDef } from './core/voxels/blocks';
 
+// Asset-pipeline view: the small slice of registry state the bake builders read.
+// Materialized by `runAssetPipelinePass` from the singleton's per-kind maps
+// before dispatching to the per-asset builders.
 export type ModuleVersion = {
     blocks: Blocks;
     blockTextures: Map<string, BlockTextureDef>;
@@ -13,20 +16,20 @@ export type ModuleVersion = {
     scenes: Map<string, SceneHandle>;
 };
 
+// registerModel / registerScene / registerSound: registration primitives the
+// generated codegen barrels import to stamp one handle/payload into the singleton
+// registry (see asset-pipeline/bake/{models,scenes,audio}.ts). Sorted apart by path.
 export { _registerScenePayload as registerScene } from './api/scenes';
-export type { Region } from './core/atlas/skyline';
-export { addSkylineLevel, emptySkyline, findBestFit } from './core/atlas/skyline';
-export type { ModelHandle } from './core/models/handle';
-export type { ModelBinChannel, ModelBinClip, ModelBinImage, ModelBinMesh } from './core/models/model-bin';
-export { pack as packModelBin } from './core/models/model-bin';
 export { _registerModelHandle as registerModel } from './core/models/models';
-export type { Registry, RegistryStore as KindStore } from './core/registry';
+// The shared registry singleton. The asset-pipeline realm fetches this by the
+// `bongle/internal` specifier at runtime so it reads the SAME instance the
+// user declarations populated (a static import would get an empty copy).
 export { registry } from './core/registry';
-export type { SceneHandle } from './core/scene/scene-handle';
-export type { SoundHandle } from './core/sounds/sounds';
 export { _registerSoundHandle as registerSound } from './core/sounds/sounds';
-export type { DrawSource, NormalizedImageSource, SpriteHandle } from './core/sprites/sprites';
-export type { Blocks } from './core/voxels/block-registry';
+// block registry builder: pure data computation over the raw registry maps,
+// consumed by the pipeline pass to assemble a partial ModuleVersion view.
 export { buildBlockRegistry } from './core/voxels/block-registry';
-export type { BlockDef, BlockHandle, BlockTextureDef } from './core/voxels/blocks';
+// __bongle, runtime namespace called by bongle-generated code (dev transform +
+// build prelude/postlude, model + scene codegen barrels, realm boot entries).
+// See src/internal-runtime.ts for the full surface + injection sites.
 export { __bongle } from './internal-runtime';
