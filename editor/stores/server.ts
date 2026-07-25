@@ -69,8 +69,10 @@ export const useServer = create<ServerStore>((set, get) => ({
         try {
             await manager.restart();
             // the fresh worker is `ready`; reconnect the open client iframes (their
-            // transports died with the old worker).
+            // transports died with the old worker), and mount the preview shell if a
+            // failed first boot left it waiting (recovery restart).
             useClients.getState().host?.rejoinAll();
+            useClients.getState().attachPending();
             set({ status: 'running', phase: '' });
         } catch {
             set({ status: 'failed', phase: '' });

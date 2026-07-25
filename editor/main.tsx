@@ -73,7 +73,7 @@ import { vec3 } from 'mathcat';
 
 use(blocks);
 
-const SPAWN = blockTopCenter(vec3.create(), 0, 5, 0);
+const SPAWN = blockTopCenter(vec3.create(), [0, 5, 0]);
 
 system('environment', (ctx) => {
     setEnvironment(ctx, ENVIRONMENT_OVERWORLD);
@@ -397,15 +397,22 @@ async function boot(): Promise<void> {
     useBoot.getState().setReady();
     bootTimer.summary();
 
+    // frame the play surface RIGHT NOW (snapped full), showing the realm-boot status
+    // in place of the iframe — so the user isn't left staring at a blank desktop, or
+    // poking a dead window, while the stack comes up. Its iframe mounts (attachPending)
+    // the moment the server is live.
+    const previewId = useClients.getState().openShell();
+    useWindows.getState().snapTo(previewId, 'full');
+
     void useServer
         .getState()
-        .start() // swallows failures, leaving status 'idle'; success → 'running'
+        .start() // swallows failures → status 'failed'; success → 'running'
         .then(() => {
             if (useServer.getState().status === 'running') {
-                const id = useClients.getState().open();
-                if (id) useWindows.getState().snapTo(id, 'full');
+                useClients.getState().attachPending();
             } else {
-                // realm boot failed — surface where the user fixes + retries it.
+                // realm boot failed — the shell now shows a "failed → logs" target; also
+                // pop the windows where the user fixes + retries it.
                 log('game server failed to start — see the build log, fix src/, then start server.');
                 useSystemWindows.getState().open('build');
                 useSystemWindows.getState().open('server');

@@ -463,27 +463,27 @@ const transformScaleSync = sync(TransformTrait, 'scale', {
 // mark a transform changed for world-recompute + interpolation snapshot +
 // descendant invalidation, WITHOUT flagging any replication sync. callers pair
 // this with the specific `transform*Sync.dirty(t)` for the slice they wrote.
-function markTransformChanged(t: TransformTrait): void {
+function markTransformChanged(transform: TransformTrait): void {
     // always enqueue for snapshot, even when _dirty is already maxed,
     // the node may have moved again this tick and prev snapshot needs to
     // catch the new pose.
-    const node = t._node;
-    if (node?.scene) node.scene._transformDirty.add(t);
-    if (t._dirty === TRANSFORM_DIRTY_ALL) return;
-    t._dirty = TRANSFORM_DIRTY_ALL;
-    t._version++;
-    markDescendants(t._node);
+    const node = transform._node;
+    if (node?.scene) node.scene._transformDirty.add(transform);
+    if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
+    transform._dirty = TRANSFORM_DIRTY_ALL;
+    transform._version++;
+    markDescendants(transform._node);
 }
 
-export function markTransformDirty(t: TransformTrait): void {
-    markTransformChanged(t);
+export function markTransformDirty(transform: TransformTrait): void {
+    markTransformChanged(transform);
     // fire replication dirty bits unconditionally (cheap single bits, and
     // freshly-created traits start at _dirty=ALL so markTransformChanged's
     // early-out would otherwise swallow the first local write's emission,
     // mountRig hit this with bone TRS on first set). full write: every slice.
-    transformPositionSync.dirty(t);
-    transformQuaternionSync.dirty(t);
-    transformScaleSync.dirty(t);
+    transformPositionSync.dirty(transform);
+    transformQuaternionSync.dirty(transform);
+    transformScaleSync.dirty(transform);
 }
 
 /**
@@ -496,20 +496,20 @@ export function markTransformDirty(t: TransformTrait): void {
  * the next snapshot and stomp the buffered path's irrelevant prev) and
  * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
  */
-export function markWorldDirty(t: TransformTrait): void {
-    if (t._dirty === TRANSFORM_DIRTY_ALL) return;
-    t._dirty = TRANSFORM_DIRTY_ALL;
-    t._version++;
-    if (t._node) markDescendants(t._node);
+export function markWorldDirty(transform: TransformTrait): void {
+    if (transform._dirty === TRANSFORM_DIRTY_ALL) return;
+    transform._dirty = TRANSFORM_DIRTY_ALL;
+    transform._version++;
+    if (transform._node) markDescendants(transform._node);
 }
 
 function markDescendants(node: Node): void {
     for (const child of node.children) {
-        const ct = getTrait(child, TransformTrait);
-        if (ct) {
-            if (ct._dirty !== TRANSFORM_DIRTY_ALL) {
-                ct._dirty = TRANSFORM_DIRTY_ALL;
-                ct._version++;
+        const childTransform = getTrait(child, TransformTrait);
+        if (childTransform) {
+            if (childTransform._dirty !== TRANSFORM_DIRTY_ALL) {
+                childTransform._dirty = TRANSFORM_DIRTY_ALL;
+                childTransform._version++;
                 // no pose/scaleSync.dirty here, descendants' local TRS is
                 // unchanged, only their world. replication is local-only.
                 markDescendants(child);
@@ -535,11 +535,13 @@ function markDescendants(node: Node): void {
  *     replicated separately by the scene-graph layer.
  */
 export function markAncestryChanged(node: Node): void {
-    const t = getTrait(node, TransformTrait);
-    if (t) {
-        t._dirty = TRANSFORM_DIRTY_ALL;
-        t._version++;
+    const transform = getTrait(node, TransformTrait);
+
+    if (transform) {
+        transform._dirty = TRANSFORM_DIRTY_ALL;
+        transform._version++;
     }
+
     for (const child of node.children) {
         markAncestryChanged(child);
     }
@@ -547,7 +549,7 @@ export function markAncestryChanged(node: Node): void {
 
 // ── scratch mats/vecs (reused to avoid allocation) ──────────────────────
 
-const _invParent: Mat4 = mat4.create();
+const _invParent = mat4.create();
 
 // reusable walk stack for updateWorldTransform's iterative ancestor walk.
 // non-reentrant, safe because updateWorldTransform never calls anything
@@ -578,12 +580,12 @@ const _interpolatedWalkStack: TransformTrait[] = [];
  * called by both `updateWorldTransform`'s lazy walk-up-then-down loop and
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
-export function composeWorldMatrix(n: TransformTrait): void {
-    const parent = n._parent as TransformTrait | null;
+export function composeWorldMatrix(transform: TransformTrait): void {
+    const parent = transform._parent as TransformTrait | null;
 
-    const q = n.quaternion;
-    const p = n.position;
-    const s = n.scale;
+    const q = transform.quaternion;
+    const p = transform.position;
+    const s = transform.scale;
     const qx = q[0];
     const qy = q[1];
     const qz = q[2];
@@ -621,20 +623,20 @@ export function composeWorldMatrix(n: TransformTrait): void {
     const l9 = (yz - wx) * sz;
     const l10 = (1 - (xx + yy)) * sz;
 
-    const worldMatrix = n.worldMatrix;
+    const worldMatrix = transform.worldMatrix;
 
     if (parent === null) {
         // root: world = local. seed worldP/Q/S directly (no decompose).
-        n.worldPosition[0] = px;
-        n.worldPosition[1] = py;
-        n.worldPosition[2] = pz;
-        n.worldQuaternion[0] = qx;
-        n.worldQuaternion[1] = qy;
-        n.worldQuaternion[2] = qz;
-        n.worldQuaternion[3] = qw;
-        n.worldScale[0] = sx;
-        n.worldScale[1] = sy;
-        n.worldScale[2] = sz;
+        transform.worldPosition[0] = px;
+        transform.worldPosition[1] = py;
+        transform.worldPosition[2] = pz;
+        transform.worldQuaternion[0] = qx;
+        transform.worldQuaternion[1] = qy;
+        transform.worldQuaternion[2] = qz;
+        transform.worldQuaternion[3] = qw;
+        transform.worldScale[0] = sx;
+        transform.worldScale[1] = sy;
+        transform.worldScale[2] = sz;
 
         worldMatrix[0] = l0;
         worldMatrix[1] = l1;
@@ -654,7 +656,7 @@ export function composeWorldMatrix(n: TransformTrait): void {
         worldMatrix[15] = 1;
 
         // worldP/Q/S already fresh.
-        n._dirty &= ~(TRANSFORM_DIRTY_WORLD_MATRIX | TRANSFORM_DIRTY_WORLD_TRS);
+        transform._dirty &= ~(TRANSFORM_DIRTY_WORLD_MATRIX | TRANSFORM_DIRTY_WORLD_TRS);
     } else {
         // affine multiply: world = parent.world * local. caller guarantees
         // parent.worldMatrix is fresh. both matrices are affine (bottom row
@@ -692,7 +694,7 @@ export function composeWorldMatrix(n: TransformTrait): void {
         worldMatrix[15] = 1;
 
         // worldP/Q/S deferred (lazy decompose on read).
-        n._dirty = (n._dirty & ~TRANSFORM_DIRTY_WORLD_MATRIX) | TRANSFORM_DIRTY_WORLD_TRS;
+        transform._dirty = (transform._dirty & ~TRANSFORM_DIRTY_WORLD_MATRIX) | TRANSFORM_DIRTY_WORLD_TRS;
     }
 }
 
@@ -701,15 +703,15 @@ export function composeWorldMatrix(n: TransformTrait): void {
  * first clean ancestor (or root), then composes back down the chain via
  * `composeWorldMatrixInline`.
  */
-function updateWorldTransform(t: TransformTrait): void {
-    if (!(t._dirty & TRANSFORM_DIRTY_WORLD_MATRIX)) return;
+function updateWorldTransform(transform: TransformTrait): void {
+    if (!(transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX)) return;
 
     // walk up, collecting the dirty chain; stop at the first clean
     // ancestor (or root). stack[length-1] is the topmost dirty ancestor;
     // stack[0] is `t`. iterative form avoids JS function-call overhead
     // for deep skeletons.
     const stack = _walkStack;
-    let cursor: TransformTrait | null = t;
+    let cursor: TransformTrait | null = transform;
     while (cursor !== null && cursor._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) {
         stack.push(cursor);
         cursor = cursor._parent as TransformTrait | null;
@@ -737,12 +739,12 @@ function updateWorldTransform(t: TransformTrait): void {
  * TRANSFORM_DIRTY_INTERPOLATED_TRS since interpolatedWorld P/Q/S are seeded directly.
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
-export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
-    const parent = n._parent as TransformTrait | null;
+export function composeInterpolatedWorldMatrix(transform: TransformTrait): void {
+    const parent = transform._parent as TransformTrait | null;
 
-    const q = n.quaternion;
-    const p = n.position;
-    const s = n.scale;
+    const q = transform.quaternion;
+    const p = transform.position;
+    const s = transform.scale;
     const qx = q[0];
     const qy = q[1];
     const qz = q[2];
@@ -777,19 +779,19 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
     const l9 = (yz - wx) * sz;
     const l10 = (1 - (xx + yy)) * sz;
 
-    const interpolatedWorldMatrix = n.interpolatedWorldMatrix;
+    const interpolatedWorldMatrix = transform.interpolatedWorldMatrix;
 
     if (parent === null) {
-        n.interpolatedWorldPosition[0] = px;
-        n.interpolatedWorldPosition[1] = py;
-        n.interpolatedWorldPosition[2] = pz;
-        n.interpolatedWorldQuaternion[0] = qx;
-        n.interpolatedWorldQuaternion[1] = qy;
-        n.interpolatedWorldQuaternion[2] = qz;
-        n.interpolatedWorldQuaternion[3] = qw;
-        n.interpolatedWorldScale[0] = sx;
-        n.interpolatedWorldScale[1] = sy;
-        n.interpolatedWorldScale[2] = sz;
+        transform.interpolatedWorldPosition[0] = px;
+        transform.interpolatedWorldPosition[1] = py;
+        transform.interpolatedWorldPosition[2] = pz;
+        transform.interpolatedWorldQuaternion[0] = qx;
+        transform.interpolatedWorldQuaternion[1] = qy;
+        transform.interpolatedWorldQuaternion[2] = qz;
+        transform.interpolatedWorldQuaternion[3] = qw;
+        transform.interpolatedWorldScale[0] = sx;
+        transform.interpolatedWorldScale[1] = sy;
+        transform.interpolatedWorldScale[2] = sz;
 
         interpolatedWorldMatrix[0] = l0;
         interpolatedWorldMatrix[1] = l1;
@@ -808,7 +810,7 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
         interpolatedWorldMatrix[14] = pz;
         interpolatedWorldMatrix[15] = 1;
 
-        n._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
+        transform._dirty &= ~(TRANSFORM_DIRTY_INTERPOLATED_MATRIX | TRANSFORM_DIRTY_INTERPOLATED_TRS);
     } else {
         // source from parent's visual chain if parent participates in
         // interpolation; otherwise the visual chain is not maintained
@@ -846,7 +848,7 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
         interpolatedWorldMatrix[15] = 1;
 
         // visual TRS deferred (lazy decompose on read).
-        n._dirty = (n._dirty & ~TRANSFORM_DIRTY_INTERPOLATED_MATRIX) | TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        transform._dirty = (transform._dirty & ~TRANSFORM_DIRTY_INTERPOLATED_MATRIX) | TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
 }
 
@@ -863,11 +865,11 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void {
  * caller (the getters) guarantees `t._interpolated === 1`, so the topmost
  * stacked node is always an Interp participant.
  */
-export function updateInterpolatedWorldTransform(t: TransformTrait): void {
-    if (!(t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX)) return;
+export function updateInterpolatedWorldTransform(transform: TransformTrait): void {
+    if (!(transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX)) return;
 
     const stack = _interpolatedWalkStack;
-    let cursor: TransformTrait | null = t;
+    let cursor: TransformTrait | null = transform;
     while (cursor?._interpolated && cursor._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) {
         stack.push(cursor);
         cursor = cursor._parent as TransformTrait | null;
@@ -944,25 +946,25 @@ export function markInterpolatedDescendantsDirty(node: Node): void {
  * fine.
  */
 export function setInterpolation(node: Node, on: boolean): void {
-    const t = getTrait(node, TransformTrait);
-    if (!t) return;
+    const transform = getTrait(node, TransformTrait);
+    if (!transform) return;
     if (on) {
-        if (t.interpolate) return;
-        t.interpolate = 1;
-        vec3.copy(t.prevPosition, t.position);
-        quat.copy(t.prevQuaternion, t.quaternion);
+        if (transform.interpolate) return;
+        transform.interpolate = 1;
+        vec3.copy(transform.prevPosition, transform.position);
+        quat.copy(transform.prevQuaternion, transform.quaternion);
         // force the first interpolate() frame down the teleport branch so
         // it snaps `interpolatedWorld*` to the current pose instead of
         // chase-lerping from (0,0,0). matches godot's
         // `reset_physics_interpolation` cold-start guarantee.
-        t.lastTeleport = t.teleport - 1;
-        if (node.scene) node.scene._interpolating.add(t);
+        transform.lastTeleport = transform.teleport - 1;
+        if (node.scene) node.scene._interpolating.add(transform);
     } else {
-        if (!t.interpolate) return;
-        t.interpolate = 0;
-        t._interpolated = 0;
-        t._correctionFrames = 0;
-        if (node.scene) node.scene._interpolating.delete(t);
+        if (!transform.interpolate) return;
+        transform.interpolate = 0;
+        transform._interpolated = 0;
+        transform._correctionFrames = 0;
+        if (node.scene) node.scene._interpolating.delete(transform);
     }
 }
 
@@ -975,59 +977,59 @@ export function setInterpolation(node: Node, on: boolean): void {
  * no-op for nodes that aren't enrolled in interpolation.
  */
 export function resetInterpolation(node: Node): void {
-    const t = getTrait(node, TransformTrait);
-    if (!t?.interpolate) return;
-    vec3.copy(t.prevPosition, t.position);
-    quat.copy(t.prevQuaternion, t.quaternion);
+    const transform = getTrait(node, TransformTrait);
+    if (!transform?.interpolate) return;
+    vec3.copy(transform.prevPosition, transform.position);
+    quat.copy(transform.prevQuaternion, transform.quaternion);
     // also force a teleport-edge snap on next interpolate() so the chase
     // path (if this transform is non-owner) re-seats interpolatedWorld*
     // instead of smearing across the discontinuity.
-    t.lastTeleport = t.teleport - 1;
+    transform.lastTeleport = transform.teleport - 1;
 }
 
 // ── local-space setters ─────────────────────────────────────────────────
 
 /** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void {
-    t.position[0] = v[0];
-    t.position[1] = v[1];
-    t.position[2] = v[2];
-    markTransformChanged(t);
-    transformPositionSync.dirty(t);
+export function setPosition(transform: TransformTrait, position: Vec3): void {
+    transform.position[0] = position[0];
+    transform.position[1] = position[1];
+    transform.position[2] = position[2];
+    markTransformChanged(transform);
+    transformPositionSync.dirty(transform);
 }
 
 /** set local quaternion and mark dirty. only the quaternion slice replicates. */
-export function setQuaternion(t: TransformTrait, q: Quat): void {
-    t.quaternion[0] = q[0];
-    t.quaternion[1] = q[1];
-    t.quaternion[2] = q[2];
-    t.quaternion[3] = q[3];
-    markTransformChanged(t);
-    transformQuaternionSync.dirty(t);
+export function setQuaternion(transform: TransformTrait, quaternion: Quat): void {
+    transform.quaternion[0] = quaternion[0];
+    transform.quaternion[1] = quaternion[1];
+    transform.quaternion[2] = quaternion[2];
+    transform.quaternion[3] = quaternion[3];
+    markTransformChanged(transform);
+    transformQuaternionSync.dirty(transform);
 }
 
 /** set local scale and mark dirty. only the scale slice replicates. */
-export function setScale(t: TransformTrait, v: Vec3): void {
-    t.scale[0] = v[0];
-    t.scale[1] = v[1];
-    t.scale[2] = v[2];
-    markTransformChanged(t);
-    transformScaleSync.dirty(t);
+export function setScale(transform: TransformTrait, scale: Vec3): void {
+    transform.scale[0] = scale[0];
+    transform.scale[1] = scale[1];
+    transform.scale[2] = scale[2];
+    markTransformChanged(transform);
+    transformScaleSync.dirty(transform);
 }
 
 /** set all local transform fields and mark dirty (single dirty pass). */
-export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec3): void {
-    t.position[0] = pos[0];
-    t.position[1] = pos[1];
-    t.position[2] = pos[2];
-    t.quaternion[0] = rot[0];
-    t.quaternion[1] = rot[1];
-    t.quaternion[2] = rot[2];
-    t.quaternion[3] = rot[3];
-    t.scale[0] = scale[0];
-    t.scale[1] = scale[1];
-    t.scale[2] = scale[2];
-    markTransformDirty(t);
+export function setTransform(transform: TransformTrait, position: Vec3, quaternion: Quat, scale: Vec3): void {
+    transform.position[0] = position[0];
+    transform.position[1] = position[1];
+    transform.position[2] = position[2];
+    transform.quaternion[0] = quaternion[0];
+    transform.quaternion[1] = quaternion[1];
+    transform.quaternion[2] = quaternion[2];
+    transform.quaternion[3] = quaternion[3];
+    transform.scale[0] = scale[0];
+    transform.scale[1] = scale[1];
+    transform.scale[2] = scale[2];
+    markTransformDirty(transform);
 }
 
 // ── world-space getters (lazy recompute via dirty bitmask) ──────────────
@@ -1038,13 +1040,13 @@ export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec
 // since worldMatrix is the source for all the others.
 
 /** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3 {
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
-        mat4.decompose(t.worldQuaternion, t.worldPosition, t.worldScale, t.worldMatrix);
-        t._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
+export function getWorldPosition(transform: TransformTrait): Vec3 {
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
+        mat4.decompose(transform.worldQuaternion, transform.worldPosition, transform.worldScale, transform.worldMatrix);
+        transform._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
     }
-    return t.worldPosition;
+    return transform.worldPosition;
 }
 
 /**
@@ -1054,41 +1056,41 @@ export function getWorldPosition(t: TransformTrait): Vec3 {
  * transform computes it once and a never-queried transform never computes it
  * at all. the returned Vec3 is the cached instance, do not mutate.
  */
-export function getWorldChunk(t: TransformTrait): Vec3 {
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_CHUNK) {
-        const p = getWorldPosition(t);
-        t.worldChunk[0] = toChunkCoord(Math.floor(p[0]));
-        t.worldChunk[1] = toChunkCoord(Math.floor(p[1]));
-        t.worldChunk[2] = toChunkCoord(Math.floor(p[2]));
-        t._dirty &= ~TRANSFORM_DIRTY_WORLD_CHUNK;
+export function getWorldChunk(transform: TransformTrait): Vec3 {
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_CHUNK) {
+        const p = getWorldPosition(transform);
+        transform.worldChunk[0] = toChunkCoord(Math.floor(p[0]));
+        transform.worldChunk[1] = toChunkCoord(Math.floor(p[1]));
+        transform.worldChunk[2] = toChunkCoord(Math.floor(p[2]));
+        transform._dirty &= ~TRANSFORM_DIRTY_WORLD_CHUNK;
     }
-    return t.worldChunk;
+    return transform.worldChunk;
 }
 
 /** get world-space quaternion, decomposing from worldMatrix if needed. */
-export function getWorldQuaternion(t: TransformTrait): Quat {
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
-        mat4.decompose(t.worldQuaternion, t.worldPosition, t.worldScale, t.worldMatrix);
-        t._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
+export function getWorldQuaternion(transform: TransformTrait): Quat {
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
+        mat4.decompose(transform.worldQuaternion, transform.worldPosition, transform.worldScale, transform.worldMatrix);
+        transform._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
     }
-    return t.worldQuaternion;
+    return transform.worldQuaternion;
 }
 
 /** get world-space scale, decomposing from worldMatrix if needed. */
-export function getWorldScale(t: TransformTrait): Vec3 {
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
-        mat4.decompose(t.worldQuaternion, t.worldPosition, t.worldScale, t.worldMatrix);
-        t._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
+export function getWorldScale(transform: TransformTrait): Vec3 {
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_TRS) {
+        mat4.decompose(transform.worldQuaternion, transform.worldPosition, transform.worldScale, transform.worldMatrix);
+        transform._dirty &= ~TRANSFORM_DIRTY_WORLD_TRS;
     }
-    return t.worldScale;
+    return transform.worldScale;
 }
 
 /** get world matrix, recomputing if dirty. */
-export function getWorldMatrix(t: TransformTrait): Mat4 {
-    if (t._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(t);
-    return t.worldMatrix;
+export function getWorldMatrix(transform: TransformTrait): Mat4 {
+    if (transform._dirty & TRANSFORM_DIRTY_WORLD_MATRIX) updateWorldTransform(transform);
+    return transform.worldMatrix;
 }
 
 // ── visual-space getters ───────────────────────────────────────────────
@@ -1101,58 +1103,58 @@ export function getWorldMatrix(t: TransformTrait): Mat4 {
 // from `parent.interpolatedWorldMatrix * local`.
 
 /** get the world matrix to render with, visual chain if interpolated, world otherwise. */
-export function getVisualWorldMatrix(t: TransformTrait): Mat4 {
-    if (!t._interpolated) return getWorldMatrix(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
-    return t.interpolatedWorldMatrix;
+export function getVisualWorldMatrix(transform: TransformTrait): Mat4 {
+    if (!transform._interpolated) return getWorldMatrix(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(transform);
+    return transform.interpolatedWorldMatrix;
 }
 
 /** get visual world-space position, lazy-decomposing if deferred. */
-export function getVisualWorldPosition(t: TransformTrait): Vec3 {
-    if (!t._interpolated) return getWorldPosition(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
+export function getVisualWorldPosition(transform: TransformTrait): Vec3 {
+    if (!transform._interpolated) return getWorldPosition(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
         mat4.decompose(
-            t.interpolatedWorldQuaternion,
-            t.interpolatedWorldPosition,
-            t.interpolatedWorldScale,
-            t.interpolatedWorldMatrix,
+            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldScale,
+            transform.interpolatedWorldMatrix,
         );
-        t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        transform._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
-    return t.interpolatedWorldPosition;
+    return transform.interpolatedWorldPosition;
 }
 
 /** get visual world-space quaternion, lazy-decomposing if deferred. */
-export function getVisualWorldQuaternion(t: TransformTrait): Quat {
-    if (!t._interpolated) return getWorldQuaternion(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
+export function getVisualWorldQuaternion(transform: TransformTrait): Quat {
+    if (!transform._interpolated) return getWorldQuaternion(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
         mat4.decompose(
-            t.interpolatedWorldQuaternion,
-            t.interpolatedWorldPosition,
-            t.interpolatedWorldScale,
-            t.interpolatedWorldMatrix,
+            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldScale,
+            transform.interpolatedWorldMatrix,
         );
-        t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        transform._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
-    return t.interpolatedWorldQuaternion;
+    return transform.interpolatedWorldQuaternion;
 }
 
 /** get visual world-space scale, lazy-decomposing if deferred. */
-export function getVisualWorldScale(t: TransformTrait): Vec3 {
-    if (!t._interpolated) return getWorldScale(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(t);
-    if (t._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
+export function getVisualWorldScale(transform: TransformTrait): Vec3 {
+    if (!transform._interpolated) return getWorldScale(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_MATRIX) updateInterpolatedWorldTransform(transform);
+    if (transform._dirty & TRANSFORM_DIRTY_INTERPOLATED_TRS) {
         mat4.decompose(
-            t.interpolatedWorldQuaternion,
-            t.interpolatedWorldPosition,
-            t.interpolatedWorldScale,
-            t.interpolatedWorldMatrix,
+            transform.interpolatedWorldQuaternion,
+            transform.interpolatedWorldPosition,
+            transform.interpolatedWorldScale,
+            transform.interpolatedWorldMatrix,
         );
-        t._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
+        transform._dirty &= ~TRANSFORM_DIRTY_INTERPOLATED_TRS;
     }
-    return t.interpolatedWorldScale;
+    return transform.interpolatedWorldScale;
 }
 
 // ── batch computeWorldTransforms ────────────────────────────────────────
@@ -1168,9 +1170,9 @@ export function getVisualWorldScale(t: TransformTrait): Vec3 {
  */
 export function computeWorldTransforms(nodes: SceneTree): void {
     traverse(nodes.root, (node: Node) => {
-        const t = getTrait(node, TransformTrait);
-        if (!t) return;
-        updateWorldTransform(t);
+        const transform = getTrait(node, TransformTrait);
+        if (!transform) return;
+        updateWorldTransform(transform);
     });
 }
 
@@ -1180,17 +1182,17 @@ export function computeWorldTransforms(nodes: SceneTree): void {
  * convert a world-space position to local-space for a node.
  * fast path: if no transformed parent, world === local, just copies.
  */
-export function worldToLocalPosition(t: TransformTrait, worldPos: Vec3, out: Vec3): Vec3 {
-    const parent = t._parent as TransformTrait | null;
-    if (parent === null) {
-        if (out !== worldPos) vec3.copy(out, worldPos);
+export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3 {
+    const parentTransform = t._parent as TransformTrait | null;
+    if (parentTransform === null) {
+        if (out !== worldPosition) vec3.copy(out, worldPosition);
         return out;
     }
-    mat4.invert(_invParent, getWorldMatrix(parent));
+    mat4.invert(_invParent, getWorldMatrix(parentTransform));
     // transform point by inverse parent matrix
-    const x = worldPos[0];
-    const y = worldPos[1];
-    const z = worldPos[2];
+    const x = worldPosition[0];
+    const y = worldPosition[1];
+    const z = worldPosition[2];
     const m = _invParent;
     out[0] = m[0] * x + m[4] * y + m[8] * z + m[12];
     out[1] = m[1] * x + m[5] * y + m[9] * z + m[13];
@@ -1205,17 +1207,17 @@ const _worldToLocalQuaternion_invParentQuat: Quat = quat.create();
  * convert a world-space quaternion to local-space for a node.
  * fast path: if no transformed parent, world === local, just copies.
  */
-export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: Quat): Quat {
-    const parent = t._parent as TransformTrait | null;
-    if (parent === null) {
-        if (out !== worldQuat) quat.copy(out, worldQuat);
+export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat {
+    const parentTransform = transform._parent as TransformTrait | null;
+    if (parentTransform === null) {
+        if (out !== worldQuaternion) quat.copy(out, worldQuaternion);
         return out;
     }
     // extract parent's world rotation and invert it
-    mat4.getRotation(_worldToLocalQuaternion_parentQuat, getWorldMatrix(parent));
+    mat4.getRotation(_worldToLocalQuaternion_parentQuat, getWorldMatrix(parentTransform));
     quat.invert(_worldToLocalQuaternion_invParentQuat, _worldToLocalQuaternion_parentQuat);
     // local = inverse(parentRot) * worldRot
-    quat.multiply(out, _worldToLocalQuaternion_invParentQuat, worldQuat);
+    quat.multiply(out, _worldToLocalQuaternion_invParentQuat, worldQuaternion);
     return out;
 }
 
@@ -1224,9 +1226,9 @@ export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: 
  * fast path when no transformed parent, just copies into t.position.
  * marks dirty after writing.
  */
-export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void {
-    worldToLocalPosition(t, worldPos, t.position);
-    markTransformDirty(t);
+export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3): void {
+    worldToLocalPosition(transform, worldPosition, transform.position);
+    markTransformDirty(transform);
 }
 
 /**
@@ -1234,17 +1236,17 @@ export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void {
  * fast path when no transformed parent, just copies into t.quaternion.
  * marks dirty after writing.
  */
-export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void {
-    worldToLocalQuaternion(t, worldQuat, t.quaternion);
-    markTransformDirty(t);
+export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void {
+    worldToLocalQuaternion(transform, worldQuaternion, transform.quaternion);
+    markTransformDirty(transform);
 }
 
 /**
  * returns true if this node has a transformed parent (parent transform pointer is set).
  * used as a fast path check, if false, local === world and no conversion is needed.
  */
-export function hasTransformedParent(t: TransformTrait): boolean {
-    return t._parent !== null;
+export function hasTransformedParent(transform: TransformTrait): boolean {
+    return transform._parent !== null;
 }
 
 // ── collapse (premultiply anchor.local into descendants) ────────────────
