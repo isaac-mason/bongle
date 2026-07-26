@@ -60,7 +60,7 @@ describe('vcc voxel contacts -> ContactsTrait', () => {
 
         // the character is standing on the lava block at (3, 4, 7); surface->
         // character normal points up.
-        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, /* stateId */ 42, /* subAabbIndex */ -1, 0.5, 4, 0.5, 0, 1, 0, /* penetration */ 0);
+        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, /* stateId */ 42, /* subAabbIndex */ -1, 0.5, 4, 0.5, 0, 1, 0, /* penetration */ 0, /* solid */ true);
 
         Physics.tick(physics, sceneTree, 1 / 60);
 
@@ -73,9 +73,28 @@ describe('vcc voxel contacts -> ContactsTrait', () => {
         expect(c.voxelY).toBe(4);
         expect(c.voxelZ).toBe(7);
         expect(c.stateId).toBe(42);
+        expect(c.solid).toBe(true);
         // ContactsTrait normal points AWAY from the observer (the character);
         // for a floor you stand on, that is downward.
         expect(c.normal[1]).toBeLessThan(0);
+    });
+
+    it('a passable/liquid overlap contact fans out as solid: false', () => {
+        const { sceneTree, physics, player, body } = setup();
+
+        // the character is standing inside a liquid lava cell at (3, 4, 7): no
+        // solver response, reported by the CC's overlap scan as solid: false.
+        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, 42, -1, 3.5, 4.5, 7.5, 0, 1, 0, 0, /* solid */ false);
+
+        Physics.tick(physics, sceneTree, 1 / 60);
+
+        const found = voxelContacts(physics, player);
+        expect(found).toHaveLength(1);
+        const c = found[0]!;
+        if (c.type !== 'voxel') throw new Error('unreachable');
+        expect(c.voxelX).toBe(3);
+        expect(c.stateId).toBe(42);
+        expect(c.solid).toBe(false);
     });
 
     it('no staged contact -> no voxel contacts', () => {
@@ -87,7 +106,7 @@ describe('vcc voxel contacts -> ContactsTrait', () => {
     it('the staging buffer is drained each tick (no stale carry-over)', () => {
         const { sceneTree, physics, player, body } = setup();
 
-        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, 42, -1, 0.5, 4, 0.5, 0, 1, 0, 0);
+        Physics.pushVccVoxelContact(physics, body.id, 3, 4, 7, 42, -1, 0.5, 4, 0.5, 0, 1, 0, 0, true);
         Physics.tick(physics, sceneTree, 1 / 60);
         expect(voxelContacts(physics, player)).toHaveLength(1);
 

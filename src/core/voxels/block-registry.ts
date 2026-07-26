@@ -929,14 +929,22 @@ export function buildBlockRegistry(
             // build a zero-child crashcat compound, and castRayVsShape dereferences
             // an undefined child on the next raycast (e.g. the editor cursor). leave
             // such a (degenerate) shape on the fast path so it can never crash.
+            let blockShape: BlockShape | undefined;
             if (def.shape) {
-                const blockShape = typeof def.shape === 'function' ? def.shape(props) : def.shape;
-                if (blockShape.type !== 'cube' && blockShape.boxes.length > 0) {
-                    colliderCount++;
-                    colliderIdTable[globalId] = colliderCount; // 1-based
-                    _tempBlockShapes[globalId] = blockShape;
-                    _tempColliderShapes[globalId] = blockShapeToShape(blockShape);
-                }
+                blockShape = typeof def.shape === 'function' ? def.shape(props) : def.shape;
+            } else if (liquidVal && surfaceHeightTable[globalId]! < 1) {
+                // a shallow liquid isn't solid, but its true volume is the
+                // [0..surfaceHeight] band, not the whole cell. give it that as a
+                // shape so overlap/detection (crossed voxels, selection) measure
+                // the real band. BLOCK_FLAG_COLLISION stays off, so the collision /
+                // rigid / particle paths skip it (they gate on the flag).
+                blockShape = { type: 'aabbs', boxes: [[0, 0, 0, 1, surfaceHeightTable[globalId]!, 1]] };
+            }
+            if (blockShape && blockShape.type !== 'cube' && blockShape.boxes.length > 0) {
+                colliderCount++;
+                colliderIdTable[globalId] = colliderCount; // 1-based
+                _tempBlockShapes[globalId] = blockShape;
+                _tempColliderShapes[globalId] = blockShapeToShape(blockShape);
             }
             // else: 0 (cube fast path), already zero-initialized
         }

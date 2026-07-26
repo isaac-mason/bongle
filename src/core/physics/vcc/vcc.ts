@@ -532,6 +532,11 @@ export type VCC = {
     /** active contacts from the last move(). cleared at the start of each move. */
     contacts: VccContact[];
 
+    /** reusable result for the per-segment voxel sweeps. its `crossed` list
+     *  accumulates the passable cells swept through across the whole move (reset
+     *  at the start of each move); read it after move() for liquid/trigger cells. */
+    sweep: VoxelSweepHit;
+
     /** internal pools. */
     contactsPool: VccContact[];
     constraintsPool: VccConstraint[];
@@ -660,6 +665,7 @@ export function create(world: World, voxels: Voxels, settings: VccSettings): VCC
         penetrationRecoverySpeed: settings.penetrationRecoverySpeed ?? DEFAULT_VCC_SETTINGS.penetrationRecoverySpeed,
 
         contacts: [],
+        sweep: createVoxelSweepHit(),
         contactsPool: [],
         constraintsPool: [],
 
@@ -1386,7 +1392,6 @@ function getContactsAtPosition(world: World, vcc: VCC, listener: VccListener | u
 
 // ── sweep: first contact along a displacement (mirrors kcc.ts:1440) ──
 
-const _sweepHit: VoxelSweepHit = createVoxelSweepHit();
 const _bodyCastSettings: CastShapeSettings = createDefaultCastShapeSettings();
 const _bodyCastCollector: ClosestCastShapeCollector = createClosestCastShapeCollector();
 const _sweepCenter: Vec3 = [0, 0, 0];
@@ -1431,8 +1436,10 @@ function getFirstContactForSweep(
     _sweepDisp[1] = dispY;
     _sweepDisp[2] = dispZ;
 
-    // voxel sweep.
+    // voxel sweep. collect the passable cells the box sweeps through into
+    // vcc.sweep.crossed (unioned across this move's segments; reset in move()).
     const voxelHit = sweepAabbVsVoxels(
+        vcc.sweep,
         voxels,
         _sweepCenter[0],
         _sweepCenter[1],
@@ -1443,9 +1450,9 @@ function getFirstContactForSweep(
         dispX,
         dispY,
         dispZ,
-        _sweepHit,
+        true,
     );
-    let bestFraction = voxelHit ? _sweepHit.toi : Infinity;
+    let bestFraction = voxelHit ? vcc.sweep.toi : Infinity;
     let voxelWon = voxelHit;
 
     // body sweep, castShape against non-voxel layers, excluding self.
@@ -1523,27 +1530,27 @@ function getFirstContactForSweep(
     const hZ = vcc.halfExtents[2];
 
     if (voxelWon) {
-        const cX = feetX + dispX * _sweepHit.toi;
-        const cY = feetY + dispY * _sweepHit.toi + hY;
-        const cZ = feetZ + dispZ * _sweepHit.toi;
-        outContact.positionX = cX - _sweepHit.normalX * hX;
-        outContact.positionY = cY - _sweepHit.normalY * hY;
-        outContact.positionZ = cZ - _sweepHit.normalZ * hZ;
-        outContact.contactNormalX = _sweepHit.normalX;
-        outContact.contactNormalY = _sweepHit.normalY;
-        outContact.contactNormalZ = _sweepHit.normalZ;
-        outContact.surfaceNormalX = _sweepHit.normalX;
-        outContact.surfaceNormalY = _sweepHit.normalY;
-        outContact.surfaceNormalZ = _sweepHit.normalZ;
+        const cX = feetX + dispX * vcc.sweep.toi;
+        const cY = feetY + dispY * vcc.sweep.toi + hY;
+        const cZ = feetZ + dispZ * vcc.sweep.toi;
+        outContact.positionX = cX - vcc.sweep.normalX * hX;
+        outContact.positionY = cY - vcc.sweep.normalY * hY;
+        outContact.positionZ = cZ - vcc.sweep.normalZ * hZ;
+        outContact.contactNormalX = vcc.sweep.normalX;
+        outContact.contactNormalY = vcc.sweep.normalY;
+        outContact.contactNormalZ = vcc.sweep.normalZ;
+        outContact.surfaceNormalX = vcc.sweep.normalX;
+        outContact.surfaceNormalY = vcc.sweep.normalY;
+        outContact.surfaceNormalZ = vcc.sweep.normalZ;
         outContact.distance = 0;
-        outContact.fraction = _sweepHit.toi;
-        outContact.overlapDepth = _sweepHit.overlapDepth;
+        outContact.fraction = vcc.sweep.toi;
+        outContact.overlapDepth = vcc.sweep.overlapDepth;
         outContact.bodyId = INVALID_BODY_ID;
-        outContact.voxelX = _sweepHit.vx;
-        outContact.voxelY = _sweepHit.vy;
-        outContact.voxelZ = _sweepHit.vz;
-        outContact.subAabbIndex = _sweepHit.subAabbIndex;
-        outContact.stateId = _sweepHit.stateId;
+        outContact.voxelX = vcc.sweep.vx;
+        outContact.voxelY = vcc.sweep.vy;
+        outContact.voxelZ = vcc.sweep.vz;
+        outContact.subAabbIndex = vcc.sweep.subAabbIndex;
+        outContact.stateId = vcc.sweep.stateId;
         outContact.motionType = MotionType.STATIC;
         return true;
     }
@@ -2139,6 +2146,10 @@ export function move(
 ): void {
     if (deltaTime <= 0) return;
     vcc.lastDeltaTime = deltaTime;
+
+    // this move's swept passable cells accumulate across the slide segments (and
+    // the post-move stick/stairs sweeps); clear last move's before we start.
+    vcc.sweep.crossed.count = 0;
 
     moveShape(world, voxels, aabbWorld, vcc, vcc.linearVelocity, deltaTime, listener);
     updateGroundState(world, vcc);

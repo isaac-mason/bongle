@@ -619,6 +619,7 @@ function updateSleepState(world: World, body: Body): void {
             const hitVoxel =
                 body.voxelFlagsMask !== 0 &&
                 sweepAabbVsVoxels(
+                    _voxelHit,
                     world.voxels,
                     body.position[0],
                     body.position[1],
@@ -629,7 +630,7 @@ function updateSleepState(world: World, body: Body): void {
                     probedX,
                     probedY,
                     probedZ,
-                    _voxelHit,
+                    false,
                 );
             if (hitVoxel || groundedThisTick) {
                 sleepBody(world, body);
@@ -682,6 +683,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
             _voxelHit.toi = Infinity;
             _voxelHit.axis = -1;
             const hit = sweepAabbVsVoxels(
+                _voxelHit,
                 world.voxels,
                 body.position[0],
                 body.position[1],
@@ -692,7 +694,7 @@ function slideResolve(world: World, body: Body, dt: number, sink: PairSink): voi
                 dx,
                 dy,
                 dz,
-                _voxelHit,
+                false,
             );
             if (hit && _voxelHit.toi < bestTOI) {
                 bestTOI = _voxelHit.toi;

@@ -5,14 +5,12 @@ import { ContactsTrait } from '../../builtins/contacts';
 import { setInterpolation } from '../../builtins/transform';
 import type { PlayerId } from '../client';
 import type * as Resources from '../resources';
-import type { SceneTree } from '../scene/scene-tree';
+import type { Node, SceneTree } from '../scene/scene-tree';
 import {
     addTrait,
     getNodeById,
     getTrait,
-    hasTrait,
     query,
-    removeTrait,
     runOnPostPhysicsStep,
     runOnPrePhysicsStep,
 } from '../scene/scene-tree';
@@ -77,8 +75,8 @@ export {
 // the coordinator owns: the shared contact stream both subsystems write
 // into, the aabb→ContactPair translation sink, the character-VCC contact
 // bridge (staged + replayed via the rigid recorder), the fan-out from pairs
-// into per-node `ContactsTrait` observers, and the companion-trait policy
-// (Interpolate, Contacts) that unifies across subsystems.
+// into per-node `ContactsTrait` observers (created lazily on first contact),
+// and the interpolation enrollment that unifies across subsystems.
 
 export type Physics = {
     /** crashcat rigid body sub-world, full broadphase + manifolds + sleep. */
@@ -126,9 +124,10 @@ export type Physics = {
     vccVoxelContacts: VccVoxelContact[];
     vccVoxelContactCount: number;
 
-    /** set of nodes that currently hold companion traits (Interpolate, Contacts)
-     *  because at least one subsystem has a body for them. diffed each preStep
-     *  against the union of `rigid.nodeToBody ∪ aabb.nodeToBody`. */
+    /** set of nodes currently enrolled in interpolation because at least one
+     *  subsystem has a body for them. diffed each preStep against the union of
+     *  `rigid.nodeToBody ∪ aabb.nodeToBody`. (Contacts is not membership-driven:
+     *  a node's ContactsTrait is created lazily on its first contact, in fan-out.) */
     _companionNodes: Set<number>;
 };
 
@@ -154,6 +153,9 @@ export type VccVoxelContact = {
     point: Vec3;
     normal: Vec3;
     penetrationDepth: number;
+    /** true = solid block the VCC swept against; false = passable/liquid cell
+     *  the body is inside (reported by the character's overlap scan). */
+    solid: boolean;
 };
 
 export function init(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): Physics {
@@ -245,6 +247,7 @@ export function pushVccVoxelContact(
     normalY: number,
     normalZ: number,
     penetrationDepth: number,
+    solid: boolean,
 ): void {
     let rec = physics.vccVoxelContacts[physics.vccVoxelContactCount];
     if (!rec) {
@@ -258,9 +261,11 @@ export function pushVccVoxelContact(
             point: vec3.create(),
             normal: vec3.create(),
             penetrationDepth: 0,
+            solid: true,
         };
         physics.vccVoxelContacts[physics.vccVoxelContactCount] = rec;
     }
+    rec.solid = solid;
     rec.innerBodyId = innerBodyId;
     rec.voxelX = voxelX;
     rec.voxelY = voxelY;
@@ -326,6 +331,7 @@ function ingestVccVoxelContacts(physics: Physics): void {
             rec.point,
             rec.normal,
             rec.penetrationDepth,
+            rec.solid,
         );
     }
     physics.vccVoxelContactCount = 0;
@@ -395,13 +401,15 @@ export function flush(_physics: Physics): void {
     flushHitBuffer();
 }
 
-// ── companion traits (cross-subsystem) ────────────────────────────────
+// ── interpolation enrollment (cross-subsystem) ────────────────────────
 //
 // any node that holds a body in *either* subsystem gets enrolled in
-// interpolation (via setInterpolation, which lives on TransformTrait) and
-// gets a ContactsTrait. unified here (not per-subsystem) so the policy and
-// the diff live in one place, subsystems stay independent of these
-// import paths.
+// interpolation (via setInterpolation, which lives on TransformTrait), and
+// unenrolled when its last body goes away. unified here (not per-subsystem)
+// so the policy and the diff live in one place, subsystems stay independent
+// of these import paths. Contacts is deliberately not handled here: a node's
+// ContactsTrait is born lazily on its first contact (see ensureContactsTrait
+// in the fan-out), so it needs neither membership nor a remove pass.
 
 function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
     const want = new Set<number>();
@@ -414,7 +422,6 @@ function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
         const node = getNodeById(sceneTree, nid);
         if (!node) continue;
         setInterpolation(node, true);
-        if (!hasTrait(node, ContactsTrait)) addTrait(node, ContactsTrait);
     }
     // remove from gone entries
     for (const nid of physics._companionNodes) {
@@ -422,7 +429,6 @@ function syncCompanionTraits(physics: Physics, sceneTree: SceneTree): void {
         const node = getNodeById(sceneTree, nid);
         if (!node) continue;
         setInterpolation(node, false);
-        if (hasTrait(node, ContactsTrait)) removeTrait(node, ContactsTrait);
     }
 
     physics._companionNodes = want;
@@ -457,6 +463,7 @@ function makeAabbPairSink(contacts: PhysicsContacts, pool: ContactPairPool): Aab
                 pair.bIsSensor = info.bIsSensor;
             } else {
                 pair.bKind = 'voxel';
+                pair.bVoxelSolid = true; // aabb-vs-voxel is always a solid collision
                 pair.bVoxelX = info.bVoxelX;
                 pair.bVoxelY = info.bVoxelY;
                 pair.bVoxelZ = info.bVoxelZ;
@@ -507,20 +514,28 @@ function fanOutContacts(physics: Physics, sceneTree: SceneTree): void {
     fanOutBucket(physics, sceneTree, physics.contacts.removed, 'removed');
 }
 
+// a node earns its ContactsTrait the moment a contact first resolves to it,
+// created here rather than enrolled up front by body membership. the trait is
+// never removed (an empty one just gets cleared each step by the contactsQuery
+// pass); presence therefore means "has had at least one contact", so consumers
+// read it null-safely. covers character VCC nodes for free: their inner body
+// resolves to the node via bodyToNode even though it's not in nodeToBody.
+function ensureContactsTrait(node: Node): ContactsTrait {
+    return getTrait(node, ContactsTrait) ?? addTrait(node, ContactsTrait);
+}
+
 function fanOutBucket(physics: Physics, sceneTree: SceneTree, bucket: ContactPair[], phase: 'added' | 'persisted' | 'removed'): void {
     for (let i = 0; i < bucket.length; i++) {
         const pair = bucket[i]!;
         const aObserverNodeId = observerNodeIdForSide(pair, 'a');
         if (aObserverNodeId !== -1) {
             const node = getNodeById(sceneTree, aObserverNodeId);
-            const ct = node ? getTrait(node, ContactsTrait) : undefined;
-            if (ct) emitForObserver(physics, ct, pair, 'a', phase);
+            if (node) emitForObserver(physics, ensureContactsTrait(node), pair, 'a', phase);
         }
         const bObserverNodeId = observerNodeIdForSide(pair, 'b');
         if (bObserverNodeId !== -1) {
             const node = getNodeById(sceneTree, bObserverNodeId);
-            const ct = node ? getTrait(node, ContactsTrait) : undefined;
-            if (ct) emitForObserver(physics, ct, pair, 'b', phase);
+            if (node) emitForObserver(physics, ensureContactsTrait(node), pair, 'b', phase);
         }
     }
 }
@@ -609,12 +624,14 @@ function emitForObserver(
             c.voxelZ = pair.bVoxelZ;
             c.stateId = pair.bStateId;
             c.subAabbIndex = pair.bSubAabbIndex;
+            c.solid = pair.bVoxelSolid;
         } else {
             c.voxelX = pair.aVoxelX;
             c.voxelY = pair.aVoxelY;
             c.voxelZ = pair.aVoxelZ;
             c.stateId = pair.aStateId;
             c.subAabbIndex = pair.aSubAabbIndex;
+            c.solid = pair.aVoxelSolid;
         }
         contact = c;
     }

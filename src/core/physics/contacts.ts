@@ -72,6 +72,10 @@ export type VoxelContact = ContactBase & {
     stateId: number;
     /** sub-aabb index for multi-aabb voxels; -1 for cube voxels. */
     subAabbIndex: number;
+    /** true when the character collided with a solid block; false when it is
+     *  merely inside a passable/liquid cell (no solver response). the voxel
+     *  analogue of a body contact's `isSensor`. */
+    solid: boolean;
 };
 
 export type Contact = RigidBodyContact | AabbBodyContact | VoxelContact;
@@ -102,6 +106,8 @@ export type ContactPair = {
     aVoxelZ: number;
     aStateId: number;
     aSubAabbIndex: number;
+    /** voxel-only: true = solid collision, false = passable/liquid overlap. */
+    aVoxelSolid: boolean;
     // shared on body sides (rigidBody, aabbBody)
     aIsSensor: boolean;
 
@@ -117,6 +123,8 @@ export type ContactPair = {
     bVoxelZ: number;
     bStateId: number;
     bSubAabbIndex: number;
+    /** voxel-only: true = solid collision, false = passable/liquid overlap. */
+    bVoxelSolid: boolean;
     bIsSensor: boolean;
 
     // ── manifold ──
@@ -193,6 +201,7 @@ function createVoxelContact(): VoxelContact {
         voxelZ: 0,
         stateId: 0,
         subAabbIndex: -1,
+        solid: true,
         point: vec3.create(),
         normal: vec3.create(),
         penetrationDepth: 0,
@@ -212,6 +221,7 @@ function createContactPair(): ContactPair {
         aVoxelZ: 0,
         aStateId: 0,
         aSubAabbIndex: -1,
+        aVoxelSolid: true,
         aIsSensor: false,
 
         bKind: 'rigidBody',
@@ -225,6 +235,7 @@ function createContactPair(): ContactPair {
         bVoxelZ: 0,
         bStateId: 0,
         bSubAabbIndex: -1,
+        bVoxelSolid: true,
         bIsSensor: false,
 
         point: vec3.create(),

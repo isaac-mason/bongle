@@ -752,6 +752,40 @@ function deriveStandingStateFromContacts(v: vcc.VCC): number {
     return stateId;
 }
 
+// ── passable-cell overlap contacts ───────────────────────────────────
+//
+// report the passable cells (liquids, plants, hazards) the character SWEPT
+// THROUGH this tick as `solid: false` voxel contacts. these are collision:false,
+// so they'd otherwise be invisible to the contact stream; this is the inside-
+// block scan (MC's checkInsideBlocks / luanti's in_liquid probe) funneled
+// through physics.ts. the VCC collected them during its own collision sweeps
+// (one traversal, no re-scan) into v.sweep.crossed: swept, so a fast fall
+// through a thin lava sheet can't tunnel past undetected, and a zero-velocity
+// sweep still enumerates the occupied cells, so standing still in lava reports.
+function pushSweptOverlapContacts(physics: Physics, v: vcc.VCC): void {
+    const crossed = v.sweep.crossed;
+    for (let i = 0; i < crossed.count; i++) {
+        const cell = crossed.cells[i]!;
+        pushVccVoxelContact(
+            physics,
+            v.innerBody.id,
+            cell.x,
+            cell.y,
+            cell.z,
+            cell.stateId,
+            -1, // subAabbIndex: whole cell
+            cell.x + 0.5, // point: cell center (no real contact surface)
+            cell.y + 0.5,
+            cell.z + 0.5,
+            0, // normal: up, arbitrary for an overlap
+            1,
+            0,
+            cell.depth, // how far the box got into the block's shape
+            false, // solid: passable/liquid cell, not a collision
+        );
+    }
+}
+
 // ── crouch edge guard ────────────────────────────────────────────────
 //
 // Faithful port of luanti's sneak-anchor (see llm/luanti/src/client/
@@ -1319,6 +1353,7 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
             c.surfaceNormalY,
             c.surfaceNormalZ,
             c.overlapDepth,
+            true, // solid: the VCC only sweeps collidable blocks
         );
     }
 
@@ -1372,6 +1407,12 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
             }
         }
     }
+
+    // surface the passable/liquid cells the body swept through this tick (lava,
+    // water, plants) as solid: false voxel contacts (trigger/hazard detection).
+    // done after stick/stairs so their sweeps are included; the VCC unioned them
+    // into v.sweep.crossed. MC's checkInsideBlocks, via physics.ts.
+    pushSweptOverlapContacts(physics, v);
 
     // post-move sneak guard: clamp position + smoothened Y pull using
     // the previous anchor, then re-pick the anchor for next tick.

@@ -11,7 +11,7 @@
 // ground / contacts back to a specific voxel for debug + ground velocity.
 
 import { type SweepResult, sweepAabbVsAabb } from '../physics/aabb/aabb-sweep';
-import { AIR, BLOCK_FLAG_COLLISION, MISSING, SHAPE_AABBS } from './block-registry';
+import { AIR, type Blocks, BLOCK_FLAG_COLLISION, MISSING, SHAPE_AABBS } from './block-registry';
 import { CHUNK_BITS, CHUNK_SIZE, chunkKey, type Voxels, voxelIndex } from './voxels';
 
 /** result of a voxel sweep. mutated in place. */
@@ -43,6 +43,11 @@ export type VoxelSweepHit = {
     boxMaxZ: number;
     /** penetration depth along the contact normal; non-zero only when toi < 0. */
     overlapDepth: number;
+    /** the passable (non-colliding) cells the box swept through this call, when
+     *  the sweep was asked to `collect` them; empty otherwise. pooled: the caller
+     *  resets `crossed.count` before a fresh sweep (or sequence of segment
+     *  sweeps), the sweep only appends. see {@link CrossedVoxels}. */
+    crossed: CrossedVoxels;
 };
 
 export function createVoxelSweepHit(): VoxelSweepHit {
@@ -65,6 +70,7 @@ export function createVoxelSweepHit(): VoxelSweepHit {
         boxMaxY: 0,
         boxMaxZ: 0,
         overlapDepth: 0,
+        crossed: createCrossedVoxels(),
     };
 }
 
@@ -74,9 +80,17 @@ const _scratch: SweepResult = { toi: Infinity, axis: -1, sign: 0, nX: 0, nY: 0, 
  * sweep an AABB through the voxel grid. used by VCC and any future
  * voxel-aware character controller.
  *
- * `out` is reset internally; on return, `out.axis === -1` iff no hit.
+ * the nearest-solid-hit fields of `out` are reset internally; on return,
+ * `out.axis === -1` iff no hit.
+ *
+ * when `collect` is true, the passable (non-colliding) cells the box sweeps
+ * through are appended to `out.crossed` (liquid / trigger detection). the hit
+ * fields reset each call but `out.crossed` does NOT, so a caller doing a
+ * sequence of segment sweeps unions them, and resets `out.crossed.count` itself
+ * before the sequence. when `collect` is false, `out.crossed` is left untouched.
  */
 export function sweepAabbVsVoxels(
+    out: VoxelSweepHit,
     voxels: Voxels,
     mcX: number,
     mcY: number,
@@ -87,7 +101,7 @@ export function sweepAabbVsVoxels(
     dx: number,
     dy: number,
     dz: number,
-    out: VoxelSweepHit,
+    collect: boolean,
 ): boolean {
     const reg = voxels.registry;
 
@@ -197,13 +211,23 @@ export function sweepAabbVsVoxels(
                             const stateId = chunk.palette[paletteIdx]!;
                             if (stateId === AIR || stateId === MISSING) continue;
 
-                            // skip non-colliding blocks (e.g. grass tufts, water)
-                            if ((reg.flags[stateId]! & BLOCK_FLAG_COLLISION) === 0) continue;
-
-                            const cid = reg.colliderId[stateId]!;
                             const wx = cwx + lx;
                             const wy = cwy + ly;
                             const wz = cwz + lz;
+
+                            // non-colliding blocks (grass tufts, water, lava) don't
+                            // constrain the sweep. when collecting, record the ones the
+                            // box actually penetrated (by more than PASSABLE_MARGIN),
+                            // measured against the block's real shape.
+                            if ((reg.flags[stateId]! & BLOCK_FLAG_COLLISION) === 0) {
+                                if (collect) {
+                                    const depth = sweptPassablePenetration(reg, stateId, mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz, wx, wy, wz);
+                                    if (depth > PASSABLE_MARGIN) pushCrossedVoxel(out.crossed, wx, wy, wz, stateId, depth);
+                                }
+                                continue;
+                            }
+
+                            const cid = reg.colliderId[stateId]!;
 
                             if (cid === 0) {
                                 // cube fast path: unit cell box.
@@ -310,4 +334,181 @@ export function sweepAabbVsVoxels(
     }
 
     return out.axis !== -1;
+}
+
+// ── crossed-cell collection ──────────────────────────────────────────
+//
+// "which passable voxels did the box pass through", collected alongside the
+// nearest solid hit in a single sweep when `collect` is set (see
+// sweepAabbVsVoxels). a zero displacement enumerates the box's currently-
+// occupied cells, so this covers standing-inside and passing-through alike
+// (liquid / trigger detection: a resting character in lava and one falling
+// through it both need the cell reported).
+//
+// the per-cell test deliberately does NOT reuse sweepAabbVsAabb: that is a
+// face-contact TOI with grazing / inner-margin / no-motion-axis gates that
+// reject a box resting in or buried inside a cell. this is a pure swept
+// interval-overlap test at cell granularity: a cell counts if the moving box
+// intersects its unit volume for any t in [0, 1].
+
+/** one passable voxel the box actually penetrated. */
+export type CrossedVoxel = {
+    x: number;
+    y: number;
+    z: number;
+    /** global state id at that voxel. */
+    stateId: number;
+    /** how far the box got INTO the block's shape (min-axis overlap, max over the
+     *  swept path). always > {@link PASSABLE_MARGIN}: a grazing touch of a face,
+     *  or passing through the empty part of a cell (above a liquid surface), does
+     *  not produce a crossed voxel at all. */
+    depth: number;
+};
+
+/** reusable collector held in {@link VoxelSweepHit.crossed}. `cells` grows only
+ *  when a sweep crosses more cells than any prior call; iterate `cells[0..count)`. */
+export type CrossedVoxels = {
+    count: number;
+    cells: CrossedVoxel[];
+};
+
+export function createCrossedVoxels(): CrossedVoxels {
+    return { count: 0, cells: [] };
+}
+
+/** a box must get at least this far into a block's shape to count as crossed;
+ *  filters zero-thickness face grazes and settle jitter. */
+export const PASSABLE_MARGIN = 0.05;
+
+function pushCrossedVoxel(out: CrossedVoxels, x: number, y: number, z: number, stateId: number, depth: number): void {
+    let cell = out.cells[out.count];
+    if (!cell) {
+        cell = { x: 0, y: 0, z: 0, stateId: 0, depth: 0 };
+        out.cells[out.count] = cell;
+    }
+    cell.x = x;
+    cell.y = y;
+    cell.z = z;
+    cell.stateId = stateId;
+    cell.depth = depth;
+    out.count++;
+}
+
+/** min-axis overlap (MTV depth) of the box at sweep time `t` with the world-space
+ *  shape box [s0..s1]; <= 0 when not overlapping on some axis. */
+function penetrationAt(
+    mcX: number, mcY: number, mcZ: number,
+    mhX: number, mhY: number, mhZ: number,
+    dx: number, dy: number, dz: number,
+    s0x: number, s0y: number, s0z: number,
+    s1x: number, s1y: number, s1z: number,
+    t: number,
+): number {
+    const cx = mcX + dx * t;
+    const cy = mcY + dy * t;
+    const cz = mcZ + dz * t;
+    const ovx = Math.min(cx + mhX, s1x) - Math.max(cx - mhX, s0x);
+    const ovy = Math.min(cy + mhY, s1y) - Math.max(cy - mhY, s0y);
+    const ovz = Math.min(cz + mhZ, s1z) - Math.max(cz - mhZ, s0z);
+    return Math.min(ovx, ovy, ovz);
+}
+
+/** deepest the swept box gets INTO the world-space shape box [s0..s1] over the
+ *  sweep, or 0 if it never overlaps within [0, 1]. finds the mutual-overlap window
+ *  (minkowski slab test) then samples penetration at the window's midpoint
+ *  (deepest for a pass-through) and its end (deepest for coming to rest inside). */
+function sweptBoxPenetration(
+    mcX: number, mcY: number, mcZ: number,
+    mhX: number, mhY: number, mhZ: number,
+    dx: number, dy: number, dz: number,
+    s0x: number, s0y: number, s0z: number,
+    s1x: number, s1y: number, s1z: number,
+): number {
+    let tEnter = -Infinity;
+    let tExit = Infinity;
+
+    const minX = s0x - mhX;
+    const maxX = s1x + mhX;
+    if (dx > 0) {
+        const e = (minX - mcX) / dx;
+        const x = (maxX - mcX) / dx;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (dx < 0) {
+        const e = (maxX - mcX) / dx;
+        const x = (minX - mcX) / dx;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (mcX <= minX || mcX >= maxX) {
+        return 0;
+    }
+
+    const minY = s0y - mhY;
+    const maxY = s1y + mhY;
+    if (dy > 0) {
+        const e = (minY - mcY) / dy;
+        const x = (maxY - mcY) / dy;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (dy < 0) {
+        const e = (maxY - mcY) / dy;
+        const x = (minY - mcY) / dy;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (mcY <= minY || mcY >= maxY) {
+        return 0;
+    }
+
+    const minZ = s0z - mhZ;
+    const maxZ = s1z + mhZ;
+    if (dz > 0) {
+        const e = (minZ - mcZ) / dz;
+        const x = (maxZ - mcZ) / dz;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (dz < 0) {
+        const e = (maxZ - mcZ) / dz;
+        const x = (minZ - mcZ) / dz;
+        if (e > tEnter) tEnter = e;
+        if (x < tExit) tExit = x;
+    } else if (mcZ <= minZ || mcZ >= maxZ) {
+        return 0;
+    }
+
+    if (tEnter > tExit || tEnter > 1 || tExit < 0) return 0;
+    const t0 = tEnter < 0 ? 0 : tEnter;
+    const t1 = tExit > 1 ? 1 : tExit;
+    const mid = penetrationAt(mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz, s0x, s0y, s0z, s1x, s1y, s1z, (t0 + t1) * 0.5);
+    const end = penetrationAt(mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz, s0x, s0y, s0z, s1x, s1y, s1z, t1);
+    const depth = mid > end ? mid : end;
+    return depth > 0 ? depth : 0;
+}
+
+/** deepest the swept box gets into the passable block at (wx,wy,wz), measured
+ *  against its actual shape (unit cell for the cube fast path, else its
+ *  `shapeAabbs`, e.g. a liquid's `[0..surfaceHeight]` band). 0 if it never
+ *  meaningfully enters. */
+function sweptPassablePenetration(
+    reg: Blocks,
+    stateId: number,
+    mcX: number, mcY: number, mcZ: number,
+    mhX: number, mhY: number, mhZ: number,
+    dx: number, dy: number, dz: number,
+    wx: number, wy: number, wz: number,
+): number {
+    const cid = reg.colliderId[stateId]!;
+    if (cid === 0) {
+        return sweptBoxPenetration(mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz, wx, wy, wz, wx + 1, wy + 1, wz + 1);
+    }
+    const boxes = reg.shapeAabbs[cid]!;
+    let best = 0;
+    for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i]!;
+        const d = sweptBoxPenetration(
+            mcX, mcY, mcZ, mhX, mhY, mhZ, dx, dy, dz,
+            wx + b[0], wy + b[1], wz + b[2], wx + b[3], wy + b[4], wz + b[5],
+        );
+        if (d > best) best = d;
+    }
+    return best;
 }

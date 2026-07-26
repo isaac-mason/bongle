@@ -820,6 +820,7 @@ function writePairSide(p: ContactPair, side: 'a' | 'b', s: SideInfo): void {
             p.aVoxelZ = s.voxelZ;
             p.aStateId = s.stateId;
             p.aSubAabbIndex = s.subAabbIndex;
+            p.aVoxelSolid = true; // solver contacts are always solid blocks
         } else {
             p.bKind = 'voxel';
             p.bVoxelX = s.voxelX;
@@ -827,6 +828,7 @@ function writePairSide(p: ContactPair, side: 'a' | 'b', s: SideInfo): void {
             p.bVoxelZ = s.voxelZ;
             p.bStateId = s.stateId;
             p.bSubAabbIndex = s.subAabbIndex;
+            p.bVoxelSolid = true; // solver contacts are always solid blocks
         }
     }
 }
@@ -1003,6 +1005,7 @@ export function recordBodyVoxelContact(
     point: Vec3,
     normal: Vec3,
     penetrationDepth: number,
+    solid: boolean,
 ): void {
     const kindA = resolveSide(_sideA, world, body, 0);
     if (kindA !== 'rigidBody') return;
@@ -1012,6 +1015,7 @@ export function recordBodyVoxelContact(
 
     writePairSide(pair, 'a', _sideA);
     pair.bKind = 'voxel';
+    pair.bVoxelSolid = solid;
     pair.bVoxelX = voxelX;
     pair.bVoxelY = voxelY;
     pair.bVoxelZ = voxelZ;
