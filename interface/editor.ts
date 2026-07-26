@@ -330,21 +330,6 @@ export function serveFolderSync(target: SyncTarget, port: MessagePort): { close(
     return { close: () => port.close() };
 }
 
-// ── the managed set + the browser backing ───────────────────────────
-// Which project paths the folder sync owns (publish + import + delete). Everything NOT
-// excluded here is two-way synced. We mirror almost everything so the on-disk copy is a
-// complete, standalone project — including node_modules (the engine seed), resources
-// (bake output), and src/generated (generated barrels). Only `dist` (the bundler's JS
-// output) is excluded: it's large, fully regenerated, and not useful on disk.
-const IGNORED_SYNC_DIRS = new Set(['dist']);
-
-/** does the folder sync manage this path? False only for `dist`, which it never
- *  publishes, imports, or deletes on either side. */
-export function syncManaged(path: string): boolean {
-    for (const seg of path.split('/')) if (IGNORED_SYNC_DIRS.has(seg)) return false;
-    return true;
-}
-
 function syncSplit(path: string): { dirs: string[]; name: string } {
     const parts = path.replace(/^\/+/, '').replace(/\/+$/, '').split('/');
     return { dirs: parts.slice(0, -1), name: parts[parts.length - 1]! };
@@ -353,9 +338,9 @@ function syncSplit(path: string): { dirs: string[]; name: string } {
 type AnyDirHandle = FileSystemDirectoryHandle & { entries(): AsyncIterable<[string, FileSystemHandle]> };
 
 /** THE browser backing: expose a picked directory handle (File System Access API) as a
- *  `SyncTarget`. Chromium-only (`showDirectoryPicker`). The disk walk skips unmanaged
- *  paths, so a real project's node_modules is never enumerated. A node host would ship
- *  its own `SyncTarget` over node fs — the loop + wire protocol are backing-agnostic. */
+ *  `SyncTarget`. Chromium-only (`showDirectoryPicker`). The disk walk enumerates the
+ *  whole folder — the sync mirrors everything, node_modules included. A node host would
+ *  ship its own `SyncTarget` over node fs — the loop + wire protocol are backing-agnostic. */
 export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
     const dirHandle = async (dirs: string[], create: boolean): Promise<FileSystemDirectoryHandle | null> => {
         let cur = root;
@@ -413,7 +398,6 @@ export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
             const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
                 for await (const [name, h] of (dir as AnyDirHandle).entries()) {
                     const path = prefix ? `${prefix}/${name}` : name;
-                    if (!syncManaged(path)) continue;
                     if (h.kind === 'directory') await walk(h as FileSystemDirectoryHandle, path);
                     else {
                         const f = await (h as FileSystemFileHandle).getFile();

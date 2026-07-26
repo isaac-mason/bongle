@@ -92,8 +92,9 @@ export function initAutosave(fs: Filesystem, bridge: PlatformBridge, intent: Pla
  *  fire. An avatar cares only about its .bbmodel source; a project ignores DERIVED
  *  writes (the bake's barrels + resources, now visible on editor.fs cross-context)
  *  via `isSourcePath` — the SAVE's own source set, so a bake doesn't re-arm a save of
- *  unchanged source. (This is deliberately NOT the folder-sync mirror's `syncManaged`:
- *  what mirrors to disk and what belongs in a save are different concerns.) */
+ *  unchanged source. (This is deliberately narrower than the folder-sync mirror, which
+ *  mirrors everything: what mirrors to disk and what belongs in a save are different
+ *  concerns.) */
 function onEdit(state: State, changes: FsChange[]): void {
     const relevant =
         state.kind === 'avatar'

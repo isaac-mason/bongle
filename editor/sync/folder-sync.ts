@@ -20,7 +20,7 @@
 // A cheap size+mtime `diskSig` filter keeps the poll from re-reading unchanged
 // files.
 
-import { consumeFolderSync, openDiskFolder, type SyncTarget, syncManaged } from '../../interface/editor';
+import { consumeFolderSync, openDiskFolder, type SyncTarget } from '../../interface/editor';
 import { seedEngineDist } from '../engine-dist';
 import type { Filesystem, FsChange } from '../fs';
 import { useSync } from '../stores/sync';
@@ -180,12 +180,11 @@ function teardown(s: Session): void {
 
 // ── initial reconcile ───────────────────────────────────────────────
 
-/** editor wins: write the OPFS managed set out to disk, leaving unmanaged disk
- *  paths (node_modules, .git) untouched. */
+/** editor wins: write the entire OPFS project out to disk. */
 async function reconcilePublish(s: Session): Promise<void> {
     const files = await s.fs.list('', { recursive: true });
     for (const f of files) {
-        if (f.kind !== 'file' || !syncManaged(f.path)) continue;
+        if (f.kind !== 'file') continue;
         const bytes = await s.fs.read(f.path);
         const sig = sigOf(bytes);
         await s.disk.write(f.path, bytes);
@@ -195,16 +194,12 @@ async function reconcilePublish(s: Session): Promise<void> {
     }
 }
 
-/** disk wins: mirror the folder's managed source into OPFS — writing what's on
- *  disk and deleting managed OPFS files absent from it — then re-seed the engine
- *  libs on top. Unmanaged paths (node_modules seeds, dist/resources bakes,
- *  src/generated barrels) are never read, written, or deleted, so an imported
- *  folder without them keeps them and still boots. */
+/** disk wins: mirror the whole folder into OPFS — writing what's on disk and
+ *  deleting OPFS files absent from it — then re-seed the engine libs on top. */
 async function reconcileImport(s: Session): Promise<void> {
-    const entries = await s.disk.list(); // recursive, managed files only
+    const entries = await s.disk.list();
     const onDisk = new Set<string>();
     for (const e of entries) {
-        if (!syncManaged(e.path)) continue;
         onDisk.add(e.path);
         const bytes = await s.disk.read(e.path);
         const sig = sigOf(bytes);
@@ -212,10 +207,10 @@ async function reconcileImport(s: Session): Promise<void> {
         s.synced.set(e.path, sig);
         s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
     }
-    // disk is the source of truth: drop managed OPFS files the folder doesn't have.
+    // disk is the source of truth: drop OPFS files the folder doesn't have.
     const files = await s.fs.list('', { recursive: true });
     for (const f of files) {
-        if (f.kind !== 'file' || !syncManaged(f.path) || onDisk.has(f.path)) continue;
+        if (f.kind !== 'file' || onDisk.has(f.path)) continue;
         await s.fs.remove(f.path);
     }
     await seedEngineDist(s.fs);
@@ -228,14 +223,13 @@ async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void>
     try {
         let moved = false;
         for (const c of changes) {
-            if (!syncManaged(c.path)) continue;
             if (c.type === 'deleted') {
                 await s.disk.remove(c.path);
                 s.synced.delete(c.path);
                 s.diskSig.delete(c.path);
                 moved = true;
             } else {
-                if (c.type === 'moved' && c.from && syncManaged(c.from)) {
+                if (c.type === 'moved' && c.from) {
                     await s.disk.remove(c.from);
                     s.synced.delete(c.from);
                     s.diskSig.delete(c.from);
@@ -269,11 +263,10 @@ async function pullDiskChanges(s: Session): Promise<void> {
     if (s.stopped || s.busy) return;
     s.busy = true;
     try {
-        const entries = await s.disk.list(); // recursive, managed files only
+        const entries = await s.disk.list();
         const present = new Set<string>();
         let moved = false;
         for (const e of entries) {
-            if (!syncManaged(e.path)) continue;
             present.add(e.path);
             const prev = s.diskSig.get(e.path);
             if (prev && prev.size === e.size && prev.mtime === e.mtime) continue; // unchanged on disk
@@ -287,7 +280,7 @@ async function pullDiskChanges(s: Session): Promise<void> {
         }
         // files we were tracking that vanished from disk → delete from OPFS.
         for (const path of [...s.diskSig.keys()]) {
-            if (present.has(path) || !syncManaged(path)) continue;
+            if (present.has(path)) continue;
             s.diskSig.delete(path);
             s.synced.delete(path);
             await s.fs.remove(path);
