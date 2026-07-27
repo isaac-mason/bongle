@@ -117,6 +117,9 @@ let activeGroupId: string | null = null;
 // the editor instance that most recently held focus — the target for palette
 // commands (format / organize imports), which run while focus is in the palette.
 let activeEditor: monaco.editor.IStandaloneCodeEditor | null = null;
+// the fs backing the most-recently-focused editor — lets saveActiveEditor()
+// write without a component closure.
+let activeFs: Filesystem | null = null;
 
 const isSrc = (p: string) => /^src\/.+\.tsx?$/.test(p);
 
@@ -351,6 +354,23 @@ export function hasActiveEditor(): boolean {
     return activeEditor !== null;
 }
 
+/** persist the most-recently-focused editor's buffer. Driven by a window-level
+ *  Cmd/Ctrl+S handler (not Monaco's focus-scoped command) so save works even
+ *  when focus has drifted to a tab, panel, or other chrome. Returns whether a
+ *  writable editor was saved. */
+export function saveActiveEditor(): boolean {
+    const ed = activeEditor;
+    const model = ed?.getModel();
+    if (!ed || !model || !activeFs) return false;
+    const path = model.uri.path.replace(/^\/+/, '');
+    if (isReadOnlyPath(path)) return false; // seeded/derived — not writable
+    const value = model.getValue();
+    void activeFs.write(path, value);
+    savedText.set(path, value);
+    useEditor.getState().setDirty(path, false);
+    return true;
+}
+
 /** run a built-in Monaco action (by id) on the most-recently-focused editor.
  *  Refocuses it first so selection-based actions land where the user can see
  *  and keep working with the result. `trigger` routes to both core commands
@@ -394,20 +414,18 @@ export function Monaco({ fs, group }: { fs: Filesystem; group: string }) {
         ed.onDidFocusEditorText(() => {
             activeGroupId = group;
             activeEditor = ed;
+            activeFs = fs;
             useEditor.getState().focusGroup(group);
         });
-        ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-            const model = ed.getModel();
-            if (!model) return;
-            const path = model.uri.path.replace(/^\/+/, '');
-            if (isReadOnlyPath(path)) return; // seeded/derived — not writable
-            const value = model.getValue();
-            void fs.write(path, value);
-            savedText.set(path, value);
-            useEditor.getState().setDirty(path, false);
-        });
+        // Save is driven by a window-level Cmd/Ctrl+S handler (see main.tsx), not
+        // a Monaco command — Monaco commands only fire while the text input holds
+        // focus, so they miss the very common case of focus sitting on a tab,
+        // panel, or other chrome.
         return () => {
-            if (activeEditor === ed) activeEditor = null;
+            if (activeEditor === ed) {
+                activeEditor = null;
+                activeFs = null;
+            }
             ed.dispose();
         };
     }, [fs, group]);

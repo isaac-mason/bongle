@@ -1,7 +1,9 @@
 // editor/ignored.ts — the editor's fixed set of non-source dirs: engine seeds
 // (node_modules, where seedEngineDist unzips bongle/mathcat/…) and bake outputs
-// (dist, resources). These are grayed + default-collapsed in the file tree and
-// excluded from folder sync. A concrete list, not a parsed .gitignore — the
+// (dist, resources). These are grayed + default-collapsed in the file tree, excluded
+// from saves, and treated as EDITOR-OWNED derived trees by folder sync — published
+// one-way to disk (so external tooling resolves) but never imported/pulled back (the
+// editor re-seeds + re-bakes them). A concrete list, not a parsed .gitignore — the
 // generated dirs are known and stable, so there's nothing to discover at runtime.
 
 export const IGNORED_DIRS = ['node_modules', 'dist', 'resources'] as const;

@@ -342,16 +342,36 @@ type AnyDirHandle = FileSystemDirectoryHandle & { entries(): AsyncIterable<[stri
  *  whole folder — the sync mirrors everything, node_modules included. A node host would
  *  ship its own `SyncTarget` over node fs — the loop + wire protocol are backing-agnostic. */
 export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
-    const dirHandle = async (dirs: string[], create: boolean): Promise<FileSystemDirectoryHandle | null> => {
-        let cur = root;
-        for (const d of dirs) {
+    // Resolved directory handles, keyed by dir path. Without this, dirHandle re-walks
+    // from root on EVERY op — one getDirectoryHandle round-trip per path segment — so a
+    // deep path like node_modules/@scope/pkg/dist/x.js costs 5+ lookups on every
+    // read/write/stat. Over a ~1k-file seed reconcile that re-walk is the dominant cost.
+    // Promises (not resolved handles) are cached so concurrent writes into the same new
+    // dir create it once. A miss (dir absent, create=false) is evicted so it can appear
+    // later; a remove() evicts the removed subtree.
+    const dirCache = new Map<string, Promise<FileSystemDirectoryHandle | null>>();
+    const dirHandle = (dirs: string[], create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+        if (dirs.length === 0) return Promise.resolve(root);
+        const key = dirs.join('/');
+        const hit = dirCache.get(key);
+        if (hit) return hit;
+        const p = (async () => {
+            const parent = await dirHandle(dirs.slice(0, -1), create);
+            if (!parent) return null;
             try {
-                cur = await cur.getDirectoryHandle(d, { create });
+                return await parent.getDirectoryHandle(dirs[dirs.length - 1]!, { create });
             } catch {
                 return null;
             }
-        }
-        return cur;
+        })();
+        dirCache.set(key, p);
+        void p.then((h) => {
+            if (!h) dirCache.delete(key);
+        });
+        return p;
+    };
+    const evictDirCache = (path: string): void => {
+        for (const key of dirCache.keys()) if (key === path || key.startsWith(`${path}/`)) dirCache.delete(key);
     };
 
     return {
@@ -381,6 +401,7 @@ export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
             } catch {
                 /* already gone */
             }
+            evictDirCache(path); // path may have been a directory subtree
         },
         async stat(path) {
             const { dirs, name } = syncSplit(path);

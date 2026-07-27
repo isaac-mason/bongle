@@ -23,6 +23,7 @@
 import { consumeFolderSync, openDiskFolder, type SyncTarget } from '../../interface/editor';
 import { seedEngineDist } from '../engine-dist';
 import type { Filesystem, FsChange } from '../fs';
+import { IGNORED_DIRS } from '../ignored';
 import { useSync } from '../stores/sync';
 
 export type SyncDirection = 'editor-to-folder' | 'folder-to-editor';
@@ -70,6 +71,26 @@ const sigOf = (b: Uint8Array): Sig => ({ size: b.length, hash: hashBytes(b) });
 const sameSig = (a: Sig | undefined, b: Sig): boolean => !!a && a.size === b.size && a.hash === b.hash;
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** node_modules (engine seed) + dist/resources (bake output) are EDITOR-OWNED derived
+ *  trees. They're published editor→disk so an on-disk checkout has what external tooling
+ *  needs (VS Code type acquisition, a resolvable resource tree), but they're strictly
+ *  ONE-WAY: the editor re-seeds / re-bakes them, so we never import them from the target
+ *  folder, never pull disk edits back, and never track them for loop-suppression.
+ *  Publish writes them untracked, skipping files already on disk at the same size (the
+ *  reconcile's slow path — node_modules alone is ~1k files). Matches ignored.ts. */
+const isDerived = (path: string): boolean =>
+    path.split('/').some((seg) => (IGNORED_DIRS as readonly string[]).includes(seg));
+
+/** run `fn` over items with bounded concurrency so the per-file OPFS/disk latencies
+ *  overlap — a working copy holds thousands of files and sequential awaits are the
+ *  slow path (see engine-dist's identical batching). */
+async function inBatches<T>(items: T[], batch: number, fn: (item: T) => Promise<void>): Promise<void> {
+    for (let i = 0; i < items.length; i += batch) {
+        await Promise.all(items.slice(i, i + batch).map(fn));
+    }
+}
+const RECONCILE_BATCH = 32;
 
 /** standalone/top-level: pick a folder and start a live two-way sync. Must be
  *  called from a user gesture (the picker requires one). No-op if unsupported or
@@ -184,10 +205,22 @@ function teardown(s: Session): void {
 
 /** editor wins: write the entire OPFS project out to disk. */
 async function reconcilePublish(s: Session): Promise<void> {
-    const files = await s.fs.list('', { recursive: true });
-    for (const f of files) {
-        if (f.kind !== 'file') continue;
+    const files = (await s.fs.list('', { recursive: true })).filter((f) => f.kind === 'file');
+    // one round-trip to learn what's already on disk, so a reconnect skips re-writing
+    // the unchanged seed tree (node_modules is ~1k files — the reconcile's slow path).
+    const diskSize = new Map<string, number>();
+    for (const e of await s.disk.list()) diskSize.set(e.path, e.size);
+
+    await inBatches(files, RECONCILE_BATCH, async (f) => {
         try {
+            if (isDerived(f.path)) {
+                // one-way: write only when missing or a different size (bins are
+                // content-hashed and the seed is stable, so size is a sufficient
+                // change check), then forget it — no stat, no synced/diskSig, so the
+                // live loop never pulls it back.
+                if (diskSize.get(f.path) !== f.size) await s.disk.write(f.path, await s.fs.read(f.path));
+                return;
+            }
             const bytes = await s.fs.read(f.path);
             const sig = sigOf(bytes);
             await s.disk.write(f.path, bytes);
@@ -199,16 +232,17 @@ async function reconcilePublish(s: Session): Promise<void> {
             // whole publish — skip that file, seed the rest.
             console.warn(`[folder-sync] skipped publish of ${f.path}:`, errText(e));
         }
-    }
+    });
 }
 
 /** disk wins: mirror the whole folder into OPFS — writing what's on disk and
  *  deleting OPFS files absent from it — then re-seed the engine libs on top. */
 async function reconcileImport(s: Session): Promise<void> {
-    const entries = await s.disk.list();
-    const onDisk = new Set<string>();
-    for (const e of entries) {
-        onDisk.add(e.path);
+    // never take the editor-owned derived trees (node_modules/dist/resources) from the
+    // target folder — the editor re-seeds + re-bakes them itself.
+    const entries = (await s.disk.list()).filter((e) => !isDerived(e.path));
+    const onDisk = new Set(entries.map((e) => e.path));
+    await inBatches(entries, RECONCILE_BATCH, async (e) => {
         try {
             const bytes = await s.disk.read(e.path);
             const sig = sigOf(bytes);
@@ -218,11 +252,13 @@ async function reconcileImport(s: Session): Promise<void> {
         } catch (err) {
             console.warn(`[folder-sync] skipped import of ${e.path}:`, errText(err));
         }
-    }
-    // disk is the source of truth: drop OPFS files the folder doesn't have.
+    });
+    // disk is the source of truth for SOURCE: drop OPFS source the folder lacks — but
+    // never a derived tree (seedEngineDist owns node_modules and reseeds it just below;
+    // the bake owns dist/resources).
     const files = await s.fs.list('', { recursive: true });
     for (const f of files) {
-        if (f.kind !== 'file' || onDisk.has(f.path)) continue;
+        if (f.kind !== 'file' || isDerived(f.path) || onDisk.has(f.path)) continue;
         await s.fs.remove(f.path);
     }
     await seedEngineDist(s.fs);
@@ -247,7 +283,15 @@ async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void>
                     s.diskSig.delete(c.from);
                     moved = true;
                 }
-                if (await writeToDisk(s, c.path)) moved = true;
+                if (isDerived(c.path)) {
+                    // one-way: keep the disk copy fresh as the bake regenerates it, but
+                    // untracked — never pulled back, so it stays out of synced/diskSig
+                    // (else the pull's vanished-sweep would delete it from OPFS).
+                    await s.disk.write(c.path, await s.fs.read(c.path));
+                    moved = true;
+                } else if (await writeToDisk(s, c.path)) {
+                    moved = true;
+                }
             }
         } catch (e) {
             // One unwritable path (e.g. a name the disk FS rejects with "Name is not
@@ -280,7 +324,8 @@ async function pullDiskChanges(s: Session): Promise<void> {
     if (s.stopped || s.busy) return;
     s.busy = true;
     try {
-        const entries = await s.disk.list();
+        // never pull the editor-owned derived trees back from disk.
+        const entries = (await s.disk.list()).filter((e) => !isDerived(e.path));
         const present = new Set<string>();
         let moved = false;
         for (const e of entries) {

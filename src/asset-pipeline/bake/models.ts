@@ -55,6 +55,16 @@ const CLIENT_BIN_DIR = 'resources/client/models';
 const SERVER_BIN_DIR = 'resources/server/models';
 const BARREL_PATH = 'src/generated/models.ts';
 
+// Model ids use a `namespace:name` convention, but ':' (and the rest of the
+// Windows-reserved set) isn't a valid FILENAME char: Chromium's File System Access
+// API rejects it ("Name is not allowed"), and it doesn't survive a real disk on
+// Windows. Map those chars to '_' for the bin filename only — the id itself is
+// unchanged (it stays in MODEL_ID / the barrel), and nothing parses it back out of
+// the filename, so this is purely a portable storage key. '_' (not %-encoding) keeps
+// the fetch URL a plain path segment with no decode round-trip. The content hash8 in
+// the filename makes name collisions impossible for distinct content.
+const binSafeId = (id: string): string => id.replace(/[<>:"/\\|?*]/g, '_');
+
 /** per-id record of the last successful build for this model. Owned by
  *  the pipeline orchestrator (`PipelineState.modelsCache`) and threaded
  *  in via `BuildModelsOptions.cache`; this module mutates it in place. */
@@ -325,8 +335,9 @@ async function processModel(
     const clientBytes = packModelBin({ ...binCommon, images });
 
     const hash8 = (await sha256Hex(clientBytes)).slice(0, 8);
-    const clientFilename = `${id}.${hash8}.client.bin`;
-    const serverFilename = `${id}.${hash8}.server.bin`;
+    const safeId = binSafeId(id);
+    const clientFilename = `${safeId}.${hash8}.client.bin`;
+    const serverFilename = `${safeId}.${hash8}.server.bin`;
     const clientBinPath = `${CLIENT_BIN_DIR}/${clientFilename}`;
     const serverBinPath = `${SERVER_BIN_DIR}/${serverFilename}`;
 

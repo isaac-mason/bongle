@@ -48,7 +48,7 @@ import { ClientPanel } from './ui/components/ClientPanel';
 import { CodePane } from './ui/components/CodePane';
 import { Desktop, type WindowDef } from './ui/components/Desktop';
 import { FileTree } from './ui/components/FileTree';
-import { loadEngineTypes, syncProjectModels } from './ui/components/Monaco';
+import { loadEngineTypes, saveActiveEditor, syncProjectModels } from './ui/components/Monaco';
 import { PipelinePanel } from './ui/components/PipelinePanel';
 import { ServerPanel } from './ui/components/ServerPanel';
 import { TASKBAR_W } from './ui/components/Taskbar';
@@ -87,10 +87,10 @@ system('setup', (ctx) => {
 });
 `;
 
-// Seeded so a folder-sync'd copy on disk is git-ready. The mirror includes
-// node_modules (engine seed) + resources (bake output) so external tooling resolves,
-// but those are derived — git shouldn't track them. Display-ignored + save-excluded
-// (see ignored.ts / project-save.ts), but folder-sync mirrors it like any managed file.
+// Seeded so a folder-sync'd copy on disk is git-ready. Folder sync publishes
+// node_modules (engine seed) + resources/dist (bake output) to disk one-way so external
+// tooling resolves, but those are derived — git shouldn't track them, and the editor
+// never imports them back (see ignored.ts / folder-sync.ts / project-save.ts).
 const GITIGNORE = 'node_modules\nresources\ndist\n';
 
 // boot progress → both the console (with +delta/total timing) and the BootScreen
@@ -510,6 +510,21 @@ window.addEventListener('gesturestart', (e) => e.preventDefault());
 window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && ['=', '-', '+', '0'].includes(e.key)) e.preventDefault();
 });
+// Route Cmd/Ctrl+S to the most-recently-focused editor, in the capture phase so
+// the browser's native "save page" never runs and the save works even when focus
+// has drifted off the text area (tab, panel, chrome). Shift+S stays free for
+// Save-As. Blockbench owns its own save inside its iframe (focus is in the
+// iframe, so this parent handler never fires for it).
+window.addEventListener(
+    'keydown',
+    (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 's') return;
+        e.preventDefault();
+        e.stopPropagation();
+        saveActiveEditor();
+    },
+    true,
+);
 
 void boot().catch((err) => {
     // Boot can't proceed without a working fs (e.g. storage fully blocked). Surface
