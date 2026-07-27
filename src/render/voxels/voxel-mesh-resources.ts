@@ -38,6 +38,7 @@ import {
     mat3,
     max,
     mul,
+    type Node,
     normalize,
     storage,
     struct,
@@ -49,6 +50,7 @@ import {
     vertexIndex,
 } from 'gpucat';
 import { QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import type { TimeResources } from '../time-resources';
 import { shadeTinted } from '../visuals/dsl';
 import {
     buildEnvSky,
@@ -120,8 +122,8 @@ export type VoxelMeshResources = {
     material: Material;
 };
 
-export function init(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<any>): VoxelMeshResources {
-    return { material: createBakedMeshMaterial(atlas, texAnimBuffer) };
+export function init(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<any>, time: TimeResources): VoxelMeshResources {
+    return { material: createBakedMeshMaterial(atlas, texAnimBuffer, time.elapsedTime) };
 }
 
 export function dispose(resources: VoxelMeshResources): void {
@@ -130,7 +132,7 @@ export function dispose(resources: VoxelMeshResources): void {
 
 // ── material ────────────────────────────────────────────────────────
 
-function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<any>): Material {
+function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<any>, elapsedTime: Node<d.f32>): Material {
     // per-name storage bindings
     const meshQuads = storage('meshQuads', d.array(d.u32), 'read');
     const instanceDataStorage = storage('instanceData', d.array(ModelInstance), 'read');
@@ -191,7 +193,7 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
         add(floor(worldPosBase.z), f32(0.5)),
     ).toVar('blockCenter');
 
-    const animResult = computeVertexAnimation(worldPosBase.xyz, blockCenter, animType);
+    const animResult = computeVertexAnimation(worldPosBase.xyz, blockCenter, animType, elapsedTime);
     const xDisp = animResult.x;
     const zDisp = animResult.y;
     const depthBias = animResult.z;
@@ -259,6 +261,7 @@ function createBakedMeshMaterial(atlas: ArrayTexture, texAnimBuffer: GpuBuffer<a
         sunDirection,
         sunIntensity,
         ambientMinimum,
+        elapsedTime,
     );
 
     const tintedRgb = shadeTinted(texColor.rgb, vTint, vFlash, light, vGlow, vUnlit);

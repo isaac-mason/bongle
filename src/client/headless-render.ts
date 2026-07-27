@@ -78,8 +78,17 @@ export async function buildRenderDeps(
 
     const cloudResources = CloudResources.init(ctx.renderer.environmentResources);
     const modelResources = ModelResources.init();
-    const voxelResources = VoxelResources.init(registry.blockRegistry, ctx.renderer.environmentResources, ctx.budget);
-    const voxelMeshResources = VoxelMeshResources.init(voxelResources.atlas, voxelResources.texAnimBuffer);
+    const voxelResources = VoxelResources.init(
+        registry.blockRegistry,
+        ctx.renderer.environmentResources,
+        ctx.budget,
+        ctx.renderer.timeResources,
+    );
+    const voxelMeshResources = VoxelMeshResources.init(
+        voxelResources.atlas,
+        voxelResources.texAnimBuffer,
+        ctx.renderer.timeResources,
+    );
 
     // workerCount=0 → synchronous remesh, no nested mesher worker pool (icons mesh
     // inline via meshChunk); still fetches + decodes the baked atlas (worker-safe

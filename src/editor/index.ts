@@ -740,6 +740,11 @@ script(
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 
+            // shared render clock, threaded into the rainbow selection/inspect
+            // materials (by node identity at material-build time) so they flow
+            // with the rest of the engine's time-driven animation.
+            const timeResources = client.state!.renderer.timeResources;
+
             // sync editor node bodies with the scene tree for broadphase queries
             NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
 
@@ -761,7 +766,7 @@ script(
                     const n = getNodeById(room.nodes, nid);
                     if (n) selectedNodes.push(n);
                 }
-                InspectMesh.update(inspectMeshState, selectedNodes, client.state!.resources);
+                InspectMesh.update(inspectMeshState, selectedNodes, client.state!.resources, timeResources);
             }
 
             // update prefab ghost voxels for nodes whose def produces voxels
@@ -1032,7 +1037,7 @@ script(
                     _brushCornerA = null;
                     _brushCornerB = null;
                 }
-                updateSelectionMeshes(meshState, store.getState());
+                updateSelectionMeshes(meshState, store.getState(), timeResources);
                 redrawInspectMesh();
                 return;
             }
@@ -1049,7 +1054,7 @@ script(
                 _brushHoverKey = '';
                 _brushCornerA = null;
                 _brushCornerB = null;
-                updateSelectionMeshes(meshState, store.getState());
+                updateSelectionMeshes(meshState, store.getState(), timeResources);
                 redrawInspectMesh();
                 return;
             }
@@ -1104,7 +1109,7 @@ script(
                 }
             }
 
-            updateSelectionMeshes(meshState, store.getState());
+            updateSelectionMeshes(meshState, store.getState(), timeResources);
             redrawInspectMesh();
         });
 

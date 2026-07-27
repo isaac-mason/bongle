@@ -182,7 +182,7 @@ export function updateInspect(
             brush: null,
             selection: cur.selection.chunks.size > 0 ? { chunks: new Map(), nodes: cur.selection.nodes } : cur.selection,
         }));
-        updateSelectionMeshes(meshState, store.getState());
+        updateSelectionMeshes(meshState, store.getState(), client.state!.renderer.timeResources);
     }
     // clear inspected voxel when not in inspect tool
     if (activeTool !== 'inspect' && store.getState().inspectedVoxel !== null) {

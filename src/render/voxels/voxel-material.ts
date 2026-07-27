@@ -80,7 +80,6 @@ import {
     storage,
     sub,
     u32,
-    uniform,
     Var,
     varying,
     vec2f,
@@ -90,15 +89,6 @@ import {
     vertexIndex,
 } from 'gpucat';
 import { META_OFFSET, QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
-
-/**
- * Voxel animation clock in seconds. gpucat no longer ticks time itself, so the
- * render loop drives this each frame (see render/renderer.ts); static offline
- * renders leave it at 0, freezing animation. renderGroup so it uploads once per
- * render rather than per draw.
- */
-export const elapsedTime = uniform('elapsedTime', d.f32);
-elapsedTime.value = 0;
 
 import { EnvConfig } from '../environment';
 import { ditherDiscard } from '../visuals/dsl';
@@ -245,7 +235,7 @@ export const readByte = Fn(
 // liquid ripples don't tear at quad seams.
 
 export const computeVertexAnimation = Fn(
-    (worldPos, blockCenter, animType) => {
+    (worldPos, blockCenter, animType, elapsedTime) => {
         const xDisp = Var('xDisp', f32(0.0));
         const zDisp = Var('zDisp', f32(0.0));
         const depthBias = Var('depthBias', f32(0.0));
@@ -286,6 +276,7 @@ export const computeVertexAnimation = Fn(
             { name: 'worldPos', type: d.vec3f },
             { name: 'blockCenter', type: d.vec3f },
             { name: 'animType', type: d.u32 },
+            { name: 'elapsedTime', type: d.f32 },
         ],
     },
 );
@@ -399,6 +390,7 @@ export function buildVoxelFragment(
     sunDirection: Node<d.vec3f>,
     sunIntensity: Node<d.f32>,
     ambientMinimum: Node<d.vec3f>,
+    elapsedTime: Node<d.f32>,
 ) {
     // texture animation
     const texAnimData = storage(texAnimBuffer, 'read');
@@ -503,8 +495,13 @@ export function makePassMaterial(opts: {
 //   'chunkInfo', per-room ChunkInfo side-table (slot → {origin, arenaBase})
 //   'env', per-room EnvConfig
 
-export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: GpuBuffer; pass: VoxelPass }): Material {
-    const { atlas, texAnimBuffer, pass } = opts;
+export function createQuadMaterial(opts: {
+    atlas: ArrayTexture;
+    texAnimBuffer: GpuBuffer;
+    pass: VoxelPass;
+    elapsedTime: Node<d.f32>;
+}): Material {
+    const { atlas, texAnimBuffer, pass, elapsedTime } = opts;
 
     // ── per-name storage bindings ───────────────────────────────────
     const quads = storage('quads', d.array(d.u32), 'read');
@@ -581,7 +578,7 @@ export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: G
 
     // ── vertex animation ─────────────────────────────────────────────
     const worldPosBase = add(sectionOrigin, chunkLocal).toVar('worldPosBase');
-    const animResult = computeVertexAnimation(worldPosBase, blockCenter, animType);
+    const animResult = computeVertexAnimation(worldPosBase, blockCenter, animType, elapsedTime);
     const xDisp = animResult.x;
     const zDisp = animResult.y;
     const depthBias = animResult.z;
@@ -619,6 +616,7 @@ export function createQuadMaterial(opts: { atlas: ArrayTexture; texAnimBuffer: G
         sunDirection,
         sunIntensity,
         ambientMinimum,
+        elapsedTime,
     );
 
     return makePassMaterial({

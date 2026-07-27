@@ -78,6 +78,7 @@ import {
 import { CHUNK_SIZE } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment';
 import * as Performance from '../performance';
+import type { TimeResources } from '../time-resources';
 import {
     createMeshDispatcher,
     disposeMeshDispatcher,
@@ -1839,7 +1840,7 @@ export type VoxelResources = {
     meshOutput: MeshOutput;
 };
 
-export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelArenaBudget): VoxelResources {
+export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelArenaBudget, time: TimeResources): VoxelResources {
     console.log(`[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
     const atlas = createVoxelTextureArray(registry.textures.length);
@@ -1849,10 +1850,11 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     const { promise: atlasReady, resolve: _resolveAtlasReady } = Promise.withResolvers<void>();
     const { promise: computeReady, resolve: _resolveComputeReady } = Promise.withResolvers<void>();
 
+    const elapsedTime = time.elapsedTime;
     const quadMaterials: Record<VoxelPass, Material> = {
-        opaque: createQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque' }),
-        transparent: createQuadMaterial({ atlas, texAnimBuffer, pass: 'transparent' }),
-        translucent: createQuadMaterial({ atlas, texAnimBuffer, pass: 'translucent' }),
+        opaque: createQuadMaterial({ atlas, texAnimBuffer, pass: 'opaque', elapsedTime }),
+        transparent: createQuadMaterial({ atlas, texAnimBuffer, pass: 'transparent', elapsedTime }),
+        translucent: createQuadMaterial({ atlas, texAnimBuffer, pass: 'translucent', elapsedTime }),
     };
 
     // arenas first: the radix kernels bake the histogram row stride (maxBlocks,
@@ -2147,6 +2149,7 @@ export async function refresh(
     registry: Blocks,
     env: EnvironmentResources,
     budget: VoxelArenaBudget,
+    time: TimeResources,
     workerCount: number,
     workerQueueDepth: number,
     resources: Resources,
@@ -2175,7 +2178,7 @@ export async function refresh(
     // a transient VRAM cost for a safe swap. The caller re-points every reference
     // synchronously once we return, so there's no render frame between this
     // dispose and the swap.
-    const built = init(registry, env, budget);
+    const built = init(registry, env, budget, time);
     await load(built, registry, workerCount, workerQueueDepth, resources, renderer, meta);
     if (prev) dispose(prev);
     return { resources: built, changed: true };

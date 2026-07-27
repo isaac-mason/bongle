@@ -37,6 +37,7 @@ import type { EnvironmentConfig, SkyPreset, SkyStop } from '../api/environment';
 import { srgbBytesToLinear } from '../core/color';
 import type * as CloudResources from './cloud-resources';
 import * as CloudVisuals from './cloud-visuals';
+import type { TimeResources } from './time-resources';
 
 /* ── types ────────────────────────────────────────────────────────── */
 
@@ -705,8 +706,8 @@ export function dispose(env: Environment): void {
  *  the wall-clock field, and flush any pending CPU→GPU writes for the
  *  env buffers. ACTIVE ROOM ONLY, the engine-global resource buffers
  *  hold exactly one room's state at a time, the currently rendered one. */
-export function updateForCamera(env: Environment, camera: gpu.Camera): void {
-    CloudVisuals.update(env.clouds, env._cloudResources, env, camera);
+export function updateForCamera(env: Environment, camera: gpu.Camera, time: TimeResources): void {
+    CloudVisuals.update(env.clouds, env._cloudResources, env, camera, time);
     const wallTime = (performance.now() - env._wallStartMs) / 1000;
     env._packed[WALL_TIME_F32_INDEX] = wallTime;
     env._configDirty = true;

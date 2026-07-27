@@ -4,24 +4,26 @@
 // directly (via unionSubtreeWorldAabb). falls back to a sphere around
 // the transform position if the subtree contains no mesh geometry.
 
-import { LineMaterial, LineSegmentsGeometry, Mesh, type Scene, vec4f } from 'gpucat';
+import { type d, LineMaterial, LineSegmentsGeometry, Mesh, type Scene, type Node as ShaderNode } from 'gpucat';
 import { type Box3, box3 } from 'mathcat';
 import { getVisualWorldPosition } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Resources } from '../../core/resources';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait } from '../../core/scene/scene-tree';
+import type { TimeResources } from '../../render/time-resources';
 import { unionSubtreeWorldAabb } from '../node-aabb';
 import { INSPECT_OUTLINE } from './editor-colors';
+import { rainbowLineColor } from './rainbow';
 
 // ── material (shared, created once) ─────────────────────────────────
 
 let _material: LineMaterial | null = null;
 
-function getMaterial(): LineMaterial {
+function getMaterial(elapsedTime: ShaderNode<d.f32>): LineMaterial {
     if (!_material) {
         _material = new LineMaterial({
-            color: vec4f(...INSPECT_OUTLINE),
+            color: rainbowLineColor(elapsedTime, INSPECT_OUTLINE[3]),
             lineWidth: 3,
             transparent: false,
         });
@@ -171,7 +173,7 @@ const _aabb: Box3 = box3.create();
  * call each frame to keep the inspect outline in sync with the
  * selected node(s). pass empty array to clear.
  */
-export function update(state: InspectMeshState, nodes: Node[], resources: Resources): void {
+export function update(state: InspectMeshState, nodes: Node[], resources: Resources, time: TimeResources): void {
     if (nodes.length === 0) {
         // clear
         if (state.mesh) {
@@ -205,7 +207,7 @@ export function update(state: InspectMeshState, nodes: Node[], resources: Resour
         state.mesh.geometry = geo;
         state.mesh.visible = true;
     } else {
-        const mesh = new Mesh(geo, getMaterial());
+        const mesh = new Mesh(geo, getMaterial(time.elapsedTime));
         mesh.name = 'editor-inspect-mesh';
         mesh.frustumCulled = false;
         state.scene.add(mesh);

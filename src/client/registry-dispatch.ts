@@ -41,7 +41,7 @@
 import { env } from 'bongle';
 import { collectDirtyByRegistry } from '../core/capture/dep-graph';
 import * as Content from '../core/content';
-import { bumpVersion, type RegistryStore, logPendingChanges, registry, reindexRegistry } from '../core/registry';
+import { bumpVersion, logPendingChanges, type RegistryStore, registry, reindexRegistry } from '../core/registry';
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
@@ -265,6 +265,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
         blockRegistry,
         state.renderer.environmentResources,
         state.voxelBudget,
+        state.renderer.timeResources,
         Performance.settingsForTier(state.performance).voxelWorkerCount,
         Performance.settingsForTier(state.performance).voxelWorkerQueueDepth,
         state.resources,
@@ -276,7 +277,11 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
     // must rebuild alongside voxelResources whenever those swap.
     if (voxelResourcesChanged) {
         VoxelMeshResources.dispose(state.voxelMeshResources);
-        state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
+        state.voxelMeshResources = VoxelMeshResources.init(
+            state.voxelResources.atlas,
+            state.voxelResources.texAnimBuffer,
+            state.renderer.timeResources,
+        );
     }
 
     const activeRoom = state.rooms.activePlayerId !== null ? (state.rooms.rooms.get(state.rooms.activePlayerId) ?? null) : null;

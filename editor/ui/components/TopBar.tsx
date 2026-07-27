@@ -234,7 +234,7 @@ function SaveMenu({ fs }: { fs: Filesystem }) {
                         >
                             Save Draft
                             <span className="mt-0.5 block text-[9px] leading-tight text-fg-muted">
-                                Quick on-device snapshot of the working copy.
+                                Quick snapshot. Saved on device, and to your account if owned.
                             </span>
                         </button>
                     )}
@@ -248,7 +248,7 @@ function SaveMenu({ fs }: { fs: Filesystem }) {
                     >
                         Save As New Version
                         <span className="mt-0.5 block text-[9px] leading-tight text-fg-muted">
-                            Mints a version — enters history, what builds come from.
+                            Mints a version. Enters history.
                         </span>
                     </button>
                 </div>

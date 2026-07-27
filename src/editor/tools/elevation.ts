@@ -255,12 +255,12 @@ export function updateElevation(
     //         mid-stroke, the raycast surface (hv) stays anchored to the
     //         original ground.
     //
-    // tint reflects intent:
-    //   raise   → cyan  (additive)
+    // tint reflects intent, warning colours override the default rainbow brush:
+    //   raise   → null  (flowing rainbow, additive)
     //   lower   → red   (destructive)
-    //   flatten → amber (neutral / mixed-effect)
-    // both fill and edges point at stable BRUSH_TINTS preset refs, so the
-    // uniform pushes exactly once per mode change (not per frame).
+    //   flatten → amber (mixed-effect)
+    // a set tint points at a stable BRUSH_TINTS preset ref, so the uniform
+    // pushes exactly once per mode change (not per frame).
     // stroke active → show the projected delta ghost, anchored to the click
     // origin. doesn't need a live hover voxel (the cursor can wander off the
     // terrain during a stroke without nuking the visual feedback).
@@ -274,7 +274,9 @@ export function updateElevation(
         // idle reads from the live UI setting so the tint previews the next
         // click's behavior.
         const activeMode = state.active && state.opts ? state.opts.mode : opts.mode;
-        const tint = activeMode === 'lower' ? BRUSH_TINTS.red : activeMode === 'flatten' ? BRUSH_TINTS.amber : BRUSH_TINTS.cyan;
+        const tint = activeMode === 'lower' ? BRUSH_TINTS.red : activeMode === 'flatten' ? BRUSH_TINTS.amber : null;
+        const tintFill = tint?.fill ?? null;
+        const tintEdges = tint?.edges ?? null;
         // idle preview always marks the hit voxel (cy) so the user sees
         // where the click lands, plus thin disc layers at the mode's reachable
         // cap(s) so the y-limit band is visible:
@@ -311,11 +313,11 @@ export function updateElevation(
                 if (showUpCap) addDisc(cy + yLimit);
                 if (showDownCap) addDisc(cy - yLimit);
             }
-            store.setState({ brush: sel, brushFill: tint.fill, brushEdges: tint.edges });
-        } else if (store.getState().brushFill !== tint.fill || store.getState().brushEdges !== tint.edges) {
+            store.setState({ brush: sel, brushFill: tintFill, brushEdges: tintEdges });
+        } else if (store.getState().brushFill !== tintFill || store.getState().brushEdges !== tintEdges) {
             // mode changed without the preview geometry changing, push the new
             // tint refs anyway so the materials update.
-            store.setState({ brushFill: tint.fill, brushEdges: tint.edges });
+            store.setState({ brushFill: tintFill, brushEdges: tintEdges });
         }
     } else if (state.previewKey !== '') {
         state.previewKey = '';

@@ -14,7 +14,7 @@ import {
     PerspectiveCamera,
     pass,
     RenderPipeline,
-    RenderTarget,
+    type RenderTarget,
     renderOutput,
     Scene,
     sub,
@@ -31,7 +31,7 @@ import { getTrait } from '../core/scene/scene-tree';
 import { getCameraTint } from '../core/voxels/camera-tint';
 import type { Voxels } from '../core/voxels/voxels';
 import * as Environment from './environment';
-import { elapsedTime } from './voxels/voxel-material';
+import * as Time from './time-resources';
 import * as VoxelResources from './voxels/voxel-resources';
 
 export type Renderer = {
@@ -45,6 +45,9 @@ export type Renderer = {
     /** engine-global render pipeline, one set across all rooms; the active
      *  room swaps in via `setActiveScene` each frame. */
     pipeline: EngineRenderPipeline;
+    /** shared render clock; its `elapsedTime` node is threaded into every
+     *  time-driven shader graph, and `render()` advances it each frame. */
+    timeResources: Time.TimeResources;
 };
 
 /**
@@ -63,7 +66,7 @@ export function init(): Renderer {
     renderer.setSize(window.innerWidth, window.innerHeight);
     const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
     const pipeline = createRenderPipeline(renderer);
-    return { renderer, environmentResources, pipeline };
+    return { renderer, environmentResources, pipeline, timeResources: Time.init() };
 }
 
 /**
@@ -83,7 +86,7 @@ export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): R
     });
     const environmentResources = Environment.createEnvironmentResources(ENVIRONMENT_DEFAULT);
     const pipeline = createRenderPipeline(renderer);
-    return { renderer, environmentResources, pipeline };
+    return { renderer, environmentResources, pipeline, timeResources: Time.init() };
 }
 
 /** async device handshake. all GPU objects defer their real work until now. */
@@ -339,7 +342,7 @@ export function renderRoomToTarget(
         const dispatches: ComputeDispatch[] = [];
         for (const disp of VoxelResources.cullDispatches(voxelResources)) dispatches.push(disp);
         scene.updateWorldMatrix();
-        elapsedTime.value = performance.now() / 1000;
+        Time.tick(state.timeResources, performance.now() / 1000);
         if (dispatches.length > 0) state.renderer.compute(dispatches);
         pipeline.render();
     } finally {
@@ -388,6 +391,11 @@ export function render(
         state.renderer.setCanvasTarget(room.canvasTarget);
     }
 
+    // drive the shared render clock first so every time-driven consumer this
+    // frame (GPU shaders via elapsedTime, cloud drift via seconds) sees the
+    // same value. gpucat no longer ticks time itself.
+    Time.tick(state.timeResources, performance.now() / 1000);
+
     // env flush + screen tint, only the active camera defines what world
     // context the post-chain should see this frame. when camera is null
     // (e.g. boot before a POV camera is bound) we still render whatever the
@@ -395,7 +403,7 @@ export function render(
     // fine for the rare null window.
     if (camera) {
         updateCameraEnvironment(state.pipeline, room.voxels, camera);
-        Environment.updateForCamera(room.environment, camera);
+        Environment.updateForCamera(room.environment, camera, state.timeResources);
         // prepare the GPU cull: pre-shift the frustum planes camera-relative
         // and reset the per-frame cull/emit counters. The cull + per-facing
         // emit computes themselves are queued below via `cullDispatches`.
@@ -413,8 +421,6 @@ export function render(
     // visibleQuads the VS reads. Empty when no chunks are resident.
     for (const disp of VoxelResources.cullDispatches(voxelResources)) dispatches.push(disp);
 
-    // drive the voxel animation clock, gpucat no longer ticks time itself.
-    elapsedTime.value = performance.now() / 1000;
     state.renderer.compute(dispatches);
     state.pipeline.pipeline.render();
 }

@@ -22,6 +22,7 @@ import { type Camera, frustum, Mesh, type Scene } from 'gpucat';
 import { type CloudResources, COMPACTED_CLOUD_INSTANCE_STRIDE } from './cloud-resources';
 import { N_CLOUD_SHAPES } from './cloud-shapes';
 import type * as Environment from './environment';
+import type { TimeResources } from './time-resources';
 
 // ── tunables ────────────────────────────────────────────────────────
 
@@ -86,10 +87,18 @@ function hash2f(x: number, y: number): number {
 const STRIDE4 = COMPACTED_CLOUD_INSTANCE_STRIDE / 4;
 const M_CLOUD_INSTANCES = GRID_DIM * GRID_DIM;
 
-export function update(_visuals: CloudVisuals, resources: CloudResources, env: Environment.Environment, camera: Camera): void {
+export function update(
+    _visuals: CloudVisuals,
+    resources: CloudResources,
+    env: Environment.Environment,
+    camera: Camera,
+    time: TimeResources,
+): void {
     const cfg = env.config;
     const cp = camera.position;
-    const windTime = (performance.now() - resources.windStartMs) / 1000;
+    // shared render clock keeps drift continuous across room switches (the old
+    // per-resources windStartMs anchor only mattered as a phase offset).
+    const windTime = time.seconds;
     const gridSpacing = (camera.far * SAFE_FAR_FRACTION) / (GRID_DIM / 2);
 
     // frustum planes, same math as the old WGSL cull.

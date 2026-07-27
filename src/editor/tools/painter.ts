@@ -22,7 +22,6 @@ import { activeBlockKeyOf } from '../inventory';
 import type { PointerState } from '../pointer-state';
 import { pointerHeld, pointerJustDown, pointerJustRight, pointerJustUp } from '../pointer-state';
 import { buildShape } from '../scene/shapes';
-import { BRUSH_TINTS } from '../visuals/editor-colors';
 import { commitVoxelOps } from '../voxel-edit';
 import { applyStamp } from './brush-apply';
 
@@ -178,11 +177,8 @@ export function updatePainter(
             state.previewKey = key;
             const sel = Selection.create();
             buildShape(sel, opts.shape, hv[0], hv[1], hv[2], opts.size, opts.height);
-            store.setState({
-                brush: sel,
-                brushFill: BRUSH_TINTS.cyan.fill,
-                brushEdges: BRUSH_TINTS.cyan.edges,
-            });
+            // null tint → the default flowing rainbow brush.
+            store.setState({ brush: sel, brushFill: null, brushEdges: null });
         }
     } else if (state.previewKey !== '') {
         state.previewKey = '';

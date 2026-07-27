@@ -15,9 +15,9 @@
 //   - compactedInstanceBuf,
 //     indirectBuf               (per-frame cull output, one writer)
 //   - shapes, maxIndexCount     (CPU-side cull metadata)
-//   - windStartMs               (wall-clock anchor, global on purpose,
-//                                so clouds drift consistently across
-//                                room switches)
+//
+// cloud drift reads the shared render clock (render/time-resources.ts) so it
+// stays continuous across room switches, no per-resources time anchor needed.
 //
 // vertex-pull design: the geometry has no vertex attributes and no
 // index buffer. The VS uses `vertexIndex` (in [0, maxIndexCount)) and
@@ -130,11 +130,6 @@ export type CloudResources = {
     /** CPU mirror of the uber-geometry's per-shape metadata. */
     shapes: CloudShapeMeta[];
     maxIndexCount: number;
-
-    /** wall-clock anchor so windTime is monotonic seconds, unaffected
-     *  by envTime resets at midnight. Global so clouds keep drifting
-     *  consistently across room switches. */
-    windStartMs: number;
 };
 
 export function init(envResources: EnvironmentResources): CloudResources {
@@ -192,7 +187,6 @@ export function init(envResources: EnvironmentResources): CloudResources {
         indexStorageBuf,
         shapes,
         maxIndexCount,
-        windStartMs: performance.now(),
     };
 }
 

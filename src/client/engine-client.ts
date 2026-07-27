@@ -374,8 +374,17 @@ export async function load(state: EngineClient) {
     state.modelResources = ModelResources.init();
     state.shadowResources = ShadowResources.init();
 
-    state.voxelResources = VoxelResources.init(registry.blockRegistry, state.renderer.environmentResources, voxelBudget);
-    state.voxelMeshResources = VoxelMeshResources.init(state.voxelResources.atlas, state.voxelResources.texAnimBuffer);
+    state.voxelResources = VoxelResources.init(
+        registry.blockRegistry,
+        state.renderer.environmentResources,
+        voxelBudget,
+        state.renderer.timeResources,
+    );
+    state.voxelMeshResources = VoxelMeshResources.init(
+        state.voxelResources.atlas,
+        state.voxelResources.texAnimBuffer,
+        state.renderer.timeResources,
+    );
 
     // async load pass, pre-warms compile pipelines, fetches atlases. All
     // resources race in parallel; the placeholder atlas keeps materials

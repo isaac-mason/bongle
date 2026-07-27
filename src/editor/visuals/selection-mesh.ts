@@ -8,10 +8,12 @@
 // then calls `meshOccupancy` with `Selection.has` as the occupancy probe.
 // normals omitted, the flat-colour material doesn't need them.
 //
-// materials are created once and shared.
-//   selection: blue tint, depthTest:false so it overlays everything.
-//   brush:     cyan tint, used for hovered block (idle), wip box-select, future brush shapes.
-//   hover outline: white aabb outline around the single hovered block (separate from brush mesh).
+// materials are created once and shared. all use the flowing brand rainbow
+// (see visuals/rainbow.ts), depthTest:false so they overlay everything.
+//   selection: rainbow fill + outline + surface edges of the committed selection.
+//   brush:     rainbow by default (hovered block idle, wip box-select, brush shapes),
+//              blends to a solid red/amber tint for elevation lower/flatten.
+//   hover outline: rainbow aabb around the single hovered block (separate from brush mesh).
 
 import {
     createIndexBuffer,
@@ -22,17 +24,18 @@ import {
     LineSegmentsGeometry,
     Material,
     Mesh,
+    mix,
+    type Node,
     positionClip,
     type Scene,
     Uniform,
     uniform,
-    vec4f,
 } from 'gpucat';
 import * as Selection from '../../core/scene/selection';
 import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
 import { CHUNK_BITS, CHUNK_VOLUME } from '../../core/voxels/voxels';
+import type { TimeResources } from '../../render/time-resources';
 import type { EditRoomState } from '../edit-room-store';
-import type { Rgba } from './editor-colors';
 import {
     BRUSH_EDGES_DEFAULT,
     BRUSH_FILL_DEFAULT,
@@ -41,6 +44,7 @@ import {
     SELECTION_FILL,
     SELECTION_OUTLINE,
 } from './editor-colors';
+import { rainbowFillColor, rainbowLineColor } from './rainbow';
 
 // ── materials ──────────────────────────────────────────────────────
 
@@ -53,12 +57,19 @@ let _brushEdgesMaterial: LineMaterial | null = null;
 let _brushEdgesUniform: Uniform<d.vec4f> | null = null;
 let _hoverOutlineMaterial: LineMaterial | null = null;
 
-function getSelectionMaterial(): Material {
+// brush tint blend: 0 = flowing rainbow (default), 1 = solid semantic tint.
+// shared by the brush fill + edges materials; elevation lower/flatten push it
+// to 1 with a red/amber tint, every other brush use leaves it at 0 (rainbow).
+const _brushTintStrength = new Uniform(d.f32, 0);
+
+function getSelectionMaterial(elapsedTime: Node<d.f32>): Material {
     if (!_selectionMaterial) {
         _selectionMaterial = new Material({
             name: 'editor-selection-fill',
             vertex: positionClip,
-            fragment: vec4f(...SELECTION_FILL),
+            // flowing brand rainbow, keyed to world position; alpha keeps the
+            // committed-selection fill as translucent as the old blue tint.
+            fragment: rainbowFillColor(elapsedTime, SELECTION_FILL[3]),
             transparent: true,
             cullMode: 'none',
             depthTest: false,
@@ -68,18 +79,21 @@ function getSelectionMaterial(): Material {
     return _selectionMaterial;
 }
 
-function getBrushMaterial(): Material {
+function getBrushMaterial(elapsedTime: Node<d.f32>): Material {
     if (!_brushMaterial) {
-        // single material; color driven by a vec4f uniform. tools push rgba
-        // into the store, selection-mesh forwards new references to this
-        // uniform, no material swap, no mesh rebind. animated colors
-        // (pulse) just allocate a fresh tuple per frame: the reference
-        // changes → the uniform writes.
+        // flowing rainbow by default, blended toward a solid semantic tint by
+        // _brushTintStrength (elevation lower/flatten push it to 1 + a red/amber
+        // rgba here). alpha tracks the default brush-fill translucency. animated
+        // tints (pulse) just write _brushFillUniform a fresh tuple per frame.
         _brushFillUniform = new Uniform(d.vec4f, BRUSH_FILL_DEFAULT);
         _brushMaterial = new Material({
             name: 'editor-brush-fill',
             vertex: positionClip,
-            fragment: uniform(_brushFillUniform),
+            fragment: mix(
+                rainbowFillColor(elapsedTime, BRUSH_FILL_DEFAULT[3]),
+                uniform(_brushFillUniform),
+                uniform(_brushTintStrength),
+            ),
             transparent: true,
             cullMode: 'none',
             depthTest: false,
@@ -89,10 +103,10 @@ function getBrushMaterial(): Material {
     return _brushMaterial;
 }
 
-function getSelectionOutlineMaterial(): LineMaterial {
+function getSelectionOutlineMaterial(elapsedTime: Node<d.f32>): LineMaterial {
     if (!_selectionOutlineMaterial) {
         _selectionOutlineMaterial = new LineMaterial({
-            color: vec4f(...SELECTION_OUTLINE),
+            color: rainbowLineColor(elapsedTime, SELECTION_OUTLINE[3]),
             lineWidth: 4,
             transparent: false,
         });
@@ -102,11 +116,11 @@ function getSelectionOutlineMaterial(): LineMaterial {
     return _selectionOutlineMaterial;
 }
 
-function getSelectionEdgesMaterial(): LineMaterial {
+function getSelectionEdgesMaterial(elapsedTime: Node<d.f32>): LineMaterial {
     if (!_selectionEdgesMaterial) {
         _selectionEdgesMaterial = new LineMaterial({
-            color: vec4f(...SELECTION_EDGES),
-            lineWidth: 2,
+            color: rainbowLineColor(elapsedTime, SELECTION_EDGES[3]),
+            lineWidth: 4,
             transparent: false,
         });
         _selectionEdgesMaterial.depthTest = false;
@@ -115,12 +129,16 @@ function getSelectionEdgesMaterial(): LineMaterial {
     return _selectionEdgesMaterial;
 }
 
-function getBrushEdgesMaterial(): LineMaterial {
+function getBrushEdgesMaterial(elapsedTime: Node<d.f32>): LineMaterial {
     if (!_brushEdgesMaterial) {
         _brushEdgesUniform = new Uniform(d.vec4f, BRUSH_EDGES_DEFAULT);
         _brushEdgesMaterial = new LineMaterial({
-            color: uniform(_brushEdgesUniform),
-            lineWidth: 2,
+            color: mix(
+                rainbowLineColor(elapsedTime, BRUSH_EDGES_DEFAULT[3]),
+                uniform(_brushEdgesUniform),
+                uniform(_brushTintStrength),
+            ),
+            lineWidth: 4,
             transparent: false,
         });
         _brushEdgesMaterial.depthTest = false;
@@ -129,10 +147,10 @@ function getBrushEdgesMaterial(): LineMaterial {
     return _brushEdgesMaterial;
 }
 
-function getHoverOutlineMaterial(): LineMaterial {
+function getHoverOutlineMaterial(elapsedTime: Node<d.f32>): LineMaterial {
     if (!_hoverOutlineMaterial) {
         _hoverOutlineMaterial = new LineMaterial({
-            color: vec4f(...HOVER_OUTLINE),
+            color: rainbowLineColor(elapsedTime, HOVER_OUTLINE[3]),
             lineWidth: 3,
             transparent: false,
         });
@@ -575,7 +593,7 @@ export function buildMeshEdgeSegments(sel: Selection.Selection): number[] | null
 // AABB (hover collider outline). OUTLINE_EXPAND keeps the outline just
 // outside the fill mesh to avoid z-fighting.
 
-const OUTLINE_EXPAND = 0.02;
+const OUTLINE_EXPAND = 0.005;
 
 export function buildOutlineSegments(sel: Selection.Selection): number[] | null {
     if (sel.chunks.size === 0) return null;
@@ -773,11 +791,11 @@ export type SelectionMeshState = {
     selectionMesh: Mesh | null;
     selectionOutline: Mesh | null;
     selectionEdges: Mesh | null;
-    // brush: any-shape selection displayed in cyan. used for hovered block (idle),
-    // wip box-select region, and future arbitrary brush shapes.
+    // brush: any-shape selection (hovered block idle, wip box-select region,
+    // future arbitrary brush shapes). rainbow by default, red/amber when tinted.
     brushMesh: Mesh | null;
     brushEdges: Mesh | null;
-    // single-block aabb outline around the exact hovered voxel, white, tight box.
+    // single-block aabb outline around the exact hovered voxel, tight box.
     hoverOutline: Mesh | null;
     scene: Scene;
     // track last updated data to avoid redundant rebuilds
@@ -786,11 +804,6 @@ export type SelectionMeshState = {
     // string key `aabb:x0,y0,…,z1` when the brush is a synthesized sub-unit
     // collider box. covers both rebuild triggers via one identity check.
     _lastBrushSig: string | Selection.Selection | null;
-    // last brush color refs pushed into the fill / edges uniforms. reference
-    // equality matches both patterns: static presets (stable refs → write once)
-    // and animated colors (fresh allocation each frame → writes every frame).
-    _lastBrushFill: Rgba | null;
-    _lastBrushEdges: Rgba | null;
     _lastHoverKey: string; // serialised "x,y,z" or ""
 };
 
@@ -805,8 +818,6 @@ export function createSelectionMeshState(scene: Scene): SelectionMeshState {
         scene,
         _lastSelection: null,
         _lastBrushSig: null,
-        _lastBrushFill: null,
-        _lastBrushEdges: null,
         _lastHoverKey: '',
     };
 }
@@ -905,7 +916,8 @@ function setOutlineMesh(
     }
 }
 
-export function updateSelectionMeshes(meshState: SelectionMeshState, state: EditRoomState): void {
+export function updateSelectionMeshes(meshState: SelectionMeshState, state: EditRoomState, time: TimeResources): void {
+    const elapsedTime = time.elapsedTime;
     // update committed selection mesh + outline when the object reference changes
     if (state.selection !== meshState._lastSelection) {
         meshState._lastSelection = state.selection;
@@ -913,19 +925,19 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
             meshState,
             'selectionMesh',
             state.selection ? buildSelectionGeometry(state.selection) : null,
-            getSelectionMaterial(),
+            getSelectionMaterial(elapsedTime),
         );
         setOutlineMesh(
             meshState,
             'selectionOutline',
             state.selection ? buildOutlineSegments(state.selection) : null,
-            getSelectionOutlineMaterial(),
+            getSelectionOutlineMaterial(elapsedTime),
         );
         setOutlineMesh(
             meshState,
             'selectionEdges',
             state.selection ? buildMeshEdgeSegments(state.selection) : null,
-            getSelectionEdgesMaterial(),
+            getSelectionEdgesMaterial(elapsedTime),
         );
     }
 
@@ -959,7 +971,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                 meshState,
                 'brushMesh',
                 buildAabbBoxGeometry(hoverAabb[0], hoverAabb[1], hoverAabb[2], hoverAabb[3], hoverAabb[4], hoverAabb[5]),
-                getBrushMaterial(),
+                getBrushMaterial(elapsedTime),
             );
             setOutlineMesh(
                 meshState,
@@ -972,33 +984,34 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                     hoverAabb[4] + e,
                     hoverAabb[5] + e,
                 ),
-                getBrushEdgesMaterial(),
+                getBrushEdgesMaterial(elapsedTime),
             );
         } else {
-            setMesh(meshState, 'brushMesh', state.brush ? buildSelectionGeometry(state.brush) : null, getBrushMaterial());
+            setMesh(
+                meshState,
+                'brushMesh',
+                state.brush ? buildSelectionGeometry(state.brush) : null,
+                getBrushMaterial(elapsedTime),
+            );
             setOutlineMesh(
                 meshState,
                 'brushEdges',
                 state.brush ? buildMeshEdgeSegments(state.brush) : null,
-                getBrushEdgesMaterial(),
+                getBrushEdgesMaterial(elapsedTime),
             );
         }
     }
 
-    // brush fill / edges colors → vec4f uniforms on the shared materials.
-    // tools set rgba via `brushFill` / `brushEdges` (null = default cyan).
-    // reference equality covers both the static-preset and per-frame-pulse
-    // cases without any special "is animated?" flag.
-    const fill = state.brushFill ?? BRUSH_FILL_DEFAULT;
-    if (fill !== meshState._lastBrushFill) {
-        meshState._lastBrushFill = fill;
-        if (_brushFillUniform) _brushFillUniform.value = fill;
-    }
-    const edges = state.brushEdges ?? BRUSH_EDGES_DEFAULT;
-    if (edges !== meshState._lastBrushEdges) {
-        meshState._lastBrushEdges = edges;
-        if (_brushEdgesUniform) _brushEdgesUniform.value = edges;
-    }
+    // brush tint: a null `brushFill` / `brushEdges` means the default flowing
+    // rainbow (strength 0); a set rgba (elevation lower/flatten) means a solid
+    // semantic tint (strength 1) blended in by the brush materials. the tint
+    // uniforms only matter when strength is 1; writes are cheap, so set the
+    // active tint each frame (covers static presets and per-frame pulse alike).
+    const fill = state.brushFill;
+    const edges = state.brushEdges;
+    _brushTintStrength.value = fill ? 1 : 0;
+    if (fill && _brushFillUniform) _brushFillUniform.value = fill;
+    if (edges && _brushEdgesUniform) _brushEdgesUniform.value = edges;
 
     // hover outline geometry, tight white box around the hovered block's
     // collider AABB. visibility is decided below.
@@ -1019,7 +1032,7 @@ export function updateSelectionMeshes(meshState: SelectionMeshState, state: Edit
                   hoverAabb[5] + e,
               )
             : null;
-        setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterial());
+        setOutlineMesh(meshState, 'hoverOutline', pts, getHoverOutlineMaterial(elapsedTime));
     }
 
     // white hover outline pins down the focal cell within a multi-cell
