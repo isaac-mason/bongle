@@ -283,7 +283,7 @@ export const CharacterTrait = trait(
         config: (): CharacterConfig => ({
             animation: true,
             footstepVolume: 0.3,
-            ownFootstepVolume: 0.5,
+            ownFootstepVolume: 0.3,
             landingVolume: 0.5,
             ownLandingVolume: 0.7,
             landingCooldown: 0.18,
