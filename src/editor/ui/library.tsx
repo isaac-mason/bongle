@@ -15,13 +15,14 @@
 
 import * as Icons from "../../../icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
+import { HoverCard, HoverCardContent, HoverCardTrigger, Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
 import { InventoryItemIcon } from './inventory-icon';
+import { Kbd } from './kbd';
 
 type Tab = 'inventory' | 'scenes';
 type Filter = 'all' | 'bongle' | 'prefabs' | 'blueprints';
@@ -166,38 +167,101 @@ const InventoryGridItem = memo(function InventoryGridItem({ item }: { item: Inve
     const display = inventoryItemDisplay(item, room);
 
     return (
-        <Popover open={infoOpen} onOpenChange={setInfoOpen}>
-            <PopoverTrigger asChild>
-                <button
-                    type="button"
-                    onMouseEnter={() => setHovered(item)}
-                    onMouseLeave={() => setHovered(null) /* simple: clearing on leave is fine, the next enter sets it again */}
-                    onClick={() => setCarried(isCarried ? null : item)}
-                    onContextMenu={(e) => {
-                        e.preventDefault();
-                        setInfoOpen((o) => !o);
-                    }}
-                    className={`flex flex-col items-center justify-center gap-1 p-1 cursor-pointer transition-colors ${
-                        isCarried
-                            ? 'bg-accent/20 ring-2 ring-accent'
-                            : 'bg-surface-muted hover:bg-border hover:ring-1 hover:ring-fg-muted'
-                    }`}
-                    title={`${display.title}${carried ? '' : ' — left-click pick up, right-click info'}`}
-                    style={{ minHeight: ITEM_SIZE }}
-                >
-                    <InventoryItemIcon item={item} size={ICON_SIZE} />
-                    <span className="text-[10px] text-fg truncate max-w-full">{display.name}</span>
-                    {display.id !== display.name && (
-                        <span className="text-[8px] font-mono text-fg-muted truncate max-w-full -mt-0.5">{display.id}</span>
-                    )}
-                </button>
-            </PopoverTrigger>
-            <PopoverContent align="center" className="w-64 p-3">
-                <InventoryItemInfo item={item} />
-            </PopoverContent>
-        </Popover>
+        // HoverCard wraps the tile (a plain div anchor) so its hover snippet stays
+        // independent of the button's click/right-click, which drive carry + the
+        // details Popover. Both popups portal, so the scrolling grid can't clip them.
+        <HoverCard>
+            <HoverCardTrigger asChild>
+                <div className="relative">
+                    <Popover open={infoOpen} onOpenChange={setInfoOpen}>
+                        <PopoverTrigger asChild>
+                            <button
+                                type="button"
+                                onMouseEnter={() => setHovered(item)}
+                                onMouseLeave={() => setHovered(null) /* next enter sets it again */}
+                                onClick={() => setCarried(isCarried ? null : item)}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setInfoOpen((o) => !o);
+                                }}
+                                className={`flex w-full flex-col items-center justify-center gap-1 p-1 cursor-pointer transition-colors ${
+                                    isCarried
+                                        ? 'bg-accent/20 ring-2 ring-accent'
+                                        : 'bg-surface-muted hover:bg-border hover:ring-1 hover:ring-fg-muted'
+                                }`}
+                                style={{ minHeight: ITEM_SIZE }}
+                            >
+                                <InventoryItemIcon item={item} size={ICON_SIZE} />
+                                <span className="text-[10px] text-fg truncate max-w-full">{display.name}</span>
+                                {display.id !== display.name && (
+                                    <span className="text-[8px] font-mono text-fg-muted truncate max-w-full -mt-0.5">
+                                        {display.id}
+                                    </span>
+                                )}
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="center" className="w-64 p-3">
+                            <InventoryItemInfo item={item} />
+                        </PopoverContent>
+                    </Popover>
+                </div>
+            </HoverCardTrigger>
+            <HoverCardContent side="bottom" className="w-52 max-w-[70vw] p-2">
+                <InventoryHoverBody item={item} display={display} />
+            </HoverCardContent>
+        </HoverCard>
     );
 });
+
+/** the hover card body: a compact info snippet plus how to equip the item. */
+function InventoryHoverBody({ item, display }: { item: InventoryItem; display: { name: string; id: string; title: string } }) {
+    // a meaningful sub-line: the block's state suffix, or the prefab's type.
+    const detail =
+        item.kind === 'block'
+            ? item.blockKey.includes('[')
+                ? item.blockKey.slice(item.blockKey.indexOf('['))
+                : null
+            : item.kind === 'prefab'
+              ? (registry.prefabs.byId.get(item.prefabId)?.type ?? null)
+              : null;
+
+    return (
+        <>
+            <div className="flex items-center gap-2">
+                <InventoryItemIcon item={item} size={28} />
+                <div className="flex min-w-0 flex-col">
+                    <span className="truncate text-[12px] text-fg">{display.name}</span>
+                    <span className="truncate text-[9px] font-mono uppercase text-fg-muted">
+                        {item.kind}
+                        {detail ? ` · ${detail}` : ''}
+                    </span>
+                </div>
+            </div>
+            {display.id !== display.name && (
+                <div className="mt-1 truncate font-mono text-[9px] text-fg-muted">{display.id}</div>
+            )}
+            <div className="my-1.5 h-px bg-border" />
+            <div className="flex flex-col gap-1 text-[10px] text-fg-muted">
+                <div className="flex items-center gap-1.5">
+                    <Kbd size="sm">click</Kbd>
+                    <span>pick up, then click a slot</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <span className="flex items-center gap-0.5">
+                        <Kbd size="sm">1</Kbd>
+                        <span>-</span>
+                        <Kbd size="sm">9</Kbd>
+                    </span>
+                    <span>bind to a hotbar slot</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                    <Kbd size="sm">right-click</Kbd>
+                    <span>details</span>
+                </div>
+            </div>
+        </>
+    );
+}
 
 function InventoryItemInfo({ item }: { item: InventoryItem }) {
     const room = useEditor((s) => s.room);

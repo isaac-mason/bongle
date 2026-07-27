@@ -1,6 +1,7 @@
 export { Collapsible, CollapsibleContent, CollapsibleTrigger } from './collapsible';
 export { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './context-menu';
 export { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './dropdown-menu';
+export { HoverCard, HoverCardContent, HoverCardTrigger } from './hover-card';
 export { IconButton } from './icon-button';
 export { Input, Select } from './input';
 export { Popover, PopoverContent, PopoverTrigger } from './popover';
