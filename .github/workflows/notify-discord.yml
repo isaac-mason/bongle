@@ -19,15 +19,20 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.UPDATES_DISCORD_WEBHOOK }}
         run: |
-          author="${{ github.event.head_commit.author.name }}"
-          message="${{ github.event.head_commit.message }}"
-          # first line of the commit message only
-          subject="${message%%$'\n'*}"
-          url="${{ github.event.head_commit.url }}"
-          sha="${{ github.sha }}"
-          short="${sha:0:7}"
+          # Read the event payload from disk so commit messages are never
+          # interpolated into the shell (avoids injection from crafted messages).
+          # List every commit in the push, newest first, one line each:
+          #   **author** [`short`](url) subject
+          content=$(jq -r '
+            [ (.commits | reverse | .[])
+              | "**\(.author.name)** [`\(.id[0:7])`](\(.url)) \(.message | split("\n")[0])"
+            ] | join("\n")
+          ' "$GITHUB_EVENT_PATH")
+
+          # Prefix with who pushed and where.
+          header="**${{ github.event.pusher.name }}** pushed to \`main\`"
 
           jq -n \
-            --arg content "**$author** pushed to \`main\`: [\`$short\`]($url) $subject" \
+            --arg content "$header"$'\n'"$content" \
             '{content: $content}' \
           | curl -sf -X POST -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
