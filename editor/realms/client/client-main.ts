@@ -16,7 +16,7 @@
 // watcher HMRs source, and resource writes trigger the matching engine refresh.
 
 import type { ClientDriver } from '../../../interface/index';
-import { createPortBridge } from '../../../build';
+import { createNetSim, createPortBridge } from '../../../build';
 import { makeRunner } from '../../dev/runner';
 import { exposeDevtools } from '../../devtools';
 import type { Filesystem } from '../../fs';
@@ -175,10 +175,23 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     // console context (fs + the live EngineClient state / api).
     exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineEditor, bongle: __bongle, runner });
 
+    // debug-pane latency sim (see build/dev/net-sim): holds inbound + outbound
+    // frames per the live net-sim toggle so a laggy link is reproducible locally.
+    const netSim = createNetSim<Uint8Array, Uint8Array>(
+        () => {
+            const s = EngineEditor.useEditor.getState();
+            return { enabled: s.netSimEnabled, rttMs: s.netSimRttMs, jitterMs: s.netSimJitterMs };
+        },
+        {
+            deliverInbound: (bytes) => state.net.inbox.push(bytes),
+            deliverOutbound: (bytes) => gamePort.postMessage(bytes),
+        },
+    );
+
     // game transport: inbound frames from the server worker → engine inbox.
     gamePort.onmessage = (e: MessageEvent) => {
         const data = e.data;
-        state.net.inbox.push(data instanceof ArrayBuffer ? new Uint8Array(data) : (data as Uint8Array));
+        netSim.receive(data instanceof ArrayBuffer ? new Uint8Array(data) : (data as Uint8Array), performance.now());
     };
 
     // frame loop: advance, then drain the outbox onto the game port.
@@ -186,9 +199,11 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     const frame = (now: number) => {
         const dt = (now - last) / 1000;
         last = now;
+        netSim.pump(now); // release due inbound before update reads the inbox.
         EngineClient.update(state, dt);
-        for (const bytes of state.net.outbox) gamePort.postMessage(bytes);
+        for (const bytes of state.net.outbox) netSim.send(bytes, now);
         state.net.outbox.length = 0;
+        netSim.pump(now); // flush just-queued outbound that's due (immediate when disabled).
         requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

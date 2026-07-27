@@ -38,6 +38,7 @@ export {
     type TransformResult,
 } from './dev/dev-server';
 export { contentType } from './dev/mime';
+export { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './dev/net-sim';
 export { createPortBridge } from './dev/port-bridge';
 export { type AttachRealmOptions, attachRealm, type BundlerFrame, describeError } from './dev/realm-host';
 export {

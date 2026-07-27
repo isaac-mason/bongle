@@ -11,6 +11,7 @@ import * as EngineEditor from 'bongle/engine-editor';
 import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
 import type { ClientDriver } from 'bongle/interface';
+import { createNetSim } from '../../../build';
 
 export type StartClientOptions = {
     userEntry: () => Promise<unknown>;
@@ -73,16 +74,32 @@ export async function start(opts: StartClientOptions): Promise<void> {
 
     const ws = new WebSocket(`ws://${location.host}/game`);
     ws.binaryType = 'arraybuffer';
-    ws.addEventListener('message', (e) => state.net.inbox.push(new Uint8Array(e.data as ArrayBuffer)));
+
+    // debug-pane latency sim (see build/dev/net-sim): holds inbound + outbound
+    // frames per the live net-sim toggle so a laggy link is reproducible locally.
+    const netSim = createNetSim<Uint8Array, ArrayBuffer>(
+        () => {
+            const s = EngineEditor.useEditor.getState();
+            return { enabled: s.netSimEnabled, rttMs: s.netSimRttMs, jitterMs: s.netSimJitterMs };
+        },
+        {
+            deliverInbound: (bytes) => state.net.inbox.push(bytes),
+            deliverOutbound: (buf) => ws.send(buf),
+        },
+    );
+
+    ws.addEventListener('message', (e) => netSim.receive(new Uint8Array(e.data as ArrayBuffer), performance.now()));
     await new Promise<void>((res) => ws.addEventListener('open', () => res(), { once: true }));
 
     let last = performance.now();
     const frame = (now: number): void => {
         const dt = (now - last) / 1000;
         last = now;
+        netSim.pump(now); // release due inbound before update reads the inbox.
         EngineClient.update(state, dt);
-        for (const bytes of state.net.outbox) ws.send(bytes.slice().buffer);
+        for (const bytes of state.net.outbox) netSim.send(bytes.slice().buffer, now);
         state.net.outbox.length = 0;
+        netSim.pump(now); // flush just-queued outbound that's due (immediate when disabled).
         requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
