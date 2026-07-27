@@ -162,8 +162,10 @@ async function startSession(
 
 export async function disconnect(): Promise<void> {
     const s = session;
-    if (!s) return;
-    teardown(s);
+    if (s) teardown(s);
+    // Always reset the store, even with no live session: a reconcile failure tears
+    // the session down (session === null) but leaves the store in 'error', so the
+    // "Stop syncing" button must still be able to clear it back to idle.
     useSync.getState().reset();
 }
 
@@ -185,12 +187,18 @@ async function reconcilePublish(s: Session): Promise<void> {
     const files = await s.fs.list('', { recursive: true });
     for (const f of files) {
         if (f.kind !== 'file') continue;
-        const bytes = await s.fs.read(f.path);
-        const sig = sigOf(bytes);
-        await s.disk.write(f.path, bytes);
-        const st = await s.disk.stat(f.path);
-        s.synced.set(f.path, sig);
-        s.diskSig.set(f.path, { size: sig.size, mtime: st?.mtime ?? 0 });
+        try {
+            const bytes = await s.fs.read(f.path);
+            const sig = sigOf(bytes);
+            await s.disk.write(f.path, bytes);
+            const st = await s.disk.stat(f.path);
+            s.synced.set(f.path, sig);
+            s.diskSig.set(f.path, { size: sig.size, mtime: st?.mtime ?? 0 });
+        } catch (e) {
+            // A name the disk FS rejects ("Name is not allowed") shouldn't abort the
+            // whole publish — skip that file, seed the rest.
+            console.warn(`[folder-sync] skipped publish of ${f.path}:`, errText(e));
+        }
     }
 }
 
@@ -201,11 +209,15 @@ async function reconcileImport(s: Session): Promise<void> {
     const onDisk = new Set<string>();
     for (const e of entries) {
         onDisk.add(e.path);
-        const bytes = await s.disk.read(e.path);
-        const sig = sigOf(bytes);
-        await s.fs.writeIfChanged(e.path, bytes);
-        s.synced.set(e.path, sig);
-        s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
+        try {
+            const bytes = await s.disk.read(e.path);
+            const sig = sigOf(bytes);
+            await s.fs.writeIfChanged(e.path, bytes);
+            s.synced.set(e.path, sig);
+            s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
+        } catch (err) {
+            console.warn(`[folder-sync] skipped import of ${e.path}:`, errText(err));
+        }
     }
     // disk is the source of truth: drop OPFS files the folder doesn't have.
     const files = await s.fs.list('', { recursive: true });
@@ -220,9 +232,9 @@ async function reconcileImport(s: Session): Promise<void> {
 
 async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void> {
     if (s.stopped) return;
-    try {
-        let moved = false;
-        for (const c of changes) {
+    let moved = false;
+    for (const c of changes) {
+        try {
             if (c.type === 'deleted') {
                 await s.disk.remove(c.path);
                 s.synced.delete(c.path);
@@ -237,11 +249,16 @@ async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void>
                 }
                 if (await writeToDisk(s, c.path)) moved = true;
             }
+        } catch (e) {
+            // One unwritable path (e.g. a name the disk FS rejects with "Name is not
+            // allowed") must not tear the whole session down — skip it and keep
+            // mirroring everything else. The stopped guard prevents an in-flight
+            // write that rejects after disconnect from re-flagging the store.
+            if (s.stopped) return;
+            console.warn(`[folder-sync] skipped push of ${c.path}:`, errText(e));
         }
-        if (moved) useSync.getState().tick();
-    } catch (e) {
-        useSync.getState().fail(errText(e));
     }
+    if (moved && !s.stopped) useSync.getState().tick();
 }
 
 /** returns whether it actually wrote (false when the content matched `synced`,
@@ -268,15 +285,22 @@ async function pullDiskChanges(s: Session): Promise<void> {
         let moved = false;
         for (const e of entries) {
             present.add(e.path);
-            const prev = s.diskSig.get(e.path);
-            if (prev && prev.size === e.size && prev.mtime === e.mtime) continue; // unchanged on disk
-            const bytes = await s.disk.read(e.path);
-            const sig = sigOf(bytes);
-            s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
-            if (sameSig(s.synced.get(e.path), sig)) continue; // our own write landing
-            await s.fs.writeIfChanged(e.path, bytes); // fires editor watch → HMR / bake
-            s.synced.set(e.path, sig);
-            moved = true;
+            try {
+                const prev = s.diskSig.get(e.path);
+                if (prev && prev.size === e.size && prev.mtime === e.mtime) continue; // unchanged on disk
+                const bytes = await s.disk.read(e.path);
+                const sig = sigOf(bytes);
+                s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
+                if (sameSig(s.synced.get(e.path), sig)) continue; // our own write landing
+                await s.fs.writeIfChanged(e.path, bytes); // fires editor watch → HMR / bake
+                s.synced.set(e.path, sig);
+                moved = true;
+            } catch (err) {
+                // A single unreadable/unwritable path must not kill the poll — skip
+                // it and keep the rest of the folder in sync.
+                if (s.stopped) return;
+                console.warn(`[folder-sync] skipped pull of ${e.path}:`, errText(err));
+            }
         }
         // files we were tracking that vanished from disk → delete from OPFS.
         for (const path of [...s.diskSig.keys()]) {
@@ -286,7 +310,7 @@ async function pullDiskChanges(s: Session): Promise<void> {
             await s.fs.remove(path);
             moved = true;
         }
-        if (moved) useSync.getState().tick();
+        if (moved && !s.stopped) useSync.getState().tick();
     } catch (e) {
         if (!s.stopped) useSync.getState().fail(errText(e));
     } finally {
