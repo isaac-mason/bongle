@@ -18,6 +18,10 @@ export function DebugPane() {
     const setNetSimRttMs = useEditor((s) => s.setNetSimRttMs);
     const netSimJitterMs = useEditor((s) => s.netSimJitterMs);
     const setNetSimJitterMs = useEditor((s) => s.setNetSimJitterMs);
+    const netSimBurstMs = useEditor((s) => s.netSimBurstMs);
+    const setNetSimBurstMs = useEditor((s) => s.setNetSimBurstMs);
+    const netSimBurstChance = useEditor((s) => s.netSimBurstChance);
+    const setNetSimBurstChance = useEditor((s) => s.setNetSimBurstChance);
 
     return (
         <div className="flex flex-col gap-1 px-3 py-2">
@@ -77,6 +81,16 @@ export function DebugPane() {
                         <span className="text-[10px] font-mono text-fg w-12 shrink-0">jitter ms</span>
                         <NumberInput value={netSimJitterMs} onChange={setNetSimJitterMs} min={0} max={1000} step={10} />
                         <Range value={netSimJitterMs} onChange={setNetSimJitterMs} min={0} max={300} step={10} />
+                    </div>
+                    <div className="flex items-center gap-1 pl-5">
+                        <span className="text-[10px] font-mono text-fg w-12 shrink-0">burst ms</span>
+                        <NumberInput value={netSimBurstMs} onChange={setNetSimBurstMs} min={0} max={2000} step={10} />
+                        <Range value={netSimBurstMs} onChange={setNetSimBurstMs} min={0} max={1000} step={10} />
+                    </div>
+                    <div className="flex items-center gap-1 pl-5">
+                        <span className="text-[10px] font-mono text-fg w-12 shrink-0">burst pct</span>
+                        <NumberInput value={netSimBurstChance} onChange={setNetSimBurstChance} min={0} max={1} step={0.01} />
+                        <Range value={netSimBurstChance} onChange={setNetSimBurstChance} min={0} max={0.2} step={0.01} />
                     </div>
                 </>
             )}

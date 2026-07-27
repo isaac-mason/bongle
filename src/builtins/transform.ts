@@ -183,8 +183,6 @@ export type TransformTrait = TraitType<typeof TransformTrait>;
  * authoritative server time (`clock.lastServerStamp`) at unpack, NOT arrival time.
  */
 
-
-
 export type NetSnapshots = {
     /** position keyframes: server-clock seconds, and x/y/z flat (stride 3). */
     posTime: Float64Array;
@@ -269,6 +267,23 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
 // bracket search result, reused across calls (single-threaded sampler).
 const _bracket = { lo: 0, hi: 0, frac: 0 };
 
+/** hard cap (seconds) on how far past the newest keyframe we coast a dry buffer while
+ *  the transport is choking. Matches Source's `cl_extrapolate_amount` (~1/4s): past a
+ *  quarter second of dead-reckoning the guess is worthless, so we ease to a stop. */
+const MAX_EXTRAPOLATION = 0.25;
+
+/** effective extrapolation time (seconds) for a buffer that ran `dtPast` seconds past its
+ *  newest keyframe. Coasts at full last-keyframe velocity up to `cap`, then ramps that
+ *  velocity linearly to zero over a second `cap` (Source's deceleration) so an overlong
+ *  stall glides to a smooth hold instead of hard-stopping. Beyond `2·cap` the entity is
+ *  parked at `1.5·cap` worth of travel. `f(dtPast)` is C1 at the `cap` seam. */
+function extrapolationTime(dtPast: number, cap: number): number {
+    if (dtPast <= cap) return dtPast;
+    if (dtPast >= 2 * cap) return 1.5 * cap;
+    const over = dtPast - cap;
+    return cap + over - (over * over) / (2 * cap);
+}
+
 /**
  * find the two ring entries bracketing `renderTime` and the fraction between them,
  * written into the shared `_bracket`. ring is time-ordered oldest→newest. `frac ∈
@@ -277,16 +292,33 @@ const _bracket = { lo: 0, hi: 0, frac: 0 };
  * stopped, so its final keyframe is the correct pose to hold), before the oldest
  * (only right after join → hold oldest), or a lone entry.
  */
-function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
+function findBracket(time: Float64Array, head: number, count: number, renderTime: number, allowExtrapolate: boolean): void {
     const cap = time.length;
     const newest = head;
     const oldest = (head - count + 1 + cap) % cap;
 
     if (count === 1 || renderTime >= time[newest]!) {
-        // dry buffer: hold at the newest keyframe. on reliable+ordered transport a
-        // dry buffer means the entity actually stopped (its final settle keyframe IS
-        // the newest), where holding is exact; coasting the last velocity would drive
-        // a just-landed body past its true rest pose (e.g. sinking into the ground).
+        // dry buffer. Normally hold at the newest keyframe: on the reliable+ordered
+        // transport a dry buffer usually means the entity actually stopped (its final
+        // settle keyframe IS the newest), where holding is exact and coasting the last
+        // velocity would drive a just-landed body past its true rest pose (sinking).
+        // But when the caller has confirmed the transport is CHOKING (a head-of-line
+        // stall — see Clock.isServerChoking), a dry buffer instead means fresh keyframes
+        // are stuck in flight, so coast the last velocity forward (frac > 1 extrapolates
+        // along secondNewest→newest) to hide the stall, capped + ramped by
+        // `extrapolationTime`. The choke gate is what makes this safe: a stopped entity
+        // never chokes (its stream keeps flowing), so it still holds.
+        if (allowExtrapolate && count >= 2) {
+            const prev = (newest - 1 + cap) % cap;
+            const span = time[newest]! - time[prev]!;
+            if (span > 0) {
+                const eff = extrapolationTime(renderTime - time[newest]!, MAX_EXTRAPOLATION);
+                _bracket.lo = prev;
+                _bracket.hi = newest;
+                _bracket.frac = 1 + eff / span; // frac 1 == newest; >1 coasts beyond it.
+                return;
+            }
+        }
         _bracket.lo = _bracket.hi = newest;
         _bracket.frac = 0;
         return;
@@ -314,9 +346,11 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     _bracket.frac = 0;
 }
 
-/** sample the interpolated local position at `renderTime` into `out`. */
-export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void {
-    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
+/** sample the interpolated local position at `renderTime` into `out`. `allowExtrapolate`
+ *  (set only when the transport is choking) coasts a dry buffer along its last velocity
+ *  instead of freezing on the newest keyframe. */
+export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, allowExtrapolate: boolean): void {
+    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime, allowExtrapolate);
     const lo = _bracket.lo * 3;
     const hi = _bracket.hi * 3;
     const f = _bracket.frac;
@@ -328,9 +362,11 @@ export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, 
 const _rotLo = quat.create();
 const _rotHi = quat.create();
 
-/** sample the interpolated local rotation at `renderTime` into `out`. */
+/** sample the interpolated local rotation at `renderTime` into `out`. Rotation holds on a
+ *  dry buffer (no extrapolation): a frozen facing reads far milder than a frozen position,
+ *  and slerp-overshoot past a stall is rarely worth the risk. */
 export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void {
-    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime);
+    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime, false);
     const lo = _bracket.lo * 4;
     const hi = _bracket.hi * 4;
     if (_bracket.lo === _bracket.hi) {

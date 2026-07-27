@@ -124,6 +124,12 @@ export type EditorStore = {
     netSimEnabled: boolean;
     netSimRttMs: number;
     netSimJitterMs: number;
+    /** occasional head-of-line stall size (ms) and its per-frame probability. This
+     *  is the bursty, correlated delay a real WAN link produces — the shape that
+     *  actually breaks remote interpolation (freeze-and-snap), which steady rtt/jitter
+     *  can't reproduce. 0 stall disables it. */
+    netSimBurstMs: number;
+    netSimBurstChance: number;
 
     /* ── hotbar (localStorage-persisted user palette, shared across rooms) ── */
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
@@ -165,6 +171,8 @@ export type EditorStore = {
     setNetSimEnabled: (enabled: boolean) => void;
     setNetSimRttMs: (ms: number) => void;
     setNetSimJitterMs: (ms: number) => void;
+    setNetSimBurstMs: (ms: number) => void;
+    setNetSimBurstChance: (chance: number) => void;
 };
 
 export const useEditor = create<EditorStore>((set, _get) => ({
@@ -215,6 +223,8 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     netSimEnabled: false,
     netSimRttMs: 100,
     netSimJitterMs: 0,
+    netSimBurstMs: 0,
+    netSimBurstChance: 0.02,
 
     hotbar: loadHotbar(),
 
@@ -293,6 +303,8 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setNetSimEnabled: (netSimEnabled) => set({ netSimEnabled }),
     setNetSimRttMs: (netSimRttMs) => set({ netSimRttMs }),
     setNetSimJitterMs: (netSimJitterMs) => set({ netSimJitterMs }),
+    setNetSimBurstMs: (netSimBurstMs) => set({ netSimBurstMs }),
+    setNetSimBurstChance: (netSimBurstChance) => set({ netSimBurstChance }),
 }));
 
 // persist hotbar slot changes to localStorage. only fires when the array

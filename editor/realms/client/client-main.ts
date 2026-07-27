@@ -15,13 +15,13 @@
 // Source + baked-resource edits arrive as `fs-change` messages; the bundler's
 // watcher HMRs source, and resource writes trigger the matching engine refresh.
 
-import type { ClientDriver } from '../../../interface/index';
+import type { PortLike } from '../../../build';
 import { createNetSim, createPortBridge } from '../../../build';
+import type { ClientDriver } from '../../../interface/index';
 import { makeRunner } from '../../dev/runner';
 import { exposeDevtools } from '../../devtools';
 import type { Filesystem } from '../../fs';
 import { openProjectFilesystem } from '../../fs-open';
-import type { PortLike } from '../../../build';
 import { createRemoteFilesystem } from '../../net/remote-fs';
 
 /** wrap a transferred MessagePort as a PortLike (createRemoteFilesystem reads
@@ -180,7 +180,13 @@ async function boot(msg: InitMessage, gamePort: MessagePort, bundlerPort: Messag
     const netSim = createNetSim<Uint8Array, Uint8Array>(
         () => {
             const s = EngineEditor.useEditor.getState();
-            return { enabled: s.netSimEnabled, rttMs: s.netSimRttMs, jitterMs: s.netSimJitterMs };
+            return {
+                enabled: s.netSimEnabled,
+                rttMs: s.netSimRttMs,
+                jitterMs: s.netSimJitterMs,
+                burstMs: s.netSimBurstMs,
+                burstChance: s.netSimBurstChance,
+            };
         },
         {
             deliverInbound: (bytes) => state.net.inbox.push(bytes),

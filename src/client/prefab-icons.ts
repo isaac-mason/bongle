@@ -108,7 +108,7 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         // ── world transforms (via interpolation, held at alpha=1) ──
         Interpolation.snapshot(room.nodes);
         computeWorldTransforms(room.nodes);
-        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0);
+        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0, false);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
         const packer = deps.voxelResources.arenas.packer;

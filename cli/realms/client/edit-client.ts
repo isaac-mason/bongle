@@ -9,8 +9,8 @@
 import { EngineClient } from 'bongle/engine-client';
 import * as EngineEditor from 'bongle/engine-editor';
 import { env } from 'bongle/env';
-import { __bongle } from 'bongle/internal';
 import type { ClientDriver } from 'bongle/interface';
+import { __bongle } from 'bongle/internal';
 import { createNetSim } from '../../../build';
 
 export type StartClientOptions = {
@@ -67,7 +67,10 @@ export async function start(opts: StartClientOptions): Promise<void> {
     if (import.meta.hot) {
         import.meta.hot.on('bongle:scene-update', (msg: { id: string; scene: string }) => {
             const file = JSON.parse(msg.scene);
-            EngineClient.applyScenePayload(state, msg.id, { nodes: file.nodes, voxels: file.chunks ? { chunks: file.chunks } : null });
+            EngineClient.applyScenePayload(state, msg.id, {
+                nodes: file.nodes,
+                voxels: file.chunks ? { chunks: file.chunks } : null,
+            });
         });
         import.meta.hot.on('bongle:scene-clear', (msg: { id: string }) => EngineClient.clearScene(state, msg.id));
     }
@@ -80,7 +83,13 @@ export async function start(opts: StartClientOptions): Promise<void> {
     const netSim = createNetSim<Uint8Array, ArrayBuffer>(
         () => {
             const s = EngineEditor.useEditor.getState();
-            return { enabled: s.netSimEnabled, rttMs: s.netSimRttMs, jitterMs: s.netSimJitterMs };
+            return {
+                enabled: s.netSimEnabled,
+                rttMs: s.netSimRttMs,
+                jitterMs: s.netSimJitterMs,
+                burstMs: s.netSimBurstMs,
+                burstChance: s.netSimBurstChance,
+            };
         },
         {
             deliverInbound: (bytes) => state.net.inbox.push(bytes),

@@ -118,7 +118,13 @@ export function snapshot(sceneTree: SceneTree): void {
  *   - remote (non-owner) → sample the snapshot ring at `renderTime`;
  *     teleport edge collapses the ring to the current pose
  */
-export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: number, renderTime: number): void {
+export function interpolate(
+    sceneTree: SceneTree,
+    playerId: PlayerId,
+    alpha: number,
+    renderTime: number,
+    serverChoking: boolean,
+): void {
     for (const transform of sceneTree._interpolating) {
         const node = transform._node!;
 
@@ -133,7 +139,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
             sampleFixedStepPose(transform, alpha, _interpLocalPos, _interpLocalQuat);
             writeInterpolated(transform, _interpLocalPos, _interpLocalQuat);
         } else {
-            sampleSnapshotPose(transform, renderTime);
+            sampleSnapshotPose(transform, renderTime, serverChoking);
         }
 
         if (node.children.length > 0) markInterpolatedDescendantsDirty(node);
@@ -168,7 +174,7 @@ function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, out
  * current pose so we hold on it instead of smearing across the discontinuity. an
  * empty ring (enrolled but no pose landed yet) holds at the current local pose.
  */
-function sampleSnapshotPose(t: TransformTrait, renderTime: number): void {
+function sampleSnapshotPose(t: TransformTrait, renderTime: number, serverChoking: boolean): void {
     const snaps = t._netSnapshots;
 
     if (t.teleport !== t.lastTeleport) {
@@ -184,8 +190,9 @@ function sampleSnapshotPose(t: TransformTrait, renderTime: number): void {
     // sample each ring independently; a slice with no keyframes yet holds the
     // current local value (position and rotation are independent syncs, so an
     // entity that only rotates in place never fills the position ring, and vice
-    // versa).
-    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos);
+    // versa). `serverChoking` lets a dry position buffer coast the last velocity
+    // through a transport stall instead of freezing (see samplePositionSnapshot).
+    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos, serverChoking);
     else vec3.copy(_interpLocalPos, t.position);
     if (snaps.rotCount > 0) sampleRotationSnapshot(snaps, renderTime, _interpLocalQuat);
     else quat.copy(_interpLocalQuat, t.quaternion);

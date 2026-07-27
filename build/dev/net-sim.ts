@@ -21,6 +21,13 @@ export type NetSimConfig = {
     rttMs: number;
     /** extra per-frame uniform random [0, jitterMs] on top of the one-way delay. */
     jitterMs: number;
+    /** size of an occasional head-of-line stall (ms). Because release times are
+     *  clamped monotonic, one stalled frame bunches the frames behind it — the
+     *  bursty, correlated delay a real TCP/WAN link produces (and the one shape a
+     *  steady `jitterMs` can't). 0 disables bursts. */
+    burstMs: number;
+    /** per-frame probability [0, 1] of triggering a `burstMs` stall. */
+    burstChance: number;
 };
 
 type Held<T> = { releaseAt: number; payload: T };
@@ -47,11 +54,15 @@ export function createNetSim<In, Out>(getConfig: () => NetSimConfig, sinks: NetS
     let lastInboundRelease = 0;
     let lastOutboundRelease = 0;
 
-    // one-way hold (ms) for a frame arriving now: half the RTT plus per-frame jitter.
+    // one-way hold (ms) for a frame arriving now: half the RTT, plus per-frame jitter,
+    // plus an occasional head-of-line stall (the monotonic clamp below bunches whatever
+    // arrives during it, reproducing real bursty/correlated delay).
     const holdMs = (): number => {
         const cfg = getConfig();
         if (!cfg.enabled) return 0;
-        return cfg.rttMs / 2 + Math.random() * cfg.jitterMs;
+        let ms = cfg.rttMs / 2 + Math.random() * cfg.jitterMs;
+        if (cfg.burstMs > 0 && Math.random() < cfg.burstChance) ms += cfg.burstMs;
+        return ms;
     };
 
     const drainDue = <T>(queue: Held<T>[], now: number, deliver: (payload: T) => void): void => {

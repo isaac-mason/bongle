@@ -1255,7 +1255,13 @@ export function update(state: EngineClient, delta: number) {
         // poses they actually sent. the margin widens on jittery links so slow packets
         // stay bracketable instead of snapping; 0 on good ones.
         Debug.begin(room.clientMetrics, 'interpolate');
-        Interpolation.interpolate(room.nodes, room.playerId, alpha, Clock.transformRenderTime(room.clock, delta));
+        Interpolation.interpolate(
+            room.nodes,
+            room.playerId,
+            alpha,
+            Clock.transformRenderTime(room.clock, delta),
+            Clock.isServerChoking(room.clock),
+        );
         Debug.end(room.clientMetrics, 'interpolate');
 
         // user frame scripts (camera follow, local player motion, etc.) run

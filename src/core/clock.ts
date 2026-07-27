@@ -19,6 +19,13 @@ export type Clock = {
      *  timestamps, the exact thing this stamp exists to remove. 0 until the first
      *  push; on the server / local rooms it stays 0 (no pushes arrive). */
     serverLatest: number;
+    /** local-monotonic `wall` when the most recent `server_clock` push arrived. A
+     *  head-of-line stall on the reliable+ordered transport delays the WHOLE stream,
+     *  `server_clock` included, so a growing `wall − lastRecvWall` gap is the client's
+     *  proof the transport is choking (vs an entity that merely stopped emitting, where
+     *  the stream keeps flowing). `isServerChoking` reads it to gate remote-transform
+     *  extrapolation. 0 until the first push; stays 0 on the server / local rooms. */
+    lastRecvWall: number;
     /** smooth render time (seconds): advances every RENDER FRAME by the REAL frame
      *  delta, UNCLAMPED, unlike the integrator delta, so it never loses time to the
      *  stall clamp and tracks true elapsed across hitches/backgrounding. per-frame
@@ -167,6 +174,14 @@ export const SERVER_CLOCK_INTERP_DELAY = 0.05;
 export const TRANSFORM_SEND_HZ = 30;
 /** one send interval (seconds). the newest received keyframe is up to this old. */
 const TRANSFORM_SEND_INTERVAL = 1 / TRANSFORM_SEND_HZ;
+
+/** how long (seconds) the `server_clock` stream must be silent before we treat the
+ *  transport as choking. `server_clock` rides every server tick (~60Hz / 16.7ms), so a
+ *  gap of a couple send intervals is unambiguously a stall, not normal jitter — well
+ *  clear of the per-tick cadence, so a healthy link never trips it. Gates remote
+ *  extrapolation: only coast a dry buffer when the whole transport stalled, never when
+ *  an entity merely stopped emitting (its stream keeps flowing). */
+const CHOKE_STALL_SECONDS = 2 * TRANSFORM_SEND_INTERVAL;
 /** render this many send-intervals behind live. Source's cl_interp is 2 update
  *  intervals (one so the newest keyframe has landed, one of bracketing reserve); we
  *  add ~2 more to cover the render clock's optimistic lead — `clock.server` tracks the
@@ -270,7 +285,7 @@ function observeJitter(sync: ClockSync, offset: number): void {
 /** `seed` is the server clock to align `server` to (from the join handshake);
  *  0 for the server itself and for local rooms. `time`/`wall` start at 0. */
 export function init(seed = 0): Clock {
-    return { time: 0, serverSmoothed: seed, wall: 0, sync: newSync(), serverLatest: 0 };
+    return { time: 0, serverSmoothed: seed, wall: 0, sync: newSync(), serverLatest: 0, lastRecvWall: 0 };
 }
 
 /** advance the fixed-cadence clocks by the elapsed tick delta (seconds). `time` is
@@ -312,6 +327,9 @@ export function observeSample(clock: Clock, serverClock: number, recvTime: numbe
     // entity emits poses. this is the unfiltered server time, distinct from the
     // skewed `server` render clock the estimator drives below.
     clock.serverLatest = serverClock;
+    // remember when this push landed (local wall), so `isServerChoking` can measure
+    // how long the transport has been silent — the stall signal that gates extrapolation.
+    clock.lastRecvWall = recvTime;
 
     // feed the FULL-RATE jitter estimator on every push, BEFORE the decimation gate
     // below — arrival jitter is a fast-moving quantity, so it's measured at the cadence
@@ -415,4 +433,15 @@ export function transformRenderTime(clock: Clock, dt: number): number {
     const next = clock.serverSmoothed - sync.interpMargin;
     if (next > sync.serverRenderTime) sync.serverRenderTime = next;
     return sync.serverRenderTime;
+}
+
+/** is the transport currently choking (a head-of-line stall on the reliable+ordered
+ *  link)? True when no `server_clock` push has landed for `CHOKE_STALL_SECONDS`. Since
+ *  a stall delays the WHOLE stream, this is the client's proof that a dry remote-transform
+ *  buffer is a transport gap (coast the last velocity) rather than an entity that stopped
+ *  emitting (hold). Mirrors Source's `GetLastTimeStamp() <= m_LastNetworkedTime` choke
+ *  test. Always false until synced, so local/offline rooms never extrapolate. */
+export function isServerChoking(clock: Clock): boolean {
+    if (!clock.sync.synced) return false;
+    return clock.wall - clock.lastRecvWall > CHOKE_STALL_SECONDS;
 }

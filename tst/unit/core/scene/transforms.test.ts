@@ -1063,7 +1063,7 @@ describe('interpolate', () => {
         });
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         const t = getTrait(node, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 20, 30));
@@ -1082,14 +1082,14 @@ describe('interpolate', () => {
 
         // prime: consume the setInterpolation cold-start teleport snap so
         // the next interpolate() actually exercises the lerp path.
-        interpolate(sceneTree, 1, 0, 1);
+        interpolate(sceneTree, 1, 0, 1, false);
 
         // move to (10, 0, 0)
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 1);
+        interpolate(sceneTree, 1, 0.5, 1, false);
 
         // at alpha=0.5, should be halfway: (5, 0, 0)
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(5, 0, 0));
@@ -1106,13 +1106,13 @@ describe('interpolate', () => {
         setInterpolation(node, true);
 
         // prime: consume the cold-start teleport snap.
-        interpolate(sceneTree, 1, 0, 1);
+        interpolate(sceneTree, 1, 0, 1, false);
 
         const t = getTrait(node, TransformTrait)!;
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0, 1);
+        interpolate(sceneTree, 1, 0, 1, false);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(0, 0, 0));
     });
@@ -1131,7 +1131,7 @@ describe('interpolate', () => {
         vec3.set(t.position, 10, 0, 0);
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 1, 1);
+        interpolate(sceneTree, 1, 1, 1, false);
 
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(10, 0, 0));
     });
@@ -1147,7 +1147,7 @@ describe('interpolate', () => {
         setInterpolation(node, true);
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         const t = getTrait(node, TransformTrait)!;
         const expected: Mat4 = mat4.create();
@@ -1181,7 +1181,7 @@ describe('interpolate', () => {
 
         // prime: consume the cold-start teleport snap on parent so the
         // next interpolate() exercises the lerp path.
-        interpolate(sceneTree, 1, 0, 1);
+        interpolate(sceneTree, 1, 0, 1, false);
 
         // now move parent (the "current" pose), interpolate at alpha=0.5
         // should produce parent.visualPos = (5,0,0), so child world =
@@ -1189,7 +1189,7 @@ describe('interpolate', () => {
         const pt = getTrait(parent, TransformTrait)!;
         pt.position[0] = 10;
         markTransformDirty(pt);
-        interpolate(sceneTree, 1, 0.5, 1);
+        interpolate(sceneTree, 1, 0.5, 1, false);
 
         const ct = getTrait(child, TransformTrait)!;
         expectVec3Near(getVisualWorldPosition(ct), vec3.fromValues(6, 0, 0));
@@ -1211,7 +1211,7 @@ describe('interpolate', () => {
         });
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         const ct = getTrait(child, TransformTrait)!;
         // nested non-owned uses current local directly, composed with parent world
@@ -1233,7 +1233,7 @@ describe('interpolate', () => {
         t.teleport = 1; // trigger teleport
 
         computeWorldTransforms(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 1);
+        interpolate(sceneTree, 1, 0.5, 1, false);
 
         // should snap to current, not lerp
         expectVec3Near(getVisualWorldPosition(t), vec3.fromValues(100, 0, 0));
@@ -1250,7 +1250,7 @@ describe('interpolate', () => {
         // run interpolate over a scene with no Interp nodes, should not
         // touch this node's _interpolated bit.
         snapshot(sceneTree);
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
@@ -1269,7 +1269,7 @@ describe('interpolate', () => {
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(0);
 
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         expect(t._interpolated).toBe(1);
     });
@@ -1295,7 +1295,7 @@ describe('interpolate', () => {
         expect(ct._interpolated).toBe(0);
         expect(gct._interpolated).toBe(0);
 
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         expect(ct._interpolated).toBe(1);
         expect(gct._interpolated).toBe(1);
@@ -1326,7 +1326,7 @@ describe('interpolate', () => {
         // directly, which still exercises the parent-matrix boundary.
         setPosition(ct, vec3.fromValues(3, 0, 0));
 
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         // parent never participated, bit stays 0, boundary takes the
         // parent.worldMatrix branch.
@@ -1366,7 +1366,7 @@ describe('interpolate', () => {
         addChild(sceneTree.root, node);
         addTrait(node, TransformTrait, { position: vec3.fromValues(1, 0, 0) });
         setInterpolation(node, true);
-        interpolate(sceneTree, 1, 0.5, 0);
+        interpolate(sceneTree, 1, 0.5, 0, false);
 
         const t = getTrait(node, TransformTrait)!;
         expect(t._interpolated).toBe(1);
