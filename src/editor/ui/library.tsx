@@ -18,6 +18,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HoverCard, HoverCardContent, HoverCardTrigger, Popover, PopoverContent, PopoverTrigger } from '../../client/ui/components';
 import { useReleasePointer } from '../../client/ui/use-release-pointer';
 import { depId, registry } from '../../core/registry';
+import { BLOCK_FLAG_CLIMBABLE, BLOCK_FLAG_COLLISION, BLOCK_FLAG_LIQUID, parseKey, resolveKey } from '../../core/voxels/block-registry';
+import { MaterialType } from '../../core/voxels/blocks';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { buildCatalog, type InventoryItem, inventoryItemDisplay, inventoryItemKey, inventoryItemsEqual } from '../inventory';
@@ -288,13 +290,62 @@ function PrefabInfoRows({ prefabId }: { prefabId: string }) {
     if (!room) return null;
     const def = registry.prefabs.byId.get(prefabId);
     if (!def) return null;
-    return <InfoRow label="type" value={def.type} />;
+    // realm = where it instantiates (client/server/shared); args = its
+    // parameter names, so you can tell a configurable prefab from a fixed one.
+    const realm = def.node?.realm;
+    const argsDefault = def.args?.default;
+    const argKeys = argsDefault && typeof argsDefault === 'object' ? Object.keys(argsDefault) : [];
+    return (
+        <>
+            <AttrRow label="type" value={def.type} />
+            {realm && <AttrRow label="realm" value={String(realm)} />}
+            {argKeys.length > 0 && <AttrRow label="args" value={argKeys.join(', ')} />}
+            {def.deps.length > 0 && <AttrRow label="deps" value={String(def.deps.length)} />}
+        </>
+    );
 }
 
 function BlockInfoRows({ blockKey }: { blockKey: string }) {
-    const idOnly = blockKey.split('[')[0]!;
-    if (idOnly === blockKey) return null;
-    return <InfoRow label="state" value={blockKey.slice(idOnly.length)} />;
+    const blocks = registry.blockRegistry;
+    if (!blocks) return null;
+    // resolve the specific state so every attribute reflects THIS variant, read
+    // straight from the frozen per-state tables (authoritative, no def-fn calls).
+    const parsed = parseKey(blockKey);
+    const stateProps = parsed ? Object.entries(parsed.props) : [];
+    const sid = resolveKey(blocks, blockKey);
+    const flags = blocks.flags[sid] ?? 0;
+    const material = blocks.material[sid] ?? MaterialType.OPAQUE;
+    const emits = (blocks.lightEmission[sid] ?? 0) !== 0;
+    const totalStates = (parsed ? blocks.defs.find((d) => d.id === parsed.blockId) : undefined)?.states.totalStates ?? 1;
+
+    const materialLabel =
+        material === MaterialType.TRANSLUCENT ? 'translucent' : material === MaterialType.TRANSPARENT ? 'cutout' : 'opaque';
+
+    return (
+        <>
+            {/* the state's own props (facing, half, ...), one row each. */}
+            {stateProps.map(([name, value]) => (
+                <AttrRow key={name} label={name} value={value} />
+            ))}
+            <AttrRow label="material" value={materialLabel} />
+            <AttrRow label="collision" value={(flags & BLOCK_FLAG_COLLISION) !== 0 ? 'solid' : 'passable'} />
+            {emits && <AttrRow label="light" value="emits" />}
+            {(flags & BLOCK_FLAG_LIQUID) !== 0 && <AttrRow label="liquid" value="yes" />}
+            {(flags & BLOCK_FLAG_CLIMBABLE) !== 0 && <AttrRow label="climb" value="yes" />}
+            {totalStates > 1 && <AttrRow label="states" value={String(totalStates)} />}
+        </>
+    );
+}
+
+/** a compact, non-copyable label/value row for resolved attributes (the copy
+ *  affordance is reserved for the id). */
+function AttrRow({ label, value }: { label: string; value: string }) {
+    return (
+        <div className="flex items-center gap-1.5">
+            <span className="w-16 shrink-0 text-[9px] font-mono text-fg-muted uppercase">{label}</span>
+            <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-fg">{value}</span>
+        </div>
+    );
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {

@@ -44,6 +44,7 @@ const SPECIFIERS = [
     '@base-ui/react/context-menu',
     '@base-ui/react/menu',
     '@base-ui/react/popover',
+    '@base-ui/react/preview-card',
     '@dnd-kit/react',
     '@dnd-kit/react/sortable',
     '@dnd-kit/helpers',
