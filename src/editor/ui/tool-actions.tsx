@@ -1,6 +1,7 @@
 import * as Icons from "../../../icons";
 import { useCallback, useMemo, useState } from 'react';
 import * as Selection from '../../core/scene/selection';
+import { useClient } from '../../client/ui/client-store';
 import type { TransformMode } from '../edit-room-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, INSPECT_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';
@@ -189,6 +190,7 @@ function ActionBtn({
     slashCmd?: string;
 }) {
     const [hovered, setHovered] = useState(false);
+    const touch = useClient((s) => s.inputMode === 'touch');
     return (
         // biome-ignore lint/a11y/noStaticElementInteractions: hover wrapper for a tooltip, not an interactive control
         <div className="relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
@@ -196,13 +198,15 @@ function ActionBtn({
                 type="button"
                 disabled={disabled}
                 onClick={onClick}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono shadow-sm border transition-colors ${
+                className={`flex items-center gap-1 rounded font-mono shadow-sm border transition-colors ${
+                    touch ? 'px-3 py-2 text-xs' : 'px-2 py-1 text-[11px]'
+                } ${
                     disabled
                         ? 'bg-surface border-border text-fg-muted opacity-50 cursor-default'
                         : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
                 }`}
             >
-                <Icon size={12} />
+                <Icon size={touch ? 16 : 12} />
                 {label}
             </button>
             {hovered && slashCmd && (
@@ -230,13 +234,16 @@ function GizmoModeBtn({
     onClick: (mode: TransformMode) => void;
 }) {
     const active = current === mode;
+    const touch = useClient((s) => s.inputMode === 'touch');
     return (
         <button
             type="button"
             title={label}
             disabled={disabled}
             onClick={() => onClick(mode)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-mono shadow-sm border transition-colors ${
+            className={`flex items-center gap-1 rounded font-mono shadow-sm border transition-colors ${
+                touch ? 'px-3 py-2 text-xs' : 'px-2 py-1 text-[11px]'
+            } ${
                 disabled
                     ? 'bg-surface-muted border-border text-fg-muted opacity-50 cursor-not-allowed'
                     : active
@@ -244,7 +251,7 @@ function GizmoModeBtn({
                       : 'bg-surface border-border text-fg hover:bg-surface-muted cursor-pointer'
             }`}
         >
-            <Icon size={12} />
+            <Icon size={touch ? 16 : 12} />
             {label}
         </button>
     );

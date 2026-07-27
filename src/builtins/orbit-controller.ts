@@ -18,7 +18,7 @@
 
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
 import { env } from '../env';
-import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
+import { getCanvasTouches, getPinchDelta, isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
@@ -85,6 +85,9 @@ function headDrop(node: Parameters<typeof findByName>[0], rootTransform: Transfo
 const ROTATE_SPEED = 1.0;
 const PAN_SPEED = 1.0;
 const ZOOM_SPEED = 1.0;
+// scales pinch spread (CSS px per frame) into a wheel-like dolly magnitude so a
+// two-finger pinch dollies at a comfortable rate. tuned to feel like the wheel.
+const PINCH_ZOOM_PX_SCALE = 8;
 const DAMPING_FACTOR = 0.05;
 const MIN_DISTANCE = 0.1;
 const MAX_DISTANCE = 10000;
@@ -223,6 +226,32 @@ script(
                 scaleAccum /= zoomScale(mk._wheelDeltaY);
             } else if (mk._wheelDeltaY < 0) {
                 scaleAccum *= zoomScale(mk._wheelDeltaY);
+            }
+
+            // ── touch gestures ────────────────────────────────────
+            // one finger orbits (same mapping as a left-drag), two fingers
+            // pinch to dolly and drag to pan. touch never fires the mouse-delta
+            // path above (no synthetic mousemove during a touch drag), so this
+            // is the sole touch source and can't double up with the mouse.
+            const touches = getCanvasTouches(input.touch);
+            if (touches.size === 1) {
+                const finger = touches.values().next().value!;
+                sphDelta[1] -= (_TWO_PI * finger.dx * ROTATE_SPEED) / h;
+                sphDelta[2] -= (_TWO_PI * finger.dy * ROTATE_SPEED) / h;
+            } else if (touches.size === 2) {
+                // dolly on the change in finger spread: spreading apart (>0)
+                // zooms in (shrinks radius), pinching together zooms out.
+                const pinch = getPinchDelta(input.touch);
+                if (pinch > 0) scaleAccum *= zoomScale(pinch * PINCH_ZOOM_PX_SCALE);
+                else if (pinch < 0) scaleAccum /= zoomScale(pinch * PINCH_ZOOM_PX_SCALE);
+                // pan on the two fingers' shared translation (their average move).
+                let panDx = 0;
+                let panDy = 0;
+                for (const finger of touches.values()) {
+                    panDx += finger.dx;
+                    panDy += finger.dy;
+                }
+                pan((panDx / 2) * PAN_SPEED, (panDy / 2) * PAN_SPEED);
             }
 
             // ── update spherical from current eye relative to target ──

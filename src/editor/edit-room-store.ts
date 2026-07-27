@@ -583,6 +583,12 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
 
         /* ── room cmds ── */
         play: () => {
+            // fire-and-forget: the play room activates asynchronously. flag the
+            // request as pending so the Play button (and Tab) show a loading
+            // state; `setRoomMode` clears it when the room activates. ignore
+            // repeat requests while one is already in flight.
+            if (useEditor.getState().playPending) return;
+            useEditor.getState().setPlayPending(true);
             const net = ctx.client!.state!.net;
             // ride the editor's current viewpoint along as `__editor` join data
             // so games can offer "play from here" (they opt in to using it).

@@ -48,6 +48,12 @@ export type EditorStore = {
     /** the active room's authoritative mode. may differ from `mode` (player
      *  view mode) when the user joins a play room with playerMode='edit'. */
     roomMode: 'edit' | 'play';
+    /** true between a Play request (Tab / Play button) being sent and the
+     *  spawned play room activating. drives the Play button's loading state.
+     *  set by `edit-room-store.play()`, cleared deterministically when the
+     *  play room activates (`setRoomMode`), with a timeout fallback in
+     *  `setPlayPending` so a silent spawn failure can't leave it stuck. */
+    playPending: boolean;
     roomId: string | null;
     sceneId: string | null;
     room: ClientRoom | null;
@@ -150,6 +156,7 @@ export type EditorStore = {
     /* ── setters ── */
     setMode: (mode: 'edit' | 'play') => void;
     setRoomMode: (roomMode: 'edit' | 'play') => void;
+    setPlayPending: (pending: boolean) => void;
     setRoomId: (roomId: string | null) => void;
     setSceneId: (sceneId: string | null) => void;
     setRoom: (room: ClientRoom | null) => void;
@@ -175,10 +182,17 @@ export type EditorStore = {
     setNetSimBurstChance: (chance: number) => void;
 };
 
+// fallback release for the Play spinner. the play room normally activates in
+// well under a second; this only fires if the spawn fails silently (there's no
+// `play_failed` protocol message), so the button can't get stuck spinning.
+const PLAY_PENDING_TIMEOUT_MS = 15_000;
+let playPendingTimer: ReturnType<typeof setTimeout> | null = null;
+
 export const useEditor = create<EditorStore>((set, _get) => ({
     /* ── initial state ── */
     mode: 'edit',
     roomMode: 'edit',
+    playPending: false,
     roomId: null,
     sceneId: null,
     room: null,
@@ -247,7 +261,27 @@ export const useEditor = create<EditorStore>((set, _get) => ({
 
     /* ── setters ── */
     setMode: (mode) => set({ mode }),
-    setRoomMode: (roomMode) => set({ roomMode }),
+    setRoomMode: (roomMode) => {
+        // room activation is the deterministic "Play resolved" signal: a
+        // successful play spawns + activates the play room, flipping roomMode
+        // to 'play'. clear the pending spinner on any activation (switching to
+        // another room while a play is in flight abandons it too).
+        useEditor.getState().setPlayPending(false);
+        set({ roomMode });
+    },
+    setPlayPending: (pending) => {
+        if (playPendingTimer !== null) {
+            clearTimeout(playPendingTimer);
+            playPendingTimer = null;
+        }
+        if (pending) {
+            playPendingTimer = setTimeout(() => {
+                playPendingTimer = null;
+                set({ playPending: false });
+            }, PLAY_PENDING_TIMEOUT_MS);
+        }
+        set({ playPending: pending });
+    },
     setRoomId: (roomId) => set({ roomId }),
     setSceneId: (sceneId) => set({ sceneId }),
     setRoom: (room) => {

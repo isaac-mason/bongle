@@ -1,6 +1,7 @@
 // shared pointer state for the voxel editor.
 //
-// tracks canvas mouse position (NDC) and button state. all tools consume
+// tracks canvas pointer position (NDC) and primary-button state from unified
+// pointer events, so mouse, pen and touch all drive the tools. all tools consume
 // this instead of each registering their own event listeners.
 //
 // the hover raycast runs once per frame in editor/index.ts and writes
@@ -10,26 +11,32 @@ import type { Input } from '../client/input';
 import { isMouseDown, isMouseJustDown, isMouseJustUp } from '../client/input';
 
 export type PointerState = {
-    // mouse position in NDC space, updated via canvas mousemove
+    // pointer position in NDC space, updated via canvas pointermove/pointerdown
     ndcX: number;
     ndcY: number;
 
-    // mouse position in canvas-relative CSS pixels (same coordinate space
+    // pointer position in canvas-relative CSS pixels (same coordinate space
     // the React viewport overlay uses). frozen under pointer lock just like ndc.
     screenX: number;
     screenY: number;
 
-    // canvas-sourced click/held/release flags (left button only).
-    // under pointer lock, canvas events are suppressed, callers should
-    // fall back to the engine input system (isMouseJustDown etc).
-    _justClicked: number; // incremented by mousedown, consumed each frame
+    // canvas-sourced click/held/release flags for the primary pointer (left
+    // mouse button, first finger, or pen tip). secondary fingers are ignored so
+    // multi-touch camera gestures don't register as clicks. under pointer lock,
+    // canvas events are suppressed, callers should fall back to the engine input
+    // system (isMouseJustDown etc).
+    _justClicked: number; // incremented by pointerdown, consumed each frame
     _mouseHeld: boolean;
     _justUp: boolean;
 
+    // id of the pointer currently held down as the primary; -1 when none. used
+    // to ignore up/move from other pointers (e.g. a second finger).
+    _activePointerId: number;
+
     // event handlers stored for removal on dispose
-    _onMouseMove: (e: MouseEvent) => void;
-    _onMouseDown: (e: MouseEvent) => void;
-    _onMouseUp: (e: MouseEvent) => void;
+    _onPointerMove: (e: PointerEvent) => void;
+    _onPointerDown: (e: PointerEvent) => void;
+    _onPointerUp: (e: PointerEvent) => void;
     _onPointerLockChange: () => void;
 };
 
@@ -42,15 +49,17 @@ export function createPointerState(canvas: HTMLCanvasElement): PointerState {
         _justClicked: 0,
         _mouseHeld: false,
         _justUp: false,
-        _onMouseMove: null!,
-        _onMouseDown: null!,
-        _onMouseUp: null!,
+        _activePointerId: -1,
+        _onPointerMove: null!,
+        _onPointerDown: null!,
+        _onPointerUp: null!,
         _onPointerLockChange: null!,
     };
 
-    state._onMouseMove = (e: MouseEvent) => {
-        // under pointer lock the cursor is hidden and bound to crosshair,
-        // freeze ndc at (0, 0) so editor raycasts hit screen center.
+    // write ndc/screen from a pointer event's client coords. under pointer lock
+    // the cursor is hidden and bound to crosshair, so callers freeze ndc at
+    // (0, 0); we skip the update there and let pointerlockchange pin it.
+    const updateFromEvent = (e: PointerEvent) => {
         if (document.pointerLockElement) return;
         const rect = canvas.getBoundingClientRect();
         state.screenX = e.clientX - rect.left;
@@ -59,43 +68,77 @@ export function createPointerState(canvas: HTMLCanvasElement): PointerState {
         state.ndcY = -((state.screenY / rect.height) * 2 - 1);
     };
 
+    state._onPointerMove = (e: PointerEvent) => {
+        // only the primary pointer drives ndc: on a mouse that's always the
+        // cursor (hover included), on touch it's the first finger. secondary
+        // fingers move the camera (see camera gestures), not the tool cursor.
+        if (!e.isPrimary) return;
+        updateFromEvent(e);
+    };
+
     state._onPointerLockChange = () => {
         if (document.pointerLockElement) {
             state.ndcX = 0;
             state.ndcY = 0;
         }
-        // on unlock, leave (0, 0) until the next mousemove refreshes ndc.
+        // on unlock, leave (0, 0) until the next pointermove refreshes ndc.
     };
 
-    state._onMouseDown = (e: MouseEvent) => {
-        if (e.button === 0) {
-            state._justClicked++;
-            state._mouseHeld = true;
+    state._onPointerDown = (e: PointerEvent) => {
+        // a second finger down means the user is starting a two-finger camera
+        // gesture (pinch/pan). abandon any in-progress one-finger drag so it
+        // doesn't leave a stray selection box behind while the camera moves.
+        if (!e.isPrimary) {
+            if (state._activePointerId !== -1) {
+                state._justUp = true;
+                state._mouseHeld = false;
+                state._activePointerId = -1;
+            }
+            return;
+        }
+        // left mouse button / first finger / pen tip only. e.button is 0 for the
+        // primary press across all pointer types.
+        if (e.button !== 0) return;
+        // touch has no hover, so the down event is the first time we learn the
+        // position — sync ndc before the click flag is consumed this frame.
+        updateFromEvent(e);
+        state._activePointerId = e.pointerId;
+        state._justClicked++;
+        state._mouseHeld = true;
+        // keep receiving moves/up even if the pointer strays off the canvas mid
+        // drag (selection boxes, gizmo drags), matching desktop mouse capture.
+        try {
+            canvas.setPointerCapture(e.pointerId);
+        } catch {
+            // capture can throw if the pointer is already gone; harmless.
         }
     };
 
-    state._onMouseUp = (e: MouseEvent) => {
-        if (e.button === 0) {
-            state._justUp = true;
-            state._mouseHeld = false;
-        }
+    state._onPointerUp = (e: PointerEvent) => {
+        if (e.pointerId !== state._activePointerId) return;
+        state._justUp = true;
+        state._mouseHeld = false;
+        state._activePointerId = -1;
     };
 
-    canvas.addEventListener('mousemove', state._onMouseMove);
-    canvas.addEventListener('mousedown', state._onMouseDown);
-    canvas.addEventListener('mouseup', state._onMouseUp);
-    // catch mouseup outside the canvas too
-    window.addEventListener('mouseup', state._onMouseUp);
+    canvas.addEventListener('pointermove', state._onPointerMove);
+    canvas.addEventListener('pointerdown', state._onPointerDown);
+    // captured pointers deliver up to the canvas; also catch the uncaptured case
+    // and cancellation (finger lifted off-screen, gesture interrupted) on window.
+    canvas.addEventListener('pointerup', state._onPointerUp);
+    canvas.addEventListener('pointercancel', state._onPointerUp);
+    window.addEventListener('pointerup', state._onPointerUp);
     document.addEventListener('pointerlockchange', state._onPointerLockChange);
 
     return state;
 }
 
 export function disposePointerState(canvas: HTMLCanvasElement, state: PointerState): void {
-    canvas.removeEventListener('mousemove', state._onMouseMove);
-    canvas.removeEventListener('mousedown', state._onMouseDown);
-    canvas.removeEventListener('mouseup', state._onMouseUp);
-    window.removeEventListener('mouseup', state._onMouseUp);
+    canvas.removeEventListener('pointermove', state._onPointerMove);
+    canvas.removeEventListener('pointerdown', state._onPointerDown);
+    canvas.removeEventListener('pointerup', state._onPointerUp);
+    canvas.removeEventListener('pointercancel', state._onPointerUp);
+    window.removeEventListener('pointerup', state._onPointerUp);
     document.removeEventListener('pointerlockchange', state._onPointerLockChange);
 }
 

@@ -1,12 +1,12 @@
 import * as Icons from "../../../icons";
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { setEditorEnabledForRoom } from '../../client/editor';
 import { useClient } from '../../client/ui/client-store';
 import '../../client/ui/editor.css';
 import { ChatPanel, useChatPanel } from '../../client/ui/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
-import { useEditRoom } from '../edit-room-store';
+import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
 import { ControlHints } from './control-hints';
 import { FlySpeedIndicator } from './fly-speed-indicator';
@@ -112,6 +112,23 @@ function ControlModeWidget() {
     );
 }
 
+// slim drawer-pull tab on the right edge of the viewport. toggles the docked
+// right panel in and out. chevron points toward the motion: left (pull the
+// panel in) while collapsed, right (push it away) while open. sized with a
+// tall hit area so it's comfortable to tap on touch.
+function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            title={collapsed ? 'show panel' : 'hide panel'}
+            className="absolute top-1/2 -translate-y-1/2 right-0 z-10 flex items-center justify-center w-5 py-4 bg-surface border border-r-0 border-border rounded-l-sm text-fg-muted hover:bg-surface-muted hover:text-fg pointer-events-auto"
+        >
+            <Icons.ChevronRight size={14} className={collapsed ? 'rotate-180' : ''} />
+        </button>
+    );
+}
+
 /**
  * root editor layout.
  *
@@ -146,10 +163,31 @@ function EditUI() {
     const controlMode = useEditRoom((s) => s.controlMode);
     const showOrientationCube = useEditRoom((s) => s.showOrientationCube);
     const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_DEFAULT);
+    const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
     const onRightPanelResize = useCallback((dx: number) => {
         setRightPanelWidth((w) => Math.max(RIGHT_PANEL_MIN, Math.min(RIGHT_PANEL_MAX, w + dx)));
     }, []);
+
+    // the first time the user picks up touch as their input, adapt the editor
+    // defaults for a finger. runs once (a ref latch) so we never fight a user
+    // who undoes either choice by hand afterwards.
+    const inputMode = useClient((s) => s.inputMode);
+    const adaptedForTouch = useRef(false);
+    useEffect(() => {
+        if (inputMode !== 'touch' || adaptedForTouch.current) return;
+        adaptedForTouch.current = true;
+        // the docked right panel eats a big slice of a phone/tablet screen, so
+        // tuck it into its drawer and give the viewport the room.
+        setRightPanelCollapsed(true);
+        // fly is pointer-lock-only (a finger can't lock it, so it's inert on
+        // touch); default a touch session to the player-controller instead
+        // (walk + on-screen HUD). only when the mode is still the untouched
+        // 'fly' default, so a hybrid user who picked orbit/character with a
+        // mouse keeps their choice.
+        const store = activeEditRoomStore();
+        if (store.getState().controlMode === 'fly') store.getState().setControlMode('character');
+    }, [inputMode]);
 
     const debugOpen = useClient((s) => s.debugOpen);
     const debugTab = useClient((s) => s.debugTab);
@@ -300,10 +338,22 @@ function EditUI() {
                         rendered outside the editorEnabled gate so it works in
                         play mode too. */}
                     <ChatPanel />
+
+                    {/* drawer-pull tab on the right edge, shows/hides the panel.
+                        floats over the canvas so it stays reachable while the
+                        panel is collapsed (mainly a touch affordance). */}
+                    {editorEnabled && (
+                        <RightPanelToggle
+                            collapsed={rightPanelCollapsed}
+                            onToggle={() => setRightPanelCollapsed((c) => !c)}
+                        />
+                    )}
                 </div>
 
-                {/* right panel */}
-                {editorEnabled && <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />}
+                {/* right panel, collapsible into a drawer (auto-tucked on touch) */}
+                {editorEnabled && !rightPanelCollapsed && (
+                    <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />
+                )}
             </div>
 
             {/* carried-item cursor preview, follows mouse while picking up an inventory item */}

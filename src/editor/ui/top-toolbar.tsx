@@ -418,6 +418,7 @@ function PlaySection() {
     const roomMode = useEditor((s) => s.roomMode);
     const stopRoom = useEditor((s) => s.stopRoom);
     const roomId = useEditor((s) => s.roomId);
+    const playPending = useEditor((s) => s.playPending);
     const play = useEditRoom((s) => s.play);
 
     // Show Stop whenever the active room is a play session, regardless of
@@ -442,10 +443,11 @@ function PlaySection() {
         <button
             type="button"
             onClick={() => play?.()}
-            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-success/40 bg-success/15 text-success hover:bg-success/25 cursor-pointer"
+            disabled={playPending}
+            className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono rounded border border-success/40 bg-success/15 text-success hover:bg-success/25 cursor-pointer disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-success/15"
         >
-            <Icons.Play size={12} />
-            Play
+            {playPending ? <Icons.Loader2 size={12} className="animate-spin" /> : <Icons.Play size={12} />}
+            {playPending ? 'Starting' : 'Play'}
         </button>
     );
 }

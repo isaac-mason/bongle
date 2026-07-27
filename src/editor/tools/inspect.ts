@@ -9,7 +9,7 @@
 import { type PerspectiveCamera, unproject } from 'gpucat';
 import { vec3 } from 'mathcat';
 import { TransformTrait } from '../../builtins/transform';
-import { isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
+import { getCanvasTouches, isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait, isAncestorOf } from '../../core/scene/scene-tree';
@@ -79,7 +79,18 @@ export function openViewportContextMenu(
     pointer: PointerState,
     camera: PerspectiveCamera,
 ): void {
-    if (!isMouseTap(client.input.mouseKeyboard, 'right')) return;
+    // desktop opens on a right-click tap. touch has no second button, so a
+    // long-press (a finger held in place past the hold threshold) stands in for
+    // it. the primary pointer already tracks the pressing finger, so the raycast
+    // and menu anchor below use its position unchanged.
+    let longPress = false;
+    for (const finger of getCanvasTouches(client.input.touch).values()) {
+        if (finger.longPressed) {
+            longPress = true;
+            break;
+        }
+    }
+    if (!longPress && !isMouseTap(client.input.mouseKeyboard, 'right')) return;
     if (document.pointerLockElement) return;
 
     unproject(_nearWorld, [pointer.ndcX, pointer.ndcY, 0], camera);
