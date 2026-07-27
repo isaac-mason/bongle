@@ -473,7 +473,7 @@ export const CharacterControllerTrait = trait(
             stepHeight: 0.55,
             groundDragRate: 12,
             airDragRate: 0.6,
-            airAccel: 2,
+            airAccel: 6,
             sprintJumpImpulse: 4,
             climbSpeed: 3,
             climbDescendSpeed: 1.5,
@@ -666,9 +666,18 @@ function applyGroundWishAccel(vel: Vec3, wishDir: Vec3, dragRate: number, wishSp
 
 function applyAirWishAccel(vel: Vec3, wishDir: Vec3, airAccel: number, wishSpeed: number, dt: number): void {
     if (wishSpeed <= 0) return;
-    const a = airAccel * dt;
-    vel[0] += wishDir[0] * a;
-    vel[2] += wishDir[2] * a;
+    // projected air accel: only add speed up to wishSpeed *along wishDir*.
+    // steering into a fresh direction gets full accel (that axis has ~0 current
+    // speed) so control feels crisp, but pushing along existing motion adds
+    // nothing once you're already at wishSpeed, so you can't build speed in air
+    // and perpendicular momentum is untouched. airAccel is now a pure steer-rate
+    // knob decoupled from top speed.
+    const currentSpeed = vel[0] * wishDir[0] + vel[2] * wishDir[2];
+    const addSpeed = wishSpeed - currentSpeed;
+    if (addSpeed <= 0) return;
+    const accelSpeed = Math.min(airAccel * dt, addSpeed);
+    vel[0] += wishDir[0] * accelSpeed;
+    vel[2] += wishDir[2] * accelSpeed;
 }
 
 // ── environment sampling (climb / liquid / standing voxel) ───────────
