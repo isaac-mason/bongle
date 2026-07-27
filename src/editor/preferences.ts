@@ -58,6 +58,12 @@ function writeJson(key: string, value: unknown): void {
 
 const HOTBAR_KEY = 'blocks-editor-hotbar';
 
+/** whether a hotbar has ever been persisted, distinguishes a first-run editor
+ *  (prefill with defaults) from one the user has deliberately emptied. */
+export function hasStoredHotbar(): boolean {
+    return readString(HOTBAR_KEY) !== null;
+}
+
 export function loadHotbar(): HotbarSlot[] {
     const parsed = readJson<unknown[]>(HOTBAR_KEY);
     if (!Array.isArray(parsed)) return emptyHotbar();

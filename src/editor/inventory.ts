@@ -28,6 +28,24 @@ export function emptyHotbar(): HotbarSlot[] {
     return Array.from({ length: HOTBAR_SIZE }, () => null);
 }
 
+/**
+ * a hotbar seeded with the first registered blocks (alphabetical by id, default
+ * state), so a fresh editor with no persisted hotbar starts with something to
+ * build with instead of nine empty slots. blocks only, prefabs and blueprints
+ * are project-specific and left for the user to bind.
+ *
+ * returns an all-empty hotbar if no blocks are registered yet.
+ */
+export function defaultHotbar(): HotbarSlot[] {
+    const slots = emptyHotbar();
+    const blocks = [...registry.blockRegistry.defs].sort((a, b) => a.id.localeCompare(b.id));
+    for (let i = 0; i < HOTBAR_SIZE && i < blocks.length; i++) {
+        const def = blocks[i]!;
+        slots[i] = { kind: 'block', blockKey: formatKey(def.id, def.states, def.defaultLocalIdx ?? 0) };
+    }
+    return slots;
+}
+
 /** stable string key for an item, usable as a react key or DnD id. */
 export function inventoryItemKey(item: InventoryItem): string {
     switch (item.kind) {

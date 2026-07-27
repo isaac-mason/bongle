@@ -1,4 +1,4 @@
-import { Grid3x3 } from "../../../icons";
+import { ShoppingBag } from "../../../icons";
 import { useState } from 'react';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
@@ -79,8 +79,7 @@ function InventoryButton() {
     const keyLabel = formatKeyLabel(LIBRARY_KEYS.toggleLibrary);
 
     return (
-        <div className="mt-auto flex flex-col items-center gap-1 pt-1">
-            <div className="w-6 h-px bg-border mb-1" />
+        <div className="flex flex-col items-center gap-1 pb-1">
             {/* control indicator: the key that toggles the inventory */}
             <Kbd size="xs">{keyLabel}</Kbd>
             <button
@@ -93,8 +92,9 @@ function InventoryButton() {
                         : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
                 }`}
             >
-                <Grid3x3 size={15} />
+                <ShoppingBag size={15} />
             </button>
+            <div className="w-6 h-px bg-border mt-1" />
         </div>
     );
 }
@@ -105,6 +105,9 @@ export function LeftToolbar() {
 
     return (
         <div className="w-12 flex-shrink-0 flex flex-col items-center pt-2 pb-2 bg-surface border-r border-border">
+            {/* inventory (library) toggle, pinned to the top with an E key hint */}
+            <InventoryButton />
+
             {/* tools, grouped by category. each group has a small header like
                 "scene v", the category name plus its hotkey. per-tool slot
                 digits appear in the bottom-right corner of each icon. */}
@@ -136,9 +139,6 @@ export function LeftToolbar() {
                     );
                 })}
             </div>
-
-            {/* inventory (library) toggle, pinned to the bottom with an E key hint */}
-            <InventoryButton />
         </div>
     );
 }

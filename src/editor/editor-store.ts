@@ -21,8 +21,8 @@ import type { ScenePayload } from '../core/content/scene-store';
 import type { PlayerMode, RoomInfo } from '../core/protocol';
 import type { Resources } from '../core/resources';
 import type { EditRoomStoreApi } from './edit-room-store';
-import { HOTBAR_SIZE, type HotbarSlot } from './inventory';
-import { loadHotbar, saveHotbar } from './preferences';
+import { defaultHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
+import { hasStoredHotbar, loadHotbar, saveHotbar } from './preferences';
 
 /** Transient HMR / status notification shown briefly in the top-left of
  *  the editor viewport. Pushed from `applyRegistryChanges` for each
@@ -240,7 +240,22 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setRoomMode: (roomMode) => set({ roomMode }),
     setRoomId: (roomId) => set({ roomId }),
     setSceneId: (sceneId) => set({ sceneId }),
-    setRoom: (room) => set({ room }),
+    setRoom: (room) => {
+        // lazy first-run hotbar seed. loadHotbar() runs at module init, before
+        // the block registry is populated, so the default can't be computed
+        // there; the first activated room is our "registry is ready" signal.
+        // seeds only when nothing was ever persisted, and the write persists
+        // (via the subscribe below), so a hotbar the user later empties is left
+        // alone. no-op on subsequent room switches once a hotbar exists.
+        if (room && !hasStoredHotbar()) {
+            const seed = defaultHotbar();
+            if (seed.some((slot) => slot !== null)) {
+                set({ room, hotbar: seed });
+                return;
+            }
+        }
+        set({ room });
+    },
     setRoomList: (roomList) => set({ roomList }),
     setJoinedPlayers: (joinedPlayers) => set({ joinedPlayers }),
     setAllRooms: (allRooms) => set({ allRooms }),
