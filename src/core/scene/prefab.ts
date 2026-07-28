@@ -177,9 +177,16 @@ export function expandPrefab(
         voxels = createVoxels(blockRegistry);
     }
 
+    // resolve args against the def's declared default so `fn` always receives
+    // every field. clone the default (it's shared on the registry def) and
+    // overlay the config's authored args, backfilling any field the config
+    // omits — covers args-less instantiation (icon bake) and schema drift
+    // (a field added after nodes were placed with the old args).
+    const args = def.args ? { ...(structuredClone(def.args.default) as object), ...(config.args as object) } : config.args;
+
     // single def.apply call, fn does all the work
     try {
-        def.apply(buildPrefabApplyContext(node, voxels), config.args);
+        def.apply(buildPrefabApplyContext(node, voxels), args);
     } catch (err) {
         logScriptError(`prefab '${def.id}'.apply @${node.id}`, err);
     }
