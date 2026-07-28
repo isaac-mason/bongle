@@ -40,6 +40,11 @@ export type CreateTouchJoystickOpts = {
     size: number;
     /** 0..1 inner dead-zone applied to the normalised stick magnitude. */
     deadzone?: number;
+    /** constrain the stick to a single axis. 'both' (default) is the free
+     *  2-axis nipple; 'y' locks it to vertical (up/down, e.g. noclip fly
+     *  ascend/descend); 'x' locks it to horizontal. the thumb and the reported
+     *  value both stay on the allowed axis. */
+    axis?: 'both' | 'x' | 'y';
     /** appear-where-you-touch: the ring spawns centred on the touch point inside `zone` and
      *  hides on release. before the FIRST touch it shows a one-time hint at the left/right/
      *  top/bottom anchor, so players see where the stick lives. */
@@ -66,6 +71,7 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     const deadzone = opts.deadzone ?? 0.1;
     const radius = size / 2;
     const dynamic = !!opts.dynamic;
+    const axis = opts.axis ?? 'both';
 
     // the visible ring (+ thumb). fixed mode: the ring itself captures pointers, pinned at
     // its anchor. dynamic mode: a transparent `zone` captures and the ring floats to the
@@ -103,6 +109,10 @@ export function createTouchJoystickImpl(ctx: ScriptContext, opts: CreateTouchJoy
     if (dynamic) ring.style.opacity = '0.5'; // the pre-use "the stick is here" hint
 
     const setStick = (nx: number, ny: number): void => {
+        // drop the locked-out axis so a constrained stick reports (and draws)
+        // only along its allowed direction.
+        if (axis === 'y') nx = 0;
+        else if (axis === 'x') ny = 0;
         const mag = Math.sqrt(nx * nx + ny * ny);
         if (mag < deadzone) {
             state.x = 0;
