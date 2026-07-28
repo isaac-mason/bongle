@@ -28,7 +28,7 @@
  *  INTERFACE_VERSION — they evolve independently). The editor announces its
  *  value in `bongle:ready`; the platform announces its own in `bongle:init`, so
  *  either side can warn / degrade when the peer's major differs. */
-export const EDITOR_INTERFACE_VERSION = '1.4.0';
+export const EDITOR_INTERFACE_VERSION = '1.5.0';
 
 /** whether two EDITOR_INTERFACE_VERSION values can bridge. The contract has
  *  stabilised to same-major-compatible per rule #1: minor/patch changes are
@@ -228,8 +228,15 @@ export type SyncEntry = { path: string; size: number; mtime: number };
  *  Paths are POSIX, root-relative. */
 export type SyncTarget = {
     read(path: string): Promise<Uint8Array>;
-    write(path: string, bytes: Uint8Array): Promise<void>;
+    /** write the bytes and report the resulting size+mtime, so a caller tracking disk
+     *  signatures needn't follow every write with a second `stat()` round trip. Returns
+     *  null only when the backing can't report it — an OLDER host on the other end of the
+     *  port that still answers writes with a bare ack; the caller then falls back to a
+     *  mtime of 0 and lets the next poll settle the signature. */
+    write(path: string, bytes: Uint8Array): Promise<SyncStat | null>;
     remove(path: string): Promise<void>;
+    /** kept for older editor bundles that still stat over the port; the live loop now
+     *  reads the post-write stat from `write()` instead. */
     stat(path: string): Promise<SyncStat | null>;
     /** every managed file (recursive), with size + mtime. */
     list(): Promise<SyncEntry[]>;
@@ -277,7 +284,10 @@ export function consumeFolderSync(port: MessagePort): SyncTarget {
 
     return {
         read: (path) => call<Uint8Array>((id) => ({ t: 'read', id, path })),
-        write: (path, bytes) => call<void>((id) => ({ t: 'write', id, path, bytes })),
+        // an old host answers a write with `ok:void` → syncResultOf yields undefined,
+        // which the caller reads as "no stat reported" (nullish). A current host answers
+        // `ok:stat` with the post-write size+mtime.
+        write: (path, bytes) => call<SyncStat | null>((id) => ({ t: 'write', id, path, bytes })),
         remove: (path) => call<void>((id) => ({ t: 'remove', id, path })),
         stat: (path) => call<SyncStat | null>((id) => ({ t: 'stat', id, path })),
         list: () => call<SyncEntry[]>((id) => ({ t: 'list', id })),
@@ -309,8 +319,10 @@ export function serveFolderSync(target: SyncTarget, port: MessagePort): { close(
                 case 'read':
                     return reply({ t: 'ok:bytes', id, bytes: await target.read(req.path) });
                 case 'write':
-                    await target.write(req.path, req.bytes);
-                    return reply({ t: 'ok:void', id });
+                    // reply with the post-write stat so the consumer skips a follow-up
+                    // stat. An old consumer that expected `ok:void` still handles `ok:stat`
+                    // (its syncResultOf knows the frame) and just ignores the payload.
+                    return reply({ t: 'ok:stat', id, stat: await target.write(req.path, req.bytes) });
                 case 'remove':
                     await target.remove(req.path);
                     return reply({ t: 'ok:void', id });
@@ -386,11 +398,17 @@ export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
             const { dirs, name } = syncSplit(path);
             const dir = await dirHandle(dirs, true);
             if (!dir) throw new Error(`[disk] cannot create dir for ${path}`);
-            const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+            const fh = await dir.getFileHandle(name, { create: true });
+            const w = await fh.createWritable();
             // cast: the DOM lib types a Uint8Array<ArrayBufferLike> as not-quite a
             // BufferSource, but the bytes write fine.
             await w.write(bytes as BufferSource);
             await w.close();
+            // report size+mtime from the handle we already hold — one getFile, versus the
+            // dir-walk + getFileHandle + getFile a separate stat() would cost. mtime must
+            // come from the file (the OS stamps it on close); size is what we just wrote.
+            const f = await fh.getFile();
+            return { size: f.size, mtime: f.lastModified };
         },
         async remove(path) {
             const { dirs, name } = syncSplit(path);
@@ -417,13 +435,28 @@ export function openDiskFolder(root: FileSystemDirectoryHandle): SyncTarget {
         async list() {
             const out: SyncEntry[] = [];
             const walk = async (dir: FileSystemDirectoryHandle, prefix: string): Promise<void> => {
-                for await (const [name, h] of (dir as AnyDirHandle).entries()) {
-                    const path = prefix ? `${prefix}/${name}` : name;
-                    if (h.kind === 'directory') await walk(h as FileSystemDirectoryHandle, path);
-                    else {
-                        const f = await (h as FileSystemFileHandle).getFile();
-                        out.push({ path, size: f.size, mtime: f.lastModified });
+                // The FS Access API resolves handles lazily, so an entry enumerated here
+                // can be deleted/renamed on disk (git, a formatter, or the editor's own
+                // bake/reseed rewriting dist + node_modules) before we getFile() it or
+                // descend into it — which throws NotFoundError. For a live folder that's
+                // the steady state, not a sync failure: skip the vanished entry and let
+                // the next poll list the settled tree. Without this the error propagates
+                // out of the unguarded list() and fails the whole session.
+                try {
+                    for await (const [name, h] of (dir as AnyDirHandle).entries()) {
+                        const path = prefix ? `${prefix}/${name}` : name;
+                        try {
+                            if (h.kind === 'directory') await walk(h as FileSystemDirectoryHandle, path);
+                            else {
+                                const f = await (h as FileSystemFileHandle).getFile();
+                                out.push({ path, size: f.size, mtime: f.lastModified });
+                            }
+                        } catch {
+                            /* this entry vanished mid-walk — omit it */
+                        }
                     }
+                } catch {
+                    /* the directory itself vanished mid-enumeration — skip its subtree */
                 }
             };
             await walk(root, '');

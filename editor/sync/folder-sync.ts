@@ -24,7 +24,7 @@ import { consumeFolderSync, openDiskFolder, type SyncTarget } from '../../interf
 import { seedEngineDist } from '../engine-dist';
 import type { Filesystem, FsChange } from '../fs';
 import { IGNORED_DIRS } from '../ignored';
-import { useSync } from '../stores/sync';
+import { type SyncLogKind, useSync } from '../stores/sync';
 
 export type SyncDirection = 'editor-to-folder' | 'folder-to-editor';
 
@@ -34,6 +34,9 @@ type Sig = { size: number; hash: number };
 
 type Session = {
     fs: Filesystem;
+    /** picked folder's display name — for restoring the 'connected' status if a poll
+     *  recovers after a transient failure. */
+    folderName: string;
     /** the on-disk folder as a SyncTarget — local (openDiskFolder) when standalone,
      *  a port proxy to the host's handle when embedded. */
     disk: SyncTarget;
@@ -72,6 +75,10 @@ const sameSig = (a: Sig | undefined, b: Sig): boolean => !!a && a.size === b.siz
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/** append a line to the panel's activity log. Thin wrapper so the loop reads as
+ *  `log('pull', ...)` and the store stays the single owner of the ring. */
+const log = (kind: SyncLogKind, message: string): void => useSync.getState().log(kind, message);
+
 /** node_modules (engine seed) + dist/resources (bake output) are EDITOR-OWNED derived
  *  trees. They're published editor→disk so an on-disk checkout has what external tooling
  *  needs (VS Code type acquisition, a resolvable resource tree), but they're strictly
@@ -79,18 +86,37 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
  *  folder, never pull disk edits back, and never track them for loop-suppression.
  *  Publish writes them untracked, skipping files already on disk at the same size (the
  *  reconcile's slow path — node_modules alone is ~1k files). Matches ignored.ts. */
-const isDerived = (path: string): boolean =>
-    path.split('/').some((seg) => (IGNORED_DIRS as readonly string[]).includes(seg));
+const isDerived = (path: string): boolean => path.split('/').some((seg) => (IGNORED_DIRS as readonly string[]).includes(seg));
 
-/** run `fn` over items with bounded concurrency so the per-file OPFS/disk latencies
- *  overlap — a working copy holds thousands of files and sequential awaits are the
- *  slow path (see engine-dist's identical batching). */
-async function inBatches<T>(items: T[], batch: number, fn: (item: T) => Promise<void>): Promise<void> {
-    for (let i = 0; i < items.length; i += batch) {
-        await Promise.all(items.slice(i, i + batch).map(fn));
-    }
+/** run `fn` over items with a fixed pool of `concurrency` workers pulling from a shared
+ *  cursor. A working copy holds thousands of files and sequential awaits are the slow
+ *  path, so the per-file OPFS/disk latencies must overlap — but unlike a per-batch
+ *  Promise.all barrier, a pool never stalls the whole group on its slowest file (no
+ *  head-of-line blocking), keeping the disk saturated end to end. */
+async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+        while (next < items.length) await fn(items[next++]!);
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
-const RECONCILE_BATCH = 32;
+const RECONCILE_CONCURRENCY = 32;
+
+/** a per-file tick that logs a coarse "reconcile: N%" line every 20% of `total`, so a
+ *  large seed shows steady progress in the panel without flooding it (5 lines, not 1k).
+ *  Call the returned fn once per processed file. */
+function reconcileProgress(total: number): () => void {
+    let done = 0;
+    let lastPct = 0;
+    return () => {
+        done++;
+        const pct = total ? Math.floor((done / total) * 100) : 100;
+        if (pct >= lastPct + 20) {
+            lastPct = pct;
+            log('info', `reconcile: ${pct}% (${done}/${total})`);
+        }
+    };
+}
 
 /** standalone/top-level: pick a folder and start a live two-way sync. Must be
  *  called from a user gesture (the picker requires one). No-op if unsupported or
@@ -99,8 +125,9 @@ export async function connect(fs: Filesystem, direction: SyncDirection): Promise
     if (!syncSupported()) return;
     let handle: FileSystemDirectoryHandle;
     try {
-        handle = await (window as unknown as { showDirectoryPicker(o: { mode: string }): Promise<FileSystemDirectoryHandle> })
-            .showDirectoryPicker({ mode: 'readwrite' });
+        handle = await (
+            window as unknown as { showDirectoryPicker(o: { mode: string }): Promise<FileSystemDirectoryHandle> }
+        ).showDirectoryPicker({ mode: 'readwrite' });
     } catch (e) {
         // AbortError is the user closing the picker — fall back to idle quietly.
         // Anything else is a real failure (e.g. Chromium blocks the picker inside
@@ -149,6 +176,7 @@ async function startSession(
     await disconnect();
     const s: Session = {
         fs,
+        folderName,
         disk,
         synced: new Map(),
         diskSig: new Map(),
@@ -206,33 +234,45 @@ function teardown(s: Session): void {
 /** editor wins: write the entire OPFS project out to disk. */
 async function reconcilePublish(s: Session): Promise<void> {
     const files = (await s.fs.list('', { recursive: true })).filter((f) => f.kind === 'file');
+    log('info', `reconcile: publishing ${files.length} file${files.length === 1 ? '' : 's'} to the folder`);
     // one round-trip to learn what's already on disk, so a reconnect skips re-writing
     // the unchanged seed tree (node_modules is ~1k files — the reconcile's slow path).
     const diskSize = new Map<string, number>();
     for (const e of await s.disk.list()) diskSize.set(e.path, e.size);
 
-    await inBatches(files, RECONCILE_BATCH, async (f) => {
+    const progress = reconcileProgress(files.length);
+    let wrote = 0;
+    let skipped = 0;
+    await runPool(files, RECONCILE_CONCURRENCY, async (f) => {
         try {
             if (isDerived(f.path)) {
                 // one-way: write only when missing or a different size (bins are
                 // content-hashed and the seed is stable, so size is a sufficient
                 // change check), then forget it — no stat, no synced/diskSig, so the
                 // live loop never pulls it back.
-                if (diskSize.get(f.path) !== f.size) await s.disk.write(f.path, await s.fs.read(f.path));
+                if (diskSize.get(f.path) !== f.size) {
+                    await s.disk.write(f.path, await s.fs.read(f.path));
+                    wrote++;
+                }
                 return;
             }
             const bytes = await s.fs.read(f.path);
             const sig = sigOf(bytes);
-            await s.disk.write(f.path, bytes);
-            const st = await s.disk.stat(f.path);
+            const st = await s.disk.write(f.path, bytes); // returns the post-write stat, no separate round trip
             s.synced.set(f.path, sig);
             s.diskSig.set(f.path, { size: sig.size, mtime: st?.mtime ?? 0 });
+            wrote++;
         } catch (e) {
             // A name the disk FS rejects ("Name is not allowed") shouldn't abort the
             // whole publish — skip that file, seed the rest.
+            skipped++;
+            log('warn', `skipped ${f.path}: ${errText(e)}`);
             console.warn(`[folder-sync] skipped publish of ${f.path}:`, errText(e));
+        } finally {
+            progress();
         }
     });
+    log('info', `reconcile complete: wrote ${wrote}${skipped ? `, skipped ${skipped}` : ''}`);
 }
 
 /** disk wins: mirror the whole folder into OPFS — writing what's on disk and
@@ -241,27 +281,41 @@ async function reconcileImport(s: Session): Promise<void> {
     // never take the editor-owned derived trees (node_modules/dist/resources) from the
     // target folder — the editor re-seeds + re-bakes them itself.
     const entries = (await s.disk.list()).filter((e) => !isDerived(e.path));
+    log('info', `reconcile: importing ${entries.length} file${entries.length === 1 ? '' : 's'} from the folder`);
     const onDisk = new Set(entries.map((e) => e.path));
-    await inBatches(entries, RECONCILE_BATCH, async (e) => {
+    const progress = reconcileProgress(entries.length);
+    let loaded = 0;
+    let skipped = 0;
+    await runPool(entries, RECONCILE_CONCURRENCY, async (e) => {
         try {
             const bytes = await s.disk.read(e.path);
             const sig = sigOf(bytes);
             await s.fs.writeIfChanged(e.path, bytes);
             s.synced.set(e.path, sig);
             s.diskSig.set(e.path, { size: e.size, mtime: e.mtime });
+            loaded++;
         } catch (err) {
+            skipped++;
+            log('warn', `skipped ${e.path}: ${errText(err)}`);
             console.warn(`[folder-sync] skipped import of ${e.path}:`, errText(err));
+        } finally {
+            progress();
         }
     });
     // disk is the source of truth for SOURCE: drop OPFS source the folder lacks — but
     // never a derived tree (seedEngineDist owns node_modules and reseeds it just below;
     // the bake owns dist/resources).
     const files = await s.fs.list('', { recursive: true });
+    let removed = 0;
     for (const f of files) {
         if (f.kind !== 'file' || isDerived(f.path) || onDisk.has(f.path)) continue;
         await s.fs.remove(f.path);
+        removed++;
     }
+    if (removed) log('info', `removed ${removed} editor file${removed === 1 ? '' : 's'} absent from the folder`);
+    log('info', 'reconcile: reseeding engine libraries');
     await seedEngineDist(s.fs);
+    log('info', `reconcile complete: loaded ${loaded}${skipped ? `, skipped ${skipped}` : ''}`);
 }
 
 // ── live editor → disk ──────────────────────────────────────────────
@@ -269,12 +323,16 @@ async function reconcileImport(s: Session): Promise<void> {
 async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void> {
     if (s.stopped) return;
     let moved = false;
+    // derived (bake/seed) writes are collapsed into one line per batch: they churn on
+    // every bake and would drown the real source edits the log is there to show.
+    let derived = 0;
     for (const c of changes) {
         try {
             if (c.type === 'deleted') {
                 await s.disk.remove(c.path);
                 s.synced.delete(c.path);
                 s.diskSig.delete(c.path);
+                if (!isDerived(c.path)) log('remove', `removed ${c.path} from the folder`);
                 moved = true;
             } else {
                 if (c.type === 'moved' && c.from) {
@@ -288,8 +346,15 @@ async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void>
                     // untracked — never pulled back, so it stays out of synced/diskSig
                     // (else the pull's vanished-sweep would delete it from OPFS).
                     await s.disk.write(c.path, await s.fs.read(c.path));
+                    derived++;
                     moved = true;
                 } else if (await writeToDisk(s, c.path)) {
+                    log(
+                        'push',
+                        c.type === 'moved' && c.from
+                            ? `moved ${c.from} to ${c.path} in the folder`
+                            : `wrote ${c.path} to the folder`,
+                    );
                     moved = true;
                 }
             }
@@ -299,9 +364,11 @@ async function pushEditorChanges(s: Session, changes: FsChange[]): Promise<void>
             // mirroring everything else. The stopped guard prevents an in-flight
             // write that rejects after disconnect from re-flagging the store.
             if (s.stopped) return;
+            log('warn', `skipped ${c.path}: ${errText(e)}`);
             console.warn(`[folder-sync] skipped push of ${c.path}:`, errText(e));
         }
     }
+    if (derived) log('push', `wrote ${derived} build output${derived === 1 ? '' : 's'} to the folder`);
     if (moved && !s.stopped) useSync.getState().tick();
 }
 
@@ -311,8 +378,7 @@ async function writeToDisk(s: Session, path: string): Promise<boolean> {
     const bytes = await s.fs.read(path);
     const sig = sigOf(bytes);
     if (sameSig(s.synced.get(path), sig)) return false; // echo of a disk→editor apply
-    await s.disk.write(path, bytes);
-    const st = await s.disk.stat(path);
+    const st = await s.disk.write(path, bytes); // returns the post-write stat, no separate round trip
     s.synced.set(path, sig);
     s.diskSig.set(path, { size: sig.size, mtime: st?.mtime ?? 0 });
     return true;
@@ -323,6 +389,7 @@ async function writeToDisk(s: Session, path: string): Promise<boolean> {
 async function pullDiskChanges(s: Session): Promise<void> {
     if (s.stopped || s.busy) return;
     s.busy = true;
+    useSync.getState().polled(); // heartbeat: stamp each poll so the panel shows the loop is alive
     try {
         // never pull the editor-owned derived trees back from disk.
         const entries = (await s.disk.list()).filter((e) => !isDerived(e.path));
@@ -339,11 +406,13 @@ async function pullDiskChanges(s: Session): Promise<void> {
                 if (sameSig(s.synced.get(e.path), sig)) continue; // our own write landing
                 await s.fs.writeIfChanged(e.path, bytes); // fires editor watch → HMR / bake
                 s.synced.set(e.path, sig);
+                log('pull', `loaded ${e.path} from the folder`);
                 moved = true;
             } catch (err) {
                 // A single unreadable/unwritable path must not kill the poll — skip
                 // it and keep the rest of the folder in sync.
                 if (s.stopped) return;
+                log('warn', `skipped ${e.path}: ${errText(err)}`);
                 console.warn(`[folder-sync] skipped pull of ${e.path}:`, errText(err));
             }
         }
@@ -353,9 +422,15 @@ async function pullDiskChanges(s: Session): Promise<void> {
             s.diskSig.delete(path);
             s.synced.delete(path);
             await s.fs.remove(path);
+            log('remove', `removed ${path} (gone from the folder)`);
             moved = true;
         }
         if (moved && !s.stopped) useSync.getState().tick();
+        // The poll keeps running after a fail() (unlike a reconcile fail, which tears
+        // the session down), so a transient blip can leave the UI pinned to 'error'
+        // while the loop silently heals. A poll that completes cleanly means the folder
+        // is reachable again — restore 'connected' so the status stops lying.
+        if (!s.stopped && useSync.getState().phase === 'error') useSync.getState().connected(s.folderName);
     } catch (e) {
         if (!s.stopped) useSync.getState().fail(errText(e));
     } finally {

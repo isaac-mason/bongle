@@ -61,20 +61,6 @@ function LassoOverlay() {
     );
 }
 
-// simple crosshair shown when in character (first-person) control mode
-function Crosshair() {
-    return (
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-20">
-            <div className="relative w-4 h-4">
-                {/* horizontal bar */}
-                <div className="absolute top-1/2 left-0 right-0 h-px -translate-y-1/2 bg-white opacity-80 mix-blend-difference" />
-                {/* vertical bar */}
-                <div className="absolute left-1/2 top-0 bottom-0 w-px -translate-x-1/2 bg-white opacity-80 mix-blend-difference" />
-            </div>
-        </div>
-    );
-}
-
 // fly / orbit / character control mode toggle, floats top-right inside canvas
 function ControlModeWidget() {
     const controlMode = useEditRoom((s) => s.controlMode);
@@ -142,8 +128,10 @@ function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggl
  *   └────┴────────────────────────────┴───────┘
  *
  * left toolbar and right panel are normal flex siblings, they shrink the
- * actual 3d viewport. overlays (ToolActions, ControlModeWidget, DebugPanel,
- * Crosshair) are absolute-positioned inside the canvas container.
+ * actual 3d viewport. overlays (ToolActions, ControlModeWidget, DebugPanel)
+ * are absolute-positioned inside the canvas container. the first-person
+ * crosshair is the engine's play-mode HUD widget, driven by the
+ * PlayerControllerTrait that character mode installs, not editor chrome.
  */
 const RIGHT_PANEL_MIN = 180;
 const RIGHT_PANEL_MAX = 600;
@@ -160,7 +148,6 @@ function EditUI() {
         if (!s.room.editor) return true;
         return s.playerToView.get(s.room.playerId) === 'edit';
     });
-    const controlMode = useEditRoom((s) => s.controlMode);
     const showOrientationCube = useEditRoom((s) => s.showOrientationCube);
     const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_DEFAULT);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
@@ -295,9 +282,6 @@ function EditUI() {
                             <DebugPanel tab={debugTab} />
                         </Suspense>
                     )}
-
-                    {/* crosshair, character (fp) mode only */}
-                    {controlMode === 'character' && <Crosshair />}
 
                     {/* in-canvas overlays, editor-enabled rooms only */}
                     {editorEnabled && (
