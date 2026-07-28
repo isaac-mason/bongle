@@ -472,8 +472,8 @@ export const CharacterControllerTrait = trait(
             gravity: 20,
             stepHeight: 0.55,
             groundDragRate: 12,
-            airDragRate: 0.6,
-            airAccel: 6,
+            airDragRate: 0.85,
+            airAccel: 13,
             sprintJumpImpulse: 4,
             climbSpeed: 3,
             climbDescendSpeed: 1.5,
@@ -1300,11 +1300,24 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
         }
 
         if (wantsJump || !wasGrounded) {
-            // air: small fixed accel + light drag. you keep most of your
-            // liftoff momentum and can steer, but can't actively build new
-            // horizontal speed beyond a slow drift.
+            // air: steer your momentum, don't add to it. light drag bleeds
+            // carried speed gently (that's the momentum knob). the projected
+            // accel turns velocity toward the input, then we clamp the total
+            // back to the speed you already had (or walkSpeed from a standstill)
+            // so steering ROTATES your momentum instead of stacking into extra
+            // speed. net: responsive, forgiving air control that can never make
+            // you faster than you came in, and fast momentum naturally resists
+            // turning (airAccel is a smaller fraction of a big speed) so quick
+            // jumps still feel committed while slow ones stay nimble.
             applyHorizontalDrag(_horizVel, config.airDragRate, dt);
+            const airSpeedCap = Math.max(Math.hypot(_horizVel[0], _horizVel[2]), wishSpeed);
             applyAirWishAccel(_horizVel, _movementDir, config.airAccel, wishSpeed, dt);
+            const airSpeed = Math.hypot(_horizVel[0], _horizVel[2]);
+            if (airSpeed > airSpeedCap) {
+                const scale = airSpeedCap / airSpeed;
+                _horizVel[0] *= scale;
+                _horizVel[2] *= scale;
+            }
         } else {
             // ground: add surface velocity, then drag + accel. block
             // friction multiplies the drag rate (ice → less drag → coasts;
