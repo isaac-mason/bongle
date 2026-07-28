@@ -49,7 +49,9 @@ import {
     isKeyDown,
     isKeyJustDown,
     isTouchButtonDown,
+    isTouchButtonJustDown,
 } from '../api/input';
+import { drone as flyIcon, footprints as walkIcon } from '../../icons/strings';
 import { isTouchPrimary } from '../api/mobile';
 import type { Physics } from '../api/physics';
 import { setPointerLock } from '../api/pointer-lock';
@@ -107,6 +109,15 @@ export type ControlsConfig = {
         sprintButton: boolean;
         /** auto-mount 'crouch' button on mobile (off by default). */
         crouchButton: boolean;
+        /** while noclip (free-fly) is active, mount a vertical up/down joystick
+         *  in place of the jump button so the flyer can ascend AND descend with
+         *  analog control. on by default. */
+        noclipVerticalJoystick: boolean;
+        /** mount a fly/walk toggle button that flips noclip on tap. off by
+         *  default; opt in where free-fly is allowed (the editor turns it on,
+         *  same as `desktop.doubleTapNoclip`). the touch counterpart to the
+         *  double-tap-Space toggle, which a finger can't do. */
+        flyToggleButton: boolean;
         /** right-half canvas drag → cc.look on touch devices. */
         canvasLook: boolean;
     };
@@ -124,6 +135,10 @@ export const PlayerControllerTouchIds = {
     jumpButton: 'jump',
     sprintButton: 'sprint',
     crouchButton: 'crouch',
+    /** y-locked stick shown in place of the jump button while noclip flying. */
+    verticalJoystick: 'vertical',
+    /** tap toggles noclip (free-fly) on/off. touch stand-in for double-tap Space. */
+    flyToggle: 'fly-toggle',
 } as const;
 
 // ── trait ─────────────────────────────────────────────────────────────
@@ -164,6 +179,9 @@ type PlayerControllerState = {
     sprintActive: boolean;
     wantsCrouch: boolean;
     lastTeleportId: number;
+    /** analog vertical fly input while noclip: +1 = ascend, -1 = descend.
+     *  fed by Space/Shift on desktop and the vertical joystick on touch. */
+    noclipVertical: number;
 };
 
 export const PlayerControllerTrait = trait(
@@ -191,6 +209,7 @@ export const PlayerControllerTrait = trait(
             sprintActive: false,
             wantsCrouch: false,
             lastTeleportId: 0,
+            noclipVertical: 0,
         }),
 
         // four ticks (top/bottom/left/right). game code can mutate these at
@@ -210,6 +229,8 @@ export const PlayerControllerTrait = trait(
                 jumpButton: true,
                 sprintButton: false,
                 crouchButton: false,
+                noclipVerticalJoystick: true,
+                flyToggleButton: false,
                 canvasLook: true,
             },
         }),
@@ -315,10 +336,14 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
     cc.input.jump = isKeyDown(mk, 'Space') || isTouchButtonDown(t, PlayerControllerTouchIds.jumpButton);
 
     if (cc.input.noclip) {
-        cc.input.sprint =
-            isKeyDown(mk, 'ShiftLeft') ||
-            isKeyDown(mk, 'ShiftRight') ||
-            isTouchButtonDown(t, PlayerControllerTouchIds.sprintButton);
+        // vertical fly is analog: Space/Shift on desktop, the y-locked vertical
+        // joystick on touch. the stick's y is positive-down, so negate it (push
+        // up = ascend). tickPlayerNoclip reads pc.state.noclipVertical.
+        const vstick = getJoystick(t, PlayerControllerTouchIds.verticalJoystick);
+        const keyUp = isKeyDown(mk, 'Space') ? 1 : 0;
+        const keyDown = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight') ? 1 : 0;
+        pc.state.noclipVertical = Math.max(-1, Math.min(1, keyUp - keyDown - vstick.y));
+        cc.input.sprint = false;
         pc.state.wantsCrouch = false;
         cc.input.crouch = false;
         return;
@@ -353,7 +378,7 @@ function pollInput(pc: PlayerControllerTrait, cc: CharacterControllerTrait, inpu
 // ── noclip tick (player-driven; uses camera pitch for fly direction) ─
 
 function tickPlayerNoclip(
-    _playerController: PlayerControllerTrait,
+    playerController: PlayerControllerTrait,
     characterController: CharacterControllerTrait,
     transform: TransformTrait,
     physics: Physics,
@@ -374,11 +399,12 @@ function tickPlayerNoclip(
 
     const strafe = characterController.input.move[0];
     const fwd = characterController.input.move[1];
-    const up = characterController.input.jump ? 1 : 0;
-    const down = characterController.input.sprint ? -1 : 0;
+    // analog vertical: +1 ascend / -1 descend, from Space/Shift or the vertical
+    // fly joystick (see the noclip branch of the input gather).
+    const vertical = playerController.state.noclipVertical;
 
     _noclipMove[0] = (fwdX * fwd + rgtX * strafe) * NOCLIP_SPEED;
-    _noclipMove[1] = fwdY * fwd + (up + down) * NOCLIP_SPEED;
+    _noclipMove[1] = fwdY * fwd + vertical * NOCLIP_SPEED;
     _noclipMove[2] = (fwdZ * fwd + rgtZ * strafe) * NOCLIP_SPEED;
 
     applyNoclipDisplacement(characterController, transform, physics, _noclipMove, dt);
@@ -779,7 +805,19 @@ script(
             jumpButton: HudHandle;
             sprintButton: HudHandle;
             crouchButton: HudHandle;
-        } = { joystick: null, jumpButton: null, sprintButton: null, crouchButton: null };
+            verticalJoystick: HudHandle;
+            flyToggle: HudHandle;
+        } = {
+            joystick: null,
+            jumpButton: null,
+            sprintButton: null,
+            crouchButton: null,
+            verticalJoystick: null,
+            flyToggle: null,
+        };
+        // which glyph the fly toggle currently shows (true = boot/flying), so we
+        // remount it only when the mode actually flips.
+        let flyToggleShowsBoot: boolean | null = null;
 
         function reconcileHud(key: keyof typeof hud, want: boolean, make: () => HudHandle): void {
             if (want && !hud[key]) {
@@ -807,6 +845,9 @@ script(
             // independent, so tablets and landscape phones get them too (a width gate
             // would wrongly drop them).
             const wantHud = on && isTouchPrimary(ctx);
+            // noclip (free-fly) swaps the jump button for a vertical up/down
+            // joystick so the flyer can descend too, not just ascend.
+            const noclip = !!getTrait(ctx.node, CharacterControllerTrait)?.input.noclip;
 
             reconcileHud('joystick', wantHud && pc.controls.touch.joystick, () =>
                 createTouchJoystick(ctx, {
@@ -820,7 +861,7 @@ script(
                     deadzone: 0.12,
                 }),
             );
-            reconcileHud('jumpButton', wantHud && pc.controls.touch.jumpButton, () =>
+            reconcileHud('jumpButton', wantHud && pc.controls.touch.jumpButton && !noclip, () =>
                 createTouchButton(ctx, {
                     id: PlayerControllerTouchIds.jumpButton,
                     right: 24,
@@ -830,6 +871,42 @@ script(
                     icon: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>', // lucide arrow-up
                 }),
             );
+            reconcileHud('verticalJoystick', wantHud && pc.controls.touch.noclipVerticalJoystick && noclip, () =>
+                createTouchJoystick(ctx, {
+                    id: PlayerControllerTouchIds.verticalJoystick,
+                    // sits where the jump button was; y-locked to ascend/descend.
+                    right: 24,
+                    bottom: 24,
+                    size: 104,
+                    deadzone: 0.12,
+                    axis: 'y',
+                }),
+            );
+            // fly/walk toggle: the glyph reflects the destination, so it has to
+            // remount when the mode flips (a touch button's svg is fixed at
+            // creation). reconcileHud only tracks presence, so drive it directly.
+            const wantFlyToggle = wantHud && pc.controls.touch.flyToggleButton;
+            if (!wantFlyToggle) {
+                if (hud.flyToggle) {
+                    hud.flyToggle.dispose();
+                    hud.flyToggle = null;
+                }
+                flyToggleShowsBoot = null;
+            } else if (!hud.flyToggle || flyToggleShowsBoot !== noclip) {
+                hud.flyToggle?.dispose();
+                flyToggleShowsBoot = noclip;
+                hud.flyToggle = createTouchButton(ctx, {
+                    id: PlayerControllerTouchIds.flyToggle,
+                    // above the ascend/jump control in the bottom-right cluster.
+                    right: 24,
+                    bottom: 132,
+                    width: 52,
+                    height: 52,
+                    // glyph shows the destination: footprints while flying (tap
+                    // to walk), a drone while walking (tap to fly).
+                    icon: noclip ? walkIcon : flyIcon,
+                });
+            }
             reconcileHud('sprintButton', wantHud && pc.controls.touch.sprintButton, () =>
                 createTouchButton(ctx, {
                     id: PlayerControllerTouchIds.sprintButton,
@@ -912,6 +989,18 @@ script(
                     } else {
                         pc.state.lastJumpDownTime = pc.state.elapsed;
                     }
+                }
+
+                // touch fly/walk toggle button (stand-in for double-tap Space,
+                // which a finger can't do). same effect: flip noclip, kill
+                // momentum on entry so you don't rocket off with prior velocity.
+                if (
+                    pc.controls.touch.flyToggleButton &&
+                    isTouchButtonJustDown(input.touch, PlayerControllerTouchIds.flyToggle)
+                ) {
+                    cc.input.noclip = !cc.input.noclip;
+                    if (cc.input.noclip) vec3.set(cc.state.velocity, 0, 0, 0);
+                    cc.input.jump = false;
                 }
 
                 // 'C' cycles perspective (play mode only, keep the edit-mode

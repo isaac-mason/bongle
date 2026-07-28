@@ -1239,9 +1239,11 @@ script(
                     cc.input.look[2] = _seedSph[2];
 
                     // editor character mode starts in free-fly with the
-                    // double-tap-Space toggle armed.
+                    // double-tap-Space toggle armed (desktop) and the on-screen
+                    // fly/walk toggle button shown (touch).
                     cc.input.noclip = true;
                     pc.controls.desktop.doubleTapNoclip = true;
+                    pc.controls.touch.flyToggleButton = true;
                 }
             }
         });
