@@ -53,6 +53,10 @@ const SPECIFIERS = [
     '@gltf-transform/functions',
     'meshoptimizer',
     '@breezystack/lamejs',
+    // browser audio-decode for the asset bake (WebCodecs; standalone AudioContext
+    // decodeAudioData is Window-only). Reached through the runner in the pipeline
+    // realm, so it must be seeded — bundling it in the editor worker no longer covers it.
+    'mediabunny',
     'fflate',
 ];
 
