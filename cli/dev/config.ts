@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { createRunnableDevEnvironment, defineConfig, type Plugin, searchForWorkspaceRoot, type UserConfig } from 'vite';
-import { envPlugin } from '../../editor/env-plugin';
+import { envPlugin } from '../../build/env-plugin';
 import { bongle, type EngineRebootRef } from './plugin';
 import { serveAvatars } from './serve-avatars';
 import { serveResources } from './serve-resources';
