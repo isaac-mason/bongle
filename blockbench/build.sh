@@ -20,7 +20,7 @@ export ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BB="$ROOT/blockbench"
-OUT="$ROOT/../editor/public/static/blockbench"
+OUT="$ROOT/../../apps/editor/public/static/blockbench"
 # Assemble into a staging dir; build-plugin.sh content-hashes it and moves it to
 # $OUT/<hash>/ (see scripts/stamp.mjs). $OUT holds exactly one <hash>/ dir.
 STAGING="$OUT/.staging"

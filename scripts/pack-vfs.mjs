@@ -117,8 +117,13 @@ addFile('@webgpu/types/package.json', join(webgpuDir, 'package.json'));
 addTree('@webgpu/types', webgpuDir, (abs) => abs.endsWith('.d.ts'));
 
 const zip = zipSync(files, { level: 6 });
-const out = join(ROOT, 'editor/editor-node-modules.zip');
+// The seed is consumed by the platform editor shell (apps/editor/engine-dist.ts). Write
+// it there when the monorepo is present; fall back to lib/editor for a standalone lib
+// build (a bare bongle checkout with no platform sibling — which doesn't need the seed).
+const appsEditor = join(ROOT, '../apps/editor');
+const out = existsSync(appsEditor)
+    ? join(appsEditor, 'editor-node-modules.zip')
+    : join(ROOT, 'editor/editor-node-modules.zip');
 writeFileSync(out, zip);
-console.log(
-    `packed ${Object.keys(files).length} files → editor/editor-node-modules.zip (${(zip.length / 1024 / 1024).toFixed(2)} MB)`,
-);
+const outLabel = existsSync(appsEditor) ? 'apps/editor/editor-node-modules.zip' : 'editor/editor-node-modules.zip';
+console.log(`packed ${Object.keys(files).length} files → ${outLabel} (${(zip.length / 1024 / 1024).toFixed(2)} MB)`);

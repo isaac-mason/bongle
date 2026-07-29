@@ -9,8 +9,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BB="$ROOT/blockbench"
-OUT="$ROOT/../editor/public/static/blockbench"
-VERSION_MODULE="$ROOT/../editor/ui/blockbench-version.ts"
+OUT="$ROOT/../../apps/editor/public/static/blockbench"
+VERSION_MODULE="$ROOT/../../apps/editor/ui/blockbench-version.ts"
 
 # Full build (build.sh) passes the freshly-assembled staging dir as $1. The
 # standalone fast path takes no arg: it re-bundles the plugin into the current
