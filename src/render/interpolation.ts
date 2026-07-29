@@ -192,7 +192,7 @@ function sampleSnapshotPose(t: TransformTrait, renderTime: number, serverChoking
     // entity that only rotates in place never fills the position ring, and vice
     // versa). `serverChoking` lets a dry position buffer coast the last velocity
     // through a transport stall instead of freezing (see samplePositionSnapshot).
-    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos, serverChoking);
+    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos, serverChoking, true);
     else vec3.copy(_interpLocalPos, t.position);
     if (snaps.rotCount > 0) sampleRotationSnapshot(snaps, renderTime, _interpLocalQuat);
     else quat.copy(_interpLocalQuat, t.quaternion);

@@ -195,6 +195,23 @@ export type NetSnapshots = {
     rot: Float32Array;
     rotHead: number;
     rotCount: number;
+
+    // ── render-layer correction smoothing (Gaffer "State Synchronization") ──
+    // Extrapolation coasts a dry buffer forward; when the entity's real motion during a
+    // stall differs from that linear guess (it stops / slows / turns), the recovery would
+    // SNAP the sample backward. Instead we fold that discontinuity into `smoothErr` (a
+    // visual position offset), render `logical + smoothErr`, and decay `smoothErr` toward
+    // zero over a few frames — the snap becomes a glide. The logical sample is untouched
+    // (future extrapolation stays correct); only the rendered value carries the offset.
+    /** decaying visual position offset (local units). 0 == no correction in flight. */
+    smoothErr: Float64Array;
+    /** last rendered visual position, to seed `smoothErr` continuously across a recovery. */
+    prevVisual: Float64Array;
+    /** did the previous position sample extrapolate? the extrap→interp falling edge is the
+     *  recovery where the overshoot is absorbed. */
+    wasExtrap: 0 | 1;
+    /** false until `prevVisual` holds a real sample (skip seeding on the very first frame). */
+    smoothInit: 0 | 1;
 };
 
 function newNetSnapshots(): NetSnapshots {
@@ -207,6 +224,10 @@ function newNetSnapshots(): NetSnapshots {
         rot: new Float32Array(NET_SNAPSHOT_CAP * 4),
         rotHead: -1,
         rotCount: 0,
+        smoothErr: new Float64Array(3),
+        prevVisual: new Float64Array(3),
+        wasExtrap: 0,
+        smoothInit: 0,
     };
 }
 
@@ -262,6 +283,13 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
     snaps.rot[1] = rotation[1];
     snaps.rot[2] = rotation[2];
     snaps.rot[3] = rotation[3];
+    // a teleport is an intentional discontinuity — drop any in-flight correction so we
+    // don't glide across it, and re-seed prevVisual from the next sample.
+    snaps.smoothErr[0] = 0;
+    snaps.smoothErr[1] = 0;
+    snaps.smoothErr[2] = 0;
+    snaps.wasExtrap = 0;
+    snaps.smoothInit = 0;
 }
 
 // bracket search result, reused across calls (single-threaded sampler).
@@ -346,17 +374,69 @@ function findBracket(time: Float64Array, head: number, count: number, renderTime
     _bracket.frac = 0;
 }
 
+/** per-frame decay for the correction offset, by its magnitude (Gaffer "State
+ *  Synchronization"): a small error bleeds slowly (0.95, invisibly smooth); a large one
+ *  faster (0.85) so a big overshoot doesn't leave the entity lagging for long. Linear
+ *  between 25cm and 1m. Assumes ~60fps (the offset is a render-layer visual, so a modest
+ *  frame-rate dependence in the bleed duration is acceptable). */
+function smoothFactor(errorMag: number): number {
+    if (errorMag <= 0.25) return 0.95;
+    if (errorMag >= 1.0) return 0.85;
+    return 0.95 + (0.85 - 0.95) * ((errorMag - 0.25) / 0.75);
+}
+
 /** sample the interpolated local position at `renderTime` into `out`. `allowExtrapolate`
  *  (set only when the transport is choking) coasts a dry buffer along its last velocity
- *  instead of freezing on the newest keyframe. */
-export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, allowExtrapolate: boolean): void {
+ *  instead of freezing on the newest keyframe. `smooth` folds the extrapolation-recovery
+ *  discontinuity into a decaying visual offset so an overshoot glides back instead of
+ *  snapping (see NetSnapshots.smoothErr). */
+export function samplePositionSnapshot(
+    snaps: NetSnapshots,
+    renderTime: number,
+    out: Vec3,
+    allowExtrapolate: boolean,
+    smooth: boolean,
+): void {
     findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime, allowExtrapolate);
     const lo = _bracket.lo * 3;
     const hi = _bracket.hi * 3;
     const f = _bracket.frac;
+    // logical pose: the authoritative interpolated/extrapolated sample (untouched).
     out[0] = snaps.pos[lo]! + (snaps.pos[hi]! - snaps.pos[lo]!) * f;
     out[1] = snaps.pos[lo + 1]! + (snaps.pos[hi + 1]! - snaps.pos[lo + 1]!) * f;
     out[2] = snaps.pos[lo + 2]! + (snaps.pos[hi + 2]! - snaps.pos[lo + 2]!) * f;
+
+    if (!smooth) return;
+
+    const err = snaps.smoothErr;
+    const extrapolating = f > 1;
+    if (snaps.smoothInit === 0) {
+        // first sample: nothing to correct against yet.
+        err[0] = err[1] = err[2] = 0;
+        snaps.smoothInit = 1;
+    } else if (snaps.wasExtrap === 1 && !extrapolating) {
+        // recovery frame: the logical pose just snapped from the overshoot back to the
+        // truth. Seed the offset so the rendered pose stays continuous (err = prevVisual −
+        // logical → rendered == prevVisual), then let it decay over the next frames.
+        err[0] = snaps.prevVisual[0] - out[0];
+        err[1] = snaps.prevVisual[1] - out[1];
+        err[2] = snaps.prevVisual[2] - out[2];
+    } else {
+        // no new discontinuity: bleed any offset toward zero (a no-op when already 0, so
+        // steady interpolation and exact extrapolation pay nothing).
+        const factor = smoothFactor(Math.hypot(err[0], err[1], err[2]));
+        err[0] *= factor;
+        err[1] *= factor;
+        err[2] *= factor;
+    }
+
+    out[0] += err[0];
+    out[1] += err[1];
+    out[2] += err[2];
+    snaps.prevVisual[0] = out[0];
+    snaps.prevVisual[1] = out[1];
+    snaps.prevVisual[2] = out[2];
+    snaps.wasExtrap = extrapolating ? 1 : 0;
 }
 
 const _rotLo = quat.create();

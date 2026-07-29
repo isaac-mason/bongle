@@ -46,21 +46,49 @@ let booted = false;
 /** paint a minimal error card into the iframe when the client realm fails to boot,
  *  so the window shows what broke instead of a silent black void. Matches the
  *  editor's square, black-bordered, no-radius style. */
+type BootError = { title: string; detail: string; hint: string };
+
+/** Map a raw boot failure to the card's copy. Each `if` block owns one known
+ *  failure class; add a new block above the generic fallthrough to handle
+ *  another. Order matters — the first match wins, so keep the specific ones
+ *  first and the catch-all last. */
+function classifyBootError(message: string): BootError {
+    // A WebGPU adapter/support failure isn't the user's code — it's their device
+    // or browser. Point at drivers/browser instead of the "fix src/" hint, which
+    // would send them hunting a nonexistent bug in their project.
+    if (message.includes('WebGPU') || message.includes('adapter')) {
+        return {
+            title: 'unable to start WebGPU',
+            detail: "This device or browser can't start WebGPU, which bongle needs to render. Update your graphics drivers, then use an up-to-date Chromium browser (Chrome or Edge) with hardware acceleration turned on.",
+            hint: 'open chrome://gpu to check your WebGPU status.',
+        };
+    }
+
+    // generic fallthrough: an error in the user's project code.
+    return {
+        title: 'client failed to load',
+        detail: message,
+        hint: 'fix src/, save, then restart the server.',
+    };
+}
+
 function showBootError(message: string): void {
+    const { title, detail, hint } = classifyBootError(message);
+
     const el = document.createElement('div');
     el.style.cssText =
         'position:fixed;inset:0;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;' +
         'padding:24px;background:#000;color:#fff;font:13px/1.5 ui-monospace,monospace;text-align:center';
-    const title = document.createElement('div');
-    title.textContent = 'client failed to load';
-    title.style.cssText = 'color:#ff5a5a;font-weight:600';
-    const detail = document.createElement('div');
-    detail.textContent = message;
-    detail.style.cssText = 'max-width:560px;white-space:pre-wrap;word-break:break-word;opacity:.85';
-    const hint = document.createElement('div');
-    hint.textContent = 'fix src/, save, then restart the server.';
-    hint.style.cssText = 'opacity:.6';
-    el.append(title, detail, hint);
+    const titleEl = document.createElement('div');
+    titleEl.textContent = title;
+    titleEl.style.cssText = 'color:#ff5a5a;font-weight:600';
+    const detailEl = document.createElement('div');
+    detailEl.textContent = detail;
+    detailEl.style.cssText = 'max-width:560px;white-space:pre-wrap;word-break:break-word;opacity:.85';
+    const hintEl = document.createElement('div');
+    hintEl.textContent = hint;
+    hintEl.style.cssText = 'opacity:.6';
+    el.append(titleEl, detailEl, hintEl);
     document.body.appendChild(el);
 }
 

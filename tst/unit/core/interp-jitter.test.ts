@@ -55,14 +55,22 @@ type Metrics = {
     /** largest single-frame jump in sampled position (m). Smooth motion sits at
      *  MOVER_SPEED*DT; a big value is the visible SNAP out of a freeze. */
     maxSnapJump: number;
+    /** largest single-frame BACKWARD move (m) — the mover profiles here are
+     *  forward-monotone, so any backward step is the "jitter forward then snap back"
+     *  artifact: extrapolation coasted past where the entity actually was, then the
+     *  real keyframes pulled it back. 0 == never rewinds. */
+    maxBackwardStep: number;
     /** expected smooth per-frame step, for reference. */
     expectedStep: number;
 };
 
+/** true world x of the remote entity at a given server time. Keyframes sample this. */
+type MoverProfile = (serverTime: number) => number;
+
 /** `extrapolate` toggles the fix: when true we pass the real Clock.isServerChoking()
  *  verdict to the sampler (production behavior); when false we always hold (the old
  *  behavior), so the two can be compared on an identical packet stream. */
-function simulate(delay: DelayModel, seed: number, extrapolate: boolean): Metrics {
+function simulate(delay: DelayModel, seed: number, extrapolate: boolean, profile: MoverProfile, smooth: boolean): Metrics {
     const rng = mulberry32(seed);
 
     // Build the packet stream. The server is healthy (in tick budget): it emits one
@@ -79,7 +87,7 @@ function simulate(delay: DelayModel, seed: number, extrapolate: boolean): Metric
         const serverClock = SERVER_SEED + serverWall;
         const arrival = Math.max(prevArrival, serverWall + delay(tick, rng));
         prevArrival = arrival;
-        const pose = tick % TRANSFORM_EVERY === 0 ? MOVER_SPEED * serverWall : null;
+        const pose = tick % TRANSFORM_EVERY === 0 ? profile(serverWall) : null;
         packets.push({ arrival, serverClock, pose });
     }
 
@@ -98,6 +106,7 @@ function simulate(delay: DelayModel, seed: number, extrapolate: boolean): Metric
         coastFrames: 0,
         maxBehindNewest: -Infinity,
         maxSnapJump: 0,
+        maxBackwardStep: 0,
         expectedStep: MOVER_SPEED * DT,
     };
 
@@ -122,7 +131,7 @@ function simulate(delay: DelayModel, seed: number, extrapolate: boolean): Metric
         if (!snaps || snaps.posCount === 0) continue;
         // production gates extrapolation on the transport choke verdict (see engine-client).
         const choking = extrapolate && Clock.isServerChoking(clock);
-        samplePositionSnapshot(snaps, renderTime, out, choking);
+        samplePositionSnapshot(snaps, renderTime, out, choking, smooth);
 
         if (wall < WARMUP_S) {
             prevSampledX = out[0];
@@ -136,8 +145,9 @@ function simulate(delay: DelayModel, seed: number, extrapolate: boolean): Metric
         if (dry) m.dryFrames++;
         if (dry && choking) m.coastFrames++;
 
-        const jump = Math.abs(out[0] - prevSampledX);
-        if (jump > m.maxSnapJump) m.maxSnapJump = jump;
+        const step = out[0] - prevSampledX;
+        if (Math.abs(step) > m.maxSnapJump) m.maxSnapJump = Math.abs(step);
+        if (-step > m.maxBackwardStep) m.maxBackwardStep = -step;
         prevSampledX = out[0];
     }
 
@@ -158,9 +168,45 @@ const burstyJitter: DelayModel = (tick, rng) => {
     return tick > 0 && tick % STALL_PERIOD_TICKS === 0 ? base + 0.35 : base;
 };
 
+const STALL_PERIOD_S = STALL_PERIOD_TICKS * DT; // 4s between stalls
+
+// Constant-velocity mover: the simple case where extrapolation is exact.
+const constantVelocity: MoverProfile = (t) => MOVER_SPEED * t;
+
+// Walk-then-pause mover: walks at MOVER_SPEED but STANDS STILL for PAUSE_S at the top of
+// each stall period — where the head-of-line stall also lands. So while the entity is
+// actually stopped, the client (mid-stall, buffer dry) coasts its last WALKING velocity
+// forward, overshooting the true position; when the bunched keyframes finally land they
+// reveal it was standing still and the sampler snaps BACK. This is the "jitter forward
+// then back" extrapolation introduced. Holding doesn't overshoot here — during the pause
+// the frozen newest keyframe IS the correct pose.
+const PAUSE_S = 0.4;
+const walkPause: MoverProfile = (t) => {
+    const periods = Math.floor(t / STALL_PERIOD_S);
+    const movePerPeriod = STALL_PERIOD_S - PAUSE_S;
+    const e = t - periods * STALL_PERIOD_S; // position within this period, 0..STALL_PERIOD_S
+    let x = periods * movePerPeriod * MOVER_SPEED; // distance banked from completed periods
+    if (e > PAUSE_S) x += (e - PAUSE_S) * MOVER_SPEED; // pause [0,PAUSE_S) then walk
+    return x;
+};
+
+// Walk-then-reverse mover: the harshest case. It walks forward, then REVERSES (walks
+// backward at the same speed) for PAUSE_S at the top of each stall period. Mid-stall the
+// client coasts the last FORWARD velocity while the entity is actually going backward, so
+// the overshoot (and the recovery correction) is doubled. Real backward motion here is
+// exactly one step per frame, so a smoothed correction should keep the worst backward step
+// near that — anything much larger is the un-smoothed snap leaking through.
+const walkReverse: MoverProfile = (t) => {
+    const periods = Math.floor(t / STALL_PERIOD_S);
+    const banked = periods * (STALL_PERIOD_S - 2 * PAUSE_S) * MOVER_SPEED;
+    const e = t - periods * STALL_PERIOD_S;
+    if (e < PAUSE_S) return banked - MOVER_SPEED * e; // reverse for PAUSE_S
+    return banked - MOVER_SPEED * PAUSE_S + MOVER_SPEED * (e - PAUSE_S); // then forward
+};
+
 describe('remote-transform interpolation vs jitter shape', () => {
     it('absorbs smooth bounded jitter — render time stays bracketed, motion is smooth', () => {
-        const m = simulate(smoothJitter, 0x1234, false);
+        const m = simulate(smoothJitter, 0x1234, false, constantVelocity, true);
         // render time never reaches the newest keyframe: always interpolating between two.
         expect(m.dryFrames).toBe(0);
         expect(m.maxBehindNewest).toBeLessThan(0);
@@ -169,7 +215,7 @@ describe('remote-transform interpolation vs jitter shape', () => {
     });
 
     it('BUG: breaks on a bursty link without the fix — freezes on the frontier then snaps', () => {
-        const m = simulate(burstyJitter, 0x1234, false);
+        const m = simulate(burstyJitter, 0x1234, false, constantVelocity, true);
         // the buffer runs dry during stalls: many frozen frames on the frontier...
         expect(m.dryFrames).toBeGreaterThan(20);
         expect(m.coastFrames).toBe(0); // extrapolation disabled → never coasts
@@ -179,7 +225,7 @@ describe('remote-transform interpolation vs jitter shape', () => {
     });
 
     it('FIX: choke-gated extrapolation coasts the bursty link smoothly', () => {
-        const m = simulate(burstyJitter, 0x1234, true);
+        const m = simulate(burstyJitter, 0x1234, true, constantVelocity, true);
         // still goes dry during stalls, but now it COASTS instead of freezing...
         expect(m.dryFrames).toBeGreaterThan(20);
         expect(m.coastFrames).toBeGreaterThan(20);
@@ -189,11 +235,47 @@ describe('remote-transform interpolation vs jitter shape', () => {
     });
 
     it('DISCIPLINE: the fix is a no-op on a healthy link (choke never fires, zero added lag)', () => {
-        const off = simulate(smoothJitter, 0x1234, false);
-        const on = simulate(smoothJitter, 0x1234, true);
+        const off = simulate(smoothJitter, 0x1234, false, constantVelocity, true);
+        const on = simulate(smoothJitter, 0x1234, true, constantVelocity, true);
         // no spurious extrapolation, and render-behind / motion are byte-identical.
         expect(on.coastFrames).toBe(0);
         expect(on.maxBehindNewest).toBe(off.maxBehindNewest);
         expect(on.maxSnapJump).toBe(off.maxSnapJump);
+    });
+});
+
+// The flip-side of the extrapolation fix: when the entity's real motion during a stall
+// differs from the linear projection of its pre-stall velocity (it stops / slows / turns),
+// coasting overshoots and the recovery pulls it back — visible as "jitter forward then
+// snap back". Reproduced with a mover that stops exactly while the transport stalls.
+describe('remote-transform interpolation overshoot on mid-stall velocity change', () => {
+    it('BUG: extrapolation overshoots a mid-stall stop then snaps backward (no smoothing)', () => {
+        const m = simulate(burstyJitter, 0x1234, true, walkPause, false);
+        expect(m.coastFrames).toBeGreaterThan(0); // it did extrapolate the stop
+        expect(m.maxBackwardStep).toBeGreaterThan(m.expectedStep * 3); // and rewound hard
+    });
+
+    it('FIX: correction smoothing glides the overshoot back — no visible rewind', () => {
+        const raw = simulate(burstyJitter, 0x1234, true, walkPause, false);
+        const m = simulate(burstyJitter, 0x1234, true, walkPause, true);
+        expect(m.coastFrames).toBeGreaterThan(0); // still coasts the stall (freeze fix kept)
+        // the 1m backward snap becomes a gentle glide — well under a jerk, and ~7x smaller.
+        expect(m.maxBackwardStep).toBeLessThan(m.expectedStep * 2.5);
+        expect(m.maxBackwardStep).toBeLessThan(raw.maxBackwardStep / 5);
+    });
+
+    it('SECOND GUARD: reverses direction mid-stall (harshest overshoot) — still smoothed', () => {
+        const raw = simulate(burstyJitter, 0x1234, true, walkReverse, false);
+        const m = simulate(burstyJitter, 0x1234, true, walkReverse, true);
+        // real motion here IS backward, so the offset is bigger, but the smoothed step is
+        // still a small fraction of the raw ~2m snap.
+        expect(m.maxBackwardStep).toBeLessThan(raw.maxBackwardStep / 4);
+    });
+
+    it('holding never rewinds — the backward jitter is introduced by extrapolation', () => {
+        const m = simulate(burstyJitter, 0x1234, false, walkPause, false);
+        // during the pause the frozen newest keyframe is the correct pose, so hold is
+        // forward-monotone: no overshoot, nothing to snap back from.
+        expect(m.maxBackwardStep).toBeLessThan(m.expectedStep);
     });
 });
