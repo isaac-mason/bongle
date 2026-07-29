@@ -382,7 +382,7 @@ function CarriedItemCursor() {
 
 /**
  * Mount the editor UI shell into `container`. Called from
- * `bongle/engine-editor`'s `setup(state)`, which only the edit-mode boot
+ * `bongle/engine-client-editor`'s `setup(state)`, which only the edit-mode boot
  * template imports, so this chunk only ships in editor builds.
  */
 export function mountEditUI(container: HTMLElement): Root {

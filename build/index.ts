@@ -20,7 +20,7 @@
 // OPFS, @rolldown/browser/experimental transform, the MessagePort pumps) — that's
 // editor/bundler. `bongle dev` supplies the node counterparts and shares this core.
 
-export { type Bundler, bundleWorkers, createBonglePlugin } from './bundle/bongle-plugin';
+export { type Bundler, bundleWorkerEntry, bundleWorkers, createBonglePlugin, workerWrapperModule } from './bundle/bongle-plugin';
 export { type BuildOptions, buildBundle } from './bundle/bundle';
 export { type DepParser, initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture/capture-deps';
 export {

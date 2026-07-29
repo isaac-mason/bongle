@@ -10,7 +10,8 @@
         "src/index.ts",
         "src/engine-client.ts",
         "src/engine-server.ts",
-        "src/engine-editor.ts",
+        "src/engine-client-editor.ts",
+        "src/engine-server-editor.ts",
         "src/internal.ts",
         "src/builtins/**",
         "src/core/physics/crashcat.ts"
@@ -40,11 +41,17 @@
             "import": "./dist/engine-server-node.js",
             "default": "./dist/engine-server-node.js"
         },
-        "./engine-editor": {
-            "source": "./src/engine-editor.ts",
-            "types": "./dist/types/src/engine-editor.d.ts",
-            "import": "./dist/engine-editor.js",
-            "default": "./dist/engine-editor.js"
+        "./engine-client-editor": {
+            "source": "./src/engine-client-editor.ts",
+            "types": "./dist/types/src/engine-client-editor.d.ts",
+            "import": "./dist/engine-client-editor.js",
+            "default": "./dist/engine-client-editor.js"
+        },
+        "./engine-server-editor": {
+            "source": "./src/engine-server-editor.ts",
+            "types": "./dist/types/src/engine-server-editor.d.ts",
+            "import": "./dist/engine-server-editor.js",
+            "default": "./dist/engine-server-editor.js"
         },
         "./engine-asset-pipeline": {
             "source": "./src/asset-pipeline/index.ts",
@@ -77,15 +84,40 @@
             "import": "./dist/kit.js",
             "default": "./dist/kit.js"
         },
+        "./build": {
+            "source": "./build/index.ts",
+            "default": "./build/index.ts"
+        },
+        "./icons": {
+            "source": "./icons/index.tsx",
+            "default": "./icons/index.tsx"
+        },
+        "./zstd-wasm": {
+            "source": "./zstd-wasm/index.ts",
+            "default": "./zstd-wasm/index.ts"
+        },
+        "./avatar": {
+            "source": "./avatar/index.ts",
+            "default": "./avatar/index.ts"
+        },
+        "./storage-in-memory": {
+            "source": "./src/server/storage-in-memory.ts",
+            "default": "./src/server/storage-in-memory.ts"
+        },
+        "./blockbench/starter/*": "./blockbench/starter/*",
         "./package.json": "./package.json"
     },
     "files": [
         "src",
         "cli",
         "build",
+        "icons",
+        "zstd-wasm",
+        "avatar",
         "interface",
         "avatars",
         "assets",
+        "blockbench/starter",
         "templates",
         "LICENSE",
         "README.md"

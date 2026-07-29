@@ -1,16 +1,15 @@
 /// <reference types="vite/client" />
 // cli/realms/client/edit-client.ts — the browser EDIT client for `bongle dev`.
 // Runs the game client in mode:'edit' — the in-game scene + voxel editing tools
-// (EngineEditor.setup mounts the edit UI). Your IDE is the code editor; this is the
+// (EngineClientEditor.setup mounts the edit UI). Your IDE is the code editor; this is the
 // in-project editor. Served by the Vite `client` env; dials the edit server over /game.
 //
 // (Play-from-source lives in play-client.ts, reserved for `bongle start`/preview.)
 
 import { EngineClient } from 'bongle/engine-client';
-import * as EngineEditor from 'bongle/engine-editor';
+import * as EngineClientEditor from 'bongle/engine-client-editor';
 import { env } from 'bongle/env';
 import type { ClientDriver } from 'bongle/interface';
-import { __bongle } from 'bongle/internal';
 import { createNetSim } from '../../../build';
 
 export type StartClientOptions = {
@@ -42,7 +41,7 @@ export async function start(opts: StartClientOptions): Promise<void> {
     };
     // the editor lists/reads scene files over HTTP from the dev server (writes flow
     // through the engine's scene protocol to the server's disk persist).
-    const sceneSource: EngineEditor.SceneSource = {
+    const sceneSource: EngineClientEditor.SceneSource = {
         listScenes: async () => {
             const r = await fetch('/__bongle/scenes');
             return r.ok ? ((await r.json()) as string[]) : [];
@@ -54,14 +53,15 @@ export async function start(opts: StartClientOptions): Promise<void> {
     };
 
     const state = EngineClient.init({ mode: 'edit', driver, resourceLoader, domElement: document.body });
-    // EngineEditor.setup registers the editor client + mounts the in-world edit UI —
+    // EngineClientEditor.setup registers the editor client + mounts the in-world edit UI —
     // BEFORE load() (its clearPendingChanges sweep). Then flush AFTER load so the
     // registry apply sees the render tier load set up. Resources are already baked
     // (startup child-bake), so no pipeline-ready gate is needed.
-    await EngineEditor.setup(state, { sceneSource });
+    await EngineClientEditor.setup(state, { sceneSource });
     await EngineClient.load(state);
-    __bongle.registerFlush(() => EngineClient.applyRegistryChanges(state));
-    __bongle.flush();
+    // watch the registry for HMR re-declares + do the initial apply. AFTER load so
+    // the first apply sees the render tier.
+    EngineClientEditor.watchRegistry(state);
 
     // scene HMR: a .scene.json edit on disk → live update in the running world.
     if (import.meta.hot) {
@@ -82,7 +82,7 @@ export async function start(opts: StartClientOptions): Promise<void> {
     // frames per the live net-sim toggle so a laggy link is reproducible locally.
     const netSim = createNetSim<Uint8Array, ArrayBuffer>(
         () => {
-            const s = EngineEditor.useEditor.getState();
+            const s = EngineClientEditor.useEditor.getState();
             return {
                 enabled: s.netSimEnabled,
                 rttMs: s.netSimRttMs,

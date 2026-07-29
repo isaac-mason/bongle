@@ -9,9 +9,9 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
 import path from 'node:path';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
+import * as EngineServerEditor from 'bongle/engine-server-editor';
 import { createFallbackAvatarsDriver } from 'bongle/engine-server-node';
 import { env } from 'bongle/env';
-import { __bongle } from 'bongle/internal';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { attachGameTransport, type GameTransport } from './transport';
@@ -97,9 +97,13 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         driver: { storage: createInMemoryStorageDriver(), avatars },
     });
 
+    // register the editor's server commands BEFORE load (mirrors the client's
+    // EngineClientEditor.setup), then load, then watch the registry for HMR
+    // re-declares + the initial apply.
+    await EngineServerEditor.setup(state);
     await EngineServer.load(state);
     console.log('[dev:server] loaded');
-    __bongle.registerFlush(() => EngineServer.applyRegistryChanges(state));
+    EngineServerEditor.watchRegistry(state);
 
     // random sample avatar per join → onClientJoin (via the transport), so clients
     // wear a real avatar instead of the failing builtin fallback.
@@ -133,8 +137,6 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
         EngineServer.update(state, dt);
         transport.flush();
     }, 1000 / 60);
-
-    __bongle.flush();
 
     return {
         app,

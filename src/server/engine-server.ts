@@ -1,4 +1,3 @@
-import { env } from 'bongle';
 import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
@@ -15,7 +14,6 @@ import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
 import * as Light from '../core/voxels/light';
-import type * as EditorModule from '../editor/index';
 import type { Zstd } from '../core/voxels/chunk-codec';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
@@ -28,18 +26,15 @@ import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
 import * as Save from './save';
 
-// Re-export the registry-dispatch entry so consumers (realm boot entries,
-// bongle internals) can call `EngineServer.applyRegistryChanges(state)`
-// through the existing namespace without reaching into engine internals
-// directly.
+// Re-export the registry-dispatch entry so the cli play realms (a dev loop over
+// the play interface) can call `EngineServer.applyRegistryChanges(state)` from
+// their flush handler. The editor + cli EDIT realms go through
+// `engine-server-editor.watchRegistry` instead, so this stays off their path.
 export { applyRegistryChanges } from './registry-dispatch';
 // runtime avatar swap (editor live preview — re-register the edited glb under a
 // fresh modelId + re-stamp the player without a re-join).
 export { reloadClientAvatar } from './avatars';
 export { DEFAULT_SCENE_ID };
-
-/** cached editor module ref, populated by load() when env.editor */
-let _editor: typeof EditorModule | undefined;
 
 export type InitOptions = {
     mode: 'edit' | 'play';
@@ -352,26 +347,15 @@ function recordProcessStats(metrics: Debug.Metrics, delta: number): void {
 export async function load(state: EngineServer) {
     const mode = state.mode;
 
-    // import editor module before loading user module so editor commands
-    // upsert into the registry first.
-    if (env.editor) {
-        _editor = await import('../editor/index');
-        await _editor.registerServer(state);
-        // expose state + api on globalThis for ad-hoc inspection via
-        // `bun --inspect` / chrome devtools. `_state` is the full
-        // EngineServer; `_api` is the same surface user scripts import
-        // from 'bongle'. dynamic import keeps the api module out of
-        // non-editor bundles.
-        const api = await import('bongle');
-        const g = globalThis as unknown as { _state: typeof state; _api: typeof api };
-        g._state = state;
-        g._api = api;
-    }
+    // In edit mode the realm calls `engine-server-editor.setup(state)` BEFORE this
+    // (mirroring the client's `engine-client-editor.setup`), so the editor's server
+    // commands have already upserted into the registry by now — keeping this runtime
+    // entry free of the `env.editor` branch.
 
-    // user + editor modules have registered by now (loadModule ran before this,
-    // editor imported just above). build the derived index fields once so scene
-    // population + room creation below read a live `blockRegistry` / `protocol`.
-    // in dev the flush handler reindexes again on every HMR.
+    // user + editor modules have registered by now (loadModule ran before this).
+    // build the derived index fields once so scene population + room creation below
+    // read a live `blockRegistry` / `protocol`. in dev the flush handler reindexes
+    // again on every HMR.
     reindexRegistry(registry);
 
     // seed Resources.models from the registry. lazy systems (renderer,

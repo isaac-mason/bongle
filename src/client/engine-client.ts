@@ -94,7 +94,7 @@ export { applyRegistryChanges, refreshAudioResources, refreshBlockResources, ref
 
 // Re-export the play-mode UI mount so the play-mode boot template can mount
 // the play shell directly, keeps `engine-client` free of `env.editor` UI
-// branches; the editor counterpart lives at `bongle/engine-editor`.
+// branches; the editor counterpart lives at `bongle/engine-client-editor`.
 export { mountPlayUI } from './ui/play-ui';
 
 export function init(opts: InitOptions) {
@@ -475,7 +475,7 @@ export async function load(state: EngineClient) {
     });
 
     // UI mounting is the boot template's job: edit mode calls
-    // `EngineEditor.setup` (bongle/engine-editor) between init and load;
+    // `EngineClientEditor.setup` (bongle/engine-client-editor) between init and load;
     // play mode calls `EngineClient.mountPlayUI(state.domElement)`. Keeping
     // it out here means `engine-client` has zero `env.editor` UI branches.
 
