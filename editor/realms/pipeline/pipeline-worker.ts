@@ -1,15 +1,15 @@
 // editor/realms/pipeline/pipeline-worker.ts — the asset-pipeline realm, off the main thread.
 //
-// Bakes get heavy (atlas packing, audio encode) — running here keeps the UI
-// responsive. Mirrors server-worker.ts: opens the shared OPFS project, evaluates
-// the user code via a ModuleRunner bridged to the bundler worker, then runs the
-// AssetPipeline the user declarations registered into. HMR re-evals re-fire the
-// flush → re-bake; results post back to the main doc for the atlas view + logs.
+// A THIN DRIVER. Bakes get heavy (atlas packing, audio encode, GPU icon render), so they
+// run here to keep the UI responsive — but the orchestration lives in the engine now. This
+// worker: opens the shared OPFS project, evaluates the user code via a ModuleRunner bridged
+// to the bundler, then hands the engine's `EditPipeline` session the fs + an `onBaked`
+// callback. The engine owns the bake loop, the icon render, and re-bake-on-re-declare (it
+// registers the flush internally — this worker never touches `bongle/internal`). The worker
+// only drives asset-file re-bakes (its own fs.watch) + the initial bake, and pumps the
+// message protocol. Mirrors server-worker.ts.
 
 import { createPortBridge } from '../../../build';
-import { createBrowserRaster } from '../../../src/asset-pipeline/bake/raster-browser';
-import { createBrowserDecodeAudio } from '../../../src/asset-pipeline/decode-audio-browser';
-import { createBakeLoader, createClientResourceLoader } from '../../../src/asset-pipeline/loader';
 import { createBootTimer } from '../../boot-timing';
 import { makeRunner } from '../../dev/runner';
 import { openProjectFilesystem } from '../../fs-open';
@@ -24,32 +24,25 @@ const log = (m: string) => post({ type: 'log', msg: m });
 
 async function boot(projectName: string, bundlerPort: MessagePort): Promise<void> {
     bt.mark('boot() start');
-    // shared OPFS project (same origin) — baked outputs land here for the main
-    // doc's atlas view to re-read; no snapshot.
+    // shared OPFS project (same origin) — baked outputs land here for the main doc's atlas
+    // view to re-read via the OPFS cross-context mirror; no snapshot, no explicit relay.
     const fs = await openProjectFilesystem(projectName);
     bt.mark('opfs open');
 
-    // the bake's writes reach the main doc (barrel HMR + baked-resource refresh) via
-    // the OPFS cross-context mirror — no explicit relay from here.
-
-    // evaluate user code via a ModuleRunner bridged to the bundler worker (it
-    // transforms; this realm evaluates → its own engine registry).
+    // evaluate user code via a ModuleRunner bridged to the bundler worker (it transforms;
+    // this realm evaluates → its own engine registry).
     const runner = makeRunner(createPortBridge(bundlerPort));
-    // runtime env flags before user/engine eval. NOT env.client: this is a bake +
-    // icon-render worker with no document/window. The icon render stack is
-    // canvas-less (headless-render builds OffscreenCanvas directly, with no
-    // env.client gate), so it doesn't need it — and env.client=true would make user
-    // scripts' `if (!env.client) return` gameplay guards PASS, running DOM-assuming
-    // gameplay here → it throws. Matches the cli pipeline realm.
     bt.mark('runner built');
+    // runtime env flags before user/engine eval. NOT env.client: this is a bake + icon-render
+    // worker with no document/window; env.client=true would make user gameplay guards pass and
+    // run DOM-assuming code here. Matches the cli pipeline realm.
     const { env } = await runner.import('bongle/env'); // first bundler fetch
     bt.mark('import bongle/env');
     env.client = false;
     env.server = true;
     env.editor = true;
-    // Resilience: a user module that throws at eval (unguarded top-level DOM, or
-    // gameplay that assumes a running engine) must NOT abort the bake — the atlas /
-    // models / audio still generate from whatever registered before the throw.
+    // Resilience: a user module that throws at eval must NOT abort the bake — bake what
+    // registered before the throw.
     try {
         await runner.import('src/index.ts'); // user declarations register into this realm's engine (full graph)
     } catch (err) {
@@ -57,156 +50,36 @@ async function boot(projectName: string, bundlerPort: MessagePort): Promise<void
         console.error('[pipeline-worker] user eval failed', err);
     }
     bt.mark('import src/index.ts (full graph)');
-    // registry is populated by the import above — the prod build reads matchmaking
-    // off it (see below), since the build itself never evaluates user code.
-    const { __bongle, registry } = await runner.import('bongle/internal');
-    // engine-asset-pipeline exposes the data baker (`AssetPipeline`) and the
-    // post-bake icon render step (`Icons`). Both run in THIS realm, so they see
-    // the registry the user declarations populated (a static worker import would
-    // get a different, empty engine instance). Same JS realm → plain calls, no
-    // serialization: `loader` goes in, atlas pixels come back.
-    const { AssetPipeline, Icons } = await runner.import('bongle/engine-asset-pipeline');
-    bt.mark('import engine barrels');
 
-    // the baker reads inputs through the loader (project-relative → fs, absolute
-    // + file:// → fetch/vfs) and decodes audio via mediabunny + WebCodecs (worker-
-    // safe, unlike OfflineAudioContext — see decode-audio-browser.ts).
-    const loader = createBakeLoader(fs);
-    // icons read baked client assets (atlas, model bins) back out of the fs; those
-    // live under resources/client/, not at the project root the bake loader reads.
-    const iconLoader = createClientResourceLoader(fs);
-    const decodeAudio = createBrowserDecodeAudio();
-    const raster = createBrowserRaster();
-    const pipeline = AssetPipeline.init({ mode: 'edit', cache: true, fs, loader, decodeAudio, raster });
+    // The engine's edit-session owns the data bake + GPU icon render, and registers the flush
+    // internally (re-bake when the user re-declares). We provide only the fs + an onBaked
+    // callback (post the result to the main doc), and drive asset-edit re-bakes below.
+    const { EditPipeline } = await runner.import('bongle/engine-asset-pipeline');
+    const session = EditPipeline.init(
+        { fs, onBaked: (r: { atlasChanged: boolean; maxPlayers: number | null }) => post({ type: 'baked', ...r }), log },
+        { mode: 'edit', cache: true },
+    );
+    bt.mark('edit-pipeline init');
 
-    // in-worker icon rendering: a headless GPU render stack, lazily created on
-    // first use (device handshake + pipeline compiles are expensive and atlas-
-    // independent). null until then; a failed handshake stays null and we retry.
-    let renderCtx: Awaited<ReturnType<typeof Icons.createHeadlessRenderContext>> | null = null;
-    let renderingIcons = false;
-
-    // Render block (and later prefab) icons for the current registry + baked
-    // atlas and write them as first-class client assets under resources/client/
-    // (voxels-icons.png + sidecar json) — shipped alongside the atlas so gameplay
-    // (inventory/hotbar) and the editor both read them from the same place. Fully
-    // isolated: an icon failure logs and never disturbs the bake. Instrumented
-    // per step so a break in the worker render path is pinpointable.
-    async function renderIcons(atlasChanged: boolean): Promise<void> {
-        if (renderingIcons) return;
-        renderingIcons = true;
-        try {
-            if (!renderCtx) {
-                log('icons: creating headless render context…');
-                renderCtx = await Icons.createHeadlessRenderContext();
-                log('icons: render context ready');
-            }
-            log('icons: building render deps…');
-            const { deps, dispose } = await Icons.buildRenderDeps(renderCtx, iconLoader);
-            try {
-                log('icons: rendering block atlas…');
-                const atlas = await Icons.renderBlockIconAtlas(deps);
-                if (atlas.atlasWidth > 0 && atlas.atlasHeight > 0) {
-                    log(`icons: encoding ${atlas.atlasWidth}x${atlas.atlasHeight} atlas → png…`);
-                    const png = await encodeRgbaPng(atlas.pixels, atlas.atlasWidth, atlas.atlasHeight);
-                    await fs.write('resources/client/voxels-icons.png', png);
-                    await fs.write(
-                        'resources/client/voxels-icons.json',
-                        new TextEncoder().encode(
-                            JSON.stringify({
-                                coords: atlas.coords,
-                                cols: atlas.cols,
-                                rows: atlas.rows,
-                                iconPx: atlas.iconPx,
-                                atlasWidth: atlas.atlasWidth,
-                                atlasHeight: atlas.atlasHeight,
-                            }),
-                        ),
-                    );
-                    log(`icons: wrote resources/client/voxels-icons.png (${(png.byteLength / 1024).toFixed(0)}KB)`);
-                } else {
-                    log('icons: empty block atlas (no renderable blocks)');
-                }
-                const prefabCount = await Icons.bakePrefabIcons(deps, fs, atlasChanged, encodeRgbaPng);
-                if (prefabCount > 0) log(`icons: rendered ${prefabCount} prefab icon(s)`);
-                // no explicit signal needed: these writes land in OPFS and the host's
-                // fs.watch relays each resources/client/ change into the client iframe,
-                // where `applyFsChange` calls `reloadBakedIcons` (same window as the UI).
-            } finally {
-                dispose();
-            }
-        } catch (err) {
-            log(`icons error: ${(err as Error).message}`);
-            console.error('[pipeline-worker] icon render failed', err);
-        } finally {
-            renderingIcons = false;
-        }
-    }
-
-    // one bake pass against the current registry + asset bytes. Resolves when the
-    // outputs (atlas / manifest / generated barrels) are written — boot awaits the
-    // first one (bake-then-run) so the realms don't read a missing audio-manifest.json
-    // etc. The `baking` guard drops triggers that land mid-bake; a later edit re-bakes.
-    let baking = false;
-    const runBake = async (): Promise<void> => {
-        if (baking) return;
-        baking = true;
-        let atlasChanged = false;
-        try {
-            const t0 = performance.now();
-            const r = await AssetPipeline.run(pipeline, {});
-            atlasChanged = r.atlasChanged;
-            log(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-            // report matchmaking (singleton id 'main') so the prod build has a current
-            // maxPlayers without evaluating user code itself.
-            const maxPlayers = registry.matchmaking.byId.get('main')?.payload?.maxPlayers;
-            post({ type: 'baked', atlasChanged: r.atlasChanged, maxPlayers });
-        } catch (err) {
-            log(`bake error: ${(err as Error).message}`);
-        } finally {
-            baking = false;
-        }
-        // icons render after the bake — own error boundary, and deliberately NOT awaited:
-        // a GPU handshake shouldn't gate the bake result or `ready`.
-        void renderIcons(atlasChanged);
-    };
-    // declarations settle → bake. Registered on THIS realm's __bongle, so its flush
-    // (initial + every HMR re-eval) runs the bake against the registry the user
-    // code populated.
-    __bongle.registerFlush(runBake);
-    // asset-file edits don't re-eval code, so no flush fires — watch for them (from
-    // any context; the fs is cross-context) and rebake, mirroring the CLI's node
-    // asset watcher (cli/dev/start.ts). Exclude the derived dirs: our own bake outputs
-    // (resources/*.png|flac) match ASSET_RE, and would otherwise re-trigger us.
+    // asset-file edits don't re-eval code (so no flush fires) — watch for them and re-bake,
+    // mirroring the CLI's node asset watcher. Exclude the derived dirs: our own bake outputs
+    // (resources/*.png|flac) match ASSET_RE and would otherwise re-trigger us.
     const ASSET_RE = /\.(png|jpe?g|glb|gltf|ogg|wav|mp3|flac)$/i;
     let bakeTimer: ReturnType<typeof setTimeout> | undefined;
     fs.watch((changes) => {
         const hit = changes.some((c) => ASSET_RE.test(c.path) && !/(^|\/)(resources|node_modules|dist)(\/|$)/.test(c.path));
         if (!hit) return;
         clearTimeout(bakeTimer);
-        bakeTimer = setTimeout(() => void runBake(), 150);
+        bakeTimer = setTimeout(() => void EditPipeline.run(session), 150);
     });
     bt.mark('pipeline init');
-    // the first bake, awaited (bake-then-run): its outputs must exist before the realms
-    // boot. registerFlush drives later HMR re-evals, but the flush event is microtask-
-    // debounced (core/capture/flush.ts), so run the first bake directly for a promise to
-    // await — __bongle.flush() would return before the bake even starts.
-    await runBake();
+
+    // the first bake, awaited (bake-then-run): its outputs must exist before the realms boot.
+    // Later re-bakes come from the engine's flush (code edits) or the fs.watch above (assets).
+    await EditPipeline.run(session);
     bt.mark('initial bake done');
     bt.summary();
     post({ type: 'ready' });
-}
-
-/** RGBA8 pixels → PNG bytes via OffscreenCanvas (worker-safe; no DOM canvas). */
-async function encodeRgbaPng(pixels: Uint8Array, width: number, height: number): Promise<Uint8Array> {
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('OffscreenCanvas 2d context unavailable');
-    // copy into a fresh ArrayBuffer-backed view (ImageData rejects a possibly-
-    // SharedArrayBuffer-backed one).
-    const clamped = new Uint8ClampedArray(pixels);
-    ctx.putImageData(new ImageData(clamped, width, height), 0, 0);
-    const blob = await canvas.convertToBlob({ type: 'image/png' });
-    return new Uint8Array(await blob.arrayBuffer());
 }
 
 let booted = false;
@@ -220,16 +93,14 @@ self.addEventListener('message', (e: MessageEvent) => {
     void boot(msg.projectName, bundlerPort).catch((err) => {
         log(`pipeline boot failed: ${(err as Error).message}`);
         console.error(err);
-        // report it so the host rejects `ready` instead of hanging (it only
-        // resolves on the first 'ready'). A USER-code error can't reach here —
-        // boot() try/catches the user import and bakes what registered — so this
-        // is a real infra failure (engine-asset-pipeline import, GPU/bake).
+        // report it so the host rejects `ready` instead of hanging. A USER-code error can't
+        // reach here — boot() try/catches the user import — so this is a real infra failure.
         self.postMessage({ type: 'boot-error', message: (err as Error).message });
     });
 });
 
-// handshake (mirrors bundler-worker): announce we're live so the host posts init
-// (with the transferred bundler port) only now. A blind init at spawn is dropped
-// in vite's dep-optimize/reload window — this module often finishes eval AFTER it.
+// handshake (mirrors bundler-worker): announce we're live so the host posts init (with the
+// transferred bundler port) only now. A blind init at spawn is dropped in vite's
+// dep-optimize/reload window — this module often finishes eval AFTER it.
 console.log('[boot] pipeline-worker: module eval complete, posting worker-ready');
 self.postMessage({ type: 'worker-ready' });
