@@ -1,4 +1,4 @@
-// editor/env-plugin.ts — the vite adapter for the editor's OWN build (vite.config.ts).
+// build/env-plugin.ts — the vite adapter for the editor's OWN build (vite.config.ts).
 //
 // Thin wrapper over lib/build's `replaceEnv` (the pure, host-neutral `env.<key>` →
 // boolean-literal pass, shared with the in-browser dev transform). Each realm
@@ -11,7 +11,7 @@ import type { Plugin } from 'vite';
 // resolves file imports but not bare directory-index imports (`../build` →
 // build/index.ts), so it fails in the website Dockerfile's `vite build`. This also
 // keeps the whole build barrel out of the editor's config bundle.
-import { type EnvValues, replaceEnv } from '../build/env-replace';
+import { type EnvValues, replaceEnv } from './env-replace';
 
 export function envPlugin(values: EnvValues, applyToEnvironmentName?: string): Plugin {
     return {
