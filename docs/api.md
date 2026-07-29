@@ -351,6 +351,10 @@ export type NetSnapshots = {
     rot: Float32Array;
     rotHead: number;
     rotCount: number;
+    smoothErr: Float64Array;
+    prevVisual: Float64Array;
+    wasExtrap: 0 | 1;
+    smoothInit: 0 | 1;
 };
 ```
 
@@ -388,21 +392,27 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
 #### `samplePositionSnapshot`
 
 ```ts
-/** sample the interpolated local position at `renderTime` into `out`. */
-export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3): void;
+/** sample the interpolated local position at `renderTime` into `out`. `allowExtrapolate`
+ *  (set only when the transport is choking) coasts a dry buffer along its last velocity
+ *  instead of freezing on the newest keyframe. `smooth` folds the extrapolation-recovery
+ *  discontinuity into a decaying visual offset so an overshoot glides back instead of
+ *  snapping (see NetSnapshots.smoothErr). */
+export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, allowExtrapolate: boolean, smooth: boolean): void;
 ```
 
 #### `sampleRotationSnapshot`
 
 ```ts
-/** sample the interpolated local rotation at `renderTime` into `out`. */
+/** sample the interpolated local rotation at `renderTime` into `out`. Rotation holds on a
+ *  dry buffer (no extrapolation): a frozen facing reads far milder than a frozen position,
+ *  and slerp-overshoot past a stall is rarely worth the risk. */
 export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void;
 ```
 
 #### `markTransformDirty`
 
 ```ts
-export function markTransformDirty(t: TransformTrait): void;
+export function markTransformDirty(transform: TransformTrait): void;
 ```
 
 #### `markWorldDirty`
@@ -418,7 +428,7 @@ export function markTransformDirty(t: TransformTrait): void;
  * the next snapshot and stomp the buffered path's irrelevant prev) and
  * NOT the pose/scale dirty bits (we're not the owner; we don't re-emit).
  */
-export function markWorldDirty(t: TransformTrait): void;
+export function markWorldDirty(transform: TransformTrait): void;
 ```
 
 #### `markAncestryChanged`
@@ -461,7 +471,7 @@ export function markAncestryChanged(node: Node): void;
  * called by both `updateWorldTransform`'s lazy walk-up-then-down loop and
  * the animator's eager forward-DFS compose at the end of `tickAnimator`.
  */
-export function composeWorldMatrix(n: TransformTrait): void;
+export function composeWorldMatrix(transform: TransformTrait): void;
 ```
 
 #### `composeInterpolatedWorldMatrix`
@@ -474,7 +484,7 @@ export function composeWorldMatrix(n: TransformTrait): void;
  * TRANSFORM_DIRTY_INTERPOLATED_TRS since interpolatedWorld P/Q/S are seeded directly.
  * caller must ensure parent.interpolatedWorldMatrix is fresh.
  */
-export function composeInterpolatedWorldMatrix(n: TransformTrait): void;
+export function composeInterpolatedWorldMatrix(transform: TransformTrait): void;
 ```
 
 #### `updateInterpolatedWorldTransform`
@@ -493,7 +503,7 @@ export function composeInterpolatedWorldMatrix(n: TransformTrait): void;
  * caller (the getters) guarantees `t._interpolated === 1`, so the topmost
  * stacked node is always an Interp participant.
  */
-export function updateInterpolatedWorldTransform(t: TransformTrait): void;
+export function updateInterpolatedWorldTransform(transform: TransformTrait): void;
 ```
 
 #### `markInterpolatedDescendantsDirty`
@@ -561,35 +571,35 @@ export function resetInterpolation(node: Node): void;
 
 ```ts
 /** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void;
+export function setPosition(transform: TransformTrait, position: Vec3): void;
 ```
 
 #### `setQuaternion`
 
 ```ts
 /** set local quaternion and mark dirty. only the quaternion slice replicates. */
-export function setQuaternion(t: TransformTrait, q: Quat): void;
+export function setQuaternion(transform: TransformTrait, quaternion: Quat): void;
 ```
 
 #### `setScale`
 
 ```ts
 /** set local scale and mark dirty. only the scale slice replicates. */
-export function setScale(t: TransformTrait, v: Vec3): void;
+export function setScale(transform: TransformTrait, scale: Vec3): void;
 ```
 
 #### `setTransform`
 
 ```ts
 /** set all local transform fields and mark dirty (single dirty pass). */
-export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec3): void;
+export function setTransform(transform: TransformTrait, position: Vec3, quaternion: Quat, scale: Vec3): void;
 ```
 
 #### `getWorldPosition`
 
 ```ts
 /** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3;
+export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
 #### `getWorldChunk`
@@ -602,56 +612,56 @@ export function getWorldPosition(t: TransformTrait): Vec3;
  * transform computes it once and a never-queried transform never computes it
  * at all. the returned Vec3 is the cached instance, do not mutate.
  */
-export function getWorldChunk(t: TransformTrait): Vec3;
+export function getWorldChunk(transform: TransformTrait): Vec3;
 ```
 
 #### `getWorldQuaternion`
 
 ```ts
 /** get world-space quaternion, decomposing from worldMatrix if needed. */
-export function getWorldQuaternion(t: TransformTrait): Quat;
+export function getWorldQuaternion(transform: TransformTrait): Quat;
 ```
 
 #### `getWorldScale`
 
 ```ts
 /** get world-space scale, decomposing from worldMatrix if needed. */
-export function getWorldScale(t: TransformTrait): Vec3;
+export function getWorldScale(transform: TransformTrait): Vec3;
 ```
 
 #### `getWorldMatrix`
 
 ```ts
 /** get world matrix, recomputing if dirty. */
-export function getWorldMatrix(t: TransformTrait): Mat4;
+export function getWorldMatrix(transform: TransformTrait): Mat4;
 ```
 
 #### `getVisualWorldMatrix`
 
 ```ts
 /** get the world matrix to render with, visual chain if interpolated, world otherwise. */
-export function getVisualWorldMatrix(t: TransformTrait): Mat4;
+export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
 ```
 
 #### `getVisualWorldPosition`
 
 ```ts
 /** get visual world-space position, lazy-decomposing if deferred. */
-export function getVisualWorldPosition(t: TransformTrait): Vec3;
+export function getVisualWorldPosition(transform: TransformTrait): Vec3;
 ```
 
 #### `getVisualWorldQuaternion`
 
 ```ts
 /** get visual world-space quaternion, lazy-decomposing if deferred. */
-export function getVisualWorldQuaternion(t: TransformTrait): Quat;
+export function getVisualWorldQuaternion(transform: TransformTrait): Quat;
 ```
 
 #### `getVisualWorldScale`
 
 ```ts
 /** get visual world-space scale, lazy-decomposing if deferred. */
-export function getVisualWorldScale(t: TransformTrait): Vec3;
+export function getVisualWorldScale(transform: TransformTrait): Vec3;
 ```
 
 #### `computeWorldTransforms`
@@ -676,7 +686,7 @@ export function computeWorldTransforms(nodes: SceneTree): void;
  * convert a world-space position to local-space for a node.
  * fast path: if no transformed parent, world === local, just copies.
  */
-export function worldToLocalPosition(t: TransformTrait, worldPos: Vec3, out: Vec3): Vec3;
+export function worldToLocalPosition(t: TransformTrait, worldPosition: Vec3, out: Vec3): Vec3;
 ```
 
 #### `worldToLocalQuaternion`
@@ -686,7 +696,7 @@ export function worldToLocalPosition(t: TransformTrait, worldPos: Vec3, out: Vec
  * convert a world-space quaternion to local-space for a node.
  * fast path: if no transformed parent, world === local, just copies.
  */
-export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: Quat): Quat;
+export function worldToLocalQuaternion(transform: TransformTrait, worldQuaternion: Quat, out: Quat): Quat;
 ```
 
 #### `setWorldPosition`
@@ -697,7 +707,7 @@ export function worldToLocalQuaternion(t: TransformTrait, worldQuat: Quat, out: 
  * fast path when no transformed parent, just copies into t.position.
  * marks dirty after writing.
  */
-export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void;
+export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3): void;
 ```
 
 #### `setWorldQuaternion`
@@ -708,7 +718,7 @@ export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void;
  * fast path when no transformed parent, just copies into t.quaternion.
  * marks dirty after writing.
  */
-export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void;
+export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void;
 ```
 
 #### `hasTransformedParent`
@@ -718,7 +728,7 @@ export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void;
  * returns true if this node has a transformed parent (parent transform pointer is set).
  * used as a fast path check, if false, local === world and no conversion is needed.
  */
-export function hasTransformedParent(t: TransformTrait): boolean;
+export function hasTransformedParent(transform: TransformTrait): boolean;
 ```
 
 #### `collapseTransformIntoChildren`
@@ -768,62 +778,62 @@ Read and write node positions, rotations, and scales in local and world space.
 
 ```ts
 /** get the world matrix to render with, visual chain if interpolated, world otherwise. */
-export function getVisualWorldMatrix(t: TransformTrait): Mat4;
+export function getVisualWorldMatrix(transform: TransformTrait): Mat4;
 ```
 
 #### `getVisualWorldPosition`
 
 ```ts
 /** get visual world-space position, lazy-decomposing if deferred. */
-export function getVisualWorldPosition(t: TransformTrait): Vec3;
+export function getVisualWorldPosition(transform: TransformTrait): Vec3;
 ```
 
 #### `getVisualWorldQuaternion`
 
 ```ts
 /** get visual world-space quaternion, lazy-decomposing if deferred. */
-export function getVisualWorldQuaternion(t: TransformTrait): Quat;
+export function getVisualWorldQuaternion(transform: TransformTrait): Quat;
 ```
 
 #### `getVisualWorldScale`
 
 ```ts
 /** get visual world-space scale, lazy-decomposing if deferred. */
-export function getVisualWorldScale(t: TransformTrait): Vec3;
+export function getVisualWorldScale(transform: TransformTrait): Vec3;
 ```
 
 #### `getWorldMatrix`
 
 ```ts
 /** get world matrix, recomputing if dirty. */
-export function getWorldMatrix(t: TransformTrait): Mat4;
+export function getWorldMatrix(transform: TransformTrait): Mat4;
 ```
 
 #### `getWorldPosition`
 
 ```ts
 /** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3;
+export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
 #### `getWorldQuaternion`
 
 ```ts
 /** get world-space quaternion, decomposing from worldMatrix if needed. */
-export function getWorldQuaternion(t: TransformTrait): Quat;
+export function getWorldQuaternion(transform: TransformTrait): Quat;
 ```
 
 #### `getWorldScale`
 
 ```ts
 /** get world-space scale, decomposing from worldMatrix if needed. */
-export function getWorldScale(t: TransformTrait): Vec3;
+export function getWorldScale(transform: TransformTrait): Vec3;
 ```
 
 #### `markDirty`
 
 ```ts
-export function markDirty(t: TransformTrait): void;
+export function markDirty(transform: TransformTrait): void;
 ```
 
 #### `resetInterpolation`
@@ -869,28 +879,28 @@ export function setInterpolation(node: Node, on: boolean): void;
 
 ```ts
 /** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void;
+export function setPosition(transform: TransformTrait, position: Vec3): void;
 ```
 
 #### `setQuaternion`
 
 ```ts
 /** set local quaternion and mark dirty. only the quaternion slice replicates. */
-export function setQuaternion(t: TransformTrait, q: Quat): void;
+export function setQuaternion(transform: TransformTrait, quaternion: Quat): void;
 ```
 
 #### `setScale`
 
 ```ts
 /** set local scale and mark dirty. only the scale slice replicates. */
-export function setScale(t: TransformTrait, v: Vec3): void;
+export function setScale(transform: TransformTrait, scale: Vec3): void;
 ```
 
 #### `setTransform`
 
 ```ts
 /** set all local transform fields and mark dirty (single dirty pass). */
-export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec3): void;
+export function setTransform(transform: TransformTrait, position: Vec3, quaternion: Quat, scale: Vec3): void;
 ```
 
 #### `setWorldPosition`
@@ -901,7 +911,7 @@ export function setTransform(t: TransformTrait, pos: Vec3, rot: Quat, scale: Vec
  * fast path when no transformed parent, just copies into t.position.
  * marks dirty after writing.
  */
-export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void;
+export function setWorldPosition(transform: TransformTrait, worldPosition: Vec3): void;
 ```
 
 #### `setWorldQuaternion`
@@ -912,7 +922,7 @@ export function setWorldPosition(t: TransformTrait, worldPos: Vec3): void;
  * fast path when no transformed parent, just copies into t.quaternion.
  * marks dirty after writing.
  */
-export function setWorldQuaternion(t: TransformTrait, worldQuat: Quat): void;
+export function setWorldQuaternion(transform: TransformTrait, worldQuaternion: Quat): void;
 ```
 
 ## Traits & schemas
@@ -3479,6 +3489,7 @@ export type VoxelSweepHit = {
     boxMaxY: number;
     boxMaxZ: number;
     overlapDepth: number;
+    crossed: CrossedVoxels;
 };
 ```
 
@@ -3495,9 +3506,16 @@ export function createVoxelSweepHit(): VoxelSweepHit;
  * sweep an AABB through the voxel grid. used by VCC and any future
  * voxel-aware character controller.
  *
- * `out` is reset internally; on return, `out.axis === -1` iff no hit.
+ * the nearest-solid-hit fields of `out` are reset internally; on return,
+ * `out.axis === -1` iff no hit.
+ *
+ * when `collect` is true, the passable (non-colliding) cells the box sweeps
+ * through are appended to `out.crossed` (liquid / trigger detection). the hit
+ * fields reset each call but `out.crossed` does NOT, so a caller doing a
+ * sequence of segment sweeps unions them, and resets `out.crossed.count` itself
+ * before the sequence. when `collect` is false, `out.crossed` is left untouched.
  */
-export function sweepAabbVsVoxels(voxels: Voxels, mcX: number, mcY: number, mcZ: number, mhX: number, mhY: number, mhZ: number, dx: number, dy: number, dz: number, out: VoxelSweepHit): boolean;
+export function sweepAabbVsVoxels(out: VoxelSweepHit, voxels: Voxels, mcX: number, mcY: number, mcZ: number, mhX: number, mhY: number, mhZ: number, dx: number, dy: number, dz: number, collect: boolean): boolean;
 ```
 
 #### `VoxelRaycastResult`
@@ -3695,9 +3713,9 @@ export function worldToBlockCoord(worldCoord: number): number;
 
 ```ts
 /** world-space point at the center of a block's top face, i.e. where
- *  feet land if standing on top of block `(x, y, z)`. block N occupies
- *  `[N, N+1)`, so the top-center is `(x + 0.5, y + 1, z + 0.5)`. */
-export function blockTopCenter(out: Vec3, x: number, y: number, z: number): Vec3;
+ *  feet land if standing on top of block `block`. block N occupies
+ *  `[N, N+1)`, so the top-center is `(block[0] + 0.5, block[1] + 1, block[2] + 0.5)`. */
+export function blockTopCenter(out: Vec3, block: Vec3): Vec3;
 ```
 
 #### `createChunk`
@@ -4578,8 +4596,8 @@ export type ParticlePlayback = 'stretch' | 'loop' | 'once';
 
 ```ts
 /** Per-room SoA pool. Alive prefix is `[0, count)`; dead slots are
- *  compacted by `Particles.update` (client). The type is declared here
- *  so `UpdateFn` (also here) can name its first param without forcing a
+ *  compacted by `particleUpdate` (client). The type is declared here
+ *  so `ParticleUpdateFn` (also here) can name its first param without forcing a
  *  core→client import; the runtime that allocates / mutates it lives in
  *  client. Both halves agree on the layout via this single declaration. */
 export type ParticlePool = {
@@ -4608,7 +4626,7 @@ export type ParticlePool = {
 };
 ```
 
-#### `UpdateFn`
+#### `ParticleUpdateFn`
 
 ```ts
 /** per-particle update fn, owns motion, collision, and death.
@@ -4616,7 +4634,7 @@ export type ParticlePool = {
  *  to kill from inside the fn. `voxels` is the room's voxel world,
  *  threaded so `collide*` primitives can query `BLOCK_FLAG_COLLISION`
  *  without the pool carrying a back-ref. pure-motion fns ignore it. */
-export type UpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
+export type ParticleUpdateFn = (pool: ParticlePool, i: number, dt: number, voxels: Voxels) => void;
 ```
 
 #### `particle`
@@ -5078,8 +5096,10 @@ export type Physics = {
         typeof ContactsTrait
     ]>>;
     aabbPairSink: AabbPhysics.PairSink;
-    vccContacts: VccBodyContact[];
-    vccContactCount: number;
+    vccRigidContacts: VccRigidContact[];
+    vccRigidContactCount: number;
+    vccVoxelContacts: VccVoxelContact[];
+    vccVoxelContactCount: number;
     _companionNodes: Set<number>;
 };
 ```
@@ -5331,6 +5351,8 @@ export type ControlsConfig = {
         jumpButton: boolean;
         sprintButton: boolean;
         crouchButton: boolean;
+        noclipVerticalJoystick: boolean;
+        flyToggleButton: boolean;
         canvasLook: boolean;
     };
 };

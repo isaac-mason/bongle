@@ -253,7 +253,7 @@ The local setters are `setPosition`, `setQuaternion`, and `setScale`, or
 
 ```ts
 /** set local position and mark dirty. only the position slice replicates. */
-export function setPosition(t: TransformTrait, v: Vec3): void;
+export function setPosition(transform: TransformTrait, position: Vec3): void;
 ```
 
 The world getters read where a node actually ended up after its parents' transforms
@@ -262,7 +262,7 @@ apply: `getWorldPosition`, `getWorldQuaternion`, `getWorldScale`, and
 
 ```ts
 /** get world-space position, decomposing from worldMatrix if needed. */
-export function getWorldPosition(t: TransformTrait): Vec3;
+export function getWorldPosition(transform: TransformTrait): Vec3;
 ```
 
 To place a node at an absolute world position or orientation regardless of its
@@ -1100,8 +1100,8 @@ color, a difficulty, or a team.
 
 ## The editor
 
-`bongle edit` starts the editor, the visual workspace for building your game. It
-runs your project live on `http://localhost:3002`, so code changes and content
+`bongle dev` starts the editor, the visual workspace for building your game. It
+runs your project live on `http://localhost:5566`, so code changes and content
 changes show up immediately.
 
 The editor is where you author the content your code references. You place and
@@ -1115,9 +1115,6 @@ and the editor regenerates the typed handles in `src/generated/`, so your code c
 reference scenes, models, and sounds by name. Scripts marked `{ editor: true }`
 run inside the editor too, so world setup such as lighting is visible while you
 build.
-
-When the content format changes between engine versions, `bongle migrate`
-upgrades your `content/` to the latest schema.
 
 ### Patterns and masks
 
@@ -1513,8 +1510,8 @@ when you can.
 
 ### glTF support
 
-**TLDR: author with [bongle-blockbench](https://blockbench.bongle.io)** and you stay
-inside the supported subset by construction. It is a build of
+**TLDR: author in the [bongle editor](https://bongle.io/editor/a/new)** and you stay
+inside the supported subset by construction. It embeds a build of
 [Blockbench](https://www.blockbench.net/) set up for bongle (the same tool the
 [Characters](#characters) section uses) that exports engine-ready glTF, so you rarely
 need the specifics below.
@@ -1596,12 +1593,10 @@ one, the engine derives its rest position from the parent bone's geometry, so
 creators get usable mount points for free, while an authored socket keeps its own
 transform.
 
-You author character models in
-[bongle-blockbench](https://github.com/isaac-mason/bongle-blockbench), a build of
-[Blockbench](https://www.blockbench.net/) set up for bongle. It starts you from that
-rig, validates it as you work, and exports an engine-ready glTF in one click. Run it
-online at [blockbench.bongle.io](https://blockbench.bongle.io), or install it into
-the Blockbench desktop app.
+You author character models in the [bongle editor](https://bongle.io/editor/a/new),
+which embeds a build of [Blockbench](https://www.blockbench.net/) set up for bongle. It
+starts you from that rig, validates it as you work, and exports an engine-ready glTF in
+one click.
 
 ### Avatars
 
@@ -2664,7 +2659,7 @@ feels slow" into a specific row on a specific side.
 ## Building & deploying
 
 `bongle build` compiles your project into `dist/bundle.zip`, a self-contained
-bundle of the client, server, and content. `bongle start` serves a built `dist/`
+bundle of the client, server, and content. `bongle start` runs that built bundle
 locally, so you can play the production build before shipping it.
 
 Deploying that bundle lands it as a **draft**. Promoting a draft to live is a
@@ -2673,36 +2668,27 @@ publish it.
 
 ### CLI reference
 
-The `bongle` CLI covers the whole workflow, from scaffolding a project to building
-the bundle you deploy:
+The `bongle` CLI covers the local workflow, from running the editor to building
+the bundle you deploy. Run these in a project directory:
 
 ```sh
-# scaffold a new project in `./[dir]/`
-bongle new [dir]
+# run the editor + live dev server (http://localhost:5566)
+bongle dev
 
-# the below commands run in an existing project:
-
-# start the editor for the current project
-bongle edit
-
-# build the project into a `dist/bundle.zip`
+# build the project into `dist/bundle.zip`
 bongle build
 
-# serve a built dist/ locally
+# run a built bundle (a zip or a dir) locally
 bongle start
 
-# bump the `bongle` dep, install, run migrate
-bongle upgrade
-
-# migrates editor-managed content in ./content/* to the latest version
-bongle migrate [--check]
+# re-bake assets (textures, models, audio) on their own; dev and build do this for you
+bongle bake
 ```
 
 ## Examples
 
 The [`examples/`](../examples) directory holds small, self-contained programs, each
-isolating one feature. Clone the repo and run any of them, as the
-[Getting Started](#getting-started) section shows.
+isolating one feature. Clone the repo and run any of them locally with `bongle dev`.
 
 Feature examples:
 
