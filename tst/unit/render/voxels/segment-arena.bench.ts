@@ -14,7 +14,7 @@
 
 import { bench, describe } from 'vitest';
 import { createOffsetAllocator, type OAHandle, oaAllocate, oaFree } from '../../../../src/render/voxels/offset-allocator';
-import { arenaAlloc, arenaFree, createQuadArena, type QuadArena } from '../../../../src/render/voxels/voxel-resources';
+import { arenaAlloc, arenaFree, createQuadArena, type QuadArena } from '../../../../src/render/voxels/voxel-arena';
 
 // ── workload ───────────────────────────────────────────────────────
 //

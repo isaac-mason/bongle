@@ -1,4 +1,4 @@
-import { CanvasTarget, Scene, type PerspectiveCamera } from 'gpucat';
+import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
 import { mat4, quat } from 'mathcat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
@@ -10,7 +10,7 @@ import * as Clock from '../core/clock';
 import * as Debug from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
-import { registry, type InboundProtocol } from '../core/registry';
+import { type InboundProtocol, registry } from '../core/registry';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import { unpackSceneTree } from '../core/scene/scene-pack';
@@ -20,37 +20,33 @@ import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import { useEditor } from '../editor/editor-store';
-import type * as CloudResourcesNs from '../render/cloud-resources';
-import * as Environment from '../render/environment';
-import * as ModelLighting from '../render/model-lighting';
-import type * as ModelResourcesNs from '../render/models/model-resources';
-import * as ModelVisuals from '../render/models/model-visuals';
-import type * as ParticleResourcesNs from '../render/particles/particle-resources';
-import * as ParticleVisuals from '../render/particles/particle-visuals';
-import * as Particles from '../render/particles/particles';
-import * as Performance from '../render/performance';
-import * as Renderer from '../render/renderer';
-import type * as ShadowResourcesNs from '../render/shadows/shadow-resources';
-import * as ShadowVisuals from '../render/shadows/shadow-visuals';
-import type * as ExtrudedSpriteResourcesNs from '../render/sprites/extruded-sprite-resources';
-import * as ExtrudedSpriteVisuals from '../render/sprites/extruded-sprite-visuals';
-import type * as SpriteResourcesNs from '../render/sprites/sprite-resources';
-import * as SpriteVisuals from '../render/sprites/sprite-visuals';
-import * as Visibility from '../render/visibility';
-import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import * as VoxelResourcesNs from '../render/voxels/voxel-resources';
-import * as VoxelVisuals from '../render/voxels/voxel-visuals';
+import type { RenderBackendModule } from '../render/backend';
+import * as RenderCamera from '../render/common/camera';
+import * as Visibility from '../render/common/cull/visibility';
+import type * as CloudResourcesNs from '../render/common/environment/clouds/cloud-resources';
+import * as Environment from '../render/common/environment/environment';
+import * as ModelLighting from '../render/common/models/model-lighting';
+import type * as ModelResourcesNs from '../render/common/models/model-resources';
+import * as ModelVisuals from '../render/common/models/model-visuals';
+import * as Particles from '../render/common/particles/particles';
+import type { EngineRenderPipeline } from '../render/common/pipeline';
+import * as VoxelArena from '../render/common/voxels/voxel-arena';
+import type * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
+import * as VoxelMeshVisuals from '../render/common/voxels/voxel-mesh-visuals';
+import * as VoxelVisuals from '../render/common/voxels/voxel-visuals';
+import type * as Renderer from '../render/webgpu';
+import type * as VoxelResourcesNs from '../render/webgpu/voxels/gpu-frame';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
 import * as Chat from './chat';
-import * as DomUi from './dom-ui';
 import type { EngineClient } from './engine-client';
+import * as ClientEnv from './environment';
 import * as Input from './input';
 import * as Net from './net';
+import * as Performance from './performance';
 import * as Replication from './replication';
-import { UILayer } from './ui-layers';
-import { useClient } from './ui/client-store';
+import { useClient } from './ui/stores/client-store';
+import { UILayer } from './ui/util/ui-layers';
 
 /* ── ClientRoom ─────────────────────────────────────────────────── */
 
@@ -118,17 +114,12 @@ export type ClientRoom = {
      *  subscribers, inbox/outbox queues. drained each frame by Chat.tick. */
     chat: ChatClient;
 
-    /** per-room voxel renderer. always present. owns the per-room voxel
-     *  materials internally, they bind the engine-global env buffers
-     *  (`state.renderer.environmentResources`) by name. */
-    voxelVisuals: VoxelVisuals.VoxelVisuals;
-
     /** per-room sky + sun/moon/stars/clouds. holds a CPU shadow of the env
      *  config; `setTime`/`setEnvironment` mutate it without touching GPU.
      *  the active room's shadow flushes into the engine-global env buffers
      *  each frame (see `Environment.updateForCamera`), so background rooms
      *  can keep mutating their state with zero GPU traffic. */
-    environment: Environment.Environment;
+    environment: ClientEnv.Environment;
 
     /** per-room audio coordinator. backed by engine-global
      *  `AudioResources` (one decoded atlas across rooms), but each room
@@ -180,29 +171,9 @@ export type ClientRoom = {
     /** server-side log buffer, fed by `debug_logs` packets while subscribed. */
     serverLogs: Debug.Logs;
 
-    /** per-room voxel model visuals */
-    voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
-
-    /** per-room model visuals (MeshTrait instances). reads from client-global ModelResources. */
-    modelVisuals: ModelVisuals.ModelVisuals;
-
-    /** per-room DOM/canvas UI visuals (HtmlTrait + CanvasTrait). */
-    domUi: DomUi.DomUi;
-
-    /** per-room sprite visuals (SpriteTrait instances). reads from
-     *  client-global SpriteResources; disposed + re-init'd on atlas swap. */
-    spriteVisuals: SpriteVisuals.SpriteVisuals;
-
-    /** per-room extruded-sprite visuals (ExtrudedSpriteTrait instances).
-     *  batched DII pipeline with a private geometry pool keyed by
-     *  spriteId (baked on first reference, refcounted). disposed +
-     *  re-init'd on atlas swap alongside spriteVisuals. */
-    extrudedSpriteVisuals: ExtrudedSpriteVisuals.ExtrudedSpriteVisuals;
-
-    /** per-room shadow visuals (ShadowCasterTrait instances). batched
-     *  ground-disc renderer with per-frame downward raycast, no
-     *  external resources, no atlas dependency. */
-    shadowVisuals: ShadowVisuals.ShadowVisuals;
+    // per-room GPU visuals (voxel / voxel-mesh / model / sprite / extruded-sprite
+    // / shadow / particle / domUi) are owned by the render backend, keyed by this
+    // ClientRoom in `state.renderer.rooms` (see render/webgpu/room-visuals).
 
     /** per-room particle pool. fixed capacity; spawn fills slots,
      *  `Particles.update` compacts dead ones. advanced per-frame (variable
@@ -211,11 +182,6 @@ export type ClientRoom = {
      *  motion is acceptable; the fixed-step loop is reserved for
      *  simulation that must stay deterministic. */
     particles: Particles.ParticlePool;
-
-    /** per-room particle billboard renderer. reads `particles` directly
-     *  each frame (no scene-graph traits). disposed + re-init'd on atlas
-     *  swap alongside spriteVisuals. */
-    particleVisuals: ParticleVisuals.ParticleVisuals;
 
     /** per-room visibility (DBVT + frustum cull). model-visuals + voxel-visuals
      *  register leaves and read the per-frame visible set. */
@@ -284,7 +250,7 @@ export type ClientRoom = {
      * the active render camera (`getRenderCamera`, editor tools) without
      * threading the engine state through their api.
      */
-    _pipeline: Renderer.EngineRenderPipeline;
+    _pipeline: EngineRenderPipeline;
 };
 
 /* ── Rooms registry ─────────────────────────────────────────────── */
@@ -333,7 +299,11 @@ export type RenderRoom = {
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
     modelVisuals: ModelVisuals.ModelVisuals;
     visibility: Visibility.Visibility;
-    environment: Environment.Environment;
+    /** client-side env config (CPU). */
+    environment: ClientEnv.Environment;
+    /** env render state (sky/cloud meshes) — this offline room owns it directly
+     *  (no backend `createRoomVisuals` in the icon path). */
+    envVisuals: Environment.EnvVisuals;
 };
 
 /** Everything `createRenderRoom` needs, decoupled from `EngineClient` so a
@@ -362,10 +332,11 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const scene = new Scene();
     const envResources = deps.renderer.environmentResources;
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources);
-    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, deps.voxelMeshResources, envResources);
-    const modelVisuals = ModelVisuals.init(scene, nodes, deps.modelResources, envResources);
+    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, deps.voxelMeshResources);
+    const modelVisuals = ModelVisuals.init(scene, nodes, deps.modelResources);
     const visibility = Visibility.init();
-    const environment = Environment.init(scene, envResources, ENVIRONMENT_DEFAULT, deps.cloudResources);
+    const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
+    const envVisuals = Environment.initEnvVisuals(scene, envResources, deps.cloudResources);
 
     // host trait at the root; its env onInit no-ops with no live scene init.
     attachWorldTrait(nodes.root);
@@ -382,6 +353,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         modelVisuals,
         visibility,
         environment,
+        envVisuals,
     };
 }
 
@@ -391,7 +363,7 @@ export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void 
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
     ModelVisuals.dispose(room.modelVisuals, room.visibility);
-    Environment.dispose(room.environment);
+    Environment.disposeEnvVisuals(room.envVisuals);
 }
 
 /** prefix used for synthetic local-room ids, server roomIds never collide with this. */
@@ -489,15 +461,11 @@ export type CreateRoomOptions = {
     net: Net.ClientNet;
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
+    /** the backend state handle; carries the client-global GPU resources the
+     *  room's visuals are built from (`renderer.resources`). */
     renderer: Renderer.Renderer;
-    modelResources: ModelResourcesNs.ModelResources;
-    voxelResources: VoxelResourcesNs.VoxelResources;
-    voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
-    spriteResources: SpriteResourcesNs.SpriteResources;
-    extrudedSpriteResources: ExtrudedSpriteResourcesNs.ExtrudedSpriteResources;
-    particleResources: ParticleResourcesNs.ParticleResources;
-    cloudResources: CloudResourcesNs.CloudResources;
-    shadowResources: ShadowResourcesNs.ShadowResources;
+    /** the backend module, to build this room's per-room visuals. */
+    renderBackend: RenderBackendModule<Renderer.Renderer>;
     /** engine-global audio resources. pass through to createRoomCore so
      *  the per-room Audio coordinator can be set up. */
     audioResources: Audio.AudioResources;
@@ -537,15 +505,8 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         net: opts.net,
         rpc: opts.rpc,
         renderer: opts.renderer,
+        renderBackend: opts.renderBackend,
         resources: opts.resources,
-        modelResources: opts.modelResources,
-        voxelResources: opts.voxelResources,
-        voxelMeshResources: opts.voxelMeshResources,
-        spriteResources: opts.spriteResources,
-        extrudedSpriteResources: opts.extrudedSpriteResources,
-        particleResources: opts.particleResources,
-        cloudResources: opts.cloudResources,
-        shadowResources: opts.shadowResources,
         audioResources: opts.audioResources,
         nodes,
         voxels,
@@ -570,14 +531,7 @@ type CreateRoomCoreOptions = {
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
     renderer: Renderer.Renderer;
-    modelResources: ModelResourcesNs.ModelResources;
-    voxelResources: VoxelResourcesNs.VoxelResources;
-    voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
-    spriteResources: SpriteResourcesNs.SpriteResources;
-    extrudedSpriteResources: ExtrudedSpriteResourcesNs.ExtrudedSpriteResources;
-    particleResources: ParticleResourcesNs.ParticleResources;
-    cloudResources: CloudResourcesNs.CloudResources;
-    shadowResources: ShadowResourcesNs.ShadowResources;
+    renderBackend: RenderBackendModule<Renderer.Renderer>;
     audioResources: Audio.AudioResources;
     /**
      * pre-populated room core, sceneGraph, voxels, physics, context
@@ -687,11 +641,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // read-only for occlusion. see Renderer.EngineRenderPipeline.overlayPassNode.
     const overlayScene = new Scene();
 
-    // env buffers are engine-global (owned by Renderer); per-room env state
-    // lives in its own CPU shadow on `Environment` (below) and only flushes
-    // to these buffers when this room is the active one.
-    const environmentResources = renderer.environmentResources;
-
     const viewport = document.createElement('div');
     viewport.style.display = 'none';
     viewport.style.position = 'absolute';
@@ -751,11 +700,11 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     };
     context.client = client;
 
-    // Per-room sky + sun/moon/stars/clouds (mesh + per-room CPU
-    // shadow). the env GPU buffers in `environmentResources` are engine-
-    // global; this Environment's `applyTime`/`applyConfig` mutate the
-    // shadow only and flush to GPU when the room is active.
-    const environment = Environment.init(scene, environmentResources, ENVIRONMENT_DEFAULT, opts.cloudResources);
+    // per-room env CONFIG — pure client CPU state (time / sky / cloud settings).
+    // `applyTime`/`applyConfig` mutate this shadow; the renderer reads it and owns
+    // all the env RENDER state (sky/cloud meshes, GPU flush) in its per-room
+    // `createRoomVisuals` (below). No backend resources touched here.
+    const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
 
     // per-room audio coordinator. master gain + active-playback set are
     // owned by the room (disposeRoom tears them down); the underlying
@@ -771,7 +720,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // since its host-script onInit reads them (e.g. setEnvironment).
 
     const syncSnapshots = Replication.createSyncSnapshots();
-    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, opts.voxelResources);
 
     // metrics seed from the current debugOpen so rooms created mid-session pick
     // up the right state; engine-client's subscription flips them on later toggles.
@@ -782,25 +730,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const clientLogs = Debug.createLogs();
     const serverLogs = Debug.createLogs();
 
-    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, opts.voxelMeshResources, environmentResources);
-
-    const modelVisuals = ModelVisuals.init(scene, nodes, opts.modelResources, environmentResources);
-
-    // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
-    // panels are DOM and unaffected by the scene argument. the scene depth node
-    // lets canvas materials discard fragments occluded by world geometry.
-    const domUi = DomUi.init(overlayScene, viewport, nodes, renderer.pipeline.sceneDepthNode);
-
-    // append touchOverlay after DomUi.init created the html overlay; their
-    // paint order is set by UILayer z-index, not by DOM order.
-    viewport.appendChild(touchOverlay);
-
-    const spriteVisuals = SpriteVisuals.init(scene, nodes, opts.spriteResources, environmentResources);
-    const extrudedSpriteVisuals = ExtrudedSpriteVisuals.init(scene, nodes, opts.extrudedSpriteResources, environmentResources);
-    const shadowVisuals = ShadowVisuals.init(scene, nodes, opts.shadowResources);
     const particles = Particles.init();
-    const particleVisuals = ParticleVisuals.init(scene, opts.spriteResources, opts.particleResources, environmentResources);
-
     const visibility = Visibility.init();
     const modelLighting = ModelLighting.init(nodes);
     const animations = Animation.init(nodes);
@@ -822,7 +752,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         physics,
         clock,
         chat,
-        voxelVisuals,
         environment,
         audio,
         playerNode,
@@ -836,14 +765,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         serverMetrics,
         clientLogs,
         serverLogs,
-        voxelMeshVisuals,
-        modelVisuals,
-        domUi,
-        spriteVisuals,
-        extrudedSpriteVisuals,
-        shadowVisuals,
         particles,
-        particleVisuals,
         visibility,
         modelLighting,
         animations,
@@ -857,6 +779,15 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         editorClipboard: null,
         _pipeline: renderer.pipeline,
     };
+
+    // the room's GPU visuals (voxel/model/sprite/.../domUi) are owned by the
+    // backend, keyed by this room. builds them from the room's scene graph +
+    // the backend's client-global resources.
+    opts.renderBackend.createRoomVisuals(renderer, room);
+
+    // append touchOverlay after createRoomVisuals (which created the DOM overlay
+    // via DomUi.init); paint order is set by UILayer z-index, not DOM order.
+    viewport.appendChild(touchOverlay);
 
     return room;
 }
@@ -944,7 +875,7 @@ function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTr
  */
 export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
     const cameraTrait = SceneTree.getTrait(room.client.camera, CameraTrait) ?? null;
-    Renderer.syncRenderCamera(room._pipeline, cameraTrait);
+    RenderCamera.syncRenderCamera(room._pipeline, cameraTrait);
     return room._pipeline.camera;
 }
 
@@ -1048,15 +979,8 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         net: state.net,
         rpc: state.rpc,
         renderer: state.renderer,
+        renderBackend: state.renderBackend,
         resources: state.resources,
-        modelResources: state.modelResources,
-        voxelResources: state.voxelResources,
-        voxelMeshResources: state.voxelMeshResources,
-        spriteResources: state.spriteResources,
-        extrudedSpriteResources: state.extrudedSpriteResources,
-        particleResources: state.particleResources,
-        cloudResources: state.cloudResources,
-        shadowResources: state.shadowResources,
         audioResources: state.audioResources,
         nodes: nodes,
         voxels,
@@ -1130,19 +1054,12 @@ export function findRoomByRoomId(state: Rooms, roomId: string): ClientRoom | und
  */
 export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     Physics.dispose(room.physics);
-    VoxelVisuals.dispose(room.voxelVisuals, room.scene);
-    // release the active world's chunks from the arena + mesh worker cache.
-    VoxelVisuals.unmountRoom(state.voxelResources);
-    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
-    ModelVisuals.dispose(room.modelVisuals, room.visibility);
-    DomUi.dispose(room.domUi);
-    SpriteVisuals.dispose(room.spriteVisuals, room.visibility);
-    ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.visibility);
-    ShadowVisuals.dispose(room.shadowVisuals);
-    ParticleVisuals.dispose(room.particleVisuals);
-    Environment.dispose(room.environment);
-    // env GPU buffers are engine-global (state.renderer.environmentResources),
-    // not disposed here; they live for the lifetime of the engine.
+    // per-room GPU visuals (incl. domUi + releasing the active world's arena
+    // chunks) are backend-owned; dispose them together.
+    state.renderBackend.disposeRoomVisuals(state.renderer, room);
+    // room.environment is pure client CPU config — nothing to dispose. Its render
+    // state (env meshes/clouds) is backend-owned and dropped by disposeRoomVisuals
+    // above; the engine-global env GPU buffers live for the engine's lifetime.
     if (room.audio) Audio.dispose(room.audio);
     room.disposeCanvasTouchListeners();
     room.viewport.remove();
@@ -1161,7 +1078,8 @@ export function getActiveRoom(state: Rooms): ClientRoom | null {
 export function setActivePlayer(
     state: Rooms,
     net: Net.ClientNet,
-    voxelResources: VoxelResourcesNs.VoxelResources,
+    renderer: Renderer.Renderer,
+    renderBackend: RenderBackendModule<Renderer.Renderer>,
     playerId: PlayerId,
 ): void {
     const prevRoom = state.activePlayerId !== null ? (state.rooms.get(state.activePlayerId) ?? null) : null;
@@ -1175,15 +1093,15 @@ export function setActivePlayer(
     // matches what its scripts have set (otherwise the previously
     // active room's sky/config would still be on the GPU until the
     // first frame finishes ticking).
-    Environment.flushActive(room.environment);
+    Environment.flushActive(room.environment, renderer.environmentResources);
 
     // single-world arena: clear the world we're leaving (freeing its arena chunks
     // + mesh worker cache) and mount the new active room, which marks its chunks
     // dirty so the prioritised remesh path cycles them in over the next few frames.
     if (prevRoom && prevRoom !== room) {
-        VoxelVisuals.unmountRoom(voxelResources);
+        renderBackend.unmountRoom(renderer);
     }
-    VoxelVisuals.mountRoom(room.voxelVisuals, room.voxels);
+    renderBackend.mountRoom(renderer, room);
 
     // toggle viewport visibility, only the active room's viewport (and
     // therefore its canvas + script overlays) is shown.
@@ -1223,7 +1141,7 @@ export function setActivePlayer(
 export function clearRoomVoxels(room: ClientRoom, voxelResources: VoxelResourcesNs.VoxelResources): void {
     for (const [key, chunk] of room.voxels.chunks) {
         Voxels.unlinkChunkNeighbors(chunk);
-        VoxelResourcesNs.removeChunkMesh(voxelResources, key);
+        VoxelArena.removeChunkMesh(voxelResources.arenas, key);
     }
     room.voxels.chunks.clear();
 }

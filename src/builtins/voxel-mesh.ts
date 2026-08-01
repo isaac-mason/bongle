@@ -12,7 +12,7 @@ import type { Vec4 } from 'mathcat';
 import { type TraitType, trait } from '../core/scene/traits';
 import { VoxelModel } from '../core/voxels/voxel-model';
 import type { Voxels } from '../core/voxels/voxels';
-import type { VoxelMeshState } from '../render/voxels/voxel-mesh-visuals';
+import type { VoxelMeshState } from '../render/common/voxels/voxel-mesh-visuals';
 
 export { VoxelModel } from '../core/voxels/voxel-model';
 export { createVoxelModelShape } from '../core/voxels/voxel-model-collider';

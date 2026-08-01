@@ -12,7 +12,7 @@
 
 import { useEffect } from 'react';
 import { addLockRelease, removeLockRelease } from '../input';
-import { useClient } from './client-store';
+import { useClient } from './stores/client-store';
 
 export function useReleasePointer(id: string, active = true): void {
     useEffect(() => {

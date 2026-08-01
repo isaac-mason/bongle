@@ -16,7 +16,7 @@
  */
 
 import type { ScriptContext } from '../api/scripts';
-import { UILayer } from './ui-layers';
+import { UILayer } from './ui/util/ui-layers';
 
 export type CrosshairConfig = {
     /** show the four-tick crosshair HUD. controllers map this to

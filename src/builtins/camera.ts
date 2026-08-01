@@ -8,7 +8,7 @@ import { type TraitType, trait } from '../core/scene/traits';
  * on the client state, which the renderer composes the render camera from.
  *
  * the renderer composes a per-room PerspectiveCamera each frame from
- * (camera node Transform + this trait), see `Renderer.syncRenderCamera`.
+ * (camera node Transform + this trait), see `RenderCamera.syncRenderCamera`.
  *
  * persist: false, runtime-only; camera nodes are recreated on room spin-up and
  * never survive a scene round-trip.

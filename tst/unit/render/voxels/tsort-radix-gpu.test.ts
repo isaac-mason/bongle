@@ -6,13 +6,14 @@
 // that the CPU mirror model cannot. Histograms are garbage-prefilled to prove
 // the self-zeroing paths; a second smaller fire reuses them to prove the
 // cross-fire zeroTo logic.
-import { describe, expect, it } from 'vitest';
+
 import { compileCompute } from 'gpucat';
+import { describe, expect, it } from 'vitest';
 import {
     createRadixCountCompute,
     createRadixScanCompute,
     createRadixScatterCompute,
-} from '../../../../src/render/voxels/voxel-resources';
+} from '../../../../src/render/webgpu/voxels/gpu-frame';
 
 const RADIX_BLOCK = 1024;
 
@@ -84,7 +85,11 @@ describe('translucent radix sort — real kernels on GPU (Dawn)', () => {
             }),
         };
 
-        const bindByName = (pipeline: GPUComputePipeline, k: (typeof kernels)[keyof typeof kernels], map: Record<string, GPUBuffer>) =>
+        const bindByName = (
+            pipeline: GPUComputePipeline,
+            k: (typeof kernels)[keyof typeof kernels],
+            map: Record<string, GPUBuffer>,
+        ) =>
             device.createBindGroup({
                 layout: pipeline.getBindGroupLayout(0),
                 entries: k.storage.map((entry, i) => {
@@ -131,42 +136,62 @@ describe('translucent radix sort — real kernels on GPU (Dawn)', () => {
 
             // ── the real chain, mirroring cullDispatches' wiring exactly ──
             const hists = [buf.histA, buf.histB];
-            dispatch(pipelines.count0, kernels.count0, {
-                sortIndirectArgs: buf.args,
-                srcKeys: buf.keysA,
-                radixHist: hists[0]!,
-            }, nb);
+            dispatch(
+                pipelines.count0,
+                kernels.count0,
+                {
+                    sortIndirectArgs: buf.args,
+                    srcKeys: buf.keysA,
+                    radixHist: hists[0]!,
+                },
+                nb,
+            );
             for (let pass = 0; pass < 4; pass++) {
                 const srcKeys = pass % 2 === 0 ? buf.keysA : buf.keysB;
                 const srcIdx = pass % 2 === 0 ? buf.idxA : buf.idxB;
                 const histCur = hists[pass % 2]!;
                 const histNext = hists[(pass + 1) % 2]!;
-                dispatch(pipelines.scan, kernels.scan, {
-                    sortIndirectArgs: buf.args,
-                    radixHist: histCur,
-                    radixHistNext: histNext,
-                }, 1);
-                if (pass < 3) {
-                    dispatch(pipelines.scatter, kernels.scatter, {
+                dispatch(
+                    pipelines.scan,
+                    kernels.scan,
+                    {
                         sortIndirectArgs: buf.args,
-                        srcKeys,
-                        srcIdx,
                         radixHist: histCur,
                         radixHistNext: histNext,
-                        radixPassConfig: buf.cfg[pass]!,
-                        dstKeys: pass % 2 === 0 ? buf.keysB : buf.keysA,
-                        dstIdx: pass % 2 === 0 ? buf.idxB : buf.idxA,
-                    }, nb);
+                    },
+                    1,
+                );
+                if (pass < 3) {
+                    dispatch(
+                        pipelines.scatter,
+                        kernels.scatter,
+                        {
+                            sortIndirectArgs: buf.args,
+                            srcKeys,
+                            srcIdx,
+                            radixHist: histCur,
+                            radixHistNext: histNext,
+                            radixPassConfig: buf.cfg[pass]!,
+                            dstKeys: pass % 2 === 0 ? buf.keysB : buf.keysA,
+                            dstIdx: pass % 2 === 0 ? buf.idxB : buf.idxA,
+                        },
+                        nb,
+                    );
                 } else {
-                    dispatch(pipelines.scatterLast, kernels.scatterLast, {
-                        sortIndirectArgs: buf.args,
-                        srcKeys,
-                        srcIdx,
-                        radixHist: histCur,
-                        radixPassConfig: buf.cfg[pass]!,
-                        sortPayload: buf.payload,
-                        visibleQuads: buf.visibleQuads,
-                    }, nb);
+                    dispatch(
+                        pipelines.scatterLast,
+                        kernels.scatterLast,
+                        {
+                            sortIndirectArgs: buf.args,
+                            srcKeys,
+                            srcIdx,
+                            radixHist: histCur,
+                            radixPassConfig: buf.cfg[pass]!,
+                            sortPayload: buf.payload,
+                            visibleQuads: buf.visibleQuads,
+                        },
+                        nb,
+                    );
                 }
             }
             // readback visibleQuads.
@@ -195,9 +220,7 @@ describe('translucent radix sort — real kernels on GPU (Dawn)', () => {
 
         const rng = makeRng(42);
         // fire 1: big (multi-block, tails), realistic packed keys + duplicates.
-        const keys1 = Array.from({ length: 5000 }, (_, i) =>
-            i % 4 === 0 ? (((rng() % 4) << 26) | (12345 << 1)) >>> 0 : rng(),
-        );
+        const keys1 = Array.from({ length: 5000 }, (_, i) => (i % 4 === 0 ? (((rng() % 4) << 26) | (12345 << 1)) >>> 0 : rng()));
         expect(await runFire(keys1)).toEqual(referenceOrder(keys1));
         // fire 2: much smaller (cross-fire zeroTo must cover fire 1's dirt).
         const keys2 = Array.from({ length: 700 }, () => rng());

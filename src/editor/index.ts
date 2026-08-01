@@ -19,7 +19,7 @@ import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { getRenderCamera, setActivePlayer } from '../client/rooms';
-import { availableDebugTabs, useClient } from '../client/ui/client-store';
+import { availableDebugTabs, useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
 import {
@@ -1407,7 +1407,7 @@ export function registerClient(state: EngineClient): void {
         switchRoom: (roomId, mode) => {
             for (const room of state.rooms.rooms.values()) {
                 if (room.roomId === roomId && room.playerMode === mode) {
-                    setActivePlayer(state.rooms, state.net, state.voxelResources, room.playerId);
+                    setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, room.playerId);
                     return;
                 }
             }

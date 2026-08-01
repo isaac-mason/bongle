@@ -70,5 +70,5 @@ export * from './builtins/sprite';
 export * from './builtins/transform';
 export * from './builtins/voxel-mesh';
 export * from './builtins/world';
-export { UILayer } from './client/ui-layers';
+export { UILayer } from './client/ui/util/ui-layers';
 export type { Avatar } from './core/avatar/avatar';

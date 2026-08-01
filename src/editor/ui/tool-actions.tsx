@@ -1,7 +1,7 @@
 import * as Icons from "../../../icons";
 import { useCallback, useMemo, useState } from 'react';
 import * as Selection from '../../core/scene/selection';
-import { useClient } from '../../client/ui/client-store';
+import { useClient } from '../../client/ui/stores/client-store';
 import type { TransformMode } from '../edit-room-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, INSPECT_KEYS, TRANSFORM_GIZMO_KEYS } from '../editor-controls';

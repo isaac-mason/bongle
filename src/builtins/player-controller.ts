@@ -30,6 +30,7 @@ import {
 } from 'gpucat';
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
+import { drone as flyIcon, footprints as walkIcon } from '../../icons/strings';
 import {
     addCrosshair,
     type Crosshair,
@@ -40,7 +41,6 @@ import {
     updateCrosshair,
 } from '../api/crosshair';
 import { warn } from '../api/debug';
-import { env } from '../env';
 import {
     consumeTouchButtonLookDrag,
     getCanvasTouches,
@@ -51,7 +51,6 @@ import {
     isTouchButtonDown,
     isTouchButtonJustDown,
 } from '../api/input';
-import { drone as flyIcon, footprints as walkIcon } from '../../icons/strings';
 import { isTouchPrimary } from '../api/mobile';
 import type { Physics } from '../api/physics';
 import { setPointerLock } from '../api/pointer-lock';
@@ -62,10 +61,11 @@ import { getCamera, getSubject } from '../api/subject';
 import { createTouchButton, createTouchJoystick } from '../api/touch-controls';
 import { control, type TraitType, trait } from '../api/traits';
 import { getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
-import { UILayer } from '../client/ui-layers';
+import { UILayer } from '../client/ui/util/ui-layers';
 import type * as vcc from '../core/physics/vcc/vcc';
 import { BLOCK_FLAG_COLLISION } from '../core/voxels/block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
+import { env } from '../env';
 import { CameraTrait } from './camera';
 import { applyNoclipDisplacement, CharacterControllerTrait } from './character-controller';
 import { TransformTrait } from './transform';
@@ -994,10 +994,7 @@ script(
                 // touch fly/walk toggle button (stand-in for double-tap Space,
                 // which a finger can't do). same effect: flip noclip, kill
                 // momentum on entry so you don't rocket off with prior velocity.
-                if (
-                    pc.controls.touch.flyToggleButton &&
-                    isTouchButtonJustDown(input.touch, PlayerControllerTouchIds.flyToggle)
-                ) {
+                if (pc.controls.touch.flyToggleButton && isTouchButtonJustDown(input.touch, PlayerControllerTouchIds.flyToggle)) {
                     cc.input.noclip = !cc.input.noclip;
                     if (cc.input.noclip) vec3.set(cc.state.velocity, 0, 0, 0);
                     cc.input.jump = false;

@@ -4,4 +4,4 @@
 
 export * as EngineClient from './client/engine-client';
 export type { ResourceLoader } from './core/resource-loader';
-export { browserResourceLoader, fetchResourceLoader } from './render/asset-url';
+export { browserResourceLoader, fetchResourceLoader } from './render/common/asset-url';

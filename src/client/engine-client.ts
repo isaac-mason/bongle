@@ -28,38 +28,27 @@ import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
-import * as CloudResources from '../render/cloud-resources';
-import * as Device from '../render/device';
-import * as Interpolation from '../render/interpolation';
-import * as ModelLighting from '../render/model-lighting';
-import * as ModelResources from '../render/models/model-resources';
-import * as ModelVisuals from '../render/models/model-visuals';
-import * as ParticleResources from '../render/particles/particle-resources';
-import * as ParticleVisuals from '../render/particles/particle-visuals';
-import * as Particles from '../render/particles/particles';
-import * as Performance from '../render/performance';
-import * as Renderer from '../render/renderer';
-import * as ShadowResources from '../render/shadows/shadow-resources';
-import * as ShadowVisuals from '../render/shadows/shadow-visuals';
-import * as ExtrudedSpriteResources from '../render/sprites/extruded-sprite-resources';
-import * as ExtrudedSpriteVisuals from '../render/sprites/extruded-sprite-visuals';
-import * as SpriteResources from '../render/sprites/sprite-resources';
-import * as SpriteVisuals from '../render/sprites/sprite-visuals';
-import * as Visibility from '../render/visibility';
-import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import * as VoxelResources from '../render/voxels/voxel-resources';
-import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-resources';
-import * as VoxelVisuals from '../render/voxels/voxel-visuals';
+import type { RenderBackendModule } from '../render/backend';
+import * as RenderCamera from '../render/common/camera';
+import * as Visibility from '../render/common/cull/visibility';
+import * as Interpolation from '../render/common/interpolation';
+import * as ModelLighting from '../render/common/models/model-lighting';
+import * as ModelResources from '../render/common/models/model-resources';
+import * as Particles from '../render/common/particles/particles';
+import * as VoxelArena from '../render/common/voxels/voxel-arena';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/common/voxels/voxel-arena';
+import { loadRenderBackend } from '../render/load';
+import type * as Renderer from '../render/webgpu';
 import * as Audio from './audio/audio';
 import * as Chat from './chat';
-import * as DomUi from './dom-ui';
+import * as Device from './device';
 import * as Input from './input';
 import * as Net from './net';
+import * as Performance from './performance';
 import * as Replication from './replication';
 import * as Rooms from './rooms';
 import * as ClientRpc from './rpc';
-import { useClient } from './ui/client-store';
+import { useClient } from './ui/stores/client-store';
 import * as Viewport from './viewport';
 
 export type InitOptions = {
@@ -106,7 +95,6 @@ export function init(opts: InitOptions) {
     const uiRoot = document.createElement('div');
     opts.domElement.appendChild(uiRoot);
 
-    const renderer = Renderer.init();
     const net = Net.init();
 
     // static device capability probe (deviceType / mobile). The live input modality is
@@ -140,7 +128,13 @@ export function init(opts: InitOptions) {
 
     return {
         mode,
-        renderer,
+        /** engine-global renderer handle. constructed in `load()` after the
+         *  backend module is dynamically imported (code-split), so it starts null
+         *  like the resources below. typed as the WebGPU shape in phase 1. */
+        renderer: null! as Renderer.Renderer,
+        /** the selected backend module (webgpu | webgl), resolved + imported in
+         *  `load()`. the live render path drives the renderer through this. */
+        renderBackend: null! as RenderBackendModule<Renderer.Renderer>,
         net,
         rpc,
         driver: opts.driver,
@@ -163,37 +157,10 @@ export function init(opts: InitOptions) {
          *  here instead of calling `clientWidth`/`clientHeight` (which
          *  trigger layout). */
         viewport: Viewport.init(),
-        /** engine-global model atlas + cull compute. populated in `load()`
-         *  alongside the other compute pre-warms. */
-        modelResources: null! as ModelResources.ModelResources,
-        /** engine-global voxel atlas + texAnim buffer. built in `load()`
-         *  after the project module is captured; rebuilt on script reload
-         *  because block defs and textures may have changed. per-room
-         *  voxel materials reference these and rebind on atlas swap. */
-        voxelResources: null! as VoxelResources.VoxelResources,
-        /** engine-global voxel-mesh material + cull compute. depends on
-         *  voxelResources (atlas + texAnim); rebuilt alongside it. */
-        voxelMeshResources: null! as VoxelMeshResources.VoxelMeshResources,
-        /** engine-global sprite atlas + frame UV LUT. sync-created at
-         *  `load()` time with a magenta placeholder; the trailing async
-         *  `SpriteResources.load()` fetches the real atlas if the bongle
-         *  pipeline has produced one. refreshed by the spritesRegistry
-         *  dispatch branch + the `bongle:sprite-atlas-updated` HMR event. */
-        spriteResources: null! as SpriteResources.SpriteResources,
-        /** engine-global extruded-sprite material + cull compute. binds the
-         *  sprite atlas Texture via a TextureNode; atlas swaps rebind it
-         *  in place without rebuilding the compiled pipeline. */
-        extrudedSpriteResources: null! as ExtrudedSpriteResources.ExtrudedSpriteResources,
-        /** engine-global particle material + cull compute. binds the sprite
-         *  atlas Texture via a TextureNode; atlas swaps rebind it in place. */
-        particleResources: null! as ParticleResources.ParticleResources,
-        /** engine-global cloud system, material, geometry, static
-         *  storage buffers, and the shared compacted+indirect buffers the
-         *  active room's CloudVisuals.update writes to each frame. */
-        cloudResources: null! as CloudResources.CloudResources,
-        /** engine-global shadow material. per-room ShadowVisuals routes
-         *  its `instance` buffer by name. */
-        shadowResources: null! as ShadowResources.ShadowResources,
+        // the eight client-global GPU resource sets (model/voxel/voxel-mesh/
+        // sprite/extruded-sprite/particle/cloud/shadow) now live on the backend
+        // as `state.renderer.resources`, built in `load()` via
+        // `backend.initResources`/`loadResources`.
         /** engine-global audio resources, manifest + decoded atlas +
          *  AudioContext. populated in `load()` (async fetch + decode).
          *  the clips map is empty when no manifest was emitted, but the
@@ -251,7 +218,7 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
         playerMode: 'play',
         roomMode: 'play',
     });
-    Rooms.setActivePlayer(state.rooms, state.net, state.voxelResources, room.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, room.playerId);
     return room;
 }
 
@@ -295,6 +262,13 @@ function seedModels(state: EngineClient): void {
 }
 
 export async function load(state: EngineClient) {
+    // select + code-split-load the render backend before anything touches the
+    // renderer (`render/init` owns which concrete backends exist + the selection).
+    // awaited here so the dynamic import resolves before `init()`.
+    const backend: RenderBackendModule<Renderer.Renderer> = await loadRenderBackend();
+    state.renderBackend = backend;
+    state.renderer = backend.init();
+
     // user modules have registered (loadModule ran before this). build the
     // derived index fields once so boot reads a live `blockRegistry` /
     // `slotToTrait` / `protocol`; the dev flush reindexes again on each HMR.
@@ -324,14 +298,14 @@ export async function load(state: EngineClient) {
     // renderer init gates everything that calls into gpucat (material
     // builds, compileCompute pre-warms). do it once, up front; everything
     // below runs concurrently afterwards. env GPU buffers + the engine-
-    // global post-chain pipeline are wired up in `Renderer.init()` (sync,
+    // global post-chain pipeline are wired up in `backend.init()` (sync,
     // pre-load); this just runs the device handshake.
-    await Renderer.load(state.renderer);
+    await backend.load(state.renderer);
 
     // adapter is now resolved on the gpucat renderer. detect tier + GPU
     // limits up front so every subsystem below can derive its budget
     // from `state.performance.active`.
-    state.performance = Performance.detect(state.renderer.renderer._adapter);
+    state.performance = Performance.detect(state.renderer.renderer.adapter);
     state.voxelBudget = voxelArenaBudgetForTier(state.performance);
     const voxelBudget = state.voxelBudget;
     const settings = Performance.settingsForTier(state.performance);
@@ -356,51 +330,28 @@ export async function load(state: EngineClient) {
     // validation message before APICreateErrorBuffer but doesn't tag the
     // buffer; this scope-pushes around every WebGPU command and surfaces
     // the offender. cheap to leave on; one log per uncaptured error.
-    const gpuDevice = state.renderer.renderer._device as GPUDevice | undefined;
+    const gpuDevice = state.renderer.renderer.device as GPUDevice | undefined;
     if (gpuDevice) {
         gpuDevice.addEventListener('uncapturederror', (e) => {
             console.error('[webgpu] uncaptured error:', (e as GPUUncapturedErrorEvent).error.message);
         });
     }
 
-    // sync init pass, every *Resources.init() is pure construction (no
-    // side effects, no awaits). Builds materials + cull computes against
-    // the magenta placeholder atlas so the downstream extruded/particle
-    // inits can name-bind it immediately.
-    state.spriteResources = SpriteResources.init();
-    state.extrudedSpriteResources = ExtrudedSpriteResources.init(state.spriteResources);
-    state.particleResources = ParticleResources.init(state.spriteResources.atlas);
-    state.cloudResources = CloudResources.init(state.renderer.environmentResources);
-    state.modelResources = ModelResources.init();
-    state.shadowResources = ShadowResources.init();
+    // sync build of every client-global GPU resource set (owned by the backend).
+    // pure construction against the magenta placeholder atlas.
+    state.renderBackend.initResources(state.renderer, { blockRegistry: registry.blockRegistry, voxelBudget });
 
-    state.voxelResources = VoxelResources.init(
-        registry.blockRegistry,
-        state.renderer.environmentResources,
-        voxelBudget,
-        state.renderer.timeResources,
-    );
-    state.voxelMeshResources = VoxelMeshResources.init(
-        state.voxelResources.atlas,
-        state.voxelResources.texAnimBuffer,
-        state.renderer.timeResources,
-    );
-
-    // async load pass, pre-warms compile pipelines, fetches atlases. All
-    // resources race in parallel; the placeholder atlas keeps materials
-    // valid until SpriteResources.load() swaps the real atlas in.
+    // async load pass: the backend pre-warms compile pipelines + fetches the real
+    // atlases (rebinding the extruded/particle materials afterwards). Audio isn't a
+    // render resource, so it races alongside in its own promise.
     const audioPromise = Audio.loadResources(state.resources.loader);
-    const spriteLoadPromise = SpriteResources.load(state.spriteResources, state.resources.loader);
-    const voxelLoadPromise = VoxelResources.load(
-        state.voxelResources,
-        registry.blockRegistry,
-        settings.voxelWorkerCount,
-        settings.voxelWorkerQueueDepth,
-        state.resources,
-        state.renderer.renderer,
-    );
+    const backendLoadPromise = state.renderBackend.loadResources(state.renderer, {
+        blockRegistry: registry.blockRegistry,
+        settings,
+        resources: state.resources,
+    });
 
-    const [audioResources] = await Promise.all([audioPromise, spriteLoadPromise, voxelLoadPromise]);
+    const [audioResources] = await Promise.all([audioPromise, backendLoadPromise]);
 
     state.audioResources = audioResources!;
     // the AudioContext is built suspended and browsers only start it after a
@@ -408,16 +359,6 @@ export async function load(state: EngineClient) {
     // ambience and programmatically-triggered sounds (e.g. the editor preview
     // boot inside the same-origin iframe) aren't silently dropped.
     Audio.installGestureUnlock(state.audioResources);
-
-    // Both extruded-sprite and particle materials captured a TextureNode
-    // against `state.spriteResources.atlas` *as it was during init()*,
-    // i.e. the magenta placeholder. `SpriteResources.load()` then ran
-    // concurrently and swapAtlas'd the placeholder out (disposing it), but
-    // `rebindAtlas` only fires from `refreshSpriteResources` on registry
-    // change, not the initial load. Without this re-bind the particle
-    // material samples a disposed texture (renders white on most GPUs).
-    ExtrudedSpriteResources.rebindAtlas(state.extrudedSpriteResources, state.spriteResources.atlas);
-    ParticleResources.rebindAtlas(state.particleResources, state.spriteResources.atlas);
 
     // resize the renderer + cameras when the viewport div changes size.
     // useClient is the source of truth, Viewport writes dims into the store
@@ -441,7 +382,7 @@ export async function load(state: EngineClient) {
             room.canvasTarget.setSize(w, h);
         }
 
-        Renderer.resize(state.renderer, w, h);
+        state.renderBackend.resize(state.renderer, w, h);
     };
     const initial = useClient.getState();
     applyViewportSize(initial.viewportWidth, initial.viewportHeight);
@@ -690,15 +631,8 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         net: state.net,
         rpc: state.rpc,
         renderer: state.renderer,
+        renderBackend: state.renderBackend,
         resources: state.resources,
-        modelResources: state.modelResources,
-        voxelResources: state.voxelResources,
-        voxelMeshResources: state.voxelMeshResources,
-        spriteResources: state.spriteResources,
-        extrudedSpriteResources: state.extrudedSpriteResources,
-        particleResources: state.particleResources,
-        cloudResources: state.cloudResources,
-        shadowResources: state.shadowResources,
         audioResources: state.audioResources,
         inbound: state.inbound,
     });
@@ -731,7 +665,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
 }
 
 function processActivateRoom(state: EngineClient, message: Protocol.ActivateRoom): void {
-    Rooms.setActivePlayer(state.rooms, state.net, state.voxelResources, message.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, message.playerId);
 }
 
 function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void {
@@ -758,7 +692,7 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
         }
 
         if (fallback) {
-            Rooms.setActivePlayer(state.rooms, state.net, state.voxelResources, fallback.playerId);
+            Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, fallback.playerId);
         } else {
             state.rooms.activePlayerId = null;
             useClient.getState().setActivePlayerId(null);
@@ -1022,7 +956,7 @@ function processVoxelChunkDel(state: EngineClient, message: Protocol.VoxelChunkD
     }
     room.voxels.chunks.delete(key);
     if (room === Rooms.getActiveRoom(state.rooms)) {
-        VoxelResources.removeChunkMesh(state.voxelResources, key);
+        VoxelArena.removeChunkMesh(state.renderer.resources.voxel.arenas, key);
     }
 }
 
@@ -1232,7 +1166,7 @@ export function update(state: EngineClient, delta: number) {
     const alpha = state.accumulator / timestep;
 
     // sync client-global model GPU pools with newly-ready / vanished payloads
-    ModelResources.update(state.modelResources, state.resources);
+    ModelResources.update(state.renderer.resources.model, state.resources);
 
     // tier settings, fetch once per tick, threaded to every subsystem
     // that takes a tier-driven cap (cull radius, mesher caps, ...). reads
@@ -1282,7 +1216,7 @@ export function update(state: EngineClient, delta: number) {
         // directly. must run AFTER user frame scripts (they write pose/fov
         // on the POV camera) and BEFORE any consumer that reads it.
         const povCamera = Rooms.getRenderCamera(room);
-        Renderer.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
+        RenderCamera.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
         if (!povCamera) continue;
 
         // per-mesh frustum cull with the fresh camera. Refits each renderable
@@ -1322,73 +1256,18 @@ export function update(state: EngineClient, delta: number) {
         SceneTree.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
 
-        // engine-global voxel arenas hold only the active room's chunks
-        // at any one time. inactive rooms skip the mesher/relight pass +
-        // arena-occupancy metrics here; their chunks cycle back in via
-        // the prioritised remesh path on the next activation.
-        if (room === activeRoom) {
-            Debug.begin(room.clientMetrics, 'mesh');
-            // streaming rooms defer meshing a chunk until its 26-neighbourhood has
-            // arrived (mesh once, correct AO/light); local rooms load all at once so
-            // there's no trickle to dedupe — mesh immediately.
-            VoxelVisuals.update(
-                room.voxelVisuals,
-                state.voxelResources,
-                room.voxels,
-                room.voxels.registry,
-                povCamera.position,
-                !room.local,
-            );
-            Debug.end(room.clientMetrics, 'mesh');
-
-            // arena occupancy + fragmentation, recorded post-update so the
-            // sample reflects this frame's allocs. usedPct is overall pressure;
-            // largestFreePct surfaces fragmentation (low while usedPct is moderate
-            // = TLSF carving up the heap); allocs vs the tier's maxAllocs cap
-            // tracks node-pool headroom.
-            if (room.clientMetrics.enabled) {
-                const quadR = VoxelResources.arenaReport(state.voxelResources.arenas.quadArena);
-                Debug.record(room.clientMetrics, 'voxels/arena/quad/usedPct', (100 * quadR.used) / quadR.slotCount, '%');
-                Debug.record(
-                    room.clientMetrics,
-                    'voxels/arena/quad/largestFreePct',
-                    (100 * quadR.largestFree) / quadR.slotCount,
-                    '%',
-                );
-                Debug.record(room.clientMetrics, 'voxels/arena/quad/allocs', quadR.allocs, 'count');
-            }
-        }
-
-        Debug.begin(room.clientMetrics, 'voxel-mesh');
-        VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels, room.visibility);
-        Debug.end(room.clientMetrics, 'voxel-mesh');
-
-        Debug.begin(room.clientMetrics, 'model');
-        ModelVisuals.update(room.modelVisuals, state.modelResources, state.resources, room.visibility);
-        Debug.end(room.clientMetrics, 'model');
-
-        Debug.begin(room.clientMetrics, 'dom-ui');
-        DomUi.update(room.domUi, povCamera, state.viewport);
-        Debug.end(room.clientMetrics, 'dom-ui');
-
-        Debug.begin(room.clientMetrics, 'sprite');
-        SpriteVisuals.update(room.spriteVisuals, state.spriteResources, room.voxels, povCamera, room.visibility);
-        Debug.end(room.clientMetrics, 'sprite');
-
-        Debug.begin(room.clientMetrics, 'extruded-sprite');
-        ExtrudedSpriteVisuals.update(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.voxels, room.visibility);
-        Debug.end(room.clientMetrics, 'extruded-sprite');
-
-        Debug.begin(room.clientMetrics, 'shadow');
-        ShadowVisuals.update(room.shadowVisuals, room.voxels, povCamera);
-        Debug.end(room.clientMetrics, 'shadow');
-
-        // particle visuals reads pool[0..count) directly, no scene-graph
-        // traits. runs after `Particles.update` (per-frame loop above) so
-        // freshly-stepped positions feed this frame's pose buffer.
-        Debug.begin(room.clientMetrics, 'particle');
-        ParticleVisuals.update(room.particleVisuals, room.particles, room.voxels, performance.now() / 1000);
-        Debug.end(room.clientMetrics, 'particle');
+        // all per-room GPU visuals (voxel mesher [active room only] + arena
+        // metrics, voxel-mesh, model, dom-ui, sprite, extruded-sprite, shadow,
+        // particle) are owned by the backend and driven in one call, order + Debug
+        // labels preserved. Must run AFTER Animation.tick (world matrices) and
+        // BEFORE Audio.updateForFrame.
+        state.renderBackend.updateRoom(state.renderer, room, {
+            isActive: room === activeRoom,
+            povCamera,
+            viewport: state.viewport,
+            resources: state.resources,
+            now: performance.now() / 1000,
+        });
 
         // refresh listener pose + node-bound panners, reap finished
         // one-shots.
@@ -1404,7 +1283,7 @@ export function update(state: EngineClient, delta: number) {
         const activeCamera = Rooms.getRenderCamera(activeRoom);
 
         Debug.begin(activeRoom.clientMetrics, 'render');
-        Renderer.render(state.renderer, activeRoom, activeCamera, state.voxelResources, perfSettings.voxelViewChunkRadius);
+        state.renderBackend.render(state.renderer, activeRoom, activeCamera, perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
         /* metrics, request server-side stats for every room the client
@@ -1419,7 +1298,7 @@ export function update(state: EngineClient, delta: number) {
         // gpucat Inspector overlay, visible only on the 'renderer' tab while
         // the panel is open. available in non-editor builds too (debug perf
         // for shipped games).
-        Renderer.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
+        state.renderBackend.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
 
         // request server metrics for the summary/perf/net panels in EVERY build, not
         // just the editor, so a shipped game surfaces server-side perf too. a player
@@ -1495,13 +1374,9 @@ export function dispose(state: EngineClient): void {
     useClient.setState({ rooms: new Map(), activePlayerId: null, inputManager: null });
 
     if (state.inputManager) Input.disposeInputManager(state.inputManager);
-    if (state.shadowResources) ShadowResources.dispose(state.shadowResources);
-    if (state.cloudResources) CloudResources.dispose(state.cloudResources);
-    if (state.voxelMeshResources) VoxelMeshResources.dispose(state.voxelMeshResources);
-    if (state.voxelResources) VoxelResources.dispose(state.voxelResources);
-    if (state.particleResources) ParticleResources.dispose(state.particleResources);
-    if (state.extrudedSpriteResources) ExtrudedSpriteResources.dispose(state.extrudedSpriteResources);
-    if (state.spriteResources) SpriteResources.dispose(state.spriteResources);
-    Renderer.dispose(state.renderer);
+    // client-global GPU resources live on the backend; dispose them together.
+    if (state.renderBackend && state.renderer?.resources) state.renderBackend.disposeResources(state.renderer);
+    // renderer + backend are null until `load()` runs; guard for early dispose.
+    if (state.renderBackend && state.renderer) state.renderBackend.dispose(state.renderer);
     state.domElement?.remove();
 }

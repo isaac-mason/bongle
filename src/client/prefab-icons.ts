@@ -8,11 +8,11 @@
 // isometric ortho camera fit to its AABB, and rendered. One prefab → one tile;
 // the caller caches by id and invalidates on registry change.
 
-import { OrthographicCamera, readPixels, RenderTarget } from 'gpucat';
+import { OrthographicCamera, RenderTarget, readPixels } from 'gpucat';
+import { PRESETS } from '../api/environment';
 import { MeshTrait } from '../builtins/mesh';
 import { computeWorldTransforms, getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
 import { VoxelMeshTrait } from '../builtins/voxel-mesh';
-import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
 import * as Resources from '../core/resources';
 import * as Prefab from '../core/scene/prefab';
@@ -20,14 +20,15 @@ import { addChild, createNode, createPrefabConfig, query, setPrefab } from '../c
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, chunkKey, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
-import * as Environment from '../render/environment';
-import * as Interpolation from '../render/interpolation';
-import { meshInfoIndexOf } from '../render/models/model-resources';
-import * as ModelResources from '../render/models/model-resources';
-import * as ModelVisuals from '../render/models/model-visuals';
-import * as Renderer from '../render/renderer';
-import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import * as VoxelResources from '../render/voxels/voxel-resources';
+import * as Environment from '../render/common/environment/environment';
+import * as Interpolation from '../render/common/interpolation';
+import * as ModelResources from '../render/common/models/model-resources';
+import { meshInfoIndexOf } from '../render/common/models/model-resources';
+import * as ModelVisuals from '../render/common/models/model-visuals';
+import * as VoxelArena from '../render/common/voxels/voxel-arena';
+import * as VoxelMeshVisuals from '../render/common/voxels/voxel-mesh-visuals';
+import * as Renderer from '../render/webgpu';
+import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
 
 const ICON_PX = 256;
@@ -60,8 +61,11 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     await deps.voxelResources.computeReady;
 
     const room = createRenderRoom(deps);
-    Environment.applyConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
-    Environment.flushActive(room.environment);
+    applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
+    Environment.flushActive(room.environment, deps.renderer.environmentResources);
+    // hide the sky/cloud meshes (config.enabled=false) — no per-frame
+    // updateForCamera on the offline icon path, so sync visibility directly.
+    Environment.syncEnvVisibility(room.envVisuals, room.environment);
 
     const target = new RenderTarget(ICON_PX, ICON_PX, {
         colorFormat: 'rgba8unorm',
@@ -119,7 +123,12 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
             if (chunk.nonAirCount === 0) continue;
             const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, chunk.cx, chunk.cy, chunk.cz), room.voxels.registry);
             if (mesh) {
-                VoxelResources.packerUpsertChunk(packer, chunkKey(chunk.cx, chunk.cy, chunk.cz), [chunk.wx, chunk.wy, chunk.wz], mesh);
+                VoxelArena.packerUpsertChunk(
+                    packer,
+                    chunkKey(chunk.cx, chunk.cy, chunk.cz),
+                    [chunk.wx, chunk.wy, chunk.wz],
+                    mesh,
+                );
             }
         }
 

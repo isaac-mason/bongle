@@ -203,7 +203,13 @@ export function activate(
         throw new Error(`[bongle] rooms.activate: client is not observing (room '${roomId}'${mode ? `, mode '${mode}'` : ''})`);
     }
     assertSameNamespace(callerNamespace(ctx), target.namespace, roomId);
-    ClientRooms.setActivePlayer(rooms, ctx.client.state.net, ctx.client.state.voxelResources, target.playerId);
+    ClientRooms.setActivePlayer(
+        rooms,
+        ctx.client.state.net,
+        ctx.client.state.renderer,
+        ctx.client.state.renderBackend,
+        target.playerId,
+    );
 }
 
 /* ── enumeration ─────────────────────────────────────────────────── */

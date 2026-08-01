@@ -47,15 +47,7 @@ import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
-import * as ParticleResources from '../render/particles/particle-resources';
-import * as Performance from '../render/performance';
-import * as ExtrudedSpriteResources from '../render/sprites/extruded-sprite-resources';
-import * as ExtrudedSpriteVisuals from '../render/sprites/extruded-sprite-visuals';
-import * as SpriteResources from '../render/sprites/sprite-resources';
-import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import * as VoxelResources from '../render/voxels/voxel-resources';
-import * as VoxelVisuals from '../render/voxels/voxel-visuals';
+import * as Performance from './performance';
 import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
 
@@ -259,61 +251,29 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
  */
 export async function refreshBlockResources(state: EngineClient): Promise<void> {
     const blockRegistry = registry.blockRegistry;
-
-    const { resources: nextRes, changed: voxelResourcesChanged } = await VoxelResources.refresh(
-        state.voxelResources,
-        blockRegistry,
-        state.renderer.environmentResources,
-        state.voxelBudget,
-        state.renderer.timeResources,
-        Performance.settingsForTier(state.performance).voxelWorkerCount,
-        Performance.settingsForTier(state.performance).voxelWorkerQueueDepth,
-        state.resources,
-        state.renderer.renderer,
-    );
-    state.voxelResources = nextRes;
-
-    // voxelMeshResources binds the engine-global atlas + texAnim, so it
-    // must rebuild alongside voxelResources whenever those swap.
-    if (voxelResourcesChanged) {
-        VoxelMeshResources.dispose(state.voxelMeshResources);
-        state.voxelMeshResources = VoxelMeshResources.init(
-            state.voxelResources.atlas,
-            state.voxelResources.texAnimBuffer,
-            state.renderer.timeResources,
-        );
-    }
-
     const activeRoom = state.rooms.activePlayerId !== null ? (state.rooms.rooms.get(state.rooms.activePlayerId) ?? null) : null;
 
+    // per-room voxel DATA: repoint each room's registry + re-resolve its chunks.
+    // this is independent of the GPU resource swap (which reads the block registry
+    // to rebuild the atlas), so it runs first.
     for (const room of state.rooms.rooms.values()) {
         room.voxels.registry = blockRegistry;
         resolveAllChunks(room.voxels);
-
-        if (voxelResourcesChanged) {
-            // engine-global voxel arenas + geometries + materials all live
-            // on the rebuilt `state.voxelResources`. per-room visuals just
-            // hold three `Mesh` wrappers pointing at those, re-init drops
-            // the stale meshes (which still reference the disposed
-            // geometries) and adds fresh ones bound to the new resources.
-            VoxelVisuals.dispose(room.voxelVisuals, room.scene);
-            VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
-            room.voxelVisuals = VoxelVisuals.initRoomMeshes(room.scene, state.voxelResources);
-            room.voxelMeshVisuals = VoxelMeshVisuals.init(
-                room.scene,
-                room.nodes,
-                state.voxelMeshResources,
-                state.renderer.environmentResources,
-            );
-        }
     }
 
-    // the refresh blew away the previous arena (the new packer is empty), so
-    // re-mount the active room, marking its chunks dirty so the prioritised remesh
-    // path refills the arena over the next few frames.
-    if (voxelResourcesChanged && activeRoom) {
-        VoxelVisuals.mountRoom(activeRoom.voxelVisuals, activeRoom.voxels);
-    }
+    // swap the voxel + voxel-mesh GPU resources and (if they changed) rebuild every
+    // room's voxel visuals against them, remounting the active room. Owned by the
+    // backend since it spans the client-global resources + every room's visuals.
+    await state.renderBackend.refreshBlockResources(
+        state.renderer,
+        {
+            blockRegistry,
+            voxelBudget: state.voxelBudget,
+            settings: Performance.settingsForTier(state.performance),
+            resources: state.resources,
+        },
+        activeRoom,
+    );
 
     // notify browser-side consumers that the block registry / texture atlas
     // changed, so they can rebuild — e.g. the editor's in-browser block-icon
@@ -324,35 +284,14 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
 }
 
 /**
- * Re-fetch `sprites-atlas.{png,json}` into the engine-global
- * `SpriteResources`. Called from the sprites dispatch branch above AND
- * from the `bongle:sprite-atlas-updated` HMR listener in the boot
- * template (the image-file-edit path has no registry change to ride).
- * `SpriteResources.refresh` rebinds the sprite material's atlas
- * TextureNode in place; the extruded + particle materials hold their own
- * TextureNodes against the same atlas and need an explicit rebind. The
- * extruded-sprite per-room geometry pool is baked from atlas pixels and
- * is invalidated wholesale, dispose + re-init so it re-bakes lazily.
+ * Re-fetch `sprites-atlas.{png,json}` into the backend's sprite resources. Called
+ * from the sprites dispatch branch above AND from the `bongle:sprite-atlas-updated`
+ * HMR listener in the boot template (the image-file-edit path has no registry
+ * change to ride). The backend rebinds the sprite/extruded/particle materials,
+ * clears the silhouette pool, and rebuilds each room's extruded-sprite visuals.
  */
 export async function refreshSpriteResources(state: EngineClient): Promise<void> {
-    const changed = await SpriteResources.refresh(state.spriteResources, state.resources.loader);
-    if (!changed) return;
-    ExtrudedSpriteResources.rebindAtlas(state.extrudedSpriteResources, state.spriteResources.atlas);
-    ParticleResources.rebindAtlas(state.particleResources, state.spriteResources.atlas);
-    // wipe the engine-global silhouette pool, every bake is stale against
-    // the new atlas pixels. per-room visuals dispose+re-init so their alive
-    // states (holding now-dangling GeometrySlot refs) drop, and next frame's
-    // update lazily re-acquires into the freshly-cleared pool.
-    ExtrudedSpriteResources.clearGeometryPool(state.extrudedSpriteResources);
-    for (const room of state.rooms.rooms.values()) {
-        ExtrudedSpriteVisuals.dispose(room.extrudedSpriteVisuals, state.extrudedSpriteResources, room.visibility);
-        room.extrudedSpriteVisuals = ExtrudedSpriteVisuals.init(
-            room.scene,
-            room.nodes,
-            state.extrudedSpriteResources,
-            state.renderer.environmentResources,
-        );
-    }
+    await state.renderBackend.refreshSpriteResources(state.renderer, { resources: state.resources });
 }
 
 /**

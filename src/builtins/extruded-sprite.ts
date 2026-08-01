@@ -24,7 +24,7 @@
 import type { Vec4 } from 'mathcat';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
-import type { ExtrudedSpriteVisualState } from '../render/sprites/extruded-sprite-visuals';
+import type { ExtrudedSpriteVisualState } from '../render/common/sprites/extruded-sprite-visuals';
 
 export const ExtrudedSpriteMeshTrait = trait('extruded-sprite-mesh', {
     /** the sprite handle to extrude + render. defaults to null

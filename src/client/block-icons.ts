@@ -8,15 +8,16 @@
 // room down. Same `createRenderRoom` → populate → `renderRoomToTarget` → dispose
 // shape as prefab icons — blocks just populate one voxel instead of a prefab.
 
-import { OrthographicCamera, readPixels, RenderTarget } from 'gpucat';
+import { OrthographicCamera, RenderTarget, readPixels } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
 import { MODEL_NONE } from '../core/voxels/block-registry';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
 import { ensureChunk, setBlock } from '../core/voxels/voxels';
-import * as Environment from '../render/environment';
-import * as Renderer from '../render/renderer';
-import * as VoxelResources from '../render/voxels/voxel-resources';
+import * as Environment from '../render/common/environment/environment';
+import * as VoxelArena from '../render/common/voxels/voxel-arena';
+import * as Renderer from '../render/webgpu';
+import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
 const ICON_PX = 128;
@@ -85,8 +86,11 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     // flat + full-bright: disable the env so an overhead sun doesn't crush the
     // side faces and the sky/cloud meshes don't bleed in — the classic
     // inventory-icon look (per-face directional factor still gives the 3D read).
-    Environment.applyConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
-    Environment.flushActive(room.environment);
+    applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
+    Environment.flushActive(room.environment, deps.renderer.environmentResources);
+    // hide the sky/cloud meshes (config.enabled=false) — no per-frame
+    // updateForCamera on the offline icon path, so sync visibility directly.
+    Environment.syncEnvVisibility(room.envVisuals, room.environment);
 
     // isometric ortho camera, framing the block centered at voxel (1.5,1.5,1.5)
     // (the mesher places the block spanning (1,1,1)→(2,2,2)).
@@ -132,12 +136,12 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             if (!mesh) {
                 // all-air after culling (shouldn't happen for a solid block): drop
                 // any prior slot so the tile renders empty, then skip.
-                if (VoxelResources.packerHas(packer, ICON_CHUNK_KEY)) {
-                    VoxelResources.packerEvictChunk(packer, ICON_CHUNK_KEY);
+                if (VoxelArena.packerHas(packer, ICON_CHUNK_KEY)) {
+                    VoxelArena.packerEvictChunk(packer, ICON_CHUNK_KEY);
                 }
                 continue;
             }
-            VoxelResources.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh);
+            VoxelArena.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh);
 
             Renderer.renderRoomToTarget(
                 deps.renderer,
@@ -160,14 +164,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
 }
 
 /** Copy a tightly-packed RGBA tile into (col,row) of the atlas, row by row. */
-function blitTile(
-    atlas: Uint8Array,
-    atlasWidth: number,
-    tile: Uint8Array,
-    px: number,
-    col: number,
-    row: number,
-): void {
+function blitTile(atlas: Uint8Array, atlasWidth: number, tile: Uint8Array, px: number, col: number, row: number): void {
     const x0 = col * px;
     const y0 = row * px;
     const rowBytes = px * 4;

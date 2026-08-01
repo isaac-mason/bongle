@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useClient } from './client-store';
+import { useClient } from './stores/client-store';
 
 /**
  * The 3D viewport `<div>`. Owns the canvas mount surface (per-room canvases

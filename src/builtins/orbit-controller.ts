@@ -11,7 +11,7 @@
  * grabs the active camera node (`getCamera(ctx)`) and writes pose to its
  * TransformTrait each frame while it's the subject. the renderer composes
  * its per-room PerspectiveCamera from that node's TransformTrait +
- * CameraTrait via `Renderer.syncRenderCamera`. callers
+ * CameraTrait via `RenderCamera.syncRenderCamera`. callers
  * can pre-seed the camera transform (or `target` on this trait) before
  * attach to open with a specific view.
  */

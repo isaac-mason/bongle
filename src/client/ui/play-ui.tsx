@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ChatPanel, useChatEnabled, useChatPanel } from './chat-panel';
-import { useClient } from './client-store';
+import { ChatPanel, useChatEnabled, useChatPanel } from './chat/chat-panel';
+import { useClient } from './stores/client-store';
 import { Viewport } from './viewport';
 
 import './editor.css';

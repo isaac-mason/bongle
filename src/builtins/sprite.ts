@@ -19,7 +19,7 @@
 import type { Vec4 } from 'mathcat';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
-import type { SpriteVisualState } from '../render/sprites/sprite-visuals';
+import type { SpriteVisualState } from '../render/common/sprites/sprite-visuals';
 
 export type SpriteMode = 'world' | 'billboard' | 'y-billboard';
 

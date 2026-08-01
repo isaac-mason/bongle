@@ -2,9 +2,9 @@ import * as Icons from "../../../icons";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { setEditorEnabledForRoom } from '../../client/editor';
-import { useClient } from '../../client/ui/client-store';
+import { useClient } from '../../client/ui/stores/client-store';
 import '../../client/ui/editor.css';
-import { ChatPanel, useChatPanel } from '../../client/ui/chat-panel';
+import { ChatPanel, useChatPanel } from '../../client/ui/chat/chat-panel';
 import { Viewport } from '../../client/ui/viewport';
 import { activeEditRoomStore, useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
@@ -391,7 +391,7 @@ export function mountEditUI(container: HTMLElement): Root {
     return root;
 }
 
-export { useClient } from '../../client/ui/client-store';
+export { useClient } from '../../client/ui/stores/client-store';
 export { useEditRoom } from '../edit-room-store';
 // keep these re-exports, script consumers and pane components import the
 // stores from here for convenience (matches the prior `client/ui/ui.tsx`

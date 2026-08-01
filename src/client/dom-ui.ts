@@ -50,7 +50,7 @@ import { HtmlTrait } from '../builtins/html';
 import { getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
 import type { SceneTree } from '../core/scene/scene-tree';
 import { query } from '../core/scene/scene-tree';
-import { UILayer } from './ui-layers';
+import { UILayer } from './ui/util/ui-layers';
 import type { Viewport } from './viewport';
 
 // ── shared per-instance state ──────────────────────────────────────

@@ -5,7 +5,16 @@ import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
-import { buildInboundProtocol, clearPendingChanges, localInbound, matchmakingConfig, protocolManifest, registry, reindexRegistry, touch } from '../core/registry';
+import {
+    buildInboundProtocol,
+    clearPendingChanges,
+    localInbound,
+    matchmakingConfig,
+    protocolManifest,
+    registry,
+    reindexRegistry,
+    touch,
+} from '../core/registry';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
@@ -13,8 +22,8 @@ import * as Prefab from '../core/scene/prefab';
 import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import * as SceneTree from '../core/scene/scene-tree';
 import * as Scripts from '../core/scene/scripts';
-import * as Light from '../core/voxels/light';
 import type { Zstd } from '../core/voxels/chunk-codec';
+import * as Light from '../core/voxels/light';
 import * as Avatars from './avatars';
 import * as Chat from './chat';
 import * as Clients from './clients';
@@ -26,14 +35,14 @@ import * as Rooms from './rooms';
 import * as ServerRpc from './rpc';
 import * as Save from './save';
 
+// runtime avatar swap (editor live preview — re-register the edited glb under a
+// fresh modelId + re-stamp the player without a re-join).
+export { reloadClientAvatar } from './avatars';
 // Re-export the registry-dispatch entry so the cli play realms (a dev loop over
 // the play interface) can call `EngineServer.applyRegistryChanges(state)` from
 // their flush handler. The editor + cli EDIT realms go through
 // `engine-server-editor.watchRegistry` instead, so this stays off their path.
 export { applyRegistryChanges } from './registry-dispatch';
-// runtime avatar swap (editor live preview — re-register the edited glb under a
-// fresh modelId + re-stamp the player without a re-join).
-export { reloadClientAvatar } from './avatars';
 export { DEFAULT_SCENE_ID };
 
 export type InitOptions = {

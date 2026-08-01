@@ -13,7 +13,7 @@ import {
     oaFree,
     oaReset,
     oaStorageReport,
-} from '../../../../src/render/voxels/offset-allocator';
+} from '../../../../src/render/common/offset-allocator';
 
 // ── helpers ─────────────────────────────────────────────────────────
 

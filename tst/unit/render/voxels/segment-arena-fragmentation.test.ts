@@ -8,7 +8,7 @@
 
 import { describe, it } from 'vitest';
 
-import { createOffsetAllocator, type OAHandle, oaAllocate, oaFree } from '../../../../src/render/voxels/offset-allocator';
+import { createOffsetAllocator, type OAHandle, oaAllocate, oaFree } from '../../../../src/render/common/offset-allocator';
 
 const CAPACITY_SLOTS = 100_000;
 const SMALL_MIN = 1;

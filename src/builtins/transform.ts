@@ -91,7 +91,7 @@ export const TransformTrait = trait('transform', {
     quaternion: quat.create(),
     scale: vec3.fromValues(1, 1, 1),
 
-    /** sync-only teleport counter. when it changes, client snaps instead of lerping. */
+    /** sync-only teleport counter. when it changes, client snaps instead of interpolating */
     teleport: 0,
 
     // ── computed world-space (runtime-only, lazy recompute) ───────────

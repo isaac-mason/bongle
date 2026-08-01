@@ -34,7 +34,7 @@ import {
 import * as Selection from '../../core/scene/selection';
 import { meshOccupancy, meshToGeometry } from '../../core/voxels/greedy-mesh';
 import { CHUNK_BITS, CHUNK_VOLUME } from '../../core/voxels/voxels';
-import type { TimeResources } from '../../render/time-resources';
+import type { TimeResources } from '../../render/common/time';
 import type { EditRoomState } from '../edit-room-store';
 import {
     BRUSH_EDGES_DEFAULT,

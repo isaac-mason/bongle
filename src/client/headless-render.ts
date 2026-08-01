@@ -12,12 +12,13 @@ import { registry, reindexRegistry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
-import * as CloudResources from '../render/cloud-resources';
-import * as ModelResources from '../render/models/model-resources';
-import * as Performance from '../render/performance';
-import * as Renderer from '../render/renderer';
-import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
-import * as VoxelResources from '../render/voxels/voxel-resources';
+import * as CloudResources from '../render/common/environment/clouds/cloud-resources';
+import * as ModelResources from '../render/common/models/model-resources';
+import * as Performance from './performance';
+import * as VoxelResources from '../render/webgpu/voxels/gpu-frame';
+import * as VoxelArena from '../render/common/voxels/voxel-arena';
+import * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
+import * as Renderer from '../render/webgpu';
 import type { RenderRoomDeps } from './rooms';
 
 /** Persistent GPU + renderer context. Created once per worker: the device
@@ -26,7 +27,7 @@ export type HeadlessRenderContext = {
     renderer: Renderer.Renderer;
     adapter: GPUAdapter;
     performance: Performance.Profile;
-    budget: VoxelResources.VoxelArenaBudget;
+    budget: VoxelArena.VoxelArenaBudget;
 };
 
 /** Stand up a headless renderer. The GPU device is either injected (node: Dawn
@@ -52,7 +53,7 @@ export async function createHeadlessRenderContext(gpu?: {
     const renderer = Renderer.initHeadless({ device, adapter });
     await Renderer.load(renderer);
     const performance = Performance.detect(adapter);
-    const budget = VoxelResources.voxelArenaBudgetForTier(performance);
+    const budget = VoxelArena.voxelArenaBudgetForTier(performance);
     return { renderer, adapter, performance, budget };
 }
 
@@ -77,7 +78,7 @@ export async function buildRenderDeps(
     const rpc = Rpc.init({ send() {}, broadcast() {} });
 
     const cloudResources = CloudResources.init(ctx.renderer.environmentResources);
-    const modelResources = ModelResources.init();
+    const modelResources = ModelResources.init(ctx.renderer.environmentResources);
     const voxelResources = VoxelResources.init(
         registry.blockRegistry,
         ctx.renderer.environmentResources,
@@ -88,6 +89,7 @@ export async function buildRenderDeps(
         voxelResources.atlas,
         voxelResources.texAnimBuffer,
         ctx.renderer.timeResources,
+        ctx.renderer.environmentResources,
     );
 
     // workerCount=0 → synchronous remesh, no nested mesher worker pool (icons mesh
