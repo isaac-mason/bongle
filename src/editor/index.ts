@@ -19,7 +19,7 @@ import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
-import { setActivePlayer } from '../client/rooms';
+import { resolveRoomCamera, setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -489,7 +489,7 @@ script(
         // holds its own camera ref internally; the per-frame sync below
         // (`transformToolState.gizmo.camera = camera`) keeps it pointing
         // at the active POV so swaps don't strand the gizmo on a stale ref.
-        const initialCamera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera;
+        const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
             client.domElement,
@@ -550,7 +550,7 @@ script(
         // motion. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera | null;
             if (!camera) return;
             TransformTool.prePhysicsGrab(transformToolState, room.physics, camera);
         });
@@ -565,7 +565,7 @@ script(
         // fly nor character controller swings the camera.
         onInput(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera | null;
             if (!camera) return;
             const mk = client.input.mouseKeyboard;
             const grab = transformToolState.grab!;
@@ -736,14 +736,14 @@ script(
             // is reflected in the gizmo's projection without rebuilding.
             // TransformControls is third-party and holds its own camera
             // ref, there's no way to avoid this sync.
-            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera | null;
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 
             // shared render clock, threaded into the rainbow selection/inspect
             // materials (by node identity at material-build time) so they flow
             // with the rest of the engine's time-driven animation.
-            const timeResources = client.state!.renderer.renderClock();
+            const timeResources = client.state!.renderer.time;
 
             // sync editor node bodies with the scene tree for broadphase queries
             NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
@@ -1412,7 +1412,7 @@ export function registerClient(state: EngineClient): void {
         switchRoom: (roomId, mode) => {
             for (const room of state.rooms.rooms.values()) {
                 if (room.roomId === roomId && room.playerMode === mode) {
-                    setActivePlayer(state.rooms, state.net, state.renderer, room.playerId);
+                    setActivePlayer(state.rooms, state.net, room.playerId);
                     return;
                 }
             }

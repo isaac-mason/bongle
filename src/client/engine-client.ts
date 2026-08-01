@@ -24,16 +24,17 @@ import * as Animation from '../core/scene/animation';
 import * as Prefab from '../core/scene/prefab';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
+import { loadAtlasMetadata } from '../core/sprites/atlas';
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
 import type { Renderer } from '../render/backend';
-import * as Visibility from '../render/common/cull/visibility';
-import * as Interpolation from '../render/common/interpolation';
-import * as ModelLighting from '../render/common/models/model-lighting';
-import * as Particles from '../render/common/particles/particles';
-import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/common/voxels/voxel-arena';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-arena';
+import * as ModelLighting from '../render/core/models/model-lighting';
+import * as Particles from '../render/core/particles/particles';
+import * as Interpolation from '../render/core/transform/interpolation';
+import * as Visibility from '../render/core/visibility/visibility';
 import { loadRenderBackend } from '../render/load';
 import * as Audio from './audio/audio';
 import * as Chat from './chat';
@@ -180,6 +181,12 @@ export function init(opts: InitOptions) {
          *  their own budgets from `profile.active` (see `voxelArenaBudgetForTier`
          *  in voxel-visuals.ts). */
         performance: null! as Performance.Profile,
+        /** tier-driven caps (cull radius, mesher caps, pixel ratio, ...), resolved
+         *  from `performance` once at boot. The tier is fixed per session, so
+         *  subsystems read this instead of recomputing `settingsForTier` per frame.
+         *  If live tier-switching is ever wired (`Performance.setActive`), recompute
+         *  this at that point. */
+        perfSettings: null! as Performance.Settings,
         /** per-room voxel arena/section sizing, derived from `performance`
          *  once at boot. threaded into every `VoxelVisuals.init` call so
          *  rooms allocate identical-sized arenas regardless of who creates
@@ -212,7 +219,7 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
         playerMode: 'play',
         roomMode: 'play',
     });
-    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, room.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, room.playerId);
     return room;
 }
 
@@ -293,21 +300,23 @@ export async function load(state: EngineClient) {
     // global post-chain pipeline are wired up when the handle is minted (sync,
     // pre-load); this just runs the device handshake (and installs the
     // uncaptured-error listener, both backend-internal now).
-    await state.renderer.load();
+    const caps = await state.renderer.load();
 
-    // adapter is now resolved on the gpucat renderer. detect tier + GPU
+    // the device is now acquired; load() handed back its caps. detect tier + GPU
     // limits up front so every subsystem below can derive its budget
     // from `state.performance.active`.
-    state.performance = state.renderer.detectPerformance();
+    state.performance = Performance.detect(caps);
     state.voxelBudget = voxelArenaBudgetForTier(state.performance);
     const voxelBudget = state.voxelBudget;
-    const settings = Performance.settingsForTier(state.performance);
+    // tier is fixed per session (no live switch wired), so resolve the tier caps
+    // once here; every subsystem + the frame loop reads `state.perfSettings`.
+    state.perfSettings = Performance.settingsForTier(state.performance);
     console.log(
         `[performance] tier=${state.performance.active} (auto=${state.performance.autoDetected}, source=${state.performance.source}) ` +
             `platform=${state.performance.platform} ` +
             `arch="${state.performance.adapterInfo.architecture}" ` +
             `voxelArena=${(voxelBudget.quadArenaBytes / 1024 / 1024).toFixed(0)}MB sections=${voxelBudget.maxSections} ` +
-            `viewRadius=${settings.voxelViewChunkRadius}ch`,
+            `viewRadius=${state.perfSettings.voxelViewChunkRadius}ch`,
     );
     {
         const L = state.performance.limits;
@@ -323,13 +332,17 @@ export async function load(state: EngineClient) {
     // pure construction against the magenta placeholder atlas.
     state.renderer.initResources({ blockRegistry: registry.blockRegistry, voxelBudget });
 
+    // the CPU sprite atlas metadata must be resident before the backend's atlas
+    // load reads it (frame UVs + extrusion bake). Tiny JSON, so await it up front.
+    state.resources.spriteAtlas = await loadAtlasMetadata(state.resources.loader);
+
     // async load pass: the backend pre-warms compile pipelines + fetches the real
     // atlases (rebinding the extruded/particle materials afterwards). Audio isn't a
     // render resource, so it races alongside in its own promise.
     const audioPromise = Audio.loadResources(state.resources.loader);
     const backendLoadPromise = state.renderer.loadResources({
         blockRegistry: registry.blockRegistry,
-        settings,
+        settings: state.perfSettings,
         resources: state.resources,
     });
 
@@ -612,7 +625,6 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         message,
         net: state.net,
         rpc: state.rpc,
-        renderer: state.renderer,
         resources: state.resources,
         audioResources: state.audioResources,
         inbound: state.inbound,
@@ -634,7 +646,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     SceneTree.initSceneTree(room.nodes);
 
     if (existing) {
-        Rooms.disposeRoom(state, existing);
+        Rooms.disposeRoom(existing);
     }
 
     // add to rooms map (additive, replaces if already present). does NOT
@@ -646,7 +658,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
 }
 
 function processActivateRoom(state: EngineClient, message: Protocol.ActivateRoom): void {
-    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, message.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, message.playerId);
 }
 
 function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void {
@@ -654,7 +666,7 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
     const leavingRoom = state.rooms.rooms.get(message.playerId);
 
     if (leavingRoom) {
-        Rooms.disposeRoom(state, leavingRoom);
+        Rooms.disposeRoom(leavingRoom);
     }
 
     // remove the room from our state
@@ -673,7 +685,7 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
         }
 
         if (fallback) {
-            Rooms.setActivePlayer(state.rooms, state.net, state.renderer, fallback.playerId);
+            Rooms.setActivePlayer(state.rooms, state.net, fallback.playerId);
         } else {
             state.rooms.activePlayerId = null;
             useClient.getState().setActivePlayerId(null);
@@ -936,9 +948,10 @@ function processVoxelChunkDel(state: EngineClient, message: Protocol.VoxelChunkD
         room.voxels.dirty.blocks.delete(chunk);
     }
     room.voxels.chunks.delete(key);
-    if (room === Rooms.getActiveRoom(state.rooms)) {
-        state.renderer.removeChunkMesh(key);
-    }
+    // queue the arena removal for the mesher (voxel-visuals.update drains it).
+    // Unconditional + room-agnostic: non-active rooms hold no live arena, and
+    // mountRoom clears stale removals when a room (re)activates.
+    room.voxels.dirty.removed.add(key);
 }
 
 function processVoxelChunkEmpty(state: EngineClient, message: Protocol.VoxelChunkEmpty): void {
@@ -1146,13 +1159,9 @@ export function update(state: EngineClient, delta: number) {
 
     const alpha = state.accumulator / timestep;
 
-    // sync client-global model GPU pools with newly-ready / vanished payloads
-    state.renderer.updateModelResources(state.resources);
-
-    // tier settings, fetch once per tick, threaded to every subsystem
-    // that takes a tier-driven cap (cull radius, mesher caps, ...). reads
-    // through profile.active so a runtime tier flip applies next tick.
-    const perfSettings = Performance.settingsForTier(state.performance);
+    // tier caps (cull radius, mesher caps, ...), resolved once at boot; threaded
+    // to every subsystem that takes a tier-driven cap.
+    const perfSettings = state.perfSettings;
 
     // per-room interpolate, frame hooks, visual update, every room
     // advances even when not active; inactive viewports are display:none
@@ -1190,13 +1199,12 @@ export function update(state: EngineClient, delta: number) {
         // protocol messages.
         Chat.tick(room.chat, state.net, room.roomId);
 
-        // resolve the active POV camera (POV node's CameraTrait) and
-        // bind it to the renderer. pulls viewport aspect from canvasTarget,
-        // writes it back into the POV camera (gated on aspect change),
-        // then reassigns the scene pass camera so the next render reads it
-        // directly. must run AFTER user frame scripts (they write pose/fov
-        // on the POV camera) and BEFORE any consumer that reads it.
-        const povCamera = state.renderer.getRenderCamera(room);
+        // resolve this room's POV camera into the backend's `Renderer.camera`
+        // (pose/fov from the POV node's CameraTrait, aspect from its canvasTarget)
+        // for the cull below. resolution is backend-neutral math (render/common/
+        // camera); the client just hands over the camera object. must run AFTER user
+        // frame scripts (they write pose/fov on the POV camera) and BEFORE any reader.
+        const povCamera = Rooms.resolveRoomCamera(state.renderer.camera, room);
         if (!povCamera) continue;
 
         // per-mesh frustum cull with the fresh camera. Refits each renderable
@@ -1236,25 +1244,30 @@ export function update(state: EngineClient, delta: number) {
         SceneTree.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
 
-        // all per-room GPU visuals (voxel mesher [active room only] + arena
-        // metrics, voxel-mesh, model, dom-ui, sprite, extruded-sprite, shadow,
-        // particle) are owned by the backend and driven in one call, order + Debug
-        // labels preserved. Must run AFTER Animation.tick (world matrices) and
-        // BEFORE Audio.updateForFrame.
-        state.renderer.updateRoom(room, {
-            isActive: room === activeRoom,
-            povCamera,
-            viewport: state.viewport,
-            resources: state.resources,
-            now: performance.now() / 1000,
-        });
-
         // refresh listener pose + node-bound panners, reap finished
-        // one-shots.
+        // one-shots. (audio reads settled node/listener poses only — independent of
+        // the GPU visuals below, which is why the render tick can run after the loop.)
         Debug.begin(room.clientMetrics, 'audio');
         Audio.updateForFrame(room.audio, room);
         Debug.end(room.clientMetrics, 'audio');
     }
+
+    // resolve the active room's POV into `Renderer.camera` for the render tick + the
+    // draw (the per-room loop above left the camera on whichever room it visited
+    // last). null when the active room has no POV camera.
+    const activeCamera = activeRoom ? Rooms.resolveRoomCamera(state.renderer.camera, activeRoom) : null;
+
+    // one render tick: the renderer reconciles its visual slot to the active room
+    // (build/mount/flush on entry, teardown on exit — null tears down), then, if a
+    // room is active, polls the model pools + drives its visuals + meshes it. Runs
+    // once after the per-room loop so every room's animation is settled first; keying
+    // off `activeRoom` means it can never mesh a stale/backgrounded room.
+    state.renderer.updateFrame(activeRoom, {
+        viewport: state.viewport,
+        resources: state.resources,
+        now: performance.now() / 1000,
+        povCamera: activeCamera,
+    });
 
     /* render, only the active room renders to the GPU each frame */
     if (activeRoom) {
@@ -1262,7 +1275,7 @@ export function update(state: EngineClient, delta: number) {
         // flushes scene world-matrices in its render (setActiveScene), binding both
         // the main and overlay scenes for the pass.
         Debug.begin(activeRoom.clientMetrics, 'render');
-        state.renderer.render(activeRoom, perfSettings.voxelViewChunkRadius);
+        state.renderer.render(perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
         /* metrics, request server-side stats for every room the client
@@ -1346,7 +1359,7 @@ export function update(state: EngineClient, delta: number) {
 
 export function dispose(state: EngineClient): void {
     for (const room of state.rooms.rooms.values()) {
-        Rooms.disposeRoom(state, room);
+        Rooms.disposeRoom(room);
     }
     state.rooms.rooms.clear();
     state.rooms.activePlayerId = null;

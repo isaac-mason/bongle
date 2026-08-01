@@ -1,4 +1,4 @@
-import { CanvasTarget, Scene } from 'gpucat';
+import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
 import { mat4, quat } from 'mathcat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
@@ -20,20 +20,20 @@ import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import { useEditor } from '../editor/editor-store';
-import type { Renderer } from '../render/backend';
-import * as Visibility from '../render/common/cull/visibility';
-import type * as CloudResourcesNs from '../render/common/environment/clouds/cloud-resources';
-import * as Environment from '../render/common/environment/environment';
-import * as ModelLighting from '../render/common/models/model-lighting';
-import type * as ModelResourcesNs from '../render/common/models/model-resources';
-import * as ModelVisuals from '../render/common/models/model-visuals';
-import * as Particles from '../render/common/particles/particles';
-import * as VoxelArena from '../render/common/voxels/voxel-arena';
-import type * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
-import * as VoxelMeshVisuals from '../render/common/voxels/voxel-mesh-visuals';
-import * as VoxelVisuals from '../render/common/voxels/voxel-visuals';
+import * as RenderCamera from '../render/camera';
+import * as ModelLighting from '../render/core/models/model-lighting';
+import * as Particles from '../render/core/particles/particles';
+import * as Visibility from '../render/core/visibility/visibility';
+import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
+import * as Environment from '../render/environment/environment';
+import type * as ModelResourcesNs from '../render/models/model-resources';
+import * as ModelVisuals from '../render/models/model-visuals';
+import * as VoxelArena from '../render/voxels/voxel-arena';
+import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import type * as VoxelResourcesNs from '../render/voxels/voxel-resources-gpu';
+import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import type * as WebGpu from '../render/webgpu';
-import type * as VoxelResourcesNs from '../render/webgpu/voxels/gpu-frame';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
 import * as Chat from './chat';
@@ -169,9 +169,10 @@ export type ClientRoom = {
     /** server-side log buffer, fed by `debug_logs` packets while subscribed. */
     serverLogs: Debug.Logs;
 
-    // per-room GPU visuals (voxel / voxel-mesh / model / sprite / extruded-sprite
-    // / shadow / particle / domUi) are owned by the render backend, keyed by this
-    // ClientRoom in `state.renderer.rooms` (see render/webgpu/room-visuals).
+    // GPU visuals (voxel / voxel-mesh / model / sprite / extruded-sprite / shadow
+    // / particle / domUi) are owned by the render backend and exist only for the
+    // ACTIVE room, in `state.active` (see render/webgpu/room-visuals). Non-active
+    // rooms still simulate; they just hold no visual bundle.
 
     /** per-room particle pool. fixed capacity; spawn fills slots,
      *  `Particles.update` compacts dead ones. advanced per-frame (variable
@@ -322,8 +323,8 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     const scene = new Scene();
     const envResources = deps.renderer.environmentResources;
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources);
-    const voxelMeshVisuals = VoxelMeshVisuals.init(scene, nodes, deps.voxelMeshResources);
-    const modelVisuals = ModelVisuals.init(scene, nodes, deps.modelResources);
+    const voxelMeshVisuals = VoxelMeshVisuals.init(deps.voxelMeshResources.batch, scene, nodes);
+    const modelVisuals = ModelVisuals.init(deps.modelResources.batch, scene, nodes);
     const visibility = Visibility.init();
     const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
     const envVisuals = Environment.initEnvVisuals(scene, envResources, deps.cloudResources);
@@ -351,8 +352,8 @@ export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void 
     VoxelVisuals.unmountRoom(deps.voxelResources);
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
-    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, room.scene, room.visibility);
-    ModelVisuals.dispose(room.modelVisuals, room.visibility);
+    VoxelMeshVisuals.dispose(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
+    ModelVisuals.dispose(room.modelVisuals, deps.modelResources.batch, room.visibility);
     Environment.disposeEnvVisuals(room.envVisuals);
 }
 
@@ -451,9 +452,6 @@ export type CreateRoomOptions = {
     net: Net.ClientNet;
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
-    /** the renderer handle, to build this room's per-room visuals from the
-     *  client-global GPU resources it owns. */
-    renderer: Renderer;
     /** engine-global audio resources. pass through to createRoomCore so
      *  the per-room Audio coordinator can be set up. */
     audioResources: Audio.AudioResources;
@@ -492,7 +490,6 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         local: false,
         net: opts.net,
         rpc: opts.rpc,
-        renderer: opts.renderer,
         resources: opts.resources,
         audioResources: opts.audioResources,
         nodes,
@@ -517,7 +514,6 @@ type CreateRoomCoreOptions = {
     net: Net.ClientNet;
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
-    renderer: Renderer;
     audioResources: Audio.AudioResources;
     /**
      * pre-populated room core, sceneGraph, voxels, physics, context
@@ -616,7 +612,6 @@ function findPlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, roomId: 
 function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, local } = opts;
     const { nodes, voxels, physics, clock, chat, context, playerNode } = opts;
-    const { renderer } = opts;
 
     const input = Input.createInput();
 
@@ -688,8 +683,8 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     // per-room env CONFIG — pure client CPU state (time / sky / cloud settings).
     // `applyTime`/`applyConfig` mutate this shadow; the renderer reads it and owns
-    // all the env RENDER state (sky/cloud meshes, GPU flush) in its per-room
-    // `createRoomVisuals` (below). No backend resources touched here.
+    // all the env RENDER state (sky/cloud meshes, GPU flush), built when it
+    // reconciles this room into its active slot. No backend resources touched here.
     const environment = ClientEnv.createEnvironment(ENVIRONMENT_DEFAULT);
 
     // per-room audio coordinator. master gain + active-playback set are
@@ -765,13 +760,14 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         editorClipboard: null,
     };
 
-    // the room's GPU visuals (voxel/model/sprite/.../domUi) are owned by the
-    // backend, keyed by this room. builds them from the room's scene graph +
-    // the backend's client-global resources.
-    renderer.createRoomVisuals(room);
+    // the room's GPU visuals (voxel/model/sprite/.../domUi) are backend-owned and
+    // built when the renderer reconciles this room into its active slot (driven by
+    // `state.activePlayerId`), so only the active room holds a visual bundle.
+    // Nothing to build here.
 
-    // append touchOverlay after createRoomVisuals (which created the DOM overlay
-    // via DomUi.init); paint order is set by UILayer z-index, not DOM order.
+    // append touchOverlay into the room viewport; paint order is set by UILayer
+    // z-index, not DOM order, so it composes correctly once the active room's DOM
+    // overlay is built on activation.
     viewport.appendChild(touchOverlay);
 
     return room;
@@ -944,7 +940,6 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         local: true,
         net: state.net,
         rpc: state.rpc,
-        renderer: state.renderer,
         resources: state.resources,
         audioResources: state.audioResources,
         nodes: nodes,
@@ -990,7 +985,7 @@ export function stopLocalRoom(state: EngineClient, roomId: string): void {
     if (!room.local) {
         throw new Error(`[bongle] stopLocalRoom: room '${roomId}' is server-backed; only local rooms can be stopped`);
     }
-    disposeRoom(state, room);
+    disposeRoom(room);
     state.rooms.rooms.delete(room.playerId);
     useClient.getState().removeRoom(room.playerId);
     // mirror the registry: drop the synthetic RoomInfo we added in
@@ -1013,18 +1008,19 @@ export function findRoomByRoomId(state: Rooms, roomId: string): ClientRoom | und
 }
 
 /**
- * dispose gpu resources for a room. `state` supplies the engine-global
- * resources a few teardowns need (e.g. the extruded-sprite geometry pool
- * to release this room's refcounts back into).
+ * Tear down a room's non-render resources (physics, audio, DOM). The room's GPU
+ * visuals are backend-owned and released by the renderer's reconcile/`dispose`, not
+ * here — a non-active room has none, and the active room's are torn down when the
+ * renderer next reconciles away from it.
  */
-export function disposeRoom(state: EngineClient, room: ClientRoom): void {
+export function disposeRoom(room: ClientRoom): void {
     Physics.dispose(room.physics);
-    // per-room GPU visuals (incl. domUi + releasing the active world's arena
-    // chunks) are backend-owned; dispose them together.
-    state.renderer.disposeRoomVisuals(room);
-    // room.environment is pure client CPU config — nothing to dispose. Its render
-    // state (env meshes/clouds) is backend-owned and dropped by disposeRoomVisuals
-    // above; the engine-global env GPU buffers live for the engine's lifetime.
+    // if this was the active room, its GPU visuals (incl. domUi + arena chunks) are
+    // backend-owned; the renderer tears them down when it reconciles to the next
+    // active room (or null) on the following `updateFrame`, or at `dispose()`. A
+    // non-active room has no visuals, so there's nothing to release here.
+    // room.environment is pure client CPU config — nothing to dispose. The
+    // engine-global env GPU buffers live for the engine's lifetime.
     if (room.audio) Audio.dispose(room.audio);
     room.disposeCanvasTouchListeners();
     room.viewport.remove();
@@ -1039,28 +1035,26 @@ export function getActiveRoom(state: Rooms): ClientRoom | null {
     return state.rooms.get(state.activePlayerId) ?? null;
 }
 
-/** set the active Player and update the editor store. */
-export function setActivePlayer(state: Rooms, net: Net.ClientNet, renderer: Renderer, playerId: PlayerId): void {
-    const prevRoom = state.activePlayerId !== null ? (state.rooms.get(state.activePlayerId) ?? null) : null;
+/**
+ * Resolve `camera` (the backend's `Renderer.camera`) into `room`'s live POV: pose +
+ * fov from its active CameraTrait, aspect from its canvas target. Returns the camera,
+ * or null when the room has no active POV. Resolution is backend-neutral math
+ * (`render/common/camera`); the client just hands the backend's stable camera object
+ * to it — the cull, the editor tools, and the draw all share the one camera.
+ */
+export function resolveRoomCamera(camera: PerspectiveCamera, room: ClientRoom): PerspectiveCamera | null {
+    const cameraTrait = SceneTree.getTrait(room.client.camera, CameraTrait) ?? null;
+    return RenderCamera.resolvePovCamera(camera, cameraTrait, room.canvasTarget);
+}
+
+/** set the active Player and update the editor store. The renderer isn't touched
+ *  here — it reconciles its visuals to `state.activePlayerId` on the next
+ *  `updateFrame` (build/mount/flush on entry, teardown on exit). */
+export function setActivePlayer(state: Rooms, net: Net.ClientNet, playerId: PlayerId): void {
     state.activePlayerId = playerId;
     useClient.getState().setActivePlayerId(playerId);
     const room = state.rooms.get(playerId);
     if (!room) return;
-
-    // engine-global env buffers hold one room's state at a time. on
-    // activation, force-push this room's CPU shadow so any rebind
-    // matches what its scripts have set (otherwise the previously
-    // active room's sky/config would still be on the GPU until the
-    // first frame finishes ticking).
-    renderer.flushRoomEnv(room);
-
-    // single-world arena: clear the world we're leaving (freeing its arena chunks
-    // + mesh worker cache) and mount the new active room, which marks its chunks
-    // dirty so the prioritised remesh path cycles them in over the next few frames.
-    if (prevRoom && prevRoom !== room) {
-        renderer.unmountRoom();
-    }
-    renderer.mountRoom(room);
 
     // toggle viewport visibility, only the active room's viewport (and
     // therefore its canvas + script overlays) is shown.

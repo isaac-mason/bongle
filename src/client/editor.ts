@@ -96,8 +96,8 @@ export function enterLocalEditorView(room: ClientRoom): void {
 
     // snapshot the outgoing view pose BEFORE swapping, so the lens starts where
     // the play camera was and entry is seamless. Read the active camera node's
-    // world transform directly (the same pose getRenderCamera would copy into the
-    // pipeline camera) — reaching the renderer from client code would be a cycle.
+    // world transform directly (the same pose the render camera resolves from) —
+    // reaching the renderer from client code would be a cycle.
     const srcTransform = room.client.camera ? getTrait(room.client.camera, TransformTrait) : null;
     const srcPos = srcTransform ? (Array.from(getWorldPosition(srcTransform)) as [number, number, number]) : null;
     const srcQuat = srcTransform ? (Array.from(getWorldQuaternion(srcTransform)) as [number, number, number, number]) : null;

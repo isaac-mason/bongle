@@ -31,7 +31,7 @@ import {
     queueMesh,
     setMeshRegistry,
     type WorkerLike,
-} from '../../../../src/render/common/voxels/mesh-dispatcher';
+} from '../../../../src/render/voxels/mesh-dispatcher';
 
 beforeAll(() => {
     registerAllShapes();

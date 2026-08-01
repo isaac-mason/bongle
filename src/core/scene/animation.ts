@@ -1,5 +1,4 @@
 import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { env } from '../../env';
 import { AnimatorTrait } from '../../builtins/animator';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';
@@ -10,9 +9,10 @@ import {
     TRANSFORM_DIRTY_WORLD_MATRIX,
     TransformTrait,
 } from '../../builtins/transform';
+import { env } from '../../env';
 import type { ClipChannel, ClipChannels, ClipDef } from '../models/handle';
 import * as Resources from '../resources';
-import { addTrait, findChildByName, getTrait, type Node, type SceneTree, query } from './scene-tree';
+import { addTrait, findChildByName, getTrait, type Node, query, type SceneTree } from './scene-tree';
 
 // ── types ────────────────────────────────────────────────────────────
 
@@ -442,29 +442,29 @@ function collectDescendantNames(node: Node, out: Set<string>): void {
  * so the per-frame walk doesn't rebuild bitsets / hash each call.
  */
 export type Animations = {
-    _query: ReturnType<typeof query<[typeof AnimatorTrait]>>;
+    animators: ReturnType<typeof query<[typeof AnimatorTrait]>>;
     /** monotonic per-room frame counter, drives LOD stride/phase gating in
      *  the per-animator tick. Wraps would only matter past ~10⁹ frames. */
-    _frameCount: number;
+    frameCount: number;
     /** room-scoped counter handed out as `_lodPhase` to each animator on its
      *  first tick. Ensures N rigs at stride 2 split across both phase buckets
      *  rather than all sampling on the same frame. */
-    _nextLodPhase: number;
+    nextLodPhase: number;
 };
 
 export function init(sceneTree: SceneTree): Animations {
-    return { _query: query(sceneTree, [AnimatorTrait]), _frameCount: 0, _nextLodPhase: 0 };
+    return { animators: query(sceneTree, [AnimatorTrait]), frameCount: 0, nextLodPhase: 0 };
 }
 
 export function tick(animations: Animations, resources: Resources.Resources, dt: number): void {
-    animations._frameCount++;
-    for (const [animator] of animations._query) {
+    animations.frameCount++;
+    for (const [animator] of animations.animators) {
         const node = animator._node;
         if (!node) continue;
         if (!animator._state) animator._state = createAnimatorState();
         const state = animator._state;
-        if (state._lodPhase < 0) state._lodPhase = animations._nextLodPhase++;
-        tickAnimator(state, node, resources, dt, animator.lod, animations._frameCount);
+        if (state._lodPhase < 0) state._lodPhase = animations.nextLodPhase++;
+        tickAnimator(state, node, resources, dt, animator.lod, animations.frameCount);
     }
 }
 

@@ -12,12 +12,12 @@ import { registry, reindexRegistry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
-import * as CloudResources from '../render/common/environment/clouds/cloud-resources';
-import * as ModelResources from '../render/common/models/model-resources';
-import * as VoxelArena from '../render/common/voxels/voxel-arena';
-import * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
+import * as CloudResources from '../render/environment/clouds/cloud-resources';
+import * as ModelResources from '../render/models/model-resources';
+import * as VoxelArena from '../render/voxels/voxel-arena';
+import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
+import * as VoxelResources from '../render/voxels/voxel-resources-gpu';
 import * as Renderer from '../render/webgpu';
-import * as VoxelResources from '../render/webgpu/voxels/gpu-frame';
 import * as Performance from './performance';
 import type { RenderRoomDeps } from './rooms';
 
@@ -51,8 +51,8 @@ export async function createHeadlessRenderContext(gpu?: {
         device = await adapter.requestDevice();
     }
     const renderer = Renderer.initHeadless({ device, adapter });
-    await Renderer.load(renderer);
-    const performance = Performance.detect(adapter);
+    const caps = await Renderer.load(renderer);
+    const performance = Performance.detect(caps);
     const budget = VoxelArena.voxelArenaBudgetForTier(performance);
     return { renderer, adapter, performance, budget };
 }

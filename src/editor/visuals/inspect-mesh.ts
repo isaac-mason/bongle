@@ -11,7 +11,7 @@ import { TransformTrait } from '../../builtins/transform';
 import type { Resources } from '../../core/resources';
 import type { Node } from '../../core/scene/scene-tree';
 import { getTrait } from '../../core/scene/scene-tree';
-import type { TimeResources } from '../../render/common/time';
+import type { TimeResources } from '../../render/time';
 import { unionSubtreeWorldAabb } from '../node-aabb';
 import { INSPECT_OUTLINE } from './editor-colors';
 import { rainbowLineColor } from './rainbow';

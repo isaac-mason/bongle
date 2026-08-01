@@ -45,11 +45,11 @@ import { bumpVersion, logPendingChanges, type RegistryStore, registry, reindexRe
 import * as Resources from '../core/resources';
 import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
+import { loadAtlasMetadata } from '../core/sprites/atlas';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
 import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
-import * as Performance from './performance';
 
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const allStores = [
@@ -251,7 +251,6 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
  */
 export async function refreshBlockResources(state: EngineClient): Promise<void> {
     const blockRegistry = registry.blockRegistry;
-    const activeRoom = state.rooms.activePlayerId !== null ? (state.rooms.rooms.get(state.rooms.activePlayerId) ?? null) : null;
 
     // per-room voxel DATA: repoint each room's registry + re-resolve its chunks.
     // this is independent of the GPU resource swap (which reads the block registry
@@ -261,18 +260,15 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
         resolveAllChunks(room.voxels);
     }
 
-    // swap the voxel + voxel-mesh GPU resources and (if they changed) rebuild every
-    // room's voxel visuals against them, remounting the active room. Owned by the
-    // backend since it spans the client-global resources + every room's visuals.
-    await state.renderer.refreshBlockResources(
-        {
-            blockRegistry,
-            voxelBudget: state.voxelBudget,
-            settings: Performance.settingsForTier(state.performance),
-            resources: state.resources,
-        },
-        activeRoom,
-    );
+    // swap the voxel + voxel-mesh GPU resources and (if they changed) rebuild the
+    // active room's voxel visuals against them, remounting its world. Owned by the
+    // backend since it spans the client-global resources + the active room's visuals.
+    await state.renderer.refreshBlockResources({
+        blockRegistry,
+        voxelBudget: state.voxelBudget,
+        settings: state.perfSettings,
+        resources: state.resources,
+    });
 
     // notify browser-side consumers that the block registry / texture atlas
     // changed, so they can rebuild — e.g. the editor's in-browser block-icon
@@ -290,6 +286,9 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
  * clears the silhouette pool, and rebuilds each room's extruded-sprite visuals.
  */
 export async function refreshSpriteResources(state: EngineClient): Promise<void> {
+    // reload the CPU atlas metadata first (the render swap reads it for the new
+    // frame UVs + extrusion bake), then swap the GPU atlas.
+    state.resources.spriteAtlas = await loadAtlasMetadata(state.resources.loader);
     await state.renderer.refreshSpriteResources({ resources: state.resources });
 }
 

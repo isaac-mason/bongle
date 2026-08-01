@@ -18,6 +18,7 @@ import { type Model, type ModelMesh, toModel } from './models/model';
 import { unpack } from './models/model-bin';
 import { gltfUnpack } from './models/model-glb';
 import type { ResourceLoader } from './resource-loader';
+import type { SpriteAtlasMetadata } from './sprites/atlas';
 
 // ── cached model ────────────────────────────────────────────────────
 
@@ -142,6 +143,11 @@ export type Resources = {
     /** which side this Resources instance runs on. Picks `clientUrl` vs
      *  `serverUrl` in `ensureModel`. Set once at init. */
     side: ResourcesSide;
+    /** sprite atlas sidecar metadata (pixel rects + per-sprite flags), CPU asset
+     *  data loaded via `Sprites.loadAtlasMetadata` at boot + on HMR atlas change.
+     *  null server-side / before load. The render layer reads it to derive frame
+     *  UVs + the extrusion bake; script helpers read native pixel dims from it. */
+    spriteAtlas: SpriteAtlasMetadata | null;
 };
 
 export function init(loader: ResourceLoader, side: ResourcesSide): Resources {
@@ -150,6 +156,7 @@ export function init(loader: ResourceLoader, side: ResourcesSide): Resources {
         modelPayloads: new Map(),
         loader,
         side,
+        spriteAtlas: null,
     };
 }
 

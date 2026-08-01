@@ -13,7 +13,7 @@ import {
     oaFree,
     oaReset,
     oaStorageReport,
-} from '../../../../src/render/common/offset-allocator';
+} from '../../../../src/render/offset-allocator';
 
 // ── helpers ─────────────────────────────────────────────────────────
 

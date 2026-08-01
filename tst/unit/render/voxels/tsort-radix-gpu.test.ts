@@ -13,7 +13,7 @@ import {
     createRadixCountCompute,
     createRadixScanCompute,
     createRadixScatterCompute,
-} from '../../../../src/render/webgpu/voxels/gpu-frame';
+} from '../../../../src/render/voxels/voxel-resources-gpu';
 
 const RADIX_BLOCK = 1024;
 

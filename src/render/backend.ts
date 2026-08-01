@@ -18,28 +18,26 @@ import type { ClientRoom } from '../client/rooms';
 import type { Viewport } from '../client/viewport';
 import type { Resources } from '../core/resources';
 import type { Blocks } from '../core/voxels/block-registry';
-import type { SpriteResources } from './common/sprites/sprite-resources';
-import type { TimeResources } from './common/time';
-import type { VoxelArenaBudget } from './common/voxels/voxel-arena';
+import type { TimeResources } from './time';
+import type { VoxelArenaBudget } from './voxels/voxel-arena';
 
 export type RendererBackendKind = 'webgpu' | 'webgl';
 
 // ── contract parameter types (owned by the contract, not a backend) ──────────
 
-/** Per-frame per-room drive context passed to `updateRoom`. */
-export type UpdateRoomContext = {
-    /** true only for the room whose world is resident in the voxel arena; gates
-     *  the mesher pass + arena metrics. */
-    isActive: boolean;
-    /** the room's live render camera (resolved once via `getRenderCamera`, also
-     *  used by the client's per-frame frustum cull). */
-    povCamera: Camera;
+/** Per-frame drive context passed to `updateFrame`: the engine-global per-frame
+ *  inputs the active room's visuals read, including the client-resolved POV camera. */
+export type FrameContext = {
     /** engine-global viewport dims (for the DOM overlay layout). */
     viewport: Viewport;
     /** engine-global model/animation resources (visuals read them). */
     resources: Resources;
     /** seconds, `performance.now() / 1000`, sampled once for the frame. */
     now: number;
+    /** the active room's POV camera, resolved by the client into `Renderer.camera`
+     *  (via `render/common/camera`); null when the active room has no POV. Drives
+     *  the mesher/dom-ui/sprite/shadow visuals. */
+    povCamera: Camera | null;
 };
 
 /** Options for `initResources` (sync client-global resource build). */
@@ -56,6 +54,15 @@ export type RefreshBlockResourcesOpts = {
 /** Options for `refreshSpriteResources` (HMR sprite-atlas change). */
 export type RefreshSpriteResourcesOpts = { resources: Resources };
 
+/** Backend-neutral GPU device capabilities, read once the device is acquired.
+ *  The client's Performance.detect builds the tier Profile from these. */
+export type RenderDeviceCaps = {
+    maxStorageBufferBindingSize: number;
+    maxBufferSize: number;
+    maxComputeWorkgroupsPerDimension: number;
+    adapterInfo: { vendor: string; architecture: string; description: string };
+};
+
 /**
  * The render backend as one stateful handle. `create()` builds the internal state
  * and returns this; every method operates on that closed-over state, so the client
@@ -66,53 +73,49 @@ export type Renderer = {
     readonly kind: RendererBackendKind;
 
     // ── lifecycle ────────────────────────────────────────────────────────────
-    /** async device handshake; GPU objects defer their real work until here. */
-    load(): Promise<void>;
+    /** async device handshake; GPU objects defer their real work until here.
+     *  Returns the acquired device's capabilities (the client derives its perf
+     *  tier from them via `Performance.detect`). */
+    load(): Promise<RenderDeviceCaps>;
     dispose(): void;
     resize(width: number, height: number): void;
     setInspectorVisible(visible: boolean): void;
-    /** detect the GPU performance tier from the (now-resolved) adapter. */
-    detectPerformance(): Performance.Profile;
     /** the engine-global shared render clock. in-scene editor materials
      *  (selection/inspect rainbow) bind its `elapsedTime` node by identity, the
      *  same shared clock the voxel/cloud materials use. */
-    renderClock(): TimeResources;
+    readonly time: TimeResources;
+    /** the backend's render camera (a stable gpucat PerspectiveCamera the pass
+     *  binds). The client resolves it per-frame into the active room's POV via
+     *  `render/common/camera` — for its own cull + to hand back through `FrameContext`
+     *  — and the editor reads it. Backend-neutral math; not a device resource. */
+    readonly camera: PerspectiveCamera;
 
     // ── client-global resources ────────────────────────────────────────────
     initResources(opts: InitResourcesOpts): void;
     loadResources(opts: LoadResourcesOpts): Promise<void>;
     disposeResources(): void;
-    /** per-frame poll of the model-resource pools (uploads newly-ready models). */
-    updateModelResources(resources: Resources): void;
-    /** drop a chunk's mesh from the voxel arena (edit path). */
-    removeChunkMesh(key: string): void;
-    /** the client-global sprite resources (atlas texture + metadata), or null
-     *  before `initResources`. Script-API escape hatch (`spriteAtlasTexture`,
-     *  `spriteWorldSize`) for advanced sprite sampling. */
-    spriteResources(): SpriteResources | null;
 
-    // ── per-room visuals ─────────────────────────────────────────────────────
-    createRoomVisuals(room: ClientRoom): void;
-    disposeRoomVisuals(room: ClientRoom): void;
-    updateRoom(room: ClientRoom, ctx: UpdateRoomContext): void;
-    /** mount the room's world into the (single-world) voxel arena. */
-    mountRoom(room: ClientRoom): void;
-    /** release the currently-mounted world's arena residency. */
-    unmountRoom(): void;
-    /** force-push a room's env config into the engine-global env UBOs (on activation). */
-    flushRoomEnv(room: ClientRoom): void;
+    // ── active-room visuals ──────────────────────────────────────────────────
+    // Only ONE room renders at a time. The client owns which room is active; the
+    // renderer reconciles its visual bundle to match inside `updateFrame` (build on
+    // entry, teardown on exit) — no explicit activate/deactivate. Simulation runs
+    // for every room the client holds; visuals + render are active-room only.
+    /** the per-frame render tick. Reconciles the active-room visual slot to
+     *  `activeRoom` (null → tear down + render nothing): builds visuals + mounts the
+     *  world + flushes env on entry, tears them down on exit. Then, if a room is
+     *  active, polls the client-global model pools + drives its visuals (mesher,
+     *  models, sprites, dom-ui, ...), resolving the camera internally. */
+    updateFrame(activeRoom: ClientRoom | null, ctx: FrameContext): void;
 
-    // ── camera + render ──────────────────────────────────────────────────────
-    /** resolve the room's live render camera: sync the engine-global pipeline
-     *  camera from the room's active CameraTrait, bind the viewport aspect, and
-     *  return it. Used by the client's per-frame cull + the editor tools. */
-    getRenderCamera(room: ClientRoom): PerspectiveCamera | null;
-    /** render the room. Resolves its camera internally (no camera argument). */
-    render(room: ClientRoom, voxelViewChunkRadius: number): void;
+    // ── render ────────────────────────────────────────────────────────────────
+    /** render the active room, drawing with `camera` (resolved by the client before
+     *  this call). No-op when there is no active room. */
+    render(voxelViewChunkRadius: number): void;
 
     // ── HMR / registry-dispatch driven resource + visual rebuilds ────────────
-    /** returns whether the block/voxel resources actually swapped. */
-    refreshBlockResources(opts: RefreshBlockResourcesOpts, activeRoom: ClientRoom | null): Promise<boolean>;
+    /** returns whether the block/voxel resources actually swapped. rebuilds the
+     *  active room's voxel visuals + remounts its world when they do. */
+    refreshBlockResources(opts: RefreshBlockResourcesOpts): Promise<boolean>;
     /** returns whether the sprite atlas actually changed. */
     refreshSpriteResources(opts: RefreshSpriteResourcesOpts): Promise<boolean>;
 };

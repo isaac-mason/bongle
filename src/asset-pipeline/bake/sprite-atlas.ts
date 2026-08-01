@@ -15,6 +15,7 @@
 import { addSkylineLevel, emptySkyline, findBestFit, type Region } from '../../core/atlas/skyline';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
+import type { SpriteAtlasEntry, SpriteAtlasMetadata, SpriteFrameRect } from '../../core/sprites/atlas';
 import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
 import type { Filesystem } from '../filesystem';
 import { readArtifactHash } from './cache';
@@ -41,26 +42,6 @@ export type BuildSpriteAtlasOptions = {
     fs: Filesystem;
     /** host-injected 2d raster (host-provided; see pipeline InitCtx). */
     raster: Raster;
-};
-
-/** uv rect in pixel coords of the atlas. SpriteResources divides by
- *  atlasSize to produce 0..1 sampler uvs. */
-export type SpriteFrameRect = { x: number; y: number; w: number; h: number };
-
-export type SpriteAtlasEntry = {
-    /** ordered per-frame uv rects. single-element for static sprites. */
-    frames: SpriteFrameRect[];
-    /** atlas gutter (pixels) on each side of each frame. */
-    padding: number;
-    /** generate mips for this sprite on the runtime side. */
-    mipmap: boolean;
-};
-
-export type SpriteAtlasMetadata = {
-    atlasSize: number;
-    sprites: Record<string, SpriteAtlasEntry>;
-    /** content hash over sources + sprite knobs; the rebuild gate. */
-    hash: string;
 };
 
 /**

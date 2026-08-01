@@ -1,0 +1,190 @@
+// ShadowResources, engine-global shadow material.
+//
+// One instance per `EngineClient`, shared across rooms. Per-room
+// `ShadowVisuals` owns the geometry + per-instance vertex buffer (instanced attributes)
+// and routes it to this material by name (`instance`) via
+// `geometry.setBuffer(name, buf)`.
+
+import {
+    add,
+    attribute,
+    cameraProjectionMatrix,
+    cameraViewMatrix,
+    createPlaneGeometry,
+    d,
+    f32,
+    type Geometry,
+    GpuBuffer,
+    layoutStrideOf,
+    Material,
+    Mesh,
+    mul,
+    struct,
+    vec3f,
+    vec4f,
+} from 'gpucat';
+
+// ── shared gpu structs ──────────────────────────────────────────────
+//
+// Exported so per-room ShadowVisuals can pack into the matching layout.
+
+// One struct per live shadow. groundPos is the raycast hit point
+// (already shifted up by a small Y epsilon). radius is the half-width
+// of the disc in world units. Invisible casters don't occupy a slot.
+export const ShadowInstance = struct('ShadowInstance', {
+    groundPos: d.vec3f,
+    radius: d.f32,
+});
+
+export const SHADOW_INSTANCE_STRIDE = layoutStrideOf(ShadowInstance);
+
+// ── instance batch (client-global, persistent GPU allocation) ───────
+// The plane geometry + per-instance vertex buffer + their Mesh live here, NOT on
+// per-room visuals. One room renders at a time, so a room swap REUSES this
+// allocation (reset `head` + re-add the Mesh) instead of freeing + reallocating
+// it. Dense swap-pop layout: slots are `[0, head)`, drawn via `mesh.count`.
+
+const INITIAL_INSTANCE_CAPACITY = 64;
+
+type GpuBufferType = GpuBuffer<any>;
+
+/** minimal shape the batch's `slotOwner` needs: the per-instance state's mutable
+ *  slot. `ShadowVisualState` (owned by shadow-visuals) satisfies this — kept
+ *  structural so resources doesn't import back from visuals. */
+type SlotOwner = { slot: number };
+
+export type ShadowBatch = {
+    /** one Mesh(plane, material); added to the active room's scene on `init`,
+     *  removed on `dispose`. Never disposed on a room swap. `mesh.count = head`. */
+    mesh: Mesh;
+    geometry: Geometry;
+    instanceBuf: GpuBufferType;
+    /** dense alive prefix `[0, head)` of `instanceBuf`. */
+    head: number;
+    capacity: number;
+    /** parallel to instanceBuf: which state owns slot i (null for free). */
+    slotOwner: (SlotOwner | null)[];
+};
+
+/** Build the client-global instance batch: a shared 1×1 plane with a per-instance
+ *  vertex buffer, wrapped in a Mesh with the engine-global material. Not added to
+ *  any scene until a room `init`s. */
+function createShadowBatch(material: Material): ShadowBatch {
+    const capacity = INITIAL_INSTANCE_CAPACITY;
+
+    // Shared 1×1 plane geometry; the VS reads aPosition.xy as world-XZ offsets.
+    const geometry = createPlaneGeometry(1, 1);
+
+    const instanceBuf = new GpuBuffer(d.array(ShadowInstance), {
+        data: new Float32Array((capacity * SHADOW_INSTANCE_STRIDE) / 4),
+        usage: 'vertex',
+    });
+    geometry.setBuffer('instance', instanceBuf);
+
+    const mesh = new Mesh(geometry, material);
+    mesh.name = 'shadow-visuals';
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+
+    return {
+        mesh,
+        geometry,
+        instanceBuf,
+        head: 0,
+        capacity,
+        slotOwner: new Array(capacity).fill(null),
+    };
+}
+
+/** Ready the batch for a fresh room: empty the dense head + slot ownership.
+ *  Buffers are NOT touched — every visible slot re-writes each frame. */
+export function resetShadowBatch(batch: ShadowBatch): void {
+    batch.head = 0;
+    batch.mesh.count = 0;
+    batch.slotOwner.fill(null);
+}
+
+// gpucat tracks buffer swaps by GpuBuffer identity; routing a fresh wrapper via
+// `geometry.setBuffer(name, newBuf)` rebuilds the material's bind groups.
+export function growShadowBatch(batch: ShadowBatch, newCapacity: number): void {
+    const oldArr = batch.instanceBuf.array as Float32Array;
+    const floats = (newCapacity * SHADOW_INSTANCE_STRIDE) / 4;
+    const newArr = new Float32Array(floats);
+    newArr.set(oldArr.subarray(0, Math.min(oldArr.length, floats)));
+    const newBuf = new GpuBuffer(d.array(ShadowInstance), { data: newArr, usage: 'vertex' });
+    batch.geometry.setBuffer('instance', newBuf);
+    batch.instanceBuf.dispose();
+    batch.instanceBuf = newBuf;
+
+    batch.slotOwner.length = newCapacity;
+    for (let i = batch.capacity; i < newCapacity; i++) batch.slotOwner[i] = null;
+    batch.capacity = newCapacity;
+}
+
+function disposeShadowBatch(batch: ShadowBatch): void {
+    // Called once at client shutdown, never on room swap.
+    batch.geometry.dispose();
+    batch.instanceBuf.dispose();
+}
+
+// ── public type ─────────────────────────────────────────────────────
+
+export type ShadowResources = {
+    /** engine-global shadow material, reads the per-instance vertex buffer by name (`instance`)
+     *  as instanced attributes. */
+    material: Material;
+    /** client-global instance batch (plane Mesh + per-instance buffer + dense
+     *  head). Reused across room swaps; per-room `ShadowVisuals` drive it. */
+    batch: ShadowBatch;
+};
+
+// ── public api ──────────────────────────────────────────────────────
+
+export function init(): ShadowResources {
+    const material = createShadowMaterial();
+    const batch = createShadowBatch(material);
+    return { material, batch };
+}
+
+export function dispose(res: ShadowResources): void {
+    disposeShadowBatch(res.batch);
+    res.material.dispose();
+}
+
+// ── internals ───────────────────────────────────────────────────────
+
+function createShadowMaterial(): Material {
+    const aPosition = attribute('position', d.vec3f);
+
+    // per-instance data via instanced vertex attributes (both backends). the
+    // per-room ShadowVisuals provides the `instance` buffer by name (usage:
+    // 'vertex'); std430 field offsets: groundPos vec3f@0, radius@12. a single dense
+    // instanced draw, so instanceIndex indexes the buffer directly (no slotMap).
+    const groundPos = attribute('instance', d.vec3f, { instanced: true, stride: SHADOW_INSTANCE_STRIDE, offset: 0 }).toVar(
+        'shGround',
+    );
+    const radius = attribute('instance', d.f32, { instanced: true, stride: SHADOW_INSTANCE_STRIDE, offset: 12 }).toVar('shR');
+
+    // World-XZ-aligned ground quad: aPosition.x/y in [-0.5..0.5] map to
+    // world X/Z offsets scaled by the disc diameter (2 * radius). Y is
+    // pinned to groundPos.y so the quad sits flush on the hit surface.
+    const diameter = mul(radius, f32(2)).toVar('shDiam');
+    const worldX = add(groundPos.x, mul(aPosition.x, diameter)).toVar('shWX');
+    const worldZ = add(groundPos.z, mul(aPosition.y, diameter)).toVar('shWZ');
+    const worldPos3 = vec3f(worldX, groundPos.y, worldZ).toVar('shWP');
+    const clipPos = mul(cameraProjectionMatrix, mul(cameraViewMatrix, vec4f(worldPos3, f32(1)))).toVar('shClip');
+
+    const fragment = vec4f(0, 0, 0, 1).toVar('shColor');
+
+    return new Material({
+        name: 'shadow-batched',
+        vertex: clipPos,
+        fragment,
+        // shadow disc has no back face (it's flat on the ground), but
+        // 'none' is cheaper than picking a side and matches sprite.
+        cullMode: 'none',
+        depthTest: true,
+        depthWrite: true,
+        transparent: false,
+    });
+}

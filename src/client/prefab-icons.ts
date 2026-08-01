@@ -20,13 +20,13 @@ import { addChild, createNode, createPrefabConfig, query, setPrefab } from '../c
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, chunkKey, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
-import * as Environment from '../render/common/environment/environment';
-import * as Interpolation from '../render/common/interpolation';
-import * as ModelResources from '../render/common/models/model-resources';
-import { meshInfoIndexOf } from '../render/common/models/model-resources';
-import * as ModelVisuals from '../render/common/models/model-visuals';
-import * as VoxelArena from '../render/common/voxels/voxel-arena';
-import * as VoxelMeshVisuals from '../render/common/voxels/voxel-mesh-visuals';
+import * as Interpolation from '../render/core/transform/interpolation';
+import * as Environment from '../render/environment/environment';
+import * as ModelResources from '../render/models/model-resources';
+import { meshInfoIndexOf } from '../render/models/model-resources';
+import * as ModelVisuals from '../render/models/model-visuals';
+import * as VoxelArena from '../render/voxels/voxel-arena';
+import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import * as Renderer from '../render/webgpu';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
@@ -142,8 +142,8 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // model + voxel-mesh visuals (register cull entries; offline pass draws all).
-        ModelVisuals.update(room.modelVisuals, deps.modelResources, deps.resources, room.visibility);
-        VoxelMeshVisuals.update(room.voxelMeshVisuals, room.voxels, room.visibility);
+        ModelVisuals.update(room.modelVisuals, deps.modelResources.batch, deps.modelResources, deps.resources, room.visibility);
+        VoxelMeshVisuals.update(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.voxels, room.visibility);
 
         // ── frame + render ──
         const aabb = computeSceneAabb(room, deps);

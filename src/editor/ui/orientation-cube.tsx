@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { resolveRoomCamera } from '../../client/rooms';
 import { useEditor } from '../editor-store';
 import { getEditorClient } from '../index';
 
@@ -173,7 +174,7 @@ export function OrientationCube() {
         const tick = () => {
             const r = roomRef.current;
             const rc = getEditorClient();
-            const camera = r && rc ? rc.renderer.getRenderCamera(r) : null;
+            const camera = r && rc ? resolveRoomCamera(rc.renderer.camera, r) : null;
             if (camera) {
                 const m = camera.matrixWorldInverse;
                 const a0 = m[0],

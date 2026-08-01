@@ -2,11 +2,10 @@
  * Script-facing sprite API.
  *
  * Module-scope `sprite()` declaration primitive + source-type re-exports
- * + a small set of ctx-taking free fns for advanced consumers (custom
- * materials, body-size-from-sprite). Mirrors `api/audio.ts`'s shape,
- * server-safe shims that gate on `ctx.client?.state?.spriteResources`
- * and return `null` when the resource isn't up (server side, or before
- * the client has finished `load()`).
+ * + `spriteWorldSize()`, a ctx-taking helper that reads native pixel dims
+ * from the CPU atlas metadata (`ctx.client?.state?.resources?.spriteAtlas`).
+ * Server-safe: returns `null` when the metadata isn't up (server side, or
+ * before the client has finished `load()`).
  *
  * Per `feedback_no_speculative_precompute`: `sampleSprite()` +
  * `spriteWhiteUv()` are the shader-node fragment surface and depend on
@@ -16,7 +15,6 @@
  * first caller.
  */
 
-import type { Texture } from 'gpucat';
 import type { ScriptContext } from '../core/scene/scripts';
 import type { SpriteHandle } from '../core/sprites/sprites';
 
@@ -42,25 +40,14 @@ export { draw, sprite } from '../core/sprites/sprites';
 export const DEFAULT_PIXELS_PER_UNIT = 16;
 
 /**
- * Resolve the engine-global sprite atlas `Texture`, escape hatch for
- * advanced scripts that want to write a custom material sampling the
- * atlas directly. Returns `null` server-side or before the client has
- * finished `load()`. Prefer `sampleSprite()` (step 7) over raw atlas
- * access where possible, atlas-layout shifts on every registry change,
- * but `sampleSprite()`'s LUT indirection absorbs them.
- */
-export function spriteAtlasTexture(ctx: ScriptContext): Texture | null {
-    const res = ctx.client?.state?.renderer?.spriteResources() ?? null;
-    if (!res) return null;
-    return res.atlas;
-}
-
-/**
  * World-space `[width, height]` of a sprite, derived from its native
  * pixel dims (frame 0 if the sprite is a flipbook) divided by
  * `pixelsPerUnit` (defaults to `DEFAULT_PIXELS_PER_UNIT`). Returns
  * `null` server-side, before the client has booted, or before the
  * asset pipeline has emitted this sprite into the atlas.
+ *
+ * Reads the CPU atlas metadata (`Resources.spriteAtlas`) directly, no
+ * renderer involvement, pixel dims are asset data, not a GPU resource.
  *
  * Convenience for keeping an `AabbBody` size in sync with the visual,
  * body owns its own size concern per "own table for sub-concepts",
@@ -71,9 +58,8 @@ export function spriteWorldSize(
     sprite: SpriteHandle,
     opts?: { pixelsPerUnit?: number },
 ): [number, number] | null {
-    const res = ctx.client?.state?.renderer?.spriteResources() ?? null;
-    if (!res?.metadata) return null;
-    const entry = res.metadata.sprites[sprite.spriteId];
+    const meta = ctx.client?.state?.resources?.spriteAtlas ?? null;
+    const entry = meta?.sprites[sprite.spriteId];
     if (!entry) return null;
     const frame = entry.frames[0];
     if (!frame) return null;

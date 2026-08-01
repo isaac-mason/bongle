@@ -12,9 +12,12 @@
 // from the settings UI without re-detecting.
 //
 // usage:
-//   const profile = detect(state.renderer.renderer._adapter);
+//   const caps = await renderer.load();        // backend hands back device caps
+//   const profile = detect(caps);
 //   setActive(profile, 'standard', 'user');   // user override
 //   const s = settingsForTier(profile);       // read tier knobs here
+
+import type { RenderDeviceCaps } from '../render/backend';
 
 const TIER_ORDER = ['low', 'standard'] as const;
 export type Tier = (typeof TIER_ORDER)[number];
@@ -141,7 +144,7 @@ function detectPlatform(): Platform {
     return 'desktop';
 }
 
-function detectAutoTier(_adapter: GPUAdapter, _platform: Platform): Tier {
+function detectAutoTier(): Tier {
     if (typeof navigator === 'undefined') return 'standard';
 
     // Chrome-only; undefined on Firefox/Safari → falsy, treated as standard.
@@ -168,23 +171,16 @@ function readStoredTier(): Tier | null {
     }
 }
 
-export function detect(adapter: GPUAdapter): Profile {
+export function detect(caps: RenderDeviceCaps): Profile {
     const platform = detectPlatform();
-    const autoDetected = detectAutoTier(adapter, platform);
+    const autoDetected = detectAutoTier();
     const stored = readStoredTier();
 
     const limits: Limits = {
-        maxArenaBytes: Math.min(adapter.limits.maxStorageBufferBindingSize, adapter.limits.maxBufferSize),
-        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-        maxBufferSize: adapter.limits.maxBufferSize,
-        maxComputeWorkgroupsPerDimension: adapter.limits.maxComputeWorkgroupsPerDimension,
-    };
-
-    const info = adapter.info;
-    const adapterInfo = {
-        vendor: (info?.vendor as string) ?? '',
-        architecture: (info?.architecture as string) ?? '',
-        description: (info?.description as string) ?? '',
+        maxArenaBytes: Math.min(caps.maxStorageBufferBindingSize, caps.maxBufferSize),
+        maxStorageBufferBindingSize: caps.maxStorageBufferBindingSize,
+        maxBufferSize: caps.maxBufferSize,
+        maxComputeWorkgroupsPerDimension: caps.maxComputeWorkgroupsPerDimension,
     };
 
     return {
@@ -192,7 +188,7 @@ export function detect(adapter: GPUAdapter): Profile {
         autoDetected,
         source: stored ? 'user' : 'auto',
         limits,
-        adapterInfo,
+        adapterInfo: caps.adapterInfo,
         platform,
     };
 }

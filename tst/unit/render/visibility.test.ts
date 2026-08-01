@@ -3,7 +3,7 @@ import { box3, mat4 } from 'mathcat';
 import { describe, expect, it } from 'vitest';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree } from '../../../src/core/scene/scene-tree';
-import * as Visibility from '../../../src/render/common/cull/visibility';
+import * as Visibility from '../../../src/render/core/visibility/visibility';
 
 function makeCamera(): PerspectiveCamera {
     const cam = new PerspectiveCamera(Math.PI / 3, 1, 0.1, 100);

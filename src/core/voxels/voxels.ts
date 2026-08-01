@@ -844,8 +844,14 @@ export type Voxels = {
      *  `markChunkLightDirty` only. consumed by discovery's per-client
      *  chunk_light streaming. kept separate from `blocks` so the server
      *  doesn't have to filter a growing `blocks` set every tick to find
-     *  light-only changes. */
-    dirty: { blocks: Set<Chunk>; light: Set<Chunk> };
+     *  light-only changes.
+     *
+     *  `removed` is chunk keys the server dropped from `chunks`; the client
+     *  renderer's `voxel-visuals.update` drains it to evict those meshes from
+     *  the arena. Data-driven so the client stays room-agnostic — only the
+     *  active room's arena is maintained; non-active rooms rebuild fresh on
+     *  activation (which clears this set). */
+    dirty: { blocks: Set<Chunk>; light: Set<Chunk>; removed: Set<string> };
     /** xz-column index, chunks at the same (cx, cz) sorted by cy descending.
      *  maintained by `ensureChunk` and rebuilt by `loadVoxels`. lets
      *  sky-light / heightmap / surface code walk only chunks that actually
@@ -864,7 +870,7 @@ export type Voxels = {
 export function createVoxels(registry: Blocks): Voxels {
     return {
         chunks: new Map(),
-        dirty: { blocks: new Set(), light: new Set() },
+        dirty: { blocks: new Set(), light: new Set(), removed: new Set() },
         columns: new Map(),
         registry,
         authority: null,
