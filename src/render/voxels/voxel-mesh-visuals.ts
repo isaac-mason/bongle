@@ -43,7 +43,7 @@ import { buildMeshInput, createMeshOutput, meshChunk } from '../../core/voxels/c
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
 import type { Voxels } from '../../core/voxels/voxels';
-import * as Visibility from '../core/visibility/visibility';
+import * as Visibility from '../visibility/visibility';
 import { arenaAlloc, arenaFree, arenaWrite } from './voxel-arena';
 import {
     allocateSlot,

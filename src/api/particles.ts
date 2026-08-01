@@ -17,7 +17,7 @@
 import type { Vec3 } from 'mathcat';
 import type { ParticleHandle } from '../core/particles/particles';
 import type { ScriptContext } from '../core/scene/scripts';
-import { allocateSlot, type SpawnOpts } from '../render/core/particles/particles';
+import { allocateSlot, type SpawnOpts } from '../render/particles/particles';
 
 export { particleUpdate } from '../core/particles/particle-update';
 export type {
@@ -28,7 +28,7 @@ export type {
     ParticleUpdateFn,
 } from '../core/particles/particles';
 export { particle } from '../core/particles/particles';
-export type { SpawnOpts } from '../render/core/particles/particles';
+export type { SpawnOpts } from '../render/particles/particles';
 
 /**
  * spawn a particle of the given type at world `pos` into the active

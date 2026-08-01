@@ -9,13 +9,13 @@
 // mesh subtree to decide visibility + a centroid. Off-screen models pay the
 // sample; the meshes themselves are still frustum-culled downstream.
 
-import { getVisualWorldMatrix } from '../../../api/transforms';
-import { ModelTrait } from '../../../builtins/model';
-import { TransformTrait } from '../../../builtins/transform';
-import type { SceneTree } from '../../../core/scene/scene-tree';
-import { query } from '../../../core/scene/scene-tree';
-import { sampleVoxelLight } from '../../../core/voxels/light';
-import type { Voxels } from '../../../core/voxels/voxels';
+import { getVisualWorldMatrix } from '../../api/transforms';
+import { ModelTrait } from '../../builtins/model';
+import { TransformTrait } from '../../builtins/transform';
+import type { SceneTree } from '../../core/scene/scene-tree';
+import { query } from '../../core/scene/scene-tree';
+import { sampleVoxelLight } from '../../core/voxels/light';
+import type { Voxels } from '../../core/voxels/voxels';
 
 type LightingQuery = ReturnType<typeof query<[typeof ModelTrait, typeof TransformTrait]>>;
 

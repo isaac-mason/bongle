@@ -47,10 +47,10 @@
 // stamped on the pool) so collision primitives can query the world
 // without the pool carrying a back-ref. pure-motion fns ignore the arg.
 
-import type { ParticleHandle, ParticlePool, ParticleUpdateFn } from '../../../core/particles/particles';
-import type { Voxels } from '../../../core/voxels/voxels';
+import type { ParticleHandle, ParticlePool, ParticleUpdateFn } from '../../core/particles/particles';
+import type { Voxels } from '../../core/voxels/voxels';
 
-export type { ParticlePool } from '../../../core/particles/particles';
+export type { ParticlePool } from '../../core/particles/particles';
 
 /** per-room pool size. fixed at room creation; spawn returns `-1` when
  *  full (caller decides whether to silently drop or warn). 8k is well

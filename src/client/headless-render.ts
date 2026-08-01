@@ -1,116 +1,44 @@
-// Headless render-deps assembler for a canvas-less, window-less context — the
-// pipeline worker's in-worker icon renderer. Builds the same engine render
-// resources `engine-client.load()` does, minus everything presentation-coupled
-// (no input, viewport, React UI, net, or DOM canvas). The GPU device + renderer
-// are created once (`createHeadlessRenderContext`); the per-bake resources are
-// rebuilt (`buildRenderDeps`) so the voxel atlas always reflects the latest bake.
-//
-// Both `createRenderRoom` consumers — the live client and this — go through the
-// same `RenderRoomDeps` seam, so block/prefab icon rendering is identical code.
+// Headless render context for the pipeline worker's icon bakers. Thin wrapper
+// over the offline render backend seam (`render/offline`): `createHeadlessRenderContext`
+// stands one up (backend chosen by `selectBackend()` — honours a forwarded
+// `?renderer=`), and `buildRenderDeps` rebuilds the per-bake render resources
+// through it. All backend specifics (device, voxel producer, readback) live behind
+// the `OfflineRenderer` handle, so block/prefab icon rendering is backend-neutral.
 
-import { registry, reindexRegistry } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
-import * as Resources from '../core/resources';
-import * as Rpc from '../core/rpc';
-import * as CloudResources from '../render/environment/clouds/cloud-resources';
-import * as ModelResources from '../render/models/model-resources';
-import * as VoxelArena from '../render/voxels/voxel-arena';
-import * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
-import * as VoxelResources from '../render/voxels/voxel-resources-gpu';
-import * as Renderer from '../render/webgpu';
-import * as Performance from './performance';
+import { loadOfflineBackend, type OfflineRenderer } from '../render/offline';
+import type * as VoxelArena from '../render/voxels/voxel-arena';
+import type * as Performance from './performance';
 import type { RenderRoomDeps } from './rooms';
 
-/** Persistent GPU + renderer context. Created once per worker: the device
+/** Persistent offline render context. Created once per worker: the device
  *  handshake and pipeline compiles are expensive and atlas-independent. */
 export type HeadlessRenderContext = {
-    renderer: Renderer.WebGpuState;
-    adapter: GPUAdapter;
+    offline: OfflineRenderer;
     performance: Performance.Profile;
     budget: VoxelArena.VoxelArenaBudget;
 };
 
-/** Stand up a headless renderer. The GPU device is either injected (node: Dawn
- *  via the `webgpu` pkg, which has no `navigator.gpu`) or requested from
- *  `navigator.gpu` (browser worker — WebGPU is not DOM-bound). */
+/** Stand up a headless renderer via the offline seam. `gpu` is the injected Node
+ *  Dawn device (WebGPU); the browser worker leaves it undefined and the backend
+ *  acquires its own. The concrete backend is `selectBackend()`'s choice. */
 export async function createHeadlessRenderContext(gpu?: {
     device: GPUDevice;
     adapter: GPUAdapter;
 }): Promise<HeadlessRenderContext> {
-    let adapter: GPUAdapter;
-    let device: GPUDevice;
-    if (gpu) {
-        ({ device, adapter } = gpu);
-    } else {
-        if (typeof navigator === 'undefined' || !navigator.gpu) {
-            throw new Error('[headless-render] WebGPU unavailable here (no navigator.gpu)');
-        }
-        const requested = await navigator.gpu.requestAdapter();
-        if (!requested) throw new Error('[headless-render] no GPU adapter');
-        adapter = requested;
-        device = await adapter.requestDevice();
-    }
-    const renderer = Renderer.initHeadless({ device, adapter });
-    const caps = await Renderer.load(renderer);
-    const performance = Performance.detect(caps);
-    const budget = VoxelArena.voxelArenaBudgetForTier(performance);
-    return { renderer, adapter, performance, budget };
+    const offline = await loadOfflineBackend(gpu);
+    return { offline, performance: offline.performance, budget: offline.budget };
 }
 
 /**
- * Build a `RenderRoomDeps` (+ its teardown) against the realm's live registry and
- * the just-baked assets read through `loader`. Rebuilt per bake so the voxel
- * atlas reflects the latest baked textures; the persistent `ctx` renderer/device
- * is reused. Arena index 0 is free here (no live world room to coexist with).
+ * Rebuild the `RenderRoomDeps` (+ teardown) against the just-baked assets read
+ * through `loader`. Delegates to the offline backend, which picks its voxel
+ * producer (WebGPU compute / WebGL CPU) and wires `deps.offline` back to itself.
+ * Rebuilt per bake so the voxel atlas reflects the latest baked textures.
  */
-export async function buildRenderDeps(
+export function buildRenderDeps(
     ctx: HeadlessRenderContext,
     loader: ResourceLoader,
 ): Promise<{ deps: RenderRoomDeps; dispose: () => void }> {
-    // this path doesn't call engine-client.load(), so rebuild the derived index
-    // fields from the (baked) registrations before reading block registry
-    reindexRegistry(registry);
-
-    const resources = Resources.init(loader, 'client');
-
-    // no net in a headless render room; context only stores this, and a
-    // `local:` room's send no-ops anyway. static handles satisfy the driver shape.
-    const rpc = Rpc.init({ send() {}, broadcast() {} });
-
-    const cloudResources = CloudResources.init(ctx.renderer.environmentResources);
-    const modelResources = ModelResources.init(ctx.renderer.environmentResources);
-    const voxelResources = VoxelResources.init(
-        registry.blockRegistry,
-        ctx.renderer.environmentResources,
-        ctx.budget,
-        ctx.renderer.timeResources,
-    );
-    const voxelMeshResources = VoxelMeshResources.init(
-        voxelResources.atlas,
-        voxelResources.texAnimBuffer,
-        ctx.renderer.timeResources,
-        ctx.renderer.environmentResources,
-    );
-
-    // workerCount=0 → synchronous remesh, no nested mesher worker pool (icons mesh
-    // inline via meshChunk); still fetches + decodes the baked atlas (worker-safe
-    // createImageBitmap path). consumers gate on `voxelResources.atlasReady`.
-    await VoxelResources.load(voxelResources, registry.blockRegistry, 0, 0, resources, ctx.renderer.renderer);
-
-    const deps: RenderRoomDeps = {
-        resources,
-        rpc,
-        renderer: ctx.renderer,
-        voxelResources,
-        voxelMeshResources,
-        modelResources,
-        cloudResources,
-    };
-    const dispose = (): void => {
-        VoxelResources.dispose(voxelResources);
-        VoxelMeshResources.dispose(voxelMeshResources);
-        ModelResources.dispose(modelResources);
-        CloudResources.dispose(cloudResources);
-    };
-    return { deps, dispose };
+    return ctx.offline.rebuildDeps(loader);
 }

@@ -34,7 +34,7 @@ import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { query, type SceneTree } from '../../core/scene/scene-tree';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
-import * as Visibility from '../core/visibility/visibility';
+import * as Visibility from '../visibility/visibility';
 import {
     CENTER_BIT,
     growSpriteBatch,

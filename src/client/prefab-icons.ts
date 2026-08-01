@@ -8,7 +8,7 @@
 // isometric ortho camera fit to its AABB, and rendered. One prefab → one tile;
 // the caller caches by id and invalidates on registry change.
 
-import { OrthographicCamera, RenderTarget, readPixels } from 'gpucat';
+import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { MeshTrait } from '../builtins/mesh';
 import { computeWorldTransforms, getVisualWorldMatrix, TransformTrait } from '../builtins/transform';
@@ -20,14 +20,13 @@ import { addChild, createNode, createPrefabConfig, query, setPrefab } from '../c
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, chunkKey, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
-import * as Interpolation from '../render/core/transform/interpolation';
 import * as Environment from '../render/environment/environment';
 import * as ModelResources from '../render/models/model-resources';
 import { meshInfoIndexOf } from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
+import * as Interpolation from '../render/transform/interpolation';
 import * as VoxelArena from '../render/voxels/voxel-arena';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import * as Renderer from '../render/webgpu';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
 
@@ -55,14 +54,11 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     const def = engineRegistry.prefabs.byId.get(prefabId);
     if (!def) return null;
 
-    await deps.voxelResources.atlasReady;
-    // wait for the shared voxel compute pipelines to compile before the offline
-    // render dispatches them (see block-icons for the same guard).
-    await deps.voxelResources.computeReady;
-
+    // `deps` is render-ready when `buildRenderDeps` returns (atlas uploaded +
+    // backend voxel producer ready), so no per-baker readiness gate here.
     const room = createRenderRoom(deps);
     applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
-    Environment.flushActive(room.environment, deps.renderer.environmentResources);
+    Environment.flushActive(room.environment, deps.environmentResources);
     // hide the sky/cloud meshes (config.enabled=false) — no per-frame
     // updateForCamera on the offline icon path, so sync visibility directly.
     Environment.syncEnvVisibility(room.envVisuals, room.environment);
@@ -149,19 +145,11 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         const aabb = computeSceneAabb(room, deps);
         if (!aabb) return null;
         const camera = fitOrthoIsometric(aabb);
-        const pipeline = Renderer.createOfflinePipeline(deps.renderer, room.scene, camera);
+        const pipeline = deps.offline.createPipeline(room.scene, camera);
         try {
             room.scene.updateWorldMatrix();
-            Renderer.renderRoomToTarget(
-                deps.renderer,
-                deps.voxelResources,
-                room.scene,
-                camera,
-                target,
-                pipeline,
-                Number.POSITIVE_INFINITY,
-            );
-            const pixels = await readPixels(deps.renderer.renderer, target);
+            deps.offline.renderToTarget(deps, room, camera, target, pipeline, Number.POSITIVE_INFINITY);
+            const pixels = await deps.offline.readTarget(target);
             return { pixels, pxSize: ICON_PX };
         } finally {
             pipeline.dispose();

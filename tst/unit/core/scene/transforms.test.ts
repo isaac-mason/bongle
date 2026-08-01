@@ -26,7 +26,7 @@ import {
     worldToLocalPosition,
     worldToLocalQuaternion,
 } from '../../../../src/builtins/transform';
-import { interpolate, snapshot } from '../../../../src/render/core/transform/interpolation';
+import { interpolate, snapshot } from '../../../../src/render/transform/interpolation';
 import {
     addChild,
     addTrait,

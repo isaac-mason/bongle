@@ -8,7 +8,7 @@
 // room down. Same `createRenderRoom` → populate → `renderRoomToTarget` → dispose
 // shape as prefab icons — blocks just populate one voxel instead of a prefab.
 
-import { OrthographicCamera, RenderTarget, readPixels } from 'gpucat';
+import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
 import { MODEL_NONE } from '../core/voxels/block-registry';
@@ -16,7 +16,6 @@ import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chun
 import { ensureChunk, setBlock } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import * as VoxelArena from '../render/voxels/voxel-arena';
-import * as Renderer from '../render/webgpu';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
@@ -69,11 +68,8 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     }
     if (renderable.length === 0) return EMPTY_ATLAS;
 
-    await voxelResources.atlasReady;
-    // the offline render dispatches the shared voxel computes directly; wait for
-    // their pipelines to compile (init() assigns voxelResources before load()
-    // compiles them) or setPipeline binds a null pipeline.
-    await voxelResources.computeReady;
+    // `deps` is render-ready when `buildRenderDeps` returns (atlas uploaded +
+    // backend voxel producer ready), so no per-baker readiness gate here.
 
     const cols = Math.ceil(Math.sqrt(renderable.length));
     const rows = Math.ceil(renderable.length / cols);
@@ -87,7 +83,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     // side faces and the sky/cloud meshes don't bleed in — the classic
     // inventory-icon look (per-face directional factor still gives the 3D read).
     applyEnvConfig(room.environment, { enabled: false, sun: { intensity: 0 } }, PRESETS);
-    Environment.flushActive(room.environment, deps.renderer.environmentResources);
+    Environment.flushActive(room.environment, deps.environmentResources);
     // hide the sky/cloud meshes (config.enabled=false) — no per-frame
     // updateForCamera on the offline icon path, so sync visibility directly.
     Environment.syncEnvVisibility(room.envVisuals, room.environment);
@@ -113,7 +109,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
         depthFormat: 'depth24plus',
         samples: 1,
     });
-    const pipeline = Renderer.createOfflinePipeline(deps.renderer, room.scene, camera);
+    const pipeline = deps.offline.createPipeline(room.scene, camera);
     const meshOutput = createMeshOutput();
     const packer = voxelResources.arenas.packer;
 
@@ -143,16 +139,8 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             }
             VoxelArena.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh);
 
-            Renderer.renderRoomToTarget(
-                deps.renderer,
-                voxelResources,
-                room.scene,
-                camera,
-                target,
-                pipeline,
-                Number.POSITIVE_INFINITY,
-            );
-            blitTile(atlasPixels, atlasWidth, await readPixels(deps.renderer.renderer, target), ICON_PX, col, row);
+            deps.offline.renderToTarget(deps, room, camera, target, pipeline, Number.POSITIVE_INFINITY);
+            blitTile(atlasPixels, atlasWidth, await deps.offline.readTarget(target), ICON_PX, col, row);
         }
     } finally {
         pipeline.dispose();

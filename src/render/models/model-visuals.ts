@@ -35,7 +35,7 @@ import * as Resources from '../../core/resources';
 import type { Node, SceneTree } from '../../core/scene/scene-tree';
 import { getTrait, query } from '../../core/scene/scene-tree';
 import { env } from '../../env';
-import * as Visibility from '../core/visibility/visibility';
+import * as Visibility from '../visibility/visibility';
 import {
     allocateSlot,
     freeSlot,

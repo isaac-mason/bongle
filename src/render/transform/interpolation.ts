@@ -35,7 +35,7 @@
  */
 
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
-import { RigidBodyTrait } from '../../../builtins/rigid-body';
+import { RigidBodyTrait } from '../../builtins/rigid-body';
 import {
     getWorldMatrix,
     hasTransformedParent,
@@ -47,11 +47,11 @@ import {
     TRANSFORM_DIRTY_INTERPOLATED_TRS,
     type TransformTrait,
     updateInterpolatedWorldTransform,
-} from '../../../builtins/transform';
-import type { PlayerId } from '../../../core/client';
-import { getTrait, type SceneTree } from '../../../core/scene/scene-tree';
+} from '../../builtins/transform';
+import type { PlayerId } from '../../core/client';
+import { getTrait, type SceneTree } from '../../core/scene/scene-tree';
 
-export { resetInterpolation, setInterpolation } from '../../../builtins/transform';
+export { resetInterpolation, setInterpolation } from '../../builtins/transform';
 
 // ── constants ───────────────────────────────────────────────────────────
 

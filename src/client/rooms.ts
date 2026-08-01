@@ -21,19 +21,20 @@ import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import { useEditor } from '../editor/editor-store';
 import * as RenderCamera from '../render/camera';
-import * as ModelLighting from '../render/core/models/model-lighting';
-import * as Particles from '../render/core/particles/particles';
-import * as Visibility from '../render/core/visibility/visibility';
 import type * as CloudResourcesNs from '../render/environment/clouds/cloud-resources';
 import * as Environment from '../render/environment/environment';
+import * as ModelLighting from '../render/models/model-lighting';
 import type * as ModelResourcesNs from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
+import type { OfflineRenderer } from '../render/offline';
+import * as Particles from '../render/particles/particles';
+import * as Visibility from '../render/visibility/visibility';
 import * as VoxelArena from '../render/voxels/voxel-arena';
 import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import type * as VoxelResourcesCpuNs from '../render/voxels/voxel-resources-cpu';
 import type * as VoxelResourcesNs from '../render/voxels/voxel-resources-gpu';
 import * as VoxelVisuals from '../render/voxels/voxel-visuals';
-import type * as WebGpu from '../render/webgpu';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
 import * as Chat from './chat';
@@ -303,8 +304,15 @@ export type RenderRoom = {
 export type RenderRoomDeps = {
     resources: Resources;
     rpc: SceneTreeContext['rpc'];
-    renderer: WebGpu.WebGpuState;
-    voxelResources: VoxelResourcesNs.VoxelResources;
+    /** engine-global env GPU buffers the offline renderer flushes into (neutral
+     *  render type, was reached via the backend state). */
+    environmentResources: Environment.EnvironmentResources;
+    /** the headless render backend handle — pipeline/render/readback ops. */
+    offline: OfflineRenderer;
+    /** gpu (WebGPU compute producer) or cpu (WebGL cullEmit producer); the offline
+     *  backend that built these deps knows which. Bakers touch only the shared
+     *  surface (atlas / atlasReady / arenas); each backend narrows in renderToTarget. */
+    voxelResources: VoxelResourcesNs.VoxelResources | VoxelResourcesCpuNs.VoxelResources;
     voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
     modelResources: ModelResourcesNs.ModelResources;
     cloudResources: CloudResourcesNs.CloudResources;
@@ -321,7 +329,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     nodes.context = context;
 
     const scene = new Scene();
-    const envResources = deps.renderer.environmentResources;
+    const envResources = deps.environmentResources;
     const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources);
     const voxelMeshVisuals = VoxelMeshVisuals.init(deps.voxelMeshResources.batch, scene, nodes);
     const modelVisuals = ModelVisuals.init(deps.modelResources.batch, scene, nodes);

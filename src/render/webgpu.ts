@@ -1,8 +1,8 @@
 // The entire WebGPU render backend, one file: state + lifecycle, client-global
-// resources (was resources.ts), active-room visuals (was room-visuals.ts), the
-// per-frame render tick, offline icon baking, and the `create()` handle. It's
-// composition + lifecycle glue over the shared modules + the WebGPU
-// voxel producer; the sibling `webgl/index.ts` mirrors it minus compute + offline.
+// resources, active-room visuals, the per-frame render tick, offline icon baking,
+// and the `create()` handle. Composition + lifecycle glue over the shared render
+// modules + the WebGPU voxel producer (compute cull/emit); the sibling `webgl.ts`
+// mirrors it with the CPU `cullEmit` producer in place of compute.
 
 import {
     type Camera,
@@ -13,16 +13,20 @@ import {
     pass,
     RenderPipeline,
     type RenderTarget,
+    readPixels,
     renderOutput,
     type Scene,
     WebGPURenderer,
 } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import * as DomUi from '../client/dom-ui';
-import type * as Performance from '../client/performance';
-import type { ClientRoom } from '../client/rooms';
+import * as Performance from '../client/performance';
+import type { ClientRoom, RenderRoomDeps } from '../client/rooms';
 import * as Debug from '../core/debug';
-import type { Resources as EngineResources } from '../core/resources';
+import { registry, reindexRegistry } from '../core/registry';
+import type { ResourceLoader } from '../core/resource-loader';
+import { type Resources as EngineResources, init as initEngineResources } from '../core/resources';
+import * as Rpc from '../core/rpc';
 import type { Blocks } from '../core/voxels/block-registry';
 import type { FrameContext, RenderDeviceCaps, Renderer } from './backend';
 import * as RenderCamera from './camera';
@@ -30,6 +34,7 @@ import * as CloudResources from './environment/clouds/cloud-resources';
 import * as Environment from './environment/environment';
 import * as ModelResources from './models/model-resources';
 import * as ModelVisuals from './models/model-visuals';
+import type { OfflineRenderer } from './offline';
 import * as ParticleResources from './particles/particle-resources';
 import * as ParticleVisuals from './particles/particle-visuals';
 import { createRenderPipeline, type EngineRenderPipeline, setActiveScene, updateCameraEnvironment } from './pipeline';
@@ -225,6 +230,108 @@ export function renderRoomToTarget(
     if (dispatches.length > 0) state.renderer.compute(dispatches);
     pipeline.render();
     state.renderer.renderTarget = savedTarget;
+}
+
+/** Stand up the WebGPU offline backend (the `OfflineRenderer` handle behind
+ *  `render/offline`'s `loadOfflineBackend`). Device is injected (Node Dawn) or
+ *  requested from `navigator.gpu` (browser worker). Wraps the offline functions
+ *  above + `readPixels` into the backend-neutral contract. */
+export async function createOffline(gpu?: { device: GPUDevice; adapter: GPUAdapter }): Promise<OfflineRenderer> {
+    let device: GPUDevice;
+    let adapter: GPUAdapter;
+    if (gpu) {
+        ({ device, adapter } = gpu);
+    } else {
+        if (typeof navigator === 'undefined' || !navigator.gpu) {
+            throw new Error('[webgpu offline] WebGPU unavailable here (no navigator.gpu)');
+        }
+        const requested = await navigator.gpu.requestAdapter();
+        if (!requested) throw new Error('[webgpu offline] no GPU adapter');
+        adapter = requested;
+        device = await adapter.requestDevice();
+    }
+    const state = initHeadless({ device, adapter });
+    const caps = await load(state);
+    const performance = Performance.detect(caps);
+    const budget = VoxelArena.voxelArenaBudgetForTier(performance);
+    const offline: OfflineRenderer = {
+        kind,
+        caps,
+        performance,
+        budget,
+        rebuildDeps: (loader) => buildOfflineDeps(state, offline, budget, loader),
+        createPipeline: (scene, camera) => createOfflinePipeline(state, scene, camera),
+        renderToTarget: (deps, room, camera, target, pipeline, radius) =>
+            // deps built by this backend's buildOfflineDeps → voxelResources is the gpu type.
+            renderRoomToTarget(
+                state,
+                deps.voxelResources as VoxelResources.VoxelResources,
+                room.scene,
+                camera,
+                target,
+                pipeline,
+                radius,
+            ),
+        readTarget: (target) => readPixels(state.renderer, target),
+        dispose: () => dispose(state),
+    };
+    return offline;
+}
+
+/**
+ * Build a `RenderRoomDeps` (+ teardown) for the offline icon room, against the
+ * realm's live registry and the just-baked assets read through `loader`. Rebuilt
+ * per bake so the voxel atlas reflects the latest baked textures; the persistent
+ * `state` renderer/device is reused. Arena index 0 is free (no live world room).
+ */
+async function buildOfflineDeps(
+    state: WebGpuState,
+    offline: OfflineRenderer,
+    budget: VoxelArena.VoxelArenaBudget,
+    loader: ResourceLoader,
+): Promise<{ deps: RenderRoomDeps; dispose: () => void }> {
+    // this path doesn't call engine-client.load(), so rebuild the derived index
+    // fields from the (baked) registrations before reading the block registry.
+    reindexRegistry(registry);
+
+    const resources = initEngineResources(loader, 'client');
+    // no net in a headless render room; a `local:` room's send no-ops anyway.
+    const rpc = Rpc.init({ send() {}, broadcast() {} });
+
+    const cloudResources = CloudResources.init(state.environmentResources);
+    const modelResources = ModelResources.init(state.environmentResources);
+    const voxelResources = VoxelResources.init(registry.blockRegistry, state.environmentResources, budget, state.timeResources);
+    const voxelMeshResources = VoxelMeshResources.init(
+        voxelResources.atlas,
+        voxelResources.texAnimBuffer,
+        state.timeResources,
+        state.environmentResources,
+    );
+
+    // workerCount=0 → synchronous remesh (icons mesh inline via meshChunk); still
+    // fetches + decodes the baked atlas. rebuildDeps returns render-ready deps: wait
+    // for the atlas upload AND the voxel compute pipelines to compile (WebGPU-only —
+    // the offline render dispatches them), so the bakers never gate on it themselves.
+    await VoxelResources.load(voxelResources, registry.blockRegistry, 0, 0, resources, state.renderer);
+    await Promise.all([voxelResources.atlasReady, voxelResources.computeReady]);
+
+    const deps: RenderRoomDeps = {
+        resources,
+        rpc,
+        environmentResources: state.environmentResources,
+        offline,
+        voxelResources,
+        voxelMeshResources,
+        modelResources,
+        cloudResources,
+    };
+    const disposeDeps = (): void => {
+        VoxelResources.dispose(voxelResources);
+        VoxelMeshResources.dispose(voxelMeshResources);
+        ModelResources.dispose(modelResources);
+        CloudResources.dispose(cloudResources);
+    };
+    return { deps, dispose: disposeDeps };
 }
 
 // ═══════════════ the handle ═══════════════
