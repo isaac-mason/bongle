@@ -47,9 +47,9 @@ import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
-import * as Performance from './performance';
 import * as Audio from './audio/audio';
 import type { EngineClient } from './engine-client';
+import * as Performance from './performance';
 
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const allStores = [
@@ -264,8 +264,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
     // swap the voxel + voxel-mesh GPU resources and (if they changed) rebuild every
     // room's voxel visuals against them, remounting the active room. Owned by the
     // backend since it spans the client-global resources + every room's visuals.
-    await state.renderBackend.refreshBlockResources(
-        state.renderer,
+    await state.renderer.refreshBlockResources(
         {
             blockRegistry,
             voxelBudget: state.voxelBudget,
@@ -291,7 +290,7 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
  * clears the silhouette pool, and rebuilds each room's extruded-sprite visuals.
  */
 export async function refreshSpriteResources(state: EngineClient): Promise<void> {
-    await state.renderBackend.refreshSpriteResources(state.renderer, { resources: state.resources });
+    await state.renderer.refreshSpriteResources({ resources: state.resources });
 }
 
 /**

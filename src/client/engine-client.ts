@@ -28,17 +28,13 @@ import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
-import type { RenderBackendModule } from '../render/backend';
-import * as RenderCamera from '../render/common/camera';
+import type { Renderer } from '../render/backend';
 import * as Visibility from '../render/common/cull/visibility';
 import * as Interpolation from '../render/common/interpolation';
 import * as ModelLighting from '../render/common/models/model-lighting';
-import * as ModelResources from '../render/common/models/model-resources';
 import * as Particles from '../render/common/particles/particles';
-import * as VoxelArena from '../render/common/voxels/voxel-arena';
 import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/common/voxels/voxel-arena';
 import { loadRenderBackend } from '../render/load';
-import type * as Renderer from '../render/webgpu';
 import * as Audio from './audio/audio';
 import * as Chat from './chat';
 import * as Device from './device';
@@ -128,13 +124,11 @@ export function init(opts: InitOptions) {
 
     return {
         mode,
-        /** engine-global renderer handle. constructed in `load()` after the
-         *  backend module is dynamically imported (code-split), so it starts null
-         *  like the resources below. typed as the WebGPU shape in phase 1. */
-        renderer: null! as Renderer.Renderer,
-        /** the selected backend module (webgpu | webgl), resolved + imported in
-         *  `load()`. the live render path drives the renderer through this. */
-        renderBackend: null! as RenderBackendModule<Renderer.Renderer>,
+        /** engine-global renderer handle: the one `Renderer` the client drives
+         *  rendering through. minted in `load()` after the backend module is
+         *  dynamically imported (code-split), so it starts null like the resources
+         *  below; the client never sees backend internals. */
+        renderer: null! as Renderer,
         net,
         rpc,
         driver: opts.driver,
@@ -158,9 +152,9 @@ export function init(opts: InitOptions) {
          *  trigger layout). */
         viewport: Viewport.init(),
         // the eight client-global GPU resource sets (model/voxel/voxel-mesh/
-        // sprite/extruded-sprite/particle/cloud/shadow) now live on the backend
-        // as `state.renderer.resources`, built in `load()` via
-        // `backend.initResources`/`loadResources`.
+        // sprite/extruded-sprite/particle/cloud/shadow) live inside the renderer
+        // handle, built in `load()` via `renderer.initResources`/`loadResources`;
+        // the client never reaches them directly.
         /** engine-global audio resources, manifest + decoded atlas +
          *  AudioContext. populated in `load()` (async fetch + decode).
          *  the clips map is empty when no manifest was emitted, but the
@@ -218,7 +212,7 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
         playerMode: 'play',
         roomMode: 'play',
     });
-    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, room.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, room.playerId);
     return room;
 }
 
@@ -263,11 +257,9 @@ function seedModels(state: EngineClient): void {
 
 export async function load(state: EngineClient) {
     // select + code-split-load the render backend before anything touches the
-    // renderer (`render/init` owns which concrete backends exist + the selection).
-    // awaited here so the dynamic import resolves before `init()`.
-    const backend: RenderBackendModule<Renderer.Renderer> = await loadRenderBackend();
-    state.renderBackend = backend;
-    state.renderer = backend.init();
+    // renderer (`render/load` owns which concrete backends exist + the selection).
+    // awaited here so the dynamic import resolves and mints the handle up front.
+    state.renderer = await loadRenderBackend();
 
     // user modules have registered (loadModule ran before this). build the
     // derived index fields once so boot reads a live `blockRegistry` /
@@ -298,14 +290,15 @@ export async function load(state: EngineClient) {
     // renderer init gates everything that calls into gpucat (material
     // builds, compileCompute pre-warms). do it once, up front; everything
     // below runs concurrently afterwards. env GPU buffers + the engine-
-    // global post-chain pipeline are wired up in `backend.init()` (sync,
-    // pre-load); this just runs the device handshake.
-    await backend.load(state.renderer);
+    // global post-chain pipeline are wired up when the handle is minted (sync,
+    // pre-load); this just runs the device handshake (and installs the
+    // uncaptured-error listener, both backend-internal now).
+    await state.renderer.load();
 
     // adapter is now resolved on the gpucat renderer. detect tier + GPU
     // limits up front so every subsystem below can derive its budget
     // from `state.performance.active`.
-    state.performance = Performance.detect(state.renderer.renderer.adapter);
+    state.performance = state.renderer.detectPerformance();
     state.voxelBudget = voxelArenaBudgetForTier(state.performance);
     const voxelBudget = state.voxelBudget;
     const settings = Performance.settingsForTier(state.performance);
@@ -326,26 +319,15 @@ export async function load(state: EngineClient) {
         );
     }
 
-    // catch the specific buffer that fails, chromebook prints the
-    // validation message before APICreateErrorBuffer but doesn't tag the
-    // buffer; this scope-pushes around every WebGPU command and surfaces
-    // the offender. cheap to leave on; one log per uncaptured error.
-    const gpuDevice = state.renderer.renderer.device as GPUDevice | undefined;
-    if (gpuDevice) {
-        gpuDevice.addEventListener('uncapturederror', (e) => {
-            console.error('[webgpu] uncaptured error:', (e as GPUUncapturedErrorEvent).error.message);
-        });
-    }
-
     // sync build of every client-global GPU resource set (owned by the backend).
     // pure construction against the magenta placeholder atlas.
-    state.renderBackend.initResources(state.renderer, { blockRegistry: registry.blockRegistry, voxelBudget });
+    state.renderer.initResources({ blockRegistry: registry.blockRegistry, voxelBudget });
 
     // async load pass: the backend pre-warms compile pipelines + fetches the real
     // atlases (rebinding the extruded/particle materials afterwards). Audio isn't a
     // render resource, so it races alongside in its own promise.
     const audioPromise = Audio.loadResources(state.resources.loader);
-    const backendLoadPromise = state.renderBackend.loadResources(state.renderer, {
+    const backendLoadPromise = state.renderer.loadResources({
         blockRegistry: registry.blockRegistry,
         settings,
         resources: state.resources,
@@ -382,7 +364,7 @@ export async function load(state: EngineClient) {
             room.canvasTarget.setSize(w, h);
         }
 
-        state.renderBackend.resize(state.renderer, w, h);
+        state.renderer.resize(w, h);
     };
     const initial = useClient.getState();
     applyViewportSize(initial.viewportWidth, initial.viewportHeight);
@@ -631,7 +613,6 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         net: state.net,
         rpc: state.rpc,
         renderer: state.renderer,
-        renderBackend: state.renderBackend,
         resources: state.resources,
         audioResources: state.audioResources,
         inbound: state.inbound,
@@ -665,7 +646,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
 }
 
 function processActivateRoom(state: EngineClient, message: Protocol.ActivateRoom): void {
-    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, message.playerId);
+    Rooms.setActivePlayer(state.rooms, state.net, state.renderer, message.playerId);
 }
 
 function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void {
@@ -692,7 +673,7 @@ function processRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void 
         }
 
         if (fallback) {
-            Rooms.setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, fallback.playerId);
+            Rooms.setActivePlayer(state.rooms, state.net, state.renderer, fallback.playerId);
         } else {
             state.rooms.activePlayerId = null;
             useClient.getState().setActivePlayerId(null);
@@ -956,7 +937,7 @@ function processVoxelChunkDel(state: EngineClient, message: Protocol.VoxelChunkD
     }
     room.voxels.chunks.delete(key);
     if (room === Rooms.getActiveRoom(state.rooms)) {
-        VoxelArena.removeChunkMesh(state.renderer.resources.voxel.arenas, key);
+        state.renderer.removeChunkMesh(key);
     }
 }
 
@@ -1166,7 +1147,7 @@ export function update(state: EngineClient, delta: number) {
     const alpha = state.accumulator / timestep;
 
     // sync client-global model GPU pools with newly-ready / vanished payloads
-    ModelResources.update(state.renderer.resources.model, state.resources);
+    state.renderer.updateModelResources(state.resources);
 
     // tier settings, fetch once per tick, threaded to every subsystem
     // that takes a tier-driven cap (cull radius, mesher caps, ...). reads
@@ -1215,8 +1196,7 @@ export function update(state: EngineClient, delta: number) {
         // then reassigns the scene pass camera so the next render reads it
         // directly. must run AFTER user frame scripts (they write pose/fov
         // on the POV camera) and BEFORE any consumer that reads it.
-        const povCamera = Rooms.getRenderCamera(room);
-        RenderCamera.bindRenderCamera(state.renderer.pipeline, room.canvasTarget);
+        const povCamera = state.renderer.getRenderCamera(room);
         if (!povCamera) continue;
 
         // per-mesh frustum cull with the fresh camera. Refits each renderable
@@ -1261,7 +1241,7 @@ export function update(state: EngineClient, delta: number) {
         // particle) are owned by the backend and driven in one call, order + Debug
         // labels preserved. Must run AFTER Animation.tick (world matrices) and
         // BEFORE Audio.updateForFrame.
-        state.renderBackend.updateRoom(state.renderer, room, {
+        state.renderer.updateRoom(room, {
             isActive: room === activeRoom,
             povCamera,
             viewport: state.viewport,
@@ -1278,12 +1258,11 @@ export function update(state: EngineClient, delta: number) {
 
     /* render, only the active room renders to the GPU each frame */
     if (activeRoom) {
-        // scene world-matrix flushes happen in Renderer.render (setActiveScene),
-        // where both the main and overlay scenes are bound for the pass.
-        const activeCamera = Rooms.getRenderCamera(activeRoom);
-
+        // the renderer resolves the room's camera internally (sync + bind) and
+        // flushes scene world-matrices in its render (setActiveScene), binding both
+        // the main and overlay scenes for the pass.
         Debug.begin(activeRoom.clientMetrics, 'render');
-        state.renderBackend.render(state.renderer, activeRoom, activeCamera, perfSettings.voxelViewChunkRadius);
+        state.renderer.render(activeRoom, perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
         /* metrics, request server-side stats for every room the client
@@ -1298,7 +1277,7 @@ export function update(state: EngineClient, delta: number) {
         // gpucat Inspector overlay, visible only on the 'renderer' tab while
         // the panel is open. available in non-editor builds too (debug perf
         // for shipped games).
-        state.renderBackend.setInspectorVisible(state.renderer, debugOpen && debugTab === 'renderer');
+        state.renderer.setInspectorVisible(debugOpen && debugTab === 'renderer');
 
         // request server metrics for the summary/perf/net panels in EVERY build, not
         // just the editor, so a shipped game surfaces server-side perf too. a player
@@ -1374,9 +1353,12 @@ export function dispose(state: EngineClient): void {
     useClient.setState({ rooms: new Map(), activePlayerId: null, inputManager: null });
 
     if (state.inputManager) Input.disposeInputManager(state.inputManager);
-    // client-global GPU resources live on the backend; dispose them together.
-    if (state.renderBackend && state.renderer?.resources) state.renderBackend.disposeResources(state.renderer);
-    // renderer + backend are null until `load()` runs; guard for early dispose.
-    if (state.renderBackend && state.renderer) state.renderBackend.dispose(state.renderer);
+    // the renderer is null until `load()` runs; guard for early dispose. Its
+    // client-global GPU resources are disposed via the handle too (disposeResources
+    // self-guards when they were never built).
+    if (state.renderer) {
+        state.renderer.disposeResources();
+        state.renderer.dispose();
+    }
     state.domElement?.remove();
 }

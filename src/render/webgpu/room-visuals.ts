@@ -19,7 +19,7 @@ import * as SpriteVisuals from '../common/sprites/sprite-visuals';
 import * as VoxelArena from '../common/voxels/voxel-arena';
 import * as VoxelMeshVisuals from '../common/voxels/voxel-mesh-visuals';
 import * as VoxelVisuals from '../common/voxels/voxel-visuals';
-import type { Renderer } from './index';
+import type { WebGpuState } from './index';
 
 /** the per-room GPU visual sets, one bundle per live `ClientRoom`. */
 export type RoomVisuals = {
@@ -42,7 +42,7 @@ export type RoomVisuals = {
  * `viewport`) and the backend's client-global resources + env buffers + pipeline.
  * The caller (createRoomCore) must have populated those room fields first.
  */
-export function createRoomVisuals(renderer: Renderer, room: ClientRoom): void {
+export function createRoomVisuals(renderer: WebGpuState, room: ClientRoom): void {
     const res = renderer.resources;
     const { scene, overlayScene, nodes } = room;
 
@@ -71,7 +71,7 @@ export function createRoomVisuals(renderer: Renderer, room: ClientRoom): void {
  * the active room (its world is the one resident in the arena); everything else
  * runs for every room the client holds.
  */
-export function updateRoom(renderer: Renderer, room: ClientRoom, ctx: UpdateRoomContext): void {
+export function updateRoom(renderer: WebGpuState, room: ClientRoom, ctx: UpdateRoomContext): void {
     const rv = renderer.rooms.get(room);
     if (!rv) return;
     const res = renderer.resources;
@@ -134,7 +134,7 @@ export function updateRoom(renderer: Renderer, room: ClientRoom, ctx: UpdateRoom
 
 /** dispose the room's visual bundle and drop it from the map. Mirrors the prior
  *  disposeRoom order, including releasing the active world's arena chunks. */
-export function disposeRoomVisuals(renderer: Renderer, room: ClientRoom): void {
+export function disposeRoomVisuals(renderer: WebGpuState, room: ClientRoom): void {
     const rv = renderer.rooms.get(room);
     if (!rv) return;
     VoxelVisuals.dispose(rv.voxel, room.scene);
@@ -153,14 +153,14 @@ export function disposeRoomVisuals(renderer: Renderer, room: ClientRoom): void {
 
 /** mount the room's world into the (single-world) voxel arena, marking chunks
  *  dirty so the prioritised remesh path refills it. */
-export function mountRoom(renderer: Renderer, room: ClientRoom): void {
+export function mountRoom(renderer: WebGpuState, room: ClientRoom): void {
     const rv = renderer.rooms.get(room);
     if (!rv) return;
     VoxelVisuals.mountRoom(rv.voxel, room.voxels);
 }
 
 /** release the currently-mounted world's arena chunks + mesh worker cache. */
-export function unmountRoom(renderer: Renderer): void {
+export function unmountRoom(renderer: WebGpuState): void {
     VoxelVisuals.unmountRoom(renderer.resources.voxel);
 }
 
@@ -170,7 +170,7 @@ export function unmountRoom(renderer: Renderer): void {
  * `renderer.resources.voxel`/`voxelMesh`; the old per-room meshes still point at
  * the disposed ones, so drop + re-init.
  */
-export function rebuildVoxelVisuals(renderer: Renderer, room: ClientRoom): void {
+export function rebuildVoxelVisuals(renderer: WebGpuState, room: ClientRoom): void {
     const rv = renderer.rooms.get(room);
     if (!rv) return;
     VoxelVisuals.dispose(rv.voxel, room.scene);
@@ -184,7 +184,7 @@ export function rebuildVoxelVisuals(renderer: Renderer, room: ClientRoom): void 
  * Its alive states hold now-dangling GeometrySlot refs into the cleared pool;
  * dropping them lets next frame's update lazily re-acquire into the fresh pool.
  */
-export function rebuildExtrudedSpriteVisuals(renderer: Renderer, room: ClientRoom): void {
+export function rebuildExtrudedSpriteVisuals(renderer: WebGpuState, room: ClientRoom): void {
     const rv = renderer.rooms.get(room);
     if (!rv) return;
     ExtrudedSpriteVisuals.dispose(rv.extrudedSprite, renderer.resources.extrudedSprite, room.visibility);

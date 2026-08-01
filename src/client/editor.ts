@@ -15,7 +15,13 @@
  */
 import { CameraTrait } from '../builtins/camera';
 import { FlyControllerTrait } from '../builtins/fly-controller';
-import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
+import {
+    getWorldPosition,
+    getWorldQuaternion,
+    setWorldPosition,
+    setWorldQuaternion,
+    TransformTrait,
+} from '../builtins/transform';
 import { registry } from '../core/registry';
 import * as Rpc from '../core/rpc';
 import * as SceneTree from '../core/scene/scene-tree';
@@ -23,7 +29,7 @@ import { getTrait } from '../core/scene/scene-tree';
 import { AddTraitCommand, RemoveTraitCommand } from '../editor/commands';
 import { useEditor } from '../editor/editor-store';
 import { EditorTrait } from '../editor/editor-trait';
-import { buildRoomViews, type ClientRoom, getRenderCamera } from './rooms';
+import { buildRoomViews, type ClientRoom } from './rooms';
 
 /**
  * Toggle the editor for `room`. The mechanism depends on room type:
@@ -89,12 +95,12 @@ export function enterLocalEditorView(room: ClientRoom): void {
     if (room.editor) return;
 
     // snapshot the outgoing view pose BEFORE swapping, so the lens starts where
-    // the play camera was and entry is seamless.
-    const src = getRenderCamera(room);
-    const srcPos = src ? ([src.position[0], src.position[1], src.position[2]] as [number, number, number]) : null;
-    const srcQuat = src
-        ? ([src.quaternion[0], src.quaternion[1], src.quaternion[2], src.quaternion[3]] as [number, number, number, number])
-        : null;
+    // the play camera was and entry is seamless. Read the active camera node's
+    // world transform directly (the same pose getRenderCamera would copy into the
+    // pipeline camera) — reaching the renderer from client code would be a cycle.
+    const srcTransform = room.client.camera ? getTrait(room.client.camera, TransformTrait) : null;
+    const srcPos = srcTransform ? (Array.from(getWorldPosition(srcTransform)) as [number, number, number]) : null;
+    const srcQuat = srcTransform ? (Array.from(getWorldQuaternion(srcTransform)) as [number, number, number, number]) : null;
 
     // lens-private camera node. realm: 'client' so it doesn't replicate; lives
     // for the lifetime of the lens. its TransformTrait pose is what survives

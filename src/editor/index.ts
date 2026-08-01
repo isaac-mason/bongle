@@ -18,7 +18,8 @@ import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
-import { getRenderCamera, setActivePlayer } from '../client/rooms';
+import { prefabIconRelPath } from '../client/prefab-icons';
+import { setActivePlayer } from '../client/rooms';
 import { availableDebugTabs, useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -60,7 +61,6 @@ import { SetBlockFlags } from '../core/voxels/block-flags';
 import { propagateAllLight } from '../core/voxels/light';
 import { createVoxelRaycastResult, raycastVoxels } from '../core/voxels/voxel-raycast';
 import { setBlock } from '../core/voxels/voxels';
-import { prefabIconRelPath } from '../client/prefab-icons';
 import * as Blueprints from '../server/blueprints';
 import type { EngineServer } from '../server/engine-server';
 import { setTraitProps } from './actions';
@@ -489,7 +489,7 @@ script(
         // holds its own camera ref internally; the per-frame sync below
         // (`transformToolState.gizmo.camera = camera`) keeps it pointing
         // at the active POV so swaps don't strand the gizmo on a stale ref.
-        const initialCamera = getRenderCamera(room) as PerspectiveCamera;
+        const initialCamera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera;
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
             client.domElement,
@@ -550,7 +550,7 @@ script(
         // motion. no-op when grab isn't active.
         onPrePhysicsStep(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             TransformTool.prePhysicsGrab(transformToolState, room.physics, camera);
         });
@@ -565,7 +565,7 @@ script(
         // fly nor character controller swings the camera.
         onInput(ctx, () => {
             if (!TransformTool.isInGrab(transformToolState)) return;
-            const camera = getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             const mk = client.input.mouseKeyboard;
             const grab = transformToolState.grab!;
@@ -736,14 +736,14 @@ script(
             // is reflected in the gizmo's projection without rebuilding.
             // TransformControls is third-party and holds its own camera
             // ref, there's no way to avoid this sync.
-            const camera = getRenderCamera(room) as PerspectiveCamera | null;
+            const camera = client.state!.renderer.getRenderCamera(room) as PerspectiveCamera | null;
             if (!camera) return;
             transformToolState.gizmo.camera = camera;
 
             // shared render clock, threaded into the rainbow selection/inspect
             // materials (by node identity at material-build time) so they flow
             // with the rest of the engine's time-driven animation.
-            const timeResources = client.state!.renderer.timeResources;
+            const timeResources = client.state!.renderer.renderClock();
 
             // sync editor node bodies with the scene tree for broadphase queries
             NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
@@ -1288,6 +1288,14 @@ export async function registerServer(_state: EngineServer): Promise<void> {
  * store state and no refetch.
  */
 let editorClient: EngineClient | null = null;
+
+/** The engine client the editor is bound to (set in `registerClient`), or null
+ *  before registration. Store-driven editor UI that holds only a `ClientRoom`
+ *  (orientation cube, etc.) reaches the renderer through this. */
+export function getEditorClient(): EngineClient | null {
+    return editorClient;
+}
+
 let currentBlockIconUrl: string | null = null;
 let blockIconRenderInFlight = false;
 const prefabIconInFlight = new Set<string>();
@@ -1336,10 +1344,7 @@ async function loadBakedBlockIcons(): Promise<boolean> {
     blockIconRenderInFlight = true;
     try {
         const loader = state.resources.loader;
-        const [png, jsonBytes] = await Promise.all([
-            loader.loadBytes('voxels-icons.png'),
-            loader.loadBytes('voxels-icons.json'),
-        ]);
+        const [png, jsonBytes] = await Promise.all([loader.loadBytes('voxels-icons.png'), loader.loadBytes('voxels-icons.json')]);
         const meta = JSON.parse(new TextDecoder().decode(jsonBytes)) as {
             coords: Record<string, [number, number]>;
             cols: number;
@@ -1407,7 +1412,7 @@ export function registerClient(state: EngineClient): void {
         switchRoom: (roomId, mode) => {
             for (const room of state.rooms.rooms.values()) {
                 if (room.roomId === roomId && room.playerMode === mode) {
-                    setActivePlayer(state.rooms, state.net, state.renderer, state.renderBackend, room.playerId);
+                    setActivePlayer(state.rooms, state.net, state.renderer, room.playerId);
                     return;
                 }
             }

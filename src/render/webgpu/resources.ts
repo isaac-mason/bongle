@@ -6,6 +6,7 @@
 // swaps that used to live in `registry-dispatch` are here too (resource level;
 // the per-room visual rebuild they trigger is orchestrated in `./index`).
 
+import type * as Performance from '../../client/performance';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
 import * as CloudResources from '../common/environment/clouds/cloud-resources';
@@ -16,9 +17,8 @@ import * as ExtrudedSpriteResources from '../common/sprites/extruded-sprite-reso
 import * as SpriteResources from '../common/sprites/sprite-resources';
 import type { VoxelArenaBudget } from '../common/voxels/voxel-arena';
 import * as VoxelMeshResources from '../common/voxels/voxel-mesh-resources';
-import type * as Performance from '../../client/performance';
+import type { WebGpuState } from './index';
 import * as VoxelResources from './voxels/gpu-frame';
-import type { Renderer } from './index';
 
 /** the eight client-global GPU resource sets, owned by the backend. */
 export type BackendResources = {
@@ -38,7 +38,7 @@ export type BackendResources = {
  * downstream extruded/particle inits can name-bind it immediately. The async
  * atlas fetches happen in `loadResources`. Sets `renderer.resources`.
  */
-export function initResources(renderer: Renderer, opts: { blockRegistry: Blocks; voxelBudget: VoxelArenaBudget }): void {
+export function initResources(renderer: WebGpuState, opts: { blockRegistry: Blocks; voxelBudget: VoxelArenaBudget }): void {
     const sprite = SpriteResources.init(renderer.environmentResources);
     const extrudedSprite = ExtrudedSpriteResources.init(sprite, renderer.environmentResources);
     const particle = ParticleResources.init(sprite.atlas, renderer.environmentResources);
@@ -68,7 +68,7 @@ export function initResources(renderer: Renderer, opts: { blockRegistry: Blocks;
  * Audio is NOT here — it's not a render resource; engine-client races it.
  */
 export async function loadResources(
-    renderer: Renderer,
+    renderer: WebGpuState,
     opts: { blockRegistry: Blocks; settings: Performance.Settings; resources: Resources },
 ): Promise<void> {
     const r = renderer.resources;
@@ -93,7 +93,7 @@ export async function loadResources(
  * resources actually swapped, so `./index` can rebuild each room's voxel visuals.
  */
 export async function swapVoxelResources(
-    renderer: Renderer,
+    renderer: WebGpuState,
     opts: { blockRegistry: Blocks; voxelBudget: VoxelArenaBudget; settings: Performance.Settings; resources: Resources },
 ): Promise<boolean> {
     const r = renderer.resources;
@@ -130,7 +130,7 @@ export async function swapVoxelResources(
  * (every bake is stale). Returns whether the atlas changed, so `./index` can
  * rebuild each room's extruded-sprite visuals.
  */
-export async function swapSpriteResources(renderer: Renderer, opts: { resources: Resources }): Promise<boolean> {
+export async function swapSpriteResources(renderer: WebGpuState, opts: { resources: Resources }): Promise<boolean> {
     const r = renderer.resources;
     const changed = await SpriteResources.refresh(r.sprite, opts.resources.loader);
     if (!changed) return false;
@@ -142,7 +142,7 @@ export async function swapSpriteResources(renderer: Renderer, opts: { resources:
 
 /** dispose the client-global resources. mirrors the prior engine-client dispose
  *  order; modelResources has no dispose (matches prior behaviour). */
-export function disposeResources(renderer: Renderer): void {
+export function disposeResources(renderer: WebGpuState): void {
     const r = renderer.resources;
     if (!r) return;
     ShadowResources.dispose(r.shadow);

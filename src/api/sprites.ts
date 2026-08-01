@@ -50,7 +50,7 @@ export const DEFAULT_PIXELS_PER_UNIT = 16;
  * but `sampleSprite()`'s LUT indirection absorbs them.
  */
 export function spriteAtlasTexture(ctx: ScriptContext): Texture | null {
-    const res = ctx.client?.state?.renderer?.resources?.sprite;
+    const res = ctx.client?.state?.renderer?.spriteResources() ?? null;
     if (!res) return null;
     return res.atlas;
 }
@@ -71,7 +71,7 @@ export function spriteWorldSize(
     sprite: SpriteHandle,
     opts?: { pixelsPerUnit?: number },
 ): [number, number] | null {
-    const res = ctx.client?.state?.renderer?.resources?.sprite;
+    const res = ctx.client?.state?.renderer?.spriteResources() ?? null;
     if (!res?.metadata) return null;
     const entry = res.metadata.sprites[sprite.spriteId];
     if (!entry) return null;

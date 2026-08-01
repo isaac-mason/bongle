@@ -14,17 +14,17 @@ import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as CloudResources from '../render/common/environment/clouds/cloud-resources';
 import * as ModelResources from '../render/common/models/model-resources';
-import * as Performance from './performance';
-import * as VoxelResources from '../render/webgpu/voxels/gpu-frame';
 import * as VoxelArena from '../render/common/voxels/voxel-arena';
 import * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
 import * as Renderer from '../render/webgpu';
+import * as VoxelResources from '../render/webgpu/voxels/gpu-frame';
+import * as Performance from './performance';
 import type { RenderRoomDeps } from './rooms';
 
 /** Persistent GPU + renderer context. Created once per worker: the device
  *  handshake and pipeline compiles are expensive and atlas-independent. */
 export type HeadlessRenderContext = {
-    renderer: Renderer.Renderer;
+    renderer: Renderer.WebGpuState;
     adapter: GPUAdapter;
     performance: Performance.Profile;
     budget: VoxelArena.VoxelArenaBudget;

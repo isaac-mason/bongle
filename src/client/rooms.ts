@@ -1,4 +1,4 @@
-import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
+import { CanvasTarget, Scene } from 'gpucat';
 import { mat4, quat } from 'mathcat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
@@ -20,8 +20,7 @@ import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
 import { useEditor } from '../editor/editor-store';
-import type { RenderBackendModule } from '../render/backend';
-import * as RenderCamera from '../render/common/camera';
+import type { Renderer } from '../render/backend';
 import * as Visibility from '../render/common/cull/visibility';
 import type * as CloudResourcesNs from '../render/common/environment/clouds/cloud-resources';
 import * as Environment from '../render/common/environment/environment';
@@ -29,12 +28,11 @@ import * as ModelLighting from '../render/common/models/model-lighting';
 import type * as ModelResourcesNs from '../render/common/models/model-resources';
 import * as ModelVisuals from '../render/common/models/model-visuals';
 import * as Particles from '../render/common/particles/particles';
-import type { EngineRenderPipeline } from '../render/common/pipeline';
 import * as VoxelArena from '../render/common/voxels/voxel-arena';
 import type * as VoxelMeshResources from '../render/common/voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from '../render/common/voxels/voxel-mesh-visuals';
 import * as VoxelVisuals from '../render/common/voxels/voxel-visuals';
-import type * as Renderer from '../render/webgpu';
+import type * as WebGpu from '../render/webgpu';
 import type * as VoxelResourcesNs from '../render/webgpu/voxels/gpu-frame';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
@@ -243,14 +241,6 @@ export type ClientRoom = {
      * focused hold their handlers without firing.
      */
     editorClipboard: ClipboardHandlers | null;
-
-    /**
-     * the engine-global render pipeline this room renders through. all
-     * rooms share the same instance, stored here for callers that need
-     * the active render camera (`getRenderCamera`, editor tools) without
-     * threading the engine state through their api.
-     */
-    _pipeline: EngineRenderPipeline;
 };
 
 /* ── Rooms registry ─────────────────────────────────────────────── */
@@ -284,7 +274,7 @@ export const RENDER_ROOM_PLAYER_ID = -1 as PlayerId;
  * but NO presentation — no canvas, viewport, input, dom-ui, audio, or camera
  * node. It exists only to be rendered offscreen into a `RenderTarget` at its own
  * arena index (its chunks coexist with the world's). Both block and prefab icon
- * renders build one, populate it, `Renderer.renderRoomToTarget`, then
+ * renders build one, populate it, `WebGpu.renderRoomToTarget`, then
  * `disposeRenderRoom`. Not registered in `state.rooms` — it never ticks with the
  * live rooms.
  */
@@ -312,7 +302,7 @@ export type RenderRoom = {
 export type RenderRoomDeps = {
     resources: Resources;
     rpc: SceneTreeContext['rpc'];
-    renderer: Renderer.Renderer;
+    renderer: WebGpu.WebGpuState;
     voxelResources: VoxelResourcesNs.VoxelResources;
     voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
     modelResources: ModelResourcesNs.ModelResources;
@@ -461,11 +451,9 @@ export type CreateRoomOptions = {
     net: Net.ClientNet;
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
-    /** the backend state handle; carries the client-global GPU resources the
-     *  room's visuals are built from (`renderer.resources`). */
-    renderer: Renderer.Renderer;
-    /** the backend module, to build this room's per-room visuals. */
-    renderBackend: RenderBackendModule<Renderer.Renderer>;
+    /** the renderer handle, to build this room's per-room visuals from the
+     *  client-global GPU resources it owns. */
+    renderer: Renderer;
     /** engine-global audio resources. pass through to createRoomCore so
      *  the per-room Audio coordinator can be set up. */
     audioResources: Audio.AudioResources;
@@ -505,7 +493,6 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         net: opts.net,
         rpc: opts.rpc,
         renderer: opts.renderer,
-        renderBackend: opts.renderBackend,
         resources: opts.resources,
         audioResources: opts.audioResources,
         nodes,
@@ -530,8 +517,7 @@ type CreateRoomCoreOptions = {
     net: Net.ClientNet;
     rpc: SceneTreeContext['rpc'];
     resources: Resources;
-    renderer: Renderer.Renderer;
-    renderBackend: RenderBackendModule<Renderer.Renderer>;
+    renderer: Renderer;
     audioResources: Audio.AudioResources;
     /**
      * pre-populated room core, sceneGraph, voxels, physics, context
@@ -638,7 +624,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
 
     // crisp post-fxaa overlay content (CanvasTrait, world-space HUD). rendered
     // by the engine overlay pass, which shares this room's main-scene depth
-    // read-only for occlusion. see Renderer.EngineRenderPipeline.overlayPassNode.
+    // read-only for occlusion. see WebGpu.EngineRenderPipeline.overlayPassNode.
     const overlayScene = new Scene();
 
     const viewport = document.createElement('div');
@@ -777,13 +763,12 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         disposeCanvasTouchListeners,
         editorStore: null,
         editorClipboard: null,
-        _pipeline: renderer.pipeline,
     };
 
     // the room's GPU visuals (voxel/model/sprite/.../domUi) are owned by the
     // backend, keyed by this room. builds them from the room's scene graph +
     // the backend's client-global resources.
-    opts.renderBackend.createRoomVisuals(renderer, room);
+    renderer.createRoomVisuals(room);
 
     // append touchOverlay after createRoomVisuals (which created the DOM overlay
     // via DomUi.init); paint order is set by UILayer z-index, not DOM order.
@@ -858,25 +843,6 @@ function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTr
         setWorldQuaternion(transform, q);
     }
     return node;
-}
-
-/**
- * resolve the room's active render camera and compose the engine-global
- * renderer-owned PerspectiveCamera from it (camera node Transform +
- * CameraTrait). the active camera node is `client.camera` on the single
- * client state, repointed by whichever controller / lens is driving the view.
- *
- * the renderer reads the same camera via `passNode.camera`, no separate
- * mirror; post-`bindRenderCamera` it also carries the viewport aspect. the
- * engine-global pipeline (one shared camera across rooms; pose rewritten each
- * frame from the active camera) is reached via `room._pipeline`. editor tools
- * call this to read the live render camera; scripts read camera pose off the
- * camera node's TransformTrait instead.
- */
-export function getRenderCamera(room: ClientRoom): PerspectiveCamera | null {
-    const cameraTrait = SceneTree.getTrait(room.client.camera, CameraTrait) ?? null;
-    RenderCamera.syncRenderCamera(room._pipeline, cameraTrait);
-    return room._pipeline.camera;
 }
 
 /**
@@ -979,7 +945,6 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         net: state.net,
         rpc: state.rpc,
         renderer: state.renderer,
-        renderBackend: state.renderBackend,
         resources: state.resources,
         audioResources: state.audioResources,
         nodes: nodes,
@@ -1056,7 +1021,7 @@ export function disposeRoom(state: EngineClient, room: ClientRoom): void {
     Physics.dispose(room.physics);
     // per-room GPU visuals (incl. domUi + releasing the active world's arena
     // chunks) are backend-owned; dispose them together.
-    state.renderBackend.disposeRoomVisuals(state.renderer, room);
+    state.renderer.disposeRoomVisuals(room);
     // room.environment is pure client CPU config — nothing to dispose. Its render
     // state (env meshes/clouds) is backend-owned and dropped by disposeRoomVisuals
     // above; the engine-global env GPU buffers live for the engine's lifetime.
@@ -1075,13 +1040,7 @@ export function getActiveRoom(state: Rooms): ClientRoom | null {
 }
 
 /** set the active Player and update the editor store. */
-export function setActivePlayer(
-    state: Rooms,
-    net: Net.ClientNet,
-    renderer: Renderer.Renderer,
-    renderBackend: RenderBackendModule<Renderer.Renderer>,
-    playerId: PlayerId,
-): void {
+export function setActivePlayer(state: Rooms, net: Net.ClientNet, renderer: Renderer, playerId: PlayerId): void {
     const prevRoom = state.activePlayerId !== null ? (state.rooms.get(state.activePlayerId) ?? null) : null;
     state.activePlayerId = playerId;
     useClient.getState().setActivePlayerId(playerId);
@@ -1093,15 +1052,15 @@ export function setActivePlayer(
     // matches what its scripts have set (otherwise the previously
     // active room's sky/config would still be on the GPU until the
     // first frame finishes ticking).
-    Environment.flushActive(room.environment, renderer.environmentResources);
+    renderer.flushRoomEnv(room);
 
     // single-world arena: clear the world we're leaving (freeing its arena chunks
     // + mesh worker cache) and mount the new active room, which marks its chunks
     // dirty so the prioritised remesh path cycles them in over the next few frames.
     if (prevRoom && prevRoom !== room) {
-        renderBackend.unmountRoom(renderer);
+        renderer.unmountRoom();
     }
-    renderBackend.mountRoom(renderer, room);
+    renderer.mountRoom(room);
 
     // toggle viewport visibility, only the active room's viewport (and
     // therefore its canvas + script overlays) is shown.

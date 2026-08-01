@@ -3,6 +3,7 @@ import {
     type ComputeDispatch,
     fxaa,
     Inspector,
+    type PerspectiveCamera,
     pass,
     RenderPipeline,
     type RenderTarget,
@@ -11,15 +12,20 @@ import {
     WebGPURenderer,
 } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../../api/environment';
-import type * as Performance from '../../client/performance';
+import { CameraTrait } from '../../builtins/camera';
+import * as Performance from '../../client/performance';
 import type { ClientRoom } from '../../client/rooms';
 import type { Resources as EngineResources } from '../../core/resources';
+import { getTrait } from '../../core/scene/scene-tree';
 import type { Blocks } from '../../core/voxels/block-registry';
-import type { RenderBackendModule } from '../backend';
+import type { Renderer } from '../backend';
+import * as RenderCamera from '../common/camera';
 import * as Environment from '../common/environment/environment';
+import * as ModelResources from '../common/models/model-resources';
 import { createRenderPipeline, type EngineRenderPipeline, setActiveScene, updateCameraEnvironment } from '../common/pipeline';
+import type { SpriteResources } from '../common/sprites/sprite-resources';
 import * as Time from '../common/time';
-import type * as VoxelArena from '../common/voxels/voxel-arena';
+import * as VoxelArena from '../common/voxels/voxel-arena';
 import * as Resources from './resources';
 import * as RoomVisuals from './room-visuals';
 import * as VoxelResources from './voxels/gpu-frame';
@@ -34,13 +40,14 @@ export * from './room-visuals';
 export const kind = 'webgpu' as const;
 
 /**
- * The WebGPU backend state handle — despite the name, this owns ALL of the
- * backend's GPU state, not just the gpucat renderer: the client-global resource
- * sets (`resources`) and the per-room visual bundles (`rooms`). `engine-client`
- * holds it as `state.renderer`. (The name stays `renderer` / `Renderer` even as it
- * grew into the full backend state.)
+ * The WebGPU backend state handle — owns ALL of the backend's GPU state, not just
+ * the gpucat renderer: the engine-global env buffers + pipeline + render clock, the
+ * client-global resource sets (`resources`), and the per-room visual bundles
+ * (`rooms`). `create()` closes over one of these and returns the public `Renderer`
+ * handle; the offline icon paths use it directly. (The inner `renderer` field is
+ * the gpucat `WebGPURenderer`.)
  */
-export type Renderer = {
+export type WebGpuState = {
     renderer: WebGPURenderer;
     /** engine-global env GPU buffers, one set across the whole engine,
      *  flushed each frame from the active room's CPU shadow (see
@@ -72,7 +79,7 @@ export type Renderer = {
  * builds one on first show and disposes it when hidden (full teardown of
  * GPU resources, DOM, and window listeners).
  */
-export function init(): Renderer {
+export function init(): WebGpuState {
     // No MSAA: antialiasing is done in-pipeline by FXAA (see createRenderPipeline).
     // MSAA would allocate multisample+resolve targets whose sizes must track the
     // swapchain across pixel-ratio changes — needless cost for a post-process AA path.
@@ -91,7 +98,7 @@ export function init(): Renderer {
  * output goes through a `RenderTarget` (see `renderRoomToTarget`). No pixel
  * ratio / size to set (those throw in headless).
  */
-export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): Renderer {
+export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): WebGpuState {
     const renderer = new WebGPURenderer({
         // No MSAA — the offline/icon pipeline antialiases via FXAA (createOfflinePipeline).
         antialias: false,
@@ -106,8 +113,57 @@ export function initHeadless(gpu: { device: GPUDevice; adapter: GPUAdapter }): R
 }
 
 /** async device handshake. all GPU objects defer their real work until now. */
-export async function load(state: Renderer): Promise<void> {
+export async function load(state: WebGpuState): Promise<void> {
     await state.renderer.init();
+
+    // catch the specific buffer that fails: chromebook prints the validation
+    // message before APICreateErrorBuffer but doesn't tag the buffer; this
+    // surfaces the offender. cheap to leave on; one log per uncaptured error.
+    const dev = state.renderer.device as GPUDevice | undefined;
+    if (dev) {
+        dev.addEventListener('uncapturederror', (e) => {
+            console.error('[webgpu] uncaptured error:', (e as GPUUncapturedErrorEvent).error.message);
+        });
+    }
+}
+
+/** detect the GPU performance tier from the resolved adapter (post-`load`). */
+export function detectPerformance(state: WebGpuState): Performance.Profile {
+    return Performance.detect(state.renderer.adapter);
+}
+
+/** per-frame poll of the model-resource pools (uploads newly-ready models). */
+export function updateModelResources(state: WebGpuState, resources: EngineResources): void {
+    ModelResources.update(state.resources.model, resources);
+}
+
+/** drop a chunk's mesh from the voxel arena (edit path). */
+export function removeChunkMesh(state: WebGpuState, key: string): void {
+    VoxelArena.removeChunkMesh(state.resources.voxel.arenas, key);
+}
+
+/** the client-global sprite resources, or null before `initResources` runs. */
+export function spriteResources(state: WebGpuState): SpriteResources | null {
+    return state.resources?.sprite ?? null;
+}
+
+/** force-push a room's env config into the engine-global env UBOs (on activation). */
+export function flushRoomEnv(state: WebGpuState, room: ClientRoom): void {
+    Environment.flushActive(room.environment, state.environmentResources);
+}
+
+/**
+ * resolve the room's live render camera: compose the engine-global pipeline camera
+ * from the room's active CameraTrait (pose/fov), bind the viewport aspect from its
+ * canvas target, and return it. idempotent — a deterministic copy of the camera
+ * node's world pose + canvas size into the shared pipeline camera. Null when the
+ * room has no active POV camera.
+ */
+export function getRenderCamera(state: WebGpuState, room: ClientRoom): PerspectiveCamera | null {
+    const cameraTrait = getTrait(room.client.camera, CameraTrait) ?? null;
+    RenderCamera.syncRenderCamera(state.pipeline, cameraTrait);
+    RenderCamera.bindRenderCamera(state.pipeline, room.canvasTarget);
+    return state.pipeline.camera;
 }
 
 /**
@@ -125,7 +181,7 @@ export async function load(state: Renderer): Promise<void> {
  * tears down GPU query resources, removes the DOM, drops window listeners,
  * and clears detached tab panels.
  */
-export function setInspectorVisible(state: Renderer, visible: boolean): void {
+export function setInspectorVisible(state: WebGpuState, visible: boolean): void {
     const isOn = state.renderer.inspector instanceof Inspector;
     if (visible === isOn) return;
 
@@ -156,7 +212,7 @@ export function setInspectorVisible(state: Renderer, visible: boolean): void {
  * supply a per-pass camera so each subject can be framed independently.
  * skips screen tint, icons composite against a neutral background.
  */
-export function createOfflinePipeline(state: Renderer, scene: Scene, camera: Camera): RenderPipeline {
+export function createOfflinePipeline(state: WebGpuState, scene: Scene, camera: Camera): RenderPipeline {
     const scenePass = pass(scene, camera, { clearColor: [0, 0, 0, 0] });
     const fxaaPass = fxaa(scenePass.getTextureNode());
     const outputNode = renderOutput(fxaaPass);
@@ -173,7 +229,7 @@ export function createOfflinePipeline(state: Renderer, scene: Scene, camera: Cam
  * composes cleanly before/after the main canvas pass.
  */
 export function renderRoomToTarget(
-    state: Renderer,
+    state: WebGpuState,
     voxelResources: VoxelResources.VoxelResources,
     scene: Scene,
     camera: Camera,
@@ -197,7 +253,7 @@ export function renderRoomToTarget(
     }
 }
 
-export function resize(state: Renderer, width: number, height: number) {
+export function resize(state: WebGpuState, width: number, height: number) {
     state.renderer.setPixelRatio(window.devicePixelRatio);
     state.renderer.setSize(width, height);
 }
@@ -213,7 +269,10 @@ export function resize(state: Renderer, width: number, height: number) {
  * every active room, only `passNode.scene` (and the camera + env buffer
  * contents) rotate per frame.
  */
-export function render(state: Renderer, room: ClientRoom, camera: Camera | null, voxelViewChunkRadius: number): void {
+export function render(state: WebGpuState, room: ClientRoom, voxelViewChunkRadius: number): void {
+    // resolve + bind this room's render camera here (encapsulated), so the client
+    // hands us only the room + view radius, never a camera it extracted itself.
+    const camera = getRenderCamera(state, room);
     const voxelResources = state.resources.voxel;
 
     // canvas target, guard avoids redundant reconfigure on the gpu side.
@@ -271,7 +330,7 @@ export function render(state: Renderer, room: ClientRoom, camera: Camera | null,
 /** tear down the gpucat renderer and release its gpu resources. The client-global
  *  resource sets + per-room visuals are disposed separately (`disposeResources`,
  *  `disposeRoomVisuals`) by the caller. */
-export function dispose(state: Renderer): void {
+export function dispose(state: WebGpuState): void {
     state.renderer.dispose();
 }
 
@@ -282,7 +341,7 @@ export function dispose(state: Renderer): void {
  * Returns whether the resources actually swapped.
  */
 export async function refreshBlockResources(
-    state: Renderer,
+    state: WebGpuState,
     opts: {
         blockRegistry: Blocks;
         voxelBudget: VoxelArena.VoxelArenaBudget;
@@ -307,7 +366,7 @@ export async function refreshBlockResources(
  * particle materials, clearing the silhouette pool) and rebuild every room's
  * extruded-sprite visuals. Returns whether the atlas changed.
  */
-export async function refreshSpriteResources(state: Renderer, opts: { resources: EngineResources }): Promise<boolean> {
+export async function refreshSpriteResources(state: WebGpuState, opts: { resources: EngineResources }): Promise<boolean> {
     const changed = await Resources.swapSpriteResources(state, opts);
     if (changed) {
         for (const room of state.rooms.keys()) RoomVisuals.rebuildExtrudedSpriteVisuals(state, room);
@@ -316,27 +375,37 @@ export async function refreshSpriteResources(state: Renderer, opts: { resources:
 }
 
 /**
- * The WebGPU backend as the {@link RenderBackendModule} contract — the object the
- * client selects and drives. The type annotation IS the contract check (every
- * method must line up). Individual functions stay exported above for the
+ * Mint the WebGPU backend: construct its internal {@link WebGpuState} and return
+ * the public {@link Renderer} handle bound over it. Every method closes over the
+ * one `state`, so the client drives rendering through the handle and never touches
+ * backend internals. The individual functions stay exported above for the
  * WebGPU-pinned offline paths (icon baking) that call them directly.
  */
-export const backend: RenderBackendModule<Renderer> = {
-    kind,
-    init,
-    load,
-    dispose,
-    resize,
-    setInspectorVisible,
-    initResources: Resources.initResources,
-    loadResources: Resources.loadResources,
-    disposeResources: Resources.disposeResources,
-    createRoomVisuals: RoomVisuals.createRoomVisuals,
-    disposeRoomVisuals: RoomVisuals.disposeRoomVisuals,
-    updateRoom: RoomVisuals.updateRoom,
-    mountRoom: RoomVisuals.mountRoom,
-    unmountRoom: RoomVisuals.unmountRoom,
-    render,
-    refreshBlockResources,
-    refreshSpriteResources,
-};
+export function create(): Renderer {
+    const state = init();
+    return {
+        kind,
+        load: () => load(state),
+        dispose: () => dispose(state),
+        resize: (w, h) => resize(state, w, h),
+        setInspectorVisible: (v) => setInspectorVisible(state, v),
+        detectPerformance: () => detectPerformance(state),
+        renderClock: () => state.timeResources,
+        initResources: (o) => Resources.initResources(state, o),
+        loadResources: (o) => Resources.loadResources(state, o),
+        disposeResources: () => Resources.disposeResources(state),
+        updateModelResources: (r) => updateModelResources(state, r),
+        removeChunkMesh: (k) => removeChunkMesh(state, k),
+        spriteResources: () => spriteResources(state),
+        createRoomVisuals: (room) => RoomVisuals.createRoomVisuals(state, room),
+        disposeRoomVisuals: (room) => RoomVisuals.disposeRoomVisuals(state, room),
+        updateRoom: (room, ctx) => RoomVisuals.updateRoom(state, room, ctx),
+        mountRoom: (room) => RoomVisuals.mountRoom(state, room),
+        unmountRoom: () => RoomVisuals.unmountRoom(state),
+        flushRoomEnv: (room) => flushRoomEnv(state, room),
+        getRenderCamera: (room) => getRenderCamera(state, room),
+        render: (room, radius) => render(state, room, radius),
+        refreshBlockResources: (o, activeRoom) => refreshBlockResources(state, o, activeRoom),
+        refreshSpriteResources: (o) => refreshSpriteResources(state, o),
+    };
+}

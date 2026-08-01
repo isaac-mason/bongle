@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { getRenderCamera } from '../../client/rooms';
 import { useEditor } from '../editor-store';
+import { getEditorClient } from '../index';
 
 const CUBE_PX = 165;
 const GIZMO_PX = 145;
@@ -172,7 +172,8 @@ export function OrientationCube() {
 
         const tick = () => {
             const r = roomRef.current;
-            const camera = r ? getRenderCamera(r) : null;
+            const rc = getEditorClient();
+            const camera = r && rc ? rc.renderer.getRenderCamera(r) : null;
             if (camera) {
                 const m = camera.matrixWorldInverse;
                 const a0 = m[0],
