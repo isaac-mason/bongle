@@ -51,8 +51,8 @@ export type Settings = {
     // ── remesh dispatch ─────────────────────────────────────────────
     // All meshing runs on the worker pool (off-thread). The pool holds
     // `voxelWorkerCount × voxelWorkerQueueDepth` jobs in flight at once;
-    // results land in `pendingMeshResults` and are drained at the top of
-    // the next `voxel-visuals.update` call. Near-camera / just-edited chunks
+    // results land on the dispatcher's `results` queue and are drained at the
+    // top of the next `voxel-visuals.update` call. Near-camera / just-edited chunks
     // dispatch URGENT (jump the worker queue) for low edit latency.
     //
     // Per-frame *new* dispatch is implicitly bounded by free pool slots

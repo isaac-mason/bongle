@@ -26,7 +26,6 @@ import {
     disposeMeshDispatcher,
     flushMeshQueue,
     isInFlight,
-    type MeshDispatcherResult,
     meshQueueStats,
     queueMesh,
     setMeshRegistry,
@@ -117,12 +116,10 @@ describe('mesh-dispatcher', () => {
         it('slots are ineligible for dispatch until initRegistry ack', () => {
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 2,
-                onResult: (r) => results.push(r),
             });
             setMeshRegistry(d, reg);
 
@@ -141,13 +138,12 @@ describe('mesh-dispatcher', () => {
         function bootstrap() {
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 3,
-                onResult: (r) => results.push(r),
             });
+            const results = d.results;
             setMeshRegistry(d, reg);
             step([tw]); // ack
             return { reg, tw, results, d };
@@ -203,7 +199,6 @@ describe('mesh-dispatcher', () => {
         it('LRU: cache stays within cacheMaxChunks; evicted neighbours re-set on next reference', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => {
                     const tw = createTestWorker();
@@ -213,8 +208,8 @@ describe('mesh-dispatcher', () => {
                 workerCount: 1,
                 queueDepth: 4,
                 cacheMaxChunks: 30,
-                onResult: (r) => results.push(r),
             });
+            const results = d.results;
             setMeshRegistry(d, reg);
             step(tws);
 
@@ -305,12 +300,10 @@ describe('mesh-dispatcher', () => {
             // under the queued result. Refill must wait for an explicit flush.
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 4,
-                onResult: (r) => results.push(r),
             });
             setMeshRegistry(d, reg);
             step([tw]); // ack
@@ -349,7 +342,6 @@ describe('mesh-dispatcher', () => {
         function bootstrap(workerCount: number, queueDepth: number) {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => {
                     const tw = createTestWorker();
@@ -358,8 +350,8 @@ describe('mesh-dispatcher', () => {
                 },
                 workerCount,
                 queueDepth,
-                onResult: (r) => results.push(r),
             });
+            const results = d.results;
             setMeshRegistry(d, reg);
             step(tws); // process initRegistry + deliver acks
             const voxels = createVoxels(reg);
@@ -457,7 +449,6 @@ describe('mesh-dispatcher', () => {
         it('urgent chunks mesh before normal ones already queued', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const results: MeshDispatcherResult[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => {
                     const tw = createTestWorker();
@@ -466,8 +457,8 @@ describe('mesh-dispatcher', () => {
                 },
                 workerCount: 1,
                 queueDepth: 8,
-                onResult: (r) => results.push(r),
             });
+            const results = d.results;
             setMeshRegistry(d, reg);
             step(tws); // ack
 
@@ -506,7 +497,6 @@ describe('mesh-dispatcher', () => {
                 },
                 workerCount: 2,
                 queueDepth: 4,
-                onResult: () => {},
             });
             setMeshRegistry(d, reg);
             step(tws); // ack both slots
@@ -535,12 +525,11 @@ describe('mesh-dispatcher', () => {
             disposeMeshDispatcher(d);
         });
 
-        it('crash recovery: lost in-flight chunks resurface via onLost, pool replenished, slot respawned', () => {
+        it('crash recovery: lost in-flight chunks queue on `lost`, pool replenished, slot respawned', () => {
             const reg = buildSmallRegistry();
             // Track every worker spawned by the factory so we can detect
             // respawn (slot 0 should be on its 2nd worker after the crash).
             const tws: TestWorker[] = [];
-            const lostKeys: string[] = [];
             const d = createMeshDispatcher({
                 workerFactory: () => {
                     const tw = createTestWorker();
@@ -549,9 +538,8 @@ describe('mesh-dispatcher', () => {
                 },
                 workerCount: 1,
                 queueDepth: 3,
-                onResult: () => {},
-                onLost: (key) => lostKeys.push(key),
             });
+            const lostKeys = d.lost;
             setMeshRegistry(d, reg);
             step([tws[0]!]); // ack the initial worker
 
@@ -576,7 +564,7 @@ describe('mesh-dispatcher', () => {
             // Simulate the worker crashing mid-job.
             tws[0]!.worker.onerror?.(new Error('boom'));
 
-            // Lost chunks surfaced via onLost; dedup map drained; pool
+            // Lost chunks queued on `lost`; dedup map drained; pool
             // replenished to its original capacity; a fresh worker was
             // spawned for slot 0.
             expect(new Set(lostKeys)).toEqual(new Set(['0,0,0', '1,0,0']));
@@ -600,7 +588,6 @@ describe('mesh-dispatcher', () => {
                 // 1 worker, depth 1 → queue capacity 1.
                 workerCount: 1,
                 queueDepth: 1,
-                onResult: () => {},
             });
             setMeshRegistry(d, reg);
             step([tw]);

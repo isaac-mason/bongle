@@ -1159,8 +1159,6 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         atlasHash: null,
         texAnimData: registry.texAnimData,
         meshDispatcher: null,
-        pendingMeshResults: [],
-        pendingLostChunkKeys: [],
         meshOutput: createMeshOutput(),
     };
 }
@@ -1254,8 +1252,6 @@ export async function load(
             workerFactory: spawnMeshWorker,
             workerCount,
             queueDepth: workerQueueDepth,
-            onResult: (result) => res.pendingMeshResults.push(result),
-            onLost: (key) => res.pendingLostChunkKeys.push(key),
         });
         setMeshRegistry(meshDispatcher, registry);
         res.meshDispatcher = meshDispatcher;
@@ -1346,8 +1342,6 @@ export function dispose(state: VoxelResources): void {
     state.sortCount.dispose();
     state.sortIndirectArgs.dispose();
     if (state.meshDispatcher) disposeMeshDispatcher(state.meshDispatcher);
-    state.pendingMeshResults.length = 0;
-    state.pendingLostChunkKeys.length = 0;
 }
 
 // ── per-frame GPU frame graph ───────────────────────────────────────

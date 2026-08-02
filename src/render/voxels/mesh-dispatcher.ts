@@ -1,44 +1,35 @@
 // ── mesh dispatcher ────────────────────────────────────────────────
 //
-// Owns the worker pool that runs `meshChunk` off the main thread. Each
-// worker holds its own deserialized BlockRegistry; main thread keeps a
-// canonical serialized buffer and reslices it per worker on rebuild.
+// A worker pool that meshes voxel chunks off the main thread. It is a pure
+// data primitive: you `queueMesh` chunks and `flushMeshQueue` once per frame,
+// then drain the `results` and `lost` queues it fills. No callbacks — the
+// caller pulls, the caller decides.
 //
-// Single-world: exactly one voxel world is ever meshed at a time (the active
-// room). The dispatcher + worker cache are keyed by bare chunk coordinate; on an
-// active-room swap the caller calls `resetMeshCaches` (clears our model + tells
-// each worker to drop its cache) so the incoming world re-sends from scratch and
-// never reuses the outgoing world's identically-positioned chunks.
+// One world at a time. Caches key on bare chunk coordinate, so a room swap must
+// `resetMeshCaches` before the next world reuses the old world's coordinates.
 //
-// Scheduling model:
-//   - N workers. queueMesh accumulates chunks into per-slot `pending`; a
-//     frame-end flush drains each slot's pending into ONE batched packet, so a
-//     worker meshing K chunks costs a single postMessage, not K.
-//   - Two priority tiers: `pendingUrgent` (near-camera / just-edited) drains
-//     before `pending` and leads the packet, and urgent enqueue bypasses the
-//     queueDepth gate — an edit-in-front-of-you never waits behind streaming
-//     backlog. This replaces the old main-thread sync-remesh fast-path.
-//   - Affinity routing: a chunk's jobs always go to `hash(region) % N`, so its
-//     neighbourhood accumulates in that worker's cache and re-meshes hit it.
-//   - Each worker keeps a versioned chunk cache; main tracks a matching model of
-//     it (`slot.cachedVersions`) and dispatches only DELTAS: a packet carries
-//     `set` (chunks the worker lacks at the current version) + `delete` + `tasks`
-//     (the batch). Unchanged chunks are never re-sent. See mesh-tasks.ts and
+// How work flows:
+//   - Affinity: a chunk always routes to `hash(region) % N`, so its
+//     neighbourhood warms one worker's cache and re-meshes hit it.
+//   - Batching: per-slot `pending` accumulates across a frame; one flush posts
+//     the whole slot as a single packet (K chunks, one postMessage).
+//   - Priority: `pendingUrgent` (near-camera / just-edited) drains first, leads
+//     the packet, and skips the queueDepth gate — an edit never waits behind
+//     streaming backlog.
+//   - Deltas: each worker holds a versioned chunk cache; `cachedVersions` is
+//     main's model of it. A packet ships only the diff — `set` (chunks the
+//     worker lacks) + `delete` + the `tasks` batch. See mesh-tasks.ts and
 //     llm/plan-mesh-worker-chunk-cache.md.
-//   - inFlightByChunk dedups: a chunk pending or in flight cannot be re-enqueued.
-//   - Buffers come from two pools: `packetPool` (one packet buffer per batch)
-//     and `outputPool` (one 3-buffer quad set per task). Borrowed at flush,
-//     transferred to the worker, echoed back in the result `recycle`.
-//   - Generation guard: caller passes chunk.meshGen into enqueue. Worker
-//     echoes it. Caller decides whether the result is fresh.
+//   - Dedup: `inFlightByChunk` blocks re-enqueue of a pending/in-flight chunk.
+//   - Buffers: `packetPool` (one per batch) + `outputPool` (one quad set per
+//     task) are borrowed at flush, transferred out, echoed back to recycle.
+//   - Generation: the caller's `chunk.meshGen` rides the job and comes back on
+//     the result, so the caller can drop stale meshes.
 //
-// Registry rebuild handshake:
-//   - setRegistry serializes once, slices N times, posts initRegistry
-//     to each slot, marks pendingRegistryVersion.
-//   - Slot is dispatch-eligible only when ack lands
-//     (registryVersion === dispatcher.registryVersion).
-//   - In-flight old-version jobs complete normally; caller's gen guard
-//     handles whether to apply them.
+// Registry handshake: `setMeshRegistry` serializes once, posts a per-slot copy,
+// and bumps `pendingRegistryVersion`. A slot dispatches only once its ack lands
+// (`registryVersion === dispatcher.registryVersion`); in-flight old-version jobs
+// still complete and the gen guard sorts them out.
 
 import type { Blocks } from '../../core/voxels/block-registry';
 import { serializeBlockRegistryForWorker } from '../../core/voxels/block-registry-serde';
@@ -66,12 +57,10 @@ export type WorkerLike = {
  *  imports this file via the `bongle` graph. voxel-resources reaches the
  *  spawn helper through a dynamic import that only resolves under Vite. */
 
-/** result handed back through `onResult` when a worker finishes a job.
- *  `ChunkMeshResult` carries the three PassMesh payloads + AABB (same
- *  shape the sync `meshChunk` path returns); `chunkKey` + `gen` let the
- *  caller match it back to the right chunk and discard stale results.
- *  Buffer views (`PassMesh.quads`) are backed by transferred ArrayBuffers,
- * see mesh-worker.ts protocol notes. */
+/** a finished job, pushed onto `dispatcher.results`. The `ChunkMeshResult`
+ *  payload (three PassMesh + AABB) matches the sync `meshChunk` path; `chunkKey`
+ *  + `gen` let the caller match it to a chunk and drop stale meshes. PassMesh
+ *  buffers are backed by transferred ArrayBuffers, see mesh-worker.ts. */
 export type MeshDispatcherResult = ChunkMeshResult & {
     chunkKey: string;
     gen: number;
@@ -89,62 +78,45 @@ const PASS_BUF_BYTES = MAX_QUADS_PER_PASS * QUAD_STRIDE_U32S * 4;
 
 type WorkerSlot = {
     worker: WorkerLike;
-    /** high-priority chunks (near the camera / just edited). Drained before
-     *  `pending` and placed at the front of the batch packet so the worker meshes
-     *  them first. Urgent enqueue bypasses the queueDepth gate — the whole point
-     *  is that an edit-in-front-of-you never waits behind streaming backlog. */
+    /** priority chunks: drained first and lead the packet, skip the queueDepth gate. */
     pendingUrgent: Array<{ chunk: Chunk; gen: number }>;
-    /** normal-priority chunks routed here this/last frame, accumulated by
-     *  queueMesh and drained into batch packets by flushMeshQueue. */
+    /** normal chunks accumulating for the next flush. */
     pending: Array<{ chunk: Chunk; gen: number }>;
-    /** in-flight job keys at this slot (across all in-flight batches), spliced
-     *  out by chunkKey when the matching result lands. Bounded by `queueDepth`. */
+    /** job keys posted but not yet resulted, spliced by chunkKey on result. Bounded by queueDepth. */
     inFlight: Array<{ chunkKey: string; gen: number }>;
-    /** in-flight batches (packets posted, results pending) — packet buffers to
-     *  replenish on crash. */
+    /** posted-but-unresulted packet count; how many packet buffers to replenish on crash. */
     inFlightBatches: number;
-    /** version this slot has acked. Slot is ineligible for dispatch
-     *  until this equals `MeshDispatcher.registryVersion`. */
+    /** registry version this slot has acked; dispatch-eligible only when it equals the dispatcher's. */
     registryVersion: number;
-    /** version most recently posted to this slot. Used to detect
-     *  "init pending but not yet acked". */
+    /** registry version last posted here; a gap vs `registryVersion` means an init is pending. */
     pendingRegistryVersion: number;
-    /** main's authoritative model of which chunk versions this worker currently
-     *  holds cached: chunkKey -> chunk `version`. main diffs each dispatch against
-     *  it to emit set/delete deltas. cleared on crash (the worker's cache is gone
-     *  with it) and on `resetMeshCaches` (active-room swap). */
+    /** main's model of the worker's cache (chunkKey -> version) to diff dispatches into set/delete
+     *  deltas. Cleared on crash and on `resetMeshCaches`, whenever the worker's real cache is gone. */
     cachedVersions: Map<string, number>;
 };
 
 export type MeshDispatcher = {
     slots: WorkerSlot[];
     queueDepth: number;
-    /** chunk key -> which slot owns it. Tracks a chunk from enqueue (pending)
-     *  through in-flight, for dedup and reverse lookup on result. */
+    /** chunk key -> owning slot, from enqueue through in-flight; for dedup and result lookup. */
     inFlightByChunk: Map<string, { slot: number; gen: number }>;
+    /** finished meshes awaiting the caller. The caller drains this each frame and clears it. */
+    results: MeshDispatcherResult[];
+    /** chunk keys lost to a worker crash, awaiting the caller. Drain each frame to re-dirty them,
+     *  then clear; the dispatcher has already respawned the worker and replenished the pools. */
+    lost: string[];
     /** free packet buffers (one per in-flight batch). */
     packetPool: ArrayBuffer[];
     /** free output-buffer sets (one per in-flight task). */
     outputPool: MeshOutputSet[];
     registryVersion: number;
-    /** canonical serialized registry, kept so newly spawned workers
-     *  (post-crash respawn) can be re-inited without re-encoding. */
+    /** canonical serialized registry, kept so a respawned worker re-inits without re-encoding. */
     registryBuf: ArrayBuffer | null;
-    onResult: (result: MeshDispatcherResult) => void;
-    /** called once per in-flight chunk lost when a worker crashes,
-     *  caller is expected to re-mark the chunk dirty so it gets
-     *  re-dispatched on a subsequent frame. null if the caller doesn't
-     *  care (offline paths). */
-    onLost: ((chunkKey: string) => void) | null;
-    /** kept for crash recovery, respawn calls this to get a fresh
-     *  worker for the same slot index. */
+    /** spawns a worker for a slot; called at boot and on crash respawn. */
     workerFactory: () => WorkerLike;
-    /** per-worker chunk-cache budget: main evicts LRU cache entries beyond it. */
+    /** per-worker chunk-cache budget; LRU entries beyond it are evicted. */
     cacheMaxChunks: number;
-    /** per-frame instrumentation, summed as jobs flow, drained by
-     *  `readMeshPerf`. `buildMs`/`postMs` are main-thread slab-pack and
-     *  postMessage cost; `workUs` is worker-reported job time; counts let
-     *  you see posts-per-frame. See readMeshPerf. */
+    /** per-frame instrumentation, drained by `readMeshPerf`. */
     perf: MeshPerf;
 };
 
@@ -168,14 +140,6 @@ export type MeshDispatcherOpts = {
     queueDepth: number;
     /** per-worker chunk-cache budget (chunks). ~16 KB each. defaults to 256 (~4 MB). */
     cacheMaxChunks?: number;
-    /** called when a result lands (fresh or stale, caller's gen guard
-     *  decides what to do with it). */
-    onResult: (result: MeshDispatcherResult) => void;
-    /** optional, called once per in-flight chunk lost to a worker crash
-     *  (worker `error` / `messageerror` event). The dispatcher respawns
-     *  the worker and replenishes the buffer pool; the caller is
-     *  responsible for putting the chunk back on the dirty list. */
-    onLost?: (chunkKey: string) => void;
 };
 
 export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
@@ -184,12 +148,12 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
         slots,
         queueDepth: opts.queueDepth,
         inFlightByChunk: new Map(),
+        results: [],
+        lost: [],
         packetPool: [],
         outputPool: [],
         registryVersion: -1,
         registryBuf: null,
-        onResult: opts.onResult,
-        onLost: opts.onLost ?? null,
         workerFactory: opts.workerFactory,
         cacheMaxChunks: opts.cacheMaxChunks ?? 256,
         perf: { buildMs: 0, postMs: 0, workUs: 0, enqueues: 0, results: 0 },
@@ -245,20 +209,20 @@ function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): v
 /** Respawn a crashed worker slot. The crash detaches every buffer
  *  currently in flight at the slot, they're gone, can't be returned
  *  to the pool. We replenish with freshly-allocated sets to keep the
- *  pool at its original capacity. In-flight chunks are surfaced
- *  through `onLost` so the caller can re-mark them dirty. */
+ *  pool at its original capacity. In-flight chunks are queued on
+ *  `d.lost` so the caller can re-mark them dirty. */
 function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' | 'messageerror', ev: unknown): void {
     const slot = d.slots[slotIndex];
     if (!slot) return;
     console.warn(`[mesh-dispatcher] worker slot ${slotIndex} crashed (${kind}); respawning`, ev);
 
-    // Surface lost chunks to the caller (re-dirty), drop dedup entries.
+    // Queue lost chunks for the caller to re-dirty; drop their dedup entries.
     for (const entry of slot.inFlight) {
         const tracked = d.inFlightByChunk.get(entry.chunkKey);
         if (tracked && tracked.slot === slotIndex && tracked.gen === entry.gen) {
             d.inFlightByChunk.delete(entry.chunkKey);
         }
-        d.onLost?.(entry.chunkKey);
+        d.lost.push(entry.chunkKey);
     }
 
     // Replenish pools, the in-flight buffers are gone with the crash: one
@@ -332,6 +296,8 @@ export function resetMeshCaches(d: MeshDispatcher): void {
         slot.worker.postMessage({ cmd: 'clearCache' });
     }
     d.inFlightByChunk.clear();
+    d.results.length = 0;
+    d.lost.length = 0;
 }
 
 // worker affinity: a chunk's tasks always route to the same worker (by region
@@ -597,8 +563,8 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
             const tracked = d.inFlightByChunk.get(result.chunkKey);
             if (tracked && tracked.gen === result.gen) d.inFlightByChunk.delete(result.chunkKey);
 
-            // forward the result; caller's gen guard handles staleness.
-            d.onResult({
+            // queue the result; the caller drains it and its gen guard handles staleness.
+            d.results.push({
                 chunkKey: result.chunkKey,
                 gen: result.gen,
                 opaque: result.opaque,
@@ -642,6 +608,8 @@ export function disposeMeshDispatcher(d: MeshDispatcher): void {
     d.packetPool.length = 0;
     d.outputPool.length = 0;
     d.inFlightByChunk.clear();
+    d.results.length = 0;
+    d.lost.length = 0;
     d.registryBuf = null;
 }
 

@@ -172,28 +172,30 @@ export function update(
     // null in the offline path (no camera → evict-first).
     packerSetCameraPos(arenas.packer, cameraPos ?? null);
 
+    const dispatcher = voxelResources.meshDispatcher;
+
     // drain worker results from last frame. each result carries the
     // meshGen we dispatched at; chunk.meshGen has only stayed equal if
     // nothing mutated it since, otherwise drop (chunk is back in
     // dirty.blocks for a fresh dispatch).
-    if (voxelResources.pendingMeshResults.length > 0) {
-        const pending = voxelResources.pendingMeshResults;
-        for (let i = 0; i < pending.length; i++) {
-            const result = pending[i]!;
+    if (dispatcher !== null && dispatcher.results.length > 0) {
+        const results = dispatcher.results;
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i]!;
             const chunk = voxels.chunks.get(result.chunkKey);
             if (!chunk) continue;
             if (chunk.meshGen !== result.gen) continue;
             writeChunkMesh(voxelResources, result.chunkKey, chunk, result);
         }
-        pending.length = 0;
+        results.length = 0;
     }
 
     // drain worker crash recovery: any chunks whose worker died go
     // back on the dirty list so we re-dispatch next frame. dispatcher
     // already cleared its inFlight tracking + replenished the buffer
     // pool; we just have to re-flip the dirty bit. Scoped to this room.
-    if (voxelResources.pendingLostChunkKeys.length > 0) {
-        const lost = voxelResources.pendingLostChunkKeys;
+    if (dispatcher !== null && dispatcher.lost.length > 0) {
+        const lost = dispatcher.lost;
         for (let i = 0; i < lost.length; i++) {
             const chunk = voxels.chunks.get(lost[i]!);
             if (!chunk) continue;
@@ -211,7 +213,6 @@ export function update(
         voxels.dirty.removed.clear();
     }
 
-    const dispatcher = voxelResources.meshDispatcher;
     if (cameraPos === undefined || dispatcher === null) {
         // unprioritised: full synchronous remesh of every dirty chunk in one pass.
         // the offline (asset-pipeline / test) path, and the workers-disabled
@@ -390,8 +391,6 @@ export function unmountRoom(voxelResources: VoxelCore): void {
     clearArena(voxelResources.arenas);
     // the mesh worker holds one world at a time; drop its cache + queued results.
     if (voxelResources.meshDispatcher !== null) resetMeshCaches(voxelResources.meshDispatcher);
-    voxelResources.pendingMeshResults.length = 0;
-    voxelResources.pendingLostChunkKeys.length = 0;
 }
 
 export function dispose(state: VoxelVisuals, scene: Scene): void {

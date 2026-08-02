@@ -17,7 +17,7 @@
 
 import type { ArrayTexture, Geometry, GpuBuffer, Material } from 'gpucat';
 import type { MeshOutput } from '../../core/voxels/chunk-mesher';
-import type { MeshDispatcher, MeshDispatcherResult } from './mesh-dispatcher';
+import type { MeshDispatcher } from './mesh-dispatcher';
 import type { VoxelArenaResources } from './voxel-arena';
 import type { VoxelPass } from './voxel-material';
 
@@ -47,11 +47,6 @@ export type VoxelCore = {
     /** off-thread mesh worker pool. null on asset-pipeline paths where the
      *  synchronous remesh loop is preferred (callers pass workerCount=0). */
     meshDispatcher: MeshDispatcher | null;
-    /** completed worker jobs, drained at the top of `voxel-visuals.update()`. */
-    pendingMeshResults: MeshDispatcherResult[];
-    /** chunk keys whose in-flight worker jobs were lost to a worker crash;
-     *  drained + re-dirtied at the top of `voxel-visuals.update()`. */
-    pendingLostChunkKeys: string[];
     /** scratch `MeshOutput` shared by every main-thread sync remesh. */
     meshOutput: MeshOutput;
 };
