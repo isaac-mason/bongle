@@ -18,15 +18,15 @@ import * as Resources from '../core/resources';
 import * as Prefab from '../core/scene/prefab';
 import { addChild, createNode, createPrefabConfig, query, setPrefab } from '../core/scene/scene-tree';
 import { AIR, MISSING } from '../core/voxels/block-registry';
-import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
-import { CHUNK_SIZE, chunkKey, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
+import { createMeshOutput } from '../core/voxels/chunk-mesher';
+import { CHUNK_SIZE, markChunkDirty, voxelIndex } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
 import * as ModelResources from '../render/models/model-resources';
 import { meshInfoIndexOf } from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
 import * as Interpolation from '../render/transform/interpolation';
-import * as VoxelArena from '../render/voxels/voxel-arena';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
+import { remeshChunkInto } from '../render/voxels/voxel-remesh';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
 
@@ -111,21 +111,12 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0, false);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
-        const packer = deps.voxelResources.arenas.packer;
+        const arenas = deps.voxelResources.arenas;
         const meshOutput = createMeshOutput();
         for (const chunk of room.voxels.chunks.values()) {
             chunk.light.fill(0xffff);
             markChunkDirty(room.voxels, chunk);
-            if (chunk.nonAirCount === 0) continue;
-            const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, chunk.cx, chunk.cy, chunk.cz), room.voxels.registry);
-            if (mesh) {
-                VoxelArena.packerUpsertChunk(
-                    packer,
-                    chunkKey(chunk.cx, chunk.cy, chunk.cz),
-                    [chunk.wx, chunk.wy, chunk.wz],
-                    mesh,
-                );
-            }
+            remeshChunkInto(arenas, room.voxels, room.voxels.registry, chunk, meshOutput);
         }
 
         // unlit for the flat icon read.

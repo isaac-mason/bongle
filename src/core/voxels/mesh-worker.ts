@@ -36,7 +36,7 @@
 //
 // The worker never references DOM, Voxels, or any main-thread-only
 // resource. It can be unit-tested by importing this module's `handleMessage`
-// directly with a stub `post` function, see mesh-dispatcher.test.ts.
+// directly with a stub `post` function, see mesher.test.ts.
 
 import type { Blocks } from './block-registry';
 import { deserializeBlockRegistryForWorker } from './block-registry-serde';

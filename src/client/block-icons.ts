@@ -12,10 +12,10 @@ import { OrthographicCamera, RenderTarget } from 'gpucat';
 import { PRESETS } from '../api/environment';
 import { registry as engineRegistry } from '../core/registry';
 import { MODEL_NONE } from '../core/voxels/block-registry';
-import { buildMeshInput, createMeshOutput, meshChunk } from '../core/voxels/chunk-mesher';
+import { createMeshOutput } from '../core/voxels/chunk-mesher';
 import { ensureChunk, setBlock } from '../core/voxels/voxels';
 import * as Environment from '../render/environment/environment';
-import * as VoxelArena from '../render/voxels/voxel-arena';
+import { remeshChunkInto } from '../render/voxels/voxel-remesh';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, type RenderRoomDeps } from './rooms';
 
@@ -111,7 +111,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     });
     const pipeline = deps.offline.createPipeline(room.scene, camera);
     const meshOutput = createMeshOutput();
-    const packer = voxelResources.arenas.packer;
+    const arenas = voxelResources.arenas;
 
     // one reused chunk in the room's voxels; the block at (1,1,1) is replaced
     // per icon (all 6 faces exposed to air), light held at full sky brightness.
@@ -128,16 +128,9 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             setBlock(room.voxels, 1, 1, 1, key);
             chunk.light.fill(0xf000);
 
-            const mesh = meshChunk(meshOutput, buildMeshInput(room.voxels, 0, 0, 0), registry);
-            if (!mesh) {
-                // all-air after culling (shouldn't happen for a solid block): drop
-                // any prior slot so the tile renders empty, then skip.
-                if (VoxelArena.packerHas(packer, ICON_CHUNK_KEY)) {
-                    VoxelArena.packerEvictChunk(packer, ICON_CHUNK_KEY);
-                }
-                continue;
-            }
-            VoxelArena.packerUpsertChunk(packer, ICON_CHUNK_KEY, [0, 0, 0], mesh);
+            // remeshChunkInto evicts any prior slot when the chunk is all-air after culling
+            // (shouldn't happen for a solid block); skip rendering an empty tile if so.
+            if (!remeshChunkInto(arenas, room.voxels, registry, chunk, meshOutput)) continue;
 
             deps.offline.renderToTarget(deps, room, camera, target, pipeline, Number.POSITIVE_INFINITY);
             blitTile(atlasPixels, atlasWidth, await deps.offline.readTarget(target), ICON_PX, col, row);

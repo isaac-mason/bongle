@@ -302,8 +302,8 @@ async function buildOfflineDeps(
     const modelResources = ModelResources.init(state.environmentResources);
     const voxelResources = VoxelResources.init(registry.blockRegistry, state.environmentResources, budget, state.timeResources);
     const voxelMeshResources = VoxelMeshResources.init(
-        voxelResources.atlas,
-        voxelResources.texAnimBuffer,
+        voxelResources.textures.atlas,
+        voxelResources.textures.texAnimBuffer,
         state.timeResources,
         state.environmentResources,
     );
@@ -313,7 +313,7 @@ async function buildOfflineDeps(
     // for the atlas upload AND the voxel compute pipelines to compile (WebGPU-only —
     // the offline render dispatches them), so the bakers never gate on it themselves.
     await VoxelResources.load(voxelResources, registry.blockRegistry, 0, 0, resources, state.renderer);
-    await Promise.all([voxelResources.atlasReady, voxelResources.computeReady]);
+    await Promise.all([voxelResources.textures.ready, voxelResources.computeReady]);
 
     const deps: RenderRoomDeps = {
         resources,
@@ -394,8 +394,8 @@ export function initResources(
         renderer.timeResources,
     );
     const voxelMesh = VoxelMeshResources.init(
-        voxel.atlas,
-        voxel.texAnimBuffer,
+        voxel.textures.atlas,
+        voxel.textures.texAnimBuffer,
         renderer.timeResources,
         renderer.environmentResources,
     );
@@ -462,8 +462,8 @@ export async function swapVoxelResources(
     if (changed) {
         VoxelMeshResources.dispose(r.voxelMesh);
         r.voxelMesh = VoxelMeshResources.init(
-            r.voxel.atlas,
-            r.voxel.texAnimBuffer,
+            r.voxel.textures.atlas,
+            r.voxel.textures.texAnimBuffer,
             renderer.timeResources,
             renderer.environmentResources,
         );
@@ -551,7 +551,7 @@ function build(state: WebGpuState, room: ClientRoom): RoomActive {
     const res = state.resources;
     const { scene, overlayScene, nodes } = room;
 
-    const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel);
+    const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel.geometries, res.voxel.quadMaterials);
     const voxelMesh = VoxelMeshVisuals.init(res.voxelMesh.batch, scene, nodes);
     const model = ModelVisuals.init(res.model.batch, scene, nodes);
     // CanvasTrait quads render in the overlay scene (crisp, post-fxaa); HtmlTrait
@@ -588,7 +588,7 @@ export function teardown(state: WebGpuState): void {
     const { scene, visibility, visuals: rv } = state.active;
     VoxelVisuals.dispose(rv.voxel, scene);
     // release the active world's chunks from the arena + mesh worker cache.
-    VoxelVisuals.unmountRoom(state.resources.voxel);
+    VoxelVisuals.unmountRoom(state.resources.voxel.arenas, state.resources.voxel.meshDispatcher);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, visibility);
     ModelVisuals.dispose(rv.model, state.resources.model.batch, visibility);
     DomUi.dispose(rv.domUi);
@@ -623,7 +623,7 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     // streaming rooms defer meshing a chunk until its 26-neighbourhood has
     // arrived (mesh once, correct AO/light); local rooms load all at once so
     // there's no trickle to dedupe — mesh immediately.
-    VoxelVisuals.update(rv.voxel, res.voxel, room.voxels, room.voxels.registry, povCamera.position, !room.local);
+    VoxelVisuals.update(rv.voxel, res.voxel.arenas, res.voxel.meshDispatcher, room.voxels, povCamera.position, !room.local);
     Debug.end(room.clientMetrics, 'mesh');
 
     // arena occupancy + fragmentation, recorded post-update so the sample
@@ -678,7 +678,7 @@ export function rebuildVoxelVisuals(state: WebGpuState, room: ClientRoom): void 
     const rv = state.active.visuals;
     VoxelVisuals.dispose(rv.voxel, room.scene);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, room.visibility);
-    rv.voxel = VoxelVisuals.initRoomMeshes(room.scene, state.resources.voxel);
+    rv.voxel = VoxelVisuals.initRoomMeshes(room.scene, state.resources.voxel.geometries, state.resources.voxel.quadMaterials);
     rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.scene, room.nodes);
     // the refresh blew away the previous arena (new packer is empty), so re-mount:
     // marks the room's chunks dirty and the prioritised remesh path refills it.

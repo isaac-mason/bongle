@@ -1,4 +1,4 @@
-// ── mesh-dispatcher tests ───────────────────────────────────────────
+// ── mesher tests ────────────────────────────────────────────────────
 //
 // Drives the worker protocol via in-process stub workers, no real
 // Worker spawned. Each stub holds two queues: dispatcher → worker
@@ -30,7 +30,7 @@ import {
     queueMesh,
     setMeshRegistry,
     type WorkerLike,
-} from '../../../../src/render/voxels/mesh-dispatcher';
+} from '../../../../src/render/voxels/mesher';
 
 beforeAll(() => {
     registerAllShapes();
@@ -111,7 +111,7 @@ function makeChunkWithOneBlock(reg: ReturnType<typeof buildSmallRegistry>) {
     return { voxels, chunk };
 }
 
-describe('mesh-dispatcher', () => {
+describe('mesher', () => {
     describe('registry handshake', () => {
         it('slots are ineligible for dispatch until initRegistry ack', () => {
             const reg = buildSmallRegistry();
@@ -358,12 +358,7 @@ describe('mesh-dispatcher', () => {
             return { reg, tws, results, d, voxels };
         }
 
-        function addChunk(
-            voxels: ReturnType<typeof createVoxels>,
-            cx: number,
-            cy: number,
-            cz: number,
-        ) {
+        function addChunk(voxels: ReturnType<typeof createVoxels>, cx: number, cy: number, cz: number) {
             const chunk = createChunk(cx, cy, cz);
             voxels.chunks.set(`${cx},${cy},${cz}`, chunk);
             setChunkBlock(voxels, chunk, 5, 5, 5, 'stone');

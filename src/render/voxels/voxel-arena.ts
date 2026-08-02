@@ -867,15 +867,15 @@ export function voxelArenaBudgetForTier(profile: Performance.Profile): VoxelAren
     };
 }
 
-// ── VoxelArenaResources ─────────────────────────────────────────────
+// ── VoxelArena ─────────────────────────────────────────────
 
-export type VoxelArenaResources = {
+export type VoxelArena = {
     quadArena: QuadArena;
     tables: Record<VoxelPass, SectionTable>;
     packer: ArenaPacker;
 };
 
-export function createVoxelArenaResources(budget: VoxelArenaBudget): VoxelArenaResources {
+export function createVoxelArena(budget: VoxelArenaBudget): VoxelArena {
     const quadArena = createQuadArena(budget.quadArenaBytes, budget.maxAllocs);
     const tables: Record<VoxelPass, SectionTable> = {
         opaque: createSectionTable({ name: 'sectionTable-opaque', slotCount: budget.maxSections }),
@@ -893,13 +893,13 @@ export function createVoxelArenaResources(budget: VoxelArenaBudget): VoxelArenaR
  *  re-sorts. Voxel DATA is untouched (`voxels.chunks`), so re-mounting simply
  *  remeshes it. Call on a room swap (the arena holds one world at a time) or
  *  teardown. */
-export function clearArena(arenas: VoxelArenaResources): void {
+export function clearArena(arenas: VoxelArena): void {
     packerClearAll(arenas.packer);
 }
 
 /** remove a specific chunk from the engine-global arena packer (e.g. when
  *  the chunk is unloaded from `voxels`). */
-export function removeChunkMesh(arenas: VoxelArenaResources, key: string): void {
+export function removeChunkMesh(arenas: VoxelArena, key: string): void {
     const packer = arenas.packer;
     if (packerHas(packer, key)) {
         packerEvictChunk(packer, key);

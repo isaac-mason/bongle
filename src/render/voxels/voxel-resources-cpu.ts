@@ -1,8 +1,8 @@
 // cpu-frame.ts — WebGL-only voxel frame producer (CPU cull → mesh.draws).
 //
-// The WebGL twin of voxel-resources-gpu.ts. It builds the SAME shared
-// VoxelCore (atlas + texAnimBuffer + quad arena/packer + mesher + per-pass
-// geometries + materials) but has NO compute chain: instead of the ~15-dispatch
+// The WebGL twin of voxel-resources-gpu.ts. It builds the same substrate
+// (atlas + texAnimBuffer + quad arena/packer + mesher + per-pass geometries +
+// materials) but has NO compute chain: instead of the ~15-dispatch
 // GPU cull/emit/radix-sort producer, `cullEmit` walks the resident sections on
 // the CPU each frame — frustum + per-facing back-face cone-cull — and pushes one
 // `mesh.draws` entry per surviving (section, facing) range onto the per-room
@@ -18,26 +18,30 @@
 // no `visibleQuads` table.
 
 import type { Camera, Material, NonIndexedMeshDraw } from 'gpucat';
-import { BufferLifecycle, createStorageBuffer, d, Geometry, GpuBuffer } from 'gpucat';
+import { BufferLifecycle, d, Geometry, GpuBuffer } from 'gpucat';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
-import { createMeshOutput } from '../../core/voxels/chunk-mesher';
 import { CHUNK_SIZE } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment/environment';
 import type { TimeResources } from '../time';
-import { createMeshDispatcher, disposeMeshDispatcher, setMeshRegistry } from './mesh-dispatcher';
+import { createMeshDispatcher, disposeMeshDispatcher, loadMeshWorker, type MeshDispatcher, setMeshRegistry } from './mesher';
 import {
     arenaDispose,
     buildCullView,
     CULL_VIEW_FLOATS,
-    createVoxelArenaResources,
+    createVoxelArena,
     PASSES,
+    type VoxelArena,
     type VoxelArenaBudget,
-    type VoxelArenaResources,
 } from './voxel-arena';
-import type { VoxelCore } from './voxel-core';
 import { createCpuQuadMaterial, type VoxelPass } from './voxel-material';
-import { type BlockTextureAtlasMetadata, createVoxelTextureArray, loadAtlasMeta, writeAtlasPixels } from './voxel-texture-array';
+import {
+    type BlockTextureAtlasMetadata,
+    createVoxelTextures,
+    loadAtlasMeta,
+    loadVoxelTextures,
+    type VoxelTextures,
+} from './voxel-textures';
 import type { VoxelVisuals } from './voxel-visuals';
 
 // ── geometry (no indirect) ──────────────────────────────────────────
@@ -48,7 +52,7 @@ import type { VoxelVisuals } from './voxel-visuals';
 // read-only storage streams by name — and NO `geometry.indirect` (WebGL2 rejects
 // it at prepare-time; the per-frame `mesh.draws` carries the draw args instead).
 
-function createGeometries(arenas: VoxelArenaResources, quadSlot: GpuBuffer): Record<VoxelPass, Geometry> {
+function createGeometries(arenas: VoxelArena, quadSlot: GpuBuffer): Record<VoxelPass, Geometry> {
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
@@ -68,11 +72,23 @@ function createGeometries(arenas: VoxelArenaResources, quadSlot: GpuBuffer): Rec
 // ── VoxelResources ───────────────────────────────────────────────────
 
 /**
- * The WebGL voxel resource handle = the shared {@link VoxelCore} (arena + mesher
- * + atlas + geometries/materials) plus this backend's CPU cull scratch. `init`
- * builds both halves and returns the intersection. No compute frame.
+ * The WebGL voxel resource handle: atlas + arena + mesher + per-pass geometries/
+ * materials (WebGL-flavored contents), plus this backend's CPU cull scratch. A flat,
+ * standalone type — no shared base with the WebGPU handle, so the two are free to
+ * diverge. No compute frame.
  */
-export type VoxelResources = VoxelCore & {
+export type VoxelResources = {
+    /** block texture array + texture-animation metadata + atlas load lifecycle. */
+    textures: VoxelTextures;
+    /** unified per-pass quad materials, bound on each per-room `Mesh` alongside `geometries`. */
+    quadMaterials: Record<VoxelPass, Material>;
+    /** engine-global per-pass geometry (WebGL binds mesh.draws + quadSlot). */
+    geometries: Record<VoxelPass, Geometry>;
+    /** engine-global arenas (quadArena + per-pass section tables + packer). */
+    arenas: VoxelArena;
+    /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
+    meshDispatcher: MeshDispatcher | null;
+
     /** per-quad → section-slot table (arena-quad-indexed, one u32 per quad slot);
      *  `buffer` is bound as 'quadSlot' on every pass geometry so the CPU material
      *  resolves `chunkInfo[quadSlot[instanceIndex]].origin`. A projection of the
@@ -104,10 +120,8 @@ export type VoxelResources = VoxelCore & {
 export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelArenaBudget, time: TimeResources): VoxelResources {
     console.log(`[cpu-voxel-frame] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
-    const atlas = createVoxelTextureArray(registry.textures.length);
-    const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
-
-    const { promise: atlasReady, resolve: _resolveAtlasReady } = Promise.withResolvers<void>();
+    const textures = createVoxelTextures(registry);
+    const { atlas, texAnimBuffer } = textures;
 
     const elapsedTime = time.elapsedTime;
     const quadMaterials: Record<VoxelPass, Material> = {
@@ -116,7 +130,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         translucent: createCpuQuadMaterial({ atlas, texAnimBuffer, pass: 'translucent', elapsedTime, env }),
     };
 
-    const arenas = createVoxelArenaResources(budget);
+    const arenas = createVoxelArena(budget);
 
     // per-quad → section-slot table, arena-quad-sized. Owned here (not the packer);
     // `cullEmit` stamps a section's range when it changes. MANUAL lifecycle +
@@ -147,8 +161,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     };
 
     return {
-        atlas,
-        texAnimBuffer,
+        textures,
         quadMaterials,
         geometries,
         arenas,
@@ -159,17 +172,12 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         cullView: new Float32Array(CULL_VIEW_FLOATS),
         _tsortIdx: [],
         _tsortDist: [],
-        atlasReady,
-        _resolveAtlasReady,
-        atlasHash: null,
-        texAnimData: registry.texAnimData,
         meshDispatcher: null,
-        meshOutput: createMeshOutput(),
     };
 }
 
 /** Async side of construction: fetches the atlas manifest, kicks off the atlas
- *  pixel upload (settles `res.atlasReady`), and spawns the mesh worker pool. No
+ *  pixel upload (settles `res.textures.ready`), and spawns the mesh worker pool. No
  *  compute pipelines to compile (the WebGL producer is CPU-side). `meta` may be
  *  passed in by `refresh` (which already fetched it to compare hashes); otherwise
  *  `load` fetches it itself. Mutates `res` in place. */
@@ -181,34 +189,14 @@ export async function load(
     resources: Resources,
     meta?: BlockTextureAtlasMetadata | null,
 ): Promise<void> {
-    {
-        const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(resources.loader);
-        res.atlasHash = resolvedMeta?.hash ?? null;
-        const atlasWrite = resolvedMeta
-            ? writeAtlasPixels(res.atlas, registry.textures, registry.textureCutout, resolvedMeta, resources.loader)
-            : Promise.resolve();
-        atlasWrite
-            .then(() => {
-                console.log('[cpu-voxel-frame] atlas loaded');
-                res._resolveAtlasReady();
-            })
-            .catch((e) => {
-                console.warn('[cpu-voxel-frame] atlas load failed:', e);
-                res._resolveAtlasReady();
-            });
-    }
+    await loadVoxelTextures(res.textures, registry, resources.loader, meta);
 
     if (workerCount > 0 && typeof Worker !== 'undefined') {
-        // Dynamic import so environments without workers don't reach the
-        // `?worker&inline` query suffix inside mesh-worker-spawn.ts (Vite resolves
-        // it at bundle time). The Worker guard lets node/happy-dom harnesses fall
-        // through to inline meshing.
-        const { spawnMeshWorker } = await import('./mesh-worker-spawn');
-        const meshDispatcher = createMeshDispatcher({
-            workerFactory: spawnMeshWorker,
-            workerCount,
-            queueDepth: workerQueueDepth,
-        });
+        // loadMeshWorker() pulls the `?worker&inline` bundle via a dynamic import, so runtimes that
+        // never spawn workers (the asset pipeline; node/happy-dom harnesses, guarded by `Worker`) never
+        // resolve the Vite query and fall through to inline meshing.
+        await loadMeshWorker();
+        const meshDispatcher = createMeshDispatcher({ workerCount, queueDepth: workerQueueDepth });
         setMeshRegistry(meshDispatcher, registry);
         res.meshDispatcher = meshDispatcher;
     }
@@ -230,9 +218,9 @@ export async function refresh(
     if (
         prev &&
         meta !== null &&
-        prev.atlasHash !== null &&
-        meta.hash === prev.atlasHash &&
-        f32Equal(prev.texAnimData, registry.texAnimData)
+        prev.textures.hash !== null &&
+        meta.hash === prev.textures.hash &&
+        f32Equal(prev.textures.texAnimData, registry.texAnimData)
     ) {
         // atlas + texAnim unchanged → reuse. The BlockRegistry itself may have
         // been rebuilt (block tables, shape ids, ...), so push the new registry to
@@ -259,8 +247,8 @@ function f32Equal(a: Float32Array, b: Float32Array): boolean {
 }
 
 export function dispose(state: VoxelResources): void {
-    state.atlas.dispose();
-    state.texAnimBuffer.dispose();
+    state.textures.atlas.dispose();
+    state.textures.texAnimBuffer.dispose();
     state.quadMaterials.opaque.dispose();
     state.quadMaterials.transparent.dispose();
     state.quadMaterials.translucent.dispose();

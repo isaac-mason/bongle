@@ -1,6 +1,9 @@
-// ── voxel texture array ─────────────────────────────────────────────
+// ── voxel textures ──────────────────────────────────────────────────
 //
-// builds a gpucat ArrayTexture for the block registry's texture list.
+// The voxel texture subsystem (see `VoxelTextures` at the foot of the file):
+// the block texture array + texture-animation metadata + atlas load lifecycle.
+// The primitives below build one gpucat ArrayTexture for the block registry's
+// texture list — each texture name becomes one layer in the array texture.
 // each texture name becomes one layer in the array texture.
 //
 // two-phase approach:
@@ -14,8 +17,9 @@
 // nearest magnification for crisp pixel art, with mipmaps + trilinear mip
 // blending to kill minification aliasing at distance. all layers are TILE_SIZE².
 
-import { ArrayTexture } from 'gpucat';
+import { ArrayTexture, createStorageBuffer, d, type GpuBuffer } from 'gpucat';
 import type { ResourceLoader } from '../../core/resource-loader';
+import type { Blocks } from '../../core/voxels/block-registry';
 import { buildVoxelMipPyramid } from './voxel-mip-pyramid';
 
 // ── constants ───────────────────────────────────────────────────────
@@ -242,4 +246,70 @@ export function writeBlockTextureAtlasIntoTextureArray(
     atlas.generateMipmaps = false;
 
     atlas.needsUpdate = true;
+}
+
+// ── voxel textures subsystem ────────────────────────────────────────
+//
+// The block texture array + per-layer texture-animation metadata + the atlas
+// load lifecycle, assembled as one subsystem both render backends compose
+// (alongside the arena and the mesher). `createVoxelTextures` builds it;
+// `loadVoxelTextures` fetches the server atlas and uploads the pixels, settling
+// `ready`. Backend-neutral — no producer or backend state leaks in here.
+
+export type VoxelTextures = {
+    /** gpucat array-texture atlas (one layer per block texture). */
+    atlas: ArrayTexture;
+    /** per-layer texture-animation metadata storage buffer. */
+    texAnimBuffer: GpuBuffer;
+    /** registry.texAnimData this was built against. */
+    texAnimData: Float32Array;
+    /** atlas manifest hash this was built against (null on fetch fail). */
+    hash: string | null;
+    /** resolves once the atlas pixels finish uploading into the array texture. */
+    ready: Promise<void>;
+    /** @internal settled by {@link loadVoxelTextures} once atlas pixels upload. */
+    _resolveReady: () => void;
+};
+
+/** Build the voxel texture subsystem: the placeholder array texture + texAnim buffer
+ *  + the atlas-ready gate. Pixels upload later via {@link loadVoxelTextures}. */
+export function createVoxelTextures(registry: Blocks): VoxelTextures {
+    const atlas = createVoxelTextureArray(registry.textures.length);
+    const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
+    const { promise: ready, resolve: _resolveReady } = Promise.withResolvers<void>();
+    return { atlas, texAnimBuffer, texAnimData: registry.texAnimData, hash: null, ready, _resolveReady };
+}
+
+/** Fetch the server-built atlas manifest + upload its pixels into the array texture,
+ *  settling `textures.ready`. `meta` may be pre-fetched by a caller (e.g. a hash
+ *  compare); otherwise it is loaded here. By default the upload is fire-and-forget
+ *  (`ready` settles on success or failure so callers never hang). With `serialize`,
+ *  the returned promise awaits the pixel upload before resolving — the WebGPU backend
+ *  uses this so the sharp decode finishes before it compiles the voxel computes. */
+export async function loadVoxelTextures(
+    textures: VoxelTextures,
+    registry: Blocks,
+    loader: ResourceLoader,
+    meta?: BlockTextureAtlasMetadata | null,
+    serialize = false,
+): Promise<void> {
+    const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(loader);
+    textures.hash = resolvedMeta?.hash ?? null;
+    const atlasWrite = resolvedMeta
+        ? writeAtlasPixels(textures.atlas, registry.textures, registry.textureCutout, resolvedMeta, loader)
+        : Promise.resolve();
+    if (serialize) {
+        await atlasWrite.catch((e) => console.warn('[voxel-textures] atlas load failed:', e));
+        textures._resolveReady();
+        return;
+    }
+    atlasWrite
+        .then(() => {
+            console.log('[voxel-textures] atlas loaded');
+            textures._resolveReady();
+        })
+        .catch((e) => {
+            console.warn('[voxel-textures] atlas load failed:', e);
+            textures._resolveReady();
+        });
 }

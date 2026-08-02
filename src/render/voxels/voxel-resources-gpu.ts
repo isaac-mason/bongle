@@ -20,7 +20,6 @@ import {
     BufferLifecycle,
     clamp,
     createIndirectBuffer,
-    createStorageBuffer,
     DrawIndirect,
     d,
     div,
@@ -61,30 +60,35 @@ import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
 import type { Vec3 } from 'mathcat';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
-import { createMeshOutput, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
+import { QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { CHUNK_SIZE } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment/environment';
 import type { TimeResources } from '../time';
-import { createMeshDispatcher, disposeMeshDispatcher, setMeshRegistry } from './mesh-dispatcher';
+import { createMeshDispatcher, disposeMeshDispatcher, loadMeshWorker, type MeshDispatcher, setMeshRegistry } from './mesher';
 import {
     arenaDispose,
     BUCKET_COUNT,
     buildCullView,
     ChunkCullRecord,
     ChunkInfo,
-    createVoxelArenaResources,
+    createVoxelArena,
     DRAW_INDIRECT_STRIDE,
     PASSES,
     SECTION_META_U32S,
     VISIBLE_QUAD_STRIDE,
     VisibleChunk,
     VisibleQuad,
+    type VoxelArena,
     type VoxelArenaBudget,
-    type VoxelArenaResources,
 } from './voxel-arena';
-import type { VoxelCore } from './voxel-core';
 import { createGpuQuadMaterial, decodeOct16, decodeQuadCentroid, type VoxelPass } from './voxel-material';
-import { type BlockTextureAtlasMetadata, createVoxelTextureArray, loadAtlasMeta, writeAtlasPixels } from './voxel-texture-array';
+import {
+    type BlockTextureAtlasMetadata,
+    createVoxelTextures,
+    loadAtlasMeta,
+    loadVoxelTextures,
+    type VoxelTextures,
+} from './voxel-textures';
 
 // ── translucent global stable radix sort ────────────────────────────
 //
@@ -866,7 +870,7 @@ export type PassRender = {
     indirectData: Uint32Array;
 };
 
-function createPassRender(arenas: VoxelArenaResources): Record<VoxelPass, PassRender> {
+function createPassRender(arenas: VoxelArena): Record<VoxelPass, PassRender> {
     // worst-case per-pass visible-quad cap. each quad in the arena belongs to
     // exactly one (chunk, pass), so per-pass total visible ≤ arena.slotCount.
     const visibleQuadCap = arenas.quadArena.slotCount;
@@ -890,7 +894,7 @@ function createPassRender(arenas: VoxelArenaResources): Record<VoxelPass, PassRe
     return out;
 }
 
-function createGeometries(arenas: VoxelArenaResources, passRender: Record<VoxelPass, PassRender>): Record<VoxelPass, Geometry> {
+function createGeometries(arenas: VoxelArena, passRender: Record<VoxelPass, PassRender>): Record<VoxelPass, Geometry> {
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
@@ -914,12 +918,23 @@ function createGeometries(arenas: VoxelArenaResources, passRender: Record<VoxelP
 // ── VoxelResources ──────────────────────────────────────────────────
 
 /**
- * The WebGPU voxel resource handle = the shared {@link VoxelCore} (arena +
- * mesher + atlas + geometries/materials) plus this backend's GPU compute frame
- * (cull/emit/finalize + translucent radix sort + their buffers). `init` builds
- * both halves and returns the intersection.
+ * The WebGPU voxel resource handle: atlas + arena + mesher + per-pass geometries/
+ * materials (WebGPU-flavored contents), plus this backend's GPU compute frame
+ * (cull/emit/finalize + translucent radix sort + their buffers). A flat, standalone
+ * type — no shared base with the WebGL handle, so the two are free to diverge.
  */
-export type VoxelResources = VoxelCore & {
+export type VoxelResources = {
+    /** block texture array + texture-animation metadata + atlas load lifecycle. */
+    textures: VoxelTextures;
+    /** unified per-pass quad materials, bound on each per-room `Mesh` alongside `geometries`. */
+    quadMaterials: Record<VoxelPass, Material>;
+    /** engine-global per-pass geometry (WebGPU binds indirect + visibleQuads). */
+    geometries: Record<VoxelPass, Geometry>;
+    /** engine-global arenas (quadArena + per-pass section tables + packer). */
+    arenas: VoxelArena;
+    /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
+    meshDispatcher: MeshDispatcher | null;
+
     /** engine-global GPU cull compute. one node dispatched once per frame over
      *  `packer.cullRecordsBuffer`; compacts visible chunks into `visibleChunks`
      *  and produces the per-facing emit dispatch args. */
@@ -987,8 +1002,8 @@ export type VoxelResources = VoxelCore & {
     /** per-pass static emit config `[passIndex, backFaceCull]`. */
     emitConfig: Record<VoxelPass, GpuBuffer>;
     /** engine-global per-frame cull/expand scratch + indirect buffers
-     *  (visibleQuads + DrawIndirect per pass); the `geometries` in `VoxelCore`
-     *  bind these by name. */
+     *  (visibleQuads + DrawIndirect per pass); the `geometries` above bind these
+     *  by name. */
     passRender: Record<VoxelPass, PassRender>;
     /** resolves when the cull/emit/finalize (+ translucent-sort) compute
      *  pipelines have finished compiling. `state.voxelResources` is assigned at
@@ -1003,11 +1018,9 @@ export type VoxelResources = VoxelCore & {
 export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelArenaBudget, time: TimeResources): VoxelResources {
     console.log(`[voxel-resources] init, ${registry.textures.length} textures, ${registry.totalStates} states`);
 
-    const atlas = createVoxelTextureArray(registry.textures.length);
+    const textures = createVoxelTextures(registry);
+    const { atlas, texAnimBuffer } = textures;
 
-    const texAnimBuffer = createStorageBuffer(d.array(d.vec4f), registry.texAnimData);
-
-    const { promise: atlasReady, resolve: _resolveAtlasReady } = Promise.withResolvers<void>();
     const { promise: computeReady, resolve: _resolveComputeReady } = Promise.withResolvers<void>();
 
     const elapsedTime = time.elapsedTime;
@@ -1019,7 +1032,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
 
     // arenas first: the radix kernels bake the histogram row stride (maxBlocks,
     // derived from the arena's slot capacity) into their compiled graphs.
-    const arenas = createVoxelArenaResources(budget);
+    const arenas = createVoxelArena(budget);
     const passRender = createPassRender(arenas);
     const geometries = createGeometries(arenas, passRender);
     const sortCap = arenas.quadArena.slotCount;
@@ -1116,8 +1129,6 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
     });
 
     return {
-        atlas,
-        texAnimBuffer,
         quadMaterials,
         cull,
         emit,
@@ -1152,20 +1163,16 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
         arenas,
         passRender,
         geometries,
-        atlasReady,
-        _resolveAtlasReady,
+        textures,
         computeReady,
         _resolveComputeReady,
-        atlasHash: null,
-        texAnimData: registry.texAnimData,
         meshDispatcher: null,
-        meshOutput: createMeshOutput(),
     };
 }
 
 /** Async side of construction: pre-warms the expansion compute pipeline,
  *  fetches the atlas manifest, kicks off the atlas pixel upload (settles
- *  `res.atlasReady`), and spawns the mesh worker pool. `meta` may be passed
+ *  `res.textures.ready`), and spawns the mesh worker pool. `meta` may be passed
  *  in by `refresh` (which already fetched it to compare hashes); otherwise
  *  `load` fetches it itself. Mutates `res` in place. */
 export async function load(
@@ -1186,7 +1193,7 @@ export async function load(
     //    (libvips) native work that segfaults if it overlaps a Dawn pipeline
     //    compile, so await the atlas FIRST, then compile. The pipeline isn't
     //    latency-sensitive, so serial is fine.
-    // Either way consumers gate on `res.atlasReady`.
+    // Either way consumers gate on `res.textures.ready`.
     const serializeAtlasBeforeCompute = resources.loader.decodeImage != null;
 
     let computeReady: Promise<void> = Promise.resolve();
@@ -1204,27 +1211,7 @@ export async function load(
         ]).then(() => {});
     }
 
-    {
-        const resolvedMeta = meta !== undefined ? meta : await loadAtlasMeta(resources.loader);
-        res.atlasHash = resolvedMeta?.hash ?? null;
-        const atlasWrite = resolvedMeta
-            ? writeAtlasPixels(res.atlas, registry.textures, registry.textureCutout, resolvedMeta, resources.loader)
-            : Promise.resolve();
-        if (serializeAtlasBeforeCompute) {
-            await atlasWrite.catch((e) => console.warn('[voxel-resources] atlas load failed:', e));
-            res._resolveAtlasReady();
-        } else {
-            atlasWrite
-                .then(() => {
-                    console.log('[voxel-resources] atlas loaded');
-                    res._resolveAtlasReady();
-                })
-                .catch((e) => {
-                    console.warn('[voxel-resources] atlas load failed:', e);
-                    res._resolveAtlasReady();
-                });
-        }
-    }
+    await loadVoxelTextures(res.textures, registry, resources.loader, meta, serializeAtlasBeforeCompute);
 
     // pipeline: now safe to compile, the atlas sharp decode has finished.
     if (serializeAtlasBeforeCompute && renderer) {
@@ -1242,17 +1229,11 @@ export async function load(
     }
 
     if (workerCount > 0 && typeof Worker !== 'undefined') {
-        // Dynamic import so environments that don't support workers
-        // don't reach the `?worker&inline` query suffix that lives inside
-        // mesh-worker-spawn.ts. Vite resolves it at bundle time.
-        // The Worker guard lets node/happy-dom test harnesses run without
-        // a worker shim, they fall through to inline meshing.
-        const { spawnMeshWorker } = await import('./mesh-worker-spawn');
-        const meshDispatcher = createMeshDispatcher({
-            workerFactory: spawnMeshWorker,
-            workerCount,
-            queueDepth: workerQueueDepth,
-        });
+        // loadMeshWorker() pulls the `?worker&inline` bundle via a dynamic import, so runtimes that
+        // never spawn workers (the asset pipeline; node/happy-dom harnesses, guarded by `Worker`) never
+        // resolve the Vite query and fall through to inline meshing.
+        await loadMeshWorker();
+        const meshDispatcher = createMeshDispatcher({ workerCount, queueDepth: workerQueueDepth });
         setMeshRegistry(meshDispatcher, registry);
         res.meshDispatcher = meshDispatcher;
     }
@@ -1278,9 +1259,9 @@ export async function refresh(
     if (
         prev &&
         meta !== null &&
-        prev.atlasHash !== null &&
-        meta.hash === prev.atlasHash &&
-        f32Equal(prev.texAnimData, registry.texAnimData)
+        prev.textures.hash !== null &&
+        meta.hash === prev.textures.hash &&
+        f32Equal(prev.textures.texAnimData, registry.texAnimData)
     ) {
         // atlas + texAnim unchanged → reuse. But the BlockRegistry itself
         // may have been rebuilt (block tables, shape ids, ...), so push
@@ -1310,8 +1291,8 @@ function f32Equal(a: Float32Array, b: Float32Array): boolean {
 }
 
 export function dispose(state: VoxelResources): void {
-    state.atlas.dispose();
-    state.texAnimBuffer.dispose();
+    state.textures.atlas.dispose();
+    state.textures.texAnimBuffer.dispose();
     state.quadMaterials.opaque.dispose();
     state.quadMaterials.transparent.dispose();
     state.quadMaterials.translucent.dispose();

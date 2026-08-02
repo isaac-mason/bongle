@@ -1,9 +1,10 @@
-// ── mesh dispatcher ────────────────────────────────────────────────
+// ── mesher ─────────────────────────────────────────────────────────
 //
-// A worker pool that meshes voxel chunks off the main thread. It is a pure
-// data primitive: you `queueMesh` chunks and `flushMeshQueue` once per frame,
-// then drain the `results` and `lost` queues it fills. No callbacks — the
-// caller pulls, the caller decides.
+// A worker pool that meshes voxel chunks off the main thread, plus the loader
+// for the worker bundle itself (`loadMeshWorker` / the `?worker&inline` import).
+// It is a pure data primitive: you `queueMesh` chunks and `flushMeshQueue` once
+// per frame, then drain the `results` and `lost` queues it fills. No callbacks —
+// the caller pulls, the caller decides.
 //
 // One world at a time. Caches key on bare chunk coordinate, so a room swap must
 // `resetMeshCaches` before the next world reuses the old world's coordinates.
@@ -51,11 +52,33 @@ export type WorkerLike = {
     terminate?(): void;
 };
 
-/** spawnMeshWorker lives in `mesh-worker-spawn.ts` so the `?worker&inline`
- *  query stays out of mesh-dispatcher's static import graph, Bun's TS
- *  loader doesn't strip Vite query suffixes, and the bongle asset pipeline
- *  imports this file via the `bongle` graph. voxel-resources reaches the
- *  spawn helper through a dynamic import that only resolves under Vite. */
+/**
+ * The mesh worker constructor, loaded from the `?worker&inline` bundle. The import is DYNAMIC so the
+ * Vite query never enters this module's STATIC import graph: the bongle asset pipeline walks `mesher.ts`
+ * (its runtime can't strip Vite query suffixes) but always sets workerCount=0, so it never calls
+ * loadMeshWorker() and the query is never resolved. Under Vite the query inlines the worker as a base64
+ * blob — no separate chunk, no cross-origin Worker construction (the deployed client iframe runs at
+ * origin='null'). Cached after the first load so boot + crash-respawn construct synchronously.
+ */
+let MeshWorkerCtor: (new () => WorkerLike) | null = null;
+
+/** Load the mesh worker bundle. Await once (from `voxel-resources.load`) before creating a worker-backed
+ *  dispatcher; a no-op after the first call. */
+export async function loadMeshWorker(): Promise<void> {
+    if (MeshWorkerCtor === null) {
+        const mod = await import('./mesher.worker?worker&inline');
+        MeshWorkerCtor = mod.default as unknown as new () => WorkerLike;
+    }
+}
+
+/** Default worker spawn: construct one from the loaded bundle. `MeshDispatcherOpts.workerFactory`
+ *  overrides it (the unit test injects a MessageChannel-backed fake). */
+function spawnMeshWorker(): WorkerLike {
+    if (MeshWorkerCtor === null) {
+        throw new Error('[mesher] await loadMeshWorker() before creating a worker-backed dispatcher');
+    }
+    return new MeshWorkerCtor();
+}
 
 /** a finished job, pushed onto `dispatcher.results`. The `ChunkMeshResult`
  *  payload (three PassMesh + AABB) matches the sync `meshChunk` path; `chunkKey`
@@ -113,7 +136,7 @@ export type MeshDispatcher = {
     /** canonical serialized registry, kept so a respawned worker re-inits without re-encoding. */
     registryBuf: ArrayBuffer | null;
     /** spawns a worker for a slot; called at boot and on crash respawn. */
-    workerFactory: () => WorkerLike;
+    spawn: () => WorkerLike;
     /** per-worker chunk-cache budget; LRU entries beyond it are evicted. */
     cacheMaxChunks: number;
     /** per-frame instrumentation, drained by `readMeshPerf`. */
@@ -134,8 +157,9 @@ export type MeshPerf = {
 };
 
 export type MeshDispatcherOpts = {
-    /** factory called once per worker slot at construction. */
-    workerFactory: () => WorkerLike;
+    /** override the worker spawn (the unit test injects a fake). Defaults to constructing the
+     *  `?worker&inline` bundle loaded by {@link loadMeshWorker}. */
+    workerFactory?: () => WorkerLike;
     workerCount: number;
     queueDepth: number;
     /** per-worker chunk-cache budget (chunks). ~16 KB each. defaults to 256 (~4 MB). */
@@ -144,6 +168,7 @@ export type MeshDispatcherOpts = {
 
 export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
     const slots: WorkerSlot[] = [];
+    const spawn = opts.workerFactory ?? spawnMeshWorker;
     const d: MeshDispatcher = {
         slots,
         queueDepth: opts.queueDepth,
@@ -154,7 +179,7 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
         outputPool: [],
         registryVersion: -1,
         registryBuf: null,
-        workerFactory: opts.workerFactory,
+        spawn,
         cacheMaxChunks: opts.cacheMaxChunks ?? 256,
         perf: { buildMs: 0, postMs: 0, workUs: 0, enqueues: 0, results: 0 },
     };
@@ -170,7 +195,7 @@ export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
     for (let i = 0; i < opts.workerCount * 2; i++) d.packetPool.push(new ArrayBuffer(MESH_TASKS_SCRATCH_BYTES));
 
     for (let i = 0; i < opts.workerCount; i++) {
-        const worker = opts.workerFactory();
+        const worker = spawn();
         const slot: WorkerSlot = {
             worker,
             pendingUrgent: [],
@@ -209,12 +234,12 @@ function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): v
 /** Respawn a crashed worker slot. The crash detaches every buffer
  *  currently in flight at the slot, they're gone, can't be returned
  *  to the pool. We replenish with freshly-allocated sets to keep the
- *  pool at its original capacity. In-flight chunks are queued on
- *  `d.lost` so the caller can re-mark them dirty. */
+ *  pool at its original capacity. In-flight chunks are surfaced
+ *  through `onLost` so the caller can re-mark them dirty. */
 function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' | 'messageerror', ev: unknown): void {
     const slot = d.slots[slotIndex];
     if (!slot) return;
-    console.warn(`[mesh-dispatcher] worker slot ${slotIndex} crashed (${kind}); respawning`, ev);
+    console.warn(`[mesher] worker slot ${slotIndex} crashed (${kind}); respawning`, ev);
 
     // Queue lost chunks for the caller to re-dirty; drop their dedup entries.
     for (const entry of slot.inFlight) {
@@ -241,7 +266,7 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
     // slot is dispatch-ineligible (same as boot).
     slot.worker.onmessage = null;
     slot.worker.terminate?.();
-    const fresh = d.workerFactory();
+    const fresh = d.spawn();
     slot.worker = fresh;
     slot.registryVersion = -1;
     slot.pendingRegistryVersion = -1;

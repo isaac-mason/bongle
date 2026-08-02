@@ -311,7 +311,7 @@ export type RenderRoomDeps = {
     offline: OfflineRenderer;
     /** gpu (WebGPU compute producer) or cpu (WebGL cullEmit producer); the offline
      *  backend that built these deps knows which. Bakers touch only the shared
-     *  surface (atlas / atlasReady / arenas); each backend narrows in renderToTarget. */
+     *  surface (textures / arenas); each backend narrows in renderToTarget. */
     voxelResources: VoxelResourcesNs.VoxelResources | VoxelResourcesCpuNs.VoxelResources;
     voxelMeshResources: VoxelMeshResources.VoxelMeshResources;
     modelResources: ModelResourcesNs.ModelResources;
@@ -330,7 +330,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
 
     const scene = new Scene();
     const envResources = deps.environmentResources;
-    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources);
+    const voxelVisuals = VoxelVisuals.initRoomMeshes(scene, deps.voxelResources.geometries, deps.voxelResources.quadMaterials);
     const voxelMeshVisuals = VoxelMeshVisuals.init(deps.voxelMeshResources.batch, scene, nodes);
     const modelVisuals = ModelVisuals.init(deps.modelResources.batch, scene, nodes);
     const visibility = Visibility.init();
@@ -357,7 +357,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
 }
 
 export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void {
-    VoxelVisuals.unmountRoom(deps.voxelResources);
+    VoxelVisuals.unmountRoom(deps.voxelResources.arenas, deps.voxelResources.meshDispatcher);
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
