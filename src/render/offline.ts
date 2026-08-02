@@ -63,11 +63,16 @@ export type OfflineRenderer = {
  * undefined and each backend acquires its own (WebGPU: `navigator.gpu`; WebGL:
  * OffscreenCanvas WebGL2).
  */
-export async function loadOfflineBackend(gpu?: { device: GPUDevice; adapter: GPUAdapter }): Promise<OfflineRenderer> {
+export async function loadOfflineBackend(
+    gpu?: { device: GPUDevice; adapter: GPUAdapter },
+    backend?: RendererBackendKind,
+): Promise<OfflineRenderer> {
     // An injected device is always WebGPU (Node Dawn bake — no navigator.gpu, so
-    // selectBackend() would wrongly pick WebGL). Only the browser-worker path (no
-    // injected device) honours selectBackend() → the forwarded `?renderer=`.
-    const kind = gpu ? 'webgpu' : selectBackend();
+    // selectBackend() would wrongly pick WebGL). Otherwise: the explicit override
+    // (`?renderer=` forwarded into the pipeline worker, whose `self.location` doesn't
+    // carry the page query), else `selectBackend()` (reads `?renderer=` directly when
+    // the URL does carry it — e.g. the editor's game-client iframe).
+    const kind = gpu ? 'webgpu' : (backend ?? selectBackend());
     const mod = kind === 'webgl' ? await import('./webgl') : await import('./webgpu');
     return mod.createOffline(gpu);
 }

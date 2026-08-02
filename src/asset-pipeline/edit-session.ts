@@ -16,12 +16,12 @@
 // headless GPU icon render) — kept out of the host-neutral `pipeline.ts` core.
 
 import { registerFlushHandler } from '../core/capture/flush';
-import * as AssetPipeline from './pipeline';
 import { createBrowserRaster } from './bake/raster-browser';
 import { createBrowserDecodeAudio } from './decode-audio-browser';
 import type { Filesystem } from './filesystem';
 import * as Icons from './icons';
 import { createBakeLoader, createClientResourceLoader } from './loader';
+import * as AssetPipeline from './pipeline';
 
 export type BakeReport = {
     /** atlas bytes moved this pass — the caller tells the live client to refresh. */
@@ -39,13 +39,22 @@ export type Driver = {
     log?: (msg: string) => void;
 };
 
-export type Opts = { mode: 'edit' | 'play'; cache: boolean };
+export type Opts = {
+    mode: 'edit' | 'play';
+    cache: boolean;
+    /** forced render backend for the icon bake, forwarded from the editor's
+     *  `?renderer=` (the worker's `self.location` can't carry it). Absent → the
+     *  offline seam's `selectBackend()` default. */
+    renderer?: 'webgpu' | 'webgl';
+};
 
 export type State = {
     driver: Driver;
     pipeline: AssetPipeline.State;
     iconLoader: ReturnType<typeof createClientResourceLoader>;
     unregisterFlush: () => void;
+    /** forced render backend for icon baking (see `Opts.renderer`). */
+    renderer: 'webgpu' | 'webgl' | undefined;
     // guards: a bake / icon render in flight drops overlapping triggers (a later edit re-fires).
     baking: boolean;
     // headless GPU render context, lazily created on first icon render (device handshake +
@@ -70,6 +79,7 @@ export function init(driver: Driver, opts: Opts): State {
         pipeline,
         iconLoader: createClientResourceLoader(fs),
         unregisterFlush: () => {},
+        renderer: opts.renderer,
         baking: false,
         renderCtx: null,
         renderingIcons: false,
@@ -122,7 +132,7 @@ async function renderIcons(state: State, atlasChanged: boolean): Promise<void> {
     try {
         if (!state.renderCtx) {
             log?.('icons: creating headless render context…');
-            state.renderCtx = await Icons.createHeadlessRenderContext();
+            state.renderCtx = await Icons.createHeadlessRenderContext(undefined, state.renderer);
             log?.('icons: render context ready');
         }
         log?.('icons: building render deps…');

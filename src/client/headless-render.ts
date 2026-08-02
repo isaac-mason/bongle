@@ -6,6 +6,7 @@
 // the `OfflineRenderer` handle, so block/prefab icon rendering is backend-neutral.
 
 import type { ResourceLoader } from '../core/resource-loader';
+import type { RendererBackendKind } from '../render/backend';
 import { loadOfflineBackend, type OfflineRenderer } from '../render/offline';
 import type * as VoxelArena from '../render/voxels/voxel-arena';
 import type * as Performance from './performance';
@@ -21,12 +22,14 @@ export type HeadlessRenderContext = {
 
 /** Stand up a headless renderer via the offline seam. `gpu` is the injected Node
  *  Dawn device (WebGPU); the browser worker leaves it undefined and the backend
- *  acquires its own. The concrete backend is `selectBackend()`'s choice. */
-export async function createHeadlessRenderContext(gpu?: {
-    device: GPUDevice;
-    adapter: GPUAdapter;
-}): Promise<HeadlessRenderContext> {
-    const offline = await loadOfflineBackend(gpu);
+ *  acquires its own. `backend` is the pipeline worker's forwarded `?renderer=`
+ *  override (its `self.location` can't carry the page query); absent → the offline
+ *  seam falls back to `selectBackend()`. */
+export async function createHeadlessRenderContext(
+    gpu?: { device: GPUDevice; adapter: GPUAdapter },
+    backend?: RendererBackendKind,
+): Promise<HeadlessRenderContext> {
+    const offline = await loadOfflineBackend(gpu, backend);
     return { offline, performance: offline.performance, budget: offline.budget };
 }
 
