@@ -42,6 +42,8 @@ import * as ExtrudedSpriteVisuals from './sprites/extruded-sprite-visuals';
 import * as SpriteResources from './sprites/sprite-resources';
 import * as SpriteVisuals from './sprites/sprite-visuals';
 import * as Time from './time';
+import { flushMeshQueue, readMeshPerf } from './voxels/mesher';
+import * as VoxelAoi from './voxels/voxel-aoi';
 import * as VoxelArena from './voxels/voxel-arena';
 import * as VoxelMeshResources from './voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from './voxels/voxel-mesh-visuals';
@@ -345,6 +347,17 @@ export async function createOffline(_gpu?: { device: GPUDevice; adapter: GPUAdap
                 radius,
             ),
         readTarget: (target) => state.renderer.readRenderTargetPixels(target),
+        // deps built by this backend's buildOfflineDeps → voxelResources is the cpu type.
+        unmountRoom: (deps) =>
+            VoxelResources.unmountRoom(deps.voxelResources as VoxelResources.VoxelResources, deps.voxelResources.meshDispatcher),
+        remeshChunkInto: (deps, voxels, registry, chunk, meshOutput) =>
+            VoxelResources.remeshChunkInto(
+                deps.voxelResources as VoxelResources.VoxelResources,
+                voxels,
+                registry,
+                chunk,
+                meshOutput,
+            ),
         dispose: () => dispose(state),
     };
     return offline;
@@ -656,7 +669,7 @@ export function teardown(state: WebGlState): void {
     const { scene, visibility, visuals: rv } = state.active;
     VoxelVisuals.dispose(rv.voxel, scene);
     // release the active world's chunks from the arena + mesh worker cache.
-    VoxelVisuals.unmountRoom(state.resources.voxel.arenas, state.resources.voxel.meshDispatcher);
+    VoxelResources.unmountRoom(state.resources.voxel, state.resources.voxel.meshDispatcher);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, visibility);
     ModelVisuals.dispose(rv.model, state.resources.model.batch, visibility);
     DomUi.dispose(rv.domUi);
@@ -688,10 +701,21 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
     const res = state.resources;
 
     Debug.begin(room.clientMetrics, 'mesh');
-    // streaming rooms defer meshing a chunk until its 26-neighbourhood has
-    // arrived (mesh once, correct AO/light); local rooms load all at once so
-    // there's no trickle to dedupe — mesh immediately.
-    VoxelVisuals.update(rv.voxel, res.voxel.arenas, res.voxel.meshDispatcher, room.voxels, povCamera.position, !room.local);
+    // The live drive: the AOI schedules dirty chunks off-thread (streaming rooms
+    // defer a chunk until its 26-neighbourhood has arrived so it meshes once with
+    // correct AO/light; local rooms mesh immediately), then the CPU producer
+    // consumes the staged results into its own arena. The live path always has a
+    // worker pool (the offline bakers mesh synchronously via `remeshChunkInto`).
+    const mesher = res.voxel.meshDispatcher;
+    if (mesher === null) throw new Error('[webgl] live voxel update requires a mesh worker pool (workerCount > 0)');
+    VoxelAoi.reDirtyLost(mesher, room.voxels);
+    const toForget: string[] = [];
+    VoxelAoi.scheduleDirtyChunks(rv.voxel, mesher, room.voxels, povCamera.position, !room.local, toForget);
+    VoxelResources.consume(res.voxel, mesher, room.voxels, povCamera.position, toForget);
+    // flush AFTER consume drains: the flush recycles output buffers back to the
+    // workers, which would detach them from an undrained result (see mesher.ts).
+    flushMeshQueue(mesher, room.voxels);
+    rv.voxel.lastMeshPerf = readMeshPerf(mesher);
     Debug.end(room.clientMetrics, 'mesh');
 
     // arena occupancy + fragmentation, recorded post-update so the sample

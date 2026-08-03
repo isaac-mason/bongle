@@ -29,7 +29,6 @@ import * as ModelVisuals from '../render/models/model-visuals';
 import type { OfflineRenderer } from '../render/offline';
 import * as Particles from '../render/particles/particles';
 import * as Visibility from '../render/visibility/visibility';
-import * as VoxelArena from '../render/voxels/voxel-arena';
 import type * as VoxelMeshResources from '../render/voxels/voxel-mesh-resources';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
 import type * as VoxelResourcesCpuNs from '../render/voxels/voxel-resources-cpu';
@@ -357,7 +356,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
 }
 
 export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void {
-    VoxelVisuals.unmountRoom(deps.voxelResources.arenas, deps.voxelResources.meshDispatcher);
+    deps.offline.unmountRoom(deps);
     Physics.dispose(room.physics);
     VoxelVisuals.dispose(room.voxelVisuals, room.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
@@ -1092,19 +1091,6 @@ export function setActivePlayer(state: Rooms, net: Net.ClientNet, playerId: Play
     if (!room.local) {
         Net.send(net, { type: 'set_active_room', playerId });
     }
-}
-
-/**
- * destroy all chunks in a room and their gpu meshes. used between
- * offline iterations so each subject starts on an empty world without
- * having to re-init the (expensive) voxel resources.
- */
-export function clearRoomVoxels(room: ClientRoom, voxelResources: VoxelResourcesNs.VoxelResources): void {
-    for (const [key, chunk] of room.voxels.chunks) {
-        Voxels.unlinkChunkNeighbors(chunk);
-        VoxelArena.removeChunkMesh(voxelResources.arenas, key);
-    }
-    room.voxels.chunks.clear();
 }
 
 /**

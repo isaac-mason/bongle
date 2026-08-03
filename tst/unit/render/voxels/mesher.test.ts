@@ -22,8 +22,8 @@ import {
 import { buildTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
 import { createChunk, createVoxels, setChunkBlock } from '../../../../src/core/voxels/voxels';
 import {
-    createMeshDispatcher,
-    disposeMeshDispatcher,
+    createMesher,
+    disposeMesher,
     flushMeshQueue,
     isInFlight,
     meshQueueStats,
@@ -94,7 +94,7 @@ function step(workers: TestWorker[]): void {
 
 /** one full dispatch cycle: flush accumulated pending into batch packets, then
  *  process + deliver so results land back on main. */
-function cycle(d: ReturnType<typeof createMeshDispatcher>, voxels: ReturnType<typeof createVoxels>, workers: TestWorker[]): void {
+function cycle(d: ReturnType<typeof createMesher>, voxels: ReturnType<typeof createVoxels>, workers: TestWorker[]): void {
     flushMeshQueue(d, voxels);
     step(workers);
 }
@@ -116,7 +116,7 @@ describe('mesher', () => {
         it('slots are ineligible for dispatch until initRegistry ack', () => {
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 2,
@@ -130,7 +130,7 @@ describe('mesher', () => {
             // After processing the initRegistry message, the slot should be eligible.
             step([tw]);
             expect(queueMesh(d, chunk, 1)).toBe(true);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
     });
 
@@ -138,7 +138,7 @@ describe('mesher', () => {
         function bootstrap() {
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 3,
@@ -163,7 +163,7 @@ describe('mesher', () => {
             expect(results[0]!.opaque).not.toBeNull();
             expect(results[0]!.opaque!.quadCount).toBe(6);
             expect(isInFlight(d, '0,0,0')).toBe(false);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('warm cache: re-mesh sends no data (meshes from cache), mutation re-sends', () => {
@@ -193,13 +193,13 @@ describe('mesher', () => {
             cycle(d, voxels, [tw]);
             expect(results[0]!.opaque!.quadCount).toBe(12);
 
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('LRU: cache stays within cacheMaxChunks; evicted neighbours re-set on next reference', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => {
                     const tw = createTestWorker();
                     tws.push(tw);
@@ -241,7 +241,7 @@ describe('mesher', () => {
             cycle(d, voxels, tws);
             expect(results[0]!.opaque!.quadCount).toBe(6);
 
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('dedups: enqueuing the same chunk twice rejects the second', () => {
@@ -256,7 +256,7 @@ describe('mesher', () => {
             cycle(d, voxels, [tw]);
             // After the result clears the entry, re-enqueue should succeed.
             expect(queueMesh(d, chunk, 2)).toBe(true);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('forwards stale-gen results — caller decides what to do', () => {
@@ -268,7 +268,7 @@ describe('mesher', () => {
 
             expect(results.length).toBe(1);
             expect(results[0]!.gen).toBe(5);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('batches multiple pending chunks into one post', () => {
@@ -290,7 +290,7 @@ describe('mesher', () => {
             expect(results.length).toBe(3);
             expect(new Set(results.map((r) => r.chunkKey))).toEqual(new Set(['0,0,0', '1,0,0', '2,0,0']));
             for (const r of results) expect(r.opaque!.quadCount).toBe(6);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('does not eagerly refill on result — output buffers stay put until the next flush', () => {
@@ -300,7 +300,7 @@ describe('mesher', () => {
             // under the queued result. Refill must wait for an explicit flush.
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => tw.worker,
                 workerCount: 1,
                 queueDepth: 4,
@@ -334,7 +334,7 @@ describe('mesher', () => {
             // an explicit flush is what dispatches them (safe: caller has drained).
             flushMeshQueue(d, voxels);
             expect(tw.inbox.length).toBe(1);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
     });
 
@@ -342,7 +342,7 @@ describe('mesher', () => {
         function bootstrap(workerCount: number, queueDepth: number) {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => {
                     const tw = createTestWorker();
                     tws.push(tw);
@@ -383,7 +383,7 @@ describe('mesher', () => {
             const busy = stats.perSlot.filter((p) => p.pending > 0);
             expect(busy.length).toBe(1); // one worker owns region 0
             expect(busy[0]!.pending).toBe(3);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('refuses dispatch when every slot is saturated at queueDepth', () => {
@@ -397,7 +397,7 @@ describe('mesher', () => {
             expect(queueMesh(d, c1, 1)).toBe(true);
             // workerCount=1, queueDepth=2 -> 3rd enqueue must fail (pending is full).
             expect(queueMesh(d, c2, 1)).toBe(false);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('spill: a starving chunk offloads to another worker when its affinity worker is full', () => {
@@ -419,7 +419,7 @@ describe('mesher', () => {
             const after = meshQueueStats(d);
             expect(after.inFlightTotal).toBe(3);
             expect(after.perSlot[1 - busySlot]!.pending).toBe(1);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('urgent bypasses a full queue and leads the batch packet', () => {
@@ -438,13 +438,13 @@ describe('mesher', () => {
             const stats = meshQueueStats(d);
             expect(stats.perSlot[0]!.pendingUrgent).toBe(1);
             expect(stats.perSlot[0]!.pending).toBe(2);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('urgent chunks mesh before normal ones already queued', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => {
                     const tw = createTestWorker();
                     tws.push(tw);
@@ -476,7 +476,7 @@ describe('mesher', () => {
             // results come back in packet order; the urgent chunk is first.
             expect(results[0]!.chunkKey).toBe('2,0,0');
             expect(new Set(results.map((r) => r.chunkKey))).toEqual(new Set(['0,0,0', '1,0,0', '2,0,0']));
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
     });
 
@@ -484,7 +484,7 @@ describe('mesher', () => {
         it('pool size returns to initial after every dispatch+result cycle', () => {
             const reg = buildSmallRegistry();
             const tws: TestWorker[] = [];
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => {
                     const tw = createTestWorker();
                     tws.push(tw);
@@ -517,7 +517,7 @@ describe('mesher', () => {
             // Process + deliver every result, pool restored.
             step(tws);
             expect(meshQueueStats(d).poolSize).toBe(initialPool);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('crash recovery: lost in-flight chunks queue on `lost`, pool replenished, slot respawned', () => {
@@ -525,7 +525,7 @@ describe('mesher', () => {
             // Track every worker spawned by the factory so we can detect
             // respawn (slot 0 should be on its 2nd worker after the crash).
             const tws: TestWorker[] = [];
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => {
                     const tw = createTestWorker();
                     tws.push(tw);
@@ -572,13 +572,13 @@ describe('mesher', () => {
             expect(queueMesh(d, c0, 8)).toBe(false);
             step([tws[1]!]); // ack the respawned worker
             expect(queueMesh(d, c0, 8)).toBe(true);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
 
         it('returns false when the single slot is at queue depth', () => {
             const reg = buildSmallRegistry();
             const tw = createTestWorker();
-            const d = createMeshDispatcher({
+            const d = createMesher({
                 workerFactory: () => tw.worker,
                 // 1 worker, depth 1 → queue capacity 1.
                 workerCount: 1,
@@ -598,7 +598,7 @@ describe('mesher', () => {
             expect(queueMesh(d, c0, 1)).toBe(true);
             // queue full (1 pending of depth 1) -> false
             expect(queueMesh(d, c1, 1)).toBe(false);
-            disposeMeshDispatcher(d);
+            disposeMesher(d);
         });
     });
 });

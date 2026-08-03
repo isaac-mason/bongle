@@ -9,6 +9,9 @@ import type { Camera, RenderPipeline, RenderTarget, Scene } from 'gpucat';
 import type * as Performance from '../client/performance';
 import type { RenderRoom, RenderRoomDeps } from '../client/rooms';
 import type { ResourceLoader } from '../core/resource-loader';
+import type { Blocks } from '../core/voxels/block-registry';
+import type { ChunkMeshResult, MeshOutput } from '../core/voxels/chunk-mesher';
+import type { Chunk, Voxels } from '../core/voxels/voxels';
 import { type RenderDeviceCaps, type RendererBackendKind, selectBackend } from './backend';
 import type { VoxelArenaBudget } from './voxels/voxel-arena';
 
@@ -52,6 +55,25 @@ export type OfflineRenderer = {
     /** read `target` back to tightly-packed RGBA8 — `readPixels` (WebGPU) /
      *  `readRenderTargetPixels` (WebGL). */
     readTarget(target: RenderTarget): Promise<Uint8Array>;
+
+    /** release the active render room's world from this backend's voxel arena +
+     *  mesh worker cache, so the next room bakes clean. Backend-specific: the CPU
+     *  and WebGPU producers own separate arenas, so each narrows `deps.voxelResources`
+     *  to its own producer (mirrors `renderToTarget`). */
+    unmountRoom(deps: RenderRoomDeps): void;
+
+    /** synchronously mesh a chunk into this backend's arena (the offline bakers fill
+     *  the arena on the main thread, no worker pool). Returns the mesh, or null when
+     *  the chunk was all-air / fully occluded (the caller may skip an empty tile).
+     *  Backend-specific for the same reason as `unmountRoom` — the producer owns its
+     *  arena — so the narrowing lives here, not in the shared bakers. */
+    remeshChunkInto(
+        deps: RenderRoomDeps,
+        voxels: Voxels,
+        registry: Blocks,
+        chunk: Chunk,
+        meshOutput: MeshOutput,
+    ): ChunkMeshResult | null;
 
     dispose(): void;
 };

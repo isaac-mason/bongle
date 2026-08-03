@@ -26,7 +26,6 @@ import { meshInfoIndexOf } from '../render/models/model-resources';
 import * as ModelVisuals from '../render/models/model-visuals';
 import * as Interpolation from '../render/transform/interpolation';
 import * as VoxelMeshVisuals from '../render/voxels/voxel-mesh-visuals';
-import { remeshChunkInto } from '../render/voxels/voxel-remesh';
 import { applyConfig as applyEnvConfig } from './environment';
 import { createRenderRoom, disposeRenderRoom, RENDER_ROOM_PLAYER_ID, type RenderRoom, type RenderRoomDeps } from './rooms';
 
@@ -108,15 +107,14 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         // ── world transforms (via interpolation, held at alpha=1) ──
         Interpolation.snapshot(room.nodes);
         computeWorldTransforms(room.nodes);
-        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0, false);
+        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
-        const arenas = deps.voxelResources.arenas;
         const meshOutput = createMeshOutput();
         for (const chunk of room.voxels.chunks.values()) {
             chunk.light.fill(0xffff);
             markChunkDirty(room.voxels, chunk);
-            remeshChunkInto(arenas, room.voxels, room.voxels.registry, chunk, meshOutput);
+            deps.offline.remeshChunkInto(deps, room.voxels, room.voxels.registry, chunk, meshOutput);
         }
 
         // unlit for the flat icon read.

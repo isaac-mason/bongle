@@ -1,10 +1,12 @@
-// gpu-frame.ts — WebGPU-only voxel frame producer (compute cull/emit + translucent sort).
+// voxel-resources-gpu.ts — WebGPU-only voxel frame producer (compute cull/emit +
+// translucent sort).
 //
-// Split out of the former voxel-resources.ts: this half owns the GPU compute
-// chain (cull → finalize → emit → translucent radix sort), the per-pass render
-// scratch (visibleQuads + indirect) + geometries, and the `VoxelResources`
-// handle + init/load/dispose + the per-frame graph (updateCull / cullDispatches).
-// The shared arena/packer/SectionTable/structs live in ./voxel-arena.
+// Owns the GPU compute chain (cull → finalize → emit → translucent radix sort), the
+// per-pass render scratch (visibleQuads + indirect) + geometries, this backend's
+// arena (section tables + residency/eviction packer + GPU cull buffers), and the
+// `VoxelResources` handle + init/load/dispose + the per-frame graph (updateCull /
+// cullDispatches). The backend-neutral leaf tools (structs, SegmentArena, cull-view
+// math, budgets) live in ./voxel-arena.
 //
 // Value-imported ONLY by render/webgpu/* + the offline icon paths. WebGL never
 // imports this file (it has its own producer); shared voxel files may `import
@@ -41,6 +43,7 @@ import {
     max,
     min,
     or,
+    packTo,
     Return,
     select,
     shiftLeft,
@@ -60,25 +63,38 @@ import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
 import type { Vec3 } from 'mathcat';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
-import { QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
-import { CHUNK_SIZE } from '../../core/voxels/voxels';
+import {
+    buildMeshInput,
+    type ChunkMeshResult,
+    type MeshOutput,
+    meshChunk,
+    type PassMesh,
+    QUAD_STRIDE_U32S,
+} from '../../core/voxels/chunk-mesher';
+import { CHUNK_SIZE, type Chunk, chunkKey, markChunkDirty, type Voxels } from '../../core/voxels/voxels';
 import type { EnvironmentResources } from '../environment/environment';
 import type { TimeResources } from '../time';
-import { createMeshDispatcher, disposeMeshDispatcher, loadMeshWorker, type MeshDispatcher, setMeshRegistry } from './mesher';
+import { createMesher, disposeMesher, loadMeshWorker, type Mesher, resetMeshCaches, setMeshRegistry } from './mesher';
 import {
+    arenaAlloc,
     arenaDispose,
+    arenaFree,
+    arenaWrite,
     BUCKET_COUNT,
     buildCullView,
+    type ChunkAlloc,
     ChunkCullRecord,
     ChunkInfo,
-    createVoxelArena,
+    createQuadArena,
     DRAW_INDIRECT_STRIDE,
+    hasNoVisibleSurface,
     PASSES,
+    type QuadArena,
     SECTION_META_U32S,
+    type SectionEntryFields,
     VISIBLE_QUAD_STRIDE,
     VisibleChunk,
     VisibleQuad,
-    type VoxelArena,
     type VoxelArenaBudget,
 } from './voxel-arena';
 import { createGpuQuadMaterial, decodeOct16, decodeQuadCentroid, type VoxelPass } from './voxel-material';
@@ -854,6 +870,402 @@ function createFinalizeCompute(): ComputeNode {
     }).compute({ workgroupSize: [1, 1, 1], name: 'voxel-finalize' });
 }
 
+// ── GPU-owned arena (residency + eviction + GPU cull buffers) ────────
+//
+// This backend owns its arena end to end: the quad SegmentArena (a shared leaf
+// tool), a per-pass section table carrying the ChunkInfo GPU side-table + the GPU
+// cull metaBuffer (no CPU face mirrors — the compute chain reads only the device
+// buffers), and the residency/eviction packer with the GPU cull-record buffer + the
+// translucent sort gate folded in. The WebGL producer holds the mirror image (CPU
+// face mirrors, no GPU cull buffers); the residency + eviction code is intentionally
+// duplicated across the two rather than shared, so neither carries the other's buffers.
+
+const CHUNK_CULL_RECORD_U32S = layoutStrideOf(ChunkCullRecord) / 4;
+
+// Plain State; `sectionAllocSlot`/`sectionFreeSlot`/`sectionWriteEntry`/
+// `sectionDispose` are standalone fns over it (the SegmentArena convention).
+type GpuSectionTable = {
+    readonly slotCount: number;
+    /** ChunkInfo {origin, arenaBase}, bound as 'chunkInfo' on each pass geometry. */
+    readonly buffer: GpuBuffer;
+    /** u32 view over `buffer.array`, for packing/zeroing entries in place. */
+    readonly dataU32: Uint32Array;
+    readonly entryU32s: number;
+    /** GPU mirror of the face offsets/counts (SECTION_META_U32S per slot), read by
+     *  the cull/emit/expand computes; never touched by the draw-time VS. */
+    readonly metaBuffer: GpuBuffer;
+    /** u32 view over `metaBuffer.array`, for the bit-exact face writes. */
+    readonly metaU32: Uint32Array;
+    /** free slot indices (LIFO); a slot is live iff it's not on the stack. */
+    readonly freeStack: number[];
+};
+
+function createGpuSectionTable(slotCount: number): GpuSectionTable {
+    // GPU side-table (16B/entry): origin + arenaBase. The face offsets/counts the
+    // cull compute needs live in the metaBuffer below; AABB lives on ChunkAlloc.
+    const buffer = new GpuBuffer(d.array(ChunkInfo), {
+        count: slotCount,
+        usage: 'storage',
+        lifecycle: BufferLifecycle.MANUAL,
+    });
+    const arrF32 = buffer.array as Float32Array;
+    const dataU32 = new Uint32Array(arrF32.buffer, arrF32.byteOffset, arrF32.length);
+
+    // GPU mirror of the face offsets/counts (14 u32/slot) for the cull compute.
+    // Explicit `data:` (not `count:`) so the backing store is a Uint32Array,
+    // keeping u32 writes bit-exact (the `count:` path would pick Float32Array).
+    const metaBuffer = new GpuBuffer(d.array(d.u32), {
+        data: new Uint32Array(slotCount * SECTION_META_U32S),
+        usage: 'storage',
+        lifecycle: BufferLifecycle.MANUAL,
+    });
+
+    const freeStack: number[] = new Array(slotCount);
+    for (let i = 0; i < slotCount; i++) freeStack[i] = slotCount - 1 - i;
+    return {
+        slotCount,
+        buffer,
+        dataU32,
+        entryU32s: arrF32.length / slotCount,
+        metaBuffer,
+        metaU32: metaBuffer.array as Uint32Array,
+        freeStack,
+    };
+}
+
+function sectionAllocSlot(t: GpuSectionTable): number {
+    const slot = t.freeStack.pop();
+    if (slot === undefined) throw new Error(`SectionTable OOM at ${t.slotCount}`);
+    return slot;
+}
+
+function sectionFreeSlot(t: GpuSectionTable, slot: number): void {
+    const base = slot * t.entryU32s;
+    for (let i = 0; i < t.entryU32s; i++) t.dataU32[base + i] = 0;
+    t.buffer.addUpdateRange(base, t.entryU32s);
+    // zero the GPU cull mirror too (a freed slot must contribute nothing).
+    const metaBase = slot * SECTION_META_U32S;
+    for (let i = 0; i < SECTION_META_U32S; i++) t.metaU32[metaBase + i] = 0;
+    t.metaBuffer.addUpdateRange(metaBase, SECTION_META_U32S);
+    t.freeStack.push(slot);
+}
+
+function sectionWriteEntry(t: GpuSectionTable, slot: number, entry: SectionEntryFields): void {
+    const base = slot * t.entryU32s;
+    packTo(ChunkInfo, t.dataU32, base * 4, {
+        origin: [entry.originX, entry.originY, entry.originZ],
+        arenaBase: entry.dataStart,
+    });
+    t.buffer.addUpdateRange(base, t.entryU32s);
+    const metaBase = slot * SECTION_META_U32S;
+    for (let i = 0; i < 7; i++) {
+        // GPU mirror layout: [faceOffsets[0..6], faceCounts[0..6]].
+        t.metaU32[metaBase + i] = entry.faceOffsets[i]!;
+        t.metaU32[metaBase + 7 + i] = entry.faceCounts[i]!;
+    }
+    t.metaBuffer.addUpdateRange(metaBase, SECTION_META_U32S);
+}
+
+function sectionDispose(t: GpuSectionTable): void {
+    t.buffer.dispose();
+    t.metaBuffer.dispose();
+}
+
+// The arena is its own residency manager: the `packer*` fns below are the residency
+// layer (chunk upsert/evict + GPU cull-record mirror + sort gate) over the raw slab
+// (`quadArena`) + section tables.
+type GpuVoxelArena = {
+    quadArena: QuadArena;
+    tables: Record<VoxelPass, GpuSectionTable>;
+    /** keyed by bare chunk coord key (arena holds one world at a time). */
+    allocs: Map<string, ChunkAlloc>;
+    residentKeys: Set<string>;
+    /** dense list of held ChunkAllocs, kept in lockstep with `cullRecordsBuffer` by
+     *  array index (the cull compute dispatches over `chunks.length`). */
+    chunks: ChunkAlloc[];
+    /** per-chunk worldspace min corner; consumed by OOM eviction (farthest-first). */
+    origins: Map<string, [number, number, number]>;
+    /** camera position, so eviction measures distance in world space. null offline. */
+    camera: Vec3 | null;
+    /** chunk keys evicted under memory pressure this frame → self-heal re-dirty. */
+    evicted: Set<string>;
+    /** GPU cull input, one `ChunkCullRecord` per resident chunk, mirroring `chunks`
+     *  1:1 by array index (push/swap-pop mirror below). */
+    cullRecordsBuffer: GpuBuffer;
+    /** u32 view over `cullRecordsBuffer.array` for bit-exact int writes. */
+    cullRecordsU32: Uint32Array;
+    /** true if translucent geometry mutated since the sort last ran; forces the
+     *  gated radix sort to re-run so its persisted permutation can't dangle onto
+     *  reallocated arena data. Read + cleared by `updateTranslucentSortGate`. */
+    translucentDirty: boolean;
+    /** translucent sort re-run gate baseline (camera pos + forward). `valid` false
+     *  forces the first run (e.g. after a room swap cleared the arena). */
+    tsortGate: { valid: boolean; camX: number; camY: number; camZ: number; fwdX: number; fwdY: number; fwdZ: number };
+};
+
+function createGpuVoxelArena(budget: VoxelArenaBudget): GpuVoxelArena {
+    const quadArena = createQuadArena(budget.quadArenaBytes, budget.maxAllocs);
+    const tables: Record<VoxelPass, GpuSectionTable> = {
+        opaque: createGpuSectionTable(budget.maxSections),
+        transparent: createGpuSectionTable(budget.maxSections),
+        translucent: createGpuSectionTable(budget.maxSections),
+    };
+    // a chunk occupies >= 1 section slot across the 3 tables, so the live chunk
+    // count is bounded by the sum of table capacities.
+    const maxChunks = tables.opaque.slotCount + tables.transparent.slotCount + tables.translucent.slotCount;
+    const cullRecordsBuffer = new GpuBuffer(d.array(ChunkCullRecord), {
+        count: maxChunks,
+        usage: 'storage',
+        lifecycle: BufferLifecycle.MANUAL,
+    });
+    const recF32 = cullRecordsBuffer.array as Float32Array;
+    return {
+        quadArena,
+        tables,
+        allocs: new Map(),
+        residentKeys: new Set(),
+        chunks: [],
+        origins: new Map(),
+        camera: null,
+        evicted: new Set(),
+        cullRecordsBuffer,
+        cullRecordsU32: new Uint32Array(recF32.buffer, recF32.byteOffset, recF32.length),
+        translucentDirty: false,
+        tsortGate: { valid: false, camX: 0, camY: 0, camZ: 0, fwdX: 0, fwdY: 0, fwdZ: 0 },
+    };
+}
+
+/** Write the cull record for the chunk currently at `index` in `packer.chunks`
+ *  (records mirror that array 1:1). Signed slots (-1 = pass absent) round-trip
+ *  through the u32 view bit-exactly. */
+function writeChunkCullRecord(packer: GpuVoxelArena, index: number, origin: [number, number, number], alloc: ChunkAlloc): void {
+    const base = index * CHUNK_CULL_RECORD_U32S;
+    const u = packer.cullRecordsU32;
+    u[base + 0] = origin[0] / CHUNK_SIZE;
+    u[base + 1] = origin[1] / CHUNK_SIZE;
+    u[base + 2] = origin[2] / CHUNK_SIZE;
+    u[base + 3] = alloc.opaque ? alloc.opaque.sectionSlot : -1;
+    u[base + 4] = alloc.transparent ? alloc.transparent.sectionSlot : -1;
+    u[base + 5] = alloc.translucent ? alloc.translucent.sectionSlot : -1;
+    packer.cullRecordsBuffer.addUpdateRange(base, CHUNK_CULL_RECORD_U32S);
+}
+
+/** Copy the cull record at `from` to `to` (mirrors a swap-pop in `chunks`). */
+function moveChunkCullRecord(packer: GpuVoxelArena, from: number, to: number): void {
+    const u = packer.cullRecordsU32;
+    const fromBase = from * CHUNK_CULL_RECORD_U32S;
+    const toBase = to * CHUNK_CULL_RECORD_U32S;
+    for (let i = 0; i < CHUNK_CULL_RECORD_U32S; i++) u[toBase + i] = u[fromBase + i];
+    packer.cullRecordsBuffer.addUpdateRange(toBase, CHUNK_CULL_RECORD_U32S);
+}
+
+function packerFreePass(packer: GpuVoxelArena, pass: VoxelPass, a: { sectionSlot: number; dataStart: number }): void {
+    arenaFree(packer.quadArena, a.dataStart);
+    if (pass === 'translucent') packer.translucentDirty = true;
+    sectionFreeSlot(packer.tables[pass], a.sectionSlot);
+}
+
+/** Swap-pop the chunk at `idx` out of `packer.chunks` and mirror the move in the
+ *  cull-record buffer. The last chunk backfills the hole (its `chunkIndex` +
+ *  record follow). O(1). */
+function removeChunkAt(packer: GpuVoxelArena, idx: number): void {
+    if (idx < 0) return;
+    const last = packer.chunks.pop()!;
+    const lastIdx = packer.chunks.length;
+    if (idx < lastIdx) {
+        packer.chunks[idx] = last;
+        last.chunkIndex = idx;
+        moveChunkCullRecord(packer, lastIdx, idx);
+    }
+}
+
+function packerUpsertChunk(packer: GpuVoxelArena, key: string, origin: [number, number, number], mesh: ChunkMeshResult): void {
+    const prev = packer.allocs.get(key);
+    const next: ChunkAlloc = prev ?? {
+        opaque: null,
+        transparent: null,
+        translucent: null,
+        aabb: [0, 0, 0, 0, 0, 0],
+        key,
+        chunkIndex: -1,
+    };
+    const meshAabb = mesh.aabb;
+    if (meshAabb) {
+        next.aabb[0] = meshAabb.min[0];
+        next.aabb[1] = meshAabb.min[1];
+        next.aabb[2] = meshAabb.min[2];
+        next.aabb[3] = meshAabb.max[0];
+        next.aabb[4] = meshAabb.max[1];
+        next.aabb[5] = meshAabb.max[2];
+    } else {
+        next.aabb[0] = 0;
+        next.aabb[1] = 0;
+        next.aabb[2] = 0;
+        next.aabb[3] = 0;
+        next.aabb[4] = 0;
+        next.aabb[5] = 0;
+    }
+
+    for (const pass of PASSES) {
+        const passMesh: PassMesh | null = mesh[pass];
+        const cur = next[pass];
+
+        if (!passMesh || passMesh.quadCount === 0) {
+            if (cur) {
+                packerFreePass(packer, pass, cur);
+                next[pass] = null;
+            }
+            continue;
+        }
+
+        const needQuads = passMesh.quadCount;
+        // free cur's prior quad range up front (re-upsert reallocates it below).
+        if (cur) arenaFree(packer.quadArena, cur.dataStart);
+        const dataStart = packerAllocWithEviction(packer, key, needQuads);
+        // graceful degrade: arena full and nothing evictable → drop this pass.
+        if (dataStart < 0) {
+            if (cur) {
+                sectionFreeSlot(packer.tables[pass], cur.sectionSlot);
+                if (pass === 'translucent') packer.translucentDirty = true;
+            }
+            next[pass] = null;
+            continue;
+        }
+        arenaWrite(packer.quadArena, 'quads', dataStart, needQuads, passMesh.quads);
+
+        const table = packer.tables[pass];
+        const sectionSlot = cur?.sectionSlot ?? packerAllocSlotWithEviction(packer, key, pass);
+        if (sectionSlot < 0) {
+            arenaFree(packer.quadArena, dataStart);
+            next[pass] = null;
+            continue;
+        }
+
+        sectionWriteEntry(table, sectionSlot, {
+            originX: origin[0],
+            originY: origin[1],
+            originZ: origin[2],
+            dataStart,
+            dataCount: needQuads,
+            faceOffsets: passMesh.faceOffsets,
+            faceCounts: passMesh.faceCounts,
+            flags: 1, // bit 0 = occupied
+        });
+        // a fresh translucent mesh reallocates arena data → the persisted sort
+        // permutation is stale; flag it so the gate forces a re-sort.
+        if (pass === 'translucent') packer.translucentDirty = true;
+        next[pass] = { sectionSlot, dataStart, dataCount: needQuads };
+    }
+
+    const empty = !next.opaque && !next.transparent && !next.translucent;
+    if (empty) {
+        if (prev) removeChunkAt(packer, prev.chunkIndex);
+        packer.allocs.delete(key);
+        packer.origins.delete(key);
+        packer.residentKeys.delete(key);
+    } else {
+        if (!prev) {
+            next.chunkIndex = packer.chunks.length;
+            packer.chunks.push(next);
+        }
+        // (re)write the record: a re-upsert may have moved section slots.
+        writeChunkCullRecord(packer, next.chunkIndex, origin, next);
+        packer.allocs.set(key, next);
+        packer.origins.set(key, origin);
+        packer.residentKeys.add(key);
+    }
+}
+
+function packerClearAll(packer: GpuVoxelArena): void {
+    for (const alloc of packer.allocs.values()) {
+        for (const pass of PASSES) {
+            const a = alloc[pass];
+            if (a) packerFreePass(packer, pass, a);
+        }
+    }
+    packer.allocs.clear();
+    packer.origins.clear();
+    packer.residentKeys.clear();
+    packer.chunks.length = 0;
+    // hard reset: the persisted translucent permutation is now stale, so invalidate
+    // the sort gate to force a re-sort.
+    packer.translucentDirty = false;
+    packer.tsortGate.valid = false;
+    packer.evicted.clear();
+}
+
+function packerEvictChunk(packer: GpuVoxelArena, key: string): void {
+    const cur = packer.allocs.get(key);
+    if (!cur) return;
+    for (const pass of PASSES) {
+        const a = cur[pass];
+        if (a) packerFreePass(packer, pass, a);
+    }
+    removeChunkAt(packer, cur.chunkIndex);
+    packer.allocs.delete(key);
+    packer.origins.delete(key);
+    packer.residentKeys.delete(key);
+}
+
+function packerHas(packer: GpuVoxelArena, key: string): boolean {
+    return packer.allocs.has(key);
+}
+
+// ── OOM eviction (evict farthest-from-camera, then retry) ────────────
+
+/** Pick the chunk farthest from the camera to evict (excluding the one being
+ *  upserted). Returns null when nothing else is resident → graceful degrade. */
+function evictionVictim(packer: GpuVoxelArena, excludeKey: string): string | null {
+    const cam = packer.camera;
+    let bestKey: string | null = null;
+    let bestDistSq = -1;
+    for (const [key, origin] of packer.origins) {
+        if (key === excludeKey) continue;
+        const distSq = cam
+            ? (origin[0] + CHUNK_SIZE * 0.5 - cam[0]) ** 2 +
+              (origin[1] + CHUNK_SIZE * 0.5 - cam[1]) ** 2 +
+              (origin[2] + CHUNK_SIZE * 0.5 - cam[2]) ** 2
+            : Number.POSITIVE_INFINITY; // no camera (offline) → evict-first
+        if (distSq > bestDistSq) {
+            bestDistSq = distSq;
+            bestKey = key;
+        }
+    }
+    return bestKey;
+}
+
+/** Queue a pressure-evicted chunk to re-mesh next frame. Only the forced-eviction
+ *  path records here; deliberate evicts (reconcile, clearAll) must NOT self-heal. */
+function recordEviction(packer: GpuVoxelArena, key: string): void {
+    if (packer.allocs.has(key)) packer.evicted.add(key);
+}
+
+function packerAllocWithEviction(packer: GpuVoxelArena, upsertKey: string, slots: number): number {
+    for (;;) {
+        try {
+            return arenaAlloc(packer.quadArena, slots);
+        } catch {
+            const victim = evictionVictim(packer, upsertKey);
+            if (!victim) return -1;
+            recordEviction(packer, victim);
+            packerEvictChunk(packer, victim);
+        }
+    }
+}
+
+function packerAllocSlotWithEviction(packer: GpuVoxelArena, upsertKey: string, pass: VoxelPass): number {
+    for (;;) {
+        try {
+            return sectionAllocSlot(packer.tables[pass]);
+        } catch {
+            const victim = evictionVictim(packer, upsertKey);
+            if (!victim) return -1;
+            recordEviction(packer, victim);
+            packerEvictChunk(packer, victim);
+        }
+    }
+}
+
 // ── PassRender ──────────────────────────────────────────────────────
 //
 // per-pass render-side resources rebuilt each frame by `cullCPU` and
@@ -870,7 +1282,7 @@ export type PassRender = {
     indirectData: Uint32Array;
 };
 
-function createPassRender(arenas: VoxelArena): Record<VoxelPass, PassRender> {
+function createPassRender(arenas: GpuVoxelArena): Record<VoxelPass, PassRender> {
     // worst-case per-pass visible-quad cap. each quad in the arena belongs to
     // exactly one (chunk, pass), so per-pass total visible ≤ arena.slotCount.
     const visibleQuadCap = arenas.quadArena.slotCount;
@@ -894,7 +1306,7 @@ function createPassRender(arenas: VoxelArena): Record<VoxelPass, PassRender> {
     return out;
 }
 
-function createGeometries(arenas: VoxelArena, passRender: Record<VoxelPass, PassRender>): Record<VoxelPass, Geometry> {
+function createGeometries(arenas: GpuVoxelArena, passRender: Record<VoxelPass, PassRender>): Record<VoxelPass, Geometry> {
     const out = {} as Record<VoxelPass, Geometry>;
     for (const pass of PASSES) {
         const g = new Geometry();
@@ -930,10 +1342,11 @@ export type VoxelResources = {
     quadMaterials: Record<VoxelPass, Material>;
     /** engine-global per-pass geometry (WebGPU binds indirect + visibleQuads). */
     geometries: Record<VoxelPass, Geometry>;
-    /** engine-global arenas (quadArena + per-pass section tables + packer). */
-    arenas: VoxelArena;
+    /** this backend's owned arena: quadArena + per-pass GPU section tables (ChunkInfo
+     *  + metaBuffer) + residency/eviction packer (cull-record buffer + sort gate). */
+    arenas: GpuVoxelArena;
     /** off-thread mesh worker pool. null on asset-pipeline paths (workerCount=0). */
-    meshDispatcher: MeshDispatcher | null;
+    meshDispatcher: Mesher | null;
 
     /** engine-global GPU cull compute. one node dispatched once per frame over
      *  `packer.cullRecordsBuffer`; compacts visible chunks into `visibleChunks`
@@ -1032,7 +1445,7 @@ export function init(registry: Blocks, env: EnvironmentResources, budget: VoxelA
 
     // arenas first: the radix kernels bake the histogram row stride (maxBlocks,
     // derived from the arena's slot capacity) into their compiled graphs.
-    const arenas = createVoxelArena(budget);
+    const arenas = createGpuVoxelArena(budget);
     const passRender = createPassRender(arenas);
     const geometries = createGeometries(arenas, passRender);
     const sortCap = arenas.quadArena.slotCount;
@@ -1233,7 +1646,7 @@ export async function load(
         // never spawn workers (the asset pipeline; node/happy-dom harnesses, guarded by `Worker`) never
         // resolve the Vite query and fall through to inline meshing.
         await loadMeshWorker();
-        const meshDispatcher = createMeshDispatcher({ workerCount, queueDepth: workerQueueDepth });
+        const meshDispatcher = createMesher({ workerCount, queueDepth: workerQueueDepth });
         setMeshRegistry(meshDispatcher, registry);
         res.meshDispatcher = meshDispatcher;
     }
@@ -1303,8 +1716,8 @@ export function dispose(state: VoxelResources): void {
         r.indirectBuffer.dispose();
     }
     arenaDispose(state.arenas.quadArena);
-    for (const pass of PASSES) state.arenas.tables[pass].dispose();
-    state.arenas.packer.cullRecordsBuffer.dispose();
+    for (const pass of PASSES) sectionDispose(state.arenas.tables[pass]);
+    state.arenas.cullRecordsBuffer.dispose();
     state.cullView.dispose();
     state.visibleChunks.dispose();
     state.emitArgs.dispose();
@@ -1322,7 +1735,7 @@ export function dispose(state: VoxelResources): void {
     for (const cfg of state.radixPassConfig) cfg.dispose();
     state.sortCount.dispose();
     state.sortIndirectArgs.dispose();
-    if (state.meshDispatcher) disposeMeshDispatcher(state.meshDispatcher);
+    if (state.meshDispatcher) disposeMesher(state.meshDispatcher);
 }
 
 // ── per-frame GPU frame graph ───────────────────────────────────────
@@ -1351,7 +1764,7 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     // buildCullView leaves it to us.
     const data = voxelResources.cullViewData;
     buildCullView(data, camera, viewChunkRadius);
-    data[23] = voxelResources.arenas.packer.chunks.length;
+    data[23] = voxelResources.arenas.chunks.length;
     voxelResources.cullView.addUpdateRange(0, data.length);
     voxelResources.cullView.needsUpdate = true;
 
@@ -1371,7 +1784,7 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     // previous room's draw instanceCounts + visibleQuads would keep drawing
     // stale quads. Zero the per-pass draw instanceCounts on the CPU so the
     // indirect draws render nothing until the arena refills.
-    if (voxelResources.arenas.packer.chunks.length === 0) {
+    if (voxelResources.arenas.chunks.length === 0) {
         for (const pass of PASSES) {
             const pr = voxelResources.passRender[pass];
             pr.indirectData[1] = 0; // DrawIndirect: [vertexCount, instanceCount, ...]
@@ -1409,7 +1822,7 @@ const TSORT_ROTATE_TRIGGER_COS = 0.9998; // ≈ 1.1°
  *  gate baseline when it does. `fwd` is the camera-forward (near-plane inward
  *  normal). Sets `runTranslucentSort` for `cullDispatches`. */
 function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number, camY: number, camZ: number, fwd: Vec3): void {
-    const packer = voxelResources.arenas.packer;
+    const packer = voxelResources.arenas;
     const gate = packer.tsortGate;
     let run = !gate.valid || packer.translucentDirty;
     if (!run) {
@@ -1451,7 +1864,7 @@ function updateTranslucentSortGate(voxelResources: VoxelResources, camX: number,
  *     translucent `visibleQuads` permutation + its draw count. Skipped when the
  *     camera is static and the arena unchanged; last frame's result persists. */
 export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[] {
-    const packer = voxelResources.arenas.packer;
+    const packer = voxelResources.arenas;
     const recordCount = packer.chunks.length;
     const out: ComputeDispatch[] = [];
     // Empty arena (recordCount 0, e.g. right after a room swap cleared it): skip
@@ -1597,4 +2010,106 @@ export function cullDispatches(voxelResources: VoxelResources): ComputeDispatch[
         }
     }
     return out;
+}
+
+// ── consumption (own the arena) ─────────────────────────────────────
+//
+// Drain the mesher's staged results into this backend's arena, evict what the AOI
+// forgot + what the server dropped, and self-heal pressure-evictions. Runs after the
+// AOI has scheduled this frame's meshes and before the GPU frame graph
+// (`updateCull`/`cullDispatches`) reads the arena.
+
+/** upsert a mesh result into this backend's arena (or evict if the chunk is all-air
+ *  / has no geometry). */
+export function upsertChunk(res: VoxelResources, key: string, chunk: Chunk, mesh: ChunkMeshResult | null): void {
+    const packer = res.arenas;
+    if (mesh === null || chunk.nonAirCount === 0 || mesh.aabb === null) {
+        if (packerHas(packer, key)) packerEvictChunk(packer, key);
+        return;
+    }
+    packerUpsertChunk(packer, key, [chunk.wx, chunk.wy, chunk.wz], mesh);
+}
+
+/** remove a chunk from this backend's arena (e.g. the chunk unloaded from `voxels`). */
+export function removeChunk(res: VoxelResources, key: string): void {
+    const packer = res.arenas;
+    if (packerHas(packer, key)) packerEvictChunk(packer, key);
+}
+
+/** Synchronously mesh a chunk (unless all-air or fully occluded) and place it in
+ *  this backend's arena at its own key/origin. The main-thread path used by the
+ *  offline icon bakers through the WebGPU backend. `meshOutput` is caller-owned
+ *  scratch, reused across chunks. Returns the mesh (or null when skipped/evicted). */
+export function remeshChunkInto(
+    res: VoxelResources,
+    voxels: Voxels,
+    registry: Blocks,
+    chunk: Chunk,
+    meshOutput: MeshOutput,
+): ChunkMeshResult | null {
+    const mesh =
+        chunk.nonAirCount === 0 || hasNoVisibleSurface(chunk)
+            ? null
+            : meshChunk(meshOutput, buildMeshInput(voxels, chunk.cx, chunk.cy, chunk.cz), registry);
+    upsertChunk(res, chunkKey(chunk.cx, chunk.cy, chunk.cz), chunk, mesh);
+    return mesh;
+}
+
+/**
+ * Drain the mesher's staged results into this backend's arena and reconcile
+ * residency. Runs each frame after the AOI has scheduled dirty chunks and staged
+ * `toForget`, and before the GPU frame graph reads the arena. Hands the packer the
+ * camera; drains `mesher.results` into `upsertChunk` (dropping stale-gen results);
+ * evicts `toForget`, server-dropped, and no-longer-present keys; self-heals
+ * pressure-evictions.
+ */
+export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cameraPos: Vec3, toForget: string[]): void {
+    const packer = res.arenas;
+    packer.camera = cameraPos;
+
+    // drain worker results from last frame; drop stale-gen ones (the chunk mutated
+    // since dispatch and is back in dirty.blocks for a fresh mesh).
+    if (mesher.results.length > 0) {
+        const results = mesher.results;
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i]!;
+            const chunk = voxels.chunks.get(result.chunkKey);
+            if (!chunk) continue;
+            if (chunk.meshGen !== result.gen) continue;
+            upsertChunk(res, result.chunkKey, chunk, result);
+        }
+        results.length = 0;
+    }
+
+    // evict meshes for chunks the server dropped (voxel_chunk_del queued their keys).
+    if (voxels.dirty.removed.size > 0) {
+        for (const key of voxels.dirty.removed) removeChunk(res, key);
+        voxels.dirty.removed.clear();
+    }
+
+    // evict the empty / fully-occluded chunks the AOI forgot this frame.
+    for (let i = 0; i < toForget.length; i++) removeChunk(res, toForget[i]!);
+
+    // evict any arena-held chunk the server has dropped from voxels.chunks.
+    for (const key of packer.residentKeys) {
+        if (!voxels.chunks.has(key)) packerEvictChunk(packer, key);
+    }
+
+    // self-heal: re-dirty any chunk lost to memory pressure so it re-meshes.
+    if (packer.evicted.size > 0) {
+        for (const key of packer.evicted) {
+            const chunk = voxels.chunks.get(key);
+            if (chunk) markChunkDirty(voxels, chunk);
+        }
+        packer.evicted.clear();
+    }
+}
+
+/** Clear the active world from this backend's arena + mesh worker cache. The voxel
+ *  DATA survives (`voxels.chunks`), so a later `mountRoom` simply remeshes it. Call
+ *  on a room swap or teardown (the arena/worker hold one world at a time). */
+export function unmountRoom(res: VoxelResources, mesher: Mesher | null): void {
+    packerClearAll(res.arenas);
+    // the mesh worker holds one world at a time; drop its cache + queued results.
+    if (mesher !== null) resetMeshCaches(mesher);
 }

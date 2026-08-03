@@ -71,7 +71,7 @@ export async function loadMeshWorker(): Promise<void> {
     }
 }
 
-/** Default worker spawn: construct one from the loaded bundle. `MeshDispatcherOpts.workerFactory`
+/** Default worker spawn: construct one from the loaded bundle. `MesherOpts.workerFactory`
  *  overrides it (the unit test injects a MessageChannel-backed fake). */
 function spawnMeshWorker(): WorkerLike {
     if (MeshWorkerCtor === null) {
@@ -84,7 +84,7 @@ function spawnMeshWorker(): WorkerLike {
  *  payload (three PassMesh + AABB) matches the sync `meshChunk` path; `chunkKey`
  *  + `gen` let the caller match it to a chunk and drop stale meshes. PassMesh
  *  buffers are backed by transferred ArrayBuffers, see mesh-worker.ts. */
-export type MeshDispatcherResult = ChunkMeshResult & {
+export type MesherResult = ChunkMeshResult & {
     chunkKey: string;
     gen: number;
 };
@@ -118,13 +118,13 @@ type WorkerSlot = {
     cachedVersions: Map<string, number>;
 };
 
-export type MeshDispatcher = {
+export type Mesher = {
     slots: WorkerSlot[];
     queueDepth: number;
     /** chunk key -> owning slot, from enqueue through in-flight; for dedup and result lookup. */
     inFlightByChunk: Map<string, { slot: number; gen: number }>;
     /** finished meshes awaiting the caller. The caller drains this each frame and clears it. */
-    results: MeshDispatcherResult[];
+    results: MesherResult[];
     /** chunk keys lost to a worker crash, awaiting the caller. Drain each frame to re-dirty them,
      *  then clear; the dispatcher has already respawned the worker and replenished the pools. */
     lost: string[];
@@ -156,7 +156,7 @@ export type MeshPerf = {
     results: number;
 };
 
-export type MeshDispatcherOpts = {
+export type MesherOpts = {
     /** override the worker spawn (the unit test injects a fake). Defaults to constructing the
      *  `?worker&inline` bundle loaded by {@link loadMeshWorker}. */
     workerFactory?: () => WorkerLike;
@@ -166,10 +166,10 @@ export type MeshDispatcherOpts = {
     cacheMaxChunks?: number;
 };
 
-export function createMeshDispatcher(opts: MeshDispatcherOpts): MeshDispatcher {
+export function createMesher(opts: MesherOpts): Mesher {
     const slots: WorkerSlot[] = [];
     const spawn = opts.workerFactory ?? spawnMeshWorker;
-    const d: MeshDispatcher = {
+    const d: Mesher = {
         slots,
         queueDepth: opts.queueDepth,
         inFlightByChunk: new Map(),
@@ -225,7 +225,7 @@ function allocateOutputSet(): MeshOutputSet {
  *  worker. Both `error` (worker-script exception) and `messageerror`
  *  (postMessage failed to deserialise) terminate the slot's worker and
  *  respawn, see `handleWorkerCrash`. */
-function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): void {
+function wireWorker(d: Mesher, slotIndex: number, worker: WorkerLike): void {
     worker.onmessage = (e) => handleWorkerMessage(d, slotIndex, e.data);
     worker.onerror = (ev) => handleWorkerCrash(d, slotIndex, 'error', ev);
     worker.onmessageerror = (ev) => handleWorkerCrash(d, slotIndex, 'messageerror', ev);
@@ -236,7 +236,7 @@ function wireWorker(d: MeshDispatcher, slotIndex: number, worker: WorkerLike): v
  *  to the pool. We replenish with freshly-allocated sets to keep the
  *  pool at its original capacity. In-flight chunks are surfaced
  *  through `onLost` so the caller can re-mark them dirty. */
-function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' | 'messageerror', ev: unknown): void {
+function handleWorkerCrash(d: Mesher, slotIndex: number, kind: 'error' | 'messageerror', ev: unknown): void {
     const slot = d.slots[slotIndex];
     if (!slot) return;
     console.warn(`[mesher] worker slot ${slotIndex} crashed (${kind}); respawning`, ev);
@@ -279,7 +279,7 @@ function handleWorkerCrash(d: MeshDispatcher, slotIndex: number, kind: 'error' |
     }
 }
 
-export function setMeshRegistry(d: MeshDispatcher, reg: Blocks): void {
+export function setMeshRegistry(d: Mesher, reg: Blocks): void {
     d.registryVersion += 1;
     const version = d.registryVersion;
     d.registryBuf = serializeBlockRegistryForWorker(reg, version);
@@ -298,7 +298,7 @@ export function setMeshRegistry(d: MeshDispatcher, reg: Blocks): void {
 /** caller asks "is this chunk already being meshed?". The voxel-visuals
  *  loop uses this to skip enqueueing chunks that have a stale or fresh
  *  job in flight. */
-export function isInFlight(d: MeshDispatcher, key: string): boolean {
+export function isInFlight(d: Mesher, key: string): boolean {
     return d.inFlightByChunk.has(key);
 }
 
@@ -312,7 +312,7 @@ export function isInFlight(d: MeshDispatcher, key: string): boolean {
  *  new world's neighbourhoods from scratch. Batches already in flight still land
  *  and recycle their buffers (`inFlightBatches` left intact); the cleared
  *  `inFlightByChunk` + the caller's gen guard drop their now-stale results. */
-export function resetMeshCaches(d: MeshDispatcher): void {
+export function resetMeshCaches(d: Mesher): void {
     for (const slot of d.slots) {
         slot.pendingUrgent.length = 0;
         slot.pending.length = 0;
@@ -361,7 +361,7 @@ const _tasks: Array<{ cx: number; cy: number; cz: number; gen: number }> = [];
 const _packetValue = { set: _setEntries, delete: _delEntries, tasks: _tasks };
 const _neighborhoodKeys = new Set<string>();
 
-function slotAcceptable(d: MeshDispatcher, slot: WorkerSlot): boolean {
+function slotAcceptable(d: Mesher, slot: WorkerSlot): boolean {
     return (
         slot.registryVersion === d.registryVersion &&
         slot.pendingRegistryVersion === d.registryVersion &&
@@ -378,12 +378,7 @@ function slotAcceptable(d: MeshDispatcher, slot: WorkerSlot): boolean {
  *     streaming backlog. Still requires the affinity worker to be registry-acked.
  *   - `allowSpill`: normal-tier only. If the affinity worker is full, offload to
  *     the least-committed ready worker (used when the chunk has been starving). */
-export function queueMesh(
-    d: MeshDispatcher,
-    chunk: Chunk,
-    gen: number,
-    opts: { urgent?: boolean; allowSpill?: boolean } = {},
-): boolean {
+export function queueMesh(d: Mesher, chunk: Chunk, gen: number, opts: { urgent?: boolean; allowSpill?: boolean } = {}): boolean {
     const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
     if (d.inFlightByChunk.has(key)) return false;
 
@@ -425,7 +420,7 @@ export function queueMesh(
  *  `slot.cachedVersions` -> set/delete deltas (into scratch), + LRU eviction, then
  *  packInto `packetBuf`. Does NOT commit (deferred to `commitBatch` on success).
  *  Returns packcat's {ok, size}. */
-function buildBatchPacket(d: MeshDispatcher, slot: WorkerSlot, voxels: Voxels, batchN: number, packetBuf: ArrayBuffer): boolean {
+function buildBatchPacket(d: Mesher, slot: WorkerSlot, voxels: Voxels, batchN: number, packetBuf: ArrayBuffer): boolean {
     _setEntries.length = 0;
     _setKeys.length = 0;
     _delEntries.length = 0;
@@ -508,7 +503,7 @@ function commitBatch(slot: WorkerSlot): void {
 
 /** build + post one batch for `slot` from its pending queues (urgent first), if it
  *  has pending work and a packet + output buffers are free. */
-function flushSlot(d: MeshDispatcher, slotIndex: number, voxels: Voxels): void {
+function flushSlot(d: Mesher, slotIndex: number, voxels: Voxels): void {
     const slot = d.slots[slotIndex]!;
     const total = slot.pendingUrgent.length + slot.pending.length;
     if (total === 0) return;
@@ -558,11 +553,11 @@ function flushSlot(d: MeshDispatcher, slotIndex: number, voxels: Voxels): void {
  *  frame after the enqueue loop — and, crucially, after the caller has drained
  *  the previous frame's results, so buffers recycled on result are safe to
  *  reuse here (the pending result that referenced them is already copied out). */
-export function flushMeshQueue(d: MeshDispatcher, voxels: Voxels): void {
+export function flushMeshQueue(d: Mesher, voxels: Voxels): void {
     for (let i = 0; i < d.slots.length; i++) flushSlot(d, i, voxels);
 }
 
-function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWorkerOutMsg): void {
+function handleWorkerMessage(d: Mesher, slotIndex: number, msg: MeshWorkerOutMsg): void {
     const slot = d.slots[slotIndex]!;
     if (msg.cmd === 'initRegistryAck') {
         slot.registryVersion = msg.version;
@@ -618,13 +613,13 @@ function handleWorkerMessage(d: MeshDispatcher, slotIndex: number, msg: MeshWork
  *    // p.enqueues = posts main->worker, p.results = posts worker->main
  *    // p.workUs = parallel worker time (not main-thread)
  */
-export function readMeshPerf(d: MeshDispatcher): MeshPerf {
+export function readMeshPerf(d: Mesher): MeshPerf {
     const p = d.perf;
     d.perf = { buildMs: 0, postMs: 0, workUs: 0, enqueues: 0, results: 0 };
     return p;
 }
 
-export function disposeMeshDispatcher(d: MeshDispatcher): void {
+export function disposeMesher(d: Mesher): void {
     for (const slot of d.slots) {
         slot.worker.onmessage = null;
         slot.worker.terminate?.();
@@ -641,7 +636,7 @@ export function disposeMeshDispatcher(d: MeshDispatcher): void {
 /** test-only inspection helpers, kept on the public surface because
  *  they're how the dispatcher test verifies invariants (slot queue
  *  depth, pool size). Cheap O(slots) reads, no internal state changes. */
-export function meshQueueStats(d: MeshDispatcher): {
+export function meshQueueStats(d: Mesher): {
     poolSize: number;
     inFlightTotal: number;
     perSlot: Array<{
