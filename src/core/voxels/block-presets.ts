@@ -17,8 +17,8 @@ import {
 import * as blockState from './block-state';
 import {
     type BlockHandle,
+    type BlockOptions,
     type BlockQuad,
-    type BlockSoundConfig,
     block,
     type CubeTextures,
     CullType,
@@ -29,21 +29,51 @@ import {
 } from './blocks';
 
 /**
- * Common preset options. `name` is the human-readable display label
- * shown in editor UIs (inventory, hotbar, inspector), falls back to
- * the string id when omitted. `sounds` lets games wire a
- * `blockSoundPresets.*` bundle on derived blocks the same way raw
- * `block(...)` calls do.
+ * Options shared by every preset: an explicit allowlist of the caller-facing
+ * material / behaviour knobs a raw `block(...)` call accepts, so a preset
+ * block can still tune `friction`, `restitution`, `sneakGuard`, `climbable`,
+ * `lightEmission`, `emissive`, `lightOpacity`, `selection`, `pathfindable`,
+ * `screenTint`, `particles`, ... the same way the hand-rolled `ice` cube does.
+ *
+ * It is a `Pick` rather than an `Omit` on purpose: a preset owns its geometry,
+ * and the shape-defining fields (state schema, model, collider shape,
+ * placement / rotation / mirroring and neighbour-recompute hooks, the
+ * connection `flags`, and the `surfaceHeight` / `fluidGroup` / `liquid`
+ * fields that change the block's model class) must never be caller-settable.
+ * With an allowlist a field added to `BlockOptions` later stays unexposed
+ * until deliberately opted in, instead of silently leaking through.
+ *
+ * `name` is the human-readable display label shown in editor UIs
+ * (inventory, hotbar, inspector); it falls back to the string id when
+ * omitted. `sounds` wires a `blockSoundPresets.*` bundle. `material`
+ * overrides the preset's default render pass (most presets default OPAQUE;
+ * `plant`, `leaves`, `pane`, `ladder`, `door` default TRANSPARENT).
+ *
+ * Individual presets narrow this further with `Omit` for any field they
+ * set themselves (e.g. `stairs`/`slab` fix `cull`, `plant` fixes
+ * `collision` / `lightOpacity` / `vertexAnimation`), so a caller can't pass
+ * a value the preset would silently ignore.
  */
-/**
- * `material` overrides the preset's default render pass. Most presets
- * default to OPAQUE; `plant`, `leaves`, and `pane` default to TRANSPARENT
- * (alpha cutout) since their textures conventionally have holes. Pass
- * `MaterialType.TRANSPARENT` to opt a cube/wall/stairs/etc into alpha
- * cutout (e.g. a glass wall), or `MaterialType.TRANSLUCENT` for alpha
- * blending (stained glass cube).
- */
-type PresetOptions = { name?: string; sounds?: BlockSoundConfig; material?: MaterialType };
+type PresetOptions = Pick<
+    BlockOptions,
+    | 'name'
+    | 'sounds'
+    | 'material'
+    | 'cull'
+    | 'vertexAnimation'
+    | 'selection'
+    | 'collision'
+    | 'climbable'
+    | 'pathfindable'
+    | 'friction'
+    | 'restitution'
+    | 'sneakGuard'
+    | 'lightEmission'
+    | 'lightOpacity'
+    | 'emissive'
+    | 'screenTint'
+    | 'particles'
+>;
 
 import {
     axisFromPlaceCtx,
@@ -66,10 +96,9 @@ import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
 
 export function cube(id: string, textures: CubeTextures, options?: PresetOptions) {
     return block(id, {
-        name: options?.name,
+        ...options,
         model: () => ({ type: 'cube' as const, textures }),
         material: options?.material ?? MaterialType.OPAQUE,
-        sounds: options?.sounds,
     });
 }
 
@@ -98,8 +127,7 @@ export function column(id: string, textures: { end: TextureRef; side: TextureRef
     const side = textures.side;
     let handle: BlockHandle<typeof ColumnState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: ColumnState,
         defaultState: { axis: 'y' },
@@ -323,12 +351,11 @@ function readStairAt(
     return props.facing as Facing4;
 }
 
-export function stairs(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function stairs(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     const topTex = pickTopTexture(textures);
     let handle: BlockHandle<typeof StairState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: StairState,
         defaultState: { facing: 'south', half: 'bottom', shape: 'straight' },
@@ -432,11 +459,10 @@ const SlabState = blockState.create({
 const SLAB_BOTTOM_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 0.5, 1]]);
 const SLAB_TOP_SHAPE = blockShape.aabbs([[0, 0.5, 0, 1, 1, 1]]);
 
-export function slab(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function slab(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof SlabState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: SlabState,
         shape: (p) => {
@@ -464,9 +490,13 @@ export function slab(id: string, textures: CubeTextures, options?: PresetOptions
 
 // ── plant (flowers, grass, saplings) ────────────────────────────────
 
-export function plant(id: string, texture: TextureRef, options?: PresetOptions) {
+export function plant(
+    id: string,
+    texture: TextureRef,
+    options?: Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'>,
+) {
     return block(id, {
-        name: options?.name,
+        ...options,
         model: () => ({ type: 'custom' as const, quads: blockModel.cross(texture) }),
         cull: CullType.SELF,
         collision: false,
@@ -475,20 +505,18 @@ export function plant(id: string, texture: TextureRef, options?: PresetOptions) 
         lightOpacity: 0,
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.PLANT_WIND_SWAY,
-        sounds: options?.sounds,
     });
 }
 
 // ── leaves ──────────────────────────────────────────────────────────
 
-export function leaves(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function leaves(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull' | 'vertexAnimation'>) {
     return block(id, {
-        name: options?.name,
+        ...options,
         model: () => ({ type: 'cube' as const, textures }),
         cull: CullType.SELF,
         material: options?.material ?? MaterialType.TRANSPARENT,
         vertexAnimation: VertexAnimation.WAVE,
-        sounds: options?.sounds,
     });
 }
 
@@ -511,11 +539,10 @@ const LadderFacingState = blockState.create({
     facing: blockState.enumeration(['north', 'east', 'south', 'west'] as const),
 });
 
-export function ladder(id: string, texture: TextureRef, options?: PresetOptions) {
+export function ladder(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision' | 'climbable'>) {
     let handle: BlockHandle<typeof LadderFacingState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.TRANSPARENT,
         states: LadderFacingState,
         // base panel sits at +Z facing -Z (texture normal points north). the
@@ -604,7 +631,10 @@ export type LiquidHandle = BlockHandle & {
 export function liquid(
     id: string,
     textures: CubeTextures,
-    options?: PresetOptions & {
+    // liquids are collision:false and assemble their config by hand (no spread),
+    // so only the generic fields they actually forward are exposed; the shape /
+    // light / surface behaviour is driven by the liquid-specific options below.
+    options?: Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
         viscosity?: number;
         translucent?: boolean;
         levels?: number;
@@ -750,11 +780,10 @@ function hasGroupConnection(voxels: import('./voxels').Voxels, wx: number, wy: n
     return (voxels.registry.flags[id]! & groupFlag) !== 0;
 }
 
-export function fence(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function fence(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof FenceState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: FenceState,
         defaultState: { north: true, south: true, east: true, west: true },
@@ -821,11 +850,10 @@ function paneShape(p: { north: boolean; east: boolean; south: boolean; west: boo
     return blockShape.aabbs(boxes);
 }
 
-export function pane(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function pane(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof PaneState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         states: PaneState,
         defaultState: { north: true, south: true, east: true, west: true },
         material: options?.material ?? MaterialType.TRANSPARENT,
@@ -877,9 +905,9 @@ export function pane(id: string, textures: CubeTextures, options?: PresetOptions
 
 const CARPET_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 1 / 16, 1]]);
 
-export function carpet(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function carpet(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     return block(id, {
-        name: options?.name,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         shape: CARPET_SHAPE,
         model: () => ({
@@ -887,7 +915,6 @@ export function carpet(id: string, textures: CubeTextures, options?: PresetOptio
             quads: blockModel.box([0, 0, 0], [1, 1 / 16, 1], textures),
         }),
         cull: CullType.PARTIAL,
-        sounds: options?.sounds,
     });
 }
 
@@ -946,16 +973,15 @@ function trapdoorQuads(
     }
 }
 
-export function trapdoor(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function trapdoor(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof TrapdoorState.props>;
     handle = block(id, {
-        name: options?.name,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: TrapdoorState,
         shape: (p) => trapdoorShape(p),
         model: (p) => ({ type: 'custom' as const, quads: trapdoorQuads(textures, p) }),
         cull: CullType.PARTIAL,
-        sounds: options?.sounds,
         // placement opens closed: half from where the player clicked, facing
         // toward the placer. open can be toggled later via interaction.
         place: (ctx, io) =>
@@ -1014,10 +1040,9 @@ function plateShape(pressed: boolean) {
     return blockShape.aabbs([[PLATE_INSET, 0, PLATE_INSET, 1 - PLATE_INSET, h, 1 - PLATE_INSET]]);
 }
 
-export function plate(id: string, texture: TextureRef, options?: PresetOptions) {
+export function plate(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision'>) {
     return block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: PlateState,
         shape: (p) => plateShape(p.pressed),
@@ -1087,11 +1112,10 @@ function wallQuads(
     return quads;
 }
 
-export function wall(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function wall(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof WallState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: WallState,
         defaultState: { north: true, south: true, east: true, west: true, up: true },
@@ -1264,12 +1288,10 @@ function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: numbe
     return (voxels.registry.flags[id]! & BLOCK_FLAG_COLLISION) !== 0;
 }
 
-export function torch(id: string, texture: TextureRef, options?: PresetOptions & { lightEmission?: [number, number, number] }) {
-    const emission = options?.lightEmission ?? [14, 12, 6];
+export function torch(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision' | 'emissive'>) {
     let handle: BlockHandle<typeof TorchState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.OPAQUE,
         states: TorchState,
         shape: (p) => torchShape(p.mount),
@@ -1277,7 +1299,7 @@ export function torch(id: string, texture: TextureRef, options?: PresetOptions &
         cull: CullType.PARTIAL,
         collision: false,
         emissive: true,
-        lightEmission: () => emission,
+        lightEmission: options?.lightEmission ?? [14, 12, 6],
         onNeighbourUpdate(ctx) {
             if (isTorchSupport(ctx.voxels, ctx.worldX, ctx.worldY - 1, ctx.worldZ)) {
                 return handle.stateId({ mount: 'floor' });
@@ -1355,11 +1377,10 @@ function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
     return hinge === 'left' ? [0, 0, 0, DOOR_DEPTH, 1, 1] : [1 - DOOR_DEPTH, 0, 0, 1, 1, 1];
 }
 
-export function door(id: string, textures: { top: TextureRef; bottom: TextureRef }, options?: PresetOptions) {
+export function door(id: string, textures: { top: TextureRef; bottom: TextureRef }, options?: Omit<PresetOptions, 'cull'>) {
     let handle: BlockHandle<typeof DoorState.props>;
     handle = block(id, {
-        name: options?.name,
-        sounds: options?.sounds,
+        ...options,
         material: options?.material ?? MaterialType.TRANSPARENT,
         states: DoorState,
         defaultState: { facing: 'north', half: 'lower', hinge: 'left', open: false },
