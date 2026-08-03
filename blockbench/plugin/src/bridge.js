@@ -17,6 +17,7 @@
  *   editor -> iframe: { type: 'bongle:hello' }                            re-request ready
  *   editor -> iframe: { type: 'bongle:open', path, bbmodel }             open (or focus) a file
  *   editor -> iframe: { type: 'bongle:save-active' }                     trigger a save of the active project
+ *   editor -> iframe: { type: 'bongle:save-path', path }                 trigger a save of the project mapped to `path` (selects it first)
  *   editor -> iframe: { type: 'bongle:autosave-request' }                serialize the source (no glb) for a silent draft
  *   editor -> iframe: { type: 'bongle:assign-path', uuid, path }         resolve a save-as
  *   iframe -> editor: { type: 'bongle:save', path, glb, bbmodel, name, warnings }
@@ -82,6 +83,23 @@
         }
     }
 
+    // save a SPECIFIC project by its mapped fs path, regardless of which tab is
+    // active. The editor uses this for a forced flush ("Save avatar to bongle") so
+    // it always compiles the intended model — never whatever tab the user happens to
+    // have focused (e.g. a stray native "New Project"). Selecting is a no-op when the
+    // target is already active (the common single-project avatar case).
+    async function saveByPath(path) {
+        const project = projectForPath(path);
+        if (!project) {
+            // the target isn't open — report it so the editor's flush rejects promptly
+            // instead of waiting out its timeout.
+            post({ type: 'bongle:save-failed', errors: [`no open project for ${path}`] });
+            return;
+        }
+        if (typeof Project === 'undefined' || Project !== project) project.select();
+        await saveActive();
+    }
+
     // serialize the ACTIVE project's .bbmodel source and hand it back as a silent
     // draft snapshot — source only (no glb compile), and it does NOT touch the
     // saved/dirty state, so the editor's local crash-net can capture in-progress
@@ -138,6 +156,9 @@
                 return;
             case 'bongle:save-active':
                 void saveActive();
+                return;
+            case 'bongle:save-path':
+                void saveByPath(data.path);
                 return;
             case 'bongle:autosave-request':
                 snapshotActive();
