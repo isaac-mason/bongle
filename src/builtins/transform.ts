@@ -196,20 +196,22 @@ export type NetSnapshots = {
     rotHead: number;
     rotCount: number;
 
-    // ── render-layer correction smoothing (Gaffer "State Synchronization") ──
-    // Extrapolation coasts a dry buffer forward; when the entity's real motion during a
-    // stall differs from that linear guess (it stops / slows / turns), the recovery would
-    // SNAP the sample backward. Instead we fold that discontinuity into `smoothErr` (a
-    // visual position offset), render `logical + smoothErr`, and decay `smoothErr` toward
-    // zero over a few frames — the snap becomes a glide. The logical sample is untouched
-    // (future extrapolation stays correct); only the rendered value carries the offset.
+    // ── render-layer catch-up smoothing (Gaffer "State Synchronization") ──
+    // We never extrapolate: a dry buffer holds on the newest keyframe. When a real
+    // transport stall ends, a burst of keyframes lands and the newest pose jumps forward
+    // in one frame — the sample would SNAP. Instead we fold that discontinuity into
+    // `smoothErr` (a visual position offset), render `logical + smoothErr`, and decay
+    // `smoothErr` toward zero over a few frames — the snap becomes a glide. The logical
+    // sample is untouched; only the rendered value carries the offset. Triggers on the
+    // first moving frame after a dry hold (`wasDry`), the only place a discontinuity can
+    // arise now that extrapolation is gone.
     /** decaying visual position offset (local units). 0 == no correction in flight. */
     smoothErr: Float64Array;
-    /** last rendered visual position, to seed `smoothErr` continuously across a recovery. */
+    /** last rendered visual position, to seed `smoothErr` continuously across a catch-up. */
     prevVisual: Float64Array;
-    /** did the previous position sample extrapolate? the extrap→interp falling edge is the
-     *  recovery where the overshoot is absorbed. */
-    wasExtrap: 0 | 1;
+    /** was the previous position sample a dry hold (buffer ran out ahead of render time)?
+     *  the first frame that moves off a dry hold is the catch-up the snap is absorbed on. */
+    wasDry: 0 | 1;
     /** false until `prevVisual` holds a real sample (skip seeding on the very first frame). */
     smoothInit: 0 | 1;
 };
@@ -226,7 +228,7 @@ function newNetSnapshots(): NetSnapshots {
         rotCount: 0,
         smoothErr: new Float64Array(3),
         prevVisual: new Float64Array(3),
-        wasExtrap: 0,
+        wasDry: 0,
         smoothInit: 0,
     };
 }
@@ -288,65 +290,33 @@ export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, 
     snaps.smoothErr[0] = 0;
     snaps.smoothErr[1] = 0;
     snaps.smoothErr[2] = 0;
-    snaps.wasExtrap = 0;
+    snaps.wasDry = 0;
     snaps.smoothInit = 0;
 }
 
 // bracket search result, reused across calls (single-threaded sampler).
 const _bracket = { lo: 0, hi: 0, frac: 0 };
 
-/** hard cap (seconds) on how far past the newest keyframe we coast a dry buffer while
- *  the transport is choking. Matches Source's `cl_extrapolate_amount` (~1/4s): past a
- *  quarter second of dead-reckoning the guess is worthless, so we ease to a stop. */
-const MAX_EXTRAPOLATION = 0.25;
-
-/** effective extrapolation time (seconds) for a buffer that ran `dtPast` seconds past its
- *  newest keyframe. Coasts at full last-keyframe velocity up to `cap`, then ramps that
- *  velocity linearly to zero over a second `cap` (Source's deceleration) so an overlong
- *  stall glides to a smooth hold instead of hard-stopping. Beyond `2·cap` the entity is
- *  parked at `1.5·cap` worth of travel. `f(dtPast)` is C1 at the `cap` seam. */
-function extrapolationTime(dtPast: number, cap: number): number {
-    if (dtPast <= cap) return dtPast;
-    if (dtPast >= 2 * cap) return 1.5 * cap;
-    const over = dtPast - cap;
-    return cap + over - (over * over) / (2 * cap);
-}
-
 /**
  * find the two ring entries bracketing `renderTime` and the fraction between them,
  * written into the shared `_bracket`. ring is time-ordered oldest→newest. `frac ∈
  * [0,1]`. edges collapse to a single-entry hold (`lo === hi`, `frac 0`): past the
- * newest keyframe (buffer ran dry → hold the newest; a dry buffer means the entity
- * stopped, so its final keyframe is the correct pose to hold), before the oldest
- * (only right after join → hold oldest), or a lone entry.
+ * newest keyframe (buffer ran dry → hold the newest), before the oldest (only right
+ * after join → hold oldest), or a lone entry.
+ *
+ * we never extrapolate. a dry buffer holds the newest keyframe — a brief freeze reads
+ * far milder than a wrong velocity guess that has to be corrected, and the deep
+ * jitter-adaptive render-behind (see core/clock) makes true dry-outs rare. the catch-up
+ * when a real stall ends is glided by the caller's `smoothErr` pass, not hidden by
+ * coasting.
  */
-function findBracket(time: Float64Array, head: number, count: number, renderTime: number, allowExtrapolate: boolean): void {
+function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
     const cap = time.length;
     const newest = head;
     const oldest = (head - count + 1 + cap) % cap;
 
     if (count === 1 || renderTime >= time[newest]!) {
-        // dry buffer. Normally hold at the newest keyframe: on the reliable+ordered
-        // transport a dry buffer usually means the entity actually stopped (its final
-        // settle keyframe IS the newest), where holding is exact and coasting the last
-        // velocity would drive a just-landed body past its true rest pose (sinking).
-        // But when the caller has confirmed the transport is CHOKING (a head-of-line
-        // stall — see Clock.isServerChoking), a dry buffer instead means fresh keyframes
-        // are stuck in flight, so coast the last velocity forward (frac > 1 extrapolates
-        // along secondNewest→newest) to hide the stall, capped + ramped by
-        // `extrapolationTime`. The choke gate is what makes this safe: a stopped entity
-        // never chokes (its stream keeps flowing), so it still holds.
-        if (allowExtrapolate && count >= 2) {
-            const prev = (newest - 1 + cap) % cap;
-            const span = time[newest]! - time[prev]!;
-            if (span > 0) {
-                const eff = extrapolationTime(renderTime - time[newest]!, MAX_EXTRAPOLATION);
-                _bracket.lo = prev;
-                _bracket.hi = newest;
-                _bracket.frac = 1 + eff / span; // frac 1 == newest; >1 coasts beyond it.
-                return;
-            }
-        }
+        // dry buffer: hold on the newest keyframe until a fresher one lands.
         _bracket.lo = _bracket.hi = newest;
         _bracket.frac = 0;
         return;
@@ -385,45 +355,48 @@ function smoothFactor(errorMag: number): number {
     return 0.95 + (0.85 - 0.95) * ((errorMag - 0.25) / 0.75);
 }
 
-/** sample the interpolated local position at `renderTime` into `out`. `allowExtrapolate`
- *  (set only when the transport is choking) coasts a dry buffer along its last velocity
- *  instead of freezing on the newest keyframe. `smooth` folds the extrapolation-recovery
- *  discontinuity into a decaying visual offset so an overshoot glides back instead of
- *  snapping (see NetSnapshots.smoothErr). */
-export function samplePositionSnapshot(
-    snaps: NetSnapshots,
-    renderTime: number,
-    out: Vec3,
-    allowExtrapolate: boolean,
-    smooth: boolean,
-): void {
-    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime, allowExtrapolate);
+/** the logical sample must move at least this far (local units) off a dry hold to count
+ *  as a catch-up worth gliding. below it, resuming motion is smooth on its own and the
+ *  seed would just be numerical noise. */
+const CATCHUP_SNAP_EPSILON = 0.01;
+
+/** sample the interpolated local position at `renderTime` into `out`. a dry buffer holds
+ *  the newest keyframe (never extrapolates). `smooth` folds a dry-buffer catch-up (the
+ *  newest pose jumping forward when a stalled stream resumes) into a decaying visual
+ *  offset so it glides instead of snapping (see NetSnapshots.smoothErr). */
+export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, smooth: boolean): void {
+    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
     const lo = _bracket.lo * 3;
     const hi = _bracket.hi * 3;
     const f = _bracket.frac;
-    // logical pose: the authoritative interpolated/extrapolated sample (untouched).
+    // logical pose: the authoritative interpolated sample (untouched).
     out[0] = snaps.pos[lo]! + (snaps.pos[hi]! - snaps.pos[lo]!) * f;
     out[1] = snaps.pos[lo + 1]! + (snaps.pos[hi + 1]! - snaps.pos[lo + 1]!) * f;
     out[2] = snaps.pos[lo + 2]! + (snaps.pos[hi + 2]! - snaps.pos[lo + 2]!) * f;
 
     if (!smooth) return;
 
+    // a dry hold collapses the bracket to a single entry (lo === hi). during a dry hold
+    // the logical pose is frozen == prevVisual; the catch-up is the first frame it moves
+    // off that freeze, so a jump then is a stall recovery, not real motion (which only
+    // happens while bracketing, where wasDry is 0).
+    const dryNow = _bracket.lo === _bracket.hi;
     const err = snaps.smoothErr;
-    const extrapolating = f > 1;
+    const jumped = Math.hypot(out[0] - snaps.prevVisual[0], out[1] - snaps.prevVisual[1], out[2] - snaps.prevVisual[2]);
     if (snaps.smoothInit === 0) {
         // first sample: nothing to correct against yet.
         err[0] = err[1] = err[2] = 0;
         snaps.smoothInit = 1;
-    } else if (snaps.wasExtrap === 1 && !extrapolating) {
-        // recovery frame: the logical pose just snapped from the overshoot back to the
-        // truth. Seed the offset so the rendered pose stays continuous (err = prevVisual −
-        // logical → rendered == prevVisual), then let it decay over the next frames.
+    } else if (snaps.wasDry === 1 && jumped > CATCHUP_SNAP_EPSILON) {
+        // catch-up frame: the newest pose just jumped after a dry hold. Seed the offset so
+        // the rendered pose stays continuous (err = prevVisual − logical → rendered ==
+        // prevVisual), then let it decay over the next frames.
         err[0] = snaps.prevVisual[0] - out[0];
         err[1] = snaps.prevVisual[1] - out[1];
         err[2] = snaps.prevVisual[2] - out[2];
     } else {
-        // no new discontinuity: bleed any offset toward zero (a no-op when already 0, so
-        // steady interpolation and exact extrapolation pay nothing).
+        // no discontinuity: bleed any offset toward zero (a no-op when already 0, so
+        // steady interpolation pays nothing).
         const factor = smoothFactor(Math.hypot(err[0], err[1], err[2]));
         err[0] *= factor;
         err[1] *= factor;
@@ -436,17 +409,17 @@ export function samplePositionSnapshot(
     snaps.prevVisual[0] = out[0];
     snaps.prevVisual[1] = out[1];
     snaps.prevVisual[2] = out[2];
-    snaps.wasExtrap = extrapolating ? 1 : 0;
+    snaps.wasDry = dryNow ? 1 : 0;
 }
 
 const _rotLo = quat.create();
 const _rotHi = quat.create();
 
-/** sample the interpolated local rotation at `renderTime` into `out`. Rotation holds on a
- *  dry buffer (no extrapolation): a frozen facing reads far milder than a frozen position,
- *  and slerp-overshoot past a stall is rarely worth the risk. */
+/** sample the interpolated local rotation at `renderTime` into `out`. a dry buffer holds
+ *  the newest keyframe; rotation gets no catch-up glide (a frozen facing reads far milder
+ *  than a frozen position, and slerp overshoot is rarely worth the risk). */
 export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void {
-    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime, false);
+    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime);
     const lo = _bracket.lo * 4;
     const hi = _bracket.hi * 4;
     if (_bracket.lo === _bracket.hi) {

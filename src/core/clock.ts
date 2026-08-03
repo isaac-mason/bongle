@@ -19,13 +19,6 @@ export type Clock = {
      *  timestamps, the exact thing this stamp exists to remove. 0 until the first
      *  push; on the server / local rooms it stays 0 (no pushes arrive). */
     serverLatest: number;
-    /** local-monotonic `wall` when the most recent `server_clock` push arrived. A
-     *  head-of-line stall on the reliable+ordered transport delays the WHOLE stream,
-     *  `server_clock` included, so a growing `wall − lastRecvWall` gap is the client's
-     *  proof the transport is choking (vs an entity that merely stopped emitting, where
-     *  the stream keeps flowing). `isServerChoking` reads it to gate remote-transform
-     *  extrapolation. 0 until the first push; stays 0 on the server / local rooms. */
-    lastRecvWall: number;
     /** smooth render time (seconds): advances every RENDER FRAME by the REAL frame
      *  delta, UNCLAMPED, unlike the integrator delta, so it never loses time to the
      *  stall clamp and tracks true elapsed across hitches/backgrounding. per-frame
@@ -175,13 +168,6 @@ export const TRANSFORM_SEND_HZ = 30;
 /** one send interval (seconds). the newest received keyframe is up to this old. */
 const TRANSFORM_SEND_INTERVAL = 1 / TRANSFORM_SEND_HZ;
 
-/** how long (seconds) the `server_clock` stream must be silent before we treat the
- *  transport as choking. `server_clock` rides every server tick (~60Hz / 16.7ms), so a
- *  gap of a couple send intervals is unambiguously a stall, not normal jitter — well
- *  clear of the per-tick cadence, so a healthy link never trips it. Gates remote
- *  extrapolation: only coast a dry buffer when the whole transport stalled, never when
- *  an entity merely stopped emitting (its stream keeps flowing). */
-const CHOKE_STALL_SECONDS = 2 * TRANSFORM_SEND_INTERVAL;
 /** render this many send-intervals behind live. Source's cl_interp is 2 update
  *  intervals (one so the newest keyframe has landed, one of bracketing reserve); we
  *  add ~2 more to cover the render clock's optimistic lead — `clock.server` tracks the
@@ -206,22 +192,25 @@ const JITTER_COVERAGE = 0.95;
 const INTERP_BASE_BEHIND = INTERP_SEND_INTERVAL_MULTIPLE * TRANSFORM_SEND_INTERVAL;
 /** hard ceiling on the adaptive transform render-behind (seconds), so a pathologically
  *  jittery link can't drive the buffer arbitrarily deep. total render-behind is then
- *  `SERVER_CLOCK_INTERP_DELAY + this` = 0.25s max. two reasons: (1) the snapshot ring
- *  is finite (`NET_SNAPSHOT_CAP` keyframes) and render time must stay inside it with a
- *  few keyframes of headroom; (2) past ~250ms of lag, rendering peers that far in the
- *  past is already a lot — a link jittery enough to need more is better served by
- *  snapping the worst ~5% of packets (graceful degradation) than by drifting the whole
- *  world further into the past. buffer depth tracks JITTER, not ping, so this covers a
- *  steady 300-400ms link (low jitter → small margin) and up to ~160ms of jitter (95th
- *  pct) before the tail snaps. Source sizes its history to the live interp amount the
- *  same way, rather than holding a fixed worst-case depth. */
-const MAX_INTERP_MARGIN = 0.2;
+ *  `SERVER_CLOCK_INTERP_DELAY + this` = 0.45s max. deliberately deep: the priority is
+ *  ALWAYS-smooth remote motion even on the poorest links, and we never extrapolate, so
+ *  the buffer must be able to swallow a large jitter spread rather than dry out and
+ *  freeze. the cost is visible lag on other players (they render further in the past),
+ *  the fidelity trade we accept for smoothness. still bounded because (1) the snapshot
+ *  ring is finite (`NET_SNAPSHOT_CAP` keyframes, sized off this) and render time must
+ *  stay inside it, and (2) past ~450ms even a jittery link is better served by gliding
+ *  the rare catch-up (see samplePositionSnapshot) than drifting the whole world deeper.
+ *  buffer depth tracks JITTER, not ping, so a steady high-ping link with low jitter keeps
+ *  a small margin. */
+const MAX_INTERP_MARGIN = 0.4;
 /** slew caps for `interpMargin` (fraction of real time). grow fast so a rising jitter
- *  floor is covered before it snaps; shrink slow (hysteresis) so a lull doesn't yank
- *  the lag back and immediately re-dry. both stay < 1 so `clock.server − interpMargin`
- *  keeps advancing (render clock never freezes on the slew path). */
+ *  floor is covered before it snaps; shrink GLACIALLY (strong hysteresis) so the buffer
+ *  behaves like a high-water mark that only slowly recedes — a jitter lull can't yank the
+ *  lag back and immediately re-dry when the next spike lands. both stay < 1 so
+ *  `clock.server − interpMargin` keeps advancing (render clock never freezes on the slew
+ *  path). */
 const INTERP_MARGIN_GROW_RATE = 0.6;
-const INTERP_MARGIN_SHRINK_RATE = 0.1;
+const INTERP_MARGIN_SHRINK_RATE = 0.02;
 
 /** deepest the transform render clock can ever sit behind live (seconds): the fixed
  *  `SERVER_CLOCK_INTERP_DELAY` floor plus the adaptive jitter margin's ceiling. the
@@ -230,10 +219,11 @@ const INTERP_MARGIN_SHRINK_RATE = 0.1;
  *  riding the frontier). */
 const MAX_RENDER_BEHIND = SERVER_CLOCK_INTERP_DELAY + MAX_INTERP_MARGIN;
 /** snapshot ring depth (keyframes). sized to cover the deepest render-behind at the
- *  send cadence, plus two keyframes of bracketing headroom, so the ring auto-scales
- *  with the send rate and can't under-run the buffer. imported by `builtins/transform`
- *  to size the per-entity `NetSnapshots` rings. */
-export const NET_SNAPSHOT_CAP = Math.ceil(MAX_RENDER_BEHIND / TRANSFORM_SEND_INTERVAL) + 2;
+ *  send cadence, plus three keyframes of headroom, so even at the deep ceiling render
+ *  time stays comfortably inside the ring (never falls off the old end) and the ring
+ *  auto-scales with the send rate. imported by `builtins/transform` to size the
+ *  per-entity `NetSnapshots` rings. */
+export const NET_SNAPSHOT_CAP = Math.ceil(MAX_RENDER_BEHIND / TRANSFORM_SEND_INTERVAL) + 3;
 
 /** full-rate offset ring depth for the jitter estimator (~0.8s at the 60Hz push
  *  cadence). the jitter spread is measured over THIS window, fed on every push, not
@@ -285,7 +275,7 @@ function observeJitter(sync: ClockSync, offset: number): void {
 /** `seed` is the server clock to align `server` to (from the join handshake);
  *  0 for the server itself and for local rooms. `time`/`wall` start at 0. */
 export function init(seed = 0): Clock {
-    return { time: 0, serverSmoothed: seed, wall: 0, sync: newSync(), serverLatest: 0, lastRecvWall: 0 };
+    return { time: 0, serverSmoothed: seed, wall: 0, sync: newSync(), serverLatest: 0 };
 }
 
 /** advance the fixed-cadence clocks by the elapsed tick delta (seconds). `time` is
@@ -327,9 +317,6 @@ export function observeSample(clock: Clock, serverClock: number, recvTime: numbe
     // entity emits poses. this is the unfiltered server time, distinct from the
     // skewed `server` render clock the estimator drives below.
     clock.serverLatest = serverClock;
-    // remember when this push landed (local wall), so `isServerChoking` can measure
-    // how long the transport has been silent — the stall signal that gates extrapolation.
-    clock.lastRecvWall = recvTime;
 
     // feed the FULL-RATE jitter estimator on every push, BEFORE the decimation gate
     // below — arrival jitter is a fast-moving quantity, so it's measured at the cadence
@@ -433,15 +420,4 @@ export function transformRenderTime(clock: Clock, dt: number): number {
     const next = clock.serverSmoothed - sync.interpMargin;
     if (next > sync.serverRenderTime) sync.serverRenderTime = next;
     return sync.serverRenderTime;
-}
-
-/** is the transport currently choking (a head-of-line stall on the reliable+ordered
- *  link)? True when no `server_clock` push has landed for `CHOKE_STALL_SECONDS`. Since
- *  a stall delays the WHOLE stream, this is the client's proof that a dry remote-transform
- *  buffer is a transport gap (coast the last velocity) rather than an entity that stopped
- *  emitting (hold). Mirrors Source's `GetLastTimeStamp() <= m_LastNetworkedTime` choke
- *  test. Always false until synced, so local/offline rooms never extrapolate. */
-export function isServerChoking(clock: Clock): boolean {
-    if (!clock.sync.synced) return false;
-    return clock.wall - clock.lastRecvWall > CHOKE_STALL_SECONDS;
 }
