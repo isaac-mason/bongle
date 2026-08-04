@@ -848,15 +848,15 @@ export function broadcast(
     Rpc.send(runtime.rpc, registry.protocol.commands, handle, data, runtime.roomId);
 }
 
-export function listen(
+export function listen<S extends Scripts.Schema>(
     ctx: ScriptContext,
-    handle: CommandHandle<Scripts.Schema, 'client_to_server'>,
-    fn: (data: Scripts.SchemaType<Scripts.Schema>, from: Client) => void,
+    handle: CommandHandle<S, 'client_to_server'>,
+    fn: (data: Scripts.SchemaType<S>, from: Client) => void,
 ): Unsubscribe;
-export function listen(
+export function listen<S extends Scripts.Schema>(
     ctx: ScriptContext,
-    handle: CommandHandle<Scripts.Schema, 'server_to_client'>,
-    fn: (data: Scripts.SchemaType<Scripts.Schema>) => void,
+    handle: CommandHandle<S, 'server_to_client'>,
+    fn: (data: Scripts.SchemaType<S>) => void,
 ): Unsubscribe;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function listen(

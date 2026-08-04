@@ -171,7 +171,7 @@ export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
     dependency: { registry: 'commands'; id: string };
     readonly direction: D;
     readonly schema: S;
-    readonly serdes: ReturnType<typeof pack.build>;
+    readonly serdes: ReturnType<typeof pack.build<S>>;
 };
 
 /** internal def stored in registry. */
@@ -215,7 +215,7 @@ export function command<S extends pack.Schema, D extends RpcDirection>(id: strin
         id,
         direction,
         schema,
-        serdes,
+        serdes: serdes as CommandDef['serdes'],
     };
 
     upsert(registry.commands, id, def);
