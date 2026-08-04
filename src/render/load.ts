@@ -8,10 +8,9 @@
 import { type Renderer, selectBackend } from './backend';
 
 /**
- * Select + dynamically import the render backend (WebGPU, or the WebGL stub) and
- * mint its `Renderer` handle via `create()`. Phase 1: WebGPU is the only real
- * backend; the WebGL stub's `create()` returns a same-shaped handle whose methods
- * throw until the impl lands.
+ * Select + dynamically import the render backend (WebGPU or WebGL2) and mint its
+ * `Renderer` handle via `create()`. Both are full backends behind one contract;
+ * `selectBackend()` prefers WebGPU and falls back to WebGL2.
  */
 export async function loadRenderBackend(): Promise<Renderer> {
     const mod = selectBackend() === 'webgl' ? await import('./webgl') : await import('./webgpu');

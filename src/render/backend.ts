@@ -130,11 +130,12 @@ function readRendererOverride(): RendererBackendKind | null {
 
 /**
  * Choose the render backend for this session. A `?renderer=` override wins;
- * otherwise pick WebGPU when the platform exposes it, falling back to WebGL.
+ * otherwise pick WebGPU when the platform exposes it, falling back to WebGL2.
  *
  * Sync + presence-only (`navigator.gpu`) on purpose: the real adapter handshake
- * happens in the backend's async `load()`. A robust "requestAdapter failed ->
- * WebGL" path lands with the real WebGL backend (see llm/plan-webgl2-renderer.md).
+ * happens in the backend's async `load()`. A `navigator.gpu` that fails to yield
+ * an adapter still picks WebGPU here and surfaces in `load()`; the website probes
+ * the adapter up front and only offers the game when a backend can actually run.
  */
 export function selectBackend(): RendererBackendKind {
     const override = readRendererOverride();
