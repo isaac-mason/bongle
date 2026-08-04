@@ -59,11 +59,15 @@ export async function start(opts: StartPipelineOptions): Promise<PipelineBootRes
     });
 
     let baking = false;
-    const rebake = async (): Promise<void> => {
+    // `force` bypasses the pass's registry-revision gate. Asset-file edits (start.ts's
+    // watcher) move no revision, so they must force for the builders' content-hash gates
+    // to see the new bytes; the flush path (code edits) leaves it off — a re-declare
+    // already bumped the revisions.
+    const rebake = async (force = false): Promise<void> => {
         if (baking) return;
         baking = true;
         try {
-            const r = await AssetPipeline.run(pipeline, {});
+            const r = await AssetPipeline.run(pipeline, { forceAll: force });
             opts.onBaked({ atlasChanged: r.atlasChanged, spriteAtlasChanged: r.spriteAtlasChanged, audioAtlasChanged: r.audioAtlasChanged });
         } catch (err) {
             console.error(`[dev:pipeline] bake failed: ${(err as Error).message}`);
@@ -85,5 +89,6 @@ export async function start(opts: StartPipelineOptions): Promise<PipelineBootRes
     });
     __bongle.flush();
 
-    return { rebake, stop: () => {} };
+    // The only external caller is start.ts's asset-file watcher, which needs the force.
+    return { rebake: () => rebake(true), stop: () => {} };
 }

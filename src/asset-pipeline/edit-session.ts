@@ -94,14 +94,19 @@ export function init(driver: Driver, opts: Opts): State {
 
 /** One bake pass: the data bake (atlas / sprites / models / scenes / audio) plus the GPU
  *  icon render, reported via `onBaked`. Idempotent + guarded; coalescing / when-to-fire
- *  for asset edits is the caller's concern (the flush drives code edits). */
-export async function run(state: State): Promise<void> {
+ *  for asset edits is the caller's concern (the flush drives code edits).
+ *
+ *  `forceAll` bypasses the pass's registry-revision gate: an asset-file edit moves no
+ *  registry revision, so the caller (the pipeline realm's fs.watch) must force the pass
+ *  for the builders' content-hash gates to see the new bytes. The flush path (code edits)
+ *  leaves it off — a re-declare already bumps the revisions. */
+export async function run(state: State, opts: { forceAll?: boolean } = {}): Promise<void> {
     if (state.baking) return;
     state.baking = true;
     let atlasChanged = false;
     try {
         const t0 = performance.now();
-        const r = await AssetPipeline.run(state.pipeline);
+        const r = await AssetPipeline.run(state.pipeline, { forceAll: opts.forceAll });
         atlasChanged = r.atlasChanged;
         state.driver.log?.(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
         state.driver.onBaked({ atlasChanged: r.atlasChanged, maxPlayers: r.matchmakingConfig?.maxPlayers ?? null });
