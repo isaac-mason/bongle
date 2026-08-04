@@ -93,7 +93,9 @@ export function defineBongleDevConfig(opts: BongleDevConfigOptions): UserConfig 
                 toGlob(path.join(projectDir, 'src/**/*.{ts,tsx}')),
                 `!${toGlob(path.join(BONGLE_ROOT, 'src/**/*.{test,bench}.{ts,tsx}'))}`,
             ],
-            exclude: ['bongle', 'bongle/engine-client', 'bongle/internal', 'bongle/env', 'gpucat', 'mathcat', 'packcat', 'crashcat'],
+            // mathcat's subpath exports (shapes/random) must be excluded too —
+            // optimizeDeps.exclude is exact-string, a bare 'mathcat' doesn't cover them.
+            exclude: ['bongle', 'bongle/engine-client', 'bongle/internal', 'bongle/env', 'gpucat', 'mathcat', 'mathcat/shapes', 'mathcat/random', 'packcat', 'crashcat'],
         },
         environments: {
             client: {},

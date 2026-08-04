@@ -28,7 +28,7 @@
 
 import { type Camera, packTo, type Scene } from 'gpucat';
 import type { Mat4 } from 'mathcat';
-import { box3 } from 'mathcat';
+import { box3 } from 'mathcat/shapes';
 import { SpriteTrait } from '../../builtins/sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { query, type SceneTree } from '../../core/scene/scene-tree';

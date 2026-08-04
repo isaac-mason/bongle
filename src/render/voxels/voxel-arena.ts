@@ -14,8 +14,7 @@
 // voxel-resources-gpu, imported only by render/webgpu/*.
 
 import { BufferLifecycle, type Camera, DrawIndirect, d, frustum, GpuBuffer, layoutStrideOf, struct } from 'gpucat';
-import type { Box3 } from 'mathcat';
-import { plane3 } from 'mathcat';
+import { type Box3, plane3 } from 'mathcat/shapes';
 import * as Performance from '../../client/performance';
 import { QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk } from '../../core/voxels/voxels';

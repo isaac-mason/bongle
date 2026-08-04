@@ -13,7 +13,7 @@
 // internal subtrees via the 6-plane frustum test.
 
 import { type Frustum, frustum } from 'gpucat';
-import { type Box3, box3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 
 export type DbvtNode = {
     index: number;

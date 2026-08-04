@@ -5,7 +5,7 @@
 // the transform position if the subtree contains no mesh geometry.
 
 import { type d, LineMaterial, LineSegmentsGeometry, Mesh, type Scene, type Node as ShaderNode } from 'gpucat';
-import { type Box3, box3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 import { getVisualWorldPosition } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Resources } from '../../core/resources';

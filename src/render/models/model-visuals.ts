@@ -25,7 +25,7 @@
 //     some bucket this frame"; no per-instance visible u32 to write.
 
 import type { Scene } from 'gpucat';
-import { box3 } from 'mathcat';
+import { box3 } from 'mathcat/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';

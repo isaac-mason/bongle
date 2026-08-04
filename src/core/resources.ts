@@ -11,7 +11,7 @@
 // geometry/clipChannels for downstream systems (renderer, animator,
 // physics) to poll.
 
-import type { Box3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import { createEmptyHandle, hydrateRuntimeHandle } from './models/build-runtime-handle';
 import type { ClipChannel, ClipChannels, ClipDef, MeshId, ModelHandle } from './models/handle';
 import { type Model, type ModelMesh, toModel } from './models/model';

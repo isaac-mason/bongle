@@ -34,7 +34,8 @@ import {
     subShape,
     transformFaceWithMat4RotationTranslation,
 } from 'crashcat';
-import { type Box3, box3, mat4, quat, type Vec3, vec3 } from 'mathcat';
+import { mat4, quat, type Vec3, vec3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 import type { Blocks } from './block-registry';
 import { AIR, BLOCK_FLAG_COLLISION, MISSING, MODEL_NONE } from './block-registry';
 import { createVoxelRaycastResult, raycastVoxels } from './voxel-raycast';

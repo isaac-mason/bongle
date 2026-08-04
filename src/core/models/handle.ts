@@ -7,7 +7,7 @@
 //   - meshes by compound id { modelId, meshName } (Unity GUID+fileID, Unreal path+sub-name)
 //   - clips by ClipDef ref identity (three.js style, sidecar exports refs, animator keys by identity)
 
-import type { Box3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import type { Node } from '../scene/scene-tree';
 
 /**

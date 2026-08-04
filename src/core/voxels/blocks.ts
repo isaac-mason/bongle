@@ -1,4 +1,5 @@
-import { createMulberry32Generator, type Vec2, type Vec3 } from 'mathcat';
+import type { Vec2, Vec3 } from 'mathcat';
+import { mulberry32 } from 'mathcat/random';
 import { recordBlock, recordBlockTexture } from '../capture/module-scope';
 import { particleUpdate } from '../particles/particle-update';
 import { type ParticleHandle, particle } from '../particles/particles';
@@ -937,7 +938,7 @@ export function block<const P extends PropsDef = {}>(id: string, options: BlockO
 //
 // The draw fn is hashed via `Function.prototype.toString()` for asset-
 // pipeline invalidation, so the seed rides through `params` (which DOES
-// participate in the structural hash). `createMulberry32Generator` is a
+// participate in the structural hash). `mulberry32` is a
 // stable published algorithm, the closure-capture-not-hashed gap is a
 // theoretical concern only.
 
@@ -1017,7 +1018,8 @@ export function deriveBlockDust(id: string, model: BlockModel): readonly Particl
         const variantSprite = sprite(variantId, {
             src: draw(
                 (ctx, inputs, params) => {
-                    const r = createMulberry32Generator(params.seed as number);
+                    const rng = mulberry32.create(params.seed as number);
+                    const r = () => mulberry32.sample(rng);
                     const max = (params.src as number) - (params.size as number);
                     const sx = Math.floor(r() * max);
                     const sy = Math.floor(r() * max);

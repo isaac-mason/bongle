@@ -4,7 +4,7 @@
 //
 // callers handle their own fallback when the subtree contributes no AABB.
 
-import { type Box3, box3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';

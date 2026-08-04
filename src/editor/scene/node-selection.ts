@@ -12,7 +12,7 @@
  * is the contract; it tracks voxel selection exactly across all shape kinds.
  */
 import { type BodyVisitor, broadphase, type RigidBody } from 'crashcat';
-import type { Box3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Physics } from '../../core/physics/physics';

@@ -19,7 +19,8 @@ import {
     registerShapes,
     sphere,
 } from 'crashcat';
-import { type Box3, vec3 } from 'mathcat';
+import { vec3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aabbs } from '../../../../src/core/voxels/block-collider';
 import { box } from '../../../../src/core/voxels/block-model';

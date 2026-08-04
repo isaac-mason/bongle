@@ -32,7 +32,8 @@
 
 import type { Scene } from 'gpucat';
 import { packTo } from 'gpucat';
-import { type Box3, box3, vec3 } from 'mathcat';
+import { vec3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { ModelTrait } from '../../builtins/model';
 import { TransformTrait } from '../../builtins/transform';

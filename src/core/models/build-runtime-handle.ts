@@ -12,7 +12,7 @@
 // user code that grabbed a ref to the empty shell stays valid; bumps
 // `handle.version` so dependent prefabs / queries re-trigger.
 
-import type { Box3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import { MeshTrait } from '../../builtins/mesh';
 import { TransformTrait } from '../../builtins/transform';
 import { addChild, addTrait, createNode, type Node } from '../scene/scene-tree';

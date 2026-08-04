@@ -19,7 +19,8 @@
 // shape its output for serialization. The .bin path goes through
 // `toModel` because the bytes-on-disk shape *is* ModelBin.
 
-import type { Box3, Quat, Vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'mathcat';
+import type { Box3 } from 'mathcat/shapes';
 import type { ModelBin } from './model-bin';
 
 /** scene-graph node in the parsed model. */

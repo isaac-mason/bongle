@@ -35,7 +35,8 @@ import {
     triangleMesh,
     updateWorld,
 } from 'crashcat';
-import { type Box3, box3, type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Box3, box3 } from 'mathcat/shapes';
 import { MeshTrait } from '../../../builtins/mesh';
 import { type RigidBodyDef, RigidBodyTrait, type ShapeDef } from '../../../builtins/rigid-body';
 import {
