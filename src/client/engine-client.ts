@@ -30,12 +30,12 @@ import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
 import type { Renderer } from '../render/backend';
-import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-arena';
+import { loadRenderBackend } from '../render/load';
 import * as ModelLighting from '../render/models/model-lighting';
 import * as Particles from '../render/particles/particles';
 import * as Interpolation from '../render/transform/interpolation';
 import * as Visibility from '../render/visibility/visibility';
-import { loadRenderBackend } from '../render/load';
+import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-arena';
 import * as Audio from './audio/audio';
 import * as Chat from './chat';
 import * as Device from './device';
@@ -1173,13 +1173,11 @@ export function update(state: EngineClient, delta: number) {
         // interpolate replicated transforms first so rig roots are at their
         // visual position for the frame (animator writes to child bones, not
         // rig roots, so visibility only needs roots, not bones, settled).
-        // renderTime is the render-behind server clock (plus an adaptive jitter
-        // margin): remote snapshot rings are sampled against it, so peers render
-        // ~one-way-latency + interp-buffer behind live, smoothly bracketed between the
-        // poses they actually sent. the margin widens on jittery links so slow packets
-        // stay bracketable instead of snapping; 0 on good ones.
+        // remote (non-owner) transforms chase the latest received pose over the
+        // observed send interval, eased by the real frame `delta` — no render-behind
+        // buffer, so a bad link can't freeze a peer on a stale keyframe.
         Debug.begin(room.clientMetrics, 'interpolate');
-        Interpolation.interpolate(room.nodes, room.playerId, alpha, Clock.transformRenderTime(room.clock, delta));
+        Interpolation.interpolate(room.nodes, room.playerId, alpha, delta);
         Debug.end(room.clientMetrics, 'interpolate');
 
         // user frame scripts (camera follow, local player motion, etc.) run

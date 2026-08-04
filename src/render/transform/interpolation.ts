@@ -8,14 +8,15 @@
  *     lerps `prev` → `position` with the fixed-step alpha. classic
  *     prev→cur interpolation, godot-style.
  *
- *   remote (non-owner): pose syncs land into a timestamped ring
- *     (`_netSnapshots`, filled by the transform sync unpacks). every
- *     frame `interpolate()` samples the ring at the render-behind
- *     server clock (`clock.server`), bracketing the two keyframes
- *     around render time. constant visual lag regardless of speed,
- *     jitter absorbed by the buffer, motion follows the true sent
- *     path. teleport edge (counter changed) collapses the ring to the
- *     current pose so a discontinuity doesn't smear visually.
+ *   remote (non-owner): chase-latest. no buffer, no render-behind
+ *     clock: the translator's target is always the NEWEST received pose
+ *     (`t.position` / `t.quaternion`, copied in by the sync unpacks),
+ *     and `current` eases toward it over roughly the observed send
+ *     interval. cannot freeze while the server moves on — the target is
+ *     always live — trading exact-path fidelity and jitter absorption
+ *     for robustness on bad links, where a render-behind buffer would
+ *     fall off the back of a finite ring and clamp-hold on a stale
+ *     pose. teleport edge snaps the translator to the new pose.
  *
  *   predicted physics (owner with prediction): separate path,
  *     world-space correction-blend against an authoritative pose with
@@ -37,18 +38,18 @@
 import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
 import { RigidBodyTrait } from '../../builtins/rigid-body';
 import {
+    ensureRemoteInterpolation,
     getWorldMatrix,
     hasTransformedParent,
     markInterpolatedDescendantsDirty,
-    resetNetSnapshots,
-    samplePositionSnapshot,
-    sampleRotationSnapshot,
+    type RemoteInterpolation,
     TRANSFORM_DIRTY_INTERPOLATED_MATRIX,
     TRANSFORM_DIRTY_INTERPOLATED_TRS,
     type TransformTrait,
     updateInterpolatedWorldTransform,
 } from '../../builtins/transform';
 import type { PlayerId } from '../../core/client';
+import { TRANSFORM_SEND_HZ } from '../../core/clock';
 import { getTrait, type SceneTree } from '../../core/scene/scene-tree';
 
 export { resetInterpolation, setInterpolation } from '../../builtins/transform';
@@ -108,17 +109,17 @@ export function snapshot(sceneTree: SceneTree): void {
  * VISUAL_MATRIX dirty so they lazily recompose against the freshly-written
  * ancestor on next read.
  *
- * `renderTime` is the room's render-behind server clock (`clock.server`), the
- * timeline remote snapshots are sampled on.
+ * `delta` is the real render-frame delta (seconds), the timestep the remote
+ * chase-latest translator eases over.
  *
  * per-frame routing pivot:
  *   - predicted physics → world-space correction-blend (stateful)
  *   - owner (node.owner === this room's playerId) → fixed-step
  *     prev→cur lerp at `alpha`
- *   - remote (non-owner) → sample the snapshot ring at `renderTime`;
- *     teleport edge collapses the ring to the current pose
+ *   - remote (non-owner) → chase the latest received pose (no buffer);
+ *     teleport edge snaps the translator to the current pose
  */
-export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: number, renderTime: number): void {
+export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: number, delta: number): void {
     for (const transform of sceneTree._interpolating) {
         const node = transform._node!;
 
@@ -133,7 +134,7 @@ export function interpolate(sceneTree: SceneTree, playerId: PlayerId, alpha: num
             sampleFixedStepPose(transform, alpha, _interpLocalPos, _interpLocalQuat);
             writeInterpolated(transform, _interpLocalPos, _interpLocalQuat);
         } else {
-            sampleSnapshotPose(transform, renderTime);
+            sampleRemotePose(transform, delta);
         }
 
         if (node.children.length > 0) markInterpolatedDescendantsDirty(node);
@@ -156,41 +157,123 @@ function sampleFixedStepPose(t: TransformTrait, alpha: number, outPos: Vec3, out
     }
 }
 
+/** send-interval fallback (seconds) before any cadence has been observed. */
+const DEFAULT_INTERVAL = 1 / TRANSFORM_SEND_HZ;
+/** clamp observed intervals into a sane band so a network stall (a huge gap) or a
+ *  burst (a tiny gap) can't wreck the chase rate — the eased value always arrives
+ *  within ~2 send intervals. */
+const MIN_EASE_DURATION = DEFAULT_INTERVAL * 0.5;
+const MAX_EASE_DURATION = DEFAULT_INTERVAL * 2;
+/** "move a bit less than should" damping — smooths a retarget. paired with the 1.0 ratio
+ *  ceiling (no extrapolation, matching the engine's never-guess-velocity contract), the
+ *  eased value still fully reaches the target at ~1.25 intervals. */
+const CHASE_DAMPING = 0.8;
+
+/** EWMA the observed send interval into the ease duration, clamped so outliers (a stall
+ *  or a burst) can't stall or overshoot the chase rate. */
+function blendEaseDuration(previous: number, interval: number): number {
+    const clamped =
+        interval < MIN_EASE_DURATION ? MIN_EASE_DURATION : interval > MAX_EASE_DURATION ? MAX_EASE_DURATION : interval;
+    return previous <= 0 ? clamped : previous * 0.9 + clamped * 0.1;
+}
+
+/** fraction of old→target to have covered by now: elapsed / easeDuration, damped, capped
+ *  at 1 so the eased value settles exactly on the target if updates stop. */
+function chaseRatio(elapsed: number, easeDuration: number): number {
+    const ratio = easeDuration > 0.001 ? elapsed / easeDuration : 1;
+    const damped = ratio * CHASE_DAMPING;
+    return damped < 1 ? damped : 1;
+}
+
+/** snap the translator to a known pose (first frame / teleport edge): old == current
+ *  == target, elapsed cleared, cadence retained. `seen` catches up to `sequence` so the
+ *  pending sync that rode along with the snap doesn't re-trigger a retarget. */
+export function resetRemoteInterpolation(remote: RemoteInterpolation, position: Vec3, quaternion: Quat): void {
+    vec3.copy(remote.positionOld, position);
+    vec3.copy(remote.positionCurrent, position);
+    quat.copy(remote.quaternionOld, quaternion);
+    quat.copy(remote.quaternionCurrent, quaternion);
+    remote.positionElapsed = 0;
+    remote.quaternionElapsed = 0;
+    remote.positionSeen = remote.positionSequence;
+    remote.quaternionSeen = remote.quaternionSequence;
+    remote.positionStamp = remote.positionPendingStamp;
+    remote.quaternionStamp = remote.quaternionPendingStamp;
+    remote.initialized = 1;
+}
+
 /**
- * remote snapshot-interpolation path. pose syncs landed into a timestamped ring
- * (`_netSnapshots`, filled by the position/rotation sync unpacks). sample the ring
- * at `renderTime` (the render-behind server clock) to get a smooth local pose, then
- * publish it through the shared interpolated-world write — which handles both
- * top-level (local === world) and nested (compose with the parent's interpolated
- * matrix) exactly as the owner path does.
+ * ease both channels of a remote translator toward their live targets by `dt`, writing
+ * the eased poses into `remote.positionCurrent` / `remote.quaternionCurrent`. on a fresh
+ * unpack (a bumped per-channel sequence) it restarts the ease from the current pose
+ * toward the new target, learning the cadence from the stamp gap; then it advances the
+ * elapsed timer and lerps/slerps `old → target` at the damped, capped ratio.
  *
- * a teleport edge (counter changed since last frame) collapses the ring to the
- * current pose so we hold on it instead of smearing across the discontinuity. an
- * empty ring (enrolled but no pose landed yet) holds at the current local pose.
+ * position and quaternion chase independently (a mover with a fixed facing never re-emits
+ * quaternion, and vice versa). exported for tests; the render loop uses `sampleRemotePose`,
+ * which also handles the teleport/first-frame seed and the world-space publish.
  */
-function sampleSnapshotPose(t: TransformTrait, renderTime: number): void {
-    const snaps = t._netSnapshots;
+export function advanceRemoteInterpolation(
+    remote: RemoteInterpolation,
+    positionTarget: Vec3,
+    quaternionTarget: Quat,
+    dt: number,
+): void {
+    if (remote.positionSequence !== remote.positionSeen) {
+        const interval = remote.positionStamp > 0 ? remote.positionPendingStamp - remote.positionStamp : DEFAULT_INTERVAL;
+        remote.positionStamp = remote.positionPendingStamp;
+        remote.positionSeen = remote.positionSequence;
+        remote.positionEaseDuration = blendEaseDuration(remote.positionEaseDuration, interval);
+        vec3.copy(remote.positionOld, remote.positionCurrent);
+        remote.positionElapsed = 0;
+    }
+    remote.positionElapsed += dt;
+    vec3.lerp(
+        remote.positionCurrent,
+        remote.positionOld,
+        positionTarget,
+        chaseRatio(remote.positionElapsed, remote.positionEaseDuration),
+    );
+
+    if (remote.quaternionSequence !== remote.quaternionSeen) {
+        const interval = remote.quaternionStamp > 0 ? remote.quaternionPendingStamp - remote.quaternionStamp : DEFAULT_INTERVAL;
+        remote.quaternionStamp = remote.quaternionPendingStamp;
+        remote.quaternionSeen = remote.quaternionSequence;
+        remote.quaternionEaseDuration = blendEaseDuration(remote.quaternionEaseDuration, interval);
+        quat.copy(remote.quaternionOld, remote.quaternionCurrent);
+        remote.quaternionElapsed = 0;
+    }
+    remote.quaternionElapsed += dt;
+    quat.slerp(
+        remote.quaternionCurrent,
+        remote.quaternionOld,
+        quaternionTarget,
+        chaseRatio(remote.quaternionElapsed, remote.quaternionEaseDuration),
+    );
+}
+
+/**
+ * remote chase-latest path. the sync unpacks copy the newest pose straight into
+ * `t.position` / `t.quaternion` and bump a per-channel sequence; here we ease the
+ * translator's `current` toward that live target over the observed send interval and
+ * publish it through the shared interpolated-world write.
+ *
+ * a teleport edge (counter changed) snaps the translator to the current pose instead of
+ * easing across the discontinuity; the first frame seeds `current` the same way.
+ */
+function sampleRemotePose(t: TransformTrait, dt: number): void {
+    const remote = ensureRemoteInterpolation(t);
 
     if (t.teleport !== t.lastTeleport) {
         t.lastTeleport = t.teleport;
-        if (snaps) resetNetSnapshots(t, t.position, t.quaternion, renderTime);
-        writeInterpolated(t, t.position, t.quaternion);
+        resetRemoteInterpolation(remote, t.position, t.quaternion);
+        writeInterpolated(t, remote.positionCurrent, remote.quaternionCurrent);
         return;
     }
-    if (!snaps) {
-        writeInterpolated(t, t.position, t.quaternion);
-        return;
-    }
-    // sample each ring independently; a slice with no keyframes yet holds the
-    // current local value (position and rotation are independent syncs, so an
-    // entity that only rotates in place never fills the position ring, and vice
-    // versa). a dry position buffer holds the newest keyframe and glides the
-    // catch-up when the stream resumes (see samplePositionSnapshot).
-    if (snaps.posCount > 0) samplePositionSnapshot(snaps, renderTime, _interpLocalPos, true);
-    else vec3.copy(_interpLocalPos, t.position);
-    if (snaps.rotCount > 0) sampleRotationSnapshot(snaps, renderTime, _interpLocalQuat);
-    else quat.copy(_interpLocalQuat, t.quaternion);
-    writeInterpolated(t, _interpLocalPos, _interpLocalQuat);
+    if (remote.initialized === 0) resetRemoteInterpolation(remote, t.position, t.quaternion);
+
+    advanceRemoteInterpolation(remote, t.position, t.quaternion, dt);
+    writeInterpolated(t, remote.positionCurrent, remote.quaternionCurrent);
 }
 
 /**

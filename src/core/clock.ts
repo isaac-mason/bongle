@@ -80,40 +80,10 @@ export type ClockSync = {
     synced: boolean;
     /** local-monotonic time of the last sample folded into the estimator. gates
      *  the feed to ~`SYNC_OBSERVE_MIN_INTERVAL`: `server_clock` is per-tick (~60Hz)
-     *  so `lastServerStamp` stays fresh for keyframes, but the least-delayed window
+     *  so `serverLatest` stays fresh for keyframes, but the least-delayed window
      *  (12s TTL, 16-sample cap) needs samples spread across time, not 16 crammed
      *  into ~0.27s. decimating the feed reproduces the pre-per-tick ~10Hz cadence. */
     lastObserved: number;
-
-    // ── adaptive remote-transform interp buffer (Source cl_interp_ratio style) ──
-    /** measured one-way latency SPREAD (seconds): the gap between the least-delayed
-     *  sample and the `JITTER_COVERAGE` percentile of the most-delayed, over the
-     *  FULL-RATE jitter window (`jitterOffsets`, fed every push). `clock.server` is
-     *  anchored to the least-delayed (min latency), so remote snapshots landing slower
-     *  than that arrive behind render time and snap; holding render time back by this
-     *  spread (on top of the fixed `INTERP_BASE_BEHIND` floor) keeps `JITTER_COVERAGE`
-     *  of them bracketable. a percentile (not the raw max) so a lone outlier doesn't pin
-     *  the buffer wide for the whole window. */
-    latencyJitter: number;
-    /** full-rate ring of recent raw offsets (`serverClock − recvTime`), one per push,
-     *  the `latencyJitter` spread is measured over. distinct from the decimated
-     *  `samples` window (which tracks the slow latency FLOOR for `targetOffset`);
-     *  jitter is a fast-moving quantity and needs every packet. `-1` head when empty. */
-    jitterOffsets: Float64Array;
-    jitterHead: number;
-    jitterCount: number;
-    /** transform-only render-behind currently applied on top of `clock.server`
-     *  (seconds), slewed toward
-     *  `clamp(INTERP_BASE_BEHIND + latencyJitter − SERVER_CLOCK_INTERP_DELAY, 0, MAX)`,
-     *  i.e. total transform render-behind = `INTERP_BASE_BEHIND + jitter` (the
-     *  `− SERVER_CLOCK_INTERP_DELAY` just discounts the buffer already baked into
-     *  `clock.server`). projectiles are unaffected — this rides only the transform
-     *  render clock. */
-    interpMargin: number;
-    /** monotonic transform render clock (`clock.server − interpMargin`, clamped
-     *  non-decreasing). the clamp guards the one case the slew can't: a backward
-     *  snap of `clock.server` (refocused tab) would otherwise rewind remote motion. */
-    serverRenderTime: number;
 };
 
 /** one push observation: `offset` is render-behind (`serverClock − recvTime`);
@@ -147,94 +117,14 @@ const SYNC_MAX_SLEW_RATE = 0.1;
  *  typical head-of-line stall, keeping server-stamped events from rendering early. */
 export const SERVER_CLOCK_INTERP_DELAY = 0.05;
 
-// ── transform replication timing (single source of truth) ────────────────
-//
-// remote-entity smoothness rests on one invariant, holding every frame for every
-// moving entity:
-//
-//     send_interval  <  render_behind  <  ring_span
-//
-// the three quantities below all derive from the ONE send cadence, so changing the
-// broadcast rate can never silently under-run the buffer — the failure that shipped
-// when the rate dropped to 20Hz (50ms) while the render-behind floor stayed at one
-// interval, leaving zero bracketing headroom (render time rode the newest keyframe →
-// sampler froze-and-snapped at packet cadence).
-
 /** transform broadcast cadence (position + quaternion slices, `dirty.diff` capped).
- *  the one real knob: the render-behind floor and the snapshot ring both size off it.
- *  imported by `builtins/transform` for `rate.hz(...)` so the send rate and the buffer
- *  literally cannot disagree. */
+ *  imported by `builtins/transform` for `rate.hz(...)` and by the remote chase-latest
+ *  translator (render/transform/interpolation.ts) as the fallback ease interval, so the
+ *  send rate and the chase timing derive from one constant. */
 export const TRANSFORM_SEND_HZ = 30;
-/** one send interval (seconds). the newest received keyframe is up to this old. */
-const TRANSFORM_SEND_INTERVAL = 1 / TRANSFORM_SEND_HZ;
-
-/** render this many send-intervals behind live. Source's cl_interp is 2 update
- *  intervals (one so the newest keyframe has landed, one of bracketing reserve); we
- *  add ~2 more to cover the render clock's optimistic lead — `clock.server` tracks the
- *  LEAST-delayed offset, which was measured leading the newest received keyframe by
- *  ~55ms (≈1.6 intervals at 30Hz) even on a zero-latency local link. this is the fixed,
- *  ping-independent floor that must hold regardless of network; verify empirically via
- *  the interpolation debug (`behindNewest` should sit comfortably negative). */
-const INTERP_SEND_INTERVAL_MULTIPLE = 4;
-
-/** fraction of packets the adaptive transform buffer keeps bracketable. the jitter
- *  spread is measured to this percentile of latency (not the raw max), so the worst
- *  ~5% snap rather than dragging the whole buffer (and the visible lag) out to a lone
- *  outlier. this is Source's `cl_interp_ratio` tolerance expressed as a percentile. */
-const JITTER_COVERAGE = 0.95;
-/** fixed transform render-behind floor (seconds): the ping/jitter-independent piece
- *  the render clock ALWAYS holds beyond the newest keyframe, so `renderTime` sits
- *  strictly between two received keyframes. derived from the send cadence (not a magic
- *  constant) so it can never fall below the send interval again — the bug the old
- *  fixed 50ms `INTERP_BRACKET_RESERVE` had once the rate dropped to one interval, where
- *  reserve − delay cancelled to zero and near-worst packets landed on the frontier and
- *  snapped. widens the visible lag on other players by this much and nothing else. */
-const INTERP_BASE_BEHIND = INTERP_SEND_INTERVAL_MULTIPLE * TRANSFORM_SEND_INTERVAL;
-/** hard ceiling on the adaptive transform render-behind (seconds), so a pathologically
- *  jittery link can't drive the buffer arbitrarily deep. total render-behind is then
- *  `SERVER_CLOCK_INTERP_DELAY + this` = 0.45s max. deliberately deep: the priority is
- *  ALWAYS-smooth remote motion even on the poorest links, and we never extrapolate, so
- *  the buffer must be able to swallow a large jitter spread rather than dry out and
- *  freeze. the cost is visible lag on other players (they render further in the past),
- *  the fidelity trade we accept for smoothness. still bounded because (1) the snapshot
- *  ring is finite (`NET_SNAPSHOT_CAP` keyframes, sized off this) and render time must
- *  stay inside it, and (2) past ~450ms even a jittery link is better served by gliding
- *  the rare catch-up (see samplePositionSnapshot) than drifting the whole world deeper.
- *  buffer depth tracks JITTER, not ping, so a steady high-ping link with low jitter keeps
- *  a small margin. */
-const MAX_INTERP_MARGIN = 0.4;
-/** slew caps for `interpMargin` (fraction of real time). grow fast so a rising jitter
- *  floor is covered before it snaps; shrink GLACIALLY (strong hysteresis) so the buffer
- *  behaves like a high-water mark that only slowly recedes — a jitter lull can't yank the
- *  lag back and immediately re-dry when the next spike lands. both stay < 1 so
- *  `clock.server − interpMargin` keeps advancing (render clock never freezes on the slew
- *  path). */
-const INTERP_MARGIN_GROW_RATE = 0.6;
-const INTERP_MARGIN_SHRINK_RATE = 0.02;
-
-/** deepest the transform render clock can ever sit behind live (seconds): the fixed
- *  `SERVER_CLOCK_INTERP_DELAY` floor plus the adaptive jitter margin's ceiling. the
- *  snapshot ring must hold at least this many seconds of keyframes so render time
- *  never falls off the OLD end (which would clamp-to-oldest and step just as badly as
- *  riding the frontier). */
-const MAX_RENDER_BEHIND = SERVER_CLOCK_INTERP_DELAY + MAX_INTERP_MARGIN;
-/** snapshot ring depth (keyframes). sized to cover the deepest render-behind at the
- *  send cadence, plus three keyframes of headroom, so even at the deep ceiling render
- *  time stays comfortably inside the ring (never falls off the old end) and the ring
- *  auto-scales with the send rate. imported by `builtins/transform` to size the
- *  per-entity `NetSnapshots` rings. */
-export const NET_SNAPSHOT_CAP = Math.ceil(MAX_RENDER_BEHIND / TRANSFORM_SEND_INTERVAL) + 3;
-
-/** full-rate offset ring depth for the jitter estimator (~0.8s at the 60Hz push
- *  cadence). the jitter spread is measured over THIS window, fed on every push, not
- *  the decimated 12s offset window (which sees 1-in-6 packets and so blurs the
- *  high-frequency arrival jitter the transform buffer actually has to absorb). */
-const JITTER_WINDOW_CAP = 48;
 
 /** scratch for the per-observe percentile sort (≤ SYNC_SAMPLES_MAX live samples). */
 const _sortedOffsets = new Float64Array(SYNC_SAMPLES_MAX);
-/** scratch for the full-rate jitter percentile sort (≤ JITTER_WINDOW_CAP samples). */
-const _jitterSorted = new Float64Array(JITTER_WINDOW_CAP);
 
 function newSync(): ClockSync {
     return {
@@ -243,33 +133,7 @@ function newSync(): ClockSync {
         samples: [],
         synced: false,
         lastObserved: 0,
-        latencyJitter: 0,
-        jitterOffsets: new Float64Array(JITTER_WINDOW_CAP),
-        jitterHead: -1,
-        jitterCount: 0,
-        interpMargin: 0,
-        serverRenderTime: 0,
     };
-}
-
-/** fold one offset into the full-rate jitter ring and recompute `latencyJitter`, the
- *  spread the transform buffer must absorb. runs on EVERY push (before the offset
- *  estimator's decimation gate), so it sees arrival jitter at packet cadence. */
-function observeJitter(sync: ClockSync, offset: number): void {
-    const i = (sync.jitterHead + 1) % JITTER_WINDOW_CAP;
-    sync.jitterHead = i;
-    sync.jitterOffsets[i] = offset;
-    if (sync.jitterCount < JITTER_WINDOW_CAP) sync.jitterCount++;
-
-    // sort ascending (offset falls as latency rises → most-delayed first, least last).
-    const n = sync.jitterCount;
-    for (let k = 0; k < n; k++) _jitterSorted[k] = sync.jitterOffsets[k]!;
-    _jitterSorted.subarray(0, n).sort();
-    // spread from the least-delayed sample down to the `JITTER_COVERAGE` percentile of
-    // the most-delayed, trimming the worst ~(1 − coverage) so a lone stall doesn't pin
-    // the buffer wide for the whole window.
-    const coverageIndex = Math.min(n - 1, Math.round((1 - JITTER_COVERAGE) * n));
-    sync.latencyJitter = _jitterSorted[n - 1]! - _jitterSorted[coverageIndex]!;
 }
 
 /** `seed` is the server clock to align `server` to (from the join handshake);
@@ -312,22 +176,18 @@ export function advanceWall(clock: Clock, delta: number): void {
 export function observeSample(clock: Clock, serverClock: number, recvTime: number): void {
     const sync = clock.sync;
 
-    // store the raw authoritative stamp EVERY push (per-tick), so remote-transform
-    // keyframes timestamp against a value that refreshes at the cadence a moving
-    // entity emits poses. this is the unfiltered server time, distinct from the
-    // skewed `server` render clock the estimator drives below.
+    // store the raw authoritative stamp EVERY push (per-tick), so the remote chase-latest
+    // translator learns each entity's send cadence from a value that refreshes at the
+    // cadence a moving entity emits poses. this is the unfiltered server time, distinct
+    // from the skewed `server` render clock the estimator drives below.
     clock.serverLatest = serverClock;
 
-    // feed the FULL-RATE jitter estimator on every push, BEFORE the decimation gate
-    // below — arrival jitter is a fast-moving quantity, so it's measured at the cadence
-    // packets actually land, not the 1-in-6 the offset-floor window sees.
     const offset = serverClock - recvTime;
-    observeJitter(sync, offset);
 
     // decimate the OFFSET-FLOOR estimator feed to ~`SYNC_OBSERVE_MIN_INTERVAL`. the
     // first sample always passes (it flips `synced` and adopts the offset); afterward
     // we skip pushes closer than the interval so the least-delayed window spans real
-    // time. `serverLatest`/`latencyJitter` above are unaffected, both always updated.
+    // time. `serverLatest` above is unaffected, always updated.
     if (sync.synced && recvTime - sync.lastObserved < SYNC_OBSERVE_MIN_INTERVAL) return;
     sync.lastObserved = recvTime;
 
@@ -381,43 +241,4 @@ export function syncServer(clock: Clock, now: number, dt: number): void {
     // the interp delay is a constant, so it doesn't affect monotonicity.
     const next = now + sync.appliedOffset - SERVER_CLOCK_INTERP_DELAY;
     if (next > clock.serverSmoothed) clock.serverSmoothed = next;
-}
-
-/**
- * the render clock remote transform snapshots are sampled on: `clock.server` held
- * back by the fixed send-rate-derived floor plus an adaptive, jitter-sized margin.
- * `clock.server` tracks the LEAST-delayed packets (min latency), so on a jittery link
- * the slower packets land behind it and their keyframes snap; the render-behind covers
- * `INTERP_BASE_BEHIND` (≈ a few send intervals, so render time sits BETWEEN two
- * keyframes on any link) PLUS `JITTER_COVERAGE` of the observed latency spread.
- *
- * call once per frame per room (after `syncServer`, so `clock.server` is fresh). it
- * slews `interpMargin` toward
- * `clamp(INTERP_BASE_BEHIND + latencyJitter − SERVER_CLOCK_INTERP_DELAY, 0, MAX)` — the
- * `− SERVER_CLOCK_INTERP_DELAY` accounts for the fixed buffer already baked into
- * `clock.server`, so total render-behind is `INTERP_BASE_BEHIND + jitter` — and returns
- * the monotonic render time. projectiles read `clock.server` directly and are
- * unaffected.
- */
-export function transformRenderTime(clock: Clock, dt: number): number {
-    const sync = clock.sync;
-
-    // hold render time back by the fixed send-rate-derived floor PLUS the measured
-    // jitter spread, so even a worst-case packet lands with a keyframe still ahead of
-    // render time (never freeze-holding on the frontier). `SERVER_CLOCK_INTERP_DELAY` is
-    // already baked into `clock.server`, so subtract it here — only the excess above
-    // that fixed buffer needs an adaptive margin. total render-behind is therefore
-    // `INTERP_BASE_BEHIND + latencyJitter` (capped), never below one send interval.
-    const wanted = INTERP_BASE_BEHIND + sync.latencyJitter - SERVER_CLOCK_INTERP_DELAY;
-    const target = wanted < 0 ? 0 : wanted > MAX_INTERP_MARGIN ? MAX_INTERP_MARGIN : wanted;
-    const rate = target > sync.interpMargin ? INTERP_MARGIN_GROW_RATE : INTERP_MARGIN_SHRINK_RATE;
-    const maxStep = rate * dt;
-    const residual = target - sync.interpMargin;
-    sync.interpMargin += residual > maxStep ? maxStep : residual < -maxStep ? -maxStep : residual;
-
-    // monotonic clamp: the slew keeps this advancing, but a backward snap of
-    // `clock.server` (refocused tab) must not rewind remote motion.
-    const next = clock.serverSmoothed - sync.interpMargin;
-    if (next > sync.serverRenderTime) sync.serverRenderTime = next;
-    return sync.serverRenderTime;
 }

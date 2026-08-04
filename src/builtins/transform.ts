@@ -16,7 +16,7 @@
 
 import type { Mat4, Quat, Vec3 } from 'mathcat';
 import { mat4, quat, vec3 } from 'mathcat';
-import { NET_SNAPSHOT_CAP, TRANSFORM_SEND_HZ } from '../core/clock';
+import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
@@ -144,17 +144,16 @@ export const TransformTrait = trait('transform', {
     /** local pose at the start of the current fixed tick. seeded by
      *  `setInterpolation(true)` / `resetInterpolation` and refreshed by
      *  `snapshot()` drain. only meaningful for owner-driven (fixed-step)
-     *  transforms; remote-driven transforms render from the snapshot ring
-     *  (`_netSnapshots`) and don't read these fields. */
+     *  transforms; remote-driven transforms chase the latest received pose
+     *  (`_remoteInterp`) and don't read these fields. */
     prevPosition: vec3.create(),
     prevQuaternion: quat.create(),
 
-    /** remote snapshot-interpolation ring (client-only). null until the first
-     *  remote pose lands, so owner/local/static nodes pay nothing. holds
-     *  independently-timestamped position and rotation keyframes the sampler
-     *  brackets against the render clock. see `pushPositionSnapshot` / the
-     *  sampler in render/interpolation.ts. */
-    _netSnapshots: null as NetSnapshots | null,
+    /** remote chase-latest translator (client-only). null until the first remote
+     *  pose lands, so owner/local/static nodes pay nothing. holds the eased render
+     *  pose and per-channel cadence the sampler in render/interpolation.ts chases
+     *  the live `position`/`quaternion` target with. */
+    _remoteInterpolation: null as RemoteInterpolation | null,
 
     // ── prediction-correction blend state (predicted physics bodies) ──
     /** frames remaining in an active correction blend; 0 when idle */
@@ -169,275 +168,93 @@ export const TransformTrait = trait('transform', {
 /** instance type for TransformTrait */
 export type TransformTrait = TraitType<typeof TransformTrait>;
 
-/* ── remote snapshot-interpolation ring ──────────────────────────────────
+/* ── remote chase-latest translator ───────────────────────────────────────
  *
  * a non-owner transform's pose lands from the network at an irregular cadence
- * (threshold-gated, 5cm / ~1.1°). instead of chasing the latest value, we buffer
- * timestamped keyframes and let the sampler (render/interpolation.ts) render on a
- * render-behind server-clock timeline, bracketing the two keyframes around render
- * time. constant visual lag regardless of speed, jitter absorbed by the buffer.
+ * (threshold-gated, 5cm / ~1.1°). the unpack copies the newest value straight into
+ * `t.position` / `t.quaternion` (the live target) and bumps a per-channel sequence.
+ * the render-side translator (render/interpolation.ts) eases `current` toward that live
+ * target over the observed send interval. no buffer, no render-behind clock — the target
+ * is always the newest value, so a bad link can never freeze the entity on a stale pose;
+ * it just eases at a slightly wrong rate and self-corrects on the next packet.
  *
- * position and rotation are independent sync slices (a mover with static rotation
- * only re-emits position), so each gets its own ring, its own timestamps, sampled
- * independently at the same render time. keyframes are stamped with the raw
- * authoritative server time (`clock.lastServerStamp`) at unpack, NOT arrival time.
+ * position and quaternion are independent sync slices (a mover with static facing only
+ * re-emits position), so each carries its own sequence, stamp, and ease timer. stamps
+ * are the raw authoritative server time (`clock.serverLatest`) at unpack, NOT arrival
+ * time, so the learned cadence is jitter-free.
  */
 
-export type NetSnapshots = {
-    /** position keyframes: server-clock seconds, and x/y/z flat (stride 3). */
-    posTime: Float64Array;
-    pos: Float32Array;
-    /** ring index of the newest position keyframe; -1 when empty. */
-    posHead: number;
-    posCount: number;
-    /** rotation keyframes: server-clock seconds, and x/y/z/w flat (stride 4). */
-    rotTime: Float64Array;
-    rot: Float32Array;
-    rotHead: number;
-    rotCount: number;
-
-    // ── render-layer catch-up smoothing (Gaffer "State Synchronization") ──
-    // We never extrapolate: a dry buffer holds on the newest keyframe. When a real
-    // transport stall ends, a burst of keyframes lands and the newest pose jumps forward
-    // in one frame — the sample would SNAP. Instead we fold that discontinuity into
-    // `smoothErr` (a visual position offset), render `logical + smoothErr`, and decay
-    // `smoothErr` toward zero over a few frames — the snap becomes a glide. The logical
-    // sample is untouched; only the rendered value carries the offset. Triggers on the
-    // first moving frame after a dry hold (`wasDry`), the only place a discontinuity can
-    // arise now that extrapolation is gone.
-    /** decaying visual position offset (local units). 0 == no correction in flight. */
-    smoothErr: Float64Array;
-    /** last rendered visual position, to seed `smoothErr` continuously across a catch-up. */
-    prevVisual: Float64Array;
-    /** was the previous position sample a dry hold (buffer ran out ahead of render time)?
-     *  the first frame that moves off a dry hold is the catch-up the snap is absorbed on. */
-    wasDry: 0 | 1;
-    /** false until `prevVisual` holds a real sample (skip seeding on the very first frame). */
-    smoothInit: 0 | 1;
+export type RemoteInterpolation = {
+    /** eased render pose (`current`) and the ease's start pose (`old`) per channel. */
+    positionOld: Vec3;
+    positionCurrent: Vec3;
+    quaternionOld: Quat;
+    quaternionCurrent: Quat;
+    /** ease duration (seconds), an EWMA of the observed send interval, per channel. */
+    positionEaseDuration: number;
+    quaternionEaseDuration: number;
+    /** seconds elapsed into the current ease segment, per channel. */
+    positionElapsed: number;
+    quaternionElapsed: number;
+    /** server stamp of the target the current segment is easing toward, per channel;
+     *  0 until the first sync. the gap to `*PendingStamp` is the learned cadence. */
+    positionStamp: number;
+    quaternionStamp: number;
+    /** server stamp carried by the most recent unpack, per channel (read on retarget). */
+    positionPendingStamp: number;
+    quaternionPendingStamp: number;
+    /** unpack-bumped sequence vs the last one the render side retargeted on. a
+     *  mismatch means a fresh pose landed and the ease should restart. */
+    positionSequence: number;
+    positionSeen: number;
+    quaternionSequence: number;
+    quaternionSeen: number;
+    /** 0 until `current` has been seeded from a real pose (first frame / teleport). */
+    initialized: 0 | 1;
 };
 
-function newNetSnapshots(): NetSnapshots {
+function newRemoteInterpolation(): RemoteInterpolation {
     return {
-        posTime: new Float64Array(NET_SNAPSHOT_CAP),
-        pos: new Float32Array(NET_SNAPSHOT_CAP * 3),
-        posHead: -1,
-        posCount: 0,
-        rotTime: new Float64Array(NET_SNAPSHOT_CAP),
-        rot: new Float32Array(NET_SNAPSHOT_CAP * 4),
-        rotHead: -1,
-        rotCount: 0,
-        smoothErr: new Float64Array(3),
-        prevVisual: new Float64Array(3),
-        wasDry: 0,
-        smoothInit: 0,
+        positionOld: vec3.create(),
+        positionCurrent: vec3.create(),
+        quaternionOld: quat.create(),
+        quaternionCurrent: quat.create(),
+        positionEaseDuration: 0,
+        quaternionEaseDuration: 0,
+        positionElapsed: 0,
+        quaternionElapsed: 0,
+        positionStamp: 0,
+        quaternionStamp: 0,
+        positionPendingStamp: 0,
+        quaternionPendingStamp: 0,
+        positionSequence: 0,
+        positionSeen: 0,
+        quaternionSequence: 0,
+        quaternionSeen: 0,
+        initialized: 0,
     };
 }
 
-/** lazily allocate the ring on the first remote pose. owner/local/static nodes
+/** lazily allocate the translator on the first remote pose. owner/local/static nodes
  *  never call this, so they carry a null field and pay nothing. */
-export function ensureNetSnapshots(t: TransformTrait): NetSnapshots {
-    if (t._netSnapshots === null) t._netSnapshots = newNetSnapshots();
-    return t._netSnapshots;
+export function ensureRemoteInterpolation(t: TransformTrait): RemoteInterpolation {
+    if (t._remoteInterpolation === null) t._remoteInterpolation = newRemoteInterpolation();
+    return t._remoteInterpolation;
 }
 
-/** append a position keyframe stamped at server-clock `time`. */
-export function pushPositionSnapshot(t: TransformTrait, time: number, p: Vec3): void {
-    const snaps = ensureNetSnapshots(t);
-    const i = (snaps.posHead + 1) % NET_SNAPSHOT_CAP;
-    snaps.posHead = i;
-    snaps.posTime[i] = time;
-    const base = i * 3;
-    snaps.pos[base] = p[0];
-    snaps.pos[base + 1] = p[1];
-    snaps.pos[base + 2] = p[2];
-    if (snaps.posCount < NET_SNAPSHOT_CAP) snaps.posCount++;
+/** record a freshly-unpacked remote position: stash the stamp and bump the sequence so
+ *  the render side restarts its ease toward the new `t.position` target. */
+export function noteRemotePosition(t: TransformTrait, time: number): void {
+    const remote = ensureRemoteInterpolation(t);
+    remote.positionPendingStamp = time;
+    remote.positionSequence++;
 }
 
-/** append a rotation keyframe stamped at server-clock `time`. */
-export function pushRotationSnapshot(t: TransformTrait, time: number, q: Quat): void {
-    const snaps = ensureNetSnapshots(t);
-    const i = (snaps.rotHead + 1) % NET_SNAPSHOT_CAP;
-    snaps.rotHead = i;
-    snaps.rotTime[i] = time;
-    const base = i * 4;
-    snaps.rot[base] = q[0];
-    snaps.rot[base + 1] = q[1];
-    snaps.rot[base + 2] = q[2];
-    snaps.rot[base + 3] = q[3];
-    if (snaps.rotCount < NET_SNAPSHOT_CAP) snaps.rotCount++;
-}
-
-/** collapse both rings to a single keyframe at `(pos, quat, time)`. used on a
- *  teleport edge (and local→remote ownership handoff) so the sampler holds on the
- *  new pose instead of interpolating across the discontinuity. */
-export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, time: number): void {
-    const snaps = ensureNetSnapshots(t);
-    snaps.posHead = 0;
-    snaps.posCount = 1;
-    snaps.posTime[0] = time;
-    snaps.pos[0] = pos[0];
-    snaps.pos[1] = pos[1];
-    snaps.pos[2] = pos[2];
-    snaps.rotHead = 0;
-    snaps.rotCount = 1;
-    snaps.rotTime[0] = time;
-    snaps.rot[0] = rotation[0];
-    snaps.rot[1] = rotation[1];
-    snaps.rot[2] = rotation[2];
-    snaps.rot[3] = rotation[3];
-    // a teleport is an intentional discontinuity — drop any in-flight correction so we
-    // don't glide across it, and re-seed prevVisual from the next sample.
-    snaps.smoothErr[0] = 0;
-    snaps.smoothErr[1] = 0;
-    snaps.smoothErr[2] = 0;
-    snaps.wasDry = 0;
-    snaps.smoothInit = 0;
-}
-
-// bracket search result, reused across calls (single-threaded sampler).
-const _bracket = { lo: 0, hi: 0, frac: 0 };
-
-/**
- * find the two ring entries bracketing `renderTime` and the fraction between them,
- * written into the shared `_bracket`. ring is time-ordered oldest→newest. `frac ∈
- * [0,1]`. edges collapse to a single-entry hold (`lo === hi`, `frac 0`): past the
- * newest keyframe (buffer ran dry → hold the newest), before the oldest (only right
- * after join → hold oldest), or a lone entry.
- *
- * we never extrapolate. a dry buffer holds the newest keyframe — a brief freeze reads
- * far milder than a wrong velocity guess that has to be corrected, and the deep
- * jitter-adaptive render-behind (see core/clock) makes true dry-outs rare. the catch-up
- * when a real stall ends is glided by the caller's `smoothErr` pass, not hidden by
- * coasting.
- */
-function findBracket(time: Float64Array, head: number, count: number, renderTime: number): void {
-    const cap = time.length;
-    const newest = head;
-    const oldest = (head - count + 1 + cap) % cap;
-
-    if (count === 1 || renderTime >= time[newest]!) {
-        // dry buffer: hold on the newest keyframe until a fresher one lands.
-        _bracket.lo = _bracket.hi = newest;
-        _bracket.frac = 0;
-        return;
-    }
-    if (renderTime <= time[oldest]!) {
-        _bracket.lo = _bracket.hi = oldest;
-        _bracket.frac = 0;
-        return;
-    }
-    // walk back from the newest until an entry sits at/under renderTime.
-    let hi = newest;
-    for (let n = 1; n < count; n++) {
-        const lo = (newest - n + cap) % cap;
-        if (time[lo]! <= renderTime) {
-            const span = time[hi]! - time[lo]!;
-            _bracket.lo = lo;
-            _bracket.hi = hi;
-            _bracket.frac = span > 0 ? (renderTime - time[lo]!) / span : 0;
-            return;
-        }
-        hi = lo;
-    }
-    // unreachable (renderTime > time[oldest] is guaranteed here); hold oldest.
-    _bracket.lo = _bracket.hi = oldest;
-    _bracket.frac = 0;
-}
-
-/** per-frame decay for the correction offset, by its magnitude (Gaffer "State
- *  Synchronization"): a small error bleeds slowly (0.95, invisibly smooth); a large one
- *  faster (0.85) so a big overshoot doesn't leave the entity lagging for long. Linear
- *  between 25cm and 1m. Assumes ~60fps (the offset is a render-layer visual, so a modest
- *  frame-rate dependence in the bleed duration is acceptable). */
-function smoothFactor(errorMag: number): number {
-    if (errorMag <= 0.25) return 0.95;
-    if (errorMag >= 1.0) return 0.85;
-    return 0.95 + (0.85 - 0.95) * ((errorMag - 0.25) / 0.75);
-}
-
-/** the logical sample must move at least this far (local units) off a dry hold to count
- *  as a catch-up worth gliding. below it, resuming motion is smooth on its own and the
- *  seed would just be numerical noise. */
-const CATCHUP_SNAP_EPSILON = 0.01;
-
-/** sample the interpolated local position at `renderTime` into `out`. a dry buffer holds
- *  the newest keyframe (never extrapolates). `smooth` folds a dry-buffer catch-up (the
- *  newest pose jumping forward when a stalled stream resumes) into a decaying visual
- *  offset so it glides instead of snapping (see NetSnapshots.smoothErr). */
-export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, smooth: boolean): void {
-    findBracket(snaps.posTime, snaps.posHead, snaps.posCount, renderTime);
-    const lo = _bracket.lo * 3;
-    const hi = _bracket.hi * 3;
-    const f = _bracket.frac;
-    // logical pose: the authoritative interpolated sample (untouched).
-    out[0] = snaps.pos[lo]! + (snaps.pos[hi]! - snaps.pos[lo]!) * f;
-    out[1] = snaps.pos[lo + 1]! + (snaps.pos[hi + 1]! - snaps.pos[lo + 1]!) * f;
-    out[2] = snaps.pos[lo + 2]! + (snaps.pos[hi + 2]! - snaps.pos[lo + 2]!) * f;
-
-    if (!smooth) return;
-
-    // a dry hold collapses the bracket to a single entry (lo === hi). during a dry hold
-    // the logical pose is frozen == prevVisual; the catch-up is the first frame it moves
-    // off that freeze, so a jump then is a stall recovery, not real motion (which only
-    // happens while bracketing, where wasDry is 0).
-    const dryNow = _bracket.lo === _bracket.hi;
-    const err = snaps.smoothErr;
-    const jumped = Math.hypot(out[0] - snaps.prevVisual[0], out[1] - snaps.prevVisual[1], out[2] - snaps.prevVisual[2]);
-    if (snaps.smoothInit === 0) {
-        // first sample: nothing to correct against yet.
-        err[0] = err[1] = err[2] = 0;
-        snaps.smoothInit = 1;
-    } else if (snaps.wasDry === 1 && jumped > CATCHUP_SNAP_EPSILON) {
-        // catch-up frame: the newest pose just jumped after a dry hold. Seed the offset so
-        // the rendered pose stays continuous (err = prevVisual − logical → rendered ==
-        // prevVisual), then let it decay over the next frames.
-        err[0] = snaps.prevVisual[0] - out[0];
-        err[1] = snaps.prevVisual[1] - out[1];
-        err[2] = snaps.prevVisual[2] - out[2];
-    } else {
-        // no discontinuity: bleed any offset toward zero (a no-op when already 0, so
-        // steady interpolation pays nothing).
-        const factor = smoothFactor(Math.hypot(err[0], err[1], err[2]));
-        err[0] *= factor;
-        err[1] *= factor;
-        err[2] *= factor;
-    }
-
-    out[0] += err[0];
-    out[1] += err[1];
-    out[2] += err[2];
-    snaps.prevVisual[0] = out[0];
-    snaps.prevVisual[1] = out[1];
-    snaps.prevVisual[2] = out[2];
-    snaps.wasDry = dryNow ? 1 : 0;
-}
-
-const _rotLo = quat.create();
-const _rotHi = quat.create();
-
-/** sample the interpolated local rotation at `renderTime` into `out`. a dry buffer holds
- *  the newest keyframe; rotation gets no catch-up glide (a frozen facing reads far milder
- *  than a frozen position, and slerp overshoot is rarely worth the risk). */
-export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void {
-    findBracket(snaps.rotTime, snaps.rotHead, snaps.rotCount, renderTime);
-    const lo = _bracket.lo * 4;
-    const hi = _bracket.hi * 4;
-    if (_bracket.lo === _bracket.hi) {
-        out[0] = snaps.rot[lo]!;
-        out[1] = snaps.rot[lo + 1]!;
-        out[2] = snaps.rot[lo + 2]!;
-        out[3] = snaps.rot[lo + 3]!;
-        return;
-    }
-    _rotLo[0] = snaps.rot[lo]!;
-    _rotLo[1] = snaps.rot[lo + 1]!;
-    _rotLo[2] = snaps.rot[lo + 2]!;
-    _rotLo[3] = snaps.rot[lo + 3]!;
-    _rotHi[0] = snaps.rot[hi]!;
-    _rotHi[1] = snaps.rot[hi + 1]!;
-    _rotHi[2] = snaps.rot[hi + 2]!;
-    _rotHi[3] = snaps.rot[hi + 3]!;
-    quat.slerp(out, _rotLo, _rotHi, _bracket.frac);
+/** record a freshly-unpacked remote quaternion (see `noteRemotePosition`). */
+export function noteRemoteQuaternion(t: TransformTrait, time: number): void {
+    const remote = ensureRemoteInterpolation(t);
+    remote.quaternionPendingStamp = time;
+    remote.quaternionSequence++;
 }
 
 /* ── controls (editor + persistence) ── */
@@ -494,13 +311,13 @@ sync(TransformTrait, 'teleport', {
  * `setQuaternion` dirty just their own slice; `markTransformDirty` (physics, animator,
  * compound/world writes) dirties both.
  *
- * receiving side copies the value into the live field (world caches invalidated
- * for matrix/raycast/debug readers) and, client-side, appends a timestamped
- * keyframe to the snapshot ring the per-frame `interpolate()` samples. keyframes
- * are stamped with the raw authoritative server time (`clock.lastServerStamp`,
- * refreshed per-tick by `server_clock`), NOT arrival time, so packet jitter never
- * leaks into the timeline. teleport edges are handled by the sampler via the
- * `teleport` counter.
+ * receiving side copies the value into the live field (world caches invalidated for
+ * matrix/raycast/debug readers) and, client-side, notes the arrival so the per-frame
+ * remote chase-latest translator (`interpolate()`) restarts its ease toward the new
+ * live target. the arrival stamp is the raw authoritative server time
+ * (`clock.serverLatest`, refreshed per-tick by `server_clock`), NOT arrival time, so
+ * the learned send cadence stays jitter-free. teleport edges are handled by the
+ * sampler via the `teleport` counter.
  */
 const transformPositionSync = sync(TransformTrait, 'position', {
     schema: pack.position(),
@@ -509,11 +326,11 @@ const transformPositionSync = sync(TransformTrait, 'position', {
         vec3.copy(t.position, p);
         markWorldDirty(t);
         const runtime = t._node?.scene?.context;
-        if (runtime?.client) pushPositionSnapshot(t, runtime.clock.serverLatest, p);
+        if (runtime?.client) noteRemotePosition(t, runtime.clock.serverLatest);
     },
     authority: 'owner',
     dirty: dirty.diff(), // any change to the packed pose; byte-stable at rest → silent
-    rate: rate.hz(TRANSFORM_SEND_HZ), // cadence + render-behind buffer derive from one constant (core/clock)
+    rate: rate.hz(TRANSFORM_SEND_HZ), // cadence + chase rate derive from one constant (core/clock)
 });
 
 const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
@@ -523,7 +340,7 @@ const transformQuaternionSync = sync(TransformTrait, 'quaternion', {
         quat.copy(t.quaternion, q);
         markWorldDirty(t);
         const runtime = t._node?.scene?.context;
-        if (runtime?.client) pushRotationSnapshot(t, runtime.clock.serverLatest, q);
+        if (runtime?.client) noteRemoteQuaternion(t, runtime.clock.serverLatest);
     },
     authority: 'owner',
     dirty: dirty.diff(), // matched to position
