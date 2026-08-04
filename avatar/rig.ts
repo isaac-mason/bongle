@@ -62,11 +62,25 @@ export const RIG_6BONE_REQUIRED_NODES = [
  *  get usable mount points for free; an authored node's TRS wins. */
 export const RIG_6BONE_ATTACH_NODES = [RIG_6BONE_BACK, RIG_6BONE_HAND_LEFT, RIG_6BONE_HAND_RIGHT] as const;
 
-/** Height bounds (metres), referenced by the post-v1 validator,
- *  not enforced in v1. Listed here so the eventual extension has a
- *  single source of truth. */
-export const RIG_6BONE_MAX_HEIGHT_M = 3.0;
-export const RIG_6BONE_MIN_HEIGHT_M = 0.5;
+/** Height bounds (metres) enforced on the rest-pose model extent. Centred on
+ *  the Minecraft-Steve baseline (2.0m / 32 units at 16 units/m) with give in
+ *  both directions: roughly a child-sized character up to an ogre, but nothing
+ *  that would break the box-KCC's collision assumptions. Single source of truth
+ *  for the upload worker, the authoring tool's size guide, and the export gate. */
+export const RIG_6BONE_MAX_HEIGHT_M = 2.8;
+export const RIG_6BONE_MIN_HEIGHT_M = 1.2;
+
+/** Height-bound check shared by the upload worker and the authoring tool
+ *  (Blockbench size guide + export gate). Both measure the rest-pose
+ *  world-space AABB height, in metres, and pass it here so the pass/fail
+ *  decision and its message live in one place. Returns an error string
+ *  when out of bounds, else null. */
+export function checkAvatarHeight(heightMeters: number): string | null {
+    if (heightMeters < RIG_6BONE_MIN_HEIGHT_M || heightMeters > RIG_6BONE_MAX_HEIGHT_M) {
+        return `avatar is ${heightMeters.toFixed(2)}m tall; must be between ${RIG_6BONE_MIN_HEIGHT_M}m and ${RIG_6BONE_MAX_HEIGHT_M}m`;
+    }
+    return null;
+}
 
 /** Reserved clip names. An avatar that ships a clip at any of these
  *  names registers a per-state locomotion override; whatever it
@@ -90,13 +104,18 @@ export type RigNodeView = {
 
 export type RigSceneView = {
     readonly roots: readonly RigNodeView[];
+    /** Rest-pose height in metres (max Y − min Y of the world-space AABB
+     *  over all rendered geometry). Optional: when omitted the height bound
+     *  is not checked — presence-only callers (and unit tests) leave it out;
+     *  the upload worker always measures and supplies it. */
+    readonly heightMeters?: number;
 };
 
 export type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly errors: readonly string[] };
 
-/** v1: required-node presence only.
- *  Post-v1 extends to height bounds, triangle/texture caps, TRS rest
- *  pose, and channel scope. */
+/** Enforces required-node presence and, when a measured height is supplied,
+ *  the rest-pose height bounds. Still to come: triangle/texture caps, TRS
+ *  rest pose, and channel scope. */
 export function validateRig6Bone(scene: RigSceneView): ValidationResult {
     const errors: string[] = [];
 
@@ -112,6 +131,11 @@ export function validateRig6Bone(scene: RigSceneView): ValidationResult {
 
     for (const name of RIG_6BONE_REQUIRED_NODES) {
         if (!present.has(name)) errors.push(`missing required node '${name}'`);
+    }
+
+    if (scene.heightMeters !== undefined) {
+        const heightError = checkAvatarHeight(scene.heightMeters);
+        if (heightError) errors.push(heightError);
     }
 
     return errors.length === 0 ? { ok: true } : { ok: false, errors };

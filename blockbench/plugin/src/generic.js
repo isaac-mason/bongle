@@ -28,6 +28,15 @@
 // the plugin is a single self-contained file.
 import starterCharacter from '../../starter/character.bbmodel';
 
+// Avatar rules, shared verbatim with the engine runtime and the upload worker.
+// esbuild transpiles the .ts on bundle, so the editor's size guide + export gate
+// enforce the exact same numbers the server rejects on. Single source of truth.
+import {
+	checkAvatarHeight,
+	RIG_6BONE_MAX_HEIGHT_M,
+	RIG_6BONE_MIN_HEIGHT_M,
+} from '../../../avatar/rig';
+
 const PLUGIN_ID = 'bongle';
 
 const FORMAT_IDS = {
@@ -80,8 +89,14 @@ const BONGLE_EXPORT_OPTIONS = {
 	embed_textures: true, // single embedded buffer, images in BIN
 	armature: false, // rigid bones, no skinning
 	animations: true,
-	scale: 16, // TODO: confirm the canonical Bongle export scale
+	scale: 16, // canonical Bongle export scale: 16 Blockbench units = 1 metre
 };
+
+// Blockbench units per metre. Derived from the export scale so the size guide
+// and the exported glb can never disagree about how tall a model is: the codec
+// divides positions by `scale` (16 units -> 1 glTF unit) and the engine treats
+// 1 glTF unit as 1 world metre.
+const UNITS_PER_METER = BONGLE_EXPORT_OPTIONS.scale;
 
 // ---------------------------------------------------------------------------
 // Rig validation
@@ -338,6 +353,14 @@ async function exportBongleGltf() {
 		});
 		return;
 	}
+	const height = heightIssue();
+	if (height) {
+		Blockbench.showMessageBox({
+			title: 'Bongle avatar size',
+			message: `${height}.\n\nResize the model so its total height is within the allowed range, then export again.`,
+		});
+		return;
+	}
 	if (result.warnings.length) {
 		Blockbench.showQuickMessage(result.warnings.join('  |  '), 4000);
 	}
@@ -381,6 +404,237 @@ function isCharacterFormat() {
 }
 
 // ---------------------------------------------------------------------------
+// Avatar size guide
+//
+// A quiet-until-wrong viewport overlay for the min/max avatar height rule. In
+// normal editing it stays hidden and only surfaces the offending rail (red)
+// with the model's bounding box highlighted when the rest-pose height is out of
+// bounds. The "Show avatar size guide" toggle pins both rails visible (neutral)
+// for authors who want the reference while they build. The height numbers come
+// straight from the shared rig contract — the same bounds the upload worker
+// enforces — so the editor never disagrees with the server.
+// ---------------------------------------------------------------------------
+
+const GUIDE_COLOR_OK = 0x3fb950; // within bounds / neutral reference rails
+const GUIDE_COLOR_BAD = 0xff5c57; // out of bounds
+
+let sizeGuideToggle = null;
+let sizeGuideGroup = null; // THREE.Group in Canvas.scene, registered as a gizmo
+let sizeGuideParts = null; // { minRail, maxRail, modelBox } meshes + materials
+
+/** Every element that contributes to the exported geometry. */
+function allElements() {
+	if (typeof Outliner !== 'undefined' && Array.isArray(Outliner.elements)) return Outliner.elements;
+	const out = [];
+	if (typeof Cube !== 'undefined' && Cube.all) out.push(...Cube.all);
+	if (typeof Mesh !== 'undefined' && Mesh.all) out.push(...Mesh.all);
+	return out;
+}
+
+/** Rest-pose world-space AABB of the model, in Blockbench units, or null when
+ *  there's nothing to measure.
+ *
+ *  We run from edit events, which can fire before THREE's next render recomputes
+ *  the world-matrix hierarchy — so a just-moved cube/bone leaves mesh.matrixWorld
+ *  stale and the height reads intermittently (the "sometimes fires" bug). Flush
+ *  the whole scene's matrices first, then measure each element's OWN geometry
+ *  (recomputed fresh) against its current world matrix. We deliberately don't use
+ *  expandByObject: it traverses children, and Blockbench parents the pivot/rotation
+ *  gizmo onto the selected mesh (withoutGizmos only hides it, which the AABB math
+ *  ignores), which would inflate the box. Skipping only `export === false` matches
+ *  the exported extent the upload worker validates (hidden-but-exported parts count). */
+function modelBoxUnits() {
+	if (typeof THREE === 'undefined' || typeof Canvas === 'undefined' || !Canvas.scene) return null;
+	Canvas.scene.updateMatrixWorld(true);
+	const box = new THREE.Box3();
+	const partBox = new THREE.Box3();
+	let any = false;
+	for (const el of allElements()) {
+		if (!el || el.export === false || !el.mesh) continue;
+		const geometry = el.mesh.geometry;
+		if (!geometry || !geometry.attributes || !geometry.attributes.position) continue;
+		geometry.computeBoundingBox();
+		box.union(partBox.copy(geometry.boundingBox).applyMatrix4(el.mesh.matrixWorld));
+		any = true;
+	}
+	return any && Number.isFinite(box.min.y) && Number.isFinite(box.max.y) ? box : null;
+}
+
+/** Rest-pose model height in metres, or null when unmeasurable. */
+function modelHeightMeters() {
+	const box = modelBoxUnits();
+	return box ? (box.max.y - box.min.y) / UNITS_PER_METER : null;
+}
+
+/** The height-rule violation for the current model, or null when in bounds /
+ *  unmeasurable. Reuses the shared contract's check + message. */
+function heightIssue() {
+	const height = modelHeightMeters();
+	return height === null ? null : checkAvatarHeight(height);
+}
+
+function makeWireBox(color) {
+	// Unit cube edges centred on the origin, positioned/scaled per update.
+	const material = new THREE.LineBasicMaterial({ color });
+	return new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), material);
+}
+
+function buildSizeGuide() {
+	if (sizeGuideGroup || typeof THREE === 'undefined' || typeof Canvas === 'undefined' || !Canvas.scene) {
+		return;
+	}
+	const group = new THREE.Group();
+	group.name = 'bongle_size_guide';
+	const minCage = makeWireBox(GUIDE_COLOR_OK);
+	const maxCage = makeWireBox(GUIDE_COLOR_OK);
+	const modelBox = makeWireBox(GUIDE_COLOR_BAD);
+	group.add(minCage, maxCage, modelBox);
+	Canvas.scene.add(group);
+	// Register as a gizmo so screenshots (Canvas.withoutGizmos) exclude it.
+	if (Array.isArray(Canvas.gizmos)) Canvas.gizmos.push(group);
+	sizeGuideGroup = group;
+	sizeGuideParts = { minCage, maxCage, modelBox };
+}
+
+/** Size a cage box to span the ground (y=0) up to `heightMeters`, with a
+ *  footprint that brackets the model, so it reads as the allowed envelope. */
+function placeCage(cage, heightMeters, halfExtentUnits, color, visible) {
+	cage.visible = visible;
+	if (!visible) return;
+	const h = heightMeters * UNITS_PER_METER;
+	cage.scale.set(2 * halfExtentUnits, h, 2 * halfExtentUnits);
+	cage.position.set(0, h / 2, 0);
+	cage.material.color.setHex(color);
+}
+
+/** Recompute and redraw the guide. Cheap enough to call on every model edit. */
+function updateSizeGuide() {
+	// The 3D canvas may not have existed when the plugin loaded, so build lazily:
+	// the first update once Canvas.scene is up creates the group. Without this the
+	// overlay silently never appears.
+	if (!sizeGuideGroup) buildSizeGuide();
+	if (!sizeGuideGroup) return;
+	const on = !!(sizeGuideToggle && sizeGuideToggle.value);
+	const box = isCharacterFormat() ? modelBoxUnits() : null;
+
+	// Nothing to show: not a character, no geometry, or in bounds with the
+	// reference toggle off. Hide the whole group and bail.
+	if (!box) {
+		sizeGuideGroup.visible = false;
+		requestGuideRedraw();
+		return;
+	}
+	const heightMeters = (box.max.y - box.min.y) / UNITS_PER_METER;
+	const issue = checkAvatarHeight(heightMeters);
+	if (!issue && !on) {
+		sizeGuideGroup.visible = false;
+		requestGuideRedraw();
+		return;
+	}
+	sizeGuideGroup.visible = true;
+
+	const { minCage, maxCage, modelBox } = sizeGuideParts;
+	const halfX = (box.max.x - box.min.x) / 2;
+	const halfZ = (box.max.z - box.min.z) / 2;
+	const cageHalf = Math.max(halfX, halfZ, 0.4 * UNITS_PER_METER) + 0.25 * UNITS_PER_METER;
+	const tooTall = heightMeters > RIG_6BONE_MAX_HEIGHT_M;
+	const tooShort = heightMeters < RIG_6BONE_MIN_HEIGHT_M;
+
+	// Max cage: red when exceeded; otherwise shown only as a neutral reference
+	// when the toggle is on. Min cage mirrors it for the too-short case.
+	placeCage(maxCage, RIG_6BONE_MAX_HEIGHT_M, cageHalf, tooTall ? GUIDE_COLOR_BAD : GUIDE_COLOR_OK, tooTall || on);
+	placeCage(minCage, RIG_6BONE_MIN_HEIGHT_M, cageHalf, tooShort ? GUIDE_COLOR_BAD : GUIDE_COLOR_OK, tooShort || on);
+
+	// Model bounding box: only drawn when out of bounds, in red. (We recolour
+	// the box wireframe, never the model meshes — that would fight texture work.)
+	modelBox.visible = !!issue;
+	if (issue) {
+		modelBox.position.set(
+			(box.min.x + box.max.x) / 2,
+			(box.min.y + box.max.y) / 2,
+			(box.min.z + box.max.z) / 2,
+		);
+		modelBox.scale.set(
+			Math.max(box.max.x - box.min.x, 1e-3),
+			Math.max(box.max.y - box.min.y, 1e-3),
+			Math.max(box.max.z - box.min.z, 1e-3),
+		);
+		modelBox.material.color.setHex(GUIDE_COLOR_BAD);
+	}
+	requestGuideRedraw();
+}
+
+/** Nudge the previews to repaint after mutating the scene. Blockbench renders
+ *  on demand, so a scene change outside an interaction needs a manual poke. */
+function requestGuideRedraw() {
+	if (typeof Preview !== 'undefined' && Array.isArray(Preview.all)) {
+		for (const preview of Preview.all) preview.render();
+	}
+}
+
+function disposeSizeGuide() {
+	if (sizeGuideToggle) {
+		sizeGuideToggle.delete();
+		sizeGuideToggle = null;
+	}
+	if (sizeGuideGroup) {
+		if (typeof Canvas !== 'undefined') {
+			if (Canvas.scene) Canvas.scene.remove(sizeGuideGroup);
+			if (Array.isArray(Canvas.gizmos)) {
+				const i = Canvas.gizmos.indexOf(sizeGuideGroup);
+				if (i !== -1) Canvas.gizmos.splice(i, 1);
+			}
+		}
+		sizeGuideGroup.traverse((obj) => {
+			if (obj.geometry) obj.geometry.dispose();
+			if (obj.material) obj.material.dispose();
+		});
+		sizeGuideGroup = null;
+		sizeGuideParts = null;
+	}
+}
+
+// Model edits that can change the rest-pose extent. Mirrors the rig validator's
+// triggers, plus project switches (which don't emit finish_edit).
+const SIZE_GUIDE_EVENTS = [
+	'finish_edit',
+	'update_selection',
+	'add_group',
+	'update_group',
+	'select_project',
+];
+
+function registerSizeGuide() {
+	sizeGuideToggle = new Toggle('bongle_size_guide', {
+		name: 'Show avatar size guide',
+		description:
+			'Always show the min/max avatar height rails. When off, the guide only appears if the model is out of bounds.',
+		icon: 'straighten',
+		category: 'view',
+		default: false,
+		save_on_restart: true,
+		condition: () => isCharacterFormat(),
+		onChange() {
+			updateSizeGuide();
+		},
+	});
+	if (typeof MenuBar !== 'undefined' && MenuBar.addAction) MenuBar.addAction(sizeGuideToggle, 'view');
+
+	buildSizeGuide();
+	if (typeof Blockbench !== 'undefined' && Blockbench.on) {
+		for (const event of SIZE_GUIDE_EVENTS) Blockbench.on(event, updateSizeGuide);
+	}
+	updateSizeGuide();
+}
+
+function unregisterSizeGuide() {
+	if (typeof Blockbench !== 'undefined' && Blockbench.removeListener) {
+		for (const event of SIZE_GUIDE_EVENTS) Blockbench.removeListener(event, updateSizeGuide);
+	}
+	disposeSizeGuide();
+}
+
+// ---------------------------------------------------------------------------
 // Bongle API surface (window.Bongle)
 //
 // Generic authoring capabilities for embedders. The bongle.io platform build
@@ -400,6 +654,7 @@ function loadBbmodelIntoProject(bbmodel, name) {
 	}
 	Codecs.project.load(data, { path: '', name: name || 'character', no_file: true });
 	if (typeof Project !== 'undefined' && Project && name) Project.name = name;
+	updateSizeGuide();
 }
 
 /** Compile both artefacts an embedder uploads: the engine-ready .glb (same
@@ -410,7 +665,13 @@ async function compileBongleArtifacts() {
 	const glb = postProcessGlb(await Codecs.gltf.compile(BONGLE_EXPORT_OPTIONS), sceneName);
 	let bbmodel = Codecs.project.compile();
 	if (typeof bbmodel !== 'string') bbmodel = JSON.stringify(bbmodel);
+	// Height is surfaced as a warning here (the save still commits the source):
+	// the server build is the hard gate, matching how missing-bone errors flow.
 	const warnings = isCharacterFormat() ? validateRig().warnings : [];
+	if (isCharacterFormat()) {
+		const height = heightIssue();
+		if (height) warnings.push(height);
+	}
 	const name = (typeof Project !== 'undefined' && Project && Project.name) || sceneName;
 	return { glb, bbmodel, name, warnings };
 }
@@ -433,6 +694,7 @@ function loadStarterCharacter() {
 	data.meta.model_format = FORMAT_IDS.character;
 	Codecs.project.load(data, { path: '', name: 'character', no_file: true });
 	if (typeof Project !== 'undefined' && Project && !Project.name) Project.name = 'character';
+	updateSizeGuide();
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +787,9 @@ function registerValidator() {
 			const result = validateRig();
 			result.errors.forEach((message) => this.fail({ message }));
 			result.warnings.forEach((message) => this.warn({ message }));
+			// Height rule (rejected by the upload worker too, so this fails, not warns).
+			const height = heightIssue();
+			if (height) this.fail({ message: height });
 			if (!result.ok || result.warnings.length) {
 				this.warn({
 					message:
@@ -675,6 +940,7 @@ function registerBonglePlugin() {
 			});
 			MenuBar.addAction(exportAction, 'file.export.0');
 
+			registerSizeGuide();
 			installBranding();
 			// Signal the API is live so embedders can drive load/new/serialize.
 			if (typeof window !== 'undefined' && window.Bongle) window.Bongle.ready = true;
@@ -682,6 +948,7 @@ function registerBonglePlugin() {
 		onunload() {
 			if (exportAction) exportAction.delete();
 			if (rigValidatorCheck && rigValidatorCheck.delete) rigValidatorCheck.delete();
+			unregisterSizeGuide();
 			unregisterFormats();
 			removeBranding();
 		},
@@ -739,6 +1006,11 @@ if (typeof window !== 'undefined') {
 		// formats) is live — embedders should wait for this before driving.
 		ready: false,
 		validateRig,
+		// Rest-pose model height in metres (null when unmeasurable) + the current
+		// height-rule violation message (null when in bounds). Lets the host show
+		// live size feedback next to the editor without re-deriving the rule.
+		avatarHeightMeters: modelHeightMeters,
+		avatarHeightIssue: heightIssue,
 		compileArtifacts: compileBongleArtifacts,
 		serializeBbmodel: serializeProjectBbmodel,
 		loadBbmodel: loadBbmodelIntoProject,
