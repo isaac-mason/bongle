@@ -4,37 +4,50 @@
 // `./block-sound-presets`, pure composition here. Each block is its
 // own `export const` so the package index can re-export them as
 // `export * as blocks` and bundlers can drop unused declarations.
+//
+// Blocks are grouped by material family (ground, stone, oak, ...) so adding
+// or extending a material is a single contiguous edit. Reach for a
+// `blockPreset.*` factory for the shape (cube, stairs, slab, ...) and drop
+// down to raw `block()` only when a shape-defining field a preset doesn't
+// expose is needed (e.g. `surfaceHeight` on farmland / dirt path).
 
 import { block, blockPreset, CullType, MaterialType } from 'bongle';
 import * as soundPreset from './block-sound-presets';
 import * as tex from './block-textures';
 
-export const stone = block('kit:stone', {
-    name: 'Stone',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.stone } } }),
-    sounds: soundPreset.stone,
-});
+// ── Ground ──────────────────────────────────────────────────────────
 
-export const dirt = block('kit:dirt', {
-    name: 'Dirt',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.dirt } } }),
-    sounds: soundPreset.dirt,
-});
+export const stone = blockPreset.cube(
+    'kit:stone',
+    { all: { texture: tex.stone } },
+    {
+        name: 'Stone',
+        sounds: soundPreset.stone,
+    },
+);
 
-export const grass = block('kit:grass', {
-    name: 'Grass',
-    model: () => ({
-        type: 'cube',
-        textures: { top: { texture: tex.grassTop }, bottom: { texture: tex.dirt }, sides: { texture: tex.grassSide } },
-    }),
-    sounds: soundPreset.grass,
-});
+export const dirt = blockPreset.cube(
+    'kit:dirt',
+    { all: { texture: tex.dirt } },
+    {
+        name: 'Dirt',
+        sounds: soundPreset.dirt,
+    },
+);
+
+export const grass = blockPreset.cube(
+    'kit:grass',
+    { top: { texture: tex.grassTop }, bottom: { texture: tex.dirt }, sides: { texture: tex.grassSide } },
+    { name: 'Grass', sounds: soundPreset.grass },
+);
 
 // farmland (tilled dirt) and dirt path (flattened dirt). both sit 1px below a
 // full cube via surfaceHeight, the mesher lowers the top quad and clips the
 // side quads to match. CullType.NONE so adjacent full blocks still draw their
 // faces flush down past the lowered lip (a SOLID cull would over-cull and leave
 // a see-through gap); lightOpacity 15 keeps them light-blocking like dirt.
+// surfaceHeight is shape-defining and not exposed by blockPreset.cube, so these
+// two stay on raw block().
 export const farmland = block('kit:farmland', {
     name: 'Farmland',
     model: () => ({
@@ -59,29 +72,79 @@ export const dirtPath = block('kit:dirt_path', {
     sounds: soundPreset.dirt,
 });
 
-export const cobblestone = block('kit:cobblestone', {
-    name: 'Cobblestone',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.cobblestone } } }),
+export const gravel = blockPreset.cube(
+    'kit:gravel',
+    { all: { texture: tex.gravel } },
+    {
+        name: 'Gravel',
+        sounds: soundPreset.gravel,
+    },
+);
+
+// ── Stone & cobblestone ─────────────────────────────────────────────
+//
+// building blocks worked from stone and cobble: the raw cobble cubes plus the
+// stairs / slabs / walls / pressure plate for both the stone and cobble lines.
+
+export const cobblestone = blockPreset.cube(
+    'kit:cobblestone',
+    { all: { texture: tex.cobblestone } },
+    {
+        name: 'Cobblestone',
+        sounds: soundPreset.stone,
+    },
+);
+
+export const mossyCobblestone = blockPreset.cube(
+    'kit:mossy_cobblestone',
+    { all: { texture: tex.mossyCobblestone } },
+    {
+        name: 'Mossy Cobblestone',
+        sounds: soundPreset.stone,
+    },
+);
+
+export const stoneStairs = blockPreset.stairs(
+    'kit:stone_stairs',
+    { all: { texture: tex.stone } },
+    { name: 'Stone Stairs', sounds: soundPreset.stone },
+);
+export const stoneSlab = blockPreset.slab(
+    'kit:stone_slab',
+    { all: { texture: tex.stone } },
+    { name: 'Stone Slab', sounds: soundPreset.stone },
+);
+export const stonePlate = blockPreset.plate('kit:stone_plate', tex.stone, {
+    name: 'Stone Pressure Plate',
     sounds: soundPreset.stone,
 });
 
-export const mossyCobblestone = block('kit:mossy_cobblestone', {
-    name: 'Mossy Cobblestone',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.mossyCobblestone } } }),
-    sounds: soundPreset.stone,
-});
+export const cobblestoneStairs = blockPreset.stairs(
+    'kit:cobblestone_stairs',
+    { all: { texture: tex.cobblestone } },
+    { name: 'Cobblestone Stairs', sounds: soundPreset.stone },
+);
+export const cobblestoneSlab = blockPreset.slab(
+    'kit:cobblestone_slab',
+    { all: { texture: tex.cobblestone } },
+    { name: 'Cobblestone Slab', sounds: soundPreset.stone },
+);
+export const cobblestoneWall = blockPreset.wall(
+    'kit:cobblestone_wall',
+    { all: { texture: tex.cobblestone } },
+    { name: 'Cobblestone Wall', sounds: soundPreset.stone },
+);
 
-export const gravel = block('kit:gravel', {
-    name: 'Gravel',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.gravel } } }),
-    sounds: soundPreset.gravel,
-});
+// ── Oak ─────────────────────────────────────────────────────────────
 
-export const oakPlanks = block('kit:oak_planks', {
-    name: 'Oak Planks',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.oakPlanks } } }),
-    sounds: soundPreset.wood,
-});
+export const oakPlanks = blockPreset.cube(
+    'kit:oak_planks',
+    { all: { texture: tex.oakPlanks } },
+    {
+        name: 'Oak Planks',
+        sounds: soundPreset.wood,
+    },
+);
 
 export const oakLog = blockPreset.column(
     'kit:oak_log',
@@ -89,85 +152,27 @@ export const oakLog = blockPreset.column(
     { name: 'Oak Log', sounds: soundPreset.wood },
 );
 
-// slippery. sneakGuard so crouching stops sliding.
-export const ice = block('kit:ice', {
-    name: 'Ice',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.ice } } }),
-    friction: 0.1,
-    sneakGuard: true,
-    sounds: soundPreset.ice,
-});
-
-export const stoneStairs = blockPreset.stairs(
-    'kit:stone_stairs',
-    { all: { texture: tex.stone } },
-    { name: 'Stone Stairs', sounds: soundPreset.stone },
-);
 export const oakStairs = blockPreset.stairs(
     'kit:oak_stairs',
     { all: { texture: tex.oakPlanks } },
     { name: 'Oak Stairs', sounds: soundPreset.wood },
-);
-export const cobblestoneStairs = blockPreset.stairs(
-    'kit:cobblestone_stairs',
-    { all: { texture: tex.cobblestone } },
-    { name: 'Cobblestone Stairs', sounds: soundPreset.stone },
-);
-export const stoneSlab = blockPreset.slab(
-    'kit:stone_slab',
-    { all: { texture: tex.stone } },
-    { name: 'Stone Slab', sounds: soundPreset.stone },
-);
-export const cobblestoneSlab = blockPreset.slab(
-    'kit:cobblestone_slab',
-    { all: { texture: tex.cobblestone } },
-    { name: 'Cobblestone Slab', sounds: soundPreset.stone },
 );
 export const oakSlab = blockPreset.slab(
     'kit:oak_slab',
     { all: { texture: tex.oakPlanks } },
     { name: 'Oak Slab', sounds: soundPreset.wood },
 );
-export const cobblestoneWall = blockPreset.wall(
-    'kit:cobblestone_wall',
-    { all: { texture: tex.cobblestone } },
-    { name: 'Cobblestone Wall', sounds: soundPreset.stone },
-);
-// full glass cube. transparent (alpha-cutout) like the glass pane, with
-// CullType.SELF so a wall of glass culls its internal shared faces and only
-// the outer shell draws, adjacent glass reads as one clear pane.
-export const glass = block('kit:glass', {
-    name: 'Glass',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.glass } } }),
-    cull: CullType.SELF,
-    material: MaterialType.TRANSPARENT,
-    sounds: soundPreset.glass,
-});
-export const glassPane = blockPreset.pane(
-    'kit:glass_pane',
-    { all: { texture: tex.glass } },
-    { name: 'Glass Pane', sounds: soundPreset.glass },
-);
-export const snowBlock = block('kit:snow_block', {
-    name: 'Snow Block',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.snow } } }),
-    sounds: soundPreset.snow,
-});
-export const snowSlab = blockPreset.slab(
-    'kit:snow_slab',
-    { all: { texture: tex.snow } },
-    { name: 'Snow Slab', sounds: soundPreset.snow },
-);
-export const snowCarpet = blockPreset.carpet(
-    'kit:snow_carpet',
-    { all: { texture: tex.snow } },
-    { name: 'Snow Carpet', sounds: soundPreset.snow },
+export const oakFence = blockPreset.fence(
+    'kit:oak_fence',
+    { all: { texture: tex.oakPlanks } },
+    { name: 'Oak Fence', sounds: soundPreset.wood },
 );
 export const oakTrapdoor = blockPreset.trapdoor(
     'kit:oak_trapdoor',
     { all: { texture: tex.oakPlanks } },
     { name: 'Oak Trapdoor', sounds: soundPreset.wood },
 );
+
 // two-cell door (lower + upper). top/bottom textures reuse oak planks as a
 // placeholder until dedicated door art lands. open/close via setDoorOpen.
 export const oakDoor = blockPreset.door(
@@ -175,46 +180,73 @@ export const oakDoor = blockPreset.door(
     { top: tex.oakPlanks, bottom: tex.oakPlanks },
     { name: 'Oak Door', sounds: soundPreset.wood },
 );
-export const stonePlate = blockPreset.plate('kit:stone_plate', tex.stone, {
-    name: 'Stone Pressure Plate',
-    sounds: soundPreset.stone,
-});
-export const mushroomRed = blockPreset.plant('kit:mushroom_red', tex.mushroomRed, {
-    name: 'Red Mushroom',
-    sounds: soundPreset.leaves,
-});
-export const grassPlant1 = blockPreset.plant('kit:grass_plant_1', tex.grassPlant1, {
-    name: 'Grass',
-    sounds: soundPreset.leaves,
-});
-export const grassPlant2 = blockPreset.plant('kit:grass_plant_2', tex.grassPlant2, {
-    name: 'Tall Grass',
-    sounds: soundPreset.leaves,
-});
-// minecraft-style short grass: a denser blade tuft on the same cross-quad
-// plant preset, kept alongside the existing grass_plant_1/2 sprites.
-export const shortGrass = blockPreset.plant('kit:short_grass', tex.shortGrass, {
-    name: 'Short Grass',
-    sounds: soundPreset.leaves,
-});
+
 export const oakLeaves = blockPreset.leaves(
     'kit:oak_leaves',
     { all: { texture: tex.oakLeaves } },
     { name: 'Oak Leaves', sounds: soundPreset.leaves },
 );
 
-export const lava = blockPreset.liquid(
-    'kit:lava',
-    { all: { texture: tex.lava } },
+// ── Glass ───────────────────────────────────────────────────────────
+
+// full glass cube. transparent (alpha-cutout) like the glass pane, with
+// CullType.SELF so a wall of glass culls its internal shared faces and only
+// the outer shell draws, adjacent glass reads as one clear pane.
+export const glass = blockPreset.cube(
+    'kit:glass',
+    { all: { texture: tex.glass } },
     {
-        name: 'Lava',
-        viscosity: 1.5,
-        levels: 8,
-        tint: blockPreset.LAVA_DEFAULT_TINT,
-        emissive: true,
-        lightEmission: [14, 6, 2],
+        name: 'Glass',
+        cull: CullType.SELF,
+        material: MaterialType.TRANSPARENT,
+        sounds: soundPreset.glass,
     },
 );
+
+export const glassPane = blockPreset.pane(
+    'kit:glass_pane',
+    { all: { texture: tex.glass } },
+    { name: 'Glass Pane', sounds: soundPreset.glass },
+);
+
+// ── Snow ────────────────────────────────────────────────────────────
+
+export const snowBlock = blockPreset.cube(
+    'kit:snow_block',
+    { all: { texture: tex.snow } },
+    {
+        name: 'Snow Block',
+        sounds: soundPreset.snow,
+    },
+);
+
+export const snowSlab = blockPreset.slab(
+    'kit:snow_slab',
+    { all: { texture: tex.snow } },
+    { name: 'Snow Slab', sounds: soundPreset.snow },
+);
+
+export const snowCarpet = blockPreset.carpet(
+    'kit:snow_carpet',
+    { all: { texture: tex.snow } },
+    { name: 'Snow Carpet', sounds: soundPreset.snow },
+);
+
+// ── Ice ─────────────────────────────────────────────────────────────
+
+// slippery. sneakGuard so crouching stops sliding.
+export const ice = blockPreset.cube(
+    'kit:ice',
+    { all: { texture: tex.ice } },
+    {
+        name: 'Ice',
+        friction: 0.1,
+        sneakGuard: true,
+        sounds: soundPreset.ice,
+    },
+);
+
+// ── Liquids ─────────────────────────────────────────────────────────
 
 export const water = blockPreset.liquid(
     'kit:water',
@@ -230,12 +262,47 @@ export const water = blockPreset.liquid(
     },
 );
 
-export const ladder = blockPreset.ladder('kit:ladder', tex.ladder, { name: 'Ladder', sounds: soundPreset.wood });
-export const oakFence = blockPreset.fence(
-    'kit:oak_fence',
-    { all: { texture: tex.oakPlanks } },
-    { name: 'Oak Fence', sounds: soundPreset.wood },
+export const lava = blockPreset.liquid(
+    'kit:lava',
+    { all: { texture: tex.lava } },
+    {
+        name: 'Lava',
+        viscosity: 1.5,
+        levels: 8,
+        tint: blockPreset.LAVA_DEFAULT_TINT,
+        emissive: true,
+        lightEmission: [14, 6, 2],
+    },
 );
+
+// ── Vegetation ──────────────────────────────────────────────────────
+
+export const mushroomRed = blockPreset.plant('kit:mushroom_red', tex.mushroomRed, {
+    name: 'Red Mushroom',
+    sounds: soundPreset.leaves,
+});
+
+export const grassPlant1 = blockPreset.plant('kit:grass_plant_1', tex.grassPlant1, {
+    name: 'Grass',
+    sounds: soundPreset.leaves,
+});
+
+export const grassPlant2 = blockPreset.plant('kit:grass_plant_2', tex.grassPlant2, {
+    name: 'Tall Grass',
+    sounds: soundPreset.leaves,
+});
+
+// minecraft-style short grass: a denser blade tuft on the same cross-quad
+// plant preset, kept alongside the existing grass_plant_1/2 sprites.
+export const shortGrass = blockPreset.plant('kit:short_grass', tex.shortGrass, {
+    name: 'Short Grass',
+    sounds: soundPreset.leaves,
+});
+
+// ── Light & utility ─────────────────────────────────────────────────
+
+export const ladder = blockPreset.ladder('kit:ladder', tex.ladder, { name: 'Ladder', sounds: soundPreset.wood });
+
 export const torch = blockPreset.torch('kit:torch', tex.torch, { name: 'Torch', sounds: soundPreset.wood });
 
 // rgb variants, same preset, colored-flame texture + custom lightEmission per channel.
@@ -255,80 +322,135 @@ export const blueTorch = blockPreset.torch('kit:blue_torch', tex.blueTorch, {
     sounds: soundPreset.wood,
 });
 
-// wool, 15 dye colors mirroring Minecraft's palette (light_blue omitted;
-// no source texture). soft cloth: leaves sounds (snappy dig).
-export const woolWhite = block('kit:wool_white', {
-    name: 'White Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolWhite } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolLightGray = block('kit:wool_light_gray', {
-    name: 'Light Gray Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolLightGray } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolGray = block('kit:wool_gray', {
-    name: 'Gray Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolGray } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolBlack = block('kit:wool_black', {
-    name: 'Black Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolBlack } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolBrown = block('kit:wool_brown', {
-    name: 'Brown Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolBrown } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolRed = block('kit:wool_red', {
-    name: 'Red Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolRed } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolOrange = block('kit:wool_orange', {
-    name: 'Orange Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolOrange } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolYellow = block('kit:wool_yellow', {
-    name: 'Yellow Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolYellow } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolLime = block('kit:wool_lime', {
-    name: 'Lime Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolLime } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolGreen = block('kit:wool_green', {
-    name: 'Green Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolGreen } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolCyan = block('kit:wool_cyan', {
-    name: 'Cyan Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolCyan } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolBlue = block('kit:wool_blue', {
-    name: 'Blue Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolBlue } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolPurple = block('kit:wool_purple', {
-    name: 'Purple Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolPurple } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolMagenta = block('kit:wool_magenta', {
-    name: 'Magenta Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolMagenta } } }),
-    sounds: soundPreset.leaves,
-});
-export const woolPink = block('kit:wool_pink', {
-    name: 'Pink Wool',
-    model: () => ({ type: 'cube', textures: { all: { texture: tex.woolPink } } }),
-    sounds: soundPreset.leaves,
-});
+// ── Wool ────────────────────────────────────────────────────────────
+//
+// all 16 dye colors mirroring Minecraft's palette. soft cloth: leaves sounds
+// (snappy dig). kept as individual exports so bundlers tree-shake unused colors.
+export const woolWhite = blockPreset.cube(
+    'kit:wool_white',
+    { all: { texture: tex.woolWhite } },
+    {
+        name: 'White Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolLightGray = blockPreset.cube(
+    'kit:wool_light_gray',
+    { all: { texture: tex.woolLightGray } },
+    {
+        name: 'Light Gray Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolGray = blockPreset.cube(
+    'kit:wool_gray',
+    { all: { texture: tex.woolGray } },
+    {
+        name: 'Gray Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolBlack = blockPreset.cube(
+    'kit:wool_black',
+    { all: { texture: tex.woolBlack } },
+    {
+        name: 'Black Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolBrown = blockPreset.cube(
+    'kit:wool_brown',
+    { all: { texture: tex.woolBrown } },
+    {
+        name: 'Brown Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolRed = blockPreset.cube(
+    'kit:wool_red',
+    { all: { texture: tex.woolRed } },
+    {
+        name: 'Red Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolOrange = blockPreset.cube(
+    'kit:wool_orange',
+    { all: { texture: tex.woolOrange } },
+    {
+        name: 'Orange Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolYellow = blockPreset.cube(
+    'kit:wool_yellow',
+    { all: { texture: tex.woolYellow } },
+    {
+        name: 'Yellow Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolLime = blockPreset.cube(
+    'kit:wool_lime',
+    { all: { texture: tex.woolLime } },
+    {
+        name: 'Lime Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolGreen = blockPreset.cube(
+    'kit:wool_green',
+    { all: { texture: tex.woolGreen } },
+    {
+        name: 'Green Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolCyan = blockPreset.cube(
+    'kit:wool_cyan',
+    { all: { texture: tex.woolCyan } },
+    {
+        name: 'Cyan Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolLightBlue = blockPreset.cube(
+    'kit:wool_light_blue',
+    { all: { texture: tex.woolLightBlue } },
+    {
+        name: 'Light Blue Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolBlue = blockPreset.cube(
+    'kit:wool_blue',
+    { all: { texture: tex.woolBlue } },
+    {
+        name: 'Blue Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolPurple = blockPreset.cube(
+    'kit:wool_purple',
+    { all: { texture: tex.woolPurple } },
+    {
+        name: 'Purple Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolMagenta = blockPreset.cube(
+    'kit:wool_magenta',
+    { all: { texture: tex.woolMagenta } },
+    {
+        name: 'Magenta Wool',
+        sounds: soundPreset.leaves,
+    },
+);
+export const woolPink = blockPreset.cube(
+    'kit:wool_pink',
+    { all: { texture: tex.woolPink } },
+    {
+        name: 'Pink Wool',
+        sounds: soundPreset.leaves,
+    },
+);

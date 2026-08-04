@@ -101,9 +101,10 @@ export const snow = blockTexture('kit:snow', {
     src: asset('./assets/textures/snow.png', import.meta.url),
 });
 
-// wool, 15 dye colors. names follow Minecraft's palette (textures sourced
-// from minetest_game's wool mod, MIT-licensed). there's no `light_blue`,
-// MC's 16th color, without a hand-tinted texture; skip for now.
+// wool, all 16 dye colors. names follow Minecraft's palette (textures sourced
+// from minetest_game's wool mod, MIT-licensed). `light_blue`, MC's 16th color,
+// has no minetest source texture; it's derived by tinting the shared white-wool
+// luminance noise to a light-blue hue.
 export const woolWhite = blockTexture('kit:wool_white', {
     src: asset('./assets/textures/wool_white.png', import.meta.url),
 });
@@ -129,6 +130,9 @@ export const woolGreen = blockTexture('kit:wool_green', {
     src: asset('./assets/textures/wool_green.png', import.meta.url),
 });
 export const woolCyan = blockTexture('kit:wool_cyan', { src: asset('./assets/textures/wool_cyan.png', import.meta.url) });
+export const woolLightBlue = blockTexture('kit:wool_light_blue', {
+    src: asset('./assets/textures/wool_light_blue.png', import.meta.url),
+});
 export const woolBlue = blockTexture('kit:wool_blue', { src: asset('./assets/textures/wool_blue.png', import.meta.url) });
 export const woolPurple = blockTexture('kit:wool_purple', {
     src: asset('./assets/textures/wool_purple.png', import.meta.url),
