@@ -16,7 +16,7 @@ import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuatern
 import * as ClientChat from '../client/chat';
 import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
-import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isShiftDown } from '../client/input';
+import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
 import { resolveRoomCamera, setActivePlayer } from '../client/rooms';
@@ -689,10 +689,13 @@ script(
             // grab handles its own wheel inside transform; fly/orbit
             // see only what we don't consume here. brush is included
             // because the active slot resolves $active in patterns.
+            // skip while a UI overlay (library, etc.) holds the pointer so a
+            // scroll inside an open panel scrolls it instead of cycling slots.
             const wheelTool = store.getState().activeTool;
             if (
                 (wheelTool === 'build' || wheelTool === 'brush') &&
                 mk._wheelDeltaY !== 0 &&
+                !isPointerCapturedByUi(mk) &&
                 !TransformTool.isInGrab(transformToolState)
             ) {
                 store.getState().cycleActiveSlot(Math.sign(mk._wheelDeltaY));

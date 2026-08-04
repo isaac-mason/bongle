@@ -35,6 +35,7 @@ export {
     isMouseJustUp,
     isMouseLocked,
     isMouseTap,
+    isPointerCapturedByUi,
     isTouchButtonDown,
     isTouchButtonJustDown,
     isTouchButtonJustUp,

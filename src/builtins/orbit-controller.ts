@@ -18,7 +18,7 @@
 
 import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
 import { env } from '../env';
-import { getCanvasTouches, getPinchDelta, isMouseDown, isMouseJustDown, isMouseJustUp } from '../api/input';
+import { getCanvasTouches, getPinchDelta, isMouseDown, isMouseJustDown, isMouseJustUp, isPointerCapturedByUi } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';
 import { findByName, getTrait } from '../api/scene-tree';
 import { onDispose, onFrame, script } from '../api/scripts';
@@ -222,10 +222,14 @@ script(
             }
 
             // ── wheel dolly ───────────────────────────────────────
-            if (mk._wheelDeltaY > 0) {
-                scaleAccum /= zoomScale(mk._wheelDeltaY);
-            } else if (mk._wheelDeltaY < 0) {
-                scaleAccum *= zoomScale(mk._wheelDeltaY);
+            // skip while a UI overlay holds the pointer, so scrolling an open
+            // panel scrolls the panel instead of dollying the camera.
+            if (!isPointerCapturedByUi(mk)) {
+                if (mk._wheelDeltaY > 0) {
+                    scaleAccum /= zoomScale(mk._wheelDeltaY);
+                } else if (mk._wheelDeltaY < 0) {
+                    scaleAccum *= zoomScale(mk._wheelDeltaY);
+                }
             }
 
             // ── touch gestures ────────────────────────────────────

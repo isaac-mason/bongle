@@ -99,6 +99,12 @@ export type MouseKeyboardInput = {
      *  within a frame (raw `document.pointerLockElement` can flip mid-frame). */
     _locked: boolean;
     _prevLocked: boolean;
+    /** mirrors InputManager._lockReleases: true while a UI surface (library,
+     *  dialog, ad, host overlay) is holding pointer input via useReleasePointer,
+     *  so the viewport does not own the cursor/wheel. viewport wheel gestures
+     *  (orbit dolly, hotbar cycle) read this to ignore scrolls aimed at a panel
+     *  instead of sniffing the event target for "is this the game". */
+    _pointerCapturedByUi: boolean;
 };
 
 export function createMouseKeyboardInput(): MouseKeyboardInput {
@@ -116,6 +122,7 @@ export function createMouseKeyboardInput(): MouseKeyboardInput {
         _gestures: { left: createGesture(), middle: createGesture(), right: createGesture() },
         _locked: false,
         _prevLocked: false,
+        _pointerCapturedByUi: false,
     };
 }
 
@@ -844,8 +851,19 @@ export function createInputManager(): InputManager {
     return m;
 }
 
+/** Mirror the "a UI surface is holding pointer input" fact onto the active
+ *  target's per-frame input. Viewport gestures only see `Input`, not the
+ *  manager, so this lets them interpret the wheel against real ownership state
+ *  (the _lockReleases registry that useReleasePointer drives) rather than
+ *  guessing from the DOM event target. Called wherever _lockReleases or the
+ *  target changes, so the flag is always current when scripts read it. */
+function syncPointerCapture(m: InputManager): void {
+    if (m.target) m.target.mouseKeyboard._pointerCapturedByUi = m._lockReleases.size > 0;
+}
+
 export function setInputManagerTarget(m: InputManager, target: Input | null): void {
     m.target = target;
+    syncPointerCapture(m);
     // a room swap changes whose intent we read — re-derive. Usually the new room
     // already declared its intent (onInit fires at join, before this activation),
     // so reconcile settles it now: keep the lock for a room that wants it, release
@@ -934,12 +952,21 @@ export function tryAcquirePointerLock(m: InputManager): void {
  *  (no waiting a frame with a menu over a locked cursor). */
 export function addLockRelease(m: InputManager, id: string): void {
     m._lockReleases.add(id);
+    syncPointerCapture(m);
     reconcilePointerLock(m);
+}
+
+/** True while a UI overlay is holding pointer input (see _pointerCapturedByUi).
+ *  Viewport wheel gestures check this so a scroll over an open panel drives the
+ *  panel, not the game. */
+export function isPointerCapturedByUi(mouseKeyboard: MouseKeyboardInput): boolean {
+    return mouseKeyboard._pointerCapturedByUi;
 }
 
 /** the surface closed. Re-acquire synchronously — call from the close gesture so
  *  the lock comes back in that gesture; otherwise it waits for the next click. */
 export function removeLockRelease(m: InputManager, id: string): void {
     m._lockReleases.delete(id);
+    syncPointerCapture(m);
     tryAcquirePointerLock(m);
 }
