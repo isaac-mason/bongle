@@ -9,7 +9,14 @@ import * as blockModel from '../../../../src/core/voxels/block-model';
 import { cube, door, getDoorOpen, setDoorOpen } from '../../../../src/core/voxels/block-presets';
 import { buildBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';
 import { flipBlockKey, rotateBlockKey } from '../../../../src/core/voxels/block-transform';
-import type { BlockDef, BlockHandle, BlockPlaceCtx, BlockQuad, BlockTextureDef, PlaceIO } from '../../../../src/core/voxels/blocks';
+import type {
+    BlockDef,
+    BlockHandle,
+    BlockPlaceCtx,
+    BlockQuad,
+    BlockTextureDef,
+    PlaceIO,
+} from '../../../../src/core/voxels/blocks';
 import { createVoxels, setBlock } from '../../../../src/core/voxels/voxels';
 
 const topTex: BlockTextureDef = {
@@ -34,8 +41,8 @@ const stoneTex: BlockTextureDef = {
     interpolate: false,
 };
 
-const doorHandle = door('test:door', { top: topTex, bottom: botTex }) as BlockHandle;
-const stoneHandle = cube('test:stone', { all: { texture: stoneTex } }) as BlockHandle;
+const doorHandle = door('test:door', { textures: { top: topTex, bottom: botTex } }) as BlockHandle;
+const stoneHandle = cube('test:stone', { textures: stoneTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [doorHandle.id, doorHandle._def],

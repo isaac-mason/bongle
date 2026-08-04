@@ -47,9 +47,9 @@ const stoneTex: BlockTextureDef = {
     interpolate: false,
 };
 
-const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } }) as BlockHandle;
-const columnHandle = column('test:column', { end: oakEndTex, side: oakTex }) as BlockHandle;
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
+const stairHandle = stairs('test:stairs', { textures: stoneTex }) as BlockHandle;
+const columnHandle = column('test:column', { textures: { end: oakEndTex, side: oakTex } }) as BlockHandle;
+const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [stairHandle.id, stairHandle._def],

@@ -10,7 +10,13 @@ import { SetBlockFlags } from '../../../../src/core/voxels/block-flags';
 import { cube, fence, pane } from '../../../../src/core/voxels/block-presets';
 import { AIR, buildBlockRegistry } from '../../../../src/core/voxels/block-registry';
 import type { BlockDef, BlockHandle, BlockTextureDef } from '../../../../src/core/voxels/blocks';
-import { clearVoxelChanges, createVoxels, createVoxelsAuthority, getBlockState, setBlock } from '../../../../src/core/voxels/voxels';
+import {
+    clearVoxelChanges,
+    createVoxels,
+    createVoxelsAuthority,
+    getBlockState,
+    setBlock,
+} from '../../../../src/core/voxels/voxels';
 
 beforeAll(() => {
     registerAllShapes();
@@ -40,9 +46,9 @@ const stoneTex: BlockTextureDef = {
     interpolate: false,
 };
 
-const paneHandle = pane('test:pane', { all: { texture: glassTex } }) as BlockHandle;
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
-const stoneHandle = cube('test:stone', { all: { texture: stoneTex } }) as BlockHandle;
+const paneHandle = pane('test:pane', { textures: glassTex }) as BlockHandle;
+const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
+const stoneHandle = cube('test:stone', { textures: stoneTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [paneHandle.id, paneHandle._def],

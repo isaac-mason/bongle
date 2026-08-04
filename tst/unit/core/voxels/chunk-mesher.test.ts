@@ -434,7 +434,7 @@ describe('meshChunk', () => {
         // the new bilerp dispatch.
         function buildStairRegistry() {
             blockTexture('stone', { src: 'textures/stone.png' });
-            stairs('stair', { all: { texture: 'stone' } });
+            stairs('stair', { textures: 'stone' });
             return buildTestRegistry([{ id: 'block', texId: 'block' }]);
         }
 

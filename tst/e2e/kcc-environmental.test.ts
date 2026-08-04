@@ -291,7 +291,7 @@ describe('kcc environmental mechanics', () => {
         // branch takes over so swim cadence + entry splash still work.
         harness = await createTestHarness((root) => {
             defineTestBlocks();
-            blockPreset.slab('stone-slab', { all: { texture: 'stone' } });
+            blockPreset.slab('stone-slab', { textures: 'stone' });
             spawnAt(root, [2, 3, 2]);
         });
 
@@ -346,7 +346,7 @@ describe('kcc environmental mechanics', () => {
         // water below.
         harness = await createTestHarness((root) => {
             defineTestBlocks();
-            blockPreset.slab('stone-slab', { all: { texture: 'stone' } });
+            blockPreset.slab('stone-slab', { textures: 'stone' });
             spawnAt(root, [2, 4, 2]);
         });
 

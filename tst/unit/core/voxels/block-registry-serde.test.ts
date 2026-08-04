@@ -17,7 +17,13 @@ import {
     serializeBlockRegistryForWorker,
 } from '../../../../src/core/voxels/block-registry-serde';
 import { blockTexture, CullType, MaterialType } from '../../../../src/core/voxels/blocks';
-import { buildMeshInput, type ChunkMeshResult, createMeshOutput, meshChunk, type PassMesh } from '../../../../src/core/voxels/chunk-mesher';
+import {
+    buildMeshInput,
+    type ChunkMeshResult,
+    createMeshOutput,
+    meshChunk,
+    type PassMesh,
+} from '../../../../src/core/voxels/chunk-mesher';
 import { buildTestRegistry, resetVoxelRegistry } from '../../../../src/core/voxels/test-helpers';
 import { createChunk, createVoxels, setChunkBlock } from '../../../../src/core/voxels/voxels';
 
@@ -34,7 +40,7 @@ beforeEach(() => {
 // tables, so we want at least one of each kind.
 function buildMixedRegistry(): Blocks {
     blockTexture('stone', { src: 'textures/stone.png' });
-    stairs('stair', { all: { texture: 'stone' } });
+    stairs('stair', { textures: 'stone' });
     return buildTestRegistry([
         { id: 'block', texId: 'block' },
         { id: 'glass', cull: CullType.SELF, material: MaterialType.TRANSLUCENT, texId: 'glass' },

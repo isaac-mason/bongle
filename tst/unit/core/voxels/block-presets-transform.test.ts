@@ -40,12 +40,12 @@ const stoneTex: BlockTextureDef = {
     interpolate: false,
 };
 
-const stairHandle = stairs('test:stairs', { all: { texture: stoneTex } }) as BlockHandle;
-const slabHandle = slab('test:slab', { all: { texture: stoneTex } }) as BlockHandle;
-const ladderHandle = ladder('test:ladder', oakTex) as BlockHandle;
-const trapdoorHandle = trapdoor('test:trapdoor', { all: { texture: oakTex } }) as BlockHandle;
-const columnHandle = column('test:column', { end: oakEndTex, side: oakTex }) as BlockHandle;
-const fenceHandle = fence('test:fence', { all: { texture: oakTex } }) as BlockHandle;
+const stairHandle = stairs('test:stairs', { textures: stoneTex }) as BlockHandle;
+const slabHandle = slab('test:slab', { textures: stoneTex }) as BlockHandle;
+const ladderHandle = ladder('test:ladder', { textures: oakTex }) as BlockHandle;
+const trapdoorHandle = trapdoor('test:trapdoor', { textures: oakTex }) as BlockHandle;
+const columnHandle = column('test:column', { textures: { end: oakEndTex, side: oakTex } }) as BlockHandle;
+const fenceHandle = fence('test:fence', { textures: oakTex }) as BlockHandle;
 
 const defs = new Map<string, BlockDef>([
     [stairHandle.id, stairHandle._def],

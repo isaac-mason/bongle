@@ -88,13 +88,71 @@ import {
 } from './block-place';
 import { BLOCK_AIR, getBlockState, setBlock, type Voxels } from './voxels';
 
+// A cube-shaped preset accepts either a full per-face `CubeTextures` map or,
+// as shorthand, a bare `TextureRef` meaning "this texture on all faces". A
+// `BlockTextureDef` handle never carries an `all`/`top` key, so those keys
+// unambiguously mark a `CubeTextures` map vs. a bare ref.
+type CubeTexturesInput = CubeTextures | TextureRef;
+
+function resolveCubeTextures(input: CubeTexturesInput): CubeTextures {
+    if (typeof input === 'string') return { all: { texture: input } };
+    if ('all' in input || 'top' in input) return input;
+    return { all: { texture: input } };
+}
+
+// Per-preset option bags. Each mirrors `block()`'s single-config-object shape:
+// the required `textures` for the preset's geometry plus the `PresetOptions`
+// tuning knobs the preset leaves caller-settable (each `Omit`s the fields it
+// owns itself). Named per preset so signatures stay legible and consumers can
+// name the type; a preset can also narrow its own knobs later without touching
+// the others.
+
+export type CubePresetOptions = PresetOptions & { textures: CubeTexturesInput };
+export type ColumnPresetOptions = PresetOptions & { textures: { end: TextureRef; side: TextureRef } };
+export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'> & { textures: CubeTexturesInput };
+export type FencePresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type PanePresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type WallPresetOptions = Omit<PresetOptions, 'cull'> & { textures: CubeTexturesInput };
+export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    textures: TextureRef;
+};
+export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & { textures: TextureRef };
+export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & { textures: TextureRef };
+export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & { textures: TextureRef };
+export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & { textures: { top: TextureRef; bottom: TextureRef } };
+
+// liquids are collision:false and assemble their config by hand (no spread),
+// so only the generic fields they actually forward are exposed; the shape /
+// light / surface behaviour is driven by the liquid-specific options below.
+export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
+    textures: CubeTexturesInput;
+    viscosity?: number;
+    translucent?: boolean;
+    levels?: number;
+    fluidGroup?: string;
+    /** screen tint applied when the camera eye sits inside the filled band. */
+    tint?: ScreenTintSpec;
+    /** scales the surface for every level. 1 = full cube at max level; lower
+     * (e.g. 15/16) gives a visible meniscus from above. defaults to 1. */
+    maxHeight?: number;
+    /** per-channel light output (0..15), set for lava-style glow. */
+    lightEmission?: [number, number, number];
+    /** mark the texture as self-lit so it stays bright in shadow. */
+    emissive?: boolean;
+};
+
 // ── cube ────────────────────────────────────────────────────────────
 //
 // the most basic block: a full opaque cube with the given textures. drop
 // down to block() directly if you need to override cull, friction, or any
 // other field, this preset deliberately keeps the surface small.
 
-export function cube(id: string, textures: CubeTextures, options?: PresetOptions) {
+export function cube(id: string, { textures: texturesInput, ...options }: CubePresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     return block(id, {
         ...options,
         model: () => ({ type: 'cube' as const, textures }),
@@ -122,7 +180,7 @@ const AXIS_REMAP: Record<'x' | 'y' | 'z', Record<'x' | 'y' | 'z', 'x' | 'y' | 'z
     z: { x: 'y', y: 'x', z: 'z' },
 };
 
-export function column(id: string, textures: { end: TextureRef; side: TextureRef }, options?: PresetOptions) {
+export function column(id: string, { textures, ...options }: ColumnPresetOptions) {
     const end = textures.end;
     const side = textures.side;
     let handle: BlockHandle<typeof ColumnState.props>;
@@ -351,7 +409,8 @@ function readStairAt(
     return props.facing as Facing4;
 }
 
-export function stairs(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function stairs(id: string, { textures: texturesInput, ...options }: StairsPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     const topTex = pickTopTexture(textures);
     let handle: BlockHandle<typeof StairState.props>;
     handle = block(id, {
@@ -459,7 +518,8 @@ const SlabState = blockState.create({
 const SLAB_BOTTOM_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 0.5, 1]]);
 const SLAB_TOP_SHAPE = blockShape.aabbs([[0, 0.5, 0, 1, 1, 1]]);
 
-export function slab(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function slab(id: string, { textures: texturesInput, ...options }: SlabPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof SlabState.props>;
     handle = block(id, {
         ...options,
@@ -490,11 +550,7 @@ export function slab(id: string, textures: CubeTextures, options?: Omit<PresetOp
 
 // ── plant (flowers, grass, saplings) ────────────────────────────────
 
-export function plant(
-    id: string,
-    texture: TextureRef,
-    options?: Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'>,
-) {
+export function plant(id: string, { textures: texture, ...options }: PlantPresetOptions) {
     return block(id, {
         ...options,
         model: () => ({ type: 'custom' as const, quads: blockModel.cross(texture) }),
@@ -510,7 +566,8 @@ export function plant(
 
 // ── leaves ──────────────────────────────────────────────────────────
 
-export function leaves(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull' | 'vertexAnimation'>) {
+export function leaves(id: string, { textures: texturesInput, ...options }: LeavesPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     return block(id, {
         ...options,
         model: () => ({ type: 'cube' as const, textures }),
@@ -539,7 +596,7 @@ const LadderFacingState = blockState.create({
     facing: blockState.enumeration(['north', 'east', 'south', 'west'] as const),
 });
 
-export function ladder(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision' | 'climbable'>) {
+export function ladder(id: string, { textures: texture, ...options }: LadderPresetOptions) {
     let handle: BlockHandle<typeof LadderFacingState.props>;
     handle = block(id, {
         ...options,
@@ -628,28 +685,8 @@ export type LiquidHandle = BlockHandle & {
     max(): string;
 };
 
-export function liquid(
-    id: string,
-    textures: CubeTextures,
-    // liquids are collision:false and assemble their config by hand (no spread),
-    // so only the generic fields they actually forward are exposed; the shape /
-    // light / surface behaviour is driven by the liquid-specific options below.
-    options?: Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
-        viscosity?: number;
-        translucent?: boolean;
-        levels?: number;
-        fluidGroup?: string;
-        /** screen tint applied when the camera eye sits inside the filled band. */
-        tint?: ScreenTintSpec;
-        /** scales the surface for every level. 1 = full cube at max level; lower
-         * (e.g. 15/16) gives a visible meniscus from above. defaults to 1. */
-        maxHeight?: number;
-        /** per-channel light output (0..15), set for lava-style glow. */
-        lightEmission?: [number, number, number];
-        /** mark the texture as self-lit so it stays bright in shadow. */
-        emissive?: boolean;
-    },
-): LiquidHandle {
+export function liquid(id: string, { textures: texturesInput, ...options }: LiquidPresetOptions): LiquidHandle {
+    const textures = resolveCubeTextures(texturesInput);
     const levels = Math.max(1, options?.levels ?? 1);
     const translucent = options?.translucent === true;
     const group = options?.fluidGroup ?? id;
@@ -780,7 +817,8 @@ function hasGroupConnection(voxels: import('./voxels').Voxels, wx: number, wy: n
     return (voxels.registry.flags[id]! & groupFlag) !== 0;
 }
 
-export function fence(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function fence(id: string, { textures: texturesInput, ...options }: FencePresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof FenceState.props>;
     handle = block(id, {
         ...options,
@@ -850,7 +888,8 @@ function paneShape(p: { north: boolean; east: boolean; south: boolean; west: boo
     return blockShape.aabbs(boxes);
 }
 
-export function pane(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function pane(id: string, { textures: texturesInput, ...options }: PanePresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof PaneState.props>;
     handle = block(id, {
         ...options,
@@ -905,7 +944,8 @@ export function pane(id: string, textures: CubeTextures, options?: Omit<PresetOp
 
 const CARPET_SHAPE = blockShape.aabbs([[0, 0, 0, 1, 1 / 16, 1]]);
 
-export function carpet(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function carpet(id: string, { textures: texturesInput, ...options }: CarpetPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     return block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
@@ -973,7 +1013,8 @@ function trapdoorQuads(
     }
 }
 
-export function trapdoor(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function trapdoor(id: string, { textures: texturesInput, ...options }: TrapdoorPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof TrapdoorState.props>;
     handle = block(id, {
         ...options,
@@ -1040,7 +1081,7 @@ function plateShape(pressed: boolean) {
     return blockShape.aabbs([[PLATE_INSET, 0, PLATE_INSET, 1 - PLATE_INSET, h, 1 - PLATE_INSET]]);
 }
 
-export function plate(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision'>) {
+export function plate(id: string, { textures: texture, ...options }: PlatePresetOptions) {
     return block(id, {
         ...options,
         material: options?.material ?? MaterialType.OPAQUE,
@@ -1112,7 +1153,8 @@ function wallQuads(
     return quads;
 }
 
-export function wall(id: string, textures: CubeTextures, options?: Omit<PresetOptions, 'cull'>) {
+export function wall(id: string, { textures: texturesInput, ...options }: WallPresetOptions) {
+    const textures = resolveCubeTextures(texturesInput);
     let handle: BlockHandle<typeof WallState.props>;
     handle = block(id, {
         ...options,
@@ -1288,7 +1330,7 @@ function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: numbe
     return (voxels.registry.flags[id]! & BLOCK_FLAG_COLLISION) !== 0;
 }
 
-export function torch(id: string, texture: TextureRef, options?: Omit<PresetOptions, 'cull' | 'collision' | 'emissive'>) {
+export function torch(id: string, { textures: texture, ...options }: TorchPresetOptions) {
     let handle: BlockHandle<typeof TorchState.props>;
     handle = block(id, {
         ...options,
@@ -1377,7 +1419,7 @@ function doorBox(hinge: 'left' | 'right', open: boolean): blockShape.AABB {
     return hinge === 'left' ? [0, 0, 0, DOOR_DEPTH, 1, 1] : [1 - DOOR_DEPTH, 0, 0, 1, 1, 1];
 }
 
-export function door(id: string, textures: { top: TextureRef; bottom: TextureRef }, options?: Omit<PresetOptions, 'cull'>) {
+export function door(id: string, { textures, ...options }: DoorPresetOptions) {
     let handle: BlockHandle<typeof DoorState.props>;
     handle = block(id, {
         ...options,
