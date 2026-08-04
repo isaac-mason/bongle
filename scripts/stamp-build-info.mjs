@@ -65,5 +65,13 @@ export const BONGLE_BUILD = {
 export const BONGLE_VERSION = \`\${BONGLE_BUILD.version}+g\${BONGLE_BUILD.sha}.\${BONGLE_BUILD.date}\`;
 `;
 
+// Idempotent write: only touch the file when the content actually changes (a new
+// commit). dev.sh's engine watcher fswatches lib/src and rebuilds on any change; an
+// unconditional write here would bump build-info.ts's mtime every rebuild and retrigger
+// the watcher, looping builds forever. Skipping the no-op write breaks that cycle.
+if (existsSync(target) && readFileSync(target, 'utf8') === contents) {
+    console.log(`[stamp-build-info] ${version}+g${sha}.${date} (unchanged)`);
+    process.exit(0);
+}
 writeFileSync(target, contents);
 console.log(`[stamp-build-info] ${version}+g${sha}.${date}`);
