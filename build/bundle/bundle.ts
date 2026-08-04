@@ -16,6 +16,7 @@
 
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
+import { BONGLE_VERSION } from '../../src/build-info';
 import type { EnvValues } from '../env-replace';
 import type { BuildFs } from '../resolve';
 import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
@@ -202,15 +203,6 @@ async function sri(bytes: Uint8Array): Promise<string> {
     return `sha384-${btoa(bin)}`;
 }
 
-async function bongleVersion(fs: BuildFs): Promise<string> {
-    try {
-        const pkg = JSON.parse(await fs.readText('node_modules/bongle/package.json')) as { version?: string };
-        return pkg.version ?? '0.0.0';
-    } catch {
-        return '0.0.0';
-    }
-}
-
 /** copy an OPFS subtree into the zip map under `dest/`, stripping `srcDir/`. */
 async function copyTree(fs: BuildFs, srcDir: string, zip: Record<string, Uint8Array>, dest: string): Promise<void> {
     for (const e of await fs.list(srcDir, { recursive: true }).catch(() => [])) {
@@ -270,16 +262,15 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
     await copyTree(fs, 'public', zip, 'client');
 
     progress('Writing manifest');
-    const version = await bongleVersion(fs);
     const client: Record<string, unknown> = { entry: 'client/index.js', integrity: await sri(zip['client/index.js']) };
     if (clientCss) client.styles = { entry: 'client/index.css', integrity: await sri(clientCss) };
     const manifest = {
         schema: BUNDLE_SCHEMA,
-        engine: { bongle: version, interface: INTERFACE_VERSION },
+        engine: { bongle: BONGLE_VERSION, interface: INTERFACE_VERSION },
         client,
         server: { entry: 'server/index.js', integrity: await sri(zip['server/index.js']) },
         assets: { publicDir: 'public' },
-        build: { id: crypto.randomUUID(), createdAt: new Date().toISOString(), tool: `bongle-editor@${version}` },
+        build: { id: crypto.randomUUID(), createdAt: new Date().toISOString(), tool: `bongle-editor@${BONGLE_VERSION}` },
         matchmaking: { maxPlayers: opts.maxPlayers },
     };
     zip['bongle.json'] = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
