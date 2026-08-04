@@ -52,7 +52,7 @@ importers:
         version: 7.0.1
       crashcat:
         specifier: github:isaac-mason/crashcat#dev
-        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/959bd0b106136a39cf0d31f6ce4060c818778aab
+        version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
@@ -81,8 +81,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       packcat:
-        specifier: github:isaac-mason/packcat#dev
-        version: https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d
+        specifier: github:isaac-mason/packcat#7f3b4fe20762ae12ce05726af0b50aacf04a4dda
+        version: https://codeload.github.com/isaac-mason/packcat/tar.gz/7f3b4fe20762ae12ce05726af0b50aacf04a4dda
       react:
         specifier: ^19.2.4
         version: 19.2.4
@@ -1409,8 +1409,8 @@ packages:
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/959bd0b106136a39cf0d31f6ce4060c818778aab:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/959bd0b106136a39cf0d31f6ce4060c818778aab}
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b}
     version: 0.0.5
     peerDependencies:
       three: '>=0.182.0'
@@ -1739,9 +1739,6 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  mathcat@0.0.13:
-    resolution: {integrity: sha512-d5KhlEP3p6/ACSGpgwSBPCiiubdVXYb95mkK/rfQd5DirqHjMTYpvX5AP3vZXiQGO4y9DomRgSjOYwXW3dhA+w==}
-
   mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73:
     resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73}
     version: 0.0.14
@@ -1814,8 +1811,8 @@ packages:
   packcat@0.3.0:
     resolution: {integrity: sha512-5LfyKTxoyCIFuRIjF9+sr0JtJtLYviQj1NbBlz+EsZli+t12dY1Dx18hHwDM3/9ry39F4lIhUlfuSncPNYQ8Ig==}
 
-  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/7f3b4fe20762ae12ce05726af0b50aacf04a4dda:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/packcat/tar.gz/7f3b4fe20762ae12ce05726af0b50aacf04a4dda}
     version: 0.3.0
 
   parenthesis@3.1.8:
@@ -3175,9 +3172,9 @@ snapshots:
 
   core-util-is@1.0.3: {}
 
-  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/959bd0b106136a39cf0d31f6ce4060c818778aab:
+  crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b:
     dependencies:
-      mathcat: 0.0.13
+      mathcat: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73
 
   crc-32@1.2.2: {}
 
@@ -3449,8 +3446,6 @@ snapshots:
 
   marked@14.0.0: {}
 
-  mathcat@0.0.13: {}
-
   mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73: {}
 
   mediabunny@1.50.8:
@@ -3522,7 +3517,7 @@ snapshots:
 
   packcat@0.3.0: {}
 
-  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/6b2394c5ab517133f67bb3ffb4021f32f517f70d: {}
+  packcat@https://codeload.github.com/isaac-mason/packcat/tar.gz/7f3b4fe20762ae12ce05726af0b50aacf04a4dda: {}
 
   parenthesis@3.1.8: {}
 
