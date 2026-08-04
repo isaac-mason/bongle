@@ -838,14 +838,14 @@ export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirectio
     Rpc.send(runtime.rpc, registry.protocol.commands, handle, data as never, runtime.roomId, client);
 }
 
-export function broadcast(
+export function broadcast<S extends Scripts.Schema>(
     ctx: ScriptContext,
-    handle: CommandHandle<Scripts.Schema, 'server_to_client'>,
-    data: Scripts.SchemaType<Scripts.Schema>,
+    handle: CommandHandle<S, 'server_to_client'>,
+    data: Scripts.SchemaType<S>,
 ): void {
     const runtime = ctx._runtime;
     if (!runtime) return;
-    Rpc.send(runtime.rpc, registry.protocol.commands, handle, data, runtime.roomId);
+    Rpc.send(runtime.rpc, registry.protocol.commands, handle, data as never, runtime.roomId);
 }
 
 export function listen<S extends Scripts.Schema>(
