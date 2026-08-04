@@ -155,30 +155,14 @@ type RepeatType<T, N extends number> = N extends keyof RepeatTypeMap<T> ? Repeat
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
-type NextDepth = {
-    0: 0;
-    1: 0;
-    2: 1;
-    3: 2;
-    4: 3;
-    5: 4;
-    6: 5;
-    7: 6;
-    8: 7;
-    9: 8;
-    10: 9;
-    11: 10;
-    12: 11;
-    13: 12;
-    14: 13;
-    15: 14;
-};
-
-type DecrementDepth<N extends keyof NextDepth> = N extends keyof NextDepth ? NextDepth[N] : 0;
-
 // biome-ignore format: readability
-export type SchemaType<S extends Schema, Depth extends keyof NextDepth = 15> =
-    Depth extends 0 ? any :
+export type SchemaType<S extends Schema> =
+    // guard: when S is still the bare `Schema` constraint (nothing inferred yet —
+    // e.g. signature help while typing `prefab(`), don't expand the mapping. The
+    // full union distributed recursively is a combinatorial blow-up that OOMs the
+    // TS worker; short-circuit to `any` (matching the old depth-limit fallback).
+    // A concrete inferred schema never matches this and gets its precise type below.
+    [Schema] extends [S] ? any :
     S extends BooleanSchema ? boolean :
     S extends StringSchema ? string :
     S extends NumberSchema ? number :
@@ -189,22 +173,22 @@ export type SchemaType<S extends Schema, Depth extends keyof NextDepth = 15> =
     S extends QuaternionSchema ? [x: number, y: number, z: number, w: number] :
     S extends ListSchema ? (
         S['length'] extends number
-            ? RepeatType<SchemaType<S['of'], DecrementDepth<Depth>>, S['length']>
-            : SchemaType<S['of'], DecrementDepth<Depth>>[]
+            ? RepeatType<SchemaType<S['of']>, S['length']>
+            : SchemaType<S['of']>[]
     ) :
     S extends TupleSchema ? (
         S['of'] extends [...infer El]
-            ? { [K in keyof El]: El[K] extends Schema ? SchemaType<El[K], DecrementDepth<Depth>> : never }
-            : never 
+            ? { [K in keyof El]: El[K] extends Schema ? SchemaType<El[K]> : never }
+            : never
     ) :
-    S extends ObjectSchema ? Simplify<{ [K in keyof S['fields']]: SchemaType<S['fields'][K], DecrementDepth<Depth>> }> :
-    S extends RecordSchema ? Record<string, SchemaType<S['field'], DecrementDepth<Depth>>> :
+    S extends ObjectSchema ? Simplify<{ [K in keyof S['fields']]: SchemaType<S['fields'][K]> }> :
+    S extends RecordSchema ? Record<string, SchemaType<S['field']>> :
     S extends LiteralSchema ? S['value'] :
     S extends EnumerationSchema ? (S['values'][number] extends { value: infer V } ? V : S['values'][number]) :
-    S extends NullableSchema ? SchemaType<S['of'], DecrementDepth<Depth>> | null :
-    S extends OptionalSchema ? SchemaType<S['of'], DecrementDepth<Depth>> | undefined :
-    S extends NullishSchema ? SchemaType<S['of'], DecrementDepth<Depth>> | null | undefined :
-    S extends UnionSchema ? SchemaType<S['variants'][number], DecrementDepth<Depth>> :
+    S extends NullableSchema ? SchemaType<S['of']> | null :
+    S extends OptionalSchema ? SchemaType<S['of']> | undefined :
+    S extends NullishSchema ? SchemaType<S['of']> | null | undefined :
+    S extends UnionSchema ? SchemaType<S['variants'][number]> :
     S extends PrefabRefSchema ? string :
     S extends BlockRefSchema ? string :
     never;
