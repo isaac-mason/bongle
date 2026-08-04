@@ -2,9 +2,9 @@
 
 Notable changes to `bongle`. Newest first; dates are `YYYY-MM-DD`.
 
-## 2026-08-04
+Will change to a semver changelog in future once `bongle` is on npm.
 
-### Changed
+## 2026-08-04
 
 - `blockPreset.*` factories now take a single options object that mirrors
   `block()`'s shape, with the geometry `textures` as a field, instead of a
@@ -30,7 +30,5 @@ Notable changes to `bongle`. Newest first; dates are `YYYY-MM-DD`.
   Each preset has a named options type (`CubePresetOptions`, `LeavesPresetOptions`,
   ...) if you want to annotate call sites.
 
-### Added
-
-- `blocks.woolLightBlue` (`kit:wool_light_blue`), completing all 16 Minecraft
+- added `blocks.woolLightBlue` (`kit:wool_light_blue`), completing all 16 Minecraft
   wool colors.
