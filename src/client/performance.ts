@@ -12,7 +12,7 @@
 // from the settings UI without re-detecting.
 //
 // usage:
-//   const caps = await renderer.load();        // backend hands back device caps
+//   const { caps } = await loadRenderBackend();  // backend hands back device caps
 //   const profile = detect(caps);
 //   setActive(profile, 'standard', 'user');   // user override
 //   const s = settingsForTier(profile);       // read tier knobs here
@@ -96,6 +96,19 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
 
 export function settingsForTier(profile: Profile): Settings {
     return SETTINGS_BY_TIER[profile.active];
+}
+
+/** chunks of loaded-but-not-drawn apron kept beyond the visual radius. gives
+ *  the mesher its 26-neighbour apron and a small pop-in buffer so terrain is
+ *  ready before it enters the draw radius. */
+const STREAM_APRON = 2;
+
+/** the stream radius (in chunks) this client requests from the server: its
+ *  visual (draw) radius plus an apron. pushed up via the owner-authoritative
+ *  PlayerTrait.viewRadius sync; the server clamps it. low tier lands at the
+ *  server's play baseline (6 + 2 = 8), higher tiers raise it. */
+export function streamChunkRadius(profile: Profile): number {
+    return settingsForTier(profile).voxelViewChunkRadius + STREAM_APRON;
 }
 
 /** the effective device pixel ratio for the active tier: the display's own

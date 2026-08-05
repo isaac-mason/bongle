@@ -265,8 +265,11 @@ function seedModels(state: EngineClient): void {
 export async function load(state: EngineClient) {
     // select + code-split-load the render backend before anything touches the
     // renderer (`render/load` owns which concrete backends exist + the selection).
-    // awaited here so the dynamic import resolves and mints the handle up front.
-    state.renderer = await loadRenderBackend();
+    // awaited here so the dynamic import resolves, mints the handle, AND runs the
+    // device handshake up front — `loadRenderBackend` falls back WebGPU→WebGL2 if
+    // the preferred adapter/device can't come up, and hands back the device caps.
+    const { renderer, caps } = await loadRenderBackend();
+    state.renderer = renderer;
 
     // user modules have registered (loadModule ran before this). build the
     // derived index fields once so boot reads a live `blockRegistry` /
@@ -294,17 +297,11 @@ export async function load(state: EngineClient) {
         applyScenePayload(state, sceneId, h._payload);
     }
 
-    // renderer init gates everything that calls into gpucat (material
-    // builds, compileCompute pre-warms). do it once, up front; everything
-    // below runs concurrently afterwards. env GPU buffers + the engine-
-    // global post-chain pipeline are wired up when the handle is minted (sync,
-    // pre-load); this just runs the device handshake (and installs the
-    // uncaptured-error listener, both backend-internal now).
-    const caps = await state.renderer.load();
-
-    // the device is now acquired; load() handed back its caps. detect tier + GPU
-    // limits up front so every subsystem below can derive its budget
-    // from `state.performance.active`.
+    // the device is acquired (loadRenderBackend ran the handshake + installed the
+    // uncaptured-error listener, both backend-internal). detect tier + GPU limits
+    // up front so every subsystem below can derive its budget from
+    // `state.performance.active`. everything past here may call into gpucat
+    // (material builds, compileCompute pre-warms) now that the device is live.
     state.performance = Performance.detect(caps);
     state.voxelBudget = voxelArenaBudgetForTier(state.performance);
     const voxelBudget = state.voxelBudget;
@@ -616,6 +613,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     const existing = state.rooms.rooms.get(message.playerId);
     if (existing && existing.roomId === message.roomId) {
         Rooms.resyncRoom(existing, message, state.inbound);
+        Rooms.applyClientStreamRadius(existing, state.performance);
         SceneTree.initSceneTree(existing.nodes);
         Rooms.syncJoinedPlayers(state.rooms);
         return;
@@ -629,6 +627,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         audioResources: state.audioResources,
         inbound: state.inbound,
     });
+    Rooms.applyClientStreamRadius(room, state.performance);
 
     Rooms.mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
 

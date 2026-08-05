@@ -1427,16 +1427,27 @@ const DISCOVERY_BACKLOG_CAP = 64;
  *  client establishes the "known air" frontier quickly. */
 const EMPTY_CHUNKS_PER_TICK = 256;
 
-/** fallback view radius in chunks when the player node has no PlayerTrait
+/** fallback stream radius in chunks when the player node has no PlayerTrait
  *  (shouldn't happen in practice, createPlayerNode always adds it, but
- *  guards the flush against a partially-constructed scene). */
+ *  guards the flush against a partially-constructed scene). also the play-mode
+ *  floor: a client can request more but never shrink below this. */
 const DEFAULT_VIEW_RADIUS = 8;
 
-/** hysteresis band (chunks) added to viewRadius to compute the eviction
- *  radius. chunks in [viewRadius, viewRadius + VIEW_RADIUS_MARGIN] are kept if
- *  already known but not freshly loaded, prevents thrash when the player
- *  jitters across a chunk boundary at the load frontier. */
-const VIEW_RADIUS_MARGIN = 4;
+/** clamp bounds (chunks) for the client-requested stream radius
+ *  (PlayerTrait.viewRadius, owner-authoritative). play clients raise the radius
+ *  from the floor up to the play cap; edit rooms allow a much larger radius so
+ *  editors can see/edit most of the world without clipping the frontier. */
+const MIN_STREAM_RADIUS = 8;
+const MAX_STREAM_RADIUS_PLAY = 16;
+const MAX_STREAM_RADIUS_EDIT = 24;
+
+/** hysteresis band (chunks) added to the stream radius to compute the eviction
+ *  radius. chunks in (streamRadius, streamRadius + RETENTION_MARGIN] stay
+ *  resident on the client and keep receiving ops (kept fresh); only chunks
+ *  beyond the band are evicted (voxel_chunk_del). prevents thrash at the load
+ *  frontier and makes wandering out and back within the band a free re-render
+ *  with no re-download. */
+const RETENTION_MARGIN = 6;
 
 /** if a chunk has more ops than this, promote to chunk_full re-send */
 const PROMOTION_THRESHOLD = CHUNK_VOLUME / 2;
@@ -1497,10 +1508,10 @@ export function handleVoxelAck(state: Discovery, client: Client, message: VoxelA
 
 /* ── spherical expansion order ── */
 
-/** cached spherical-expansion offsets keyed by radius. radii are chosen
- *  per-player via PlayerTrait.viewRadius (e.g. 8 for play, 24 for edit), and
- *  there are only a handful of distinct values in practice so this map stays
- *  tiny. lazy: first request for a radius builds and caches. */
+/** cached spherical-expansion offsets keyed by radius. radii are the clamped
+ *  per-player stream radius (a handful of distinct values in practice: the play
+ *  floor/cap band and the edit radius), so this map stays tiny. lazy: first
+ *  request for a radius builds and caches. */
 const EXPANSION_ORDER_CACHE = new Map<number, [number, number, number][]>();
 
 function getExpansionOrder(radius: number): [number, number, number][] {
@@ -1948,17 +1959,20 @@ function flushVoxelsForPlayer(
 
     const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
 
-    // per-player view radius, server picks 8 (play) or 24 (edit) at
-    // createPlayerNode time. fall back to the default if PlayerTrait is
-    // somehow missing.
+    // per-player stream radius, client-requested via the owner-authoritative
+    // PlayerTrait.viewRadius (client sets it from its perf tier) and clamped
+    // here to a mode-dependent range. fall back to the default (also the play
+    // floor) if PlayerTrait is somehow missing.
     const playerNode = room.playerNodes.get(player.id);
     const playerTrait = playerNode ? getTrait(playerNode, PlayerTrait) : null;
-    const viewRadius = playerTrait?.viewRadius ?? DEFAULT_VIEW_RADIUS;
-    const expansionOrder = getExpansionOrder(viewRadius);
+    const requestedRadius = playerTrait?.viewRadius ?? DEFAULT_VIEW_RADIUS;
+    const maxStreamRadius = room.mode === 'edit' ? MAX_STREAM_RADIUS_EDIT : MAX_STREAM_RADIUS_PLAY;
+    const streamRadius = Math.max(MIN_STREAM_RADIUS, Math.min(requestedRadius, maxStreamRadius));
+    const expansionOrder = getExpansionOrder(streamRadius);
 
     // 1a. eviction, only on chunk-boundary crossings. evict knownChunks
     //     (sending chunk_del) and silently drop knownEmptyChunks that drifted
-    //     beyond viewRadius + VIEW_RADIUS_MARGIN. empty stubs are cheap on the
+    //     beyond streamRadius + RETENTION_MARGIN. empty stubs are cheap on the
     //     client (aliased EMPTY_DATA) so we leave them in voxels.chunks; only
     //     the server-side knowledge needs to shrink so they can be re-emitted
     //     if the player ever returns.
@@ -1971,7 +1985,7 @@ function flushVoxelsForPlayer(
         knowledge.lastAnchor[1] !== pcy ||
         knowledge.lastAnchor[2] !== pcz
     ) {
-        evictOutOfRange(knowledge, pcx, pcy, pcz, viewRadius + VIEW_RADIUS_MARGIN, client, player.id, out);
+        evictOutOfRange(knowledge, pcx, pcy, pcz, streamRadius + RETENTION_MARGIN, client, player.id, out);
         knowledge.lastAnchor = [pcx, pcy, pcz];
         knowledge.cursor = 0;
     }

@@ -23,9 +23,12 @@ export const PlayerTrait = trait(
         /** display name for the user. */
         username: '',
         /** voxel chunk stream radius in chunks. server's Discovery flush iterates a
-         *  sphere of this radius around the player's chunk coord. server-set per
-         *  room mode at createPlayerNode time (small for play, large for edit).
-         *  the eviction radius is `viewRadius + KEEP_HYSTERESIS` (discovery.ts). */
+         *  sphere of this radius around the player's chunk coord. owner-authoritative:
+         *  the client requests it from its perf tier (visual radius + apron) and the
+         *  server clamps it to a mode-dependent range (discovery.ts). server seeds a
+         *  default per room mode at createPlayerNode time (small for play, large for
+         *  edit) which stands until the client's first sync. the eviction radius is
+         *  `streamRadius + RETENTION_MARGIN` (discovery.ts). */
         viewRadius: 8,
     },
     { persist: false },

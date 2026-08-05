@@ -616,6 +616,22 @@ function findPlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, roomId: 
     throw new Error(`[bongle] failed to find player node for player ${playerId} in room ${roomId}`);
 }
 
+/**
+ * set the owned player node's stream radius (PlayerTrait.viewRadius) from this
+ * client's perf tier, so the server streams a `visual radius + apron` sphere
+ * sized to the device. owner authority replicates the value up; the server
+ * clamps it (discovery.ts).
+ *
+ * play only: edit rooms keep the server's large edit radius, an editor wants
+ * far more of the world loaded than its draw radius, so the client must not
+ * shrink it. leaving the trait untouched lets the server's value stand.
+ */
+export function applyClientStreamRadius(room: ClientRoom, profile: Performance.Profile): void {
+    if (room.playerMode === 'edit') return;
+    const trait = SceneTree.getTrait(room.playerNode, PlayerTrait);
+    if (trait) trait.viewRadius = Performance.streamChunkRadius(profile);
+}
+
 function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     const { clientId, playerId, sceneId, roomId, playerMode, roomMode, namespace, local } = opts;
     const { nodes, voxels, physics, clock, chat, context, playerNode } = opts;
