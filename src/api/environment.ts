@@ -118,12 +118,41 @@ export function getEnvironmentTime(ctx: ScriptContext): number {
 }
 
 /**
- * merge a partial config into the room's environment. slow path, writes
- * the config storage buffer. call from script init or in response to game
- * events, not every frame.
+ * Merge a partial config into the room's environment. Slow path: this
+ * repacks and re-uploads the config storage buffer, so call it from script
+ * init or in response to game events, never every frame. For time-of-day
+ * animation use `setEnvironmentTime`, which is the per-frame hot path.
  *
- * `sky.preset` and `sky.stops` are mutually exclusive at merge time: if
- * both are set, `stops` wins. presets compile to a `stops` array here.
+ * The merge is per-field, not just top-level. Only the fields you set change;
+ * everything else keeps its current value, and any group you omit is left
+ * entirely untouched. So `setEnvironment(ctx, { clouds: { density: 0.8 } })`
+ * changes cloud density alone and leaves cloud wind, sun, sky, etc. as they
+ * were. To reset a group, pass every field explicitly (or start from one of
+ * the `ENVIRONMENT_*` presets).
+ *
+ * Groups and their fields:
+ *   - `enabled`  master switch for the whole environment. When false, the
+ *                renderer also hides the sky and cloud meshes, so this is the
+ *                one flag that gates rendering, not just config values.
+ *   - `sky`      `{ preset }` selects a named LUT (see `SkyPreset`); `{ stops }`
+ *                supplies a custom 4-stop LUT. They are mutually exclusive at
+ *                merge time: if both are set, `stops` wins. A preset compiles
+ *                to its `stops` array here, so nothing distinguishes the two
+ *                downstream.
+ *   - `sun`      `enabled` toggles the directional light; `intensity` scales it.
+ *   - `moon`     `enabled` toggles the moon sprite.
+ *   - `stars`    `enabled` toggles stars; `density` is their coverage.
+ *   - `clouds`   see `EnvironmentConfig.clouds` for the field meanings
+ *                (altitude / thickness / density / wind).
+ *
+ * Example, dim the sun and thicken the clouds on some game event:
+ *
+ *   setEnvironment(ctx, {
+ *       sun: { intensity: 0.2 },
+ *       clouds: { enabled: true, density: 0.9, thickness: 4 },
+ *   });
+ *
+ * No-ops if the room has no active client environment (e.g. on the server).
  */
 export function setEnvironment(ctx: ScriptContext, config: EnvironmentConfig): void {
     const env = activeEnv(ctx);

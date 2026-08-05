@@ -1212,37 +1212,115 @@ use(CheckerBlockTexture);
 The world's terrain is a voxel grid. Every cell holds a block type, the grid is
 split into fixed-size chunks, and you can change it freely while the game runs.
 
-### Defining a block type
+### Your first cube
 
-`block(id, options)` declares a block at module scope. The most common model is a
-textured cube: map a texture to `all` faces, or to `top`, `bottom`, and `sides`
-separately. The kit pack ships ready-made textures under `bongle/kit`.
+The simplest block is a full cube wearing your own texture. It takes two
+declarations at module scope: a `blockTexture` for the image, and a
+`blockPreset.cube` that wraps it into a block.
+
+A block texture is a small square image, drawn at 16x16 pixels: the pipeline
+bakes every source down to a 16x16 tile in the block atlas, so that is the size
+to author at. PNG is the usual format. Drop the `.png` in your project's
+`assets/` folder next to the module that declares it, then point the texture's
+`src` at it with `asset('./assets/...', import.meta.url)`, so it resolves
+relative to that module wherever the code is installed (the same pattern as
+`model()` and `sound()`, see [Assets](#assets)).
 
 ```ts
-// declare a block type at module scope. a cube model maps a texture to its
-// faces; `all` covers every face (use top/bottom/sides to differ them).
-const RubyBlock = block('guide:ruby', {
-    name: 'RubyBlock Block',
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
-});
+// 1. declare a texture from your own image. drop the .png in assets/ (drawn at
+//    16x16) and point src at it with asset(rel, import.meta.url).
+const StoneTexture = blockTexture('guide:stone', { src: asset('./assets/stone.png', import.meta.url) });
+
+// 2. wrap it in a cube. one texture argument paints all six faces the same.
+const StoneBlock = blockPreset.cube('guide:stone', { name: 'Stone', textures: StoneTexture });
+
+// keep the handle alive through bundling if nothing else in code references it
+use(StoneBlock);
 ```
 
-Options beyond `model` cover collision, lighting, sounds, and shape, among them
-`cull`, `lightOpacity`, `surfaceHeight`, and `sounds`. As with any content handle,
-reference the block in code (or pass it to `use`) so the bundler keeps its
-declaration.
+A block is often made of several textures, one per distinct face. A grass block
+needs a grass top, a dirt bottom, and a grassy side, so it draws from three
+images: declare one `blockTexture` each, then hand `cube` a per-face map instead
+of a single texture. `top`/`bottom`/`sides` splits the top and bottom from the
+four sides; or name all six faces (`top`, `bottom`, `north`, `south`, `east`,
+`west`) for full control.
 
-You rarely write the harder shapes by hand. The `blockPreset` namespace builds the
-common ones for you, wiring up the model, collision, and any block states the shape
-needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`, `trapdoor`,
-`door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`, `column`, and
-`cube`. These cover most of what a world needs without authoring a model. The
-kit blocks are the worked examples here: `bongle/kit` is built almost
-entirely from these presets, so its source
-([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best place to see them in
-use. When you need a shape no preset covers, the preset source itself
-([src/core/voxels/block-presets.ts](../src/core/voxels/block-presets.ts)) shows how
-each one assembles its model and states, which is the template for a custom one.
+```ts
+// a block can draw from several textures, one per face. declare one blockTexture
+// per image, then pass a per-face map instead of a single texture: top/bottom/
+// sides (a grass-topped dirt block), or name all six for full control
+// (top/bottom/north/south/east/west).
+const GrassTop = blockTexture('guide:grass_top', { src: asset('./assets/grass_top.png', import.meta.url) });
+const GrassSide = blockTexture('guide:grass_side', { src: asset('./assets/grass_side.png', import.meta.url) });
+const DirtTexture = blockTexture('guide:dirt', { src: asset('./assets/dirt.png', import.meta.url) });
+
+const GrassBlock = blockPreset.cube('guide:grass', {
+    name: 'Grass',
+    textures: {
+        top: { texture: GrassTop },
+        bottom: { texture: DirtTexture },
+        sides: { texture: GrassSide },
+    },
+});
+use(GrassBlock);
+```
+
+The pipeline builds the atlas when you build or edit. A texture whose file is
+missing renders as a bright magenta placeholder, so a wrong path shows up in the
+world instead of crashing. Two variations reuse the same wiring: for a texture
+painted in code rather than loaded from a file, pass a `draw()` descriptor as the
+`src` (see [Assets](#assets)); for an animated texture, pass `src` an array of
+frame images plus an `fps`.
+
+### Block presets
+
+`blockPreset.cube` is one of a family. The `blockPreset` namespace builds the
+common block shapes for you, wiring up the model, collision, and any block states
+the shape needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`,
+`trapdoor`, `door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`,
+`column`, and `cube`. These cover most of what a world needs without authoring a
+model, and each takes the same `textures` you would give a cube. The kit blocks
+are the worked examples: `bongle/kit` is built almost entirely from these
+presets, so its source ([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best
+place to see them in use.
+
+### The `block()` API
+
+Every preset is sugar over `block(id, options)`, the lower-level declaration.
+Reach for it directly when a preset's shape or defaults do not fit. The example
+below is exactly what `blockPreset.plant` expands to: a flower is not a cube at
+all, but two crossed quads, and it needs several options set together to behave
+like vegetation.
+
+```ts
+// every preset is sugar over block(). here is what blockPreset.plant expands to:
+// a flower is not a cube at all but two crossed quads (blockModel.cross), plus
+// the handful of options that make vegetation behave. reach for block() directly
+// whenever a preset's shape or defaults do not fit.
+const PoppyTexture = blockTexture('guide:poppy', { src: asset('./assets/poppy.png', import.meta.url) });
+const PoppyBlock = block('guide:poppy', {
+    name: 'Poppy',
+    model: () => ({ type: 'custom' as const, quads: blockModel.cross(PoppyTexture) }),
+    collision: false, // walk straight through it
+    cull: CullType.SELF, // only hide faces against other poppies, never neighbours
+    lightOpacity: 0, // sparse quads, let light pass instead of shadowing
+    material: MaterialType.TRANSPARENT, // cutout alpha around the petals
+    vertexAnimation: VertexAnimation.PLANT_WIND_SWAY, // sway in the wind
+});
+use(PoppyBlock);
+```
+
+The `model` function returns the block's geometry. A `type: 'cube'` model carries
+the per-face `textures` map from above; a `type: 'custom'` model returns a raw
+list of quads for any shape a preset does not cover, and `blockModel` provides
+helpers that build the common ones (`cross` for the crossed vegetation quads
+here, `box` for an axis-aligned box). The remaining options tune behaviour rather
+than shape: collision, lighting, sounds, friction, and culling, among them `cull`,
+`lightOpacity`, `surfaceHeight`, `collision`, and `material`. The preset source
+([src/core/voxels/block-presets.ts](../src/core/voxels/block-presets.ts)) is the
+best reference for how each shape assembles its model and options. As with any
+content handle, reference the block in code (or pass it to `use`) so the bundler
+keeps its declaration.
 
 ### Block states
 
@@ -1278,10 +1356,10 @@ that has been set. Server edits replicate to clients automatically.
 
 ```ts
 // read and write blocks through ctx.voxels, addressed by world x/y/z
-system('place-ruby', (ctx) => {
+system('place-grass', (ctx) => {
     onInit(ctx, () => {
         // write a block; server edits replicate to clients automatically
-        setBlock(ctx.voxels, 0, 0, 0, RubyBlock.defaultKey());
+        setBlock(ctx.voxels, 0, 0, 0, GrassBlock.defaultKey());
 
         // read a block's key, and its numeric state id (block kind + block state)
         const key = getBlock(ctx.voxels, 0, 0, 0);
@@ -1314,11 +1392,11 @@ are server-only and hand you the world coordinates of the change.
 
 ```ts
 // react when a block of this type is placed or broken (server-only)
-system('ruby-events', (ctx) => {
-    onBlockBuild(ctx, RubyBlock, (ev) => {
+system('grass-events', (ctx) => {
+    onBlockBuild(ctx, GrassBlock, (ev) => {
         console.log('placed at', ev.worldX, ev.worldY, ev.worldZ);
     });
-    onBlockBreak(ctx, RubyBlock, (ev) => {
+    onBlockBreak(ctx, GrassBlock, (ev) => {
         console.log('broke at', ev.worldX, ev.worldY, ev.worldZ);
     });
 });
@@ -1425,12 +1503,17 @@ export function release(ctx: ScriptContext): void {
 }
 ```
 
-### Lighting and sky
+### Environment - lighting and sky
 
-`setEnvironment` and `setEnvironmentTime` choose a sky preset and time of day
-(`ENVIRONMENT_OVERWORLD` is the default daylight preset). Voxel lighting is
-flood-filled through the grid; turn it on and set a floor level with the
-server-only `configureFloodFillLighting`.
+Each room has one environment: its sky, sun, moon, stars, and clouds. You drive
+it with two calls. `setEnvironment` sets the look, and `setEnvironmentTime` sets
+the time of day. Set them once in an `onInit`, or change them later on game
+events (nightfall, a storm rolling in).
+
+The quickest start is a preset. `setEnvironment(ctx, ENVIRONMENT_OVERWORLD)`
+gives you a full daylight scene with sun, moon, stars, and clouds all on, which
+is what the snippet below does. `ENVIRONMENT_DEFAULT` is the barer look a fresh
+room boots with (sky only, everything else off).
 
 ```ts
 // sky preset + voxel flood-fill lighting, set once on the world
@@ -1444,6 +1527,62 @@ system(
     },
     { editor: true },
 );
+```
+
+To tune the look, pass a partial config instead of a preset. The merge is
+per-field: only the fields you set change, and any group you leave out keeps its
+current value. So you can nudge one thing without restating the rest.
+
+```ts
+// dim the sun and roll in heavier clouds, leave sky and stars alone
+setEnvironment(ctx, {
+    sun: { intensity: 0.2 },
+    clouds: { enabled: true, density: 0.9, thickness: 4 },
+});
+```
+
+The groups are `sky` (a `preset` name or a custom `stops` LUT), `sun`
+(`enabled`, `intensity`), `moon` (`enabled`), `stars` (`enabled`, `density`),
+and `clouds` (`enabled`, `density`, `wind`, `altitude`, `thickness`). The
+top-level `enabled` is a master switch: turn it off and the sky and cloud meshes
+stop rendering entirely.
+
+`setEnvironmentTime` takes hours on a 24h clock (`0` midnight, `6` sunrise, `12`
+noon, `18` sunset, wrapping past 24). It is the per-frame hot path, one uniform
+write, so you can animate a day/night cycle by advancing it every tick. Sun,
+moon, and sky color all follow from it.
+
+```ts
+// a slow day/night cycle: one in-game day every 20 real minutes
+onTick(ctx, ({ delta }) => {
+    setEnvironmentTime(ctx, getEnvironmentTime(ctx) + (24 / 1200) * delta);
+});
+```
+
+Separately, voxel lighting is flood-filled through the grid so blocks cast and
+occlude light. It is server-authoritative: `configureFloodFillLighting` toggles
+it and sets `minLevel`, the ambient sky floor from `0` (caves go pitch black) to
+`15` (fully lit). Worlds that rewrite huge volumes per tick can disable the BFS
+and inline-seed light from `minLevel` instead.
+
+```ts
+// voxel lighting is server-authoritative. the default runs a BFS flood-fill on
+// every block change and new chunk; `minLevel` is the ambient sky floor
+// (0 = caves go pitch black, 15 = the world stays fully lit).
+system('voxel-lighting', (ctx) => {
+    onInit(ctx, () => {
+        if (ctx.server) configureFloodFillLighting(ctx, { enabled: true, minLevel: 4 });
+    });
+});
+
+// worlds that rewrite huge volumes per tick (procgen, fast-fill builders) can
+// skip the BFS and inline-seed light from `minLevel` instead, trading soft
+// block shadows for a flat sky seed.
+system('bulk-terrain-lighting', (ctx) => {
+    onInit(ctx, () => {
+        if (ctx.server) configureFloodFillLighting(ctx, { enabled: false, minLevel: 15 });
+    });
+});
 ```
 
 ### Models and meshes

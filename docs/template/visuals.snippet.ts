@@ -86,6 +86,26 @@ system(
 );
 /* SNIPPET_END: lighting */
 
+/* SNIPPET_START: flood-fill */
+// voxel lighting is server-authoritative. the default runs a BFS flood-fill on
+// every block change and new chunk; `minLevel` is the ambient sky floor
+// (0 = caves go pitch black, 15 = the world stays fully lit).
+system('voxel-lighting', (ctx) => {
+    onInit(ctx, () => {
+        if (ctx.server) configureFloodFillLighting(ctx, { enabled: true, minLevel: 4 });
+    });
+});
+
+// worlds that rewrite huge volumes per tick (procgen, fast-fill builders) can
+// skip the BFS and inline-seed light from `minLevel` instead, trading soft
+// block shadows for a flat sky seed.
+system('bulk-terrain-lighting', (ctx) => {
+    onInit(ctx, () => {
+        if (ctx.server) configureFloodFillLighting(ctx, { enabled: false, minLevel: 15 });
+    });
+});
+/* SNIPPET_END: flood-fill */
+
 /* SNIPPET_START: particles */
 // a particle type pairs a sprite with a motion update
 const SmokeSprite = sprite('smoke', { src: asset('./assets/smoke.png', import.meta.url) });

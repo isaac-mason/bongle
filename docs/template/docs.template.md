@@ -740,30 +740,71 @@ handy for procedural or composed textures.
 The world's terrain is a voxel grid. Every cell holds a block type, the grid is
 split into fixed-size chunks, and you can change it freely while the game runs.
 
-### Defining a block type
+### Your first cube
 
-`block(id, options)` declares a block at module scope. The most common model is a
-textured cube: map a texture to `all` faces, or to `top`, `bottom`, and `sides`
-separately. The kit pack ships ready-made textures under `bongle/kit`.
+The simplest block is a full cube wearing your own texture. It takes two
+declarations at module scope: a `blockTexture` for the image, and a
+`blockPreset.cube` that wraps it into a block.
 
-<Snippet source="blocks.snippet.ts" select="define-block" />
+A block texture is a small square image, drawn at 16x16 pixels: the pipeline
+bakes every source down to a 16x16 tile in the block atlas, so that is the size
+to author at. PNG is the usual format. Drop the `.png` in your project's
+`assets/` folder next to the module that declares it, then point the texture's
+`src` at it with `asset('./assets/...', import.meta.url)`, so it resolves
+relative to that module wherever the code is installed (the same pattern as
+`model()` and `sound()`, see [Assets](#assets)).
 
-Options beyond `model` cover collision, lighting, sounds, and shape, among them
-`cull`, `lightOpacity`, `surfaceHeight`, and `sounds`. As with any content handle,
-reference the block in code (or pass it to `use`) so the bundler keeps its
-declaration.
+<Snippet source="blocks.snippet.ts" select="first-cube" />
 
-You rarely write the harder shapes by hand. The `blockPreset` namespace builds the
-common ones for you, wiring up the model, collision, and any block states the shape
-needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`, `trapdoor`,
-`door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`, `column`, and
-`cube`. These cover most of what a world needs without authoring a model. The
-kit blocks are the worked examples here: `bongle/kit` is built almost
-entirely from these presets, so its source
-([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best place to see them in
-use. When you need a shape no preset covers, the preset source itself
-([src/core/voxels/block-presets.ts](../src/core/voxels/block-presets.ts)) shows how
-each one assembles its model and states, which is the template for a custom one.
+A block is often made of several textures, one per distinct face. A grass block
+needs a grass top, a dirt bottom, and a grassy side, so it draws from three
+images: declare one `blockTexture` each, then hand `cube` a per-face map instead
+of a single texture. `top`/`bottom`/`sides` splits the top and bottom from the
+four sides; or name all six faces (`top`, `bottom`, `north`, `south`, `east`,
+`west`) for full control.
+
+<Snippet source="blocks.snippet.ts" select="cube-faces" />
+
+The pipeline builds the atlas when you build or edit. A texture whose file is
+missing renders as a bright magenta placeholder, so a wrong path shows up in the
+world instead of crashing. Two variations reuse the same wiring: for a texture
+painted in code rather than loaded from a file, pass a `draw()` descriptor as the
+`src` (see [Assets](#assets)); for an animated texture, pass `src` an array of
+frame images plus an `fps`.
+
+### Block presets
+
+`blockPreset.cube` is one of a family. The `blockPreset` namespace builds the
+common block shapes for you, wiring up the model, collision, and any block states
+the shape needs: `blockPreset.stairs`, `slab`, `wall`, `fence`, `pane`, `carpet`,
+`trapdoor`, `door`, `plate`, `ladder`, `torch`, `plant`, `leaves`, `liquid`,
+`column`, and `cube`. These cover most of what a world needs without authoring a
+model, and each takes the same `textures` you would give a cube. The kit blocks
+are the worked examples: `bongle/kit` is built almost entirely from these
+presets, so its source ([src/kit/blocks.ts](../src/kit/blocks.ts)) is the best
+place to see them in use.
+
+### The `block()` API
+
+Every preset is sugar over `block(id, options)`, the lower-level declaration.
+Reach for it directly when a preset's shape or defaults do not fit. The example
+below is exactly what `blockPreset.plant` expands to: a flower is not a cube at
+all, but two crossed quads, and it needs several options set together to behave
+like vegetation.
+
+<Snippet source="blocks.snippet.ts" select="block-api" />
+
+The `model` function returns the block's geometry. A `type: 'cube'` model carries
+the per-face `textures` map from above; a `type: 'custom'` model returns a raw
+list of quads for any shape a preset does not cover, and `blockModel` provides
+helpers that build the common ones (`cross` for the crossed vegetation quads
+here, `box` for an axis-aligned box). The remaining options tune behaviour rather
+than shape: collision, lighting, sounds, friction, and culling, among them `cull`,
+`lightOpacity`, `surfaceHeight`, `collision`, and `material`. The preset source
+([src/core/voxels/block-presets.ts](../src/core/voxels/block-presets.ts)) is the
+best reference for how each shape assembles its model and options. As with any
+content handle, reference the block in code (or pass it to `use`) so the bundler
+keeps its declaration.
 
 ### Block states
 
@@ -859,14 +900,57 @@ camera) as the values to restore when a temporary override ends.
 
 <Snippet source="visuals.snippet.ts" select="subject" />
 
-### Lighting and sky
+### Environment - lighting and sky
 
-`setEnvironment` and `setEnvironmentTime` choose a sky preset and time of day
-(`ENVIRONMENT_OVERWORLD` is the default daylight preset). Voxel lighting is
-flood-filled through the grid; turn it on and set a floor level with the
-server-only `configureFloodFillLighting`.
+Each room has one environment: its sky, sun, moon, stars, and clouds. You drive
+it with two calls. `setEnvironment` sets the look, and `setEnvironmentTime` sets
+the time of day. Set them once in an `onInit`, or change them later on game
+events (nightfall, a storm rolling in).
+
+The quickest start is a preset. `setEnvironment(ctx, ENVIRONMENT_OVERWORLD)`
+gives you a full daylight scene with sun, moon, stars, and clouds all on, which
+is what the snippet below does. `ENVIRONMENT_DEFAULT` is the barer look a fresh
+room boots with (sky only, everything else off).
 
 <Snippet source="visuals.snippet.ts" select="lighting" />
+
+To tune the look, pass a partial config instead of a preset. The merge is
+per-field: only the fields you set change, and any group you leave out keeps its
+current value. So you can nudge one thing without restating the rest.
+
+```ts
+// dim the sun and roll in heavier clouds, leave sky and stars alone
+setEnvironment(ctx, {
+    sun: { intensity: 0.2 },
+    clouds: { enabled: true, density: 0.9, thickness: 4 },
+});
+```
+
+The groups are `sky` (a `preset` name or a custom `stops` LUT), `sun`
+(`enabled`, `intensity`), `moon` (`enabled`), `stars` (`enabled`, `density`),
+and `clouds` (`enabled`, `density`, `wind`, `altitude`, `thickness`). The
+top-level `enabled` is a master switch: turn it off and the sky and cloud meshes
+stop rendering entirely.
+
+`setEnvironmentTime` takes hours on a 24h clock (`0` midnight, `6` sunrise, `12`
+noon, `18` sunset, wrapping past 24). It is the per-frame hot path, one uniform
+write, so you can animate a day/night cycle by advancing it every tick. Sun,
+moon, and sky color all follow from it.
+
+```ts
+// a slow day/night cycle: one in-game day every 20 real minutes
+onTick(ctx, ({ delta }) => {
+    setEnvironmentTime(ctx, getEnvironmentTime(ctx) + (24 / 1200) * delta);
+});
+```
+
+Separately, voxel lighting is flood-filled through the grid so blocks cast and
+occlude light. It is server-authoritative: `configureFloodFillLighting` toggles
+it and sets `minLevel`, the ambient sky floor from `0` (caves go pitch black) to
+`15` (fully lit). Worlds that rewrite huge volumes per tick can disable the BFS
+and inline-seed light from `minLevel` instead.
+
+<Snippet source="visuals.snippet.ts" select="flood-fill" />
 
 ### Models and meshes
 

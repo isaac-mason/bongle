@@ -339,74 +339,51 @@ export const TRANSFORM_DIRTY_ALL;
 export const TransformTrait;
 ```
 
-#### `NetSnapshots`
+#### `RemoteInterpolation`
 
 ```ts
-export type NetSnapshots = {
-    posTime: Float64Array;
-    pos: Float32Array;
-    posHead: number;
-    posCount: number;
-    rotTime: Float64Array;
-    rot: Float32Array;
-    rotHead: number;
-    rotCount: number;
-    smoothErr: Float64Array;
-    prevVisual: Float64Array;
-    wasExtrap: 0 | 1;
-    smoothInit: 0 | 1;
+export type RemoteInterpolation = {
+    positionOld: Vec3;
+    positionCurrent: Vec3;
+    quaternionOld: Quat;
+    quaternionCurrent: Quat;
+    positionEaseDuration: number;
+    quaternionEaseDuration: number;
+    positionElapsed: number;
+    quaternionElapsed: number;
+    positionStamp: number;
+    quaternionStamp: number;
+    positionPendingStamp: number;
+    quaternionPendingStamp: number;
+    positionSequence: number;
+    positionSeen: number;
+    quaternionSequence: number;
+    quaternionSeen: number;
+    initialized: 0 | 1;
 };
 ```
 
-#### `ensureNetSnapshots`
+#### `ensureRemoteInterpolation`
 
 ```ts
-/** lazily allocate the ring on the first remote pose. owner/local/static nodes
+/** lazily allocate the translator on the first remote pose. owner/local/static nodes
  *  never call this, so they carry a null field and pay nothing. */
-export function ensureNetSnapshots(t: TransformTrait): NetSnapshots;
+export function ensureRemoteInterpolation(t: TransformTrait): RemoteInterpolation;
 ```
 
-#### `pushPositionSnapshot`
+#### `noteRemotePosition`
 
 ```ts
-/** append a position keyframe stamped at server-clock `time`. */
-export function pushPositionSnapshot(t: TransformTrait, time: number, p: Vec3): void;
+/** record a freshly-unpacked remote position: stash the stamp and bump the sequence so
+ *  the render side restarts its ease toward the new `t.position` target. */
+export function noteRemotePosition(t: TransformTrait, time: number): void;
 ```
 
-#### `pushRotationSnapshot`
+#### `noteRemoteQuaternion`
 
 ```ts
-/** append a rotation keyframe stamped at server-clock `time`. */
-export function pushRotationSnapshot(t: TransformTrait, time: number, q: Quat): void;
-```
-
-#### `resetNetSnapshots`
-
-```ts
-/** collapse both rings to a single keyframe at `(pos, quat, time)`. used on a
- *  teleport edge (and local→remote ownership handoff) so the sampler holds on the
- *  new pose instead of interpolating across the discontinuity. */
-export function resetNetSnapshots(t: TransformTrait, pos: Vec3, rotation: Quat, time: number): void;
-```
-
-#### `samplePositionSnapshot`
-
-```ts
-/** sample the interpolated local position at `renderTime` into `out`. `allowExtrapolate`
- *  (set only when the transport is choking) coasts a dry buffer along its last velocity
- *  instead of freezing on the newest keyframe. `smooth` folds the extrapolation-recovery
- *  discontinuity into a decaying visual offset so an overshoot glides back instead of
- *  snapping (see NetSnapshots.smoothErr). */
-export function samplePositionSnapshot(snaps: NetSnapshots, renderTime: number, out: Vec3, allowExtrapolate: boolean, smooth: boolean): void;
-```
-
-#### `sampleRotationSnapshot`
-
-```ts
-/** sample the interpolated local rotation at `renderTime` into `out`. Rotation holds on a
- *  dry buffer (no extrapolation): a frozen facing reads far milder than a frozen position,
- *  and slerp-overshoot past a stall is rarely worth the risk. */
-export function sampleRotationSnapshot(snaps: NetSnapshots, renderTime: number, out: Quat): void;
+/** record a freshly-unpacked remote quaternion (see `noteRemotePosition`). */
+export function noteRemoteQuaternion(t: TransformTrait, time: number): void;
 ```
 
 #### `markTransformDirty`
@@ -1424,7 +1401,7 @@ export function editorPlayData(joinData: Record<string, JsonValue>): EditorPlayD
 #### `broadcast`
 
 ```ts
-export function broadcast(ctx: ScriptContext, handle: CommandHandle<Scripts.Schema, 'server_to_client'>, data: Scripts.SchemaType<Scripts.Schema>): void;
+export function broadcast<S extends Scripts.Schema>(ctx: ScriptContext, handle: CommandHandle<S, 'server_to_client'>, data: Scripts.SchemaType<S>): void;
 ```
 
 #### `filter`
@@ -1452,7 +1429,7 @@ export function isOwner(ctx: ScriptContext, node: SceneTree.Node): boolean;
 #### `listen`
 
 ```ts
-export function listen(ctx: ScriptContext, handle: CommandHandle<Scripts.Schema, 'client_to_server'>, fn: (data: Scripts.SchemaType<Scripts.Schema>, from: Client) => void): Unsubscribe;
+export function listen<S extends Scripts.Schema>(ctx: ScriptContext, handle: CommandHandle<S, 'client_to_server'>, fn: (data: Scripts.SchemaType<S>, from: Client) => void): Unsubscribe;
 ```
 
 #### `onBlockBreak`
@@ -1979,20 +1956,6 @@ export function sprite(id: string, options: SpriteOptions): SpriteHandle;
 export const DEFAULT_PIXELS_PER_UNIT;
 ```
 
-#### `spriteAtlasTexture`
-
-```ts
-/**
- * Resolve the engine-global sprite atlas `Texture`, escape hatch for
- * advanced scripts that want to write a custom material sampling the
- * atlas directly. Returns `null` server-side or before the client has
- * finished `load()`. Prefer `sampleSprite()` (step 7) over raw atlas
- * access where possible, atlas-layout shifts on every registry change,
- * but `sampleSprite()`'s LUT indirection absorbs them.
- */
-export function spriteAtlasTexture(ctx: ScriptContext): Texture | null;
-```
-
 #### `spriteWorldSize`
 
 ```ts
@@ -2002,6 +1965,9 @@ export function spriteAtlasTexture(ctx: ScriptContext): Texture | null;
  * `pixelsPerUnit` (defaults to `DEFAULT_PIXELS_PER_UNIT`). Returns
  * `null` server-side, before the client has booted, or before the
  * asset pipeline has emitted this sprite into the atlas.
+ *
+ * Reads the CPU atlas metadata (`Resources.spriteAtlas`) directly, no
+ * renderer involvement, pixel dims are asset data, not a GPU resource.
  *
  * Convenience for keeping an `AabbBody` size in sync with the visual,
  * body owns its own size concern per "own table for sub-concepts",
@@ -2742,49 +2708,206 @@ export function rotateFacing4(f: Facing4, cw: boolean): Facing4;
 export function flipFacing4(f: Facing4, axis: Axis): Facing4;
 ```
 
+#### `blockPreset.CubePresetOptions`
+
+```ts
+export type CubePresetOptions = PresetOptions & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.ColumnPresetOptions`
+
+```ts
+export type ColumnPresetOptions = PresetOptions & {
+    textures: {
+        end: TextureRef;
+        side: TextureRef;
+    };
+};
+```
+
+#### `blockPreset.StairsPresetOptions`
+
+```ts
+export type StairsPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.SlabPresetOptions`
+
+```ts
+export type SlabPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.LeavesPresetOptions`
+
+```ts
+export type LeavesPresetOptions = Omit<PresetOptions, 'cull' | 'vertexAnimation'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.FencePresetOptions`
+
+```ts
+export type FencePresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.PanePresetOptions`
+
+```ts
+export type PanePresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.CarpetPresetOptions`
+
+```ts
+export type CarpetPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.TrapdoorPresetOptions`
+
+```ts
+export type TrapdoorPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.WallPresetOptions`
+
+```ts
+export type WallPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: CubeTexturesInput;
+};
+```
+
+#### `blockPreset.PlantPresetOptions`
+
+```ts
+export type PlantPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'lightOpacity' | 'vertexAnimation'> & {
+    textures: TextureRef;
+};
+```
+
+#### `blockPreset.LadderPresetOptions`
+
+```ts
+export type LadderPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'climbable'> & {
+    textures: TextureRef;
+};
+```
+
+#### `blockPreset.PlatePresetOptions`
+
+```ts
+export type PlatePresetOptions = Omit<PresetOptions, 'cull' | 'collision'> & {
+    textures: TextureRef;
+};
+```
+
+#### `blockPreset.TorchPresetOptions`
+
+```ts
+export type TorchPresetOptions = Omit<PresetOptions, 'cull' | 'collision' | 'emissive'> & {
+    textures: TextureRef;
+};
+```
+
+#### `blockPreset.DoorPresetOptions`
+
+```ts
+export type DoorPresetOptions = Omit<PresetOptions, 'cull'> & {
+    textures: {
+        top: TextureRef;
+        bottom: TextureRef;
+    };
+};
+```
+
+#### `blockPreset.LiquidPresetOptions`
+
+```ts
+export type LiquidPresetOptions = Pick<PresetOptions, 'name' | 'sounds' | 'material'> & {
+    textures: CubeTexturesInput;
+    viscosity?: number;
+    translucent?: boolean;
+    levels?: number;
+    fluidGroup?: string;
+    tint?: ScreenTintSpec;
+    maxHeight?: number;
+    lightEmission?: [
+        number,
+        number,
+        number
+    ];
+    emissive?: boolean;
+};
+```
+
 #### `blockPreset.cube`
 
 ```ts
-export function cube(id: string, textures: CubeTextures, options?: PresetOptions);
+export function cube(id: string, {
+    textures: texturesInput, ...options
+}: CubePresetOptions);
 ```
 
 #### `blockPreset.column`
 
 ```ts
-export function column(id: string, textures: {
-    end: TextureRef;
-    side: TextureRef;
-}, options?: PresetOptions);
+export function column(id: string, {
+    textures, ...options
+}: ColumnPresetOptions);
 ```
 
 #### `blockPreset.stairs`
 
 ```ts
-export function stairs(id: string, textures: CubeTextures, options?: PresetOptions);
+export function stairs(id: string, {
+    textures: texturesInput, ...options
+}: StairsPresetOptions);
 ```
 
 #### `blockPreset.slab`
 
 ```ts
-export function slab(id: string, textures: CubeTextures, options?: PresetOptions);
+export function slab(id: string, {
+    textures: texturesInput, ...options
+}: SlabPresetOptions);
 ```
 
 #### `blockPreset.plant`
 
 ```ts
-export function plant(id: string, texture: TextureRef, options?: PresetOptions);
+export function plant(id: string, {
+    textures: texture, ...options
+}: PlantPresetOptions);
 ```
 
 #### `blockPreset.leaves`
 
 ```ts
-export function leaves(id: string, textures: CubeTextures, options?: PresetOptions);
+export function leaves(id: string, {
+    textures: texturesInput, ...options
+}: LeavesPresetOptions);
 ```
 
 #### `blockPreset.ladder`
 
 ```ts
-export function ladder(id: string, texture: TextureRef, options?: PresetOptions);
+export function ladder(id: string, {
+    textures: texture, ...options
+}: LadderPresetOptions);
 ```
 
 #### `blockPreset.WATER_DEFAULT_TINT`
@@ -2811,77 +2934,73 @@ export type LiquidHandle = BlockHandle & {
 #### `blockPreset.liquid`
 
 ```ts
-export function liquid(id: string, textures: CubeTextures, options?: PresetOptions & {
-    viscosity?: number;
-    translucent?: boolean;
-    levels?: number;
-    fluidGroup?: string;
-    tint?: ScreenTintSpec;
-    maxHeight?: number;
-    lightEmission?: [
-        number,
-        number,
-        number
-    ];
-    emissive?: boolean;
-}): LiquidHandle;
+export function liquid(id: string, {
+    textures: texturesInput, ...options
+}: LiquidPresetOptions): LiquidHandle;
 ```
 
 #### `blockPreset.fence`
 
 ```ts
-export function fence(id: string, textures: CubeTextures, options?: PresetOptions);
+export function fence(id: string, {
+    textures: texturesInput, ...options
+}: FencePresetOptions);
 ```
 
 #### `blockPreset.pane`
 
 ```ts
-export function pane(id: string, textures: CubeTextures, options?: PresetOptions);
+export function pane(id: string, {
+    textures: texturesInput, ...options
+}: PanePresetOptions);
 ```
 
 #### `blockPreset.carpet`
 
 ```ts
-export function carpet(id: string, textures: CubeTextures, options?: PresetOptions);
+export function carpet(id: string, {
+    textures: texturesInput, ...options
+}: CarpetPresetOptions);
 ```
 
 #### `blockPreset.trapdoor`
 
 ```ts
-export function trapdoor(id: string, textures: CubeTextures, options?: PresetOptions);
+export function trapdoor(id: string, {
+    textures: texturesInput, ...options
+}: TrapdoorPresetOptions);
 ```
 
 #### `blockPreset.plate`
 
 ```ts
-export function plate(id: string, texture: TextureRef, options?: PresetOptions);
+export function plate(id: string, {
+    textures: texture, ...options
+}: PlatePresetOptions);
 ```
 
 #### `blockPreset.wall`
 
 ```ts
-export function wall(id: string, textures: CubeTextures, options?: PresetOptions);
+export function wall(id: string, {
+    textures: texturesInput, ...options
+}: WallPresetOptions);
 ```
 
 #### `blockPreset.torch`
 
 ```ts
-export function torch(id: string, texture: TextureRef, options?: PresetOptions & {
-    lightEmission?: [
-        number,
-        number,
-        number
-    ];
-});
+export function torch(id: string, {
+    textures: texture, ...options
+}: TorchPresetOptions);
 ```
 
 #### `blockPreset.door`
 
 ```ts
-export function door(id: string, textures: {
-    top: TextureRef;
-    bottom: TextureRef;
-}, options?: PresetOptions);
+export function door(id: string, {
+    textures, ...options
+}: DoorPresetOptions);
 ```
 
 #### `blockPreset.getDoorOpen`
@@ -3608,6 +3727,7 @@ export type Voxels = {
     dirty: {
         blocks: Set<Chunk>;
         light: Set<Chunk>;
+        removed: Set<string>;
     };
     columns: Map<string, Chunk[]>;
     registry: Blocks;
@@ -4199,7 +4319,7 @@ The camera, lighting and sky, and the traits that draw a node.
  * on the client state, which the renderer composes the render camera from.
  *
  * the renderer composes a per-room PerspectiveCamera each frame from
- * (camera node Transform + this trait), see `Renderer.syncRenderCamera`.
+ * (camera node Transform + this trait), see `RenderCamera.syncRenderCamera`.
  *
  * persist: false, runtime-only; camera nodes are recreated on room spin-up and
  * never survive a scene round-trip.
@@ -4377,12 +4497,41 @@ export function getEnvironmentTime(ctx: ScriptContext): number;
 
 ```ts
 /**
- * merge a partial config into the room's environment. slow path, writes
- * the config storage buffer. call from script init or in response to game
- * events, not every frame.
+ * Merge a partial config into the room's environment. Slow path: this
+ * repacks and re-uploads the config storage buffer, so call it from script
+ * init or in response to game events, never every frame. For time-of-day
+ * animation use `setEnvironmentTime`, which is the per-frame hot path.
  *
- * `sky.preset` and `sky.stops` are mutually exclusive at merge time: if
- * both are set, `stops` wins. presets compile to a `stops` array here.
+ * The merge is per-field, not just top-level. Only the fields you set change;
+ * everything else keeps its current value, and any group you omit is left
+ * entirely untouched. So `setEnvironment(ctx, { clouds: { density: 0.8 } })`
+ * changes cloud density alone and leaves cloud wind, sun, sky, etc. as they
+ * were. To reset a group, pass every field explicitly (or start from one of
+ * the `ENVIRONMENT_*` presets).
+ *
+ * Groups and their fields:
+ *   - `enabled`  master switch for the whole environment. When false, the
+ *                renderer also hides the sky and cloud meshes, so this is the
+ *                one flag that gates rendering, not just config values.
+ *   - `sky`      `{ preset }` selects a named LUT (see `SkyPreset`); `{ stops }`
+ *                supplies a custom 4-stop LUT. They are mutually exclusive at
+ *                merge time: if both are set, `stops` wins. A preset compiles
+ *                to its `stops` array here, so nothing distinguishes the two
+ *                downstream.
+ *   - `sun`      `enabled` toggles the directional light; `intensity` scales it.
+ *   - `moon`     `enabled` toggles the moon sprite.
+ *   - `stars`    `enabled` toggles stars; `density` is their coverage.
+ *   - `clouds`   see `EnvironmentConfig.clouds` for the field meanings
+ *                (altitude / thickness / density / wind).
+ *
+ * Example, dim the sun and thicken the clouds on some game event:
+ *
+ *   setEnvironment(ctx, {
+ *       sun: { intensity: 0.2 },
+ *       clouds: { enabled: true, density: 0.9, thickness: 4 },
+ *   });
+ *
+ * No-ops if the room has no active client environment (e.g. on the server).
  */
 export function setEnvironment(ctx: ScriptContext, config: EnvironmentConfig): void;
 ```
@@ -4987,11 +5136,11 @@ export function descendants(animator: AnimatorTrait, root: string, opts?: {
  * so the per-frame walk doesn't rebuild bitsets / hash each call.
  */
 export type Animations = {
-    _query: ReturnType<typeof query<[
+    animators: ReturnType<typeof query<[
         typeof AnimatorTrait
     ]>>;
-    _frameCount: number;
-    _nextLodPhase: number;
+    frameCount: number;
+    nextLodPhase: number;
 };
 ```
 
@@ -5683,6 +5832,7 @@ export type MouseKeyboardInput = {
     };
     _locked: boolean;
     _prevLocked: boolean;
+    _pointerCapturedByUi: boolean;
 };
 ```
 
@@ -5844,6 +5994,15 @@ export function isMouseLocked(mouseKeyboard: MouseKeyboardInput): boolean;
  * so a drag release doesn't double as a tap.
  */
 export function isMouseTap(mouseKeyboard: MouseKeyboardInput, button: MouseButton): boolean;
+```
+
+#### `isPointerCapturedByUi`
+
+```ts
+/** True while a UI overlay is holding pointer input (see _pointerCapturedByUi).
+ *  Viewport wheel gestures check this so a scroll over an open panel drives the
+ *  panel, not the game. */
+export function isPointerCapturedByUi(mouseKeyboard: MouseKeyboardInput): boolean;
 ```
 
 #### `isTouchButtonDown`
@@ -6088,11 +6247,7 @@ export type CanvasMode = 'world' | 'billboard' | 'y-billboard';
 ```ts
 export const CanvasTrait;
 ```
-#### `UILayer`
-
-```ts
-export const UILayer;
-```
+<!-- RenderModule: module not found: client/ui-layers -->
 
 ## Persistence
 
@@ -6150,7 +6305,7 @@ export type CommandHandle<S extends pack.Schema, D extends RpcDirection> = {
     };
     readonly direction: D;
     readonly schema: S;
-    readonly serdes: ReturnType<typeof pack.build>;
+    readonly serdes: ReturnType<typeof pack.build<S>>;
 };
 ```
 

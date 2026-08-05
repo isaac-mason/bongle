@@ -3,35 +3,84 @@
 
 import {
     AIR,
+    asset,
     block,
+    blockModel,
+    blockPreset,
     blockState,
+    blockTexture,
+    CullType,
     forEachBlock,
     getBlock,
     getBlockState,
     log,
+    MaterialType,
     onBlockBreak,
     onBlockBuild,
     onInit,
     setBlock,
     system,
+    use,
+    VertexAnimation,
 } from 'bongle';
 import { blockTextures } from 'bongle/kit';
 
-/* SNIPPET_START: define-block */
-// declare a block type at module scope. a cube model maps a texture to its
-// faces; `all` covers every face (use top/bottom/sides to differ them).
-const RubyBlock = block('guide:ruby', {
-    name: 'RubyBlock Block',
-    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.stone } } }),
+/* SNIPPET_START: first-cube */
+// 1. declare a texture from your own image. drop the .png in assets/ (drawn at
+//    16x16) and point src at it with asset(rel, import.meta.url).
+const StoneTexture = blockTexture('guide:stone', { src: asset('./assets/stone.png', import.meta.url) });
+
+// 2. wrap it in a cube. one texture argument paints all six faces the same.
+const StoneBlock = blockPreset.cube('guide:stone', { name: 'Stone', textures: StoneTexture });
+
+// keep the handle alive through bundling if nothing else in code references it
+use(StoneBlock);
+/* SNIPPET_END: first-cube */
+
+/* SNIPPET_START: cube-faces */
+// a block can draw from several textures, one per face. declare one blockTexture
+// per image, then pass a per-face map instead of a single texture: top/bottom/
+// sides (a grass-topped dirt block), or name all six for full control
+// (top/bottom/north/south/east/west).
+const GrassTop = blockTexture('guide:grass_top', { src: asset('./assets/grass_top.png', import.meta.url) });
+const GrassSide = blockTexture('guide:grass_side', { src: asset('./assets/grass_side.png', import.meta.url) });
+const DirtTexture = blockTexture('guide:dirt', { src: asset('./assets/dirt.png', import.meta.url) });
+
+const GrassBlock = blockPreset.cube('guide:grass', {
+    name: 'Grass',
+    textures: {
+        top: { texture: GrassTop },
+        bottom: { texture: DirtTexture },
+        sides: { texture: GrassSide },
+    },
 });
-/* SNIPPET_END: define-block */
+use(GrassBlock);
+/* SNIPPET_END: cube-faces */
+
+/* SNIPPET_START: block-api */
+// every preset is sugar over block(). here is what blockPreset.plant expands to:
+// a flower is not a cube at all but two crossed quads (blockModel.cross), plus
+// the handful of options that make vegetation behave. reach for block() directly
+// whenever a preset's shape or defaults do not fit.
+const PoppyTexture = blockTexture('guide:poppy', { src: asset('./assets/poppy.png', import.meta.url) });
+const PoppyBlock = block('guide:poppy', {
+    name: 'Poppy',
+    model: () => ({ type: 'custom' as const, quads: blockModel.cross(PoppyTexture) }),
+    collision: false, // walk straight through it
+    cull: CullType.SELF, // only hide faces against other poppies, never neighbours
+    lightOpacity: 0, // sparse quads, let light pass instead of shadowing
+    material: MaterialType.TRANSPARENT, // cutout alpha around the petals
+    vertexAnimation: VertexAnimation.PLANT_WIND_SWAY, // sway in the wind
+});
+use(PoppyBlock);
+/* SNIPPET_END: block-api */
 
 /* SNIPPET_START: edit-world */
 // read and write blocks through ctx.voxels, addressed by world x/y/z
-system('place-ruby', (ctx) => {
+system('place-grass', (ctx) => {
     onInit(ctx, () => {
         // write a block; server edits replicate to clients automatically
-        setBlock(ctx.voxels, 0, 0, 0, RubyBlock.defaultKey());
+        setBlock(ctx.voxels, 0, 0, 0, GrassBlock.defaultKey());
 
         // read a block's key, and its numeric state id (block kind + block state)
         const key = getBlock(ctx.voxels, 0, 0, 0);
@@ -53,11 +102,11 @@ system('place-ruby', (ctx) => {
 
 /* SNIPPET_START: block-events */
 // react when a block of this type is placed or broken (server-only)
-system('ruby-events', (ctx) => {
-    onBlockBuild(ctx, RubyBlock, (ev) => {
+system('grass-events', (ctx) => {
+    onBlockBuild(ctx, GrassBlock, (ev) => {
         console.log('placed at', ev.worldX, ev.worldY, ev.worldZ);
     });
-    onBlockBreak(ctx, RubyBlock, (ev) => {
+    onBlockBreak(ctx, GrassBlock, (ev) => {
         console.log('broke at', ev.worldX, ev.worldY, ev.worldZ);
     });
 });
