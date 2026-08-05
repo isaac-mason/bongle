@@ -115,6 +115,14 @@ const noopApply = () => {};
 /**
  * declare a prefab def at module scope.
  */
+// generic (args-bearing) overload MUST come first: TS contextually types an
+// un-annotated `fn` param from the first matching overload, so if the no-args
+// overload led, `fn`'s `args` would get pinned to `Record<string, never>` and
+// then fail the args-bearing call. see the two-overload note above.
+export function prefab<T extends PrefabType, S extends Schema>(
+    id: string,
+    options: PrefabOptions<T, S>,
+): PrefabHandle<SchemaType<S>>;
 export function prefab<T extends PrefabType>(
     id: string,
     options: {
@@ -124,10 +132,6 @@ export function prefab<T extends PrefabType>(
         fn?: (ctx: PrefabApplyContext<T>, args: Record<string, never>) => void;
     },
 ): PrefabHandle<Record<string, never>>;
-export function prefab<T extends PrefabType, S extends Schema>(
-    id: string,
-    options: PrefabOptions<T, S>,
-): PrefabHandle<SchemaType<S>>;
 export function prefab<T extends PrefabType, S extends Schema>(
     id: string,
     options: PrefabOptions<T, S>,
