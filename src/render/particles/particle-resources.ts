@@ -40,6 +40,7 @@ import {
     vec4f,
 } from 'gpucat';
 import type { TextureNode } from 'gpucat/dist/nodes/nodes';
+import { ditherDiscard } from '../dsl/dither';
 import type { EnvironmentResources } from '../environment/environment';
 
 // ── shared gpu structs ──────────────────────────────────────────────
@@ -242,8 +243,17 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
     const light = max(voxelLight, glowFloor).toVar('pvLight');
     const shaded = mul(sampled.rgb, light).toVar('pvShaded');
     const tintedRgb = mul(shaded, vTint.rgb).toVar('pvTintedRgb');
+    // overall opacity = texture alpha × tint alpha (the lifetime fade knob).
     const finalAlpha = mul(sampled.a, vTint.w).toVar('pvFinalAlpha');
-    const fragment = vec4f(tintedRgb, finalAlpha).toVar('pvFragment');
+    const color = vec4f(tintedRgb, finalAlpha).toVar('pvColor');
+
+    // dithered opacity, not blended: the full transparency drives an
+    // interleaved screen-door so coverage tracks the old blend alpha exactly,
+    // just pixelly. no hard cutout (alpha=1 disables the DSL's 0.5 cliff) —
+    // empty padding still drops out since fade -> 1 there. keeps particles in
+    // the opaque, depth-writing pipeline: no sort, no blend.
+    const fade = sub(f32(1), finalAlpha).toVar('pvFade');
+    const fragment = ditherDiscard(color, f32(1), fade).toVar('pvFragment');
 
     const material = new Material({
         name: 'particle-batched',
@@ -251,10 +261,8 @@ function createParticleMaterial(atlas: Texture, env: EnvironmentResources): { ma
         fragment,
         cullMode: 'none',
         depthTest: true,
-        // particles don't write depth, overlapping puffs should blend
-        // rather than punch holes in each other.
-        depthWrite: false,
-        transparent: true,
+        depthWrite: true,
+        transparent: false,
     });
 
     return { material, atlasTexNode };
