@@ -9,7 +9,7 @@
 // `export * as blockTextures`. Consumers reach them as
 // `blockTextures.stone`, `blockTextures.grassTop`, etc.
 
-import { asset, blockTexture } from 'bongle';
+import { asset, blockTexture, draw } from 'bongle';
 
 export const stone = blockTexture('kit:stone', {
     src: asset('./assets/textures/stone.png', import.meta.url),
@@ -101,43 +101,67 @@ export const snow = blockTexture('kit:snow', {
     src: asset('./assets/textures/snow.png', import.meta.url),
 });
 
-// wool, all 16 dye colors. names follow Minecraft's palette (textures sourced
-// from minetest_game's wool mod, MIT-licensed). `light_blue`, MC's 16th color,
-// has no minetest source texture; it's derived by tinting the shared white-wool
-// luminance noise to a light-blue hue.
-export const woolWhite = blockTexture('kit:wool_white', {
-    src: asset('./assets/textures/wool_white.png', import.meta.url),
-});
-export const woolLightGray = blockTexture('kit:wool_light_gray', {
-    src: asset('./assets/textures/wool_light_gray.png', import.meta.url),
-});
-export const woolGray = blockTexture('kit:wool_gray', { src: asset('./assets/textures/wool_gray.png', import.meta.url) });
-export const woolBlack = blockTexture('kit:wool_black', {
-    src: asset('./assets/textures/wool_black.png', import.meta.url),
-});
-export const woolBrown = blockTexture('kit:wool_brown', {
-    src: asset('./assets/textures/wool_brown.png', import.meta.url),
-});
-export const woolRed = blockTexture('kit:wool_red', { src: asset('./assets/textures/wool_red.png', import.meta.url) });
-export const woolOrange = blockTexture('kit:wool_orange', {
-    src: asset('./assets/textures/wool_orange.png', import.meta.url),
-});
-export const woolYellow = blockTexture('kit:wool_yellow', {
-    src: asset('./assets/textures/wool_yellow.png', import.meta.url),
-});
-export const woolLime = blockTexture('kit:wool_lime', { src: asset('./assets/textures/wool_lime.png', import.meta.url) });
-export const woolGreen = blockTexture('kit:wool_green', {
-    src: asset('./assets/textures/wool_green.png', import.meta.url),
-});
-export const woolCyan = blockTexture('kit:wool_cyan', { src: asset('./assets/textures/wool_cyan.png', import.meta.url) });
-export const woolLightBlue = blockTexture('kit:wool_light_blue', {
-    src: asset('./assets/textures/wool_light_blue.png', import.meta.url),
-});
-export const woolBlue = blockTexture('kit:wool_blue', { src: asset('./assets/textures/wool_blue.png', import.meta.url) });
-export const woolPurple = blockTexture('kit:wool_purple', {
-    src: asset('./assets/textures/wool_purple.png', import.meta.url),
-});
-export const woolMagenta = blockTexture('kit:wool_magenta', {
-    src: asset('./assets/textures/wool_magenta.png', import.meta.url),
-});
-export const woolPink = blockTexture('kit:wool_pink', { src: asset('./assets/textures/wool_pink.png', import.meta.url) });
+// multiply-tint a shared grayscale/near-white base to a target color at bake
+// time via `draw()`. one source image yields a whole color family (wool,
+// concrete) instead of a hand-drawn PNG per color: the base's luminance texture
+// (weave, grain) survives the multiply, only the hue changes. `r`/`g`/`b` are
+// the 0..255 target color.
+const multiplyTintedTexture = (id: string, baseHref: string, r: number, g: number, b: number) =>
+    blockTexture(id, {
+        src: draw(
+            (ctx, { base }, params) => {
+                ctx.drawImage(base, 0, 0);
+                ctx.globalCompositeOperation = 'multiply';
+                ctx.fillStyle = `rgb(${params.r}, ${params.g}, ${params.b})`;
+                ctx.fillRect(0, 0, 16, 16);
+            },
+            { size: [16, 16], inputs: { base: baseHref }, params: { r, g, b } },
+        ),
+    });
+
+// wool, all 16 dye colors mirroring Minecraft's palette. `wool_white.png`
+// (MIT-licensed, from minetest_game's wool mod) is the shared grayscale weave;
+// the other 15 multiply-tint it, so only the one base PNG is authored. RGB
+// values are Minecraft's per-color wool averages.
+const WOOL_BASE = asset('./assets/textures/wool_white.png', import.meta.url);
+export const woolWhite = blockTexture('kit:wool_white', { src: WOOL_BASE });
+export const woolLightGray = multiplyTintedTexture('kit:wool_light_gray', WOOL_BASE, 142, 142, 134);
+export const woolGray = multiplyTintedTexture('kit:wool_gray', WOOL_BASE, 62, 68, 71);
+export const woolBlack = multiplyTintedTexture('kit:wool_black', WOOL_BASE, 20, 21, 25);
+export const woolBrown = multiplyTintedTexture('kit:wool_brown', WOOL_BASE, 114, 71, 40);
+export const woolRed = multiplyTintedTexture('kit:wool_red', WOOL_BASE, 160, 39, 34);
+export const woolOrange = multiplyTintedTexture('kit:wool_orange', WOOL_BASE, 240, 118, 19);
+export const woolYellow = multiplyTintedTexture('kit:wool_yellow', WOOL_BASE, 248, 198, 39);
+export const woolLime = multiplyTintedTexture('kit:wool_lime', WOOL_BASE, 112, 185, 25);
+export const woolGreen = multiplyTintedTexture('kit:wool_green', WOOL_BASE, 84, 109, 27);
+export const woolCyan = multiplyTintedTexture('kit:wool_cyan', WOOL_BASE, 21, 137, 145);
+export const woolLightBlue = multiplyTintedTexture('kit:wool_light_blue', WOOL_BASE, 58, 175, 217);
+export const woolBlue = multiplyTintedTexture('kit:wool_blue', WOOL_BASE, 53, 57, 157);
+export const woolPurple = multiplyTintedTexture('kit:wool_purple', WOOL_BASE, 121, 42, 172);
+export const woolMagenta = multiplyTintedTexture('kit:wool_magenta', WOOL_BASE, 189, 68, 179);
+export const woolPink = multiplyTintedTexture('kit:wool_pink', WOOL_BASE, 237, 141, 172);
+
+// concrete, all 16 dye colors, tinted from one shared near-white grain base
+// (`concrete_base.png`) the same way as wool above. the base sits near white, so
+// multiplying by the target leaves the color intact with only the faint grain
+// showing through. RGB values are Minecraft's per-color concrete averages.
+const CONCRETE_BASE = asset('./assets/textures/concrete_base.png', import.meta.url);
+const concreteTexture = (id: string, r: number, g: number, b: number) =>
+    multiplyTintedTexture(id, CONCRETE_BASE, r, g, b);
+
+export const concreteWhite = concreteTexture('kit:concrete_white', 207, 213, 214);
+export const concreteLightGray = concreteTexture('kit:concrete_light_gray', 125, 125, 115);
+export const concreteGray = concreteTexture('kit:concrete_gray', 55, 58, 62);
+export const concreteBlack = concreteTexture('kit:concrete_black', 8, 10, 15);
+export const concreteBrown = concreteTexture('kit:concrete_brown', 96, 60, 32);
+export const concreteRed = concreteTexture('kit:concrete_red', 142, 33, 33);
+export const concreteOrange = concreteTexture('kit:concrete_orange', 224, 97, 0);
+export const concreteYellow = concreteTexture('kit:concrete_yellow', 241, 175, 21);
+export const concreteLime = concreteTexture('kit:concrete_lime', 94, 169, 24);
+export const concreteGreen = concreteTexture('kit:concrete_green', 73, 91, 36);
+export const concreteCyan = concreteTexture('kit:concrete_cyan', 21, 119, 136);
+export const concreteLightBlue = concreteTexture('kit:concrete_light_blue', 36, 137, 199);
+export const concreteBlue = concreteTexture('kit:concrete_blue', 44, 46, 143);
+export const concretePurple = concreteTexture('kit:concrete_purple', 100, 32, 156);
+export const concreteMagenta = concreteTexture('kit:concrete_magenta', 169, 48, 159);
+export const concretePink = concreteTexture('kit:concrete_pink', 213, 101, 143);

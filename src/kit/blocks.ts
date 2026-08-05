@@ -371,3 +371,265 @@ export const woolPink = blockPreset.cube('kit:wool_pink', {
     textures: tex.woolPink,
     sounds: soundPreset.leaves,
 });
+
+// ── Concrete ────────────────────────────────────────────────────────
+//
+// all 16 dye colors, each as a full cube plus slab and stairs. the textures are
+// one shared grain base tinted per color at bake time (see block-textures), so
+// this section is pure composition. hard mineral surface: stone sounds. kept as
+// individual exports so bundlers tree-shake unused colors and shapes.
+export const concreteWhite = blockPreset.cube('kit:concrete_white', {
+    name: 'White Concrete',
+    textures: tex.concreteWhite,
+    sounds: soundPreset.stone,
+});
+export const concreteWhiteSlab = blockPreset.slab('kit:concrete_white_slab', {
+    name: 'White Concrete Slab',
+    textures: tex.concreteWhite,
+    sounds: soundPreset.stone,
+});
+export const concreteWhiteStairs = blockPreset.stairs('kit:concrete_white_stairs', {
+    name: 'White Concrete Stairs',
+    textures: tex.concreteWhite,
+    sounds: soundPreset.stone,
+});
+
+export const concreteLightGray = blockPreset.cube('kit:concrete_light_gray', {
+    name: 'Light Gray Concrete',
+    textures: tex.concreteLightGray,
+    sounds: soundPreset.stone,
+});
+export const concreteLightGraySlab = blockPreset.slab('kit:concrete_light_gray_slab', {
+    name: 'Light Gray Concrete Slab',
+    textures: tex.concreteLightGray,
+    sounds: soundPreset.stone,
+});
+export const concreteLightGrayStairs = blockPreset.stairs('kit:concrete_light_gray_stairs', {
+    name: 'Light Gray Concrete Stairs',
+    textures: tex.concreteLightGray,
+    sounds: soundPreset.stone,
+});
+
+export const concreteGray = blockPreset.cube('kit:concrete_gray', {
+    name: 'Gray Concrete',
+    textures: tex.concreteGray,
+    sounds: soundPreset.stone,
+});
+export const concreteGraySlab = blockPreset.slab('kit:concrete_gray_slab', {
+    name: 'Gray Concrete Slab',
+    textures: tex.concreteGray,
+    sounds: soundPreset.stone,
+});
+export const concreteGrayStairs = blockPreset.stairs('kit:concrete_gray_stairs', {
+    name: 'Gray Concrete Stairs',
+    textures: tex.concreteGray,
+    sounds: soundPreset.stone,
+});
+
+export const concreteBlack = blockPreset.cube('kit:concrete_black', {
+    name: 'Black Concrete',
+    textures: tex.concreteBlack,
+    sounds: soundPreset.stone,
+});
+export const concreteBlackSlab = blockPreset.slab('kit:concrete_black_slab', {
+    name: 'Black Concrete Slab',
+    textures: tex.concreteBlack,
+    sounds: soundPreset.stone,
+});
+export const concreteBlackStairs = blockPreset.stairs('kit:concrete_black_stairs', {
+    name: 'Black Concrete Stairs',
+    textures: tex.concreteBlack,
+    sounds: soundPreset.stone,
+});
+
+export const concreteBrown = blockPreset.cube('kit:concrete_brown', {
+    name: 'Brown Concrete',
+    textures: tex.concreteBrown,
+    sounds: soundPreset.stone,
+});
+export const concreteBrownSlab = blockPreset.slab('kit:concrete_brown_slab', {
+    name: 'Brown Concrete Slab',
+    textures: tex.concreteBrown,
+    sounds: soundPreset.stone,
+});
+export const concreteBrownStairs = blockPreset.stairs('kit:concrete_brown_stairs', {
+    name: 'Brown Concrete Stairs',
+    textures: tex.concreteBrown,
+    sounds: soundPreset.stone,
+});
+
+export const concreteRed = blockPreset.cube('kit:concrete_red', {
+    name: 'Red Concrete',
+    textures: tex.concreteRed,
+    sounds: soundPreset.stone,
+});
+export const concreteRedSlab = blockPreset.slab('kit:concrete_red_slab', {
+    name: 'Red Concrete Slab',
+    textures: tex.concreteRed,
+    sounds: soundPreset.stone,
+});
+export const concreteRedStairs = blockPreset.stairs('kit:concrete_red_stairs', {
+    name: 'Red Concrete Stairs',
+    textures: tex.concreteRed,
+    sounds: soundPreset.stone,
+});
+
+export const concreteOrange = blockPreset.cube('kit:concrete_orange', {
+    name: 'Orange Concrete',
+    textures: tex.concreteOrange,
+    sounds: soundPreset.stone,
+});
+export const concreteOrangeSlab = blockPreset.slab('kit:concrete_orange_slab', {
+    name: 'Orange Concrete Slab',
+    textures: tex.concreteOrange,
+    sounds: soundPreset.stone,
+});
+export const concreteOrangeStairs = blockPreset.stairs('kit:concrete_orange_stairs', {
+    name: 'Orange Concrete Stairs',
+    textures: tex.concreteOrange,
+    sounds: soundPreset.stone,
+});
+
+export const concreteYellow = blockPreset.cube('kit:concrete_yellow', {
+    name: 'Yellow Concrete',
+    textures: tex.concreteYellow,
+    sounds: soundPreset.stone,
+});
+export const concreteYellowSlab = blockPreset.slab('kit:concrete_yellow_slab', {
+    name: 'Yellow Concrete Slab',
+    textures: tex.concreteYellow,
+    sounds: soundPreset.stone,
+});
+export const concreteYellowStairs = blockPreset.stairs('kit:concrete_yellow_stairs', {
+    name: 'Yellow Concrete Stairs',
+    textures: tex.concreteYellow,
+    sounds: soundPreset.stone,
+});
+
+export const concreteLime = blockPreset.cube('kit:concrete_lime', {
+    name: 'Lime Concrete',
+    textures: tex.concreteLime,
+    sounds: soundPreset.stone,
+});
+export const concreteLimeSlab = blockPreset.slab('kit:concrete_lime_slab', {
+    name: 'Lime Concrete Slab',
+    textures: tex.concreteLime,
+    sounds: soundPreset.stone,
+});
+export const concreteLimeStairs = blockPreset.stairs('kit:concrete_lime_stairs', {
+    name: 'Lime Concrete Stairs',
+    textures: tex.concreteLime,
+    sounds: soundPreset.stone,
+});
+
+export const concreteGreen = blockPreset.cube('kit:concrete_green', {
+    name: 'Green Concrete',
+    textures: tex.concreteGreen,
+    sounds: soundPreset.stone,
+});
+export const concreteGreenSlab = blockPreset.slab('kit:concrete_green_slab', {
+    name: 'Green Concrete Slab',
+    textures: tex.concreteGreen,
+    sounds: soundPreset.stone,
+});
+export const concreteGreenStairs = blockPreset.stairs('kit:concrete_green_stairs', {
+    name: 'Green Concrete Stairs',
+    textures: tex.concreteGreen,
+    sounds: soundPreset.stone,
+});
+
+export const concreteCyan = blockPreset.cube('kit:concrete_cyan', {
+    name: 'Cyan Concrete',
+    textures: tex.concreteCyan,
+    sounds: soundPreset.stone,
+});
+export const concreteCyanSlab = blockPreset.slab('kit:concrete_cyan_slab', {
+    name: 'Cyan Concrete Slab',
+    textures: tex.concreteCyan,
+    sounds: soundPreset.stone,
+});
+export const concreteCyanStairs = blockPreset.stairs('kit:concrete_cyan_stairs', {
+    name: 'Cyan Concrete Stairs',
+    textures: tex.concreteCyan,
+    sounds: soundPreset.stone,
+});
+
+export const concreteLightBlue = blockPreset.cube('kit:concrete_light_blue', {
+    name: 'Light Blue Concrete',
+    textures: tex.concreteLightBlue,
+    sounds: soundPreset.stone,
+});
+export const concreteLightBlueSlab = blockPreset.slab('kit:concrete_light_blue_slab', {
+    name: 'Light Blue Concrete Slab',
+    textures: tex.concreteLightBlue,
+    sounds: soundPreset.stone,
+});
+export const concreteLightBlueStairs = blockPreset.stairs('kit:concrete_light_blue_stairs', {
+    name: 'Light Blue Concrete Stairs',
+    textures: tex.concreteLightBlue,
+    sounds: soundPreset.stone,
+});
+
+export const concreteBlue = blockPreset.cube('kit:concrete_blue', {
+    name: 'Blue Concrete',
+    textures: tex.concreteBlue,
+    sounds: soundPreset.stone,
+});
+export const concreteBlueSlab = blockPreset.slab('kit:concrete_blue_slab', {
+    name: 'Blue Concrete Slab',
+    textures: tex.concreteBlue,
+    sounds: soundPreset.stone,
+});
+export const concreteBlueStairs = blockPreset.stairs('kit:concrete_blue_stairs', {
+    name: 'Blue Concrete Stairs',
+    textures: tex.concreteBlue,
+    sounds: soundPreset.stone,
+});
+
+export const concretePurple = blockPreset.cube('kit:concrete_purple', {
+    name: 'Purple Concrete',
+    textures: tex.concretePurple,
+    sounds: soundPreset.stone,
+});
+export const concretePurpleSlab = blockPreset.slab('kit:concrete_purple_slab', {
+    name: 'Purple Concrete Slab',
+    textures: tex.concretePurple,
+    sounds: soundPreset.stone,
+});
+export const concretePurpleStairs = blockPreset.stairs('kit:concrete_purple_stairs', {
+    name: 'Purple Concrete Stairs',
+    textures: tex.concretePurple,
+    sounds: soundPreset.stone,
+});
+
+export const concreteMagenta = blockPreset.cube('kit:concrete_magenta', {
+    name: 'Magenta Concrete',
+    textures: tex.concreteMagenta,
+    sounds: soundPreset.stone,
+});
+export const concreteMagentaSlab = blockPreset.slab('kit:concrete_magenta_slab', {
+    name: 'Magenta Concrete Slab',
+    textures: tex.concreteMagenta,
+    sounds: soundPreset.stone,
+});
+export const concreteMagentaStairs = blockPreset.stairs('kit:concrete_magenta_stairs', {
+    name: 'Magenta Concrete Stairs',
+    textures: tex.concreteMagenta,
+    sounds: soundPreset.stone,
+});
+
+export const concretePink = blockPreset.cube('kit:concrete_pink', {
+    name: 'Pink Concrete',
+    textures: tex.concretePink,
+    sounds: soundPreset.stone,
+});
+export const concretePinkSlab = blockPreset.slab('kit:concrete_pink_slab', {
+    name: 'Pink Concrete Slab',
+    textures: tex.concretePink,
+    sounds: soundPreset.stone,
+});
+export const concretePinkStairs = blockPreset.stairs('kit:concrete_pink_stairs', {
+    name: 'Pink Concrete Stairs',
+    textures: tex.concretePink,
+    sounds: soundPreset.stone,
+});
