@@ -422,6 +422,14 @@ export function create(): Renderer {
     return {
         kind,
         camera,
+        // Forward device-loss observation to the inner gpucat renderer (a live ref, so
+        // this stays correct if the backend renderer is ever swapped).
+        get onDeviceLost() {
+            return state.renderer.onDeviceLost;
+        },
+        set onDeviceLost(cb) {
+            state.renderer.onDeviceLost = cb;
+        },
         load: () => load(state),
         dispose: () => dispose(state),
         resize: (w, h) => resize(state, w, h),

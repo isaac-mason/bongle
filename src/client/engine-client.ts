@@ -130,6 +130,11 @@ export function init(opts: InitOptions) {
          *  dynamically imported (code-split), so it starts null like the resources
          *  below; the client never sees backend internals. */
         renderer: null! as Renderer,
+        /** Set true when the render backend loses its GPU device/context (see the
+         *  `onDeviceLost` wiring in `load()`). Rendering can't recover in place, so
+         *  the frame loop halts instead of spamming a dead context; the session must
+         *  be reloaded. */
+        deviceLost: false,
         net,
         rpc,
         driver: opts.driver,
@@ -270,6 +275,19 @@ export async function load(state: EngineClient) {
     // the preferred adapter/device can't come up, and hands back the device caps.
     const { renderer, caps } = await loadRenderBackend();
     state.renderer = renderer;
+
+    // A lost GPU device/context (driver reset, GPU-process crash, too many live
+    // contexts) invalidates every GPU resource. Recreating them in place is not
+    // wired, so mark the session dead: the frame loop (`update`) halts rather than
+    // driving a dead context, and we surface a clear, actionable message instead of
+    // a silent black screen. Recovery is a reload, which re-runs `load()`.
+    renderer.onDeviceLost = (info) => {
+        state.deviceLost = true;
+        console.error(
+            `[engine] render device lost (${info.api})${info.reason ? `: ${info.reason}` : ''}. ` +
+                `The GPU context was invalidated; reload to restore rendering.`,
+        );
+    };
 
     // user modules have registered (loadModule ran before this). build the
     // derived index fields once so boot reads a live `blockRegistry` /
@@ -1059,6 +1077,11 @@ export function clearScene(state: EngineClient, id: string): void {
 const MAX_DELTA_S = 0.2;
 
 export function update(state: EngineClient, delta: number) {
+    // Halt cleanly once the GPU device is lost: every render call would hit a dead
+    // context (GL errors / rejected WebGPU work) and the frame is not presentable
+    // anyway. The session stays frozen on its last frame until reloaded.
+    if (state.deviceLost) return;
+
     // one inbound dt, used two ways: clamped for integrators (physics/animation) so a
     // stall can't produce a runaway step; raw for `wall` (the smooth render clock +
     // server-clock sync), which must keep TRUE elapsed time and not lose it to the clamp.

@@ -12,7 +12,7 @@
 // camera resolution, env flush) are methods here. The contract is explicit and
 // references neither backend implementation.
 
-import type { Camera, PerspectiveCamera } from 'gpucat';
+import type { Camera, DeviceLostInfo, PerspectiveCamera } from 'gpucat';
 import type * as Performance from '../client/performance';
 import type { ClientRoom } from '../client/rooms';
 import type { Viewport } from '../client/viewport';
@@ -78,6 +78,10 @@ export type Renderer = {
      *  tier from them via `Performance.detect`). */
     load(): Promise<RenderDeviceCaps>;
     dispose(): void;
+    /** Set by the client to observe a lost GPU device/context (driver reset, GPU-process
+     *  crash, too many live contexts). Forwarded to the underlying backend renderer; the
+     *  device can't be recovered in place, so the client halts and surfaces a reload. */
+    onDeviceLost: ((info: DeviceLostInfo) => void) | null;
     resize(width: number, height: number): void;
     setInspectorVisible(visible: boolean): void;
     /** the engine-global shared render clock. in-scene editor materials
@@ -122,7 +126,7 @@ export type Renderer = {
 
 /** `?renderer=webgl` / `?renderer=webgpu` forces a backend (QA / debugging).
  *  Returns null when unset or in a non-DOM context. */
-function readRendererOverride(): RendererBackendKind | null {
+export function readRendererOverride(): RendererBackendKind | null {
     if (typeof location === 'undefined' || !location.search) return null;
     const v = new URLSearchParams(location.search).get('renderer');
     return v === 'webgl' || v === 'webgpu' ? v : null;
@@ -132,10 +136,11 @@ function readRendererOverride(): RendererBackendKind | null {
  * Choose the render backend for this session. A `?renderer=` override wins;
  * otherwise pick WebGPU when the platform exposes it, falling back to WebGL2.
  *
- * Sync + presence-only (`navigator.gpu`) on purpose: the real adapter handshake
- * happens in the backend's async `load()`. A `navigator.gpu` that fails to yield
- * an adapter still picks WebGPU here and surfaces in `load()`; the website probes
- * the adapter up front and only offers the game when a backend can actually run.
+ * Sync + presence-only (`navigator.gpu`): it can't tell whether the adapter will
+ * actually come up. The browser client doesn't use this — `loadRenderBackend`
+ * (render/load) probes the real adapter and falls back to WebGL2. This stays for
+ * the offline/bake path (render/offline), which runs where an adapter is injected
+ * or known-good, so presence is enough.
  */
 export function selectBackend(): RendererBackendKind {
     const override = readRendererOverride();
