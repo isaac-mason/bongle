@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  dashcat: link:../../dashcat
-
 importers:
 
   .:
@@ -54,8 +51,8 @@ importers:
         specifier: github:isaac-mason/crashcat#dev
         version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b
       dashcat:
-        specifier: link:../../dashcat
-        version: link:../../dashcat
+        specifier: github:isaac-mason/dashcat#main
+        version: https://codeload.github.com/isaac-mason/dashcat/tar.gz/2b69ce9d6fbf682769846189e2fda1a7beeccee2
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
@@ -1258,8 +1255,8 @@ packages:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
     engines: {node: '>=6.5'}
 
-  acorn@8.17.0:
-    resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
+  acorn@8.18.0:
+    resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
     engines: {node: '>=0.4.0'}
     hasBin: true
 
@@ -1439,6 +1436,10 @@ packages:
 
   cwise-compiler@1.1.3:
     resolution: {integrity: sha512-WXlK/m+Di8DMMcCjcWr4i+XzcQra9eCdXIJrgh4TUgh0pIS/yJduLxS9JgefsHJ/YVLdgPtXm9r62W92MvanEQ==}
+
+  dashcat@https://codeload.github.com/isaac-mason/dashcat/tar.gz/2b69ce9d6fbf682769846189e2fda1a7beeccee2:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/dashcat/tar.gz/2b69ce9d6fbf682769846189e2fda1a7beeccee2}
+    version: 0.0.1-alpha.1
 
   data-uri-to-buffer@4.0.1:
     resolution: {integrity: sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A==}
@@ -3041,7 +3042,7 @@ snapshots:
     dependencies:
       event-target-shim: 5.0.1
 
-  acorn@8.17.0:
+  acorn@8.18.0:
     optional: true
 
   agent-base@7.1.4: {}
@@ -3201,6 +3202,8 @@ snapshots:
   cwise-compiler@1.1.3:
     dependencies:
       uniq: 1.0.1
+
+  dashcat@https://codeload.github.com/isaac-mason/dashcat/tar.gz/2b69ce9d6fbf682769846189e2fda1a7beeccee2: {}
 
   data-uri-to-buffer@4.0.1: {}
 
@@ -3794,7 +3797,7 @@ snapshots:
   terser@5.46.1:
     dependencies:
       '@jridgewell/source-map': 0.3.11
-      acorn: 8.17.0
+      acorn: 8.18.0
       commander: 2.20.3
       source-map-support: 0.5.21
     optional: true
