@@ -22,7 +22,7 @@ import { zipSync } from 'fflate';
 
 const require = createRequire(import.meta.url);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const VENDOR_LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat'];
+const VENDOR_LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat', 'dashcat'];
 
 /** zip path → bytes. */
 const files = {};

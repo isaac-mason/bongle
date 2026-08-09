@@ -1,6 +1,6 @@
-import * as Icons from "../../../icons";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import * as Icons from '../../../icons';
 import { setEditorEnabledForRoom } from '../../client/editor';
 import { useClient } from '../../client/ui/stores/client-store';
 import '../../client/ui/editor.css';
@@ -20,8 +20,6 @@ import { ToastStack } from './toast-stack';
 import { ToolActions } from './tool-actions';
 import { TopToolbar } from './top-toolbar';
 import { ViewportContextMenu } from './viewport-context-menu';
-
-const DebugPanel = lazy(() => import('../../client/ui/debug-panel'));
 
 function isInputFocused(): boolean {
     const el = document.activeElement;
@@ -128,8 +126,8 @@ function RightPanelToggle({ collapsed, onToggle }: { collapsed: boolean; onToggl
  *   └────┴────────────────────────────┴───────┘
  *
  * left toolbar and right panel are normal flex siblings, they shrink the
- * actual 3d viewport. overlays (ToolActions, ControlModeWidget, DebugPanel)
- * are absolute-positioned inside the canvas container. the first-person
+ * actual 3d viewport. overlays (ToolActions, ControlModeWidget) are
+ * absolute-positioned inside the canvas container. the first-person
  * crosshair is the engine's play-mode HUD widget, driven by the
  * PlayerControllerTrait that character mode installs, not editor chrome.
  */
@@ -148,7 +146,7 @@ function EditUI() {
         if (!s.room.editor) return true;
         return s.playerToView.get(s.room.playerId) === 'edit';
     });
-    const showOrientationCube = useEditRoom((s) => s.showOrientationCube);
+    const showOrientationCube = useEditor((s) => s.showOrientationCube);
     const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_DEFAULT);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
 
@@ -175,9 +173,6 @@ function EditUI() {
         const store = activeEditRoomStore();
         if (store.getState().controlMode === 'fly') store.getState().setControlMode('character');
     }, [inputMode]);
-
-    const debugOpen = useClient((s) => s.debugOpen);
-    const debugTab = useClient((s) => s.debugTab);
 
     // global editor hotkeys, must work at the DOM layer because the editor
     // script's per-frame onInput hook only fires when the editor module is
@@ -272,16 +267,9 @@ function EditUI() {
                 <div className="flex-1 relative overflow-hidden flex flex-col">
                     <Viewport />
 
-                    {/* debug panel, ` toggles open; top tab strip switches
-                        view. 'renderer' tab surfaces the gpucat Inspector
-                        overlay (toggled in engine-client.ts) so the panel
-                        body is empty in that mode. Whole panel rides a lazy
-                        chunk, Suspense renders nothing while it loads. */}
-                    {debugOpen && (
-                        <Suspense fallback={null}>
-                            <DebugPanel tab={debugTab} />
-                        </Suspense>
-                    )}
+                    {/* debug dashboard is vanilla dashcat mounted straight to
+                        the DOM (client/ui/dashboard.ts), toggled by ` via the
+                        `debugOpen` store bit — nothing to render here. */}
 
                     {/* in-canvas overlays, editor-enabled rooms only */}
                     {editorEnabled && (
@@ -327,17 +315,12 @@ function EditUI() {
                         floats over the canvas so it stays reachable while the
                         panel is collapsed (mainly a touch affordance). */}
                     {editorEnabled && (
-                        <RightPanelToggle
-                            collapsed={rightPanelCollapsed}
-                            onToggle={() => setRightPanelCollapsed((c) => !c)}
-                        />
+                        <RightPanelToggle collapsed={rightPanelCollapsed} onToggle={() => setRightPanelCollapsed((c) => !c)} />
                     )}
                 </div>
 
                 {/* right panel, collapsible into a drawer (auto-tucked on touch) */}
-                {editorEnabled && !rightPanelCollapsed && (
-                    <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />
-                )}
+                {editorEnabled && !rightPanelCollapsed && <RightPanel width={rightPanelWidth} onResize={onRightPanelResize} />}
             </div>
 
             {/* carried-item cursor preview, follows mouse while picking up an inventory item */}

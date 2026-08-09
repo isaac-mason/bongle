@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ChatPanel, useChatEnabled, useChatPanel } from './chat/chat-panel';
 import { useClient } from './stores/client-store';
@@ -6,8 +6,9 @@ import { Viewport } from './viewport';
 
 import './editor.css';
 
-// lazy, same chunk-splitting as edit mode; only loads when the panel opens.
-const DebugPanel = lazy(() => import('./debug-panel'));
+// the debug dashboard is vanilla dashcat mounted straight to the DOM (see
+// client/ui/dashboard.ts), toggled by backtick via the `debugOpen` store bit.
+// nothing to render in the React tree here.
 
 function isInputFocused(): boolean {
     const el = document.activeElement;
@@ -17,8 +18,6 @@ function isInputFocused(): boolean {
 }
 
 function PlayUI() {
-    const debugOpen = useClient((s) => s.debugOpen);
-    const debugTab = useClient((s) => s.debugTab);
     // apps embedding the engine as a pure display surface call
     // `chat.setEnabled(ctx, false)`; drop the panel and its keyboard openers.
     const chatEnabled = useChatEnabled();
@@ -49,11 +48,6 @@ function PlayUI() {
         <div className="fixed inset-0 flex flex-col">
             <Viewport />
             {chatEnabled && <ChatPanel />}
-            {debugOpen && (
-                <Suspense fallback={null}>
-                    <DebugPanel tab={debugTab} />
-                </Suspense>
-            )}
         </div>
     );
 }

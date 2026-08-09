@@ -1,5 +1,6 @@
+import type { Panel, PanelOptions } from 'dashcat';
 import * as Debug from '../core/debug';
-import type { ScriptContext } from '../core/scene/scripts';
+import { onDispose, type ScriptContext } from '../core/scene/scripts';
 
 /**
  * format args the way `console.log` formats them: strings pass through,
@@ -61,4 +62,25 @@ export function warn(ctx: ScriptContext, ...args: unknown[]): void {
 /** log an error tagged with the script's trait + node. */
 export function error(ctx: ScriptContext, ...args: unknown[]): void {
     emit(ctx, 'error', args);
+}
+
+/**
+ * open a floating debug panel on the shared dashboard, scoped to this script: it
+ * is closed automatically when the script instance disposes (room teardown, node
+ * removal, hot-reload), so game debug UI can't leak. the returned dashcat `Panel`
+ * takes the full control surface — `add` (options), `monitor`, `graph`, `log`,
+ * `stat`, `tabs`, etc. — alongside the engine's panels.
+ *
+ * client-only: returns `null` on the server. `title` defaults to the script's
+ * trait/node tag, mirroring how `log` tags its source. for full control (or
+ * manual lifecycle) reach `ctx.client.debug.dashboard` directly.
+ */
+export function panel(ctx: ScriptContext, opts: PanelOptions = {}): Panel | null {
+    if (!ctx.client) return null;
+    const title = opts.title ?? `${ctx.trait._def.id}#${ctx.node.id}`;
+    const p = ctx.client.debug.dashboard.panel({ ...opts, title });
+    // close() fully disposes the floating window (controls + DOM + panels[]);
+    // the inherited destroy() only tears down controls, orphaning the window.
+    onDispose(ctx, () => p.close());
+    return p;
 }

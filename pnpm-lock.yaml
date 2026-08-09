@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  dashcat: link:../../dashcat
+
 importers:
 
   .:
@@ -50,6 +53,9 @@ importers:
       crashcat:
         specifier: github:isaac-mason/crashcat#dev
         version: https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b
+      dashcat:
+        specifier: link:../../dashcat
+        version: link:../../dashcat
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
@@ -58,13 +64,13 @@ importers:
         version: https://codeload.github.com/isaac-mason/gatho/tar.gz/775b8e38b4e64c15f7a46072e255cce66cd19c7d
       gpucat:
         specifier: github:isaac-mason/gpucat#main
-        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/19af76c1780fcafe39fda1a0232243d1d5d9a8d1
+        version: https://codeload.github.com/isaac-mason/gpucat/tar.gz/a5e38749696f5f92ec20a691c2669fe3a9493625
       magic-string:
         specifier: ^0.30.21
         version: 0.30.21
       mathcat:
         specifier: github:isaac-mason/mathcat#dev
-        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73
+        version: https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2
       mediabunny:
         specifier: ^1.50.8
         version: 1.50.8
@@ -1585,8 +1591,8 @@ packages:
     deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/19af76c1780fcafe39fda1a0232243d1d5d9a8d1:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/19af76c1780fcafe39fda1a0232243d1d5d9a8d1}
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/a5e38749696f5f92ec20a691c2669fe3a9493625:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/gpucat/tar.gz/a5e38749696f5f92ec20a691c2669fe3a9493625}
     version: 0.0.0-alpha.1
 
   graceful-fs@4.2.11:
@@ -1740,8 +1746,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73:
-    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73}
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2:
+    resolution: {tarball: https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2}
     version: 0.0.14
 
   mediabunny@1.50.8:
@@ -3175,7 +3181,7 @@ snapshots:
 
   crashcat@https://codeload.github.com/isaac-mason/crashcat/tar.gz/ee5b3cc60ffe29a2eac3350aac7d737c2510519b:
     dependencies:
-      mathcat: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73
+      mathcat: https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2
 
   crc-32@1.2.2: {}
 
@@ -3331,9 +3337,9 @@ snapshots:
       package-json-from-dist: 1.0.1
       path-scurry: 1.11.1
 
-  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/19af76c1780fcafe39fda1a0232243d1d5d9a8d1:
+  gpucat@https://codeload.github.com/isaac-mason/gpucat/tar.gz/a5e38749696f5f92ec20a691c2669fe3a9493625:
     dependencies:
-      mathcat: https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73
+      mathcat: https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2
 
   graceful-fs@4.2.11: {}
 
@@ -3451,7 +3457,7 @@ snapshots:
 
   marked@14.0.0: {}
 
-  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/c25a32156b50b228a9d846e0ec835396343b7a73: {}
+  mathcat@https://codeload.github.com/isaac-mason/mathcat/tar.gz/fe42b67f84b85efbce1f8aee6b2df30e349e55e2: {}
 
   mediabunny@1.50.8:
     dependencies:

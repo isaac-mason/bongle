@@ -150,6 +150,7 @@
         "@tanstack/react-virtual": "^3.13.24",
         "archiver": "^7.0.1",
         "crashcat": "github:isaac-mason/crashcat#dev",
+        "dashcat": "github:isaac-mason/dashcat#main",
         "fflate": "^0.8.2",
         "gatho": "github:isaac-mason/gatho",
         "gpucat": "github:isaac-mason/gpucat#main",

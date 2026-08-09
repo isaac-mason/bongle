@@ -43,6 +43,7 @@ import * as Input from './input';
 import * as Net from './net';
 import * as Performance from './performance';
 import * as Replication from './replication';
+import { clientDebug } from './ui/dashboard';
 import { useClient } from './ui/stores/client-store';
 import { UILayer } from './ui/util/ui-layers';
 
@@ -696,6 +697,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         domElement: canvas,
         viewport,
         touchOverlay,
+        debug: clientDebug,
         input,
         player: playerNode,
         camera: cameraNode,

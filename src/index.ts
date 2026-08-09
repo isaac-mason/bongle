@@ -9,6 +9,9 @@
 // graph acyclic: builtins depend on api helpers, this file depends on both,
 // but neither depends on this file.
 
+// dashcat surface types, for games annotating panels/controls built via
+// `debug.panel(ctx, …)` or `ctx.client.debug.dashboard`.
+export type { AddOptions, Dashboard, Handle, LogEntry, Panel, PanelOptions } from 'dashcat';
 export * from './api/animation';
 export * from './api/asset';
 export * from './api/audio';
@@ -18,7 +21,7 @@ export * as chat from './api/chat';
 export { client } from './api/client';
 export { clientToUser } from './api/clients';
 export * from './api/crosshair';
-export * from './api/debug';
+export * as debug from './api/debug';
 export * from './api/environment';
 export * from './api/input';
 export * from './api/lighting';

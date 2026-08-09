@@ -16,9 +16,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDOR = join(ROOT, 'vendor');
 
-// closed set (same as gather-lib-types): mathcat/packcat have no deps,
+// closed set (same as gather-lib-types): mathcat/packcat/dashcat have no deps,
 // gpucat→mathcat, crashcat→mathcat. All ship built dist ESM.
-const LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat'];
+const LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat', 'dashcat'];
 
 /** package root dir for a bare name — walk up from its resolved main entry to
  *  the package.json that names it (exports maps often omit ./package.json). */

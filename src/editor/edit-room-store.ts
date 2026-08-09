@@ -25,10 +25,9 @@ import { create, type StoreApi, useStore } from 'zustand';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
-import { getTrait } from '../core/scene/scene-tree';
 import type { PrefabConfig, Realm } from '../core/scene/scene-tree';
-import { EDITOR_JOIN_KEY, type ScriptContext } from '../core/scene/scripts';
-import { send } from '../core/scene/scripts';
+import { getTrait } from '../core/scene/scene-tree';
+import { EDITOR_JOIN_KEY, type ScriptContext, send } from '../core/scene/scripts';
 import * as Selection from '../core/scene/selection';
 import * as Actions from './actions';
 import * as Blueprint from './blueprint';
@@ -316,12 +315,6 @@ export type EditRoomState = {
     flySpeed: number | null;
     flySpeedShownAt: number;
 
-    /* ── debug visuals ── */
-    showPhysicsColliders: boolean;
-    showGrid: boolean;
-    showOrientationCube: boolean;
-    showChunkBoundaries: boolean;
-
     /* ── undo / redo ── */
     undoStack: Action[];
     redoStack: Action[];
@@ -406,10 +399,6 @@ export type EditRoomState = {
     setSnapTo: (snap: SnapTo) => void;
     setTransformPivotOffset: (offset: Vec3) => void;
     setControlMode: (mode: ControlMode) => void;
-    setShowPhysicsColliders: (show: boolean) => void;
-    setShowGrid: (show: boolean) => void;
-    setShowOrientationCube: (show: boolean) => void;
-    setShowChunkBoundaries: (show: boolean) => void;
     setInspectedVoxel: (v: { wx: number; wy: number; wz: number; key: string } | null) => void;
     setSelectionBehavior: (mode: SelectionBehavior) => void;
     setSelectTarget: (filter: SelectTarget) => void;
@@ -558,11 +547,6 @@ function initialFields() {
         controlMode: 'fly' as ControlMode,
         flySpeed: null as number | null,
         flySpeedShownAt: 0,
-
-        showPhysicsColliders: false,
-        showGrid: false,
-        showOrientationCube: false,
-        showChunkBoundaries: false,
 
         undoStack: [] as Action[],
         redoStack: [] as Action[],
@@ -823,10 +807,6 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         setSnapTo: (snapTo) => set({ snapTo }),
         setTransformPivotOffset: (transformPivotOffset) => set({ transformPivotOffset }),
         setControlMode: (controlMode) => set({ controlMode }),
-        setShowPhysicsColliders: (show) => set({ showPhysicsColliders: show }),
-        setShowGrid: (show) => set({ showGrid: show }),
-        setShowOrientationCube: (show) => set({ showOrientationCube: show }),
-        setShowChunkBoundaries: (show) => set({ showChunkBoundaries: show }),
         setInspectedVoxel: (inspectedVoxel) => set({ inspectedVoxel }),
         setSelectionBehavior: (mode) => set({ selectionBehavior: mode }),
         setSelectTarget: (filter) => set({ selectTarget: filter }),
@@ -915,10 +895,6 @@ const FALLBACK_STORE: EditRoomStoreApi = create<EditRoomState>((set) => ({
     setSnapTo: (snapTo) => set({ snapTo }),
     setTransformPivotOffset: (transformPivotOffset) => set({ transformPivotOffset }),
     setControlMode: (controlMode) => set({ controlMode }),
-    setShowPhysicsColliders: (show) => set({ showPhysicsColliders: show }),
-    setShowGrid: (show) => set({ showGrid: show }),
-    setShowOrientationCube: (show) => set({ showOrientationCube: show }),
-    setShowChunkBoundaries: (show) => set({ showChunkBoundaries: show }),
     setInspectedVoxel: (inspectedVoxel) => set({ inspectedVoxel }),
     setSelectionBehavior: (mode) => set({ selectionBehavior: mode }),
     setSelectTarget: (filter) => set({ selectTarget: filter }),

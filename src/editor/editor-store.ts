@@ -137,6 +137,14 @@ export type EditorStore = {
     netSimBurstMs: number;
     netSimBurstChance: number;
 
+    /* ── debug view toggles, global (shared across rooms). read by the editor's
+     *  per-room update loop (index.ts) + the orientation-cube overlay. per-session,
+     *  never persisted. ── */
+    showPhysicsColliders: boolean;
+    showGrid: boolean;
+    showOrientationCube: boolean;
+    showChunkBoundaries: boolean;
+
     /* ── hotbar (localStorage-persisted user palette, shared across rooms) ── */
     hotbar: HotbarSlot[]; // length === HOTBAR_SIZE
 
@@ -180,6 +188,10 @@ export type EditorStore = {
     setNetSimJitterMs: (ms: number) => void;
     setNetSimBurstMs: (ms: number) => void;
     setNetSimBurstChance: (chance: number) => void;
+    setShowPhysicsColliders: (show: boolean) => void;
+    setShowGrid: (show: boolean) => void;
+    setShowOrientationCube: (show: boolean) => void;
+    setShowChunkBoundaries: (show: boolean) => void;
 };
 
 // fallback release for the Play spinner. the play room normally activates in
@@ -239,6 +251,11 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     netSimJitterMs: 0,
     netSimBurstMs: 0,
     netSimBurstChance: 0.02,
+
+    showPhysicsColliders: false,
+    showGrid: false,
+    showOrientationCube: false,
+    showChunkBoundaries: false,
 
     hotbar: loadHotbar(),
 
@@ -339,6 +356,10 @@ export const useEditor = create<EditorStore>((set, _get) => ({
     setNetSimJitterMs: (netSimJitterMs) => set({ netSimJitterMs }),
     setNetSimBurstMs: (netSimBurstMs) => set({ netSimBurstMs }),
     setNetSimBurstChance: (netSimBurstChance) => set({ netSimBurstChance }),
+    setShowPhysicsColliders: (showPhysicsColliders) => set({ showPhysicsColliders }),
+    setShowGrid: (showGrid) => set({ showGrid }),
+    setShowOrientationCube: (showOrientationCube) => set({ showOrientationCube }),
+    setShowChunkBoundaries: (showChunkBoundaries) => set({ showChunkBoundaries }),
 }));
 
 // persist hotbar slot changes to localStorage. only fires when the array

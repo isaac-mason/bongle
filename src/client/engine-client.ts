@@ -45,6 +45,7 @@ import * as Performance from './performance';
 import * as Replication from './replication';
 import * as Rooms from './rooms';
 import * as ClientRpc from './rpc';
+import { ensureDebugDashboard, setDebugDashboardOpen } from './ui/dashboard';
 import { useClient } from './ui/stores/client-store';
 import * as Viewport from './viewport';
 
@@ -423,6 +424,9 @@ export async function load(state: EngineClient) {
             Debug.setEnabled(room.clientMetrics, s.debugOpen);
             Debug.setEnabled(room.serverMetrics, s.debugOpen);
         }
+        // show/hide the debug dashboard; opening builds it on first use.
+        if (s.debugOpen) ensureDebugDashboard().setOpen(true);
+        else setDebugDashboardOpen(false);
     });
 
     // UI mounting is the boot template's job: edit mode calls
@@ -1299,17 +1303,16 @@ export function update(state: EngineClient, delta: number) {
          * a single client may hold multiple Players in the same room. */
         // debug network traffic is editor-only, player builds never request
         // server metrics or subscribe to server logs.
-        const { debugOpen, debugTab } = useClient.getState();
+        const { debugOpen } = useClient.getState();
 
-        // gpucat Inspector overlay, visible only on the 'renderer' tab while
-        // the panel is open. available in non-editor builds too (debug perf
-        // for shipped games).
-        state.renderer.setInspectorVisible(debugOpen && debugTab === 'renderer');
+        // gpucat Inspector overlay (GPU timing), shown alongside the dashboard
+        // whenever debug is open. available in non-editor builds too.
+        state.renderer.setInspectorVisible(debugOpen);
 
-        // request server metrics for the summary/perf/net panels in EVERY build, not
-        // just the editor, so a shipped game surfaces server-side perf too. a player
-        // who opens the panel (backtick) can see it — an accepted tradeoff.
-        if (debugOpen && (debugTab === 'summary' || debugTab === 'perf' || debugTab === 'net' || debugTab === 'logs')) {
+        // request server metrics for the perf panel in EVERY build, not just the
+        // editor, so a shipped game surfaces server-side perf too. a player who
+        // opens the dashboard (backtick) can see it — an accepted tradeoff.
+        if (debugOpen) {
             const seen = new Set<string>();
             for (const room of state.rooms.rooms.values()) {
                 if (seen.has(room.roomId)) continue;
@@ -1321,9 +1324,9 @@ export function update(state: EngineClient, delta: number) {
 
         if (env.editor) {
             /* log subscription: flat per-client bit. server pushes
-             * `debug_logs` for every room we hold a Player in while enabled.
-             * only active in the logs view (editor-only tab). */
-            const subscribeLogs = debugOpen && debugTab === 'logs';
+             * `debug_logs` for every room we hold a Player in while the
+             * dashboard is open (the logs panel is editor-only). */
+            const subscribeLogs = debugOpen;
             if (subscribeLogs !== state.debugLogsSubscribed) {
                 Net.send(state.net, { type: 'debug_subscribe', enabled: subscribeLogs });
                 state.debugLogsSubscribed = subscribeLogs;

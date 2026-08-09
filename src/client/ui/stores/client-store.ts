@@ -8,7 +8,6 @@
 import { create } from 'zustand';
 import type { PlayerId } from '../../../core/client';
 import type * as Debug from '../../../core/debug';
-import { env } from '../../../env';
 import type { InputManager } from '../../input';
 import type { ClientRoom } from '../../rooms';
 
@@ -17,18 +16,6 @@ import type { ClientRoom } from '../../rooms';
  *  touch CAPABILITY (`device.deviceType`): a mouse user on a touchscreen laptop is
  *  `mouse`, and a hybrid flips as they switch. */
 export type InputMode = 'mouse' | 'touch';
-
-/** debug panel tab. 'logs' and 'deps' are editor-only and filtered out of
- *  the tab strip in non-editor builds. 'renderer' shows the gpucat
- *  Inspector overlay; the panel's own content area is empty in that mode. */
-export type DebugTab = 'summary' | 'perf' | 'net' | 'logs' | 'renderer' | 'deps';
-
-/** Tabs visible in the current build. Lives here (not in debug-panel.tsx)
- *  so the keyboard handler in edit-ui.tsx can map `` ` + N `` to a tab
- *  without pulling the lazy DebugPanel chunk eagerly. */
-export function availableDebugTabs(): DebugTab[] {
-    return env.editor ? ['summary', 'perf', 'net', 'logs', 'renderer', 'deps'] : ['summary', 'perf', 'net', 'renderer'];
-}
 
 export type ClientStore = {
     /** the viewport div that room canvases are appended to */
@@ -48,15 +35,12 @@ export type ClientStore = {
     inputMode: InputMode;
     setInputMode: (mode: InputMode) => void;
 
-    // debug panel, backtick toggles `debugOpen`; the panel's top tab strip
-    // switches `debugTab`. 'renderer' surfaces the gpucat Inspector overlay
-    // (driven from engine-client.ts via setInspectorVisible), which is
-    // intentionally available in play builds too.
+    // debug dashboard, backtick toggles `debugOpen`. the dashboard itself is
+    // vanilla dashcat (client/ui/dashboard.ts), driven off this bit; the
+    // gpucat Inspector overlay is shown alongside it while open.
     debugOpen: boolean;
     setDebugOpen: (open: boolean) => void;
     toggleDebugOpen: () => void;
-    debugTab: DebugTab;
-    setDebugTab: (tab: DebugTab) => void;
 
     /** global client-tick metrics (state.metrics on EngineClient).
      *  measured across all rooms, useful for spotting whole-frame regressions. */
@@ -96,8 +80,6 @@ export const useClient = create<ClientStore>((set) => ({
     debugOpen: false,
     setDebugOpen: (debugOpen) => set({ debugOpen }),
     toggleDebugOpen: () => set((s) => ({ debugOpen: !s.debugOpen })),
-    debugTab: 'summary',
-    setDebugTab: (debugTab) => set({ debugTab }),
 
     clientGlobalMetrics: null,
     setClientGlobalMetrics: (clientGlobalMetrics) => set({ clientGlobalMetrics }),

@@ -1,7 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { ActiveBlockPane } from './panes/active-block-pane';
 import { CollapsiblePane } from './panes/collapsible-pane';
-import { DebugPane } from './panes/debug-pane';
 import { HierarchyPane } from './panes/hierarchy-pane';
 import { HistoryPane } from './panes/history-pane';
 import { ToolSpacePane, useToolPaneTitle } from './panes/tool-space-pane';
@@ -78,10 +77,6 @@ export function RightPanel({ width, onResize }: RightPanelProps) {
 
             <CollapsiblePane title="history" defaultOpen={true} defaultHeight={120}>
                 <HistoryPane />
-            </CollapsiblePane>
-
-            <CollapsiblePane title="debug" defaultOpen={false}>
-                <DebugPane />
             </CollapsiblePane>
         </div>
     );

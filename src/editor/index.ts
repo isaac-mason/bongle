@@ -16,11 +16,11 @@ import { getWorldPosition, getWorldQuaternion, setWorldPosition, setWorldQuatern
 import * as ClientChat from '../client/chat';
 import { installEditorClientListeners } from '../client/editor';
 import type { EngineClient } from '../client/engine-client';
-import { isKeyDown, isKeyJustDown, isKeyJustUp, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
+import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
 import { resolveRoomCamera, setActivePlayer } from '../client/rooms';
-import { availableDebugTabs, useClient } from '../client/ui/stores/client-store';
+import { useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
 import {
@@ -590,11 +590,10 @@ script(
         // as onInput so we land before fly/orbit/character controllers
         // consume the same mouse delta or wheel.
         //
-        // chord-prefix patterns (` debug, V/M/B categories): tap-alone
-        // commits on keyup; hold + digit jumps to a slot and suppresses
-        // the keyup commit via a "consumed" flag. mirrors the convention
-        // that was previously DOM-listener-based in client/ui/ui.tsx.
-        let backtickConsumed = false;
+        // chord-prefix pattern (V/M/B categories): tap-alone commits on
+        // keyup; hold + digit jumps to a slot and suppresses the keyup
+        // commit via a "consumed" flag. mirrors the convention that was
+        // previously DOM-listener-based in client/ui/ui.tsx.
         let heldCategory: ToolCategoryId | null = null;
         let categoryConsumed = false;
         onInput(ctx, () => {
@@ -606,22 +605,8 @@ script(
             // letter-key tool shortcuts.
             if (isModDown(mk)) return;
 
-            // ── backtick: debug panel chord prefix ──
-            if (isKeyJustDown(mk, 'Backquote')) backtickConsumed = false;
-            if (isKeyDown(mk, 'Backquote')) {
-                for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
-                    if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
-                        const tabs = availableDebugTabs();
-                        if (i < tabs.length) {
-                            useClient.getState().setDebugTab(tabs[i]!);
-                            useClient.getState().setDebugOpen(true);
-                            backtickConsumed = true;
-                        }
-                        break;
-                    }
-                }
-            }
-            if (isKeyJustUp(mk, 'Backquote') && !backtickConsumed) {
+            // ── backtick: toggle the debug dashboard ──
+            if (isKeyJustDown(mk, 'Backquote')) {
                 useClient.getState().toggleDebugOpen();
             }
 
@@ -671,7 +656,7 @@ script(
             }
 
             // ── hotbar 1..9 (suppressed while a chord prefix is held) ──
-            if (!isKeyDown(mk, 'Backquote') && heldCategory === null) {
+            if (heldCategory === null) {
                 for (let i = 0; i < HOTBAR_NUMBER_KEYS.length; i++) {
                     if (isKeyJustDown(mk, HOTBAR_NUMBER_KEYS[i]!)) {
                         const s = store.getState();
@@ -865,14 +850,15 @@ script(
                 lastHoverVoxel: hoverVoxel ?? cur.lastHoverVoxel,
             }));
 
-            // debug collider visualization, runs every frame regardless of active tool
-            DebugVisuals.update(debugVisualsState, room.physics.rigid.world, store.getState().showPhysicsColliders);
+            // debug collider visualization, runs every frame regardless of active tool.
+            // the show* toggles are global (useEditor), shared across rooms.
+            DebugVisuals.update(debugVisualsState, room.physics.rigid.world, useEditor.getState().showPhysicsColliders);
 
             // grid visualization
-            GridVisuals.update(gridVisualsState, store.getState().showGrid);
+            GridVisuals.update(gridVisualsState, useEditor.getState().showGrid);
 
             // chunk-boundary wireframe overlay
-            ChunkBoundsVisuals.update(chunkBoundsState, ctx.voxels, store.getState().showChunkBoundaries);
+            ChunkBoundsVisuals.update(chunkBoundsState, ctx.voxels, useEditor.getState().showChunkBoundaries);
 
             // force-release any active grab when we leave transform/grab.
             // covers tool switches and transformMode flips that happen

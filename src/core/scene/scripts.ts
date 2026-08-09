@@ -1,11 +1,12 @@
 import type { Client, JsonValue, User } from 'bongle/interface';
 import type { ContactManifold, ContactSettings, RigidBody } from 'crashcat';
+import type { Dashboard } from 'dashcat';
 import type { Scene } from 'gpucat';
 import type * as Scripts from 'packcat';
-import { env } from '../../env';
 import type { EngineClient } from '../../client/engine-client';
 import type { Input } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';
+import { env } from '../../env';
 import type { EngineServer } from '../../server/engine-server';
 import type { Room } from '../../server/rooms';
 import type { Avatar } from '../avatar/avatar';
@@ -63,6 +64,15 @@ export type EditRoomState = {
      * view). torn down with the lens.
      */
     camera: SceneTree.Node;
+};
+
+/**
+ * client-side debug state, reachable from scripts as `ctx.client.debug`. a
+ * plain state bag (no methods) — ergonomics live in the `debug.*` api helpers.
+ */
+export type ClientDebugState = {
+    /** the shared dashcat dashboard; games dock panels here. */
+    readonly dashboard: Dashboard;
 };
 
 export type ClientContext = {
@@ -137,6 +147,17 @@ export type ClientContext = {
 
     /** our own client id */
     clientId: ClientId | undefined;
+
+    /**
+     * client debug surface. `dashboard` is the shared dashcat Dashboard —
+     * games dock their own panels on it (or via the scoped `debug.panel(ctx, …)`
+     * helper, which auto-cleans on script dispose). the raw handle is the
+     * escape hatch for full dashcat control. built lazily on first access.
+     *
+     * future home for the client-global metrics/logs handles + open flag
+     * that currently live on the store / ClientRoom.
+     */
+    debug: ClientDebugState;
 
     /** client input state, read keyboard/mouse here in onFrame hooks */
     input: Input;
@@ -880,7 +901,12 @@ export function listen(
 
 /* ── script instance creation ───────────────────────────────────── */
 
-export function createScriptInstance(def: ScriptDef, trait: TraitBase, node: SceneTree.Node, runtime: SceneTreeContext): ScriptInstance {
+export function createScriptInstance(
+    def: ScriptDef,
+    trait: TraitBase,
+    node: SceneTree.Node,
+    runtime: SceneTreeContext,
+): ScriptInstance {
     const instance: ScriptInstance = {
         def,
         node,
