@@ -577,19 +577,7 @@ export function updateTransformTool(state: TransformToolState, sceneTree: SceneT
         if (placement) {
             const t = getTrait(placement.rootNode, TransformTrait);
             if (t) {
-                // sync voxel ghost
-                if (placement.voxelNode) {
-                    const vt = getTrait(placement.voxelNode, TransformTrait);
-                    if (vt) {
-                        const [sx, sy, sz] = placement.rotatedBlueprint.size;
-                        const [px, py, pz] = placement.pivotOffset;
-                        const tp = getVisualWorldPosition(t);
-                        _placeScratch[0] = tp[0] - px + sx * 0.5;
-                        _placeScratch[1] = tp[1] - py + sy * 0.5;
-                        _placeScratch[2] = tp[2] - pz + sz * 0.5;
-                        setPosition(vt, _placeScratch);
-                    }
-                }
+                _syncVoxelGhost(placement, t);
                 return [...getVisualWorldPosition(t)] as Vec3;
             }
         }
@@ -686,6 +674,34 @@ export function updateTransformTool(state: TransformToolState, sceneTree: SceneT
     return [...state.proxy.position] as Vec3;
 }
 
+// (re)build the voxel ghost's mesh + tint from a blueprint's voxels. shared by
+// enterPlacement (initial) and rotate/flipPlacement (re-bake on reorientation).
+function _setVoxelGhostModel(voxelNode: Node, voxels: Voxels): void {
+    const vmTrait = getTrait(voxelNode, VoxelMeshTrait);
+    if (!vmTrait) return;
+    vmTrait.model = createVoxelModel(voxels);
+    vmTrait.flash = [0.3, 0.7, 1.0, 0.25];
+    vmTrait.glow = 0.12;
+}
+
+// align the standalone voxel ghost with the root pivot. the voxel model's origin
+// defaults to [size/2], so it renders centered on the node position; we offset by
+// -pivot + size/2 to sit the mesh min-corner on the commit anchor (root - pivot).
+// interpolatedWorldPosition is snapped so the ghost tracks the cursor with no lag.
+function _syncVoxelGhost(placement: PlacementState, rootTransform: TransformTrait): void {
+    if (!placement.voxelNode) return;
+    const vt = getTrait(placement.voxelNode, TransformTrait);
+    if (!vt) return;
+    const [sx, sy, sz] = placement.rotatedBlueprint.size;
+    const [px, py, pz] = placement.pivotOffset;
+    const tp = getVisualWorldPosition(rootTransform);
+    _placeScratch[0] = tp[0] - px + sx * 0.5;
+    _placeScratch[1] = tp[1] - py + sy * 0.5;
+    _placeScratch[2] = tp[2] - pz + sz * 0.5;
+    setPosition(vt, _placeScratch);
+    vec3.copy(vt.interpolatedWorldPosition, vt.position);
+}
+
 // returns the pivot world position, or null if root is missing.
 function _syncProxyFromPlacementRoot(state: TransformToolState): Vec3 | null {
     const placement = state.placement;
@@ -703,24 +719,7 @@ function _syncProxyFromPlacementRoot(state: TransformToolState): Vec3 | null {
         vec3.set(state.proxy.scale, 1, 1, 1);
     }
 
-    // sync standalone voxel ghost node.
-    // voxelmodel.origin defaults to [sx/2, sy/2, sz/2], so the mesh renders
-    // centered on interpolatedPosition. to align the mesh min-corner with
-    // the commit anchor (root.interpolatedPosition - pivotOffset), we set:
-    //   voxelPosition = root.interpolatedPosition - pivotOffset + [sx/2, sy/2, sz/2]
-    if (placement.voxelNode) {
-        const vt = getTrait(placement.voxelNode, TransformTrait);
-        if (vt) {
-            const [sx, sy, sz] = placement.rotatedBlueprint.size;
-            const [px, py, pz] = placement.pivotOffset;
-            const tp = getVisualWorldPosition(t);
-            _placeScratch[0] = tp[0] - px + sx * 0.5;
-            _placeScratch[1] = tp[1] - py + sy * 0.5;
-            _placeScratch[2] = tp[2] - pz + sz * 0.5;
-            setPosition(vt, _placeScratch);
-            vec3.copy(vt.interpolatedWorldPosition, vt.position);
-        }
-    }
+    _syncVoxelGhost(placement, t);
 
     return [...getVisualWorldPosition(t)] as Vec3;
 }
@@ -876,10 +875,8 @@ export function enterPlacement(
         voxelTransform.position[2] = rootTransform.position[2] - pz + sz * 0.5;
         vec3.copy(voxelTransform.interpolatedWorldPosition, voxelTransform.position);
 
-        const voxelMeshTrait = addTrait(voxelNode, VoxelMeshTrait);
-        voxelMeshTrait.model = createVoxelModel(rotatedBlueprint.voxels);
-        voxelMeshTrait.flash = [0.3, 0.7, 1.0, 0.25];
-        voxelMeshTrait.glow = 0.12;
+        addTrait(voxelNode, VoxelMeshTrait);
+        _setVoxelGhostModel(voxelNode, rotatedBlueprint.voxels);
     }
 
     // ── node ghost children (voxel-only, node-only, and mixed all handled) ──
@@ -1387,12 +1384,7 @@ export function rotatePlacement(state: TransformToolState, direction: 1 | -1 = 1
 
     // update VoxelMeshTrait on the standalone voxel ghost node
     if (placement.voxelNode && newRotatedBlueprint.voxels) {
-        const vmTrait = getTrait(placement.voxelNode, VoxelMeshTrait);
-        if (vmTrait) {
-            vmTrait.model = createVoxelModel(newRotatedBlueprint.voxels);
-            vmTrait.flash = [0.3, 0.7, 1.0, 0.25];
-            vmTrait.glow = 0.12;
-        }
+        _setVoxelGhostModel(placement.voxelNode, newRotatedBlueprint.voxels);
     }
 
     // track Y turns for legacy compat (only meaningful for Y-axis rotations)
@@ -1436,12 +1428,7 @@ export function flipPlacement(state: TransformToolState, axis: 'x' | 'y' | 'z'):
     const newRotatedBlueprint = Blueprint.flipAxis(placement.rotatedBlueprint, axis);
 
     if (placement.voxelNode && newRotatedBlueprint.voxels) {
-        const vmTrait = getTrait(placement.voxelNode, VoxelMeshTrait);
-        if (vmTrait) {
-            vmTrait.model = createVoxelModel(newRotatedBlueprint.voxels);
-            vmTrait.flash = [0.3, 0.7, 1.0, 0.25];
-            vmTrait.glow = 0.12;
-        }
+        _setVoxelGhostModel(placement.voxelNode, newRotatedBlueprint.voxels);
     }
 
     placement.rotatedBlueprint = newRotatedBlueprint;
