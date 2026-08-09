@@ -217,7 +217,7 @@ export function updateInspect(
             const prefabMismatch = placementPrefabId !== null && placementPrefabId !== slotPrefabId;
             const sceneMismatch = placementSceneId !== null && placementSceneId !== slotSceneId;
             if (prefabMismatch || sceneMismatch) {
-                TransformTool.cancelPlacement(transformToolState, room.nodes, ctx);
+                TransformTool.cancelPlacement(transformToolState, ctx);
                 store.setState({ activeTool: 'build' });
             }
         }

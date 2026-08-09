@@ -769,7 +769,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 for (let i = 0; i < Math.abs(turns); i++) {
                     next = Blueprint.rotateAxis(next, axis, dir);
                     if (transformToolState.placement) {
-                        TransformTool.rotatePlacement(transformToolState, room.nodes, dir, axis);
+                        TransformTool.rotatePlacement(transformToolState, dir, axis);
                     }
                 }
             };
@@ -785,7 +785,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const next = Blueprint.flipAxis(bp, axis);
             set({ activeBlueprint: next });
             if (transformToolState.placement) {
-                TransformTool.flipPlacement(transformToolState, room.nodes, axis);
+                TransformTool.flipPlacement(transformToolState, axis);
             }
             return true;
         },
@@ -794,7 +794,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             set({ inspectedVoxel: { wx, wy, wz, key } });
         },
         setPlacementPivotPreset: (preset) => {
-            TransformTool.setPlacementPivot(transformToolState, preset, room.nodes);
+            TransformTool.setPlacementPivot(transformToolState, preset);
         },
 
         /* ── simple setters ── */

@@ -697,6 +697,19 @@ script(
             // camera. when not active, force-hide every editor visual so
             // they don't leak into the player view, and short-circuit.
             const editorViewActive = room.playerMode === 'edit' || (!!room.editor && room.client.subject === room.editor.subject);
+
+            // tear down any armed placement the moment we're not actively placing
+            // in the transform tool with the editor view focused. this runs BEFORE
+            // the editorViewActive short-circuit below so a play/POV swap mid
+            // placement can't leave the preview ghosts armed (cancelPlacement was
+            // otherwise only reachable while still in transform with the view up).
+            if (transformToolState.placement && (!editorViewActive || store.getState().activeTool !== 'transform')) {
+                TransformTool.cancelPlacement(transformToolState, ctx);
+            }
+            // backstop: reap orphaned ghost nodes if any path dropped the
+            // placement without a clean teardown. no-op in the common case.
+            TransformTool.reconcilePlacementGhosts(transformToolState);
+
             if (!editorViewActive) {
                 gridVisualsState.minorLines.visible = false;
                 gridVisualsState.majorLines.visible = false;
@@ -746,9 +759,8 @@ script(
                 const placement = transformToolState.placement;
                 const selectedNodes = [];
                 for (const nid of selectedNodeIds) {
-                    if (placement && nid === placement.rootId && placement.voxelNodeId !== null) {
-                        const vn = getNodeById(room.nodes, placement.voxelNodeId);
-                        if (vn) selectedNodes.push(vn);
+                    if (placement && nid === placement.rootNode.id && placement.voxelNode) {
+                        selectedNodes.push(placement.voxelNode);
                         continue;
                     }
                     const n = getNodeById(room.nodes, nid);
@@ -869,15 +881,6 @@ script(
                 if (activeTool !== 'transform' || tm !== 'grab') {
                     TransformTool.exitGrab(transformToolState, room.nodes, room.physics, ctx);
                 }
-            }
-
-            // force-cancel any active placement when leaving transform.
-            // symmetric with the grab guard above, otherwise the
-            // __placement_root / __placement_voxels ghost nodes
-            // linger because cancelPlacement is only reachable via
-            // Escape/Enter while still in transform.
-            if (transformToolState.placement && activeTool !== 'transform') {
-                TransformTool.cancelPlacement(transformToolState, room.nodes, ctx);
             }
 
             // inspect tool: cast ray on click to select nodes, clear voxel visuals
