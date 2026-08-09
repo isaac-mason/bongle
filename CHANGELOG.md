@@ -4,6 +4,10 @@ Notable changes to `bongle`. Newest first; dates are `YYYY-MM-DD`.
 
 Will change to a semver changelog in future once `bongle` is on npm.
 
+## 2026-08-09
+
+- feat!: **breaking** - rename PrefabApplyContext `root` to `scene` 
+
 ## 2026-08-04
 
 - `blockPreset.*` factories now take a single options object that mirrors
