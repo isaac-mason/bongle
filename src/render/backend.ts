@@ -82,7 +82,9 @@ export type Renderer = {
      *  crash, too many live contexts). Forwarded to the underlying backend renderer; the
      *  device can't be recovered in place, so the client halts and surfaces a reload. */
     onDeviceLost: ((info: DeviceLostInfo) => void) | null;
-    resize(width: number, height: number): void;
+    /** resize the single display canvas. `pixelRatio` is the tier-capped device
+     *  pixel ratio (the client caps it), applied to the drawing buffer. */
+    resize(width: number, height: number, pixelRatio: number): void;
     setInspectorVisible(visible: boolean): void;
     /** the engine-global shared render clock. in-scene editor materials
      *  (selection/inspect rainbow) bind its `elapsedTime` node by identity, the
@@ -93,6 +95,11 @@ export type Renderer = {
      *  `render/common/camera` — for its own cull + to hand back through `FrameContext`
      *  — and the editor reads it. Backend-neutral math; not a device resource. */
     readonly camera: PerspectiveCamera;
+    /** the single display canvas the backend renders into. Only one room renders at
+     *  a time (see below), so there is one shared surface: the client mounts this into
+     *  the viewport and every room draws through it. On WebGL the GL context is bound
+     *  to this canvas; on WebGPU it is the renderer's configured canvas. */
+    readonly canvas: HTMLCanvasElement;
 
     // ── client-global resources ────────────────────────────────────────────
     initResources(opts: InitResourcesOpts): void;

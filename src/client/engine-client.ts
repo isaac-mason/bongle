@@ -33,6 +33,7 @@ import type { Renderer } from '../render/backend';
 import { loadRenderBackend } from '../render/load';
 import * as ModelLighting from '../render/models/model-lighting';
 import * as Particles from '../render/particles/particles';
+import * as RenderCamera from '../render/camera';
 import * as Interpolation from '../render/transform/interpolation';
 import * as Visibility from '../render/visibility/visibility';
 import { type VoxelArenaBudget, voxelArenaBudgetForTier } from '../render/voxels/voxel-arena';
@@ -141,6 +142,9 @@ export function init(opts: InitOptions) {
         driver: opts.driver,
         domElement: uiRoot,
         inputManager,
+        /** disposer for the shared canvas' touch listeners, set in `load()` once the
+         *  renderer (and its canvas) exist; called in `destroy`. */
+        disposeCanvasTouch: null as (() => void) | null,
         rooms: Rooms.init(),
         /** per-player buffer of chunk coords decoded + applied since the last
          *  flush, drained into one voxel_ack per player at the end of
@@ -371,6 +375,24 @@ export async function load(state: EngineClient) {
     // boot inside the same-origin iframe) aren't silently dropped.
     Audio.installGestureUnlock(state.audioResources);
 
+    // mount the single shared render canvas (the renderer's own surface) as a backdrop
+    // in the global viewport, beneath every room's overlay viewport (z-index 0 vs the
+    // rooms' z-index 1). Only one room renders at a time, so one canvas suffices for
+    // both backends. Touch listeners live here once and route to the active room's
+    // input via the InputManager (mouse/keyboard already route the same way).
+    const displayCanvas = state.renderer.canvas;
+    displayCanvas.style.position = 'absolute';
+    displayCanvas.style.inset = '0';
+    displayCanvas.style.width = '100%';
+    displayCanvas.style.height = '100%';
+    displayCanvas.style.zIndex = '0';
+    displayCanvas.style.pointerEvents = 'auto';
+    // claim touch gestures so a drag drives the game (look/aim) instead of the browser
+    // hijacking it as pan/zoom (else pointercancel fires a few px into a touch-drag).
+    displayCanvas.style.touchAction = 'none';
+    useClient.getState().viewportElement?.appendChild(displayCanvas);
+    state.disposeCanvasTouch = Input.installCanvasTouchListeners(displayCanvas, state.inputManager);
+
     // resize the renderer + cameras when the viewport div changes size.
     // useClient is the source of truth, Viewport writes dims into the store
     // on mount + ResizeObserver, the engine reads current values here and
@@ -383,17 +405,11 @@ export async function load(state: EngineClient) {
         state.viewport.width = w;
         state.viewport.height = h;
 
-        // resize all room canvas targets so they're ready when switched to.
-        // camera aspect/projection is no longer event-driven, the renderer
-        // pulls viewport size from canvasTarget each frame in `bindRenderCamera`
-        // and writes aspect into the active POV camera.
-        const pixelRatio = Performance.cappedPixelRatio(state.performance);
-        for (const room of state.rooms.rooms.values()) {
-            room.canvasTarget.setPixelRatio(pixelRatio);
-            room.canvasTarget.setSize(w, h);
-        }
-
-        state.renderer.resize(w, h);
+        // one shared display surface: size it to the viewport at the tier-capped pixel
+        // ratio, then bind the render camera's aspect (a global property of the single
+        // surface — only one room renders at a time).
+        state.renderer.resize(w, h, Performance.cappedPixelRatio(state.performance));
+        RenderCamera.bindAspect(state.renderer.camera, w, h);
     };
     const initial = useClient.getState();
     applyViewportSize(initial.viewportWidth, initial.viewportHeight);
@@ -651,7 +667,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     });
     Rooms.applyClientStreamRadius(room, state.performance);
 
-    Rooms.mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
+    Rooms.mountRoomViewport(room);
 
     // populate ctx.client.state and ctx.client.room now that both exist,
     // then fire onInit hooks, order matters: hooks may access client.room
@@ -1218,8 +1234,8 @@ export function update(state: EngineClient, delta: number) {
         Chat.tick(room.chat, state.net, room.roomId);
 
         // resolve this room's POV camera into the backend's `Renderer.camera`
-        // (pose/fov from the POV node's CameraTrait, aspect from its canvasTarget)
-        // for the cull below. resolution is backend-neutral math (render/common/
+        // (pose/fov from the POV node's CameraTrait; aspect is bound globally from the
+        // shared display surface) for the cull below. backend-neutral math (render/common/
         // camera); the client just hands over the camera object. must run AFTER user
         // frame scripts (they write pose/fov on the POV camera) and BEFORE any reader.
         const povCamera = Rooms.resolveRoomCamera(state.renderer.camera, room);
@@ -1383,10 +1399,12 @@ export function dispose(state: EngineClient): void {
     useClient.setState({ rooms: new Map(), activePlayerId: null, inputManager: null });
 
     if (state.inputManager) Input.disposeInputManager(state.inputManager);
+    state.disposeCanvasTouch?.();
     // the renderer is null until `load()` runs; guard for early dispose. Its
     // client-global GPU resources are disposed via the handle too (disposeResources
     // self-guards when they were never built).
     if (state.renderer) {
+        state.renderer.canvas.remove();
         state.renderer.disposeResources();
         state.renderer.dispose();
     }

@@ -95,9 +95,9 @@ export type WebGlState = {
  * context is acquired there), so the pipeline can be wired against the buffers up
  * front; only the context handshake stays async (`load`).
  *
- * The renderer creates its own canvas (`opts.canvas` omitted); the active room's
- * canvas target is swapped in each frame via `setCanvasTarget` in `render()`,
- * mirroring the WebGPU backend.
+ * The renderer creates its own canvas (`opts.canvas` omitted); the client mounts it
+ * into the active viewport and every room renders through this one surface (only one
+ * room renders at a time), mirroring the WebGPU backend.
  */
 export function init(camera: PerspectiveCamera): WebGlState {
     // No MSAA: antialiasing is done in-pipeline by FXAA (see createRenderPipeline),
@@ -176,9 +176,9 @@ export function setInspectorVisible(state: WebGlState, visible: boolean): void {
         if (!state.renderer.inspector) {
             const inspector = new Inspector();
             state.renderer.setInspector(inspector);
-            // the inspector self-attaches its shell into the canvas parent (the
-            // per-room viewport, pointer-events:none so gestures fall through);
-            // re-assert pointer-events on the shell so its controls stay clickable.
+            // the inspector self-attaches its shell into the shared canvas' parent
+            // (the global viewport); re-assert pointer-events on the shell so its
+            // controls stay clickable (pointer-events inherits).
             inspector.domElement.style.pointerEvents = 'auto';
         }
     } else if (state.renderer.inspector) {
@@ -186,8 +186,8 @@ export function setInspectorVisible(state: WebGlState, visible: boolean): void {
     }
 }
 
-export function resize(state: WebGlState, width: number, height: number) {
-    state.renderer.setPixelRatio(window.devicePixelRatio);
+export function resize(state: WebGlState, width: number, height: number, pixelRatio: number) {
+    state.renderer.setPixelRatio(pixelRatio);
     state.renderer.setSize(width, height);
 }
 
@@ -207,10 +207,9 @@ export function render(state: WebGlState, voxelViewChunkRadius: number): void {
     // room's POV by the client's frame loop (via render/camera) before render.
     const camera = state.pipeline.camera;
 
-    // canvas target, guard avoids redundant reconfigure on the gl side.
-    if (state.renderer.getCanvasTarget() !== room.canvasTarget) {
-        state.renderer.setCanvasTarget(room.canvasTarget);
-    }
+    // renders to the renderer's own single canvas (mounted by the client into the
+    // active viewport). Only one room renders at a time, so there is no per-room
+    // canvas to swap in — a WebGL context is bound to exactly one canvas anyway.
 
     // drive the shared render clock first so every time-driven consumer this
     // frame sees the same value.
@@ -436,6 +435,10 @@ export function create(): Renderer {
     return {
         kind,
         camera,
+        // the renderer's own canvas — the single display surface the client mounts.
+        get canvas() {
+            return state.renderer.domElement as HTMLCanvasElement;
+        },
         // Forward device-loss observation to the inner gpucat renderer (a live ref, so
         // this stays correct if the backend renderer is ever swapped).
         get onDeviceLost() {
@@ -446,7 +449,7 @@ export function create(): Renderer {
         },
         load: () => load(state),
         dispose: () => dispose(state),
-        resize: (w, h) => resize(state, w, h),
+        resize: (w, h, pr) => resize(state, w, h, pr),
         setInspectorVisible: (v) => setInspectorVisible(state, v),
         time: state.timeResources,
         initResources: (o) => initResources(state, o),

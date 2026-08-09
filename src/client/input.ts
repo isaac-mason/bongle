@@ -448,15 +448,14 @@ export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: num
 /* ── canvas touch listeners ───────────────────────────────────────── */
 
 /**
- * Installs `pointerdown/move/up/cancel` on the canvas, filtered to
- * `pointerType === 'touch'`. Touches on virtual joystick/button DOM
- * (sibling-of-canvas under viewport) never bubble here because canvas
- * isn't their ancestor, automatic separation between canvas-touch
- * gestures and HUD touches. Returns a disposer.
+ * Installs `pointerdown/move/up/cancel` on the shared display canvas, filtered to
+ * `pointerType === 'touch'` and routed to the active room's input via `manager.target`
+ * (one canvas, many rooms — same routing mouse/keyboard already use). HUD touches land
+ * on the overlay DOM (in the room viewport, a sibling of the backdrop canvas), which
+ * isn't the canvas's ancestor, so they never reach here — automatic separation between
+ * canvas-touch gestures and HUD touches. Installed once by the client; returns a disposer.
  */
-export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: Input): () => void {
-    const t = input.touch;
-
+export function installCanvasTouchListeners(canvas: HTMLCanvasElement, manager: InputManager): () => void {
     const sampleVelocity = (touch: CanvasTouch, now: number): boolean => {
         const s = touch._recentSamples;
         const cutoff = now - SWIPE_SAMPLE_WINDOW_MS;
@@ -474,6 +473,9 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: In
 
     const onDown = (e: PointerEvent): void => {
         if (e.pointerType !== 'touch') return;
+        // route to the active room's input (one shared canvas, many rooms).
+        const t = manager.target?.touch;
+        if (!t) return;
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -508,6 +510,8 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: In
 
     const onMove = (e: PointerEvent): void => {
         if (e.pointerType !== 'touch') return;
+        const t = manager.target?.touch;
+        if (!t) return;
         const touch = t._canvasTouches.get(e.pointerId);
         if (!touch) return;
         const rect = canvas.getBoundingClientRect();
@@ -526,6 +530,8 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: In
 
     const onUp = (e: PointerEvent): void => {
         if (e.pointerType !== 'touch') return;
+        const t = manager.target?.touch;
+        if (!t) return;
         const touch = t._canvasTouches.get(e.pointerId);
         if (!touch) return;
         const now = Date.now();
@@ -544,6 +550,8 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, input: In
 
     const onCancel = (e: PointerEvent): void => {
         if (e.pointerType !== 'touch') return;
+        const t = manager.target?.touch;
+        if (!t) return;
         const touch = t._canvasTouches.get(e.pointerId);
         if (!touch) return;
         touch.justEnded = true;

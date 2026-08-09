@@ -6,7 +6,7 @@
 // lives here in backend-shared `common`; consumers get a plain Camera, never reach
 // through the backend for camera behaviour.
 
-import { type CanvasTarget, PerspectiveCamera } from 'gpucat';
+import { PerspectiveCamera } from 'gpucat';
 import type { CameraTrait } from '../builtins/camera';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { getTrait } from '../core/scene/scene-tree';
@@ -61,10 +61,11 @@ export function syncCamera(camera: PerspectiveCamera, cameraTrait: CameraTrait |
     camera.updateViewMatrix();
 }
 
-/** Ensure `camera`'s aspect matches the viewport. Projection rebuilds only on
- *  change; no-op on a zero-sized target (keeps the last aspect). */
-export function bindAspect(camera: PerspectiveCamera, canvasTarget: CanvasTarget): void {
-    const { width, height } = canvasTarget.getSize();
+/** Ensure `camera`'s aspect matches the display size. Projection rebuilds only on
+ *  change; no-op on a zero size (keeps the last aspect). Aspect is a global property
+ *  of the single shared display surface (one room renders at a time), so the client
+ *  binds it once per frame from the viewport size rather than per camera-resolve. */
+export function bindAspect(camera: PerspectiveCamera, width: number, height: number): void {
     if (width <= 0 || height <= 0) return;
     const aspect = width / height;
     if (camera.aspect !== aspect) {
@@ -75,17 +76,15 @@ export function bindAspect(camera: PerspectiveCamera, canvasTarget: CanvasTarget
 
 /**
  * Resolve `camera` into the given room's live POV: sync pose/fov from `cameraTrait`,
- * bind the viewport aspect, return `camera`. Returns null when `cameraTrait` is null
- * (no active POV) — the camera is left untouched. Used by the client's per-frame cull
- * + the editor tools + the backend's active-room drive.
+ * return `camera`. Returns null when `cameraTrait` is null (no active POV) — the
+ * camera is left untouched. Aspect is bound separately/globally via `bindAspect`.
+ * Used by the client's per-frame cull + the editor tools + the backend's active-room drive.
  */
 export function resolvePovCamera(
     camera: PerspectiveCamera,
     cameraTrait: CameraTrait | null,
-    canvasTarget: CanvasTarget,
 ): PerspectiveCamera | null {
     if (!cameraTrait) return null;
     syncCamera(camera, cameraTrait);
-    bindAspect(camera, canvasTarget);
     return camera;
 }

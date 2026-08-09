@@ -120,28 +120,23 @@ export type ClientContext = {
      */
     defaultCamera: SceneTree.Node;
 
-    /** the canvas element the renderer draws into */
-    domElement: HTMLCanvasElement;
-
     /**
-     * per-room viewport div that wraps the canvas. scripts can append HTML
-     * overlays here (debug HUDs, custom UI). the viewport hides/shows with
-     * the active room and is removed when the room is disposed, so script
-     * overlays automatically follow room lifecycle.
+     * per-room overlay viewport div, stacked above the single shared render canvas
+     * (a backdrop sibling). scripts can append HTML overlays here (debug HUDs, custom
+     * UI). the viewport hides/shows with the active room and is removed when the room
+     * is disposed, so script overlays automatically follow room lifecycle.
      *
-     * has `pointer-events: none` so the canvas under it still receives mouse
-     * events. overlays that need interactivity must set `pointer-events: auto`
-     * on themselves.
+     * has `pointer-events: none` so empty-area gestures fall through to the canvas
+     * below; overlays that need interactivity must set `pointer-events: auto` on
+     * themselves.
      */
     viewport: HTMLDivElement;
 
     /**
-     * per-room touch overlay div, sibling of canvas under `viewport` and
-     * appended AFTER the html UI overlay so it stacks visually above
-     * everything by DOM order alone. touch controls helpers (joystick /
-     * button) mount their roots here; pointer events live on the
-     * helper roots, not on this container (which stays
-     * `pointer-events: none`).
+     * per-room touch overlay div under `viewport`, appended AFTER the html UI overlay
+     * so it stacks visually above everything by DOM order alone. touch controls helpers
+     * (joystick / button) mount their roots here; pointer events live on the helper
+     * roots, not on this container (which stays `pointer-events: none`).
      */
     touchOverlay: HTMLDivElement;
 

@@ -476,7 +476,7 @@ script(
 
         // ── voxel editor setup ──
 
-        const canvas = client.domElement;
+        const canvas = client.state!.renderer.canvas;
         const pointer = createPointerState(canvas);
         const meshState = createSelectionMeshState(client.scene);
         const inspectMeshState = InspectMesh.init(client.scene);
@@ -492,7 +492,7 @@ script(
         const initialCamera = resolveRoomCamera(client.state!.renderer.camera, room) as PerspectiveCamera;
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
-            client.domElement,
+            canvas,
             client.scene,
             room.nodes,
             ctx,

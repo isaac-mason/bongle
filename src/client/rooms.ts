@@ -1,4 +1,4 @@
-import { CanvasTarget, type PerspectiveCamera, Scene } from 'gpucat';
+import { type PerspectiveCamera, Scene } from 'gpucat';
 import { mat4, quat } from 'mathcat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
@@ -200,32 +200,21 @@ export type ClientRoom = {
      *  here only when this room is active, see `setActivePlayer`. */
     input: Input.Input;
 
-    /** per-room canvas element, each room has its own for DOM event
-     *  isolation. */
-    canvas: HTMLCanvasElement;
-
-    /** per-room canvas target, wraps the canvas for gpucat rendering. */
-    canvasTarget: CanvasTarget;
-
     /**
-     * per-room viewport div, wraps the canvas and any script-attached HTML
-     * overlays. mounted into the global viewport div alongside other rooms;
-     * only the active room's viewport is `display: block`. removed wholesale
-     * on dispose, so overlays don't outlive their room.
+     * per-room viewport div, holding this room's HTML overlays. mounted
+     * into the global viewport div alongside other rooms, above the single shared
+     * render canvas (a backdrop sibling); only the active room's viewport is
+     * `display: block`. removed wholesale on dispose, so overlays don't outlive
+     * their room. The 3D render surface is NOT here — it's the one shared canvas.
      */
     viewport: HTMLDivElement;
 
     /**
-     * per-room touch overlay div, sibling of canvas under `viewport`, mounted
-     * after the html UI overlay so it stacks above by DOM order. touch controls
-     * helpers append their joystick / button roots here. removed with the
-     * viewport on dispose.
+     * per-room touch overlay div under `viewport`, mounted after the html UI
+     * overlay so it stacks above by DOM order. touch controls helpers append their
+     * joystick / button roots here. removed with the viewport on dispose.
      */
     touchOverlay: HTMLDivElement;
-
-    /** disposer for the canvas pointer-events touch listeners. called from
-     *  `disposeRoom` to release the listeners before the canvas/viewport go. */
-    disposeCanvasTouchListeners: () => void;
 
     /**
      * per-room editor store. Populated by the editor script on init (only
@@ -646,24 +635,20 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // read-only for occlusion. see WebGpu.EngineRenderPipeline.overlayPassNode.
     const overlayScene = new Scene();
 
+    // per-room overlay viewport. it stacks ABOVE the single shared render canvas
+    // (a backdrop sibling in the global viewport), so z-index 1 keeps its overlays
+    // over the canvas; pointer-events:none lets empty-area gestures fall through to
+    // the canvas while interactive overlay children re-enable events themselves.
     const viewport = document.createElement('div');
     viewport.style.display = 'none';
     viewport.style.position = 'absolute';
     viewport.style.inset = '0';
     viewport.style.pointerEvents = 'none';
+    viewport.style.zIndex = '1';
 
-    const canvas = document.createElement('canvas');
-    canvas.style.position = 'absolute';
-    canvas.style.inset = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.pointerEvents = 'auto';
-    // claim touch gestures so a drag drives the game (look/aim) instead of the
-    // browser hijacking it as pan/zoom, without this the browser fires
-    // pointercancel a few pixels into any touch-drag and the gesture dies.
-    canvas.style.touchAction = 'none';
-    viewport.appendChild(canvas);
-    const canvasTarget = new CanvasTarget(canvas);
+    // the render surface is the one shared canvas owned by the renderer; rooms don't
+    // own a canvas. Scripts reach it via `client.state.renderer.canvas` if needed, but
+    // custom UI goes on `client.viewport` (per-room overlay container).
 
     // touch overlay sits ABOVE the html overlay (UILayer.touch). we create
     // the div here (so we can pass it on the runtime client shape) and
@@ -673,8 +658,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     touchOverlay.style.inset = '0';
     touchOverlay.style.pointerEvents = 'none';
     touchOverlay.style.zIndex = String(UILayer.touch);
-
-    const disposeCanvasTouchListeners = Input.installCanvasTouchListeners(canvas, input);
 
     // wire context so addChild/addTrait calls inside createDefaultCameraNode
     // see the runtime (createNode / addTrait register against it).
@@ -694,7 +677,6 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         clientId,
         scene,
         subject: null,
-        domElement: canvas,
         viewport,
         touchOverlay,
         debug: clientDebug,
@@ -776,11 +758,8 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         modelLighting,
         animations,
         input,
-        canvas,
-        canvasTarget,
         viewport,
         touchOverlay,
-        disposeCanvasTouchListeners,
         editorStore: null,
         editorClipboard: null,
     };
@@ -867,23 +846,17 @@ function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTr
 }
 
 /**
- * mount a ClientRoom's viewport into the global canvas div and size its
- * canvas target. camera projection is *not* updated here, the renderer
- * pulls viewport size from canvasTarget each frame in `bindRenderCamera`
- * and writes aspect into the active POV camera. caller is responsible
- * for wiring `room.context.client.state`/`.room` and calling
+ * mount a ClientRoom's overlay viewport into the global viewport div (above the
+ * shared render canvas; z-index governs stacking, so prepend order is fine). The
+ * render surface is the one shared canvas, sized globally by the client — not here.
+ * camera aspect is bound globally each frame from the shared canvas size. caller is
+ * responsible for wiring `room.context.client.state`/`.room` and calling
  * `SceneTree.initSceneTree(room.nodes)` after mount.
  */
-export function mountRoomViewport(room: ClientRoom, pixelRatio: number): void {
+export function mountRoomViewport(room: ClientRoom): void {
     const viewport = useClient.getState().viewportElement;
     if (!viewport) return;
     viewport.prepend(room.viewport);
-    const w = viewport.clientWidth;
-    const h = viewport.clientHeight;
-    if (w > 0 && h > 0) {
-        room.canvasTarget.setPixelRatio(pixelRatio);
-        room.canvasTarget.setSize(w, h);
-    }
 }
 
 /* ── Local rooms ────────────────────────────────────────────────── */
@@ -976,7 +949,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         playerNode,
     });
 
-    mountRoomViewport(room, Performance.cappedPixelRatio(state.performance));
+    mountRoomViewport(room);
     if (room.context.client) {
         room.context.client.state = state;
         room.context.client.room = room;
@@ -1047,9 +1020,7 @@ export function disposeRoom(room: ClientRoom): void {
     // room.environment is pure client CPU config — nothing to dispose. The
     // engine-global env GPU buffers live for the engine's lifetime.
     if (room.audio) Audio.dispose(room.audio);
-    room.disposeCanvasTouchListeners();
     room.viewport.remove();
-    room.canvasTarget.dispose();
 }
 
 /* ── Active player ──────────────────────────────────────────────── */
@@ -1062,14 +1033,15 @@ export function getActiveRoom(state: Rooms): ClientRoom | null {
 
 /**
  * Resolve `camera` (the backend's `Renderer.camera`) into `room`'s live POV: pose +
- * fov from its active CameraTrait, aspect from its canvas target. Returns the camera,
- * or null when the room has no active POV. Resolution is backend-neutral math
+ * fov from its active CameraTrait. Returns the camera, or null when the room has no
+ * active POV. Aspect is a global property of the shared display surface, bound once
+ * per frame by the client (`bindAspect`), not here. Resolution is backend-neutral math
  * (`render/common/camera`); the client just hands the backend's stable camera object
  * to it — the cull, the editor tools, and the draw all share the one camera.
  */
 export function resolveRoomCamera(camera: PerspectiveCamera, room: ClientRoom): PerspectiveCamera | null {
     const cameraTrait = SceneTree.getTrait(room.client.camera, CameraTrait) ?? null;
-    return RenderCamera.resolvePovCamera(camera, cameraTrait, room.canvasTarget);
+    return RenderCamera.resolvePovCamera(camera, cameraTrait);
 }
 
 /** set the active Player and update the editor store. The renderer isn't touched
