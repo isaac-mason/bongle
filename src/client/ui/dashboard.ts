@@ -216,6 +216,28 @@ const RENDER_PHASES = ['mesh', 'voxel-mesh', 'model', 'sprite', 'extruded-sprite
 // server physics-tick phases: trait sync, the solver step, transform writeback.
 const PHYSICS_PHASES = ['physics/pre', 'physics', 'physics/post'] as const;
 
+// top-level server frame phases: the direct children of the per-room 'room'
+// bracket in engine-server's tick loop, plus per-room 'discovery'. these are
+// siblings (non-overlapping), so a stacked area of them sums to ~the server
+// frame — the server analog of FRAME_PHASES. deliberately EXCLUDES the 'room'
+// bracket itself (it's the total, double-counting everything) and the nested
+// per-script 'script/<key>' timers (already inside nodes/update + nodes/tick).
+// ordered biggest/most-stable first so jittery small phases ride on top.
+const SERVER_PHASES = [
+    'physics',
+    'nodes/tick',
+    'nodes/update',
+    'physics/pre',
+    'physics/post',
+    'animation',
+    'prefab',
+    'lighting',
+    'nodes/post-animate',
+    'nodes/frame',
+    'chat',
+    'discovery',
+] as const;
+
 const FRAME_BUDGET_MS = 1000 / 60; // 16.67ms — the 60fps line drawn on the frame stack
 
 // samples plotted per series. dashcat samples once per frame (~60Hz), so 600 is
@@ -229,20 +251,6 @@ const CHART_HISTORY = 600;
 function seriesFrom(metrics: Debug.Metrics | null, ids: readonly string[]): Record<string, number> {
     const out: Record<string, number> = {};
     for (const id of ids) out[id] = latest(metrics, id);
-    return out;
-}
-
-/** every ms-unit component on a metrics buffer except the total 'tick' and net
- *  counters — used for the server stack, where the phase taxonomy isn't pinned
- *  down yet (nested timers may over-count; refine with a server phase list). */
-function msComponents(metrics: Debug.Metrics | null): Record<string, number> {
-    const out: Record<string, number> = {};
-    if (!metrics) return out;
-    for (const id of Debug.getIds(metrics)) {
-        if (id === 'tick' || id.startsWith('net/')) continue;
-        if (Debug.getUnit(metrics, id) !== 'ms') continue;
-        out[id] = latest(metrics, id);
-    }
     return out;
 }
 
@@ -399,8 +407,8 @@ function build(): DebugDashboard {
         hover: true,
         history: CHART_HISTORY,
     });
-    // server frame time, stacked components (see msComponents caveat).
-    cpu.lines(() => msComponents(activeRoom()?.serverMetrics ?? null), {
+    // server frame time, stacked per top-level phase (siblings summing to ~frame).
+    cpu.lines(() => seriesFrom(activeRoom()?.serverMetrics ?? null, SERVER_PHASES), {
         label: 'server frame (ms)',
         stacked: true,
         height: 140,
