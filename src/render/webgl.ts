@@ -7,6 +7,7 @@
 import {
     type Camera,
     fxaa,
+    Inspector,
     type PerspectiveCamera,
     pass,
     RenderPipeline,
@@ -166,10 +167,23 @@ export function updateFrame(state: WebGlState, activeRoom: ClientRoom | null, ct
     updateActiveRoom(state, ctx);
 }
 
-/** No-op: gpucat's WebGL renderer has no Inspector (the GPU-timing overlay is a
- *  WebGPU concern). Kept to satisfy the `Renderer` contract. */
-export function setInspectorVisible(_state: WebGlState, _visible: boolean): void {
-    // intentionally empty — no WebGL Inspector.
+/** Toggle the gpucat Inspector overlay; lazily attached on first show, detached on
+ *  hide. gpucat's WebGL renderer feeds the same Inspector as WebGPU (per-pass GPU
+ *  timing via EXT_disjoint_timer_query_webgl2 when present, CPU timing + draw stats
+ *  otherwise); this mirrors the WebGPU backend's `setInspectorVisible`. */
+export function setInspectorVisible(state: WebGlState, visible: boolean): void {
+    if (visible) {
+        if (!state.renderer.inspector) {
+            const inspector = new Inspector();
+            state.renderer.setInspector(inspector);
+            // the inspector self-attaches its shell into the canvas parent (the
+            // per-room viewport, pointer-events:none so gestures fall through);
+            // re-assert pointer-events on the shell so its controls stay clickable.
+            inspector.domElement.style.pointerEvents = 'auto';
+        }
+    } else if (state.renderer.inspector) {
+        state.renderer.setInspector(null);
+    }
 }
 
 export function resize(state: WebGlState, width: number, height: number) {
