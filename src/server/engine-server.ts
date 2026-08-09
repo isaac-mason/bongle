@@ -345,6 +345,21 @@ function recordProcessStats(metrics: Debug.Metrics, delta: number): void {
     Debug.record(metrics, 'proc/heap', mem.heapUsed / 1024 / 1024, 'mb');
 }
 
+// physics world counts (body totals by motion type, live contact pairs) onto
+// the room metrics bag so they ride the room_metrics push to the debug panel.
+// gated on `enabled` since the tally walks the rigid body pool each tick.
+function recordPhysicsStats(metrics: Debug.Metrics, world: physics.Physics): void {
+    if (!metrics.enabled) return;
+    const s = physics.stats(world);
+    Debug.record(metrics, 'physics/bodies', s.bodies, 'count');
+    Debug.record(metrics, 'physics/bodies/active', s.active, 'count');
+    Debug.record(metrics, 'physics/bodies/static', s.static, 'count');
+    Debug.record(metrics, 'physics/bodies/kinematic', s.kinematic, 'count');
+    Debug.record(metrics, 'physics/bodies/dynamic', s.dynamic, 'count');
+    Debug.record(metrics, 'physics/contacts', s.contacts, 'count');
+    Debug.record(metrics, 'physics/contacts/vcc', s.vccContacts, 'count');
+}
+
 /* ── sync_update handling ── */
 // per-sync sync_update handling is inline in the processInbox switch case.
 // authority:'owner' checks use def.syncDefs[syncIdx].authority.
@@ -764,6 +779,8 @@ export function update(state: EngineServer, delta: number) {
         Debug.begin(room.metrics, 'physics/post');
         physics.postStep(room.physics, room.nodes, null);
         Debug.end(room.metrics, 'physics/post');
+
+        recordPhysicsStats(room.metrics, room.physics);
 
         // block hooks settle inline per write (see block-hooks.ts); nothing to
         // drain here. flush the tick's accumulated light recompute.

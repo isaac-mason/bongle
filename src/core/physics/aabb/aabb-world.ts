@@ -303,6 +303,37 @@ export function removeFromBroadphase(world: World, body: Body): void {
     body._broadphaseCellMaxX = 0;
 }
 
+// ── stats ────────────────────────────────────────────────────────────
+
+/** live body counts for the debug panel. */
+export type WorldStats = {
+    total: number;
+    active: number;
+    static: number;
+    kinematic: number;
+    dynamic: number;
+};
+
+/** tally bodies by motion type. `active` is the awake (integrating) set;
+ *  STATIC bodies are never awake. */
+export function stats(world: World): WorldStats {
+    let staticCount = 0;
+    let kinematic = 0;
+    let dynamic = 0;
+    for (const body of world.bodies.values()) {
+        if (body.motionType === MotionType.STATIC) staticCount++;
+        else if (body.motionType === MotionType.KINEMATIC) kinematic++;
+        else dynamic++;
+    }
+    return {
+        total: world.bodies.size,
+        active: world.awakeBodies.length,
+        static: staticCount,
+        kinematic,
+        dynamic,
+    };
+}
+
 // ── world ───────────────────────────────────────────────────────────
 
 export type World = {

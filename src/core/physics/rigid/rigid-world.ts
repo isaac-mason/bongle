@@ -150,6 +150,36 @@ export type World = {
     _bodyQuery: ReturnType<typeof query<[typeof RigidBodyTrait, typeof TransformTrait]>>;
 };
 
+// ── stats ────────────────────────────────────────────────────────────
+
+/** live body counts for the debug panel. */
+export type WorldStats = {
+    total: number;
+    active: number;
+    static: number;
+    kinematic: number;
+    dynamic: number;
+};
+
+/** tally bodies by motion type. iterates the crashcat pool once, skipping freed
+ *  slots; `active` is crashcat's own awake count. the voxel terrain counts as
+ *  one static body. */
+export function stats(world: World): WorldStats {
+    const bodies = world.world.bodies;
+    let total = 0;
+    let staticCount = 0;
+    let kinematic = 0;
+    let dynamic = 0;
+    for (const body of bodies.pool) {
+        if (body._pooled) continue;
+        total++;
+        if (body.motionType === MotionType.STATIC) staticCount++;
+        else if (body.motionType === MotionType.KINEMATIC) kinematic++;
+        else dynamic++;
+    }
+    return { total, active: bodies.activeBodyCount, static: staticCount, kinematic, dynamic };
+}
+
 export function create(sceneTree: SceneTree, voxels: Voxels, registry: Blocks): World {
     const world = createWorld(settings);
     const terrainShape = createVoxelPhysicsShape(voxels, registry, INFINITE_AABB);

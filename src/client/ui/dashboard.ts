@@ -213,6 +213,9 @@ const FRAME_PHASES = [
 // sub-phases timed inside 'render' (in webgpu.ts / webgl.ts).
 const RENDER_PHASES = ['mesh', 'voxel-mesh', 'model', 'sprite', 'extruded-sprite', 'shadow', 'particle'] as const;
 
+// server physics-tick phases: trait sync, the solver step, transform writeback.
+const PHYSICS_PHASES = ['physics/pre', 'physics', 'physics/post'] as const;
+
 const FRAME_BUDGET_MS = 1000 / 60; // 16.67ms — the 60fps line drawn on the frame stack
 
 // samples plotted per series. dashcat samples once per frame (~60Hz), so 600 is
@@ -323,7 +326,11 @@ function build(): DebugDashboard {
     // without any reconcile; dashcat samples them.
     // start offset a little further from the top-left corner so it clears the
     // editor's top/left toolbars (dashcat's default is a tight 16px).
-    const panel = dash.panel({ title: 'debug', closable: false, position: [64, 64] });
+    const panel = dash.panel({ title: 'debug', closable: false, position: [64, 64], resizable: true });
+    // widen past dashcat's default 320px (charts + label/value rows read better),
+    // keeping its small-viewport clamp. inline so we don't fork the vendored css;
+    // `resizable` lets the user drag from here.
+    panel.root.style.width = 'min(460px, calc(100vw - 24px))';
     const tabs = panel.tabs();
 
     // overview: F3-style "where am i" readouts, grouped into folders.
@@ -402,6 +409,58 @@ function build(): DebugDashboard {
         smooth: 0.2,
         hover: true,
         history: CHART_HISTORY,
+    });
+
+    // physics: isolated server physics-tick cost + live body/contact counts.
+    // physics is server-authoritative (the client runs interpolation, not the
+    // solver), so every reading comes off serverMetrics.
+    const physics = tabs.tab('physics');
+    // collider overlay toggle (editor-only, same state the options tab drives).
+    if (env.editor) {
+        const ed = () => useEditor.getState();
+        physics.add(
+            { get: () => ed().showPhysicsColliders, set: (v) => ed().setShowPhysicsColliders(v) },
+            { label: 'show colliders', listen: true },
+        );
+    }
+    physics.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'physics', SMOOTH_TICK), {
+        label: 'physics tick',
+        unit: 'ms',
+    });
+    // pre (trait sync) + step (solver) + post (writeback), stacked = total cost.
+    physics.lines(() => seriesFrom(activeRoom()?.serverMetrics ?? null, PHYSICS_PHASES), {
+        label: 'physics tick (ms)',
+        stacked: true,
+        height: 160,
+        unit: 'ms',
+        min: 0,
+        smooth: 0.2,
+        hover: true,
+        history: CHART_HISTORY,
+    });
+    const bodies = physics.folder('bodies');
+    bodies.monitor(() => latest(activeRoom()?.serverMetrics ?? null, 'physics/bodies'), { label: 'total', ...int });
+    bodies.monitor(() => latest(activeRoom()?.serverMetrics ?? null, 'physics/bodies/active'), {
+        label: 'active',
+        ...int,
+    });
+    // static / kinematic / dynamic split as live category bars (no history).
+    bodies.bars(
+        () => ({
+            static: latest(activeRoom()?.serverMetrics ?? null, 'physics/bodies/static'),
+            kinematic: latest(activeRoom()?.serverMetrics ?? null, 'physics/bodies/kinematic'),
+            dynamic: latest(activeRoom()?.serverMetrics ?? null, 'physics/bodies/dynamic'),
+        }),
+        { label: 'by motion type' },
+    );
+    const contacts = physics.folder('contacts');
+    contacts.monitor(() => latest(activeRoom()?.serverMetrics ?? null, 'physics/contacts'), {
+        label: 'pairs',
+        ...int,
+    });
+    contacts.monitor(() => latest(activeRoom()?.serverMetrics ?? null, 'physics/contacts/vcc'), {
+        label: 'character',
+        ...int,
     });
 
     // client net: ping + client throughput + per-message-type ingress/egress

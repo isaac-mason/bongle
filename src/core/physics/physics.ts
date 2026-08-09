@@ -337,6 +337,36 @@ function ingestVccVoxelContacts(physics: Physics): void {
     physics.vccVoxelContactCount = 0;
 }
 
+// ── stats ────────────────────────────────────────────────────────────
+
+/** aggregate physics counts for the debug panel, summed across the rigid and
+ *  AABB sub-worlds. `active` counts awake (integrating) bodies; `contacts` is
+ *  the live manifold pair count (added + persisted); `vccContacts` is the
+ *  character-controller rigid + voxel contacts replayed this frame. */
+export type PhysicsStats = {
+    bodies: number;
+    active: number;
+    static: number;
+    kinematic: number;
+    dynamic: number;
+    contacts: number;
+    vccContacts: number;
+};
+
+export function stats(physics: Physics): PhysicsStats {
+    const rigid = RigidPhysics.stats(physics.rigid);
+    const aabb = AabbPhysics.stats(physics.aabb);
+    return {
+        bodies: rigid.total + aabb.total,
+        active: rigid.active + aabb.active,
+        static: rigid.static + aabb.static,
+        kinematic: rigid.kinematic + aabb.kinematic,
+        dynamic: rigid.dynamic + aabb.dynamic,
+        contacts: physics.contacts.added.length + physics.contacts.persisted.length,
+        vccContacts: physics.vccRigidContactCount + physics.vccVoxelContactCount,
+    };
+}
+
 /** step the physics world. fires pre/post hooks and runs the world update. */
 export function tick(physics: Physics, sceneTree: SceneTree, dt: number): void {
     runOnPrePhysicsStep(sceneTree, { delta: dt });
