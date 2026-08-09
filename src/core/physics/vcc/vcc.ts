@@ -304,13 +304,16 @@ export type VccListener = {
     ) => void;
 
     /**
-     * called during constraint solving after the new character velocity has been
-     * computed for a contact. `ioCharacterVelocity` can be modified to override it.
+     * called after the new character velocity has been computed for a contact,
+     * from both the rigid-body constraint solver and the voxel sweep-and-slide
+     * loop. `ioCharacterVelocity` can be modified to override it. `body` is the
+     * rigid body for a body contact, or null for a voxel contact; `stateId` is
+     * the block state id for a voxel contact, or 0 for a body contact.
      */
     onContactSolve?: (
         vcc: VCC,
-        body: RigidBody,
-        subShapeId: number,
+        body: RigidBody | null,
+        stateId: number,
         contactPosition: Vec3,
         contactNormal: Vec3,
         contactVelocity: Vec3,
@@ -1149,7 +1152,7 @@ export function solveConstraints(
                 listener.onContactSolve(
                     vcc,
                     body,
-                    active.contact.subShapeId,
+                    active.contact.stateId,
                     _solver_contactPos,
                     _solver_contactNormal,
                     _solver_contactVelocity,
@@ -1654,6 +1657,11 @@ function getFirstContactForSweep(
 const _moveShape_velocity = vec3.create();
 const _moveShape_displacement = vec3.create();
 const _moveShape_sweepContact: VccContact = createVccContact();
+// impact velocity captured before the sweep cancels the into-normal component,
+// so the onContactSolve listener can reflect a voxel landing into a bounce.
+const _moveShape_impactVel = vec3.create();
+const _moveShape_bounceNormal = vec3.create();
+const _moveShape_zeroVec = vec3.create();
 const _moveShape_constraints: VccConstraint[] = [];
 const _moveShape_ignoredContacts: VccContact[] = [];
 
@@ -1767,6 +1775,10 @@ function moveShape(
 
             const fraction = _moveShape_sweepContact.fraction;
             let applyNormalSlide = true;
+
+            // capture the pre-resolution velocity: the slide below cancels the
+            // into-normal component, but the bounce listener needs the impact.
+            vec3.copy(_moveShape_impactVel, _moveShape_velocity);
             if (fraction < 0) {
                 const nX = _moveShape_sweepContact.contactNormalX;
                 const nY = _moveShape_sweepContact.contactNormalY;
@@ -1828,6 +1840,27 @@ function moveShape(
                     _moveShape_velocity[1] -= nY * vDotN;
                     _moveShape_velocity[2] -= nZ * vDotN;
                 }
+            }
+
+            // voxel restitution: the slide above only cancelled the into-normal
+            // velocity. hand the impact + resolved velocity to the listener so a
+            // block with restitution can reflect the landing into a bounce. the
+            // sweep normal points away from the surface, so negate it to the
+            // into-surface convention the listener shares with the solver path.
+            if (listener?.onContactSolve && _moveShape_sweepContact.bodyId === INVALID_BODY_ID) {
+                _moveShape_bounceNormal[0] = -_moveShape_sweepContact.contactNormalX;
+                _moveShape_bounceNormal[1] = -_moveShape_sweepContact.contactNormalY;
+                _moveShape_bounceNormal[2] = -_moveShape_sweepContact.contactNormalZ;
+                listener.onContactSolve(
+                    vcc,
+                    null,
+                    _moveShape_sweepContact.stateId,
+                    _moveShape_zeroVec,
+                    _moveShape_bounceNormal,
+                    _moveShape_zeroVec,
+                    _moveShape_impactVel,
+                    _moveShape_velocity,
+                );
             }
 
             // pushable aabb body: apply a mass-aware impulse so it accelerates

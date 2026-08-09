@@ -13,7 +13,7 @@
 // presets take a bare texture as shorthand for "all faces"; pass a full
 // per-face map only when the faces differ (grass, logs).
 
-import { block, blockPreset, CullType, MaterialType } from 'bongle';
+import { block, blockModel, blockPreset, CullType, MaterialType } from 'bongle';
 import * as soundPreset from './block-sound-presets';
 import * as tex from './block-textures';
 
@@ -208,6 +208,24 @@ export const ice = blockPreset.cube('kit:ice', {
     friction: 0.1,
     sneakGuard: true,
     sounds: soundPreset.ice,
+});
+
+// ── Slime ───────────────────────────────────────────────────────────
+
+// translucent outer shell + opaque inner core, both full cubes. bouncy, slightly slippery.
+export const slime = block('kit:slime', {
+    name: 'Slime',
+    model: () => ({
+        type: 'custom',
+        quads: [
+            ...blockModel.box([0, 0, 0], [1, 1, 1], { all: { texture: tex.slimeTransparent } }, { material: MaterialType.TRANSLUCENT }),
+            ...blockModel.box([0.15, 0.15, 0.15], [0.85, 0.85, 0.85], { all: { texture: tex.slime } }, { material: MaterialType.OPAQUE }),
+        ],
+    }),
+    cull: CullType.SELF,
+    restitution: 0.7,
+    friction: 0.6,
+    sounds: soundPreset.grass,
 });
 
 // ── Liquids ─────────────────────────────────────────────────────────

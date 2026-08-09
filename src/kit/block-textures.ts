@@ -100,6 +100,12 @@ export const glass = blockTexture('kit:glass', {
 export const snow = blockTexture('kit:snow', {
     src: asset('./assets/textures/snow.png', import.meta.url),
 });
+export const slime = blockTexture('kit:slime', {
+    src: asset('./assets/textures/slime.png', import.meta.url),
+});
+export const slimeTransparent = blockTexture('kit:slime_transparent', {
+    src: asset('./assets/textures/slime_transparent.png', import.meta.url),
+});
 
 // multiply-tint a shared grayscale/near-white base to a target color at bake
 // time via `draw()`. one source image yields a whole color family (wool,

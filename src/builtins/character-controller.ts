@@ -42,7 +42,6 @@ import {
     type Blocks,
     SHAPE_AABBS,
 } from '../core/voxels/block-registry';
-import { unpackVoxelHitInfo } from '../core/voxels/voxel-physics-shape';
 import { getBlockState, type Voxels } from '../core/voxels/voxels';
 import { TransformTrait } from './transform';
 
@@ -66,19 +65,65 @@ const _identityQuat: Quat = [0, 0, 0, 1];
 const _bodyYawAxis: Vec3 = [0, 1, 0];
 const _bodyYawQuat = quat.create();
 
-// reusable listener, closure vars below are set from the trait before
-// vcc.move() runs each tick so the listener sees the right values.
-let _vccListenerIsIntentional = false;
-let _vccListenerTerrainBodyId = -1;
-let _vccListenerBlockRest: Float32Array | null = null;
-// physics coordinator the VCC's body contacts are staged on (see pushVccRigidContact
-// / ingestVccRigidContacts). set before each vcc.move so the listener can record the
-// bodies the character touched this frame.
-let _vccListenerPhysics: Physics | null = null;
+// scratch state for the reusable vcc contact listener. the input fields are set
+// from the trait before each vcc.move() so the listener sees the right values;
+// `bounced` is an output field the listener sets when it applies a bounce.
+type VccListenerState = {
+    /** character is intentionally moving this tick (gates preventSlide). */
+    isIntentional: boolean;
+    /** block-state-id -> restitution table, for voxel bounce lookups. */
+    blockRestitution: Float32Array | null;
+    /** physics coordinator the VCC's body contacts are staged on (see
+     *  pushVccRigidContact / ingestVccRigidContacts), used to record the bodies
+     *  the character touched this frame. */
+    physics: Physics | null;
+    /** the listener applied a bounce this move; the tick clears `grounded` (a
+     *  bounce leaves the surface) so the upward velocity carries next tick
+     *  instead of being zeroed by the grounded vertical clamp. */
+    bounced: boolean;
+};
 
-// minimum downward speed (m/s) at landing to consider a bounce. avoids
-// reflecting near-zero velocities (settled rest contacts).
-const BOUNCE_MIN_DOWN_SPEED = 0.5;
+const _vccListenerState: VccListenerState = {
+    isIntentional: false,
+    blockRestitution: null,
+    physics: null,
+    bounced: false,
+};
+
+// minimum approach speed (m/s) into a surface to consider a bounce. avoids
+// reflecting slow contacts (settled rest contacts, gentle landings), and lets a
+// decaying bounce settle once its speed drops below this.
+const BOUNCE_MIN_SPEED = 1.0;
+
+// reflect a contact into a bounce along its normal, so a floor bounces you up, a
+// wall back, and a ceiling down. `contactNormal` points into the surface, so a
+// character moving into it has a positive approach speed; that component of the
+// resolved velocity is set to the reflected speed (scaled by restitution)
+// pointing back out, leaving the tangential (slide) component untouched.
+// restitution 0 = no bounce. shared by the voxel and rigid-body contact paths.
+function applyContactBounce(
+    contactNormal: Vec3,
+    characterVelocity: Vec3,
+    ioCharacterVelocity: Vec3,
+    restitution: number,
+): boolean {
+    if (restitution <= 0) return false;
+    const approach =
+        characterVelocity[0] * contactNormal[0] +
+        characterVelocity[1] * contactNormal[1] +
+        characterVelocity[2] * contactNormal[2];
+    if (approach <= BOUNCE_MIN_SPEED) return false;
+    const currentNormalSpeed =
+        ioCharacterVelocity[0] * contactNormal[0] +
+        ioCharacterVelocity[1] * contactNormal[1] +
+        ioCharacterVelocity[2] * contactNormal[2];
+    // target normal speed: -restitution * approach (out of the surface).
+    const delta = -restitution * approach - currentNormalSpeed;
+    ioCharacterVelocity[0] += delta * contactNormal[0];
+    ioCharacterVelocity[1] += delta * contactNormal[1];
+    ioCharacterVelocity[2] += delta * contactNormal[2];
+    return true;
+}
 
 // max body-vs-head yaw difference (rad). voxelibre uses 40°; same here,
 // past this the body snaps to keep the neck within a plausible twist.
@@ -111,9 +156,9 @@ const BODY_YAW_BACK_CONE_COS = Math.cos(BODY_YAW_BACK_CONE_RAD);
 // event on both bodies' ContactsTrait. added + persisted both report (a body can
 // linger a frame before the reactor that consumes the hit removes it).
 function recordVccRigidContact(vccInstance: vcc.VCC, body: RigidBody, contactPosition: Vec3, contactNormal: Vec3): void {
-    if (_vccListenerPhysics === null) return;
+    if (_vccListenerState.physics === null) return;
     pushVccRigidContact(
-        _vccListenerPhysics,
+        _vccListenerState.physics,
         vccInstance.innerBodyId,
         body.id,
         contactPosition[0],
@@ -136,13 +181,26 @@ const _vccListener: vcc.VccListener = {
     onContactSolve(
         _vccInstance,
         _body,
-        _subShapeId,
+        _stateId,
         _contactPos,
         contactNormal,
         contactVelocity,
         characterVelocity,
         ioCharacterVelocity,
     ) {
+        // voxel contact (stateId != 0): restitution comes from the block table,
+        // keyed by state id. these arrive from the sweep-and-slide loop, which
+        // already resolved slide + ground state, so only the bounce is left.
+        if (_stateId !== 0) {
+            const restitution = _vccListenerState.blockRestitution?.[_stateId] ?? 0;
+            if (applyContactBounce(contactNormal, characterVelocity, ioCharacterVelocity, restitution)) {
+                _vccListenerState.bounced = true;
+            }
+            return;
+        }
+
+        // body contact: the solver runs slide/ceiling handling here, and the
+        // bounce reads the rigid body's own restitution.
         const inAir = _vccInstance.groundState === vcc.GROUND_STATE_IN_AIR;
         const contactVelSq =
             contactVelocity[0] * contactVelocity[0] +
@@ -153,7 +211,7 @@ const _vccListener: vcc.VccListener = {
         // upward component of the surface normal is -contactNormal[1].
         const isSteep = -contactNormal[1] < _vccInstance.cosMaxSlopeAngle;
 
-        const preventSlide = !inAir && !_vccListenerIsIntentional && contactVelSq < 0.1 && !isSteep;
+        const preventSlide = !inAir && !_vccListenerState.isIntentional && contactVelSq < 0.1 && !isSteep;
 
         if (preventSlide) {
             ioCharacterVelocity[0] = 0;
@@ -166,21 +224,8 @@ const _vccListener: vcc.VccListener = {
             ioCharacterVelocity[1] = 0;
         }
 
-        // trampoline reflect: landing on a non-steep terrain voxel with
-        // restitution > 0 bounces the character. body-side restitution is
-        // implicitly 1 here (vcc doesn't expose a per-body restitution),
-        // so the block value drives the bounce strength.
-        if (
-            _vccListenerBlockRest !== null &&
-            _body.id === _vccListenerTerrainBodyId &&
-            !isSteep &&
-            characterVelocity[1] < -BOUNCE_MIN_DOWN_SPEED
-        ) {
-            const info = unpackVoxelHitInfo(_subShapeId);
-            const restitution = _vccListenerBlockRest[info.stateId] ?? 0;
-            if (restitution > 0) {
-                ioCharacterVelocity[1] = -restitution * characterVelocity[1];
-            }
+        if (applyContactBounce(contactNormal, characterVelocity, ioCharacterVelocity, _body?.restitution ?? 0)) {
+            _vccListenerState.bounced = true;
         }
     },
 };
@@ -1345,10 +1390,10 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
     const startZ = feet[2];
 
     // run gather → solve → sweep-verify → ground state → inner-body sync.
-    _vccListenerIsIntentional = state.isIntentionalMovement;
-    _vccListenerTerrainBodyId = physics.rigid.terrainBody.id;
-    _vccListenerBlockRest = registry.restitution;
-    _vccListenerPhysics = physics;
+    _vccListenerState.isIntentional = state.isIntentionalMovement;
+    _vccListenerState.blockRestitution = registry.restitution;
+    _vccListenerState.bounced = false;
+    _vccListenerState.physics = physics;
 
     vcc.move(world, voxels, aabbWorld, v, dt, _vccListener);
 
@@ -1447,6 +1492,11 @@ function tickCharacterController(cc: CharacterControllerTrait, transform: Transf
     // does the same).
     if (isClimbing) grounded = true;
     else if (inLiquid) grounded = false;
+
+    // a bounce this move launches the character off the surface: read as airborne
+    // so next tick's vertical integration carries the upward bounce velocity
+    // instead of the grounded clamp zeroing it.
+    if (_vccListenerState.bounced) grounded = false;
 
     state.grounded = grounded;
     // foot-sample resolution for SFX + particles (luanti's
