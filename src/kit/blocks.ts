@@ -223,7 +223,7 @@ export const slime = block('kit:slime', {
         ],
     }),
     cull: CullType.SELF,
-    restitution: 0.7,
+    restitution: 0.8,
     friction: 0.6,
     sounds: soundPreset.grass,
 });
