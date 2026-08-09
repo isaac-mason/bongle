@@ -1239,6 +1239,7 @@ export type ClientContext = {
     viewport: HTMLDivElement;
     touchOverlay: HTMLDivElement;
     clientId: ClientId | undefined;
+    debug: ClientDebugState;
     input: Input;
     state?: EngineClient;
     room?: ClientRoom;
@@ -1665,25 +1666,44 @@ export function send<S extends Scripts.Schema, Direction extends Rpc.RpcDirectio
 
 Tagged logging and the build-time `env` / `platform` flags.
 
-#### `log`
+#### `debug.log`
 
 ```ts
 /** log an info-level message tagged with the script's trait + node. */
 export function log(ctx: ScriptContext, ...args: unknown[]): void;
 ```
 
-#### `warn`
+#### `debug.warn`
 
 ```ts
 /** log a warning tagged with the script's trait + node. */
 export function warn(ctx: ScriptContext, ...args: unknown[]): void;
 ```
 
-#### `error`
+#### `debug.error`
 
 ```ts
 /** log an error tagged with the script's trait + node. */
 export function error(ctx: ScriptContext, ...args: unknown[]): void;
+```
+
+#### `debug.panel`
+
+```ts
+/**
+ * open a floating debug panel on the shared dashboard, scoped to this script: it
+ * is closed automatically when the script instance disposes (room teardown, node
+ * removal, hot-reload), so game debug UI can't leak. the returned dashcat `Panel`
+ * takes the full control surface — `add` (options), `monitor`, `graph`, `log`,
+ * `stat`, `tabs`, etc. — alongside the engine's panels.
+ *
+ * client-only: returns `null` on the server. `title` defaults to the script's
+ * trait/node tag, mirroring how `log` tags its source. for full control (or
+ * manual lifecycle) reach `ctx.client.debug.dashboard` directly.
+ */
+export function panel(ctx: ScriptContext, opts: PanelOptions = {
+
+}): Panel | null;
 ```
 #### `env`
 
@@ -2170,14 +2190,7 @@ export type PrefabOptions<T extends PrefabType, S extends Schema> = {
 /**
  * declare a prefab def at module scope.
  */
-export function prefab<T extends PrefabType>(id: string, options: {
-    type: T;
-    deps?: ReadonlyArray<DepHandle>;
-    node?: {
-        realm?: Realm;
-    };
-    fn?: (ctx: PrefabApplyContext<T>, args: Record<string, never>) => void;
-}): PrefabHandle<Record<string, never>>;
+export function prefab<T extends PrefabType, S extends Schema>(id: string, options: PrefabOptions<T, S>): PrefabHandle<SchemaType<S>>;
 ```
 
 #### `createPrefab`

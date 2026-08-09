@@ -3,25 +3,25 @@
 
 import {
     AIR,
+    CullType,
+    MaterialType,
+    VertexAnimation,
     asset,
     block,
     blockModel,
     blockPreset,
     blockState,
     blockTexture,
-    CullType,
+    debug,
     forEachBlock,
     getBlock,
     getBlockState,
-    log,
-    MaterialType,
     onBlockBreak,
     onBlockBuild,
     onInit,
     setBlock,
     system,
     use,
-    VertexAnimation,
 } from 'bongle';
 import { blockTextures } from 'bongle/kit';
 
@@ -85,16 +85,16 @@ system('place-grass', (ctx) => {
         // read a block's key, and its numeric state id (block kind + block state)
         const key = getBlock(ctx.voxels, 0, 0, 0);
         const stateId = getBlockState(ctx.voxels, 0, 0, 0);
-        log(ctx, key, stateId);
+        debug.log(ctx, key, stateId);
 
         // AIR is the empty-cell state id: compare a state against it to test for air
         if (getBlockState(ctx.voxels, 0, 1, 0) === AIR) {
-            log(ctx, 'nothing above the block');
+            debug.log(ctx, 'nothing above the block');
         }
 
         // walk every non-air block that has been set
         forEachBlock(ctx.voxels, (x, y, z, blockKey) => {
-            log(ctx, 'block at', x, y, z, blockKey);
+            debug.log(ctx, 'block at', x, y, z, blockKey);
         });
     });
 });

@@ -3,21 +3,21 @@
 
 import type { Node } from 'bongle';
 import {
+    CanvasTrait,
+    TransformTrait,
     addChild,
     addTrait,
-    CanvasTrait,
     createNode,
+    debug,
     env,
     findChildByName,
     getTrait,
     isKeyDown,
-    log,
     onFrame,
     onJoin,
     query,
     setPosition,
     system,
-    TransformTrait,
     trait,
 } from 'bongle';
 
@@ -26,7 +26,7 @@ system('sides', (ctx) => {
     // server-only: authoritative logic, compiled out of the client bundle
     if (env.server) {
         onJoin(ctx, ({ playerNode }) => {
-            log(ctx, 'player joined', playerNode.id);
+            debug.log(ctx, 'player joined', playerNode.id);
         });
     }
 

@@ -2,7 +2,7 @@
 // Compiles against `bongle` (+ crashcat for physics rays); regions are pulled
 // into guide.md by build.js.
 
-import { BLOCK_FLAG_COLLISION, createVoxelRaycastResult, log, OBJECT_LAYER_VOXELS, onInit, raycastVoxels, system } from 'bongle';
+import { BLOCK_FLAG_COLLISION, OBJECT_LAYER_VOXELS, createVoxelRaycastResult, debug, onInit, raycastVoxels, system } from 'bongle';
 import {
     CastRayStatus,
     castRay,
@@ -33,7 +33,7 @@ system('block-pick', (ctx) => {
         if (out.hit) {
             // out.voxelX/Y/Z: the block cell; out.nx/ny/nz: the hit normal;
             // out.distance: range; out.stateId: which block kind was hit
-            log(ctx, 'hit block at', out.voxelX, out.voxelY, out.voxelZ);
+            debug.log(ctx, 'hit block at', out.voxelX, out.voxelY, out.voxelZ);
         }
     });
 });
@@ -57,7 +57,7 @@ system('body-pick', (ctx) => {
 
         if (collector.hit.status === CastRayStatus.COLLIDING) {
             const distance = collector.hit.fraction * 32; // fraction is 0..1 along the ray
-            log(ctx, 'hit body', collector.hit.bodyIdB, 'at', distance);
+            debug.log(ctx, 'hit body', collector.hit.bodyIdB, 'at', distance);
         }
     });
 });

@@ -274,16 +274,22 @@ function addClientFrameStack(c: Container, height: number): void {
     });
 }
 
-/** overlaid in/out throughput for client + server (not stacked — distinct flows). */
-function addThroughput(c: Container, height: number): void {
+/** overlaid in/out throughput (not stacked — distinct flows). `side` picks the
+ *  scope: 'client'/'server' show that side's in+out; omitted shows all four
+ *  (the compact glance on the perf tab). */
+function addThroughput(c: Container, height: number, side?: 'client' | 'server'): void {
     c.lines(
-        () => {
+        (): Record<string, number> => {
             const room = activeRoom();
+            const client = room?.clientMetrics ?? null;
+            const server = room?.serverMetrics ?? null;
+            if (side === 'client') return { in: latest(client, 'net/ingress'), out: latest(client, 'net/egress') };
+            if (side === 'server') return { in: latest(server, 'net/ingress'), out: latest(server, 'net/egress') };
             return {
-                'client in': latest(room?.clientMetrics ?? null, 'net/ingress'),
-                'client out': latest(room?.clientMetrics ?? null, 'net/egress'),
-                'server in': latest(room?.serverMetrics ?? null, 'net/ingress'),
-                'server out': latest(room?.serverMetrics ?? null, 'net/egress'),
+                'client in': latest(client, 'net/ingress'),
+                'client out': latest(client, 'net/egress'),
+                'server in': latest(server, 'net/ingress'),
+                'server out': latest(server, 'net/egress'),
             };
         },
         { label: 'throughput (kb/s)', height, unit: 'kb/s', min: 0, smooth: 0.2, hover: true, history: CHART_HISTORY },
@@ -315,7 +321,9 @@ function build(): DebugDashboard {
     // dashed baseline — read where the ms go at a glance, hover to freeze per-band
     // values. all widgets read live getters, so they follow the active room
     // without any reconcile; dashcat samples them.
-    const panel = dash.panel({ title: 'debug', closable: false });
+    // start offset a little further from the top-left corner so it clears the
+    // editor's top/left toolbars (dashcat's default is a tight 16px).
+    const panel = dash.panel({ title: 'debug', closable: false, position: [64, 64] });
     const tabs = panel.tabs();
 
     // overview: F3-style "where am i" readouts, grouped into folders.
@@ -396,20 +404,24 @@ function build(): DebugDashboard {
         history: CHART_HISTORY,
     });
 
-    // net: throughput + per-message-type ingress/egress breakdowns (client-side).
-    const net = tabs.tab('net');
-    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ping', SMOOTH_NET), { label: 'ping', unit: 'ms' });
-    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ingress', SMOOTH_NET), {
-        label: 'client in',
+    // client net: ping + client throughput + per-message-type ingress/egress
+    // breakdowns (net/in/*, net/out/* are recorded client-side only).
+    const clientNet = tabs.tab('client net');
+    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ping', SMOOTH_NET), {
+        label: 'ping',
+        unit: 'ms',
+    });
+    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ingress', SMOOTH_NET), {
+        label: 'in',
         unit: 'kb/s',
     });
-    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/egress', SMOOTH_NET), {
-        label: 'client out',
+    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/egress', SMOOTH_NET), {
+        label: 'out',
         unit: 'kb/s',
     });
-    addThroughput(net, 110);
+    addThroughput(clientNet, 110, 'client');
     // where the bytes go: one stacked band per message type, summing to the total.
-    net.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/in/'), {
+    clientNet.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/in/'), {
         label: 'ingress by type (kb/s)',
         stacked: true,
         height: 150,
@@ -419,7 +431,7 @@ function build(): DebugDashboard {
         hover: true,
         history: CHART_HISTORY,
     });
-    net.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/out/'), {
+    clientNet.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/out/'), {
         label: 'egress by type (kb/s)',
         stacked: true,
         height: 150,
@@ -429,6 +441,18 @@ function build(): DebugDashboard {
         hover: true,
         history: CHART_HISTORY,
     });
+
+    // server net: server-side in/out (no per-type breakdown — not recorded server-side).
+    const serverNet = tabs.tab('server net');
+    serverNet.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/ingress', SMOOTH_NET), {
+        label: 'in',
+        unit: 'kb/s',
+    });
+    serverNet.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/egress', SMOOTH_NET), {
+        label: 'out',
+        unit: 'kb/s',
+    });
+    addThroughput(serverNet, 110, 'server');
 
     // ── options tab: editor debug toggles + ws-latency sim (editor-only) ──
     //

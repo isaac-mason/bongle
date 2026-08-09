@@ -1560,22 +1560,69 @@ writer.
 ## Performance
 
 Before optimizing anything, measure. Press `` ` `` (backtick) while playing to toggle
-the **debug panel**, an on-screen overlay of live performance metrics. Do not guess at
-what is slow: open the panel and find the hot row first.
+the **debug dashboard**, a floating window of live metrics and readouts. Drag its title
+bar to move it, and drag a tab to split or reorder it. Do not guess at what is slow:
+open the dashboard and find the hot row first.
 
-The panel reports three scopes side by side, the client globally, the current room on
-the client, and that same room on the **server**, so you can tell a client-render cost
-apart from a server-simulation one. It has three views:
+The perf tabs read three scopes, the client globally, the active room on the client, and
+that same room on the **server**, so you can tell a client-render cost apart from a
+server-simulation one. The tabs are:
 
-- **Summary**: the headline frame time (ms per frame) plus the client and server tick
-  times, the quickest read on whether you are CPU-bound and on which side.
-- **CPU breakdown**: per-subsystem timings, so you can see which system (meshing,
-  physics, lighting, scripts) is eating the frame.
-- **Net breakdown**: inbound and outbound bandwidth in kb/s, broken down by message
-  kind, for spotting a chatty `sync` or RPC.
+- **overview**: where you are, camera and foot position, chunk, facing, and the block
+  under your feet (click a value to copy it), plus room info and world counts.
+- **perf**: the headline fps and client and server frame times, a stacked frame-time
+  chart (one band per phase, summing to the frame, with the 60fps budget drawn as a
+  dashed line), and a throughput glance.
+- **cpu**: the full frame breakdown, the top-level phases plus the render internals and
+  the server frame, each a stacked area you can hover to freeze per-band values.
+- **client net** and **server net**: inbound and outbound bandwidth in kb/s, with the
+  client side also broken down by message kind, for spotting a chatty `sync` or RPC.
 
-The panel is the starting point for every performance question: it turns "the game
+In the editor you also get an **options** tab (debug view toggles and a ws-latency
+simulator) and a **logs** tab (client and server log tails).
+
+The dashboard is the starting point for every performance question: it turns "the game
 feels slow" into a specific row on a specific side.
+
+### Custom debug panels
+
+Your game can dock its own panels alongside the engine's. Call `debug.panel(ctx)` from a
+script to open a floating panel scoped to that script. It is closed automatically when
+the script disposes (room teardown, node removal, hot reload), so game debug UI never
+leaks. The returned panel takes the full control surface:
+
+```ts
+import { debug } from 'bongle';
+
+const enemy = { speed: 4, aggro: true, mode: 'patrol' };
+
+const panel = debug.panel(ctx, { title: 'enemy ai' });
+panel.add(enemy, 'speed', { min: 0, max: 10 });               // slider, writes back to `enemy`
+panel.add(enemy, 'aggro');                                     // toggle
+panel.add(enemy, 'mode', { options: ['patrol', 'chase', 'flee'] }); // select
+panel.monitor(() => enemy.distanceToPlayer, { unit: 'm' });    // read-only value
+panel.graph(() => enemy.distanceToPlayer, { unit: 'm' });      // live line graph
+panel.button('reset', () => resetEnemy(enemy));
+```
+
+`add(target, key, opts)` binds a control to an object property and writes edits straight
+back, so it doubles as a live tweak surface for tuning gameplay values. `monitor`,
+`graph`, `lines` (multi-series), and `log` are read-only views over getters you supply.
+Group rows with `panel.folder('name')`, or add a nested tab strip with `panel.tabs()`.
+Pass `copy: true` to a `monitor` to make its value click-to-copy.
+
+`title` defaults to the script's trait and node, the same tag `debug.log` uses. On the
+server `debug.panel` returns `null` (there is no client dashboard), so guard with
+`ctx.client` if your script runs on both sides.
+
+For full control, or to manage a panel's lifetime yourself, reach the shared dashboard
+directly at `ctx.client.debug.dashboard` and call `.panel(...)` on it. The panel and
+control types (`Panel`, `Handle`, `AddOptions`, and friends) are re-exported from
+`bongle`.
+
+The dashboard is built on [dashcat](https://github.com/isaac-mason/dashcat). See its
+docs for the full control vocabulary (sliders, selects, colors, vectors, graphs,
+gauges, histograms, log views, and more) and the options each one takes.
 
 ## Building & deploying
 

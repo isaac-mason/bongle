@@ -1,7 +1,7 @@
 // Typechecked snippets for Multiplayer — chat.
 // Compiles against `bongle`; regions are pulled into guide.md by build.js.
 
-import { chat, log, onInit, system } from 'bongle';
+import { chat, debug, onInit, system } from 'bongle';
 
 /* SNIPPET_START: message */
 system('announcer', (ctx) => {
@@ -14,7 +14,7 @@ system('announcer', (ctx) => {
 
     // react to the plain chat players type (client-only). msg is { from, text, kind }.
     chat.onMessage(ctx, (msg) => {
-        log(ctx, `${msg.from}: ${msg.text}`);
+        debug.log(ctx, `${msg.from}: ${msg.text}`);
     });
 });
 /* SNIPPET_END: message */
@@ -37,7 +37,7 @@ system('commands', (ctx) => {
     // consumed (not shown as a normal chat line); `from` is the client that ran it.
     if (ctx.server) {
         chat.listen(ctx, teleport, ({ args, from }) => {
-            log(ctx, 'teleport', from, args.x, args.z);
+            debug.log(ctx, 'teleport', from, args.x, args.z);
         });
     }
 });

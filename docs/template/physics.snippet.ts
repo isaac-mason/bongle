@@ -3,27 +3,27 @@
 
 import type { Node } from 'bongle';
 import {
-    addChild,
-    addTrait,
     COLLISION_GROUP_CHARACTERS,
     ContactsTrait,
+    MotionType,
+    OBJECT_LAYER_NODE_MOVING,
+    PlayerTrait,
+    RigidBodyTrait,
+    TransformTrait,
+    addChild,
+    addTrait,
     createNode,
+    debug,
     defineCollisionGroups,
     destroyNode,
     env,
     exceptGroups,
-    log,
-    MotionType,
-    OBJECT_LAYER_NODE_MOVING,
     onInit,
-    onlyGroups,
     onPostPhysicsStep,
-    PlayerTrait,
+    onlyGroups,
     query,
-    RigidBodyTrait,
     setPosition,
     system,
-    TransformTrait,
     trait,
 } from 'bongle';
 import { box, rigidBody } from 'crashcat';
@@ -118,7 +118,7 @@ system('coins', (ctx) => {
             const touchedByPlayer = contacts.added.some((c) => c.type === 'rigidBody' && playerNodeIds.has(c.nodeId));
             if (touchedByPlayer) {
                 coinsCollected += coin.value;
-                log(ctx, `coin collected (total ${coinsCollected})`);
+                debug.log(ctx, `coin collected (total ${coinsCollected})`);
                 destroyNode(coin._node);
             }
         }
