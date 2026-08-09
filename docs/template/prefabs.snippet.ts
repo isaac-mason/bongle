@@ -7,13 +7,13 @@ import { addChild, cloneNode, createPrefab, onInit, prefab, scene, system } from
 const PenguinScene = scene('penguin');
 
 /* SNIPPET_START: define-prefab */
-// a prefab clones a scene's node children under each instance's root
+// a prefab clones a scene's node children into each instance's scene
 const PenguinPrefab = prefab('penguin', {
     type: 'nodes',
     deps: [PenguinScene],
     fn: (ctx) => {
         for (const child of PenguinScene.node.children) {
-            addChild(ctx.root, cloneNode(child));
+            addChild(ctx.scene, cloneNode(child));
         }
     },
 });

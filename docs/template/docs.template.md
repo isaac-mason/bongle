@@ -638,7 +638,7 @@ the world needs no handle.
 
 A prefab is a template you instantiate many times. `prefab(id, options)` declares
 one. Its `type` is `'nodes'`, `'voxels'`, or `'composite'`, and its `fn` builds an
-instance by attaching children under `ctx.root` and writing blocks into
+instance by attaching children under `ctx.scene` and writing blocks into
 `ctx.voxels`. List the scenes or other handles it reads in `deps`, so the editor
 re-instantiates it when they change.
 

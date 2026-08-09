@@ -2123,7 +2123,7 @@ Also exported: `SceneHandle`, `SceneOptions`.
 /**
  * what a prefab produces when instantiated.
  *   - 'voxels', voxel content only (`fn` populates the empty `ctx.voxels` canvas)
- *   - 'nodes', node children only (`fn` attaches children under `ctx.root`)
+ *   - 'nodes', node children only (`fn` attaches children under `ctx.scene`)
  *   - 'composite', both voxels and nodes
  */
 export type PrefabType = 'voxels' | 'nodes' | 'composite';

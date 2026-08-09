@@ -8,7 +8,7 @@
  *       deps: [PenguinScene],
  *       fn: (ctx) => {
  *           for (const child of PenguinScene.node.children) {
- *               addChild(ctx.root, cloneNode(child));
+ *               addChild(ctx.scene, cloneNode(child));
  *           }
  *       },
  *   });
@@ -23,7 +23,7 @@
  *           schema: prop.object({ color: prop.string() }),
  *           default: { color: 'red' },
  *       },
- *       fn(ctx, args) { ctx.root.name = args.color }
+ *       fn(ctx, args) { ctx.scene.name = args.color }
  *   })
  *
  *   const penguin = createPrefab(ctx, Penguin)         // detached
@@ -51,7 +51,7 @@ export type { PrefabApplyContext };
 /**
  * what a prefab produces when instantiated.
  *   - 'voxels', voxel content only (`fn` populates the empty `ctx.voxels` canvas)
- *   - 'nodes', node children only (`fn` attaches children under `ctx.root`)
+ *   - 'nodes', node children only (`fn` attaches children under `ctx.scene`)
  *   - 'composite', both voxels and nodes
  */
 export type PrefabType = 'voxels' | 'nodes' | 'composite';

@@ -91,19 +91,6 @@ function depsReady(def: PrefabDef): boolean {
 
 /* ── instantiate one prefab node ── */
 
-function collectInstantiatedNodes(children: Node[]): Node[] {
-    const out: Node[] = [];
-    const stack = [...children];
-    while (stack.length > 0) {
-        const node = stack.pop()!;
-        out.push(node);
-        for (const child of node.children) {
-            stack.push(child);
-        }
-    }
-    return out;
-}
-
 /**
  * `voxels` field type tracks the prefab's `type`:
  *   - `type: 'voxels'` or `'composite'` → `voxels: Voxels` (fresh canvas)
@@ -113,9 +100,11 @@ function collectInstantiatedNodes(children: Node[]): Node[] {
  */
 export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
     /**
-     * the prefab anchor. by convention, `ctx.root` carries only identity
-     * (uuid + scene-level transform + prefab config), attach content as
-     * children via `addChild(ctx.root, …)`, do NOT `addTrait(ctx.root, …)`.
+     * the scene this prefab populates. `ctx.scene` is the anchor node, but
+     * think of it as the container you fill: attach content as children via
+     * `addChild(ctx.scene, …)`, do NOT `addTrait(ctx.scene, …)`. the anchor
+     * itself carries only identity (uuid + scene-level transform + prefab
+     * config); traits placed on it are not part of the expanded output.
      * children added here are marked `persist: false` automatically so the
      * destroy/re-instantiate cycle cleans them up.
      *
@@ -126,8 +115,7 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
      * container and no further reconcile fires. edit mode keeps the live
      * link for HMR.
      */
-    root: Node;
-    all: () => Node[];
+    scene: Node;
     /**
      * fresh empty voxel canvas for `fn` to populate (for `type: 'voxels'`
      * or `'composite'`). null when the def's `type` is `'nodes'`.
@@ -137,14 +125,9 @@ export type PrefabApplyContext<T extends PrefabType = PrefabType> = {
     voxels: T extends 'nodes' ? null : Voxels;
 };
 
-export function buildPrefabApplyContext(root: Node, voxels: Voxels | null): PrefabApplyContext {
-    // snapshot existing children before user fn runs, `all` reflects whatever
-    // was there pre-fn. (today this is empty since reconcile tears down before
-    // expand; kept for forward compat.)
-    const snapshot = collectInstantiatedNodes(root.children);
+export function buildPrefabApplyContext(scene: Node, voxels: Voxels | null): PrefabApplyContext {
     return {
-        root,
-        all: () => snapshot,
+        scene,
         voxels,
     };
 }

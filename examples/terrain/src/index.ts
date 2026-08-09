@@ -63,7 +63,7 @@ const PenguinModelPrefab = prefab('penguin_model', {
     deps: [PenguinModel],
     fn: (ctx) => {
         const rig = cloneModel(PenguinModel.scene);
-        addChild(ctx.root, rig);
+        addChild(ctx.scene, rig);
         addTrait(rig, AnimatorTrait);
         addTrait(rig, PenguinWaddleTrait);
     },
@@ -77,7 +77,7 @@ const PenguinPrefab = prefab('penguin', {
     deps: [PenguinScene],
     fn: (ctx) => {
         for (const child of PenguinScene.node.children) {
-            addChild(ctx.root, cloneNode(child));
+            addChild(ctx.scene, cloneNode(child));
         }
     },
 });
