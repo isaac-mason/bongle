@@ -127,7 +127,7 @@ function requestGoto(ctx: ScriptContext, target: GotoTarget): void {
 
 function requestGotoLocal(ctx: ScriptContext): void {
     let localId = rooms.observed(ctx).find((r) => r.local)?.roomId;
-    if (!localId) localId = rooms.create(ctx, 'local');
+    if (!localId) localId = rooms.create(ctx, { sceneId: 'local' });
     rooms.activate(ctx, localId);
 }
 
@@ -143,7 +143,7 @@ script(NavTrait, 'nav', (ctx) => {
                 const v = rooms.view(ctx, id);
                 return v?.server?.room.sceneId === 'other';
             });
-            if (!alreadyExists) rooms.create(ctx, 'other');
+            if (!alreadyExists) rooms.create(ctx, { sceneId: 'other' });
         });
 
         onJoin(ctx, ({ playerNode }) => {

@@ -571,24 +571,44 @@ The schema is a `pack` schema, composed from the same `pack` builders that back 
 `sync` ([tabled under Traits](#traits)), so the command serializes to a compact binary
 frame rather than JSON.
 
-### Rooms
+### Matchmaking
 
-A **room** is one running instance of your game: its own copy of the scene,
-voxels, physics, and the players currently in it. Everything a script reaches
-through `ctx` belongs to its room, and most games run many rooms at once so no
-single instance fills up or slows the others.
+A game declares its room size once with `matchmaking({ maxPlayers })` (default 10).
+That per-room cap is the only knob; the platform does the placing, in two separate
+steps.
 
-`matchmaking(config)` decides how arriving players are grouped into rooms (the
-kit caps a room at 32 players). When you need rooms beyond the ones matchmaking
-creates, for lobbies, private matches, or instanced dungeons, manage them yourself:
-`rooms.create` opens one from a scene; `rooms.join`, `rooms.swap`, and `rooms.leave`
-move a client in and out; `rooms.list` and `rooms.view` inspect them; `rooms.active`
-and `rooms.observed` report which room a client is in; and `rooms.stop` closes one.
+**Room allocation** puts each joining player into a room. Players sharing a region,
+build, and join `options` are eligible for the same rooms: the matchmaker fills a
+matching room that still has space, fullest first so lobbies don't fragment, and
+opens a new one only when they are all at `maxPlayers`.
 
-A client can also re-enter matchmaking itself with `client.matchmake`, handing
-over new `options` to switch gamemodes or move from a lobby into a match.
+**Server allocation** decides where a new room runs. Each new room is placed on a
+server in the player's region, the one running the fewest rooms, so rooms fan out
+across the fleet instead of piling onto one machine.
+
+A client can re-enter matchmaking itself with `client.matchmake`, handing over new
+`options` to switch gamemodes or move from a lobby into a match.
 
 <Snippet source="multiplayer.snippet.ts" select="rematch" />
+
+### Rooms
+
+A **room** has its own players, scene, voxels, and physics. Everything a script
+reaches through `ctx` belongs to its room, and one server can run many rooms at
+once.
+
+Beyond the rooms matchmaking opens for you, you can manage rooms yourself, for
+lobbies, private matches, or instanced dungeons. `rooms.create` opens one from a
+scene; `rooms.join`, `rooms.swap`, and `rooms.leave` move a client in and out;
+`rooms.list` and `rooms.view` inspect them; `rooms.active` and `rooms.observed`
+report which room a client is in; and `rooms.stop` closes one.
+
+<Snippet source="rooms.snippet.ts" select="rooms" />
+
+Rooms from `rooms.create` all run in the **same process** as the caller. That makes
+moving a client between them cheap, with no reconnect, and lets a script read
+another through `rooms.view`, which suits a hub, a lobby, or an instanced
+side-area. But they share one server's CPU and memory, so keep the count small.
 
 `clientToUser` resolves a connected client to its durable `User`, the cross-session
 identity you key [persistence](#persistence) by.
@@ -1734,31 +1754,6 @@ reads its own contacts and flings any player whose body shows up in them, matche
 a coin pickup.
 
 <Snippet source="character-controller.snippet.ts" select="launch-pad-node" />
-
-## Examples
-
-The [`examples/`](../examples) directory holds small, self-contained programs, each
-isolating one feature. Clone the repo and run any of them locally with `bongle dev`.
-
-Feature examples:
-
-- [audio](../examples/audio): playing sounds, non-positional, pitch-shifted, and a spatial source that follows a node.
-- [blocks](../examples/blocks): defining block types with `block` and `blockPreset`, including procedural `draw()` textures.
-- [sprites](../examples/sprites): the `SpriteTrait` billboard modes alongside particles.
-- [dom-ui](../examples/dom-ui): the UI traits, `HtmlTrait` and `CanvasTrait`.
-- [voxel-model](../examples/voxel-model): a movable `VoxelModel` with a collider, a floating boat you can stand on.
-- [persistent-data](../examples/persistent-data): per-player and project-wide progress with `userStorage` and `projectStorage`.
-- [rooms](../examples/rooms): managing multiple rooms and moving clients between them.
-
-Performance stress tests, each loading one subsystem heavily:
-
-- [performance-terrain](../examples/performance-terrain): large terrain generation and streaming.
-- [performance-chunks](../examples/performance-chunks): heavy voxel chunk edits and remeshing.
-- [performance-lighting](../examples/performance-lighting): voxel flood-fill lighting under load.
-- [performance-meshes](../examples/performance-meshes): many static glTF meshes.
-- [performance-animated-meshes](../examples/performance-animated-meshes): many animated character models at once.
-- [performance-physics-rigid-body](../examples/performance-physics-rigid-body): many rigid bodies in one simulation.
-- [performance-physics-aabb-body](../examples/performance-physics-aabb-body): many lightweight AABB bodies.
 
 ## API reference
 
