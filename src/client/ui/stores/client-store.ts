@@ -42,6 +42,11 @@ export type ClientStore = {
     setDebugOpen: (open: boolean) => void;
     toggleDebugOpen: () => void;
 
+    /** gpucat Inspector overlay (GPU timing), gated behind the options-tab toggle;
+     *  only shown when the debug dashboard is open AND this is on. */
+    showGpucatInspector: boolean;
+    setShowGpucatInspector: (show: boolean) => void;
+
     /** global client-tick metrics (state.metrics on EngineClient).
      *  measured across all rooms, useful for spotting whole-frame regressions. */
     clientGlobalMetrics: Debug.Metrics | null;
@@ -80,6 +85,9 @@ export const useClient = create<ClientStore>((set) => ({
     debugOpen: false,
     setDebugOpen: (debugOpen) => set({ debugOpen }),
     toggleDebugOpen: () => set((s) => ({ debugOpen: !s.debugOpen })),
+
+    showGpucatInspector: false,
+    setShowGpucatInspector: (showGpucatInspector) => set({ showGpucatInspector }),
 
     clientGlobalMetrics: null,
     setClientGlobalMetrics: (clientGlobalMetrics) => set({ clientGlobalMetrics }),

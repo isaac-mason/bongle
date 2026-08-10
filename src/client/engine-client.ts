@@ -1319,11 +1319,11 @@ export function update(state: EngineClient, delta: number) {
          * a single client may hold multiple Players in the same room. */
         // debug network traffic is editor-only, player builds never request
         // server metrics or subscribe to server logs.
-        const { debugOpen } = useClient.getState();
+        const { debugOpen, showGpucatInspector } = useClient.getState();
 
         // gpucat Inspector overlay (GPU timing), shown alongside the dashboard
-        // whenever debug is open. available in non-editor builds too.
-        state.renderer.setInspectorVisible(debugOpen);
+        // only when debug is open AND the options-tab toggle is on.
+        state.renderer.setInspectorVisible(debugOpen && showGpucatInspector);
 
         // request server metrics for the perf panel in EVERY build, not just the
         // editor, so a shipped game surfaces server-side perf too. a player who

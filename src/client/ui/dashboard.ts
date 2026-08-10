@@ -551,6 +551,16 @@ function build(): DebugDashboard {
                 listen: true,
             },
         );
+        options.add(
+            {
+                get: () => useClient.getState().showGpucatInspector,
+                set: (v) => useClient.getState().setShowGpucatInspector(v),
+            },
+            {
+                label: 'gpucat inspector',
+                listen: true,
+            },
+        );
 
         const simOn = () => useEditor.getState().netSimEnabled;
         options.add(
