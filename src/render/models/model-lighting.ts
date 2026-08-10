@@ -17,6 +17,9 @@ import { query } from '../../core/scene/scene-tree';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';
 
+// A ModelTrait node always carries a TransformTrait (cloneModel and the
+// animator both guarantee it), so this query binds both with no per-frame
+// ancestor walk.
 type LightingQuery = ReturnType<typeof query<[typeof ModelTrait, typeof TransformTrait]>>;
 
 export type ModelLighting = {

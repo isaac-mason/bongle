@@ -1,4 +1,5 @@
 import { ModelTrait } from '../builtins/model';
+import { TransformTrait } from '../builtins/transform';
 import type { Node, Realm, TraitHandle, TraitProps } from '../core/scene/scene-tree';
 import * as SceneTree from '../core/scene/scene-tree';
 import type { TraitBase } from '../core/scene/traits';
@@ -43,11 +44,20 @@ export function cloneNode(node: Node): Node {
  * each mesh's own geometry, so there's nothing cull-related for the caller to
  * supply or maintain. If the source already has a `ModelTrait`, the existing
  * one is left in place.
+ *
+ * The clone root is also guaranteed a `TransformTrait`: a bake omits it on an
+ * identity-TRS, meshless root, but `ModelLighting` samples the `[ModelTrait,
+ * TransformTrait]` pair each frame, so without one the model would silently
+ * never be lit (stuck full-bright, `lightOffset` dead). An added identity
+ * transform is faithful, that's exactly the TRS the bake elided.
  */
 export function cloneModel(node: Node): Node {
     const clone = SceneTree.cloneNode(node);
     if (!SceneTree.getTrait(clone, ModelTrait)) {
         SceneTree.addTrait(clone, ModelTrait);
+    }
+    if (!SceneTree.getTrait(clone, TransformTrait)) {
+        SceneTree.addTrait(clone, TransformTrait);
     }
     return clone;
 }
