@@ -139,7 +139,7 @@ export const MODEL_INSTANCE_STRIDE_F32 = MODEL_INSTANCE_STRIDE / 4; // 36
 export const MODEL_VERTEX_STRIDE = layoutStrideOf(ModelVertex);
 const MODEL_VERTEX_STRIDE_F32 = MODEL_VERTEX_STRIDE / 4; // 8
 
-const INITIAL_INSTANCE_CAPACITY = 64;
+const INITIAL_INSTANCE_CAPACITY = 4096;
 
 // ── geometry pool ───────────────────────────────────────────────────
 // Pooled interleaved vertex + index buffers, slot-allocated per uploaded

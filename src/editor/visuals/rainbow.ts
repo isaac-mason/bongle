@@ -12,32 +12,49 @@
 // differing only in how they recover the fragment's world position (segment
 // endpoints for expanded lines, the position attribute for solid fills).
 
-import { attribute, d, dot, f32, mix, modelWorldMatrix, mul, type Node, sub, varying, vec3f, vec4f, wgslFn } from 'gpucat';
+import {
+    attribute,
+    d,
+    dot,
+    f32,
+    floor,
+    fract,
+    greaterThanEqual,
+    mix,
+    modelWorldMatrix,
+    mul,
+    type Node,
+    select,
+    sub,
+    varying,
+    vec3f,
+    vec4f,
+} from 'gpucat';
 
 // palette stops match the website wordmark gradient, sRGB components / 255:
 //   #ff3ea5  #ffd23f  #3fa7ff  #8a2be2  (wraps back to #ff3ea5)
 // authored in sRGB to match the eyeballed editor-colors constants (which are
 // dropped into the fragment output the same way, no linearization).
-const rainbowPalette = wgslFn(
-    `
-    fn editorRainbowPalette(t: f32) -> vec3f {
-        let x = fract(t) * 4.0;
-        let i = floor(x);
-        let f = x - i;
-        let c0 = vec3f(1.0, 0.243, 0.647);
-        let c1 = vec3f(1.0, 0.824, 0.247);
-        let c2 = vec3f(0.247, 0.655, 1.0);
-        let c3 = vec3f(0.541, 0.169, 0.886);
-        var a = c0;
-        var b = c1;
-        if (i >= 3.0) { a = c3; b = c0; }
-        else if (i >= 2.0) { a = c2; b = c3; }
-        else if (i >= 1.0) { a = c1; b = c2; }
-        return mix(a, b, f);
-    }
-`,
-    { output: d.vec3f, params: [{ name: 't', type: d.f32 }] },
-);
+//
+// `t` wraps to a 4-segment ramp; segment i picks stops (a, b) and interpolates
+// by the fractional part. select chains pick the stops branchlessly (the WGSL
+// backend lowers these to `select(false, true, cond)`).
+function rainbowPalette(t: Node<d.f32>): Node<d.vec3f> {
+    const x = mul(fract(t), f32(4));
+    const i = floor(x);
+    const f = sub(x, i);
+    const c0 = vec3f(1.0, 0.243, 0.647);
+    const c1 = vec3f(1.0, 0.824, 0.247);
+    const c2 = vec3f(0.247, 0.655, 1.0);
+    const c3 = vec3f(0.541, 0.169, 0.886);
+    const ge1 = greaterThanEqual(i, f32(1));
+    const ge2 = greaterThanEqual(i, f32(2));
+    const ge3 = greaterThanEqual(i, f32(3));
+    // a = [c0, c1, c2, c3][i], b = [c1, c2, c3, c0][i]
+    const a = select(select(select(c0, c1, ge1), c2, ge2), c3, ge3);
+    const b = select(select(select(c1, c2, ge1), c3, ge2), c0, ge3);
+    return mix(a, b, f);
+}
 
 // world units per full palette cycle. small enough that a multi-voxel
 // selection shows several bands, large enough that a single voxel reads as a

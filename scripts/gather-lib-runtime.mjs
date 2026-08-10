@@ -9,7 +9,8 @@
 // and the runner evaluates the shared, deduped package (not a copy baked into
 // each bongle chunk).
 
-import { cpSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,9 +38,36 @@ function resolvePkgDir(name) {
     }
 }
 
+/** newest mtime under a dir (0 if missing) — catches a rebuilt cat lib whose
+ *  version didn't bump. */
+function newestMtime(dir) {
+    let m = 0;
+    if (!existsSync(dir)) return m;
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const abs = join(dir, e.name);
+        const t = e.isDirectory() ? newestMtime(abs) : statSync(abs).mtimeMs;
+        if (t > m) m = t;
+    }
+    return m;
+}
+
+const pkgDirs = LIBS.map(resolvePkgDir);
+// Fingerprint each lib's version + newest dist mtime, so a lib/src edit reuses
+// the existing vendor copies but a rebuilt/bumped cat lib refreshes them. Pass
+// --force to copy regardless.
+const FP = join(VENDOR, '.fingerprint');
+const fingerprint = createHash('sha1')
+    .update(LIBS.map((lib, i) => `${lib}@${JSON.parse(readFileSync(join(pkgDirs[i], 'package.json'), 'utf8')).version}:${newestMtime(join(pkgDirs[i], 'dist'))}`).join('\n'))
+    .digest('hex');
+if (!process.argv.includes('--force') && existsSync(FP) && readFileSync(FP, 'utf8') === fingerprint) {
+    console.log('runtime libs up to date — skipping');
+    process.exit(0);
+}
+
 rmSync(VENDOR, { recursive: true, force: true });
-for (const lib of LIBS) {
-    const pkgDir = resolvePkgDir(lib);
+for (let i = 0; i < LIBS.length; i++) {
+    const lib = LIBS[i];
+    const pkgDir = pkgDirs[i];
     const dest = join(VENDOR, lib);
     mkdirSync(dest, { recursive: true });
     cpSync(join(pkgDir, 'package.json'), join(dest, 'package.json'));
@@ -48,3 +76,4 @@ for (const lib of LIBS) {
     if (existsSync(readme)) cpSync(readme, join(dest, 'README.md'));
     console.log(`gathered runtime: ${lib}`);
 }
+writeFileSync(FP, fingerprint);

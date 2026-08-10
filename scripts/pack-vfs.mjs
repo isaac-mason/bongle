@@ -116,7 +116,11 @@ const webgpuDir = dirname(require.resolve('@webgpu/types/package.json'));
 addFile('@webgpu/types/package.json', join(webgpuDir, 'package.json'));
 addTree('@webgpu/types', webgpuDir, (abs) => abs.endsWith('.d.ts'));
 
-const zip = zipSync(files, { level: 6 });
+// Dev serves this zip from localhost + unzips straight into OPFS, so compression
+// is wasted CPU per rebuild — dev.sh sets BONGLE_VFS_ZIP_LEVEL=0 (store). Prod
+// (website Docker build) leaves it unset → level 6 for the R2/network payload.
+const zipLevel = process.env.BONGLE_VFS_ZIP_LEVEL ? Number(process.env.BONGLE_VFS_ZIP_LEVEL) : 6;
+const zip = zipSync(files, { level: zipLevel });
 // The seed is consumed by the platform editor shell (apps/editor/engine-dist.ts). Write
 // it there when the monorepo is present; fall back to lib/editor for a standalone lib
 // build (a bare bongle checkout with no platform sibling — which doesn't need the seed).

@@ -1235,7 +1235,6 @@ export type ClientContext = {
     camera: SceneTree.Node;
     defaultSubject: SceneTree.Node | null;
     defaultCamera: SceneTree.Node;
-    domElement: HTMLCanvasElement;
     viewport: HTMLDivElement;
     touchOverlay: HTMLDivElement;
     clientId: ClientId | undefined;

@@ -22,6 +22,7 @@
 // thin re-export package pointing back into node_modules/react (single dir so
 // the shared-chunk relative imports resolve).
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -32,6 +33,21 @@ const require = createRequire(import.meta.url);
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'deps-dist', 'node_modules');
+
+// Fingerprint the prebundle inputs so a lib/src edit doesn't re-bundle deps that
+// haven't moved. The dep set only changes when a version (lockfile) or the
+// SPECIFIERS list (this file) changes — both hashed here. On a match, reuse the
+// existing deps-dist untouched. Pass --force to rebuild regardless.
+const FP = join(ROOT, 'deps-dist', '.fingerprint');
+const lockPath = [join(ROOT, '..', 'pnpm-lock.yaml'), join(ROOT, 'pnpm-lock.yaml')].find(existsSync);
+const fingerprint = createHash('sha1')
+    .update(readFileSync(fileURLToPath(import.meta.url)))
+    .update(lockPath ? readFileSync(lockPath) : '')
+    .digest('hex');
+if (!process.argv.includes('--force') && existsSync(OUT) && existsSync(FP) && readFileSync(FP, 'utf8') === fingerprint) {
+    console.log('deps prebundle up to date — skipping');
+    process.exit(0);
+}
 
 // The exact specifiers bongle/src imports (audit 2026-07-15) + the react runtime
 // entries oxc's automatic JSX emits (react/jsx-runtime). sharp is node-only
@@ -254,4 +270,5 @@ for (const [pkg, specs] of groups) {
     console.log(`bundled ${pkg} (${specs.length} entr${specs.length === 1 ? 'y' : 'ies'})`);
 }
 
+writeFileSync(FP, fingerprint);
 console.log(`\ndeps prebundle → deps-dist/node_modules (${(totalBytes / 1024 / 1024).toFixed(2)} MB, ${groups.size + 2} packages)`);

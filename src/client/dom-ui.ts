@@ -38,9 +38,11 @@ import {
     modelWorldMatrix,
     mul,
     type Scene,
-    screenCoordinate,
+    screenUV,
     texture,
+    textureDimensions,
     varying,
+    vec2f,
     vec2i,
     vec4f,
 } from 'gpucat';
@@ -422,9 +424,19 @@ function createTexturedQuadMaterial(tex: CanvasTexture, sceneDepthNode: DepthTex
     // sample the scene pass's depth at this fragment's pixel and discard if we're
     // behind world geometry. same camera as the scene → same NDC-z space as
     // `fragCoord.z`, so a direct compare is correct.
-    const sceneZ = sceneDepthNode.load(vec2i(screenCoordinate));
+    //
+    // index the depth texture by normalized screenUV scaled to the depth
+    // texture's OWN dimensions, not by raw fragCoord pixels. the overlay pass and
+    // the scene-depth attachment can live in different pixel spaces (notably a
+    // devicePixelRatio mismatch on the WebGL backend / HiDPI), and a raw
+    // texelFetch then indexes out of bounds outside a top-left sub-rect,
+    // discarding the quad everywhere else. screenUV is [0,1] across the render
+    // surface by construction, so this maps correctly regardless of DPR.
+    const depthTexel = vec2i(mul(screenUV, vec2f(textureDimensions(sceneDepthNode.bindingNode))));
+    const sceneZ = sceneDepthNode.load(depthTexel);
     const fragment = canvasDepthOcclude(sampled, fragCoord.z, sceneZ);
-
+    // const fragment = sampled;
+    // const fragment = vec4f(sceneZ, sceneZ, sceneZ, f32(1)); // debug: show the sampled scene
     return new Material({
         name: 'dom-ui-quad',
         vertex: clipPos,
