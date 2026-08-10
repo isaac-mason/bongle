@@ -200,10 +200,5 @@
     ],
     "optionalDependencies": {
         "webgpu": "^0.4.0"
-    },
-    "pnpm": {
-        "overrides": {
-            "dashcat": "link:/Users/isaacmason/Development/dashcat"
-        }
     }
 }
