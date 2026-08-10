@@ -3,6 +3,10 @@
 Read this guide top to bottom to learn the engine and its API, with examples and
 guidance. Reach for the [API reference](./api.md) for the exhaustive signature list.
 
+This guide is also served as plain markdown at
+[bongle.io/docs.md](https://bongle.io/docs.md), handy for reading offline or
+feeding to an LLM.
+
 ## What is bongle
 
 bongle is a multiplayer voxel game engine built for the web. It powers
@@ -1301,17 +1305,13 @@ A double-jump power-up is `config.jumpSpeed = 14`. An ice patch is a low
 
 #### Writing velocity directly
 
-`state.velocity` is the controller's live motion vector, and you can write it. Where
-`input` is a request the sim interprets, this is the motion itself, so it is the
-escape hatch for anything the input knobs can't express: a jump pad, a dash, an
-explosion knockback, a grappling yank.
-
-The pattern is to add an impulse and let the controller integrate it next tick. Two
-rules make it feel right. Add rather than overwrite, so successive impulses stack,
-which is how a rocket jump chains. Clear `state.grounded` in the same breath, or
-ground friction swallows a horizontal kick before it lands.
-
-<Snippet source="character-controller.snippet.ts" select="launch" />
+`state.velocity` is the controller's live motion vector and `state.grounded` is
+whether it is on the ground; you can write both. Where `input` is a request the
+sim interprets, these are the motion itself, so they are the escape hatch for
+anything the input knobs can't express: a launch pad, a dash, an explosion
+knockback. Add an impulse to `velocity` and clear `grounded` so ground friction
+doesn't eat it, and the controller integrates it next tick. See the launch pad
+recipes ([block](#launch-pad-block), [node](#launch-pad-node)) for worked examples.
 
 #### Respawning
 
@@ -1702,6 +1702,38 @@ bongle start
 # re-bake assets (textures, models, audio) on their own; dev and build do this for you
 bongle bake
 ```
+
+## Recipes
+
+Worked solutions that combine pieces from the earlier chapters. Each is a
+snippet you can lift straight into a game.
+
+### Launch pad block
+
+A launch pad flings a character upward, and launching one is just writing its
+velocity: add an upward impulse and clear `grounded` so ground friction doesn't eat
+it. That `launch` helper is the whole trick; the rest is deciding when to call it.
+
+<Snippet source="character-controller.snippet.ts" select="launch" />
+
+Make the pad a real block and every cell of it flings, with no per-pad wiring: drop
+the block anywhere in the world and it just works. The controller already samples
+the block under the feet each tick and hands it to you as `state.groundBlockState`
+(the standing block while grounded), so detecting the pad is a single equality check
+against the block's `defaultId()`.
+
+<Snippet source="character-controller.snippet.ts" select="launch-pad-block" />
+
+### Launch pad node
+
+When the pad is an object rather than terrain, floating off the grid or moving, give
+it a body and a model instead. A prefab bundles the launch-pad model, a static
+sensor box, and its own `ContactsTrait` into one placeable template; each instance
+reads its own contacts and flings any player whose body shows up in them, matched by
+`nodeId`, reusing the same `launch` helper. This is the same contact-driven shape as
+a coin pickup.
+
+<Snippet source="character-controller.snippet.ts" select="launch-pad-node" />
 
 ## Examples
 

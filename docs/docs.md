@@ -3,6 +3,10 @@
 Read this guide top to bottom to learn the engine and its API, with examples and
 guidance. Reach for the [API reference](./api.md) for the exhaustive signature list.
 
+This guide is also served as plain markdown at
+[bongle.io/docs.md](https://bongle.io/docs.md), handy for reading offline or
+feeding to an LLM.
+
 ## What is bongle
 
 bongle is a multiplayer voxel game engine built for the web. It powers
@@ -2153,44 +2157,13 @@ A double-jump power-up is `config.jumpSpeed = 14`. An ice patch is a low
 
 #### Writing velocity directly
 
-`state.velocity` is the controller's live motion vector, and you can write it. Where
-`input` is a request the sim interprets, this is the motion itself, so it is the
-escape hatch for anything the input knobs can't express: a jump pad, a dash, an
-explosion knockback, a grappling yank.
-
-The pattern is to add an impulse and let the controller integrate it next tick. Two
-rules make it feel right. Add rather than overwrite, so successive impulses stack,
-which is how a rocket jump chains. Clear `state.grounded` in the same breath, or
-ground friction swallows a horizontal kick before it lands.
-
-```ts
-// launching a character is just writing its velocity. this is THE knob for jump
-// pads, dashes, explosion knockback, and grappling yanks: you add to
-// state.velocity and the controller integrates it next tick. add (don't overwrite)
-// so successive launches stack (chained rocket jumps), and clear `grounded` so
-// ground friction doesn't eat a horizontal kick the same tick.
-export function launch(node: Node, impulse: Vec3): void {
-    const controller = getTrait(node, CharacterControllerTrait);
-    if (!controller) return;
-    vec3.add(controller.state.velocity, controller.state.velocity, impulse);
-    controller.state.grounded = false;
-}
-
-// a jump pad: when our player stands on the pad tile, fling them straight up.
-// actor-style — one instance per node carrying a CharacterControllerTrait.
-script(CharacterControllerTrait, 'jump-pad', (ctx) => {
-    if (!env.server) return; // launch on the server; the result replicates
-
-    const transform = getTrait(ctx.node, TransformTrait);
-    if (!transform) return;
-
-    onTick(ctx, () => {
-        const pos = getWorldPosition(transform);
-        const onPad = pos[0] > -1 && pos[0] < 1 && pos[2] > -1 && pos[2] < 1;
-        if (onPad && ctx.trait.state.grounded) launch(ctx.node, [0, 14, 0]);
-    });
-});
-```
+`state.velocity` is the controller's live motion vector and `state.grounded` is
+whether it is on the ground; you can write both. Where `input` is a request the
+sim interprets, these are the motion itself, so they are the escape hatch for
+anything the input knobs can't express: a launch pad, a dash, an explosion
+knockback. Add an impulse to `velocity` and clear `grounded` so ground friction
+doesn't eat it, and the controller integrates it next tick. See the launch pad
+recipes ([block](#launch-pad-block), [node](#launch-pad-node)) for worked examples.
 
 #### Respawning
 
@@ -2955,6 +2928,127 @@ bongle start
 
 # re-bake assets (textures, models, audio) on their own; dev and build do this for you
 bongle bake
+```
+
+## Recipes
+
+Worked solutions that combine pieces from the earlier chapters. Each is a
+snippet you can lift straight into a game.
+
+### Launch pad block
+
+A launch pad flings a character upward, and launching one is just writing its
+velocity: add an upward impulse and clear `grounded` so ground friction doesn't eat
+it. That `launch` helper is the whole trick; the rest is deciding when to call it.
+
+```ts
+// launching a character is just writing its velocity. this is THE knob for launch
+// pads, dashes, explosion knockback, and grappling yanks: you add to
+// state.velocity and the controller integrates it next tick. add (don't overwrite)
+// so successive launches stack (chained rocket jumps), and clear `grounded` so
+// ground friction doesn't eat a horizontal kick the same tick.
+export function launch(node: Node, impulse: Vec3): void {
+    const controller = getTrait(node, CharacterControllerTrait);
+    if (!controller) return;
+    vec3.add(controller.state.velocity, controller.state.velocity, impulse);
+    controller.state.grounded = false;
+}
+```
+
+Make the pad a real block and every cell of it flings, with no per-pad wiring: drop
+the block anywhere in the world and it just works. The controller already samples
+the block under the feet each tick and hands it to you as `state.groundBlockState`
+(the standing block while grounded), so detecting the pad is a single equality check
+against the block's `defaultId()`.
+
+```ts
+// a launch pad block. place LaunchPadBlock anywhere in the voxel grid and every
+// cell of it becomes a pad, no per-pad wiring. the controller already samples
+// the block under the feet each tick and exposes it as `state.groundBlockState`
+// (the standing block when grounded), so detection is one equality check.
+const LaunchPadBlock = block('demo:launch_pad', {
+    model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.slime } } }),
+    sounds: blockSoundPresets.grass,
+});
+
+system('launch-pad-block', (ctx) => {
+    if (!env.server) return; // launch on the server; the result replicates
+
+    const padState = LaunchPadBlock.defaultId();
+    const characters = query(ctx, [CharacterControllerTrait]);
+
+    onTick(ctx, () => {
+        for (const [controller] of characters) {
+            if (controller.state.grounded && controller.state.groundBlockState === padState) {
+                launch(controller._node, [0, 14, 0]);
+            }
+        }
+    });
+});
+```
+
+### Launch pad node
+
+When the pad is an object rather than terrain, floating off the grid or moving, give
+it a body and a model instead. A prefab bundles the launch-pad model, a static
+sensor box, and its own `ContactsTrait` into one placeable template; each instance
+reads its own contacts and flings any player whose body shows up in them, matched by
+`nodeId`, reusing the same `launch` helper. This is the same contact-driven shape as
+a coin pickup.
+
+```ts
+// a launch pad node. use this when the pad is an object rather than terrain,
+// floating off the grid, or moving. a prefab bundles the model, a static sensor
+// box, and its traits into one placeable template. each instance reads its OWN
+// contacts and flings any player body that enters, matched by nodeId.
+const LaunchPadModel = model('launch-pad', { src: asset('./assets/launch-pad.glb', import.meta.url) });
+const LaunchPadTrait = trait('launch-pad', {}, { persist: false });
+
+const LaunchPadPrefab = prefab('launch-pad', {
+    type: 'nodes',
+    deps: [LaunchPadModel],
+    fn: (ctx) => {
+        const pad = cloneModel(LaunchPadModel.scene);
+        const body = addTrait(pad, RigidBodyTrait);
+        body.def = {
+            shape: { type: 'box', halfExtents: [1, 0.25, 1] },
+            motionType: MotionType.STATIC,
+            sensor: true,
+        };
+        addTrait(pad, LaunchPadTrait);
+        addTrait(pad, ContactsTrait);
+        addChild(ctx.scene, pad);
+    },
+});
+
+system('launch-pad-node', (ctx) => {
+    if (!env.server) return;
+
+    const pads = query(ctx, [LaunchPadTrait, ContactsTrait]);
+    const players = query(ctx, [PlayerTrait]);
+
+    onInit(ctx, () => {
+        // createPrefab returns a detached anchor; position it and attach.
+        const pad = createPrefab(ctx, LaunchPadPrefab);
+        setPosition(addTrait(pad, TransformTrait), [4, 1, 4]);
+        addChild(ctx.node, pad);
+    });
+
+    // ContactsTrait fills `added` after each physics step; fling any player whose
+    // body just entered a pad's sensor.
+    onPostPhysicsStep(ctx, () => {
+        const playerByNodeId = new Map<number, Node>();
+        for (const [player] of players) playerByNodeId.set(player._node.id, player._node);
+
+        for (const [, contacts] of pads) {
+            for (const c of contacts.added) {
+                if (c.type !== 'rigidBody') continue;
+                const player = playerByNodeId.get(c.nodeId);
+                if (player) launch(player, [0, 14, 0]);
+            }
+        }
+    });
+});
 ```
 
 ## Examples
