@@ -607,12 +607,12 @@ function frustumIn(view: Float32Array, rx: number, ry: number, rz: number): bool
     return true;
 }
 
-/** per-facing back-face cone-cull (facings 0..5 = ±X/±Y/±Z), verbatim from the
- *  GPU emit: `axisVal = f<4 ? (f<2 ? rel.x : rel.z) : rel.y; isPlus = f%2==0;
+/** per-facing back-face cone-cull (facings 0..5 = ±X/±Y/±Z). Matches the GPU emit
+ *  (voxel-resources-gpu): `axisVal = f<2 ? rel.x : f<4 ? rel.y : rel.z; isPlus = f%2==0;
  *  visible = isPlus ? axisVal < +half : axisVal > -half`. Facing 6 (UNASSIGNED)
  *  never reaches here (the caller emits it unconditionally). */
 function facingVisible(rx: number, ry: number, rz: number, f: number): boolean {
-    const axisVal = f < 4 ? (f < 2 ? rx : rz) : ry;
+    const axisVal = f < 2 ? rx : f < 4 ? ry : rz;
     const isPlus = f % 2 === 0;
     return isPlus ? axisVal < HALF : axisVal > NEG_HALF;
 }
