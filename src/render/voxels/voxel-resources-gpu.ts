@@ -1800,7 +1800,14 @@ export function updateCull(voxelResources: VoxelResources, camera: Camera, viewC
     // arena mutation ∨ first-run. When skipped, last frame's permutation + draw
     // count stand. The forward normal is the near plane (frustum[4], inward
     // normal), the same plane buildCullView derives; rebuild it here for the gate.
-    frustum.setFromViewProjectionMatrix(_cullFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    // pass the clip-space convention so the near plane matches the backend (this is
+    // the WebGPU voxel path, so it's WebGPU here, but keep it explicit + correct).
+    frustum.setFromViewProjectionMatrix(
+        _cullFrustum,
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+        camera.coordinateSystem,
+    );
     updateTranslucentSortGate(
         voxelResources,
         camera.position[0],

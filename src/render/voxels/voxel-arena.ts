@@ -150,7 +150,14 @@ const _cullViewFrustum = /* @__PURE__ */ frustum.create();
  *  the live record count (`out[23]`); the caller owns that. `viewChunkRadius` is
  *  read live so a tier flip applies next frame. */
 export function buildCullView(out: Float32Array, camera: Camera, viewChunkRadius: number): void {
-    frustum.setFromViewProjectionMatrix(_cullViewFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    // clip-space convention matters: the near plane extracts differently for WebGPU
+    // (z=0) vs WebGL (z=-1); the default would mis-place it mid-frustum on WebGL.
+    frustum.setFromViewProjectionMatrix(
+        _cullViewFrustum,
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+        camera.coordinateSystem,
+    );
     const cx = camera.position[0];
     const cy = camera.position[1];
     const cz = camera.position[2];

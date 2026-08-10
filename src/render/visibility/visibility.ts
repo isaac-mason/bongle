@@ -168,7 +168,16 @@ export function update(v: Visibility, camera: Camera, viewRadius: number): void 
     }
 
     // ── frustum + distance cull ─────────────────────────────────────
-    frustum.setFromViewProjectionMatrix(v.frustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    // pass the camera's clip-space convention: the near-plane extraction differs
+    // between WebGPU (z=0 at near) and WebGL (z=-1 at near). Omitting it defaults to
+    // WebGPU and, on the WebGL backend, puts the near plane mid-frustum — culling the
+    // near half of the view (things pop in/out).
+    frustum.setFromViewProjectionMatrix(
+        v.frustum,
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+        camera.coordinateSystem,
+    );
     _activeEntries = entries;
     _activeCamX = camera.position[0];
     _activeCamY = camera.position[1];

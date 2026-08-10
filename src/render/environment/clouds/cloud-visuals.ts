@@ -115,8 +115,14 @@ export function update(
     const windTime = time.seconds;
     const gridSpacing = (camera.far * SAFE_FAR_FRACTION) / (GRID_DIM / 2);
 
-    // frustum planes, same math as the old WGSL cull.
-    frustum.setFromViewProjectionMatrix(_cpuFrustum, camera.projectionMatrix, camera.matrixWorldInverse);
+    // frustum planes, same math as the old WGSL cull. pass the clip-space convention
+    // so the near plane is correct on WebGL (z=-1) as well as WebGPU (z=0).
+    frustum.setFromViewProjectionMatrix(
+        _cpuFrustum,
+        camera.projectionMatrix,
+        camera.matrixWorldInverse,
+        camera.coordinateSystem,
+    );
 
     const enabled = cfg.enabled && cfg.clouds.enabled;
 
