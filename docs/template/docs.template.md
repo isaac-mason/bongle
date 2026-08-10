@@ -1747,7 +1747,6 @@ Feature examples:
 - [sprites](../examples/sprites): the `SpriteTrait` billboard modes alongside particles.
 - [dom-ui](../examples/dom-ui): the UI traits, `HtmlTrait` and `CanvasTrait`.
 - [voxel-model](../examples/voxel-model): a movable `VoxelModel` with a collider, a floating boat you can stand on.
-- [terrain](../examples/terrain): a fuller scene, generated terrain with blocks and an animated character.
 - [persistent-data](../examples/persistent-data): per-player and project-wide progress with `userStorage` and `projectStorage`.
 - [rooms](../examples/rooms): managing multiple rooms and moving clients between them.
 
