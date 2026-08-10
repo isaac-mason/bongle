@@ -2110,18 +2110,104 @@ just as it does for a rigid body.
 
 `CharacterControllerTrait` is a kinematic mover for players and NPCs: it walks,
 steps, and slides against the world without the wobble of a dynamic body. It pairs
-with `CharacterTrait` for the visible body, covered under
-[Characters](#characters).
+with `CharacterTrait` for the visible body, covered under [Characters](#characters).
+You move it in one of three ways: drive its `input`, tune its `config`, or write its
+`state.velocity` directly.
 
-You drive it through its `input`: `input.move` is a planar `[strafe, forward]`
+#### Driving with input
+
+`input` is how you steer the controller. `input.move` is a planar `[strafe, forward]`
 vector, `input.look` is the `[_, yaw, pitch]` look spherical, and `input.jump`,
 `input.sprint`, and `input.crouch` are held flags. The controller turns those into
-motion each tick. For a player, a [`PlayerControllerTrait`](#players--input) fills
-`input` from device input for you. For an NPC you write `input` yourself: set
-`input.move` to steer, and aim with `setCharacterLook(controller, yaw, pitch?)` or
-`setCharacterLookAt(controller, transform, target)` (which points the character at a world
-position through its eyes) rather than writing the look angles by hand. The
-[Pathfinding](#pathfinding) snippet drives an NPC exactly this way.
+motion each tick.
+
+For a player, a [`PlayerControllerTrait`](#players--input) fills `input` from device
+input for you. For an NPC you write it yourself: set `input.move` to steer, and aim
+with `setCharacterLook(controller, yaw, pitch?)` or `setCharacterLookAt(controller,
+transform, target)`, which points the character at a world position through its eyes,
+rather than writing the look angles by hand. The [Pathfinding](#pathfinding) snippet
+drives an NPC exactly this way.
+
+#### Tuning with config
+
+`config` holds the tunables that shape motion. The controller reads it live each
+tick, so you can change a field at runtime for a status effect or a per-block
+surface.
+
+| `config` field | Default | Controls |
+| --- | --- | --- |
+| `walkSpeed` | `5` | base ground speed, m/s |
+| `sprintSpeed` | `6.5` | ground speed while `input.sprint` is held |
+| `crouchSpeed` | `1.3` | ground speed while `input.crouch` is held |
+| `jumpSpeed` | `7` | upward launch speed on a jump, m/s |
+| `sprintJumpImpulse` | `4` | extra forward kick added to a sprinting jump |
+| `gravity` | `20` | downward acceleration, m/s² |
+| `terminalVelocity` | `40` | cap on fall speed, m/s |
+| `groundDragRate` | `12` | how fast horizontal speed bleeds off on the ground |
+| `airDragRate` | `0.85` | the same in the air (low, so momentum carries) |
+| `airAccel` | `13` | how hard `input.move` steers you mid-air |
+| `stepHeight` | `0.55` | tallest lip the controller auto-steps up |
+
+A double-jump power-up is `config.jumpSpeed = 14`. An ice patch is a low
+`config.groundDragRate`.
+
+#### Writing velocity directly
+
+`state.velocity` is the controller's live motion vector, and you can write it. Where
+`input` is a request the sim interprets, this is the motion itself, so it is the
+escape hatch for anything the input knobs can't express: a jump pad, a dash, an
+explosion knockback, a grappling yank.
+
+The pattern is to add an impulse and let the controller integrate it next tick. Two
+rules make it feel right. Add rather than overwrite, so successive impulses stack,
+which is how a rocket jump chains. Clear `state.grounded` in the same breath, or
+ground friction swallows a horizontal kick before it lands.
+
+```ts
+// launching a character is just writing its velocity. this is THE knob for jump
+// pads, dashes, explosion knockback, and grappling yanks: you add to
+// state.velocity and the controller integrates it next tick. add (don't overwrite)
+// so successive launches stack (chained rocket jumps), and clear `grounded` so
+// ground friction doesn't eat a horizontal kick the same tick.
+export function launch(node: Node, impulse: Vec3): void {
+    const controller = getTrait(node, CharacterControllerTrait);
+    if (!controller) return;
+    vec3.add(controller.state.velocity, controller.state.velocity, impulse);
+    controller.state.grounded = false;
+}
+
+// a jump pad: when our player stands on the pad tile, fling them straight up.
+// actor-style — one instance per node carrying a CharacterControllerTrait.
+script(CharacterControllerTrait, 'jump-pad', (ctx) => {
+    if (!env.server) return; // launch on the server; the result replicates
+
+    const transform = getTrait(ctx.node, TransformTrait);
+    if (!transform) return;
+
+    onTick(ctx, () => {
+        const pos = getWorldPosition(transform);
+        const onPad = pos[0] > -1 && pos[0] < 1 && pos[2] > -1 && pos[2] < 1;
+        if (onPad && ctx.trait.state.grounded) launch(ctx.node, [0, 14, 0]);
+    });
+});
+```
+
+#### Respawning
+
+Respawning is the mirror image: zero the velocity so a long fall's downward speed
+doesn't carry into the new spot and immediately launch the player off it. Teleport
+the feet with `setPosition`, then `vec3.set(controller.state.velocity, 0, 0, 0)`.
+
+```ts
+// respawn: teleport the feet and zero velocity so accumulated fall speed doesn't
+// carry into the new position and immediately fling the player off it.
+export function respawn(node: Node, feet: Vec3): void {
+    const transform = getTrait(node, TransformTrait);
+    const controller = getTrait(node, CharacterControllerTrait);
+    if (transform) setPosition(transform, feet);
+    if (controller) vec3.set(controller.state.velocity, 0, 0, 0);
+}
+```
 
 ### Contacts
 
