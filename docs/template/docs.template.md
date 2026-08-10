@@ -1734,15 +1734,18 @@ A launch pad flings a character upward, and launching one is just writing its
 velocity: add an upward impulse and clear `grounded` so ground friction doesn't eat
 it. That `launch` helper is the whole trick; the rest is deciding when to call it.
 
-<Snippet source="character-controller.snippet.ts" select="launch" />
+<Snippet source="recipe-launch-pad.snippet.ts" select="launch" />
 
 Make the pad a real block and every cell of it flings, with no per-pad wiring: drop
 the block anywhere in the world and it just works. The controller already samples
 the block under the feet each tick and hands it to you as `state.groundBlockState`
-(the standing block while grounded), so detecting the pad is a single equality check
-against the block's `defaultId()`.
+(the standing block's **state id** while grounded). Resolve that id back to its block
+with `stateToBlock(ctx.blocks, id)` and compare by identity against `LaunchPadBlock`.
+Matching the block, not one exact `defaultId()`, means every state of the pad counts,
+rotations, variants, an on/off toggle, so the check stays correct the moment the pad
+grows [block states](#block-states).
 
-<Snippet source="character-controller.snippet.ts" select="launch-pad-block" />
+<Snippet source="recipe-launch-pad.snippet.ts" select="launch-pad-block" />
 
 ### Launch pad node
 
@@ -1753,7 +1756,7 @@ reads its own contacts and flings any player whose body shows up in them, matche
 `nodeId`, reusing the same `launch` helper. This is the same contact-driven shape as
 a coin pickup.
 
-<Snippet source="character-controller.snippet.ts" select="launch-pad-node" />
+<Snippet source="recipe-launch-pad.snippet.ts" select="launch-pad-node" />
 
 ## API reference
 

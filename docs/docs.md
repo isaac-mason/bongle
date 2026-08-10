@@ -2998,14 +2998,17 @@ export function launch(node: Node, impulse: Vec3): void {
 Make the pad a real block and every cell of it flings, with no per-pad wiring: drop
 the block anywhere in the world and it just works. The controller already samples
 the block under the feet each tick and hands it to you as `state.groundBlockState`
-(the standing block while grounded), so detecting the pad is a single equality check
-against the block's `defaultId()`.
+(the standing block's **state id** while grounded). Resolve that id back to its block
+with `stateToBlock(ctx.blocks, id)` and compare by identity against `LaunchPadBlock`.
+Matching the block, not one exact `defaultId()`, means every state of the pad counts,
+rotations, variants, an on/off toggle, so the check stays correct the moment the pad
+grows [block states](#block-states).
 
 ```ts
 // a launch pad block. place LaunchPadBlock anywhere in the voxel grid and every
 // cell of it becomes a pad, no per-pad wiring. the controller already samples
 // the block under the feet each tick and exposes it as `state.groundBlockState`
-// (the standing block when grounded), so detection is one equality check.
+// (the standing block's state id when grounded).
 const LaunchPadBlock = block('demo:launch_pad', {
     model: () => ({ type: 'cube', textures: { all: { texture: blockTextures.slime } } }),
     sounds: blockSoundPresets.grass,
@@ -3014,12 +3017,16 @@ const LaunchPadBlock = block('demo:launch_pad', {
 system('launch-pad-block', (ctx) => {
     if (!env.server) return; // launch on the server; the result replicates
 
-    const padState = LaunchPadBlock.defaultId();
     const characters = query(ctx, [CharacterControllerTrait]);
 
     onTick(ctx, () => {
         for (const [controller] of characters) {
-            if (controller.state.grounded && controller.state.groundBlockState === padState) {
+            if (!controller.state.grounded) continue;
+            // resolve the state id back to the block that owns it, then compare
+            // by block identity. this matches EVERY state of the pad (rotations,
+            // variants, on/off) — not just one exact `defaultId()` — so it stays
+            // correct the moment the pad grows block-states. this is the way.
+            if (stateToBlock(ctx.blocks, controller.state.groundBlockState) === LaunchPadBlock) {
                 launch(controller._node, [0, 14, 0]);
             }
         }
@@ -3042,7 +3049,7 @@ a coin pickup.
 // box, and its traits into one placeable template. each instance reads its OWN
 // contacts and flings any player body that enters, matched by nodeId.
 const LaunchPadModel = model('launch-pad', { src: asset('./assets/launch-pad.glb', import.meta.url) });
-const LaunchPadTrait = trait('launch-pad', {}, { persist: false });
+const LaunchPadTrait = trait('launch-pad');
 
 const LaunchPadPrefab = prefab('launch-pad', {
     type: 'nodes',
