@@ -30,7 +30,7 @@ export function saveRoom(state: EngineServer, room: Rooms.Room): boolean {
     if (!room.edit) return false; // edit === null ⇔ play room (never persists)
 
     const payload = {
-        nodes: SceneTree.saveSceneTree(room.nodes),
+        nodes: SceneTree.saveSceneTree(room.scene),
         voxels: saveVoxelsIncremental(room.voxels, room.edit.voxelSaveCache),
     };
     const sceneChanged = ContentManager.saveScene(state.contentManager, room.sceneId, payload);

@@ -587,7 +587,7 @@ export function processInbox(state: EngineServer) {
                         const room = Rooms.getRoom(state.rooms, message.roomId);
                         if (!room) break;
 
-                        const node = SceneTree.getNodeById(room.nodes, message.nodeId);
+                        const node = SceneTree.getNodeById(room.scene, message.nodeId);
                         if (!node || node.owner === null) break;
                         const ownerPlayer = state.rooms.players.get(node.owner);
                         if (!ownerPlayer || ownerPlayer.client !== client || ownerPlayer.roomId !== room.id) break;
@@ -608,7 +608,7 @@ export function processInbox(state: EngineServer) {
                             state.rooms,
                             room.id,
                             client,
-                            room.nodes,
+                            room.scene,
                             node,
                             def,
                             instance,
@@ -767,13 +767,13 @@ export function update(state: EngineServer, delta: number) {
         });
 
         Debug.begin(room.metrics, 'nodes/update');
-        SceneTree.runOnUpdate(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnUpdate(room.scene, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/update');
 
         // game-script onTick, the usual home of game-logic spikes (ai, projectile
         // sweeps, the round reset). also timed per-script as `script/<key>`.
         Debug.begin(room.metrics, 'nodes/tick');
-        SceneTree.runOnTick(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnTick(room.scene, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/tick');
 
         // sample animations into rig TransformTraits before physics so the
@@ -785,24 +785,24 @@ export function update(state: EngineServer, delta: number) {
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(room.metrics, 'nodes/post-animate');
-        SceneTree.runOnPostAnimate(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnPostAnimate(room.scene, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/post-animate');
 
         // tick prefab system, discovers and re-instantiates stale prefab nodes
         Debug.begin(room.metrics, 'prefab');
-        Prefab.tick(room.nodes, room.context, state.resources, room.voxels, 'server');
+        Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'server');
         Debug.end(room.metrics, 'prefab');
 
         Debug.begin(room.metrics, 'physics/pre');
-        physics.preStep(room.physics, room.nodes, state.resources, null, room.mode === 'play');
+        physics.preStep(room.physics, room.scene, state.resources, null, room.mode === 'play');
         Debug.end(room.metrics, 'physics/pre');
 
         Debug.begin(room.metrics, 'physics');
-        physics.tick(room.physics, room.nodes, delta);
+        physics.tick(room.physics, room.scene, delta);
         Debug.end(room.metrics, 'physics');
 
         Debug.begin(room.metrics, 'physics/post');
-        physics.postStep(room.physics, room.nodes, null);
+        physics.postStep(room.physics, room.scene, null);
         Debug.end(room.metrics, 'physics/post');
 
         recordPhysicsStats(room.metrics, room.physics);
@@ -814,7 +814,7 @@ export function update(state: EngineServer, delta: number) {
         Debug.end(room.metrics, 'lighting');
 
         Debug.begin(room.metrics, 'nodes/frame');
-        SceneTree.runOnFrame(room.nodes, { delta }, room.metrics);
+        SceneTree.runOnFrame(room.scene, { delta }, room.metrics);
         Debug.end(room.metrics, 'nodes/frame');
 
         // drain chat inbox/outbox: parse queued `chat_input` lines from

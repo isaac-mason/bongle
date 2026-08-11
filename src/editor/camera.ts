@@ -100,7 +100,7 @@ const _focusQuat: Quat = [0, 0, 0, 1];
  * focus on multi-mesh model trees (matches the old ModelTrait behaviour).
  */
 export function focusNode(api: EditRoomStoreApi, room: ClientRoom, resources: Resources, nodeId: number): void {
-    const node = getNodeById(room.nodes, nodeId);
+    const node = getNodeById(room.scene, nodeId);
     if (!node) return;
 
     const transform = getTrait(node, TransformTrait);

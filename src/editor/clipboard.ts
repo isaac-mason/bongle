@@ -35,7 +35,7 @@ export function copySelectionToSystemClipboard(api: EditRoomStoreApi, ctx: Scrip
     const selection = buildCurrentSelection(api);
     if (Selection.isEmpty(selection)) return;
 
-    const blueprint = Blueprint.copySelection(ctx.voxels, ctx.nodes, selection);
+    const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, selection);
     const clipText = Blueprint.toClipboardString(blueprint);
 
     api.setState({ activeBlueprint: blueprint });
@@ -66,7 +66,7 @@ export function createClipboardHandlers(
         const selection = buildCurrentSelection(api);
         if (Selection.isEmpty(selection)) return;
 
-        const blueprint = Blueprint.copySelection(ctx.voxels, ctx.nodes, selection);
+        const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, selection);
         const clipText = Blueprint.toClipboardString(blueprint);
 
         e.preventDefault();
@@ -95,7 +95,7 @@ export function createClipboardHandlers(
 
         api.setState({ activeBlueprint: blueprint, placementContinuous: shiftHeldAtTrigger });
         console.log(`[bongle] pasted blueprint from clipboard: ${blueprint.label}${shiftHeldAtTrigger ? ' (continuous)' : ''}`);
-        TransformTool.enterPlacement(transformToolState, blueprint, false, null, room.nodes, ctx);
+        TransformTool.enterPlacement(transformToolState, blueprint, false, null, room.scene, ctx);
     };
 
     const onCut = (e: ClipboardEvent) => {
@@ -103,7 +103,7 @@ export function createClipboardHandlers(
         const sel = buildCurrentSelection(api);
         if (Selection.isEmpty(sel)) return;
 
-        const blueprint = Blueprint.copySelection(ctx.voxels, ctx.nodes, sel);
+        const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, sel);
         const clipText = Blueprint.toClipboardString(blueprint);
 
         e.preventDefault();
@@ -122,7 +122,7 @@ export function createClipboardHandlers(
         commitVoxelOps(ctx, airOps);
 
         api.setState({ placementContinuous: shiftHeldAtTrigger });
-        TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.nodes, ctx);
+        TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.scene, ctx);
     };
 
     return { onCopy, onCut, onPaste, onKeyDown };

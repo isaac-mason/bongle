@@ -39,7 +39,7 @@ export function ViewportContextMenu() {
     const replace = useEditRoom((s) => s.replace);
     const createNode = useEditRoom((s) => s.createNode);
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
-    const sceneGraph = useEditor((s) => s.room?.nodes ?? null);
+    const sceneGraph = useEditor((s) => s.room?.scene ?? null);
     const hotbar = useEditor((s) => s.hotbar);
     const activeSlotIndex = useEditRoom((s) => s.activeSlotIndex);
     const activeBlockKey = useMemo(() => activeBlockKeyOf(hotbar, activeSlotIndex), [hotbar, activeSlotIndex]);

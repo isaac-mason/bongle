@@ -38,7 +38,7 @@ function setup() {
     // explicit anchor node: getPlayerChunkCoord tracks it, and it's the always-visible
     // AOI own-anchor. registered BEFORE invalidatePlayer so join exempts it from the prune.
     const anchor = createNode({ name: `player:${player.id}` });
-    addChild(server.room.nodes.root, anchor);
+    addChild(server.room.scene.root, anchor);
     const anchorT = addTrait(anchor, TransformTrait);
     setPosition(anchorT, [0, 2, 0]); // chunk (0,0,0)
     server.room.playerNodes.set(player.id, anchor);
@@ -83,9 +83,9 @@ describe('discovery — chunk-tied node AOI', () => {
     it('join packet omits transform roots but keeps the own anchor + non-transform nodes', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        transformRootAt(server.room.nodes.root, 'near-root', [1, 2, 3]); // chunk (0,0,0)
+        transformRootAt(server.room.scene.root, 'near-root', [1, 2, 3]); // chunk (0,0,0)
         const plain = createNode({ name: 'plain-logic' }); // no transform → not chunk-gated
-        addChild(server.room.nodes.root, plain);
+        addChild(server.room.scene.root, plain);
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
@@ -106,7 +106,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('streams in an in-range transform root on the first flush after join', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const near = transformRootAt(server.room.nodes.root, 'near-root', [1, 2, 3]);
+        const near = transformRootAt(server.room.scene.root, 'near-root', [1, 2, 3]);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(near.id);
@@ -117,7 +117,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('does NOT stream a transform root outside the view radius', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const far = transformRootAt(server.room.nodes.root, 'far-root', [800, 2, 0]); // chunk (50,0,0)
+        const far = transformRootAt(server.room.scene.root, 'far-root', [800, 2, 0]); // chunk (50,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
         for (let i = 0; i < 5; i++) {
@@ -130,7 +130,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('region-driven discovery: a settled far root streams in once the player moves onto its chunk', () => {
         const { server, discovery, net, player, resources, moveAnchor } = setup();
 
-        const far = transformRootAt(server.room.nodes.root, 'far-root', [800, 2, 0]); // chunk (50,0,0)
+        const far = transformRootAt(server.room.scene.root, 'far-root', [800, 2, 0]); // chunk (50,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
         // flush so `far` settles out of dirtyNodes (still filed at chunk 50, unknown to client).
@@ -148,7 +148,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('evicts a known transform root when the player retreats out of range', () => {
         const { server, discovery, net, player, resources, moveAnchor } = setup();
 
-        const near = transformRootAt(server.room.nodes.root, 'near-root', [1, 2, 3]);
+        const near = transformRootAt(server.room.scene.root, 'near-root', [1, 2, 3]);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(near.id);
 
@@ -165,7 +165,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('root-moved: a root that moves out of the region is destroyed (player stationary)', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const mover = transformRootAt(server.room.nodes.root, 'mover', [1, 2, 3]); // chunk (0,0,0)
+        const mover = transformRootAt(server.room.scene.root, 'mover', [1, 2, 3]); // chunk (0,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(mover.id);
 
@@ -183,7 +183,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('root-moved: a root moving within the region stays present and keeps updating', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const mover = transformRootAt(server.room.nodes.root, 'mover', [1, 2, 3]); // chunk (0,0,0)
+        const mover = transformRootAt(server.room.scene.root, 'mover', [1, 2, 3]); // chunk (0,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(mover.id);
 
@@ -202,7 +202,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('root-moved: a root moving into the region is created (player stationary)', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const mover = transformRootAt(server.room.nodes.root, 'mover', [800, 2, 0]); // chunk (50,0,0)
+        const mover = transformRootAt(server.room.scene.root, 'mover', [800, 2, 0]); // chunk (50,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flush(discovery, server.rooms, resources); // settle out of range, not created
         expect(createdIds(flush(discovery, server.rooms, resources))).not.toContain(mover.id);
@@ -219,7 +219,7 @@ describe('discovery — chunk-tied node AOI', () => {
 
         // root at chunk (8,0,0): exactly viewRadius (8) from the origin anchor. it sits at
         // the frontier, discovered last in the spherical walk, so flush until it streams in.
-        const root = transformRootAt(server.room.nodes.root, 'edge-root', [128, 2, 0]);
+        const root = transformRootAt(server.room.scene.root, 'edge-root', [128, 2, 0]);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         let discovered = false;
         for (let i = 0; i < 15 && !discovered; i++) {
@@ -246,7 +246,7 @@ describe('discovery — chunk-tied node AOI', () => {
 
     it('completeness: an ancestor gaining a transform re-files the index (descendant root-status flips)', () => {
         const { server, discovery, net, player, resources } = setup();
-        const st = server.room.nodes;
+        const st = server.room.scene;
 
         // parent has no transform; child does → child is the transform root.
         const parent = createNode({ name: 'parent-logic' });
@@ -275,7 +275,7 @@ describe('discovery — chunk-tied node AOI', () => {
         const { server, discovery, net, player, resources } = setup();
 
         setBlock(server.room.voxels, 1, 0, 3, AOI_BLOCK); // occupy chunk (0,0,0)
-        const root = transformRootAt(server.room.nodes.root, 'occ-root', [1, 2, 3]); // chunk (0,0,0)
+        const root = transformRootAt(server.room.scene.root, 'occ-root', [1, 2, 3]); // chunk (0,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
         // the occupied anchor chunk ships as chunk_full on the first flush; the root streams
@@ -289,7 +289,7 @@ describe('discovery — chunk-tied node AOI', () => {
         const { server, discovery, net, player, resources } = setup();
 
         setBlock(server.room.voxels, 1, 0, 3, AOI_BLOCK); // occupy chunk (0,0,0)
-        const root = transformRootAt(server.room.nodes.root, 'occ-root', [1, 2, 3]); // chunk (0,0,0)
+        const root = transformRootAt(server.room.scene.root, 'occ-root', [1, 2, 3]); // chunk (0,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(root.id); // known now
 
@@ -314,12 +314,12 @@ describe('discovery — chunk-tied node AOI', () => {
         Discovery.addClient(discovery, CLIENT_B);
         const playerB = Rooms.joinRoom(server.rooms, CLIENT_B, server.room.id, server.room.mode);
         const anchorB = createNode({ name: `player:${playerB.id}` });
-        addChild(server.room.nodes.root, anchorB);
+        addChild(server.room.scene.root, anchorB);
         setPosition(addTrait(anchorB, TransformTrait), [2000, 2, 0]); // chunk (125,0,0)
         server.room.playerNodes.set(playerB.id, anchorB);
 
-        const nearA = transformRootAt(server.room.nodes.root, 'near-A', [1, 2, 3]); // chunk (0,0,0)
-        const nearB = transformRootAt(server.room.nodes.root, 'near-B', [2001, 2, 3]); // chunk (125,0,0)
+        const nearA = transformRootAt(server.room.scene.root, 'near-A', [1, 2, 3]); // chunk (0,0,0)
+        const nearB = transformRootAt(server.room.scene.root, 'near-B', [2001, 2, 3]); // chunk (125,0,0)
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, playerB);
@@ -343,7 +343,7 @@ describe('discovery — chunk-tied node AOI', () => {
     it('creates a transform-root subtree coherently (root + descendants together)', () => {
         const { server, discovery, net, player, resources } = setup();
 
-        const root = transformRootAt(server.room.nodes.root, 'veh-root', [2, 2, 2]); // chunk (0,0,0)
+        const root = transformRootAt(server.room.scene.root, 'veh-root', [2, 2, 2]); // chunk (0,0,0)
         const child = createNode({ name: 'veh-child' });
         addChild(root, child); // descendant, no transform of its own
 

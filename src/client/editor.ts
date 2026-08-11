@@ -108,7 +108,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
     const cameraNode = SceneTree.createNode({ name: `editor:${room.playerId}:camera`, persist: false, realm: 'client' });
     SceneTree.addTrait(cameraNode, TransformTrait);
     SceneTree.addTrait(cameraNode, CameraTrait);
-    SceneTree.addChild(room.nodes.root, cameraNode);
+    SceneTree.addChild(room.scene.root, cameraNode);
 
     // seed lens camera pose from the outgoing view so entry is seamless. Play
     // rooms always have a live render camera, so srcPos/srcQuat exist; if they
@@ -120,7 +120,7 @@ export function enterLocalEditorView(room: ClientRoom): void {
     }
 
     const editorNode = SceneTree.createNode({ name: `editor:${room.playerId}`, persist: false, realm: 'client' });
-    SceneTree.addChild(room.nodes.root, editorNode);
+    SceneTree.addChild(room.scene.root, editorNode);
 
     // publish the lens pointer *before* attaching EditorTrait, addTrait fires
     // the editor script synchronously, and its ownership gate checks
@@ -151,8 +151,8 @@ export function exitLocalEditorView(room: ClientRoom): void {
     if (!lens) return;
     room.client.subject = room.client.defaultSubject;
     room.client.camera = room.client.defaultCamera;
-    SceneTree.destroyNode(room.nodes, lens.subject);
-    SceneTree.destroyNode(room.nodes, lens.camera);
+    SceneTree.destroyNode(room.scene, lens.subject);
+    SceneTree.destroyNode(room.scene, lens.camera);
     room.editor = null;
     const store = useEditor.getState();
     store.clearRoomView(room.playerId);

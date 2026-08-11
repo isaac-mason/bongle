@@ -80,7 +80,7 @@ export type ClientRoom = {
     local: boolean;
 
     /** scene graph */
-    nodes: SceneTree.SceneTree;
+    scene: SceneTree.SceneTree;
 
     /** the gpucat render scenes (main + overlay) for this room */
     render: RenderScenes;
@@ -262,7 +262,7 @@ export const RENDER_ROOM_PLAYER_ID = -1 as PlayerId;
  * live rooms.
  */
 export type RenderRoom = {
-    nodes: SceneTree.SceneTree;
+    scene: SceneTree.SceneTree;
     voxels: Voxels.Voxels;
     physics: Physics.Physics;
     clock: Clock.Clock;
@@ -323,7 +323,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
     attachWorldTrait(nodes.root);
 
     return {
-        nodes,
+        scene: nodes,
         voxels,
         physics,
         clock,
@@ -729,7 +729,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         roomMode,
         namespace,
         local,
-        nodes,
+        scene: nodes,
         render,
         context: context,
         syncSnapshots,
@@ -788,18 +788,18 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
  * instances before rebuilding.
  */
 export function resyncRoom(room: ClientRoom, message: CreateRoomOptions['message'], inbound: InboundProtocol): void {
-    unpackSceneTree(room.nodes, room.context, message.packedNodes, inbound);
+    unpackSceneTree(room.scene, room.context, message.packedNodes, inbound);
 
     // unpackSceneTree clears root._traits and rebuilds from the wire,
     // which never carries WorldTrait (persist: false). re-attach so the
     // host script(WorldTrait, …) instances respawn against the fresh graph.
-    attachWorldTrait(room.nodes.root);
+    attachWorldTrait(room.scene.root);
 
-    const playerNode = findPlayerNode(room.nodes, message.playerId, message.roomId);
+    const playerNode = findPlayerNode(room.scene, message.playerId, message.roomId);
     room.playerNode = playerNode;
     // unpackSceneTree wiped the default camera node along with the rest of
     // root's children, re-create it.
-    room.cameraNode = createDefaultCameraNode(room.nodes, playerNode, room.playerMode);
+    room.cameraNode = createDefaultCameraNode(room.scene, playerNode, room.playerMode);
     // re-seat the client state to the fresh nodes. plain writes to the one
     // client object, observed everywhere.
     room.client.subject = playerNode;
@@ -848,7 +848,7 @@ function createDefaultCameraNode(nodes: SceneTree.SceneTree, playerNode: SceneTr
  * render surface is the one shared canvas, sized globally by the client — not here.
  * camera aspect is bound globally each frame from the shared canvas size. caller is
  * responsible for wiring `room.context.client.state`/`.room` and calling
- * `SceneTree.initSceneTree(room.nodes)` after mount.
+ * `SceneTree.initSceneTree(room.scene)` after mount.
  */
 export function mountRoomViewport(room: ClientRoom): void {
     const viewport = useClient.getState().viewportElement;
@@ -952,11 +952,11 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         room.context.client.room = room;
     }
     // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
-    attachWorldTrait(room.nodes.root);
+    attachWorldTrait(room.scene.root);
     console.log(
         `[bongle room] createLocalRoom: room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
-    SceneTree.initSceneTree(room.nodes);
+    SceneTree.initSceneTree(room.scene);
     rooms.rooms.set(playerId, room);
     useClient.getState().setRoom(playerId, room);
     // append a synthetic RoomInfo so this local room participates in

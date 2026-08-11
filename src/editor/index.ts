@@ -241,7 +241,7 @@ script(
             CreateNodeCommand,
             editMutate((args, _client) => {
                 const { room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const parent = getNodeById(sceneTree, args.parentId);
                 if (!parent) return;
                 const node = createNode({
@@ -281,11 +281,11 @@ script(
             DestroyNodeCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const node = getNodeById(room.nodes, args.id);
+                const node = getNodeById(room.scene, args.id);
                 if (!node) return;
-                if (node === room.nodes.root) return;
+                if (node === room.scene.root) return;
                 _Discovery!.forgetNode(state.discovery, state.rooms, client, room.id, args.id);
-                destroyNode(room.nodes, node);
+                destroyNode(room.scene, node);
                 return true;
             }),
         );
@@ -294,11 +294,11 @@ script(
             SetNameCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const node = getNodeById(room.nodes, args.id);
+                const node = getNodeById(room.scene, args.id);
                 if (!node) return;
                 node.name = args.name ?? undefined;
-                bumpNodeVersion(room.nodes, node);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                bumpNodeVersion(room.scene, node);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
                 return true;
             }),
         );
@@ -307,13 +307,13 @@ script(
             SetRealmCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const node = getNodeById(room.nodes, args.id);
+                const node = getNodeById(room.scene, args.id);
                 if (!node) return;
-                if (node === room.nodes.root) return;
+                if (node === room.scene.root) return;
                 // setRealm marks the affected subtree dirty so discovery re-evaluates
                 // descendants' visibility (matters for play viewers in mixed rooms).
                 setRealm(node, args.realm as Realm);
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
                 return true;
             }),
         );
@@ -322,7 +322,7 @@ script(
             ReparentCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 if (node === sceneTree.root) return;
@@ -341,7 +341,7 @@ script(
             ReorderCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node?.parent) return;
                 reorderChild(node.parent, node, args.index);
@@ -355,10 +355,10 @@ script(
             SetTraitCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const node = getNodeById(room.nodes, args.id);
+                const node = getNodeById(room.scene, args.id);
                 if (!node) return;
-                setTraitProps(room.nodes, node, args.traitId, JSON.parse(args.props));
-                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.nodes, args.id);
+                setTraitProps(room.scene, node, args.traitId, JSON.parse(args.props));
+                _Discovery!.stampNodeKnowledge(state.discovery, state.rooms, client, room.id, room.scene, args.id);
                 return true;
             }),
         );
@@ -367,7 +367,7 @@ script(
             AddTraitCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId);
@@ -386,7 +386,7 @@ script(
             RemoveTraitCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 const def = registry.traits.byId.get(args.traitId);
@@ -405,7 +405,7 @@ script(
             SetPrefabCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 if (args.prefab) {
@@ -427,7 +427,7 @@ script(
             SetNodePersistCommand,
             editMutate((args, client) => {
                 const { state, room } = ctx.server!;
-                const sceneTree = room.nodes;
+                const sceneTree = room.scene;
                 const node = getNodeById(sceneTree, args.id);
                 if (!node) return;
                 setNodePersist(node, args.persist);
@@ -494,7 +494,7 @@ script(
             initialCamera,
             canvas,
             client.render.scene,
-            room.nodes,
+            room.scene,
             ctx,
         );
         const store = createEditRoomStore({ ctx, room, transformToolState });
@@ -555,7 +555,7 @@ script(
             TransformTool.prePhysicsGrab(transformToolState, room.physics, camera);
         });
         onPostPhysicsStep(ctx, () => {
-            TransformTool.postPhysicsGrab(transformToolState, room.nodes, room.physics);
+            TransformTool.postPhysicsGrab(transformToolState, room.scene, room.physics);
         });
 
         // ── grab free-rotate input pre-pass ──
@@ -747,7 +747,7 @@ script(
             const timeResources = client.state!.renderer.time;
 
             // sync editor node bodies with the scene tree for broadphase queries
-            NodeBodies.update(nodeBodies, room.physics, room.nodes, store, client.state!.resources);
+            NodeBodies.update(nodeBodies, room.physics, room.scene, store, client.state!.resources);
 
             // redraw the per-node selection AABB outlines. called from
             // every tool's exit path so node selection is visible whether
@@ -763,14 +763,14 @@ script(
                         selectedNodes.push(placement.voxelNode);
                         continue;
                     }
-                    const n = getNodeById(room.nodes, nid);
+                    const n = getNodeById(room.scene, nid);
                     if (n) selectedNodes.push(n);
                 }
                 InspectMesh.update(inspectMeshState, selectedNodes, client.state!.resources, timeResources);
             }
 
             // update prefab ghost voxels for nodes whose def produces voxels
-            PrefabVisuals.update(prefabVisuals, room.nodes, room.context, ctx.voxels.registry);
+            PrefabVisuals.update(prefabVisuals, room.scene, room.context, ctx.voxels.registry);
 
             const { activeTool } = store.getState();
 
@@ -879,7 +879,7 @@ script(
             if (TransformTool.isInGrab(transformToolState)) {
                 const tm = store.getState().transformMode;
                 if (activeTool !== 'transform' || tm !== 'grab') {
-                    TransformTool.exitGrab(transformToolState, room.nodes, room.physics, ctx);
+                    TransformTool.exitGrab(transformToolState, room.scene, room.physics, ctx);
                 }
             }
 
@@ -920,7 +920,7 @@ script(
                 updateMagicSelect(store, pointer, client.input, ctx.voxels, ctx.blocks);
             }
             if (activeTool === 'lasso-select') {
-                updateLassoSelect(store, pointer, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.nodes);
+                updateLassoSelect(store, pointer, client.input, camera, ctx.voxels, ctx.blocks, nodeBodies, room.scene);
             }
             // right-click context menu for dedicated selection tools.
             // inspect handles its own call inside updateInspect; build/

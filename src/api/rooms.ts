@@ -242,8 +242,8 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
         return {
             mode: target.mode,
             clock: target.clock,
-            node: target.nodes.root,
-            nodes: target.nodes,
+            node: target.scene.root,
+            scene: target.scene,
             voxels: target.voxels,
             physics: target.physics,
             blocks: rt.blocks,
@@ -270,8 +270,8 @@ export function view(ctx: ScriptContext, roomId: string, o?: { mode?: PlayerMode
         return {
             mode: target.playerMode,
             clock: target.clock,
-            node: target.nodes.root,
-            nodes: target.nodes,
+            node: target.scene.root,
+            scene: target.scene,
             voxels: target.voxels,
             physics: target.physics,
             blocks: rt.blocks,

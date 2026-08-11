@@ -75,7 +75,7 @@ export type Room = {
     sceneId: string;
 
     /** The live scene tree. */
-    nodes: SceneTree;
+    scene: SceneTree;
 
     /** Players (per (client, mode)) currently in this room. */
     players: Set<PlayerId>;
@@ -299,7 +299,7 @@ export function createRoom(state: Rooms, opts: CreateRoomOptions): Room {
     const room: Room = {
         id,
         sceneId: opts.sceneId,
-        nodes: sceneGraph,
+        scene: sceneGraph,
         players: new Set(),
         edit: opts.kind === 'edit' ? { dirty: false, voxelSaveCache: new Map() } : null,
         mode: opts.kind,
@@ -369,9 +369,9 @@ export function destroyRoom(state: Rooms, roomId: string): void {
         destroyPlayerNode(room, id);
     }
 
-    const children = room.nodes.root.children.slice();
+    const children = room.scene.root.children.slice();
     for (const child of children) {
-        destroyNode(room.nodes, child);
+        destroyNode(room.scene, child);
     }
 
     Physics.dispose(room.physics);
@@ -425,8 +425,8 @@ const EDITOR_STATE_TRAIT_ID = 'editor.state';
 function attachEditorServerTrait(room: Room): void {
     const handle = registry.traits.byId.get(EDITOR_SERVER_TRAIT_ID)?.handle;
     if (!handle) return;
-    if (hasTrait(room.nodes.root, handle)) return;
-    addTrait(room.nodes.root, handle);
+    if (hasTrait(room.scene.root, handle)) return;
+    addTrait(room.scene.root, handle);
 }
 
 function attachEditorStateTrait(node: Node): void {
@@ -714,7 +714,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
             voxDeserMs = performance.now() - desT0;
         }
         const parseT0 = performance.now();
-        loadSceneTree(room.nodes, sceneFile.data.nodes);
+        loadSceneTree(room.scene, sceneFile.data.nodes);
         sceneParseMs = performance.now() - parseT0;
         // seed dedupe cache so the first flush compares against real disk
         // bytes, see saveScene / engine-server boot loop for context.
@@ -727,7 +727,7 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     }
 
     const physT0 = performance.now();
-    room.physics = Physics.init(room.nodes, room.voxels, registry.blockRegistry);
+    room.physics = Physics.init(room.scene, room.voxels, registry.blockRegistry);
     const physMs = performance.now() - physT0;
     room.context.physics = room.physics;
 
@@ -735,14 +735,14 @@ export function initializeRoom(state: EngineServer, room: Room): void {
     // reached after context.server is wired (top of this fn) and after
     // loadSceneTree. So each system's factory + onInit fires exactly once, with
     // ctx.server live. (loadSceneTree wouldn't carry these anyway: persist: false.)
-    attachWorldTrait(room.nodes.root);
+    attachWorldTrait(room.scene.root);
     attachEditorServerTrait(room);
 
     Discovery.invalidateRoomList(state.discovery);
 
     const totalMs = performance.now() - t0;
     const chunkCount = room.voxels.chunks.size;
-    const nodeCount = room.nodes.nodes.size;
+    const nodeCount = room.scene.nodes.size;
     console.log(
         `[room-start]   initializeRoom mode=${room.mode} chunks=${chunkCount} nodes=${nodeCount} ` +
             `snapshot=${snapshotMs.toFixed(1)} dispose=${disposeMs.toFixed(1)} ` +
@@ -1046,7 +1046,7 @@ export function deleteScene(state: EngineServer, sceneId: string): void {
  * different visual.
  */
 export function createPlayerNode(state: EngineServer, room: Room, player: Player): Node {
-    const sg = room.nodes;
+    const sg = room.scene;
     const node = createNode({ name: `player:${player.id}`, persist: false });
     addChild(sg.root, node);
     setOwner(sg, node, player.id);
@@ -1092,5 +1092,5 @@ export function destroyPlayerNode(room: Room, playerId: PlayerId): void {
     const node = room.playerNodes.get(playerId);
     if (!node) return;
     room.playerNodes.delete(playerId);
-    destroyNode(room.nodes, node);
+    destroyNode(room.scene, node);
 }

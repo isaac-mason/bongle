@@ -61,7 +61,7 @@ export function createTestServer(opts: TestServerOptions = {}): TestServer {
     });
 
     if (opts.scene) {
-        SceneTree.loadSceneTree(room.nodes, opts.scene);
+        SceneTree.loadSceneTree(room.scene, opts.scene);
     }
 
     return {

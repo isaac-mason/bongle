@@ -183,7 +183,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     if (dirtyPrefabIds.size > 0) {
         for (const room of state.rooms.rooms.values()) {
             if (room.roomMode !== 'edit') continue;
-            markPrefabAnchorsDirty(room.nodes, dirtyPrefabIds);
+            markPrefabAnchorsDirty(room.scene, dirtyPrefabIds);
         }
     }
     // commands + traits: wire-index tables for both are lazy-derived on

@@ -1148,7 +1148,7 @@ export function InspectorPanel() {
     }
 
     const selectedNodeId = selectedNodeIds.values().next().value!;
-    const node = getNodeById(room.nodes, selectedNodeId);
+    const node = getNodeById(room.scene, selectedNodeId);
     if (!node) {
         return <div className="p-2 text-[10px] text-fg-muted font-mono italic">node not found</div>;
     }

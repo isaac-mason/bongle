@@ -370,7 +370,7 @@ function build(): DebugDashboard {
     session.monitor(() => activeRoom()?.client.subject?.name ?? '—', { label: 'subject', ...str });
 
     const world = overview.folder('world');
-    world.monitor(() => activeRoom()?.nodes.nodes.size ?? 0, { label: 'nodes', ...int });
+    world.monitor(() => activeRoom()?.scene.nodes.size ?? 0, { label: 'nodes', ...int });
     world.monitor(() => activeRoom()?.voxels.chunks.size ?? 0, { label: 'chunks', ...int });
     world.monitor(() => activeRoom()?.clock.time ?? 0, { label: 'clock', format: (v) => `${v.toFixed(1)} s` });
     world.monitor(() => fmtTimeOfDay(activeRoom()?.environment.time ?? 0), { label: 'time of day', ...str });

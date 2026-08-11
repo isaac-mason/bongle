@@ -102,10 +102,10 @@ describe('discovery — realm filtering', () => {
 
         // shared node, should appear
         const sharedA = createNode({ name: 'shared-A' });
-        addChild(server.room.nodes.root, sharedA);
+        addChild(server.room.scene.root, sharedA);
         // server-only node with a shared descendant, entire subtree pruned
         const serverOnly = createNode({ name: 'server-B', realm: 'server' });
-        addChild(server.room.nodes.root, serverOnly);
+        addChild(server.room.scene.root, serverOnly);
         const sharedC = createNode({ name: 'shared-C', realm: 'shared' });
         addChild(serverOnly, sharedC);
 
@@ -124,9 +124,9 @@ describe('discovery — realm filtering', () => {
         const { server, discovery, net, player, resources } = setupRoom('edit');
 
         const sharedA = createNode({ name: 'shared-A' });
-        addChild(server.room.nodes.root, sharedA);
+        addChild(server.room.scene.root, sharedA);
         const serverOnly = createNode({ name: 'server-B', realm: 'server' });
-        addChild(server.room.nodes.root, serverOnly);
+        addChild(server.room.scene.root, serverOnly);
         const sharedC = createNode({ name: 'shared-C', realm: 'shared' });
         addChild(serverOnly, sharedC);
 
@@ -145,7 +145,7 @@ describe('discovery — realm filtering', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
 
         const node = createNode({ name: 'morphs' });
-        addChild(server.room.nodes.root, node);
+        addChild(server.room.scene.root, node);
 
         // emit join_room synchronously with the populated scene
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
@@ -177,9 +177,9 @@ describe('discovery — realm filtering', () => {
 
         // add mixed-realm nodes after join, incremental sync path
         const sharedX = createNode({ name: 'shared-X' });
-        addChild(server.room.nodes.root, sharedX);
+        addChild(server.room.scene.root, sharedX);
         const svr = createNode({ name: 'server-Y', realm: 'server' });
-        addChild(server.room.nodes.root, svr);
+        addChild(server.room.scene.root, svr);
         const sharedZ = createNode({ name: 'shared-Z', realm: 'shared' });
         addChild(svr, sharedZ);
 
@@ -207,9 +207,9 @@ describe('discovery — realm filtering', () => {
         // one tick. c was dirtied before p, but p is now c's parent, so the
         // fan-out must emit p's node_created before c's (depth order).
         const c = createNode({ name: 'child' });
-        addChild(server.room.nodes.root, c);
+        addChild(server.room.scene.root, c);
         const p = createNode({ name: 'parent' });
-        addChild(server.room.nodes.root, p);
+        addChild(server.room.scene.root, p);
         reparent(c, p);
 
         const messages = flushUntilQuiet(discovery, server.rooms, resources);
@@ -228,7 +228,7 @@ describe('discovery — realm filtering', () => {
     it('idle: a tick with no changes emits no scene_sync', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'static' });
-        addChild(server.room.nodes.root, n);
+        addChild(server.room.scene.root, n);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources); // drains the create
         const idle = flushUntilQuiet(discovery, server.rooms, resources);
@@ -239,7 +239,7 @@ describe('discovery — realm filtering', () => {
     it('field change on a known node emits node_trait_fields incrementally', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'mover' });
-        addChild(server.room.nodes.root, n);
+        addChild(server.room.scene.root, n);
         const t = addTrait(n, TransformTrait);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flushUntilQuiet(discovery, server.rooms, resources); // drains the create
@@ -256,7 +256,7 @@ describe('discovery — realm filtering', () => {
     it('play mode: non-shared→shared transition emits node_created (reveal)', () => {
         const { server, discovery, net, player, resources } = setupRoom('play');
         const n = createNode({ name: 'reveal-me', realm: 'server' });
-        addChild(server.room.nodes.root, n);
+        addChild(server.room.scene.root, n);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         // not shared yet → never sent to the play client
         const before = flushUntilQuiet(discovery, server.rooms, resources);
@@ -279,10 +279,10 @@ describe('discovery — realm filtering', () => {
         flushUntilQuiet(discovery, server.rooms, resources);
 
         const node = createNode({ name: 'flicker' });
-        addChild(server.room.nodes.root, node);
-        destroyNode(server.room.nodes, node);
+        addChild(server.room.scene.root, node);
+        destroyNode(server.room.scene, node);
         // re-add the same node object, it becomes live again this tick.
-        addChild(server.room.nodes.root, node);
+        addChild(server.room.scene.root, node);
 
         const messages = flushUntilQuiet(discovery, server.rooms, resources);
         const sync = messages.find(([, m]) => m.type === 'scene_sync');
@@ -291,7 +291,7 @@ describe('discovery — realm filtering', () => {
         expect(updates.some((u) => u.type === 'node_created' && u.id === node.id)).toBe(true);
         expect(updates.some((u) => u.type === 'node_destroyed' && u.id === node.id)).toBe(false);
         // node is live in the graph at end of tick
-        expect(getNodeById(server.room.nodes, node.id)).toBeDefined();
+        expect(getNodeById(server.room.scene, node.id)).toBeDefined();
 
         server.dispose();
     });
@@ -544,7 +544,7 @@ describe('discovery — chunk_full fairness (dispatchFull)', () => {
         // give the player a movable node so getPlayerChunkCoord tracks position
         // (the default harness has no node → anchor pinned at origin).
         const node = createNode({ name: 'p' });
-        addChild(server.room.nodes.root, node);
+        addChild(server.room.scene.root, node);
         const t = addTrait(node, TransformTrait);
         setPosition(t, [0, 0, 0]);
         server.room.playerNodes.set(player.id, node);

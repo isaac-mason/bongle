@@ -470,7 +470,7 @@ export function installEditorChatCommands(
         ({ args }) => {
             const name = (args.name as string | undefined)?.trim();
             const selection = store.getState().selection;
-            const payload = Blueprint.selectionToScenePayload(ctx.voxels, ctx.nodes, selection);
+            const payload = Blueprint.selectionToScenePayload(ctx.voxels, ctx.scene, selection);
             if (!payload) {
                 emit('nothing selected');
                 return;

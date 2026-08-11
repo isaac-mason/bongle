@@ -81,7 +81,7 @@ describe('project-module — deterministic wire indices', () => {
 
         // build a live node with TraitBC — capture its slot for later comparison
         const node = createNode({ name: 'persistent' });
-        addChild(server.room.nodes.root, node);
+        addChild(server.room.scene.root, node);
         addTrait(node, TraitBC);
         const slotBefore = TraitBC._slot;
         expect(node._traits.has(slotBefore)).toBe(true);
@@ -113,10 +113,10 @@ describe('project-module — deterministic wire indices', () => {
         const sender = createTestServer();
 
         const node = createNode({ name: 'snap', id: 7777, persist: false });
-        addChild(sender.room.nodes.root, node);
+        addChild(sender.room.scene.root, node);
         addTrait(node, TraitCM);
 
-        const snapshot = packSceneTree(sender.room.nodes, 'edit');
+        const snapshot = packSceneTree(sender.room.scene, 'edit');
         const indexAtPack = registry.protocol.traits.idToIndex.get('wire-test-c/m-middle');
         expect(indexAtPack).toBeDefined();
 
@@ -128,9 +128,9 @@ describe('project-module — deterministic wire indices', () => {
 
         const receiver = createTestServer();
 
-        unpackSceneTree(receiver.room.nodes, receiver.context, snapshot);
+        unpackSceneTree(receiver.room.scene, receiver.context, snapshot);
 
-        const decodedNode = receiver.room.nodes._idToNode.get(7777);
+        const decodedNode = receiver.room.scene._idToNode.get(7777);
         expect(decodedNode).toBeDefined();
 
         const misroutedId = registry.protocol.traits.indexToId[indexAtPack!];

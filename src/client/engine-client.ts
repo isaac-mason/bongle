@@ -661,7 +661,7 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     if (existing && existing.roomId === message.roomId) {
         Rooms.resyncRoom(existing, message, state.inbound);
         Rooms.applyClientStreamRadius(existing, state.performance);
-        SceneTree.initSceneTree(existing.nodes);
+        SceneTree.initSceneTree(existing.scene);
         Rooms.syncJoinedPlayers(state.rooms);
         return;
     }
@@ -685,11 +685,11 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
         room.context.client.room = room;
     }
     // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
-    attachWorldTrait(room.nodes.root);
+    attachWorldTrait(room.scene.root);
     console.log(
         `[bongle room] processJoinRoom: message.playerId=${String(message.playerId)} -> room.playerId=${String(room.playerId)} roomId=${room.roomId} playerMode=${room.playerMode}`,
     );
-    SceneTree.initSceneTree(room.nodes);
+    SceneTree.initSceneTree(room.scene);
 
     if (existing) {
         Rooms.disposeRoom(existing);
@@ -747,7 +747,7 @@ function processSceneSync(state: EngineClient, message: Protocol.SceneSync): voi
     const room = state.rooms.rooms.get(message.playerId);
     if (!room) return;
     for (const update of message.updates) {
-        applySceneSyncUpdate(room.nodes, room.context, update, state.inbound);
+        applySceneSyncUpdate(room.scene, room.context, update, state.inbound);
     }
     if (room.playerId === state.rooms.activePlayerId) {
         room.editorStore?.getState().markDirty();
@@ -1167,7 +1167,7 @@ export function update(state: EngineClient, delta: number) {
     // input, its canvas is the only one mounted as `display: block`.
     if (activeRoom) {
         Debug.begin(activeRoom.clientMetrics, 'on-input');
-        SceneTree.runOnInput(activeRoom.nodes, { delta }, activeRoom.clientMetrics);
+        SceneTree.runOnInput(activeRoom.scene, { delta }, activeRoom.clientMetrics);
         Debug.end(activeRoom.clientMetrics, 'on-input');
     }
 
@@ -1182,7 +1182,7 @@ export function update(state: EngineClient, delta: number) {
         Clock.syncServer(room.clock, room.clock.wall, delta);
 
         Debug.begin(room.clientMetrics, 'on-update');
-        SceneTree.runOnUpdate(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnUpdate(room.scene, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-update');
         // particles are visual fx, framerate-dependent motion is fine, and
         // running per-frame (not per fixed-step) avoids the spawn→render
@@ -1202,24 +1202,24 @@ export function update(state: EngineClient, delta: number) {
 
             Clock.tick(room.clock, timestep);
 
-            Interpolation.snapshot(room.nodes);
+            Interpolation.snapshot(room.scene);
 
-            SceneTree.runOnTick(room.nodes, { delta: timestep }, room.clientMetrics);
+            SceneTree.runOnTick(room.scene, { delta: timestep }, room.clientMetrics);
 
             // tick prefab system, discovers and re-instantiates stale prefab nodes
-            Prefab.tick(room.nodes, room.context, state.resources, room.voxels, 'client');
+            Prefab.tick(room.scene, room.context, state.resources, room.voxels, 'client');
 
             Debug.begin(room.clientMetrics, 'physics');
-            Physics.preStep(room.physics, room.nodes, state.resources, room.playerId, room.playerMode === 'play');
-            Physics.tick(room.physics, room.nodes, timestep);
-            Physics.postStep(room.physics, room.nodes, room.playerId);
+            Physics.preStep(room.physics, room.scene, state.resources, room.playerId, room.playerMode === 'play');
+            Physics.tick(room.physics, room.scene, timestep);
+            Physics.postStep(room.physics, room.scene, room.playerId);
             // release per-tick physics scratch (voxel hit pool). contact
             // listeners + getSurfaceNormal / getSupportingFace consumers all
             // resolve their subShapeIds within tick/postStep.
             Physics.flush(room.physics);
             Debug.end(room.clientMetrics, 'physics');
 
-            Replication.sendOwnerSyncUpdates(state.net, room.nodes, room.roomId, room.playerId, room.syncSnapshots);
+            Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
 
             Debug.end(room.clientMetrics, 'room');
         }
@@ -1247,13 +1247,13 @@ export function update(state: EngineClient, delta: number) {
         // observed send interval, eased by the real frame `delta` — no render-behind
         // buffer, so a bad link can't freeze a peer on a stale keyframe.
         Debug.begin(room.clientMetrics, 'interpolate');
-        Interpolation.interpolate(room.nodes, room.playerId, alpha, delta);
+        Interpolation.interpolate(room.scene, room.playerId, alpha, delta);
         Debug.end(room.clientMetrics, 'interpolate');
 
         // user frame scripts (camera follow, local player motion, etc.) run
         // on settled visual transforms.
         Debug.begin(room.clientMetrics, 'on-frame');
-        SceneTree.runOnFrame(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnFrame(room.scene, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-frame');
 
         // drain chat inbox/outbox: inbox payloads append to room.chat.lines +
@@ -1303,7 +1303,7 @@ export function update(state: EngineClient, delta: number) {
         // post-animation hooks: procedural overrides (head-look, springs, etc.)
         // run after animator sampling, before downstream consumers read world matrices.
         Debug.begin(room.clientMetrics, 'on-post-animate');
-        SceneTree.runOnPostAnimate(room.nodes, { delta }, room.clientMetrics);
+        SceneTree.runOnPostAnimate(room.scene, { delta }, room.clientMetrics);
         Debug.end(room.clientMetrics, 'on-post-animate');
 
         // refresh listener pose + node-bound panners, reap finished

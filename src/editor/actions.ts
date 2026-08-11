@@ -160,7 +160,7 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
         nodeIds = [];
         nodeCreateArgs = [];
         for (const nodeId of sel.nodes) {
-            const node = getNodeById(ctx.nodes, nodeId);
+            const node = getNodeById(ctx.scene, nodeId);
             if (!node?.parent) continue;
             nodeIds.push(nodeId);
             nodeCreateArgs.push(captureSubtreeAsCreateArgs(node));
@@ -181,9 +181,9 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
             if (forwardVoxelOps) sendVoxelOps(ctx, forwardVoxelOps);
             if (nodeIds) {
                 for (const nid of nodeIds) {
-                    const n = getNodeById(ctx.nodes, nid);
+                    const n = getNodeById(ctx.scene, nid);
                     if (!n) continue;
-                    destroyNode(ctx.nodes, n);
+                    destroyNode(ctx.scene, n);
                     send(ctx, DestroyNodeCommand, { id: nid });
                 }
             }
@@ -194,7 +194,7 @@ export function del(state: EditRoomState, ctx: ScriptContext): void {
             if (nodeCreateArgs) {
                 for (const createArgs of nodeCreateArgs) {
                     for (const args of createArgs) {
-                        const parent = getNodeById(ctx.nodes, args.parentId);
+                        const parent = getNodeById(ctx.scene, args.parentId);
                         if (!parent) continue;
                         const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                         addChild(parent, n);
@@ -489,7 +489,7 @@ export function replace(state: EditRoomState, ctx: ScriptContext, pattern: Patte
 
 export function createNodeAction(state: EditRoomState, ctx: ScriptContext, parentId: number, index: number, name?: string): void {
     send(ctx, CreateNodeCommand, {
-        id: ctx.nodes._nextNodeId,
+        id: ctx.scene._nextNodeId,
         parentId,
         index,
         name,
@@ -502,7 +502,7 @@ export function createNodeAction(state: EditRoomState, ctx: ScriptContext, paren
 }
 
 export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node?.parent) return;
 
     const createArgs = captureSubtreeAsCreateArgs(node);
@@ -510,15 +510,15 @@ export function destroyNodeAction(state: EditRoomState, ctx: ScriptContext, node
     state.action({
         label: 'delete node',
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            destroyNode(ctx.nodes, n);
+            destroyNode(ctx.scene, n);
             send(ctx, DestroyNodeCommand, { id: nodeId });
             state.markDirty();
         },
         undo() {
             for (const args of createArgs) {
-                const parent = getNodeById(ctx.nodes, args.parentId);
+                const parent = getNodeById(ctx.scene, args.parentId);
                 if (!parent) continue;
                 const n = createNode({ id: args.id, name: args.name, persist: args.persist });
                 addChild(parent, n);
@@ -547,7 +547,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
     const ids: number[] = [];
     const createArgs: ReturnType<typeof captureSubtreeAsCreateArgs>[] = [];
     for (const id of nodeIds) {
-        const node = getNodeById(ctx.nodes, id);
+        const node = getNodeById(ctx.scene, id);
         if (!node?.parent) continue;
         ids.push(id);
         createArgs.push(captureSubtreeAsCreateArgs(node));
@@ -558,9 +558,9 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
         label: ids.length === 1 ? 'delete node' : `delete ${ids.length} nodes`,
         do() {
             for (const id of ids) {
-                const n = getNodeById(ctx.nodes, id);
+                const n = getNodeById(ctx.scene, id);
                 if (!n) continue;
-                destroyNode(ctx.nodes, n);
+                destroyNode(ctx.scene, n);
                 send(ctx, DestroyNodeCommand, { id });
             }
             state.markDirty();
@@ -568,7 +568,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
         undo() {
             for (const args of createArgs) {
                 for (const a of args) {
-                    const parent = getNodeById(ctx.nodes, a.parentId);
+                    const parent = getNodeById(ctx.scene, a.parentId);
                     if (!parent) continue;
                     const n = createNode({ id: a.id, name: a.name, persist: a.persist });
                     addChild(parent, n);
@@ -595,7 +595,7 @@ export function destroyNodesAction(state: EditRoomState, ctx: ScriptContext, nod
 }
 
 export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, name: string | undefined): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     const prevName = node.name;
@@ -603,18 +603,18 @@ export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
     state.action({
         label: name ? `rename → "${name}"` : 'clear name',
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             n.name = name;
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetNameCommand, { id: nodeId, name: name ?? null });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             n.name = prevName;
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetNameCommand, { id: nodeId, name: prevName ?? null });
             state.markDirty();
         },
@@ -622,7 +622,7 @@ export function setNameAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
 }
 
 export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, realm: Realm): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     const prevRealm = node.realm;
@@ -631,18 +631,18 @@ export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId:
     state.action({
         label: `realm → ${realm}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             n.realm = realm;
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetRealmCommand, { id: nodeId, realm });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             n.realm = prevRealm;
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetRealmCommand, { id: nodeId, realm: prevRealm });
             state.markDirty();
         },
@@ -650,9 +650,9 @@ export function setRealmAction(state: EditRoomState, ctx: ScriptContext, nodeId:
 }
 
 export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, parentId: number, index: number): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node?.parent) return;
-    const newParent = getNodeById(ctx.nodes, parentId);
+    const newParent = getNodeById(ctx.scene, parentId);
     if (!newParent) return;
     if (node === newParent || isAncestorOf(node, newParent)) return;
 
@@ -662,22 +662,22 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
     state.action({
         label: 'reparent',
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
-            const np = getNodeById(ctx.nodes, parentId);
+            const n = getNodeById(ctx.scene, nodeId);
+            const np = getNodeById(ctx.scene, parentId);
             if (!n || !np) return;
             reparent(n, np);
             reorderChild(np, n, index);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId, index });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
-            const pp = getNodeById(ctx.nodes, prevParentId);
+            const n = getNodeById(ctx.scene, nodeId);
+            const pp = getNodeById(ctx.scene, prevParentId);
             if (!n || !pp) return;
             reparent(n, pp);
             reorderChild(pp, n, prevIndex);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, ReparentCommand, { id: nodeId, parentId: prevParentId, index: prevIndex });
             state.markDirty();
         },
@@ -685,7 +685,7 @@ export function reparentAction(state: EditRoomState, ctx: ScriptContext, nodeId:
 }
 
 export function reorderAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, index: number): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node?.parent) return;
 
     const prevIndex = Math.max(0, node.parent.children.indexOf(node));
@@ -693,18 +693,18 @@ export function reorderAction(state: EditRoomState, ctx: ScriptContext, nodeId: 
     state.action({
         label: 'reorder',
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n?.parent) return;
             reorderChild(n.parent, n, index);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, ReorderCommand, { id: nodeId, index });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n?.parent) return;
             reorderChild(n.parent, n, prevIndex);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, ReorderCommand, { id: nodeId, index: prevIndex });
             state.markDirty();
         },
@@ -718,7 +718,7 @@ export function setTraitAction(
     traitId: string,
     props: Record<string, unknown>,
 ): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     const prevProps = captureTraitProps(node, traitId);
@@ -726,17 +726,17 @@ export function setTraitAction(
     state.action({
         label: `set ${traitId}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            setTraitProps(ctx.nodes, n, traitId, props);
+            setTraitProps(ctx.scene, n, traitId, props);
             send(ctx, SetTraitCommand, { id: nodeId, traitId, props: JSON.stringify(props) });
             state.markDirty();
         },
         undo() {
             if (!prevProps) return;
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
-            setTraitProps(ctx.nodes, n, traitId, prevProps);
+            setTraitProps(ctx.scene, n, traitId, prevProps);
             send(ctx, SetTraitCommand, { id: nodeId, traitId, props: JSON.stringify(prevProps) });
             state.markDirty();
         },
@@ -744,13 +744,13 @@ export function setTraitAction(
 }
 
 export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, traitId: string): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     state.action({
         label: `add ${traitId}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) addTraitBySlot(n, def.slot);
@@ -758,7 +758,7 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
@@ -769,7 +769,7 @@ export function addTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId:
 }
 
 export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, traitId: string): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     const prevProps = captureTraitProps(node, traitId);
@@ -777,7 +777,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
     state.action({
         label: `remove ${traitId}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) removeTraitBySlot(n, def.slot);
@@ -786,7 +786,7 @@ export function removeTraitAction(state: EditRoomState, ctx: ScriptContext, node
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             const def = registry.traits.byId.get(traitId);
             if (def) addTraitBySlot(n, def.slot, prevProps ?? undefined);
@@ -870,7 +870,7 @@ export function setTraitProps(sceneTree: SceneTree, node: Node, traitId: string,
 /* ── prefab actions ── */
 
 export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number, config: PrefabConfig): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node) return;
 
     const prevPrefab = node.prefab ? { ...node.prefab } : null;
@@ -878,18 +878,18 @@ export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId
     state.action({
         label: `set prefab → ${config.prefabId}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             setPrefab(n, { ...config });
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(config) });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             setPrefab(n, prevPrefab ? { ...prevPrefab } : null);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: prevPrefab ? JSON.stringify(prevPrefab) : undefined });
             state.markDirty();
         },
@@ -897,7 +897,7 @@ export function setPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId
 }
 
 export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node?.prefab) return;
 
     const prevPrefab = { ...node.prefab };
@@ -905,18 +905,18 @@ export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, node
     state.action({
         label: 'clear prefab',
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             setPrefab(n, null);
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: undefined });
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             setPrefab(n, { ...prevPrefab });
-            bumpNodeVersion(ctx.nodes, n);
+            bumpNodeVersion(ctx.scene, n);
             send(ctx, SetPrefabCommand, { id: nodeId, prefab: JSON.stringify(prevPrefab) });
             state.markDirty();
         },
@@ -932,7 +932,7 @@ export function clearPrefabAction(state: EditRoomState, ctx: ScriptContext, node
  * still targets the right nodes.
  */
 export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeId: number): void {
-    const node = getNodeById(ctx.nodes, nodeId);
+    const node = getNodeById(ctx.scene, nodeId);
     if (!node?.prefab) return;
 
     const prevPrefab = { ...node.prefab };
@@ -972,7 +972,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
     state.action({
         label: `bake prefab → ${prevPrefab.prefabId}`,
         do() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             // capture child ids lazily, after undo + redo the reconciler will
             // have recreated children with fresh ids.
@@ -986,7 +986,7 @@ export function bakePrefabAction(state: EditRoomState, ctx: ScriptContext, nodeI
             state.markDirty();
         },
         undo() {
-            const n = getNodeById(ctx.nodes, nodeId);
+            const n = getNodeById(ctx.scene, nodeId);
             if (!n) return;
             // children survive prefab clear as persist:true, flip them back
             // to persist:false before restoring the prefab so the next

@@ -582,7 +582,7 @@ export function reconcile(state: WebGpuState, activeRoom: ClientRoom | null): vo
  */
 function build(state: WebGpuState, room: ClientRoom): RoomActive {
     const res = state.resources;
-    const { nodes } = room;
+    const nodes = room.scene;
     const { scene, overlayScene } = room.render;
 
     const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel.geometries, res.voxel.quadMaterials);
@@ -724,7 +724,7 @@ export function rebuildVoxelVisuals(state: WebGpuState, room: ClientRoom): void 
     VoxelVisuals.dispose(rv.voxel, room.render.scene);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, room.visibility);
     rv.voxel = VoxelVisuals.initRoomMeshes(room.render.scene, state.resources.voxel.geometries, state.resources.voxel.quadMaterials);
-    rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.render.scene, room.nodes);
+    rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.render.scene, room.scene);
     // the refresh blew away the previous arena (new packer is empty), so re-mount:
     // marks the room's chunks dirty and the prioritised remesh path refills it.
     VoxelVisuals.mountRoom(rv.voxel, room.voxels);
@@ -745,5 +745,5 @@ export function rebuildExtrudedSpriteVisuals(state: WebGpuState, room: ClientRoo
         state.resources.extrudedSprite,
         room.visibility,
     );
-    rv.extrudedSprite = ExtrudedSpriteVisuals.init(state.resources.extrudedSprite.batch, room.render.scene, room.nodes);
+    rv.extrudedSprite = ExtrudedSpriteVisuals.init(state.resources.extrudedSprite.batch, room.render.scene, room.scene);
 }

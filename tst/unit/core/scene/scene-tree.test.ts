@@ -773,7 +773,7 @@ describe('query — acquireQuery / releaseQuery', () => {
 
 describe('script removal on reload', () => {
     it('prunes a removed script from its trait def, disposing the instance, with no re-creation', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const runtime = TEST_SCRIPT_RUNTIME;
 
         let initCount = 0;
@@ -848,7 +848,7 @@ describe('script removal on reload', () => {
 
 describe('query — script-instance lifecycle', () => {
     it('attaching a script-bearing trait registers the query; removing it evicts', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
@@ -863,7 +863,7 @@ describe('query — script-instance lifecycle', () => {
     });
 
     it('destroying the node evicts the query', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
@@ -876,7 +876,7 @@ describe('query — script-instance lifecycle', () => {
     });
 
     it('two script instances sharing one query evict only on the second dispose', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const before = sceneTree.queries.size;
 
         const a = createNode({ name: 'A' });
@@ -898,7 +898,7 @@ describe('query — script-instance lifecycle', () => {
     });
 
     it('per-instance dedup: two query() calls in one factory still release cleanly', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const before = sceneTree.queries.size;
 
         const node = createNode({ name: 'A' });
@@ -911,7 +911,7 @@ describe('query — script-instance lifecycle', () => {
     });
 
     it('engine-side query persists across a script-side release', () => {
-        const sceneTree = server.room.nodes;
+        const sceneTree = server.room.scene;
         const before = sceneTree.queries.size;
 
         // engine-side caller, no acquire, persistent.

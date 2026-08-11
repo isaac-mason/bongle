@@ -713,7 +713,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
         copyToClipboard: () => copySelectionToSystemClipboard(api, ctx),
         saveBlueprint: (name) => {
             const s = get();
-            const payload = Blueprint.selectionToScenePayload(ctx.voxels, ctx.nodes, s.selection);
+            const payload = Blueprint.selectionToScenePayload(ctx.voxels, ctx.scene, s.selection);
             if (!payload) return;
             send(ctx, SaveBlueprintCommand, { name, payload: JSON.stringify(payload) });
         },
@@ -741,7 +741,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             const s = get();
             const sel = s.selection;
             if (Selection.isEmpty(sel)) return;
-            const blueprint = Blueprint.copySelection(ctx.voxels, ctx.nodes, sel);
+            const blueprint = Blueprint.copySelection(ctx.voxels, ctx.scene, sel);
             set({ activeBlueprint: blueprint });
 
             const { forward: cutSourceOps, reverse: cutReverseOps } = Blueprint.buildPasteOps(
@@ -756,7 +756,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
                 selection: { chunks: new Map(), nodes: new Set() },
             });
 
-            TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.nodes, ctx);
+            TransformTool.enterPlacement(transformToolState, blueprint, true, cutReverseOps, room.scene, ctx);
         },
         rotate: (yawTurns, pitchTurns, rollTurns) => {
             const bp = get().activeBlueprint;

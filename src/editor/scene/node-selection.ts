@@ -73,7 +73,7 @@ export function rebuildNodeSelection(
     broadphase.intersectAABB(physics.rigid.world, _queryBox, nodeBodies.queryFilter, _collector);
 
     for (const nid of _collector.nodeIds) {
-        const node = getNodeById(ctx.nodes, nid);
+        const node = getNodeById(ctx.scene, nid);
         if (!node) continue;
         const transform = getTrait(node, TransformTrait);
         if (!transform) continue;

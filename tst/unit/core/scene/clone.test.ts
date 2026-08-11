@@ -55,7 +55,7 @@ sync(SyncMarker, 'health', {
 /* ── capture test module ── */
 
 const server = createTestServer();
-const TEST_NODES = server.room.nodes; // nodes with runtime attached (room.nodes)
+const TEST_NODES = server.room.scene; // nodes with runtime attached (room.scene)
 
 /* ── helpers ── */
 

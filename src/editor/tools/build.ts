@@ -65,7 +65,7 @@ export function updateBuild(
             s.hoverVoxel[2] + s.hoverNormal[2],
         ];
         store.setState({ placementContinuous: true });
-        enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.nodes, ctx);
+        enterPrefabPlacement(transformToolState, slot.prefabId, anchor, ctx.scene, ctx);
         return;
     }
     // same auto-enter flow for saved blueprints, the placement preview is
@@ -77,7 +77,7 @@ export function updateBuild(
             s.hoverVoxel[2] + s.hoverNormal[2],
         ];
         store.setState({ placementContinuous: true });
-        enterBlueprintPlacement(transformToolState, slot.sceneId, anchor, ctx.nodes, ctx);
+        enterBlueprintPlacement(transformToolState, slot.sceneId, anchor, ctx.scene, ctx);
         return;
     }
 

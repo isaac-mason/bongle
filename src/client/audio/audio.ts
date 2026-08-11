@@ -813,7 +813,7 @@ function updateListener(audio: Audio, room: ClientRoom): void {
 }
 
 function resolveListenerNode(room: ClientRoom): Node | null {
-    for (const [trait] of SceneTree.query(room.nodes, [AudioListenerTrait])) {
+    for (const [trait] of SceneTree.query(room.scene, [AudioListenerTrait])) {
         if (trait.active) return trait._node!;
     }
     return room.client.subject;

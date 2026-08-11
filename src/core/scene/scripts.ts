@@ -280,7 +280,7 @@ export type ScriptContext<T extends TraitBase = TraitBase> = {
     node: SceneTree.Node;
 
     /** the scene tree this script is running in */
-    nodes: SceneTree.SceneTree;
+    scene: SceneTree.SceneTree;
 
     /** per-room voxel data */
     voxels: Voxels;
@@ -494,17 +494,17 @@ export function query<const Args extends SceneTree.ConditionArgs[]>(
     ctx: ScriptContext,
     conditions: Args,
 ): SceneTree.Query<SceneTree.ConditionArgsToConditions<Args>> {
-    const q = SceneTree.query(ctx.nodes, conditions);
+    const q = SceneTree.query(ctx.scene, conditions);
     const instance = ctx._instance;
     if (instance && !instance.queries.has(q)) {
         instance.queries.add(q);
-        SceneTree.acquireQuery(ctx.nodes, q);
+        SceneTree.acquireQuery(ctx.scene, q);
     }
     return q;
 }
 
 export function filter<const Args extends SceneTree.ConditionArgs[]>(ctx: ScriptContext, conditions: Args): SceneTree.Node[] {
-    return SceneTree.filter(ctx.nodes, conditions);
+    return SceneTree.filter(ctx.scene, conditions);
 }
 
 export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandle<T>): T | null {
@@ -959,7 +959,7 @@ export function createScriptInstance(
     instance._ctx = {
         trait,
         node,
-        nodes: node.scene!,
+        scene: node.scene!,
         mode: runtime.playerMode,
         voxels: runtime.voxels,
         physics: runtime.physics,

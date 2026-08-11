@@ -382,7 +382,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
             : undefined;
 
     const packT0 = performance.now();
-    const packedNodes = packSceneTree(room.nodes, player.mode, transformRootPrune);
+    const packedNodes = packSceneTree(room.scene, player.mode, transformRootPrune);
     const packMs = performance.now() - packT0;
     Net.send(net, player.client, {
         type: 'join_room',
@@ -399,7 +399,7 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
 
     // snapshot every node so the same-tick scene_sync diff finds no changes
     const snapT0 = performance.now();
-    snapshotAllNodeKnowledge(room.nodes, nodeKnowledge, player.mode, transformRootPrune);
+    snapshotAllNodeKnowledge(room.scene, nodeKnowledge, player.mode, transformRootPrune);
     const snapMs = performance.now() - snapT0;
     console.log(
         `[room-start]     invalidatePlayer packSceneTree=${packMs.toFixed(1)} ` +
@@ -607,7 +607,7 @@ export function flush(
     // --- phase 1: diff detection (per-room, serialize once) ---
     Debug.begin(metrics, 'discovery/diff');
     for (const room of rooms.rooms.values()) {
-        runDiffDetection(room.nodes);
+        runDiffDetection(room.scene);
     }
     Debug.end(metrics, 'discovery/diff');
 
@@ -621,7 +621,7 @@ export function flush(
         // reconcile the transform-root chunk index off this tick's dirtyNodes so
         // rootsInChunk is current for the scene phase. runs for every room (even
         // ones without voxel authority); it's O(dirtyNodes) and touches nothing else.
-        reconcileRootChunks(room.nodes);
+        reconcileRootChunks(room.scene);
         const auth = room.voxels.authority;
         if (!auth) continue;
         flushVoxelsForRoom(state, rooms, room, out);
@@ -691,7 +691,7 @@ export function flush(
             const ownRootId = aoi ? room.playerNodes.get(player.id)?.id : undefined;
 
             const updates = buildSceneSyncUpdates(
-                room.nodes,
+                room.scene,
                 nodeKnowledge,
                 nodeSyncKnowledge,
                 room.tick,
@@ -731,7 +731,7 @@ export function flush(
     // both read dirtyNodes, so clearing any earlier would strand one of them. nodes
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
     for (const room of rooms.rooms.values()) {
-        if (room.nodes.dirtyNodes.size > 0) room.nodes.dirtyNodes.clear();
+        if (room.scene.dirtyNodes.size > 0) room.scene.dirtyNodes.clear();
     }
 
     Debug.end(metrics, 'discovery/scene');

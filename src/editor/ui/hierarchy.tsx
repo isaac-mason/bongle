@@ -71,7 +71,7 @@ export function HierarchyPanel() {
     const copyToClipboard = useEditRoom((s) => s.copyToClipboard);
     const setName = useEditRoom((s) => s.setName);
     const bakePrefab = useEditRoom((s) => s.bakePrefab);
-    const sceneTree = room?.nodes ?? null;
+    const sceneTree = room?.scene ?? null;
 
     // text filter, when non-empty, the tree shows only matching nodes + their
     // ancestors, ignoring collapsed state.

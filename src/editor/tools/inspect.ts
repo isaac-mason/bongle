@@ -101,7 +101,7 @@ export function openViewportContextMenu(
     const hits = Selector.castRay(
         room.physics,
         nodeBodies,
-        room.nodes,
+        room.scene,
         ctx.voxels,
         _nearWorld[0],
         _nearWorld[1],
@@ -130,7 +130,7 @@ export function openViewportContextMenu(
         // on right-click; menu acts on whatever the user sees highlighted).
         let target: Node = nodeHit.node;
         let cur: Node | null = nodeHit.node.parent;
-        while (cur && cur !== room.nodes.root) {
+        while (cur && cur !== room.scene.root) {
             if (getTrait(cur, TransformTrait)) target = cur;
             cur = cur.parent;
         }
@@ -169,7 +169,7 @@ export function updateInspect(
         const s0 = store.getState();
         const stillActive = activeTool === 'transform' && s0.transformMode === 'place' && s0.selection.nodes.size > 0;
         if (!stillActive) {
-            TransformTool.revertPlaceSelection(transformToolState, room.nodes);
+            TransformTool.revertPlaceSelection(transformToolState, room.scene);
         }
     }
 
@@ -224,7 +224,7 @@ export function updateInspect(
 
         // refresh transformHasVoxels each frame so snapTo can be force-clamped
         // to 'corner' when voxel content is present (and the UI can disable the toggle).
-        const hasVoxels = TransformTool.computeTransformHasVoxels(transformToolState, room.nodes);
+        const hasVoxels = TransformTool.computeTransformHasVoxels(transformToolState, room.scene);
         if (store.getState().transformHasVoxels !== hasVoxels) {
             store.setState({ transformHasVoxels: hasVoxels });
         }
@@ -234,13 +234,13 @@ export function updateInspect(
         if (transformMode === 'place' && hoverVoxelAtFrame && hoverNormalAtFrame) {
             TransformTool.updatePlacementFromRaycast(
                 transformToolState,
-                room.nodes,
+                room.scene,
                 hoverVoxelAtFrame,
                 hoverNormalAtFrame,
                 hoverPointAtFrame,
             );
         }
-        const pivotPos = TransformTool.updateTransformTool(transformToolState, room.nodes);
+        const pivotPos = TransformTool.updateTransformTool(transformToolState, room.scene);
         PivotPointMod.update(pivotPoint, pivotPos ?? [0, 0, 0], pivotPos !== null);
     } else {
         TransformTool.detachGizmo(transformToolState);
@@ -269,7 +269,7 @@ export function updateInspect(
     if (inGrabMode) {
         if (TransformTool.isInGrab(transformToolState)) {
             if (pointerJustUp(pointer, client.input) || !pointerHeld(pointer, client.input)) {
-                TransformTool.exitGrab(transformToolState, room.nodes, room.physics, ctx);
+                TransformTool.exitGrab(transformToolState, room.scene, room.physics, ctx);
             } else {
                 TransformTool.updateGrab(transformToolState, client.input.mouseKeyboard);
             }
@@ -281,7 +281,7 @@ export function updateInspect(
             const hits = Selector.castRay(
                 room.physics,
                 nodeBodies,
-                room.nodes,
+                room.scene,
                 ctx.voxels,
                 _nearWorld[0],
                 _nearWorld[1],
@@ -303,12 +303,12 @@ export function updateInspect(
                 // grabbing the wrong child of an already-selected parent.
                 let target: Node = nodeHit.node;
                 let cur: Node | null = nodeHit.node.parent;
-                while (cur && cur !== room.nodes.root) {
+                while (cur && cur !== room.scene.root) {
                     if (getTrait(cur, TransformTrait)) target = cur;
                     cur = cur.parent;
                 }
                 store.getState().selectNode(target.id);
-                TransformTool.enterGrab(transformToolState, target.id, room.nodes, room.physics, client.state!.resources, camera);
+                TransformTool.enterGrab(transformToolState, target.id, room.scene, room.physics, client.state!.resources, camera);
             }
         }
     }
@@ -316,7 +316,7 @@ export function updateInspect(
     if (inPlaceMode && TransformTool.isInPlacement(transformToolState)) {
         if (rightClicked) {
             // right click → commit placement immediately
-            TransformTool.commitPlacement(transformToolState, room.nodes, ctx.voxels, ctx);
+            TransformTool.commitPlacement(transformToolState, room.scene, ctx.voxels, ctx);
         } else if (clicked) {
             // left click → pin ghost here, switch to translate gizmo for fine-tuning
             if (transformToolState.placement) transformToolState.placement.placed = true;
@@ -328,7 +328,7 @@ export function updateInspect(
         // translate for fine-tune; right → exit place mode (back to translate).
         if (clicked || rightClicked) {
             // explicit confirm, commit cursor-follow as a history entry
-            TransformTool.commitPlaceSelection(transformToolState, room.nodes, ctx);
+            TransformTool.commitPlaceSelection(transformToolState, room.scene, ctx);
             store.setState({ transformMode: 'translate' });
         }
     } else if (clicked && !gizmoDragging && !inPlaceMode && !inGrabMode) {
@@ -342,7 +342,7 @@ export function updateInspect(
         const hits = Selector.castRay(
             room.physics,
             nodeBodies,
-            room.nodes,
+            room.scene,
             ctx.voxels,
             _nearWorld[0],
             _nearWorld[1],
@@ -372,7 +372,7 @@ export function updateInspect(
         if (selectTarget !== 'voxels') {
             const rawHit = voxelWins ? null : (nodeHit ?? null);
             const selectedNode = rawHit
-                ? resolveSelectionTarget(rawHit.node, store.getState().selection.nodes, room.nodes.root)
+                ? resolveSelectionTarget(rawHit.node, store.getState().selection.nodes, room.scene.root)
                 : null;
             const mk = client.input.mouseKeyboard;
             const shiftHeld = isKeyDown(mk, 'ShiftLeft') || isKeyDown(mk, 'ShiftRight');
@@ -441,7 +441,7 @@ export function updateInspect(
                 }
             }
         } else if (activeTool === 'transform') {
-            TransformTool.handleTransformKeys(mk, client.input, camera.quaternion, transformToolState, room.nodes, ctx);
+            TransformTool.handleTransformKeys(mk, client.input, camera.quaternion, transformToolState, room.scene, ctx);
         }
     }
 

@@ -2,7 +2,7 @@
 //
 // Same shape as block icons — build a headless `RenderRoom`, populate, render
 // into a `RenderTarget` at the room's arena index, tear it down — but the
-// subject is a prefab: it's instantiated into `room.nodes` and ticked to a
+// subject is a prefab: it's instantiated into `room.scene` and ticked to a
 // fixpoint (which stamps its voxels into `room.voxels` and spawns its model
 // nodes), then models are preloaded/uploaded, the scene is framed by an
 // isometric ortho camera fit to its AABB, and rendered. One prefab → one tile;
@@ -71,17 +71,17 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
     try {
         // ── instantiate the prefab + drain nested prefabs to a fixpoint ──
         const anchor = createNode({ name: `prefab-icon:${prefabId}`, persist: false });
-        addChild(room.nodes.root, anchor);
+        addChild(room.scene.root, anchor);
         setPrefab(anchor, createPrefabConfig(prefabId));
         let guard = 0;
         do {
-            Prefab.tick(room.nodes, room.context, deps.resources, room.voxels, 'client');
-        } while (room.nodes._prefabsDirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
+            Prefab.tick(room.scene, room.context, deps.resources, room.voxels, 'client');
+        } while (room.scene._prefabsDirty.size > 0 && ++guard < MAX_PREFAB_TICKS);
 
         // ── preload referenced models + upload to the GPU pools ──
         const modelIds = new Set<string>();
         const meshKeys = new Set<string>();
-        for (const [meshTrait] of query(room.nodes, [MeshTrait, TransformTrait])) {
+        for (const [meshTrait] of query(room.scene, [MeshTrait, TransformTrait])) {
             const id = meshTrait.meshId;
             if (!id) continue;
             modelIds.add(id.modelId);
@@ -105,9 +105,9 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // ── world transforms (via interpolation, held at alpha=1) ──
-        Interpolation.snapshot(room.nodes);
-        computeWorldTransforms(room.nodes);
-        Interpolation.interpolate(room.nodes, RENDER_ROOM_PLAYER_ID, 1.0, 0);
+        Interpolation.snapshot(room.scene);
+        computeWorldTransforms(room.scene);
+        Interpolation.interpolate(room.scene, RENDER_ROOM_PLAYER_ID, 1.0, 0);
 
         // ── full-bright voxels, meshed synchronously into the arena at our index ──
         const meshOutput = createMeshOutput();
@@ -118,11 +118,11 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         }
 
         // unlit for the flat icon read.
-        for (const [meshTrait] of query(room.nodes, [MeshTrait])) {
+        for (const [meshTrait] of query(room.scene, [MeshTrait])) {
             meshTrait.unlit = true;
             meshTrait._version++;
         }
-        for (const [vmTrait] of query(room.nodes, [VoxelMeshTrait])) {
+        for (const [vmTrait] of query(room.scene, [VoxelMeshTrait])) {
             vmTrait.unlit = true;
         }
 
@@ -229,7 +229,7 @@ function computeSceneAabb(room: RenderRoom, deps: RenderRoomDeps): Aabb | null {
         }
     }
 
-    for (const [meshTrait, transformTrait] of query(room.nodes, [MeshTrait, TransformTrait])) {
+    for (const [meshTrait, transformTrait] of query(room.scene, [MeshTrait, TransformTrait])) {
         const id = meshTrait.meshId;
         if (!id) continue;
         const slot = meshInfoIndexOf(deps.modelResources.meshInfo, `${id.modelId}/${id.meshName}`);
