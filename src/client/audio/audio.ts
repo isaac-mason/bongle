@@ -8,16 +8,22 @@
  * `null` on the server side, so this file is only reached on the client.
  *
  * Resource model (the contract):
- *   - atlas: eager at boot. `loadResources()` fetches `audio-atlas.flac` +
- *     `audio-manifest.json` and runs one `decodeAudioData`. Every atlas
- *     clip is playable with zero latency from the first frame onward.
- *   - long clips: lazy at first play. The manifest entry is known at
- *     boot, but the file is not fetched until a script calls play*. First
- *     play kicks off `fetch(url)` + `decodeAudioData`; the
- *     `PlaybackHandle` is returned immediately and the source `start()`s
- *     when the buffer resolves. Decoded buffers are cached, so subsequent
- *     plays are instant. `stop()` called before resolution flips a
- *     cancellation flag.
+ *   - atlas: background at boot. `loadResources()` awaits only the tiny
+ *     `audio-manifest.json` (sample rate + clip ids), then fires off a
+ *     single `audio-atlas.flac` fetch + `decodeAudioData` that writes the
+ *     decoded buffer into shared `AtlasState` WITHOUT blocking gameplay
+ *     start. Once written it plays with zero latency for the session.
+ *   - long clips: lazy, fetched + decoded into the clip's own buffer on
+ *     first play. The manifest entry is known at boot; the file is not.
+ *
+ * Loading is data-driven, not callback-driven: the fetch+decode of each
+ * buffer lives in a small `load*Into` writer that only mutates clip state
+ * (`buffer` / `failed`), nothing subscribes to its promise. A play
+ * triggered before its buffer is ready returns its `PlaybackHandle`
+ * immediately and parks in `active` with `_pendingStart`; `updateForFrame`
+ * starts the source the frame the buffer lands, or drops the play if the
+ * load failed. `stop()` before then flips `_ended` and it's reaped, never
+ * started.
  *
  * AudioContext gating: browsers refuse to play audio in a suspended
  * context. We construct the context lazily on first `play*` call (so SSR
@@ -62,10 +68,20 @@ type AudioManifest = {
     standalone: StandaloneEntry[];
 };
 
-/** resolved per-id clip, either a slice of the decoded atlas buffer or
- *  a standalone url whose buffer is lazy-decoded on first play. */
+/** shared, background-decoded atlas buffer. Every atlas clip references the
+ *  same holder: `buffer` is null until the decode lands, `failed` latches if
+ *  the fetch/decode threw. Both are pure state, written once by loadAtlasInto
+ *  and read by play + the frame tick. */
+type AtlasState = {
+    buffer: AudioBuffer | null;
+    failed: boolean;
+};
+
+/** resolved per-id clip, either a slice of the shared atlas buffer or
+ *  a standalone url whose buffer is lazy-decoded on first play. All buffer
+ *  state is plain fields, mutated by the load* writers, read by the tick. */
 type ResolvedClip =
-    | { kind: 'atlas'; buffer: AudioBuffer; offset: number; duration: number }
+    | { kind: 'atlas'; atlas: AtlasState; offset: number; duration: number }
     | {
           kind: 'standalone';
           /** loader-relative path (e.g. 'sounds/foo.ogg'); loaded lazily on first
@@ -73,8 +89,12 @@ type ResolvedClip =
           url: string;
           loader: ResourceLoader;
           durationSec: number;
+          /** null until the first play's load lands; latches for the session after. */
           buffer: AudioBuffer | null;
-          pending: Promise<AudioBuffer> | null;
+          /** load threw, every play of this clip is silently dropped. */
+          failed: boolean;
+          /** load has been kicked off (guards against a second fetch while pending). */
+          loading: boolean;
       };
 
 /* ── resources (engine-global, loaded once at EngineClient.load) ───── */
@@ -90,7 +110,7 @@ export type AudioResources = {
     /** last-applied output mute, lets `setOutputMuted` be called every frame
      *  (it reconciles from engine state) while only ramping on a real change. */
     muted: boolean;
-    /** clips by sound id, atlas entries ready, standalones lazy. */
+    /** clips by sound id, atlas share a background-decoded buffer, standalones lazy. */
     clips: Map<string, ResolvedClip>;
     /** manifest combined `hash` the clips were built against (`null` when no
      *  manifest loaded). `refreshResources` compares against it to short-circuit
@@ -135,33 +155,23 @@ async function fetchManifest(loader: ResourceLoader): Promise<AudioManifest | nu
     }
 }
 
-/** Build the clips map for a manifest against an existing context: one eager
- *  atlas decode covering every atlas-bucket clip, plus lazy standalone stubs.
- *  Shared by `loadResources` (boot) and `refreshResources` (HMR). */
-async function buildClips(context: AudioContext, manifest: AudioManifest, loader: ResourceLoader): Promise<Map<string, ResolvedClip>> {
+/** Build the clips map for a manifest against an existing context. The atlas
+ *  fetch + decode is kicked off in the BACKGROUND (not awaited): every atlas
+ *  clip references a shared `AtlasState` holder that fills in when the decode
+ *  lands, so boot isn't blocked on the FLAC. Standalone clips stay lazy on
+ *  first play. Shared by `loadResources` (boot) and `refreshResources` (HMR). */
+function buildClips(context: AudioContext, manifest: AudioManifest, loader: ResourceLoader): Map<string, ResolvedClip> {
     const clips = new Map<string, ResolvedClip>();
 
-    // eager atlas decode, one fetch + one decodeAudioData covers every
-    // atlas-bucket clip. each id resolves to a (buffer, offset, duration)
-    // view into the same shared buffer.
+    // one shared holder for the whole atlas: a single fetch + one
+    // decodeAudioData covers every atlas clip, writing `buffer` when it lands.
+    // Fire-and-forget into state, so clips triggered mid-decode park and start
+    // from the tick, and everything after boots without waiting on the FLAC.
     if (manifest.atlas.length > 0) {
-        try {
-            const raw = await loader.loadBytes('audio-atlas.flac');
-            // decodeAudioData *detaches* its input ArrayBuffer; hand it a fresh
-            // standalone copy (loadBytes may return a subarray view).
-            const buffer = await context.decodeAudioData(raw.slice().buffer);
-            for (const e of manifest.atlas) {
-                clips.set(e.id, {
-                    kind: 'atlas',
-                    buffer,
-                    offset: e.offset,
-                    duration: e.duration,
-                });
-            }
-        } catch (err) {
-            // a failed atlas decode silences *every* atlas sound, not one,
-            // surface it loudly rather than as a per-play warning.
-            console.error(`[bongle] audio atlas failed to load — all ${manifest.atlas.length} atlas sounds will be silent:`, err);
+        const atlas: AtlasState = { buffer: null, failed: false };
+        void loadAtlasInto(atlas, context, loader, manifest.atlas.length);
+        for (const e of manifest.atlas) {
+            clips.set(e.id, { kind: 'atlas', atlas, offset: e.offset, duration: e.duration });
         }
     }
 
@@ -172,11 +182,42 @@ async function buildClips(context: AudioContext, manifest: AudioManifest, loader
             loader,
             durationSec: e.durationSec,
             buffer: null,
-            pending: null,
+            failed: false,
+            loading: false,
         });
     }
 
     return clips;
+}
+
+/** The single async writer for the atlas: one fetch + one decode, result
+ *  written into shared `AtlasState`. Never rejects (caller `void`s it); a
+ *  failure latches `failed` and silences *every* atlas sound, so surface it
+ *  loudly rather than as a per-play warning. */
+async function loadAtlasInto(atlas: AtlasState, context: AudioContext, loader: ResourceLoader, count: number): Promise<void> {
+    try {
+        const raw = await loader.loadBytes('audio-atlas.flac');
+        // decodeAudioData *detaches* its input ArrayBuffer; hand it a fresh
+        // standalone copy (loadBytes may return a subarray view).
+        atlas.buffer = await context.decodeAudioData(raw.slice().buffer);
+    } catch (err) {
+        atlas.failed = true;
+        console.error(`[bongle] audio atlas failed to load — all ${count} atlas sounds will be silent:`, err);
+    }
+}
+
+/** The single async writer for a standalone clip: fetch + decode its file,
+ *  result written onto the clip. Kicked off on first play (guarded by
+ *  `clip.loading`). Never rejects (caller `void`s it); a failure latches
+ *  `failed` so subsequent plays drop cleanly. */
+async function loadStandaloneInto(clip: Extract<ResolvedClip, { kind: 'standalone' }>, context: AudioContext): Promise<void> {
+    try {
+        const bytes = await clip.loader.loadBytes(clip.url);
+        clip.buffer = await context.decodeAudioData(bytes.slice().buffer);
+    } catch (err) {
+        clip.failed = true;
+        console.warn('[bongle] failed to load standalone audio:', err);
+    }
 }
 
 /** load + decode the audio manifest + atlas. Called from
@@ -195,7 +236,7 @@ export async function loadResources(loader: ResourceLoader): Promise<AudioResour
     }
 
     const context = new Ctx({ sampleRate: manifest.sampleRate });
-    const clips = await buildClips(context, manifest, loader);
+    const clips = buildClips(context, manifest, loader);
     return makeResources(context, clips, manifest.hash);
 }
 
@@ -278,7 +319,7 @@ export async function refreshResources(resources: AudioResources, loader: Resour
     if (!manifest) return false;
     if (resources.hash !== null && manifest.hash === resources.hash) return false;
 
-    const clips = await buildClips(resources.context, manifest, loader);
+    const clips = buildClips(resources.context, manifest, loader);
     // replace the map's CONTENTS, not the reference, `resources.clips` is read
     // on every play and shared across rooms, so mutating in place propagates.
     resources.clips.clear();
@@ -308,22 +349,27 @@ export type PlaybackHandle = {
  *  + drops it. */
 type ActivePlayback = {
     handle: PlaybackHandle;
-    /** null until the source actually starts, long-clip plays return a
-     *  handle before the buffer is decoded; the source is created inside
-     *  the .then() and assigned here. */
+    /** null until the source actually starts, a play whose buffer isn't ready
+     *  returns a handle first; the source is created when the buffer lands
+     *  (immediately, or from `updateForFrame` for a parked play). */
     source: AudioBufferSourceNode | null;
     gain: GainNode;
     panner: PannerNode | null;
     /** scene node to track for spatial position updates + auto-cancel on
      *  removal. null for `playMono` / `playAt` calls. */
     node: Node | null;
+    /** clip + opts to start once its buffer is ready, set when a play fires
+     *  before its buffer is decoded (atlas mid-decode / a standalone's first
+     *  play). `updateForFrame` reads this: starts the source when the buffer
+     *  lands, drops the play if the load failed. null once started. */
+    _pendingStart: { clip: ResolvedClip; opts: PlayOpts } | null;
     /** stopped via .stop() OR source ended naturally. drives reaping. */
     _ended: boolean;
-    /** flipped by handle.stop() before buffer resolves, the .then()
-     *  callback checks this and bails on start() if true. */
+    /** flipped by handle.stop() before the buffer resolves; `startSource`
+     *  checks this and bails without creating a source. */
     _cancelled: boolean;
-    /** setDetune called before the long-clip buffer resolved, stashed
-     *  here so the .then() that creates the source can apply it. */
+    /** setDetune called before a parked play's source was created, stashed
+     *  here so `startSource` applies it when it finally starts. */
     _pendingDetune?: number;
 };
 
@@ -487,6 +533,7 @@ function startPlayback(
         gain,
         panner,
         node,
+        _pendingStart: null,
         _ended: false,
         _cancelled: false,
     };
@@ -523,99 +570,91 @@ function startPlayback(
         },
         setDetune(cents) {
             if (playback.source) playback.source.detune.value = cents;
-            // for long clips whose source isn't created yet, the value will
-            // be applied inside the .then() callback below.
+            // parked play (buffer not ready): no source yet, `startSource`
+            // applies _pendingDetune when it finally starts.
             playback._pendingDetune = cents;
         },
     };
     playback.handle = handle;
     audio.active.add(playback);
 
-    // route to the right starter based on transport.
-    if (clip.kind === 'atlas') {
-        startAtlasSource(ctx, clip, playback, opts);
+    // start now if the buffer's ready, drop if its load already failed, else
+    // park: kick off the standalone's lazy load (the atlas load started at
+    // boot) and let updateForFrame start it the frame the buffer lands.
+    if (clipBuffer(clip)) {
+        startSource(ctx, clip, playback, opts);
+    } else if (clipFailed(clip)) {
+        playback._ended = true;
     } else {
-        startStandaloneSource(ctx, clip, playback, opts);
+        if (clip.kind === 'standalone' && !clip.loading) {
+            clip.loading = true;
+            void loadStandaloneInto(clip, ctx);
+        }
+        playback._pendingStart = { clip, opts };
     }
 
     return handle;
 }
 
-function startAtlasSource(
-    ctx: AudioContext,
-    clip: Extract<ResolvedClip, { kind: 'atlas' }>,
-    playback: ActivePlayback,
-    opts: PlayOpts,
-): void {
+/** The clip's decoded buffer, or null if not ready yet (atlas mid-decode /
+ *  standalone not-yet-loaded). Uniform read over both transports. */
+function clipBuffer(clip: ResolvedClip): AudioBuffer | null {
+    return clip.kind === 'atlas' ? clip.atlas.buffer : clip.buffer;
+}
+
+/** Whether the clip's load permanently failed. */
+function clipFailed(clip: ResolvedClip): boolean {
+    return clip.kind === 'atlas' ? clip.atlas.failed : clip.failed;
+}
+
+/** Create + start the buffer source for a play whose buffer is ready. Atlas
+ *  clips play a bounded slice of the shared concat buffer (and loop within it);
+ *  standalone clips play their whole file. A stop() before this bails via
+ *  `_cancelled` (the play is already `_ended`, reaped next tick). */
+function startSource(ctx: AudioContext, clip: ResolvedClip, playback: ActivePlayback, opts: PlayOpts): void {
+    if (playback._cancelled) return;
+    const buffer = clipBuffer(clip);
+    if (!buffer) return;
+
     const source = ctx.createBufferSource();
-    source.buffer = clip.buffer;
+    source.buffer = buffer;
     source.loop = opts.loop ?? false;
-    source.detune.value = opts.detune ?? 0;
-    if (source.loop) {
-        source.loopStart = clip.offset;
-        source.loopEnd = clip.offset + clip.duration;
+    source.detune.value = playback._pendingDetune ?? opts.detune ?? 0;
+
+    if (clip.kind === 'atlas') {
+        // the atlas is a concat, constrain a loop to this clip's slice.
+        if (source.loop) {
+            source.loopStart = clip.offset;
+            source.loopEnd = clip.offset + clip.duration;
+        }
     }
+
     source.connect(playback.gain);
     source.onended = () => {
         playback._ended = true;
     };
     playback.source = source;
-    // start(when, offset, duration), for non-loop, pass duration so the
-    // source stops at the slice end (atlas is a concat, without this we'd
-    // play straight through into the next clip).
-    if (source.loop) {
-        source.start(0, clip.offset);
+
+    if (clip.kind === 'atlas') {
+        // start(when, offset, duration), for non-loop, pass duration so the
+        // source stops at the slice end (without it we'd play straight through
+        // into the next clip in the concat).
+        if (source.loop) {
+            source.start(0, clip.offset);
+        } else {
+            source.start(0, clip.offset, clip.duration);
+        }
     } else {
-        source.start(0, clip.offset, clip.duration);
-    }
-}
-
-function startStandaloneSource(
-    ctx: AudioContext,
-    clip: Extract<ResolvedClip, { kind: 'standalone' }>,
-    playback: ActivePlayback,
-    opts: PlayOpts,
-): void {
-    const startFromBuffer = (buffer: AudioBuffer) => {
-        if (playback._cancelled) return;
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.loop = opts.loop ?? false;
-        source.detune.value = playback._pendingDetune ?? opts.detune ?? 0;
-        source.connect(playback.gain);
-        source.onended = () => {
-            playback._ended = true;
-        };
-        playback.source = source;
         source.start();
-    };
-
-    if (clip.buffer) {
-        startFromBuffer(clip.buffer);
-        return;
     }
-    if (!clip.pending) {
-        clip.pending = clip.loader
-            .loadBytes(clip.url)
-            .then((bytes) => ctx.decodeAudioData(bytes.slice().buffer))
-            .then((buf) => {
-                clip.buffer = buf;
-                return buf;
-            });
-    }
-    clip.pending
-        .then((buf) => startFromBuffer(buf))
-        .catch((err) => {
-            console.warn('[bongle] failed to load standalone audio:', err);
-            playback._ended = true;
-        });
 }
 
 /* ── per-frame tick ────────────────────────────────────────────────── */
 
-/** advance listener pose, refresh node-bound panner positions, reap
- *  finished playbacks. called once per active room per frame from
- *  engine-client's update loop (after DomUi.update, before render). */
+/** advance listener pose, start parked plays whose buffer just landed, refresh
+ *  node-bound panner positions, reap finished playbacks. called once per active
+ *  room per frame from engine-client's update loop (after DomUi.update, before
+ *  render). */
 export function updateForFrame(audio: Audio, room: ClientRoom): void {
     updateListener(audio, room);
 
@@ -624,21 +663,34 @@ export function updateForFrame(audio: Audio, room: ClientRoom): void {
             cleanup(audio, p);
             continue;
         }
-        if (p.node) {
-            if (p.node.scene === null) {
-                // node removed, cancel + reap.
-                try {
-                    p.source?.stop();
-                } catch {
-                    /* */
-                }
-                cleanup(audio, p);
-                continue;
+        if (p.node && p.node.scene === null) {
+            // node removed (possibly while parked), cancel + reap.
+            try {
+                p.source?.stop();
+            } catch {
+                /* */
             }
-            if (p.panner) {
-                const pos = readNodePosition(p.node);
-                if (pos) setPannerPosition(p.panner, pos);
+            cleanup(audio, p);
+            continue;
+        }
+        // parked play: start it the frame its buffer lands, drop it if the load
+        // failed. data-driven, we poll the clip's buffer state, no per-play promise.
+        if (p._pendingStart) {
+            const { clip, opts } = p._pendingStart;
+            if (clipBuffer(clip)) {
+                p._pendingStart = null;
+                startSource(audio.resources.context, clip, p, opts);
+            } else if (clipFailed(clip)) {
+                p._pendingStart = null;
+                p._ended = true;
+                continue; // reaped next frame
+            } else {
+                continue; // still loading, nothing else to do this frame
             }
+        }
+        if (p.node && p.panner) {
+            const pos = readNodePosition(p.node);
+            if (pos) setPannerPosition(p.panner, pos);
         }
     }
 }
