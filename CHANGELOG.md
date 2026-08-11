@@ -4,6 +4,13 @@ Notable changes to `bongle`. Newest first; dates are `YYYY-MM-DD`.
 
 Will change to a semver changelog in future once `bongle` is on npm.
 
+## 2026-08-11
+
+- feat!: **breaking** - rename the script context's scene tree from `ctx.nodes`
+  to `ctx.scene` (`ctx.node` stays the bound node). The gpucat render scenes also
+  move off `ctx.client.scene` to `ctx.client.render.scene` (with `overlayScene`
+  now alongside it under `render`).
+
 ## 2026-08-09
 
 - feat!: **breaking** - rename PrefabApplyContext `root` to `scene` 
