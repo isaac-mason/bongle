@@ -253,13 +253,16 @@ function seriesFrom(metrics: Debug.Metrics | null, ids: readonly string[]): Reco
 
 /** per-message-type net series under a prefix ('net/in/' | 'net/out/'), keyed by
  *  bare type name for the legend. skips the '<prefix>total' sum so a stacked area
- *  of these sums to the true total. dynamic: message types appear at runtime. */
+ *  of these sums to the true total. dynamic: message types appear at runtime.
+ *  uses the trailing average (like the aggregate rows) so a single-frame burst
+ *  reads as a ~1s rate rather than an instantaneous spike; recordNetStats zeros
+ *  quiet types each frame, so the average decays instead of holding stale. */
 function netSeries(metrics: Debug.Metrics | null, prefix: string): Record<string, number> {
     const out: Record<string, number> = {};
     if (!metrics) return out;
     for (const id of Debug.getIds(metrics)) {
         if (!id.startsWith(prefix) || id === `${prefix}total`) continue;
-        out[id.slice(prefix.length)] = latest(metrics, id);
+        out[id.slice(prefix.length)] = trailingAvg(metrics, id, SMOOTH_NET);
     }
     return out;
 }

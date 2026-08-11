@@ -239,13 +239,19 @@ export const SetActiveRoom = pack.object({
     playerId: pack.varuint(),
 });
 
-/** Client requests the latest metrics snapshot for a room. only sent when the debug panel is open. */
-export const RequestMetrics = pack.object({
-    type: pack.literal('request_metrics'),
-    roomId: pack.string(),
+/**
+ * Client toggles server-side metrics streaming. when enabled, the server
+ * pushes `room_metrics` snapshots (server-side throttled) for every room the
+ * client holds a Player in. flat per-client bit, mirrors `debug_subscribe`.
+ * Sent on the debug-panel open/close edge; unsubscribing on close (plus the
+ * server's disconnect cleanup) means a closed panel streams nothing.
+ */
+export const MetricsSubscribe = pack.object({
+    type: pack.literal('metrics_subscribe'),
+    enabled: pack.boolean(),
 });
 
-export type RequestMetrics = pack.SchemaType<typeof RequestMetrics>;
+export type MetricsSubscribe = pack.SchemaType<typeof MetricsSubscribe>;
 
 /**
  * Client toggles server-side debug streaming (logs + future debug feeds).
@@ -503,7 +509,7 @@ export const ClientMessage = pack.union('type', [
     Ping,
     NetPingAck,
     SetActiveRoom,
-    RequestMetrics,
+    MetricsSubscribe,
     DebugSubscribe,
     SyncUpdate,
     NetMessage,
@@ -797,7 +803,8 @@ export const VoxelChunkEmpty = pack.object({
 
 export type VoxelChunkEmpty = pack.SchemaType<typeof VoxelChunkEmpty>;
 
-/** server sends latest metrics snapshot for a room, in response to request_metrics. */
+/** server pushes a latest-values metrics snapshot for a room to subscribers
+ *  (see `metrics_subscribe`), on the server's own throttle. */
 export const RoomMetrics = pack.object({
     type: pack.literal('room_metrics'),
     roomId: pack.string(),
@@ -854,7 +861,7 @@ export type DebugLogs = pack.SchemaType<typeof DebugLogs>;
  */
 export const DEBUG_MESSAGE_TYPES: ReadonlySet<string> = new Set<string>([
     // client → server
-    'request_metrics',
+    'metrics_subscribe',
     'debug_subscribe',
     // server → client
     'room_metrics',

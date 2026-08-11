@@ -157,6 +157,15 @@ export function init(opts: InitOptions) {
          * cleaned up on disconnect and when rooms vanish.
          */
         debugLogSubscribers: new Map<Client, Map<string, number>>(),
+        /**
+         * metrics subscribers: presence = client wants `room_metrics` pushes
+         * for the rooms it holds a Player in. mirrors `debugLogSubscribers`;
+         * cleaned up on disconnect. pushes are server-throttled via
+         * `metricsPushSince`.
+         */
+        metricsSubscribers: new Set<Client>(),
+        /** seconds accumulated since the last metrics push to subscribers. */
+        metricsPushSince: 0,
     };
 }
 
@@ -254,6 +263,7 @@ export function onClientLeave(state: EngineServer, clientId: Client) {
     Discovery.removeClient(state.discovery, clientId);
     Discovery.invalidateRoomList(state.discovery);
     state.debugLogSubscribers.delete(clientId);
+    state.metricsSubscribers.delete(clientId);
     // drop any partial reassembly buffer held for this client.
     state.net.reassemblers.delete(clientId);
 }
@@ -289,22 +299,40 @@ function seedModels(state: EngineServer): void {
  * - `net/in/total` / `net/out/total`, true totals (incl. debug).
  */
 function recordNetStats(metrics: Debug.Metrics, stats: Net.NetStats, delta: number, roomCount: number): void {
+    // ids written this frame; anything net/{in,out}/* NOT in here goes quiet and
+    // must be zeroed below (see the stale-decay note).
+    const seen = new Set<string>();
     let inGame = 0;
     let outGame = 0;
     for (const [type, bytes] of stats.bytesInByType) {
-        const kbps = bytes / 1024 / delta / roomCount;
-        Debug.record(metrics, `net/in/${type}`, kbps);
+        const id = `net/in/${type}`;
+        Debug.record(metrics, id, bytes / 1024 / delta / roomCount);
+        seen.add(id);
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) inGame += bytes;
     }
     for (const [type, bytes] of stats.bytesOutByType) {
-        const kbps = bytes / 1024 / delta / roomCount;
-        Debug.record(metrics, `net/out/${type}`, kbps);
+        const id = `net/out/${type}`;
+        Debug.record(metrics, id, bytes / 1024 / delta / roomCount);
+        seen.add(id);
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) outGame += bytes;
     }
     Debug.record(metrics, 'net/ingress', inGame / 1024 / delta / roomCount);
     Debug.record(metrics, 'net/egress', outGame / 1024 / delta / roomCount);
+    // net/in|out/total share the net/{in,out}/ prefix, so mark them seen to keep
+    // the stale-decay pass below from zeroing the value we just recorded.
     Debug.record(metrics, 'net/in/total', stats.bytesIn / 1024 / delta / roomCount);
     Debug.record(metrics, 'net/out/total', stats.bytesOut / 1024 / delta / roomCount);
+    seen.add('net/in/total');
+    seen.add('net/out/total');
+    // stale decay: a per-type rate is only written on frames its type had
+    // traffic, so a type that goes quiet freezes at its last value in the
+    // breakdown. record 0 for every known per-type id absent this frame so
+    // quiet types read 0 and the panel's trailing average decays.
+    for (const id of Debug.getIds(metrics)) {
+        if (!seen.has(id) && (id.startsWith('net/in/') || id.startsWith('net/out/'))) {
+            Debug.record(metrics, id, 0);
+        }
+    }
 }
 
 // ── process CPU / memory sampling (server-only) ─────────────────────
@@ -325,6 +353,11 @@ const _process = (globalThis as { process?: ProcessStats }).process;
 let _lastCpuUsage: { user: number; system: number } | null = _process ? _process.cpuUsage() : null;
 let _procSampleAccumMs = 0;
 const PROC_SAMPLE_INTERVAL_MS = 1000; // 1Hz — the 600-sample ring then holds ~10min of trend
+
+/** cadence the server pushes `room_metrics` to subscribed panels. a few Hz
+ *  reads fine as a trend; the server owns this so the rate is independent of
+ *  any client's frame timing. */
+const METRICS_PUSH_INTERVAL_S = 0.2; // 5Hz
 
 // record process CPU% (of one core) + memory (RSS/heap, MB) onto the global
 // metrics bag, so they ride the existing room_metrics push to the debug panel
@@ -516,20 +549,12 @@ export function processInbox(state: EngineServer) {
                         Discovery.handleVoxelAck(state.discovery, client, message);
                         break;
 
-                    case 'request_metrics': {
-                        const room = Rooms.getRoom(state.rooms, message.roomId);
-                        if (!room) break;
-                        // merge room metrics with the global (non-room) stages
-                        const global = Debug.getLatestValues(state.metrics);
-                        const values = {
-                            ...Debug.getLatestValues(room.metrics),
-                            tick: global.tick ?? 0,
-                            inbox: global.inbox ?? 0,
-                            'proc/cpu': global['proc/cpu'] ?? 0,
-                            'proc/rss': global['proc/rss'] ?? 0,
-                            'proc/heap': global['proc/heap'] ?? 0,
-                        };
-                        Net.send(state.net, client, { type: 'room_metrics', roomId: room.id, values });
+                    case 'metrics_subscribe': {
+                        // presence in the set = client wants room_metrics pushes;
+                        // the push loop discovers its rooms from its Players.
+                        // dropped on unsubscribe here and on disconnect.
+                        if (message.enabled) state.metricsSubscribers.add(client);
+                        else state.metricsSubscribers.delete(client);
                         break;
                     }
 
@@ -860,6 +885,35 @@ export function update(state: EngineServer, delta: number) {
             // drop stale cursors for rooms the client no longer observes
             for (const key of cursors.keys()) {
                 if (!seen.has(key)) cursors.delete(key);
+            }
+        }
+    }
+
+    // push room_metrics snapshots to subscribed panels, server-throttled to
+    // METRICS_PUSH_INTERVAL_S (independent of client frame rate). for each
+    // subscriber, walk every room it holds a Player in and emit one snapshot:
+    // the room's latest metric values merged with the global (non-room) stages.
+    state.metricsPushSince += delta;
+    if (state.metricsSubscribers.size > 0 && state.metricsPushSince >= METRICS_PUSH_INTERVAL_S) {
+        state.metricsPushSince = 0;
+        const global = Debug.getLatestValues(state.metrics);
+        for (const client of state.metricsSubscribers) {
+            const seen = new Set<string>();
+            for (const player of Rooms.getPlayersForClient(state.rooms, client)) {
+                const roomId = player.roomId;
+                if (seen.has(roomId)) continue;
+                seen.add(roomId);
+                const room = Rooms.getRoom(state.rooms, roomId);
+                if (!room) continue;
+                const values = {
+                    ...Debug.getLatestValues(room.metrics),
+                    tick: global.tick ?? 0,
+                    inbox: global.inbox ?? 0,
+                    'proc/cpu': global['proc/cpu'] ?? 0,
+                    'proc/rss': global['proc/rss'] ?? 0,
+                    'proc/heap': global['proc/heap'] ?? 0,
+                };
+                Net.send(state.net, client, { type: 'room_metrics', roomId: room.id, values });
             }
         }
     }

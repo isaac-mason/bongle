@@ -205,6 +205,11 @@ export function init(opts: InitOptions) {
         /** last value sent in `debug_subscribe`, re-sent only on edge
          *  transitions, not every frame. */
         debugLogsSubscribed: false,
+        /** last `metrics_subscribe` value sent, re-sent only on the debug-panel
+         *  open/close edge (mirrors `debugLogsSubscribed`). while subscribed the
+         *  server pushes `room_metrics` on its own throttle; closing the panel
+         *  unsubscribes so nothing streams. */
+        metricsSubscribed: false,
         /** true while a portal ad (commercial/rewarded break) is showing. Set
          *  by `api/platform`; the update loop reconciles audio output mute
          *  against it each frame, so the game is silenced during ads with no
@@ -647,6 +652,10 @@ function processJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void 
     // (re)joined → the server has our ClientState now; force a manifest re-send
     // next update so it has our protocol table even if the pre-join send raced.
     state.lastSentManifestId = -1;
+    // a rejoin means the server dropped our metrics subscription (disconnect
+    // cleanup); clear the edge flag so the next update re-subscribes if the
+    // panel is still open, otherwise pushes would stay silent until a toggle.
+    state.metricsSubscribed = false;
 
     const existing = state.rooms.rooms.get(message.playerId);
     if (existing && existing.roomId === message.roomId) {
@@ -1030,22 +1039,41 @@ function processRoomMetrics(state: EngineClient, message: Protocol.RoomMetrics):
  * `net/in/total` / `net/out/total`, true totals (includes debug bytes).
  */
 function recordNetStats(metrics: Debug.Metrics, stats: Net.NetStats, delta: number): void {
+    // ids written this frame; anything net/{in,out}/* NOT in here goes quiet and
+    // must be zeroed below (see the stale-decay note).
+    const seen = new Set<string>();
     let inGame = 0;
     let outGame = 0;
     for (const [type, bytes] of stats.bytesInByType) {
-        const kbps = bytes / 1024 / delta;
-        Debug.record(metrics, `net/in/${type}`, kbps, 'kb/s');
+        const id = `net/in/${type}`;
+        Debug.record(metrics, id, bytes / 1024 / delta, 'kb/s');
+        seen.add(id);
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) inGame += bytes;
     }
     for (const [type, bytes] of stats.bytesOutByType) {
-        const kbps = bytes / 1024 / delta;
-        Debug.record(metrics, `net/out/${type}`, kbps, 'kb/s');
+        const id = `net/out/${type}`;
+        Debug.record(metrics, id, bytes / 1024 / delta, 'kb/s');
+        seen.add(id);
         if (!Protocol.DEBUG_MESSAGE_TYPES.has(type)) outGame += bytes;
     }
     Debug.record(metrics, 'net/ingress', inGame / 1024 / delta, 'kb/s');
     Debug.record(metrics, 'net/egress', outGame / 1024 / delta, 'kb/s');
+    // net/in|out/total share the net/{in,out}/ prefix, so mark them seen to keep
+    // the stale-decay pass below from zeroing the value we just recorded.
     Debug.record(metrics, 'net/in/total', stats.bytesIn / 1024 / delta, 'kb/s');
     Debug.record(metrics, 'net/out/total', stats.bytesOut / 1024 / delta, 'kb/s');
+    seen.add('net/in/total');
+    seen.add('net/out/total');
+    // stale decay: a per-type rate is only written on frames its type had
+    // traffic. without this, a type that goes quiet (e.g. a one-off
+    // voxel_chunk_empty burst) freezes at its last instantaneous value in the
+    // breakdown forever. record 0 for every known per-type id absent this
+    // frame so quiet types read 0 and the panel's trailing average decays.
+    for (const id of Debug.getIds(metrics)) {
+        if (!seen.has(id) && (id.startsWith('net/in/') || id.startsWith('net/out/'))) {
+            Debug.record(metrics, id, 0, 'kb/s');
+        }
+    }
 }
 
 function processDebugLogs(state: EngineClient, message: Protocol.DebugLogs): void {
@@ -1312,30 +1340,22 @@ export function update(state: EngineClient, delta: number) {
         state.renderer.render(perfSettings.voxelViewChunkRadius);
         Debug.end(activeRoom.clientMetrics, 'render');
 
-        /* metrics, request server-side stats for every room the client
-         * holds, not just the active one. each room maintains its own
-         * server-side metrics history; the response is dispatched into
-         * each ClientRoom.serverMetrics by roomId. de-dup roomIds since
-         * a single client may hold multiple Players in the same room. */
-        // debug network traffic is editor-only, player builds never request
-        // server metrics or subscribe to server logs.
         const { debugOpen, showGpucatInspector } = useClient.getState();
 
         // gpucat Inspector overlay (GPU timing), shown alongside the dashboard
         // only when debug is open AND the options-tab toggle is on.
         state.renderer.setInspectorVisible(debugOpen && showGpucatInspector);
 
-        // request server metrics for the perf panel in EVERY build, not just the
-        // editor, so a shipped game surfaces server-side perf too. a player who
-        // opens the dashboard (backtick) can see it — an accepted tradeoff.
-        if (debugOpen) {
-            const seen = new Set<string>();
-            for (const room of state.rooms.rooms.values()) {
-                if (seen.has(room.roomId)) continue;
-                if (room.local) continue; // local rooms have no server peer
-                seen.add(room.roomId);
-                Net.send(state.net, { type: 'request_metrics', roomId: room.roomId });
-            }
+        // subscribe to server metrics for the perf panel in EVERY build, not
+        // just the editor, so a shipped game surfaces server-side perf too. the
+        // server pushes room_metrics (server-throttled) for every room we hold a
+        // Player in while subscribed, and stops on unsubscribe here + its own
+        // disconnect cleanup — so a closed panel streams nothing. edge-triggered:
+        // one message per open/close, dispatched into ClientRoom.serverMetrics
+        // by roomId in processRoomMetrics.
+        if (debugOpen !== state.metricsSubscribed) {
+            Net.send(state.net, { type: 'metrics_subscribe', enabled: debugOpen });
+            state.metricsSubscribed = debugOpen;
         }
 
         if (env.editor) {
