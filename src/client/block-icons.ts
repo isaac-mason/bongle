@@ -107,7 +107,7 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
         depthFormat: 'depth24plus',
         samples: 1,
     });
-    const pipeline = deps.offline.createPipeline(room.scene, camera);
+    const pipeline = deps.offline.createPipeline(room.render.scene, camera);
     const meshOutput = createMeshOutput();
 
     // one reused chunk in the room's voxels; the block at (1,1,1) is replaced

@@ -478,8 +478,8 @@ script(
 
         const canvas = client.state!.renderer.canvas;
         const pointer = createPointerState(canvas);
-        const meshState = createSelectionMeshState(client.scene);
-        const inspectMeshState = InspectMesh.init(client.scene);
+        const meshState = createSelectionMeshState(client.render.scene);
+        const inspectMeshState = InspectMesh.init(client.render.scene);
         // forward-ref: the store references transformToolState in its
         // closures (paste/cut, placement pivot, …), and the gizmo
         // closures inside transformToolState read state.store on user
@@ -493,7 +493,7 @@ script(
         const transformToolState = TransformTool.createTransformTool(
             initialCamera,
             canvas,
-            client.scene,
+            client.render.scene,
             room.nodes,
             ctx,
         );
@@ -513,10 +513,10 @@ script(
         const smoothState = createSmoothState();
         const elevationState = createElevationState();
 
-        const pivotPoint = PivotPoint.create(client.scene);
-        const debugVisualsState = DebugVisuals.init(client.scene);
-        const gridVisualsState = GridVisuals.init(client.scene);
-        const chunkBoundsState = ChunkBoundsVisuals.init(client.scene);
+        const pivotPoint = PivotPoint.create(client.render.scene);
+        const debugVisualsState = DebugVisuals.init(client.render.scene);
+        const gridVisualsState = GridVisuals.init(client.render.scene);
+        const chunkBoundsState = ChunkBoundsVisuals.init(client.render.scene);
         const prefabVisuals = PrefabVisuals.init();
 
         // ── clipboard: copy / paste via system clipboard ──
@@ -1254,9 +1254,9 @@ script(
             disposePointerState(canvas, pointer);
             disposeSelectionMeshState(meshState);
             InspectMesh.dispose(inspectMeshState);
-            DebugVisuals.dispose(debugVisualsState, client.scene);
-            GridVisuals.dispose(gridVisualsState, client.scene);
-            ChunkBoundsVisuals.dispose(chunkBoundsState, client.scene);
+            DebugVisuals.dispose(debugVisualsState, client.render.scene);
+            GridVisuals.dispose(gridVisualsState, client.render.scene);
+            ChunkBoundsVisuals.dispose(chunkBoundsState, client.render.scene);
             PrefabVisuals.dispose(prefabVisuals);
         });
     },

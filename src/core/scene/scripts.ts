@@ -75,9 +75,26 @@ export type ClientDebugState = {
     readonly dashboard: Dashboard;
 };
 
-export type ClientContext = {
-    /** the scene this client is in */
+/**
+ * the gpucat render scenes for a room. grouped so the logical scene tree can
+ * own the bare `scene` name; the render scenes live under `render`.
+ */
+export type RenderScenes = {
+    /** the gpucat scene for this room. contains all renderable objects */
     scene: Scene;
+
+    /**
+     * the gpucat overlay scene for this room: crisp, post-fxaa content rendered
+     * by the engine's overlay pass (CanvasTrait panels, future world-space HUD).
+     * shares the main scene's depth read-only, so meshes with `depthTest` are
+     * occluded by world geometry but never blurred by the post-chain.
+     */
+    overlayScene: Scene;
+};
+
+export type ClientContext = {
+    /** the gpucat render scenes this client renders into */
+    render: RenderScenes;
 
     /**
      * the subject: the node local input drives and what the renderer + audio

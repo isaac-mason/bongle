@@ -952,7 +952,7 @@ script(
         onDispose(ctx, () => {
             if (!isOwner(ctx, ctx.node)) return;
             setPointerLock(ctx, false);
-            clearDebugHelpers(ctx.client?.scene, debugHelpers);
+            clearDebugHelpers(ctx.client?.render.scene, debugHelpers);
             removeDebugPanel();
             if (crosshair) removeCrosshair(crosshair);
             disposeAllHud();
@@ -1059,7 +1059,7 @@ script(
             }
 
             if (env.editor && ctx.mode === 'edit' && isOwner(ctx, ctx.node)) {
-                const scene = ctx.client?.scene;
+                const scene = ctx.client?.render.scene;
                 clearDebugHelpers(scene, debugHelpers);
                 if (scene && cc.state.vcc) {
                     const fp = getVisualWorldPosition(transform);
@@ -1076,7 +1076,7 @@ script(
                     removeDebugPanel();
                 }
             } else {
-                clearDebugHelpers(ctx.client?.scene, debugHelpers);
+                clearDebugHelpers(ctx.client?.render.scene, debugHelpers);
                 removeDebugPanel();
             }
         });

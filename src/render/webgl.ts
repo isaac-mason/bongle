@@ -229,7 +229,7 @@ export function render(state: WebGlState, voxelViewChunkRadius: number): void {
 
     // point the engine-global pass at this room's scene before render,
     // the pipeline graph is shared, only `passNode.scene` rotates.
-    setActiveScene(state.pipeline, room.scene, room.overlayScene);
+    setActiveScene(state.pipeline, room.render.scene, room.render.overlayScene);
 
     // WebGL voxel producer: CPU frustum + per-facing cone-cull → `mesh.draws` on
     // the per-room voxel meshes. Replaces the WebGPU compute cull/emit chain; no
@@ -353,7 +353,7 @@ export async function createOffline(_gpu?: { device: GPUDevice; adapter: GPUAdap
                 state,
                 deps.voxelResources as VoxelResources.VoxelResources,
                 room.voxelVisuals,
-                room.scene,
+                room.render.scene,
                 camera,
                 target,
                 pipeline,
@@ -628,7 +628,7 @@ export type RoomVisuals = {
  *  teardown needs captured up front so it never depends on the room outliving it. */
 export type RoomActive = {
     room: ClientRoom;
-    scene: ClientRoom['scene'];
+    scene: ClientRoom['render']['scene'];
     visibility: ClientRoom['visibility'];
     visuals: RoomVisuals;
 };
@@ -647,15 +647,16 @@ export function reconcile(state: WebGlState, activeRoom: ClientRoom | null): voi
 }
 
 /**
- * Build the active room's visual bundle from its scene graph (`scene` /
- * `overlayScene` / `nodes` / `viewport`) + the backend's client-global resources +
+ * Build the active room's visual bundle from its scene graph (`render.scene` /
+ * `render.overlayScene` / `nodes` / `viewport`) + the backend's client-global resources +
  * env buffers + pipeline, mount its world into the single-world voxel arena (marks
  * chunks dirty so the prioritised remesh path refills it), and force-push its env
  * config into the engine-global env UBOs. Returns the slot.
  */
 function build(state: WebGlState, room: ClientRoom): RoomActive {
     const res = state.resources;
-    const { scene, overlayScene, nodes } = room;
+    const { nodes } = room;
+    const { scene, overlayScene } = room.render;
 
     const voxel = VoxelVisuals.initRoomMeshes(scene, res.voxel.geometries, res.voxel.quadMaterials);
     const voxelMesh = VoxelMeshVisuals.init(res.voxelMesh.batch, scene, nodes);
@@ -793,10 +794,10 @@ export function updateActiveRoom(state: WebGlState, ctx: FrameContext): void {
 export function rebuildVoxelVisuals(state: WebGlState, room: ClientRoom): void {
     if (!state.active || state.active.room !== room) return;
     const rv = state.active.visuals;
-    VoxelVisuals.dispose(rv.voxel, room.scene);
+    VoxelVisuals.dispose(rv.voxel, room.render.scene);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, room.visibility);
-    rv.voxel = VoxelVisuals.initRoomMeshes(room.scene, state.resources.voxel.geometries, state.resources.voxel.quadMaterials);
-    rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.scene, room.nodes);
+    rv.voxel = VoxelVisuals.initRoomMeshes(room.render.scene, state.resources.voxel.geometries, state.resources.voxel.quadMaterials);
+    rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.render.scene, room.nodes);
     // the refresh blew away the previous arena (new packer is empty), so re-mount:
     // marks the room's chunks dirty and the prioritised remesh path refills it.
     VoxelVisuals.mountRoom(rv.voxel, room.voxels);
@@ -817,5 +818,5 @@ export function rebuildExtrudedSpriteVisuals(state: WebGlState, room: ClientRoom
         state.resources.extrudedSprite,
         room.visibility,
     );
-    rv.extrudedSprite = ExtrudedSpriteVisuals.init(state.resources.extrudedSprite.batch, room.scene, room.nodes);
+    rv.extrudedSprite = ExtrudedSpriteVisuals.init(state.resources.extrudedSprite.batch, room.render.scene, room.nodes);
 }

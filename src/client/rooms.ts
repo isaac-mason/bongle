@@ -15,7 +15,7 @@ import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import { unpackSceneTree } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
-import type { ClientContext, EditRoomState, SceneTreeContext } from '../core/scene/scripts';
+import type { ClientContext, EditRoomState, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
@@ -82,16 +82,8 @@ export type ClientRoom = {
     /** scene graph */
     nodes: SceneTree.SceneTree;
 
-    /** the gpucat scene for this room. contains all renderable objects */
-    scene: Scene;
-
-    /**
-     * the gpucat overlay scene for this room: crisp, post-fxaa content rendered
-     * by the engine's overlay pass (CanvasTrait panels, future world-space HUD).
-     * shares the main scene's depth read-only, so meshes with `depthTest` are
-     * occluded by world geometry but never blurred by the post-chain.
-     */
-    overlayScene: Scene;
+    /** the gpucat render scenes (main + overlay) for this room */
+    render: RenderScenes;
 
     /** the scripting runtime for this room */
     context: SceneTreeContext;
@@ -275,7 +267,8 @@ export type RenderRoom = {
     physics: Physics.Physics;
     clock: Clock.Clock;
     context: SceneTreeContext;
-    scene: Scene;
+    /** the gpucat render scene (headless — no overlay pass) */
+    render: { scene: Scene };
     voxelVisuals: VoxelVisuals.VoxelVisuals;
     voxelMeshVisuals: VoxelMeshVisuals.VoxelMeshVisuals;
     modelVisuals: ModelVisuals.ModelVisuals;
@@ -335,7 +328,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         physics,
         clock,
         context: context,
-        scene,
+        render: { scene },
         voxelVisuals,
         voxelMeshVisuals,
         modelVisuals,
@@ -348,7 +341,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
 export function disposeRenderRoom(deps: RenderRoomDeps, room: RenderRoom): void {
     deps.offline.unmountRoom(deps);
     Physics.dispose(room.physics);
-    VoxelVisuals.dispose(room.voxelVisuals, room.scene);
+    VoxelVisuals.dispose(room.voxelVisuals, room.render.scene);
     VoxelMeshVisuals.dispose(room.voxelMeshVisuals, deps.voxelMeshResources.batch, room.visibility);
     ModelVisuals.dispose(room.modelVisuals, deps.modelResources.batch, room.visibility);
     Environment.disposeEnvVisuals(room.envVisuals);
@@ -635,6 +628,11 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // read-only for occlusion. see WebGpu.EngineRenderPipeline.overlayPassNode.
     const overlayScene = new Scene();
 
+    // one shared render-scenes object; both the ClientContext (ctx.client.render)
+    // and the ClientRoom (room.render) reference it, so scripts and room-layer
+    // code observe the same scenes.
+    const render: RenderScenes = { scene, overlayScene };
+
     // per-room overlay viewport. it stacks ABOVE the single shared render canvas
     // (a backdrop sibling in the global viewport), so z-index 1 keeps its overlays
     // over the canvas; pointer-events:none lets empty-area gestures fall through to
@@ -675,7 +673,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
     // swaps without re-seating. subject is seeded to the player node post-populate.
     const client: ClientContext = {
         clientId,
-        scene,
+        render,
         subject: null,
         viewport,
         touchOverlay,
@@ -732,8 +730,7 @@ function createRoomCore(opts: CreateRoomCoreOptions): ClientRoom {
         namespace,
         local,
         nodes,
-        scene,
-        overlayScene,
+        render,
         context: context,
         syncSnapshots,
         voxels,

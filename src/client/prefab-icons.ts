@@ -134,9 +134,9 @@ export async function renderPrefabIcon(deps: RenderRoomDeps, prefabId: string): 
         const aabb = computeSceneAabb(room, deps);
         if (!aabb) return null;
         const camera = fitOrthoIsometric(aabb);
-        const pipeline = deps.offline.createPipeline(room.scene, camera);
+        const pipeline = deps.offline.createPipeline(room.render.scene, camera);
         try {
-            room.scene.updateWorldMatrix();
+            room.render.scene.updateWorldMatrix();
             deps.offline.renderToTarget(deps, room, camera, target, pipeline, Number.POSITIVE_INFINITY);
             const pixels = await deps.offline.readTarget(target);
             return { pixels, pxSize: ICON_PX };

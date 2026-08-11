@@ -38,7 +38,7 @@ export type OfflineRenderer = {
      *  once, reuses across every tile). `RenderPipeline` is a neutral gpucat type. */
     createPipeline(scene: Scene, camera: Camera): RenderPipeline;
 
-    /** render `room.scene` into `target` via `pipeline`, driving this backend's
+    /** render `room.render.scene` into `target` via `pipeline`, driving this backend's
      *  voxel producer — WebGPU compute dispatch (arena-based) OR WebGL CPU
      *  `cullEmit` (writes `mesh.draws` onto `room.voxelVisuals`). Restores the prior
      *  render target. Takes the whole `RenderRoom` because the WebGL producer needs

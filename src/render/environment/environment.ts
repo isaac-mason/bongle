@@ -58,7 +58,7 @@ export type EnvironmentResources = ReturnType<typeof createEnvironmentResources>
  * into the flush (it owns them).
  */
 export type EnvVisuals = {
-    /** per-room sky sphere (added to room.scene). */
+    /** per-room sky sphere (added to room.render.scene). */
     skyMesh: gpu.Mesh;
     /** per-room sun + moon billboard pair (2 instances). */
     sunMoonMesh: gpu.Mesh;
