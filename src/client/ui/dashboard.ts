@@ -210,9 +210,6 @@ const FRAME_PHASES = [
     'audio',
 ] as const;
 
-// sub-phases timed inside 'render' (in webgpu.ts / webgl.ts).
-const RENDER_PHASES = ['mesh', 'voxel-mesh', 'model', 'sprite', 'extruded-sprite', 'shadow', 'particle'] as const;
-
 // server physics-tick phases: trait sync, the solver step, transform writeback.
 const PHYSICS_PHASES = ['physics/pre', 'physics', 'physics/post'] as const;
 
@@ -325,7 +322,7 @@ function build(): DebugDashboard {
     dash.root.style.zIndex = String(UILayer.debug);
     dash.root.style.display = 'none'; // hidden until opened
 
-    // ── debug panel: overview / perf / cpu / net (/ logs) tabs ──
+    // ── debug panel: overview / perf / cpu / physics / net (/ options / logs) tabs ──
     //
     // overview is position/info readouts; the rest is perf. frames go on stacked
     // areas (a band per phase, summing to frame time) with the 60fps budget as a
@@ -393,25 +390,14 @@ function build(): DebugDashboard {
     addClientFrameStack(perf, 190);
     addThroughput(perf, 80);
 
-    // cpu: the full frame breakdown — top-level phases + render internals + server.
+    // cpu: one client chart + one server chart, each the frame time stacked per
+    // top-level phase (siblings summing to ~frame time).
     const cpu = tabs.tab('cpu');
     addClientFrameStack(cpu, 210);
-    // render internals, stacked (sub-phases timed inside the 'render' band above).
-    cpu.lines(() => seriesFrom(activeRoom()?.clientMetrics ?? null, RENDER_PHASES), {
-        label: 'render (ms)',
-        stacked: true,
-        height: 140,
-        unit: 'ms',
-        min: 0,
-        smooth: 0.2,
-        hover: true,
-        history: CHART_HISTORY,
-    });
-    // server frame time, stacked per top-level phase (siblings summing to ~frame).
     cpu.lines(() => seriesFrom(activeRoom()?.serverMetrics ?? null, SERVER_PHASES), {
         label: 'server frame (ms)',
         stacked: true,
-        height: 140,
+        height: 210,
         unit: 'ms',
         min: 0,
         smooth: 0.2,
@@ -471,24 +457,43 @@ function build(): DebugDashboard {
         ...int,
     });
 
-    // client net: ping + client throughput + per-message-type ingress/egress
-    // breakdowns (net/in/*, net/out/* are recorded client-side only).
-    const clientNet = tabs.tab('client net');
-    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ping', SMOOTH_NET), {
+    // net: ping + client/server throughput (all four flows overlaid) + client-side
+    // per-message-type ingress/egress breakdowns (net/in/*, net/out/* are recorded
+    // client-side only; the server records only its totals).
+    const net = tabs.tab('net');
+    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ping', SMOOTH_NET), {
         label: 'ping',
         unit: 'ms',
     });
-    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ingress', SMOOTH_NET), {
-        label: 'in',
+    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/ingress', SMOOTH_NET), {
+        label: 'client in',
         unit: 'kb/s',
     });
-    clientNet.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/egress', SMOOTH_NET), {
-        label: 'out',
+    net.monitor(() => trailingAvg(activeRoom()?.clientMetrics ?? null, 'net/egress', SMOOTH_NET), {
+        label: 'client out',
         unit: 'kb/s',
     });
-    addThroughput(clientNet, 110, 'client');
+    net.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/ingress', SMOOTH_NET), {
+        label: 'server in',
+        unit: 'kb/s',
+    });
+    net.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/egress', SMOOTH_NET), {
+        label: 'server out',
+        unit: 'kb/s',
+    });
+    // ping over time — single series so spikes read at a glance (hover to freeze).
+    net.lines(() => ({ ping: latest(activeRoom()?.clientMetrics ?? null, 'net/ping') }), {
+        label: 'ping (ms)',
+        height: 130,
+        unit: 'ms',
+        min: 0,
+        smooth: 0.2,
+        hover: true,
+        history: CHART_HISTORY,
+    });
+    addThroughput(net, 130);
     // where the bytes go: one stacked band per message type, summing to the total.
-    clientNet.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/in/'), {
+    net.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/in/'), {
         label: 'ingress by type (kb/s)',
         stacked: true,
         height: 150,
@@ -498,7 +503,7 @@ function build(): DebugDashboard {
         hover: true,
         history: CHART_HISTORY,
     });
-    clientNet.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/out/'), {
+    net.lines(() => netSeries(activeRoom()?.clientMetrics ?? null, 'net/out/'), {
         label: 'egress by type (kb/s)',
         stacked: true,
         height: 150,
@@ -508,18 +513,6 @@ function build(): DebugDashboard {
         hover: true,
         history: CHART_HISTORY,
     });
-
-    // server net: server-side in/out (no per-type breakdown — not recorded server-side).
-    const serverNet = tabs.tab('server net');
-    serverNet.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/ingress', SMOOTH_NET), {
-        label: 'in',
-        unit: 'kb/s',
-    });
-    serverNet.monitor(() => trailingAvg(activeRoom()?.serverMetrics ?? null, 'net/egress', SMOOTH_NET), {
-        label: 'out',
-        unit: 'kb/s',
-    });
-    addThroughput(serverNet, 110, 'server');
 
     // ── options tab: editor debug toggles + ws-latency sim (editor-only) ──
     //

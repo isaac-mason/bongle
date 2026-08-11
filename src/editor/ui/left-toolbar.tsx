@@ -1,5 +1,6 @@
-import { ShoppingBag } from "../../../icons";
+import { MonitorPlay, ShoppingBag } from "../../../icons";
 import { useState } from 'react';
+import { useClient } from '../../client/ui/stores/client-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
 import { TOOL_CATEGORIES, type ToolCategory, type ToolDef } from '../tool-categories';
@@ -99,6 +100,32 @@ function InventoryButton() {
     );
 }
 
+// debug dashboard toggle, pinned to the bottom of the strip. mirrors the `
+// backtick chord that opens the same perf/logs panel.
+function DebugButton() {
+    const debugOpen = useClient((s) => s.debugOpen);
+    const toggleDebug = useClient((s) => s.toggleDebugOpen);
+
+    return (
+        <div className="mt-auto flex flex-col items-center gap-1 pt-1">
+            <div className="w-6 h-px bg-border mb-1" />
+            <Kbd size="xs">{'`'}</Kbd>
+            <button
+                type="button"
+                onClick={toggleDebug}
+                title="debug panel  (`)"
+                className={`w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
+                    debugOpen
+                        ? 'bg-accent text-on-accent border-accent'
+                        : 'text-fg border-border hover:bg-surface-muted hover:text-fg'
+                }`}
+            >
+                <MonitorPlay size={15} />
+            </button>
+        </div>
+    );
+}
+
 export function LeftToolbar() {
     const activeTool = useEditRoom((s) => s.activeTool);
     const setActiveTool = useEditRoom((s) => s.setActiveTool);
@@ -139,6 +166,9 @@ export function LeftToolbar() {
                     );
                 })}
             </div>
+
+            {/* debug panel toggle, pushed to the bottom of the strip */}
+            <DebugButton />
         </div>
     );
 }
