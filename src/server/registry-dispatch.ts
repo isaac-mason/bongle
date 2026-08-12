@@ -20,8 +20,8 @@
  * `Resources.setModel` (added/changed, with server-side bin url) and
  * `Resources.deleteModel` + `releaseModel` (removed).
  *
- * Server-side launch config (server maxPlayers / room cap) is read fresh on
- * each allocation via `launchConfig(registry)`, so a config edit takes
+ * Server-side config (server maxPlayers / room cap) is read fresh on
+ * each allocation via `resolveConfig(registry)`, so a config edit takes
  * effect on the next allocation without explicit rewiring.
  *
  * scenes: when a `scene()` declaration is added or changed, read the

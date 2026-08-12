@@ -5,7 +5,7 @@
 // baked resources copied in; a bongle.json manifest (schema 1, sha384 SRI,
 // config + compat matchmaking.maxPlayers) written; the tree zipped.
 //
-// A standalone (client-only) game — `config({ standalone: true })` — has no
+// A standalone (client-only) game — `config({ server: false })` — has no
 // server, so its build skips the server target entirely: no server/index.js, no
 // server resources, no content copy, and no manifest `server` entry. Multiplayer
 // (`config({ server })`) builds both targets exactly as before.

@@ -12,14 +12,14 @@
  *
  * Both call sites materialize a partial ProjectModule view (only the
  * fields atlas + models read) from the typed registries and dispatch to
- * `buildBlockTextureAtlas` / `buildModels`. The launch config the bundle
+ * `buildBlockTextureAtlas` / `buildModels`. The config the bundle
  * manifest needs is exposed via `state.config`, the `build.ts` caller
  * reads it directly off pipeline state after the pass.
  */
 
-import { type Config, isStandalone } from '../../core/config';
+import { type Config, DEFAULT_CONFIG, isStandalone } from '../../core/config';
 import type { ModelHandle } from '../../core/models/handle';
-import { launchConfig, type Registry } from '../../core/registry';
+import { type Registry, resolveConfig } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SceneHandle } from '../../core/scene/scene-handle';
 import type { Blocks } from '../../core/voxels/block-registry';
@@ -90,9 +90,9 @@ export type PipelineState = {
     configRev: number;
     sounds: number;
     sprites: number;
-    /** Latest observed launch config, refreshed whenever the config
-     *  registry's revision moves. `build.ts` reads this after the pass to
-     *  seed the bundle manifest. */
+    /** Latest observed config, refreshed every pass. `build.ts` reads this
+     *  after the pass to seed the bundle manifest; the pass also compares
+     *  against it to detect a standalone flip. */
     config: Config | null;
     /** Per-id incremental cache for the models builder, replaces the
      *  former `.bongle/cache/models-build.json` disk sidecar. Lives for
@@ -167,11 +167,20 @@ export async function runAssetPipelinePass(
     const soundsRev = registry.sounds.revision;
     const spritesRev = registry.sprites.revision;
 
+    // The scene SET (all authored scenes vs `scene()`-declared only) and the
+    // model bake (whether the server bin is emitted) both branch on `standalone`,
+    // so a pure config() edit that flips it must re-bake them even though no
+    // scene/model registry rev changed. Compare against the last-baked config.
+    const cfg = resolveConfig(registry);
+    const standalone = isStandalone(cfg);
+    const prevStandalone = isStandalone(state.config ?? DEFAULT_CONFIG);
+    const standaloneChanged = standalone !== prevStandalone;
+
     // Atlas reads blocks (for `BlockRegistryData.textures` derivation) and
     // blockTextures (the source PNGs). Either bumping is grounds for rebuild.
     const atlasDirty = forceAll || blocksRev !== state.blocks || blockTexturesRev !== state.blockTextures;
-    const modelsDirty = forceAll || modelsRev !== state.models;
-    const scenesDirty = forceAll || scenesRev !== state.scenes;
+    const modelsDirty = forceAll || modelsRev !== state.models || standaloneChanged;
+    const scenesDirty = forceAll || scenesRev !== state.scenes || standaloneChanged;
     const configDirty = configRev !== state.configRev;
     const soundsDirty = forceAll || soundsRev !== state.sounds;
     const spritesDirty = forceAll || spritesRev !== state.sprites;
@@ -223,10 +232,7 @@ export async function runAssetPipelinePass(
                     () => undefined,
                 ),
             );
-        // standalone (client-only) games run no server. launchConfig is always safe
-        // to read (falls back to DEFAULT_CONFIG, a server config, so undeclared /
-        // multiplayer projects behave exactly as before).
-        const standalone = isStandalone(launchConfig(registry));
+        // `standalone` is computed once up top (also drives modelsDirty/scenesDirty).
         if (modelsDirty) {
             // standalone → don't emit the server-side model bin (resources/server/models).
             tasks.push(
@@ -262,13 +268,10 @@ export async function runAssetPipelinePass(
 
     await Promise.all(tasks);
 
-    if (configDirty) {
-        // `launchConfig(registry)` reads the singleton id 'main' and falls back
-        // to DEFAULT_CONFIG for the un-declared case. Stashed on pipeline state
-        // for the build caller to read; dev pipeline reads the same registry
-        // directly off bongle/internal.
-        state.config = launchConfig(registry);
-    }
+    // Stash the current launch config on pipeline state: the build caller reads it,
+    // and the next pass compares against it to detect a standalone flip. Set
+    // unconditionally (cheap) so `prevStandalone` is always the last-baked value.
+    state.config = cfg;
 
     state.blocks = blocksRev;
     state.blockTextures = blockTexturesRev;

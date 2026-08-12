@@ -614,10 +614,10 @@ export function localInbound(reg: Registry): InboundProtocol {
 }
 
 /**
- * launch config; single-keyed (id 'main'), falls back to the default when the
- * user didn't call `config()`.
+ * resolve the game config; single-keyed (id 'main'), falls back to the default
+ * when the user didn't call `config()`.
  */
-export function launchConfig(reg: Registry): Config {
+export function resolveConfig(reg: Registry): Config {
     return reg.config.byId.get(CONFIG_ID) ?? DEFAULT_CONFIG;
 }
 

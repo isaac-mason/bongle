@@ -13,11 +13,11 @@ import * as Registry from '../core/registry';
 import {
     buildInboundProtocol,
     type InboundProtocol,
-    launchConfig,
     localInbound,
     protocolManifest,
     registry,
     reindexRegistry,
+    resolveConfig,
 } from '../core/registry';
 import type { ResourceLoader } from '../core/resource-loader';
 import * as Resources from '../core/resources';
@@ -248,14 +248,14 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string = DEFAU
 
 /**
  * Boot the standalone local room IF this build is a standalone (client-only)
- * game (`config({ standalone: true })`). The play-client bundle calls this from
+ * game (`config({ server: false })`). The play-client bundle calls this from
  * its `load()` so a standalone build self-boots with no host involvement; it's a
  * no-op for multiplayer builds, which boot their room from the server's
  * `join_room`. (The editor's play preview + cli dev drive `startStandaloneRoom`
  * directly and don't go through here.)
  */
 export function startStandaloneRoomIfConfigured(state: EngineClient): void {
-    if (isStandalone(launchConfig(registry))) startStandaloneRoom(state);
+    if (isStandalone(resolveConfig(registry))) startStandaloneRoom(state);
 }
 
 /**

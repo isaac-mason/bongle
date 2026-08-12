@@ -27,7 +27,7 @@ import { startStandaloneRoom } from '../client/engine-client';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
 import { isStandalone } from '../core/config';
-import { launchConfig, registry } from '../core/registry';
+import { registry, resolveConfig } from '../core/registry';
 import type { PrefabConfig, Realm } from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { EDITOR_JOIN_KEY, type ScriptContext, send } from '../core/scene/scripts';
@@ -584,7 +584,7 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             // to preview against — spawn a client-only local room instead of
             // routing a `play` request through the edit-server worker. the edit
             // room itself stays client-server regardless (untouched below).
-            if (isStandalone(launchConfig(registry))) {
+            if (isStandalone(resolveConfig(registry))) {
                 // startStandaloneRoom mounts a local room (roomMode 'play') and
                 // makes it the active player; setActivePlayer flips roomMode to
                 // 'play', which clears the pending spinner (setRoomMode).

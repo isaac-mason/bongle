@@ -9,11 +9,11 @@ import * as Protocol from '../core/protocol';
 import {
     buildInboundProtocol,
     clearPendingChanges,
-    launchConfig,
     localInbound,
     protocolManifest,
     registry,
     reindexRegistry,
+    resolveConfig,
     touch,
 } from '../core/registry';
 import * as Resources from '../core/resources';
@@ -217,7 +217,7 @@ export function onClientJoin(
     if (state.mode === 'play') {
         // only server configs carry a cap; a standalone (client-only) game has
         // no server so no cap to enforce here.
-        const cap = serverMaxPlayers(launchConfig(registry));
+        const cap = serverMaxPlayers(resolveConfig(registry));
         if (cap !== null && state.clients.connected.size > cap) {
             console.warn(`[engine-server] rejecting client ${clientId}: room at maxPlayers (${cap})`);
             Clients.onLeave(state.clients, clientId);

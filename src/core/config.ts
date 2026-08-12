@@ -1,28 +1,28 @@
 /**
  * the user calls config(c) at module scope; the call upserts into
  * `registry.config` under CONFIG_ID, and consumers read it via
- * `launchConfig(reg)` (defaulting to DEFAULT_CONFIG when unset).
+ * `resolveConfig(reg)` (defaulting to DEFAULT_CONFIG when unset).
  *
  * a game declares:
- *   - config({ standalone: true })            — client-only, no server.
+ *   - config({ server: false })               — client-only, no server.
  *   - config({ server: { maxPlayers: N } })   — client+server multiplayer.
- * omitting config() entirely defaults to DEFAULT_CONFIG (multiplayer,
- * maxPlayers 10), preserving the pre-existing platform behavior.
+ * omitting `server` (or config() entirely) defaults to DEFAULT_CONFIG
+ * (multiplayer, maxPlayers 10), preserving the pre-existing platform behavior.
  *
- * three consumers read the launch config:
+ * three consumers read the config:
  *   1. the engine itself (engine-server), refuses onClientJoin past the cap.
  *   2. the bongle build pipeline, stamps the value into bongle.json so the
  *      platform can read it without booting the bundle.
  *   3. (future) any in-game UI / platform routing that wants to read it.
  *
- * keep the field set narrow: only launch-shaped knobs belong here. non-launch
+ * keep the field set narrow: only infrastructure knobs belong here. presentational
  * game metadata (display name, icon, …) lives elsewhere.
  */
 
 import { recordConfig } from './capture/module-scope';
 import { registry, upsert } from './registry';
 
-/** Singleton id under which the launch config lives in `registry.config`.
+/** Singleton id under which the config lives in `registry.config`.
  *  the user only ever declares one, a second config() call from a different
  *  module triggers the registry's cross-module-ownership guard. */
 export const CONFIG_ID = 'main';
@@ -32,37 +32,45 @@ export const CONFIG_ID = 'main';
  *  apps/service/src/matchmaking. */
 export const HARD_MAX_PLAYERS_PER_ROOM = 32;
 
+/** default per-room player cap for a server game that doesn't specify one
+ *  (and for a game that omits config() entirely). */
+export const DEFAULT_MAX_PLAYERS = 10;
+
 /**
- * per-game launch config.
- *   - { standalone: true }             — client-only game, no server runs.
+ * per-game config. a single axis, `server`:
+ *   - omitted                          — client+server game, default room cap.
+ *   - { server: false }                — client-only game, no server runs.
  *   - { server: { maxPlayers } }       — client+server game. `maxPlayers`
  *     caps simultaneous players in a single room; integer in
  *     [1, HARD_MAX_PLAYERS_PER_ROOM].
  */
-export type Config = { standalone: true } | { server: { maxPlayers: number } };
+export type Config = { server?: false | { maxPlayers: number } };
 
 /** Applied when the user didn't call config(), preserves the pre-existing
- *  platform behavior (multiplayer, rooms cap at 10). */
-export const DEFAULT_CONFIG: Config = { server: { maxPlayers: 10 } };
+ *  platform behavior (multiplayer, rooms cap at DEFAULT_MAX_PLAYERS). */
+export const DEFAULT_CONFIG: Config = { server: { maxPlayers: DEFAULT_MAX_PLAYERS } };
 
-/** True when the config is a client-only (standalone) game. */
-export function isStandalone(c: Config): c is { standalone: true } {
-    return 'standalone' in c;
+/** True when the game is client-only (`server: false`). */
+export function isStandalone(c: Config): boolean {
+    return c.server === false;
 }
 
-/** The per-room player cap for a server config, or null for standalone. */
+/** The per-room player cap for a server game, or null for a client-only game. */
 export function serverMaxPlayers(c: Config): number | null {
-    return 'server' in c ? c.server.maxPlayers : null;
+    if (c.server === false) return null;
+    return c.server?.maxPlayers ?? DEFAULT_MAX_PLAYERS;
 }
 
 /**
- * declare per-game launch config. call once at module scope, before
+ * declare per-game config. call once at module scope, before
  * scripts/traits/etc. only the first call wins, a second call throws so
  * conflicts don't sit hidden.
  */
 export function config(c: Config): Config {
-    if ('server' in c) {
-        const maxPlayers = c.server.maxPlayers;
+    // truthy narrows away `false` and `undefined`, leaving the { maxPlayers } arm.
+    const server = c.server;
+    if (server) {
+        const maxPlayers = server.maxPlayers;
         if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > HARD_MAX_PLAYERS_PER_ROOM) {
             throw new Error(`config({ server: { maxPlayers } }): expected integer in [1, ${HARD_MAX_PLAYERS_PER_ROOM}], got ${maxPlayers}`);
         }
