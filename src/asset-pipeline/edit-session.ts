@@ -16,6 +16,7 @@
 // headless GPU icon render) — kept out of the host-neutral `pipeline.ts` core.
 
 import { registerFlushHandler } from '../core/capture/flush';
+import { type Config, serverMaxPlayers } from '../core/config';
 import { createBrowserRaster } from './bake/raster-browser';
 import { createBrowserDecodeAudio } from './decode-audio-browser';
 import type { Filesystem } from './filesystem';
@@ -26,9 +27,20 @@ import * as AssetPipeline from './pipeline';
 export type BakeReport = {
     /** atlas bytes moved this pass — the caller tells the live client to refresh. */
     atlasChanged: boolean;
-    /** latest declared matchmaking maxPlayers (the build manifest reads this). */
+    /** latest declared launch config (the build manifest reads this). null when
+     *  the config revision hasn't produced a value this session yet. */
+    config: Config | null;
+    /** derived per-room player cap for compat — server config → its maxPlayers,
+     *  standalone → 1, absent config → null. */
     maxPlayers: number | null;
 };
+
+/** compat per-room cap: server config → its maxPlayers, standalone → 1, no
+ *  config observed yet → null. */
+function deriveMaxPlayers(config: Config | null): number | null {
+    if (!config) return null;
+    return serverMaxPlayers(config) ?? 1;
+}
 
 export type Driver = {
     /** the editor project filesystem: sidecars read from it, baked outputs written into it. */
@@ -109,7 +121,7 @@ export async function run(state: State, opts: { forceAll?: boolean } = {}): Prom
         const r = await AssetPipeline.run(state.pipeline, { forceAll: opts.forceAll });
         atlasChanged = r.atlasChanged;
         state.driver.log?.(`bake ${(performance.now() - t0).toFixed(0)}ms — atlas ${r.atlasChanged ? 'changed' : 'unchanged'}`);
-        state.driver.onBaked({ atlasChanged: r.atlasChanged, maxPlayers: r.matchmakingConfig?.maxPlayers ?? null });
+        state.driver.onBaked({ atlasChanged: r.atlasChanged, config: r.config, maxPlayers: deriveMaxPlayers(r.config) });
     } catch (err) {
         state.driver.log?.(`bake error: ${(err as Error).message}`);
     } finally {

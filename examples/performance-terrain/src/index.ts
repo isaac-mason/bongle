@@ -21,7 +21,7 @@ import {
     env,
     getTrait,
     invalidateChunk,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     prop,
@@ -37,7 +37,7 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const stone = blocks.stone.defaultKey();
 const dirt = blocks.dirt.defaultKey();

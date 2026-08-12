@@ -63,7 +63,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
         registry.sync,
         registry.scripts,
         registry.commands,
-        registry.matchmaking,
+        registry.config,
         registry.sounds,
         registry.sprites,
         registry.particles,
@@ -202,7 +202,7 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     registry.scripts.pendingChanges.length = 0;
 
     registry.prefabs.pendingChanges.length = 0;
-    registry.matchmaking.pendingChanges.length = 0;
+    registry.config.pendingChanges.length = 0;
 
     // sounds: runtime reaction wired in `client/audio/audio.ts`. drain here
     // so the queue doesn't grow unbounded; downstream readers consume via
@@ -319,7 +319,7 @@ const TOAST_LABELS: Record<string, [singular: string, plural: string]> = {
     sync: ['sync', 'syncs'],
     scripts: ['script', 'scripts'],
     commands: ['command', 'commands'],
-    matchmaking: ['matchmaking', 'matchmaking'],
+    config: ['config', 'config'],
     sounds: ['sound', 'sounds'],
     sprites: ['sprite', 'sprites'],
     particles: ['particle emitter', 'particle emitters'],

@@ -19,7 +19,7 @@ import type { EngineClient } from '../client/engine-client';
 import { isKeyDown, isKeyJustDown, isModDown, isPointerCapturedByUi, isShiftDown } from '../client/input';
 import * as Net from '../client/net';
 import { prefabIconRelPath } from '../client/prefab-icons';
-import { resolveRoomCamera, setActivePlayer } from '../client/rooms';
+import { LOCAL_ROOM_PREFIX, resolveRoomCamera, setActivePlayer, stopLocalRoom } from '../client/rooms';
 import { useClient } from '../client/ui/stores/client-store';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry } from '../core/registry';
@@ -1411,6 +1411,18 @@ export function registerClient(state: EngineClient): void {
         },
         joinRoom: (roomId, mode) => Net.send(state.net, { type: 'join_room_as', roomId, mode }),
         leaveRoom: (roomId, mode) => Net.send(state.net, { type: 'leave_room', roomId, mode }),
-        stopRoom: (roomId) => Net.send(state.net, { type: 'stop_room', roomId }),
+        stopRoom: (roomId) => {
+            if (roomId.startsWith(LOCAL_ROOM_PREFIX)) {
+                // standalone play preview: a client-only local room (no server). Tear it
+                // down locally and reactivate the edit room ourselves — stopLocalRoom
+                // leaves no active player, and there's no server `room_left` to bring the
+                // edit room back the way the server play path does.
+                const editRoom = [...state.rooms.rooms.values()].find((r) => r.roomMode === 'edit');
+                stopLocalRoom(state, roomId);
+                if (editRoom) setActivePlayer(state.rooms, state.net, editRoom.playerId);
+                return;
+            }
+            Net.send(state.net, { type: 'stop_room', roomId });
+        },
     });
 }

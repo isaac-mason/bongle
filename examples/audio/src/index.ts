@@ -27,7 +27,7 @@ import {
     getTrait,
     HtmlTrait,
     isKeyJustDown,
-    matchmaking,
+    config,
     onDispose,
     onFrame,
     onInit,
@@ -45,7 +45,7 @@ import {
 } from 'bongle';
 import { blocks, models, sounds } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 1 });
+config({ server: { maxPlayers: 1 } });
 
 const ExampleTrait = trait('example');
 

@@ -4,7 +4,7 @@ import {
     cloneModel,
     env,
     FlyControllerTrait,
-    matchmaking,
+    config,
     onFrame,
     onInit,
     onJoin,
@@ -17,7 +17,7 @@ import {
 import { models } from 'bongle/kit';
 import { quat } from 'mathcat';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const SparkModel = models.spark;
 

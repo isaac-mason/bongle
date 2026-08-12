@@ -23,6 +23,19 @@ export type { ScenePayload };
 
 const SCENE_FILE_VERSION = 1;
 
+/** scene files live under `content/scenes/`, one `*.scene.json` each; the sceneId
+ *  is that path with the dir prefix + extension stripped, `/`-separators kept
+ *  (`content/scenes/blueprints/foo.scene.json` → `blueprints/foo`). */
+export const SCENES_DIR = 'content/scenes';
+export const SCENE_EXT = '.scene.json';
+export function scenePath(sceneId: string): string {
+    return `${SCENES_DIR}/${sceneId}${SCENE_EXT}`;
+}
+export function sceneIdFromPath(path: string): string | null {
+    if (!path.startsWith(`${SCENES_DIR}/`) || !path.endsWith(SCENE_EXT)) return null;
+    return path.slice(SCENES_DIR.length + 1, -SCENE_EXT.length);
+}
+
 export type SceneEntry = {
     /** logical scene name, e.g. "main". */
     sceneId: string;
@@ -70,10 +83,11 @@ export function serializeScenePayload(payload: ScenePayload): string {
 
 // ── init ────────────────────────────────────────────────────────────
 
-/** `scenes` seeds the store (sceneId → raw JSON), read from the project fs by
- *  the host. `persist` writes changes back (optional; absent → memory-only). */
-export function init(opts: { scenes?: Record<string, string>; persist?: ContentPersistence } = {}): ContentManager {
-    return { scenes: new Map(Object.entries(opts.scenes ?? {})), persist: opts.persist };
+/** `persist` writes scene changes back (edit hosts; absent → memory-only). The
+ *  scene store is seeded lazily by the engine at `load()` via `seedLastWrittenRaw`,
+ *  reading each `content/scenes/*.scene.json` from the project fs. */
+export function init(opts: { persist?: ContentPersistence } = {}): ContentManager {
+    return { scenes: new Map(), persist: opts.persist };
 }
 
 // ── queries ─────────────────────────────────────────────────────────

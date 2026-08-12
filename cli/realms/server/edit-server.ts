@@ -5,19 +5,15 @@
 // in-project editor's scene edits save). noExternal gives one shared bongle instance
 // with the user code (userEntry).
 
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
-import path from 'node:path';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import * as EngineServerEditor from 'bongle/engine-server-editor';
 import { createFallbackAvatarsDriver } from 'bongle/engine-server-node';
 import { env } from 'bongle/env';
+import { openNodeFs } from '../../node-fs';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { attachGameTransport, type GameTransport } from './transport';
-
-const SCENES_DIR = 'content/scenes';
-const SCENE_EXT = '.scene.json';
 
 export type StartServerOptions = {
     httpServer: HttpServer;
@@ -33,19 +29,6 @@ export type ServerBootResult = {
     stop: () => void;
 };
 
-async function seedScenes(scenesDir: string): Promise<Record<string, string>> {
-    const scenes: Record<string, string> = {};
-    const walk = async (dir: string, prefix: string): Promise<void> => {
-        for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) await walk(full, `${prefix}${e.name}/`);
-            else if (e.name.endsWith(SCENE_EXT)) scenes[`${prefix}${e.name.slice(0, -SCENE_EXT.length)}`] = await readFile(full, 'utf8');
-        }
-    };
-    await walk(scenesDir, '');
-    return scenes;
-}
-
 export async function start(opts: StartServerOptions): Promise<ServerBootResult> {
     const { httpServer, projectDir, userEntry } = opts;
 
@@ -60,9 +43,6 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     await import('bongle-project-models');
 
     await initZstd();
-    const scenesDir = path.join(projectDir, SCENES_DIR);
-    const scenes = await seedScenes(scenesDir);
-    console.log(`[dev:server] seeded ${Object.keys(scenes).length} scene(s)`);
 
     // node fallback avatars: the sample pool (lib/avatars). A join gets a random
     // pick (resolveAvatar below) so it wears a real avatar, not the builtin.
@@ -70,28 +50,7 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
 
     const state = EngineServer.init({
         mode: 'edit',
-        content: {
-            scenes,
-            persist: {
-                write: (sceneId, content) => {
-                    const file = path.join(scenesDir, `${sceneId}${SCENE_EXT}`);
-                    void mkdir(path.dirname(file), { recursive: true }).then(() => writeFile(file, content));
-                },
-                delete: (sceneId) => void rm(path.join(scenesDir, `${sceneId}${SCENE_EXT}`), { force: true }),
-            },
-        },
-        resourcesDir: 'resources/server',
-        loadResource: async (p) => {
-            if (p.startsWith('http:') || p.startsWith('https:')) {
-                const r = await fetch(p);
-                if (!r.ok) throw new Error(`fetch ${p}: ${r.status}`);
-                return new Uint8Array(await r.arrayBuffer());
-            }
-            if (p.startsWith('file:')) return new Uint8Array(await readFile(new URL(p)));
-            // absolute path = a sample-avatar serverUrl (lib/avatars); read directly.
-            if (p.startsWith('/')) return new Uint8Array(await readFile(p));
-            return new Uint8Array(await readFile(path.join(projectDir, p)));
-        },
+        fs: openNodeFs(projectDir),
         zstd: { compress: zstdCompress },
         options: {},
         driver: { storage: createInMemoryStorageDriver(), avatars },

@@ -10,6 +10,7 @@
  * `dispose(state)`. One `run` is the whole job: one revision-gated bake pass.
  */
 
+import type { Config } from '../core/config';
 import type { ResourceLoader } from '../core/resource-loader';
 import { buildBlockRegistry, registry } from '../internal';
 import { readArtifactHash } from './bake/cache';
@@ -50,8 +51,8 @@ export type InitCtx = {
 export type RunResult = {
     /** per-builder bake wall-clock; absent key = builder skipped (nothing dirty). */
     timings: PipelinePassTimings;
-    /** latest matchmaking config (the build manifest reads this). */
-    matchmakingConfig: { maxPlayers: number } | null;
+    /** latest launch config (the build manifest reads this). */
+    config: Config | null;
     /** atlas bytes moved this pass → caller tells the live client to refresh.
      *  `*Hash` is the post-pass sidecar hash the caller forwards on the wire. */
     atlasChanged: boolean;
@@ -69,7 +70,7 @@ export type State = {
     ctx: InitCtx;
     /** typed registry view the bake reads, built from the engine's own barrel. */
     internal: PipelineInternal;
-    /** bake revision gates + caches + matchmaking config. */
+    /** bake revision gates + caches + launch config. */
     bake: PipelineState;
 };
 
@@ -103,7 +104,7 @@ export async function run(s: State, opts: { forceAll?: boolean } = {}): Promise<
 
     return {
         timings,
-        matchmakingConfig: s.bake.matchmakingConfig,
+        config: s.bake.config,
         atlasChanged: !!atlasHash && atlasHash !== prevAtlasHash,
         atlasHash,
         spriteAtlasChanged: !!spriteAtlasHash && spriteAtlasHash !== prevSpriteAtlasHash,

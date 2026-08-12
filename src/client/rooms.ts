@@ -3,6 +3,7 @@ import { mat4, quat } from 'mathcat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
+import { addPlayerTraits } from '../builtins/player-node';
 import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { attachWorldTrait } from '../builtins/world';
 import type { PlayerId } from '../core/client';
@@ -11,10 +12,12 @@ import * as Debug from '../core/debug';
 import * as Physics from '../core/physics/physics';
 import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
 import { type InboundProtocol, registry } from '../core/registry';
+import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
 import { unpackSceneTree } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
+import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import type { ClientContext, EditRoomState, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
@@ -307,6 +310,7 @@ export function createRenderRoom(deps: RenderRoomDeps): RenderRoom {
         roomId: `${LOCAL_ROOM_PREFIX}render`,
         playerMode: 'play',
         roomMode: 'play',
+        authority: false,
     });
     nodes.context = context;
 
@@ -461,6 +465,7 @@ export function createRoom(opts: CreateRoomOptions): ClientRoom {
         roomId,
         playerMode,
         roomMode,
+        authority: false, // networked: the remote server owns the simulation
         clockSeed: message.serverClockTime, // seed our clock from the server's (shared time base)
     });
 
@@ -538,6 +543,10 @@ function newRoomCore(opts: {
     roomId: string;
     playerMode: PlayerMode;
     roomMode: RoomMode;
+    /** whether this client runtime owns the simulation (local/standalone room)
+     *  vs replicates a remote server (networked room). gates server-authority
+     *  script hooks (onJoin/onLeave/onBlock*). */
+    authority: boolean;
     /** server clock (seconds) to seed this room's clock from, the join handshake
      *  supplies it on the networked path; omitted for local rooms (starts at 0). */
     clockSeed?: number;
@@ -551,6 +560,10 @@ function newRoomCore(opts: {
 } {
     const blocks = registry.blockRegistry;
     const voxels = Voxels.createVoxels(blocks);
+    // a client-authoritative room (local/standalone) owns lighting + sim like the
+    // server, so it gets the voxel authority that flushPendingLight relights against.
+    // networked rooms receive baked light from the server, so they stay authority-less.
+    if (opts.authority) voxels.authority = Voxels.createVoxelsAuthority();
     const nodes = SceneTree.createSceneTree();
     const physics = Physics.init(nodes, voxels, blocks);
     const clock = Clock.init(opts.clockSeed);
@@ -563,6 +576,7 @@ function newRoomCore(opts: {
         rpc: opts.rpc,
         client: undefined,
         server: undefined,
+        authority: opts.authority,
         voxels,
         physics,
         clock,
@@ -577,14 +591,26 @@ function newRoomCore(opts: {
  * by the local and offline room paths (the wire path receives a serialised
  * player node from the server and just queries for it).
  */
-function synthesizePlayerNode(nodes: SceneTree.SceneTree, playerId: PlayerId, clientId: number, name?: string): SceneTree.Node {
-    const playerNode = SceneTree.createNode({ name: name ?? `player:${playerId}`, persist: false });
+function synthesizePlayerNode(
+    nodes: SceneTree.SceneTree,
+    playerId: PlayerId,
+    clientId: number,
+    playerMode: PlayerMode,
+    user?: { id: string; username: string },
+): SceneTree.Node {
+    const playerNode = SceneTree.createNode({ name: `player:${playerId}`, persist: false });
     SceneTree.addChild(nodes.root, playerNode);
     SceneTree.setOwner(nodes, playerNode, playerId);
-    SceneTree.addTrait(playerNode, TransformTrait);
-    const trait = SceneTree.addTrait(playerNode, PlayerTrait);
-    trait.playerId = playerId;
-    trait.client = clientId;
+    // mirror the server's createPlayerNode: character rig + default controls so the
+    // camera follows and the avatar renders in a client-authoritative local room.
+    addPlayerTraits(playerNode, {
+        playerId,
+        clientId,
+        mode: playerMode,
+        viewRadius: playerMode === 'edit' ? 24 : 8,
+        userId: user?.id,
+        username: user?.username,
+    });
     return playerNode;
 }
 
@@ -903,6 +929,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         roomId,
         playerMode,
         roomMode,
+        authority: true, // local/standalone: this client owns the simulation
     });
 
     // copy declared voxels first (may be null if scene has none). must
@@ -922,7 +949,15 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         SceneTree.loadSceneTree(nodes, payload.nodes);
     }
 
-    const playerNode = synthesizePlayerNode(nodes, playerId, clientId);
+    const playerNode = synthesizePlayerNode(nodes, playerId, clientId, playerMode, state.driver.user);
+
+    // apply the local player's platform avatar (identity from driver.user), mirroring the
+    // server's setClientAvatar + enqueuePlayer: register + load the model into client
+    // Resources and stamp the CharacterTrait so the rig reconciler mounts the right avatar.
+    // networked clients get this via replication; a local room has no server to replicate
+    // from, so it resolves + assigns here.
+    const resolvedAvatar = acquireAvatarModel(state.resources, state.driver.user.avatar);
+    assignAvatar(playerNode, resolvedAvatar.modelId, resolvedAvatar.rigType);
 
     const room = createRoomCore({
         clientId,
@@ -951,6 +986,7 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
         room.context.client.state = state;
         room.context.client.room = room;
     }
+
     // host-script onInit reads client.room/.state (wired above); initSceneTree fires it.
     attachWorldTrait(room.scene.root);
     console.log(
@@ -959,6 +995,15 @@ export function startLocalRoom(opts: StartLocalRoomOptions): ClientRoom {
     SceneTree.initSceneTree(room.scene);
     rooms.rooms.set(playerId, room);
     useClient.getState().setRoom(playerId, room);
+
+    // fire onJoin for the local player — parity with a server room. A local room is
+    // client-authoritative, so the game's join logic (spawn/setup) runs here too.
+    // initSceneTree above already fired onInit (registering onJoin listeners). The
+    // resolved avatar (already stamped onto the CharacterTrait above) carries the
+    // modelId/rigType into JoinArgs, like the server's clientAvatarIdentity.
+    const joinData = {};
+    fireJoinHooks(context, clientId, state.driver.user, joinData, playerNode, resolvedAvatar);
+
     // append a synthetic RoomInfo so this local room participates in
     // roomList alongside server-driven rooms (tabs, debug, etc.).
     const store = useEditor.getState();
@@ -980,6 +1025,11 @@ export function stopLocalRoom(state: EngineClient, roomId: string): void {
     if (!room.local) {
         throw new Error(`[bongle] stopLocalRoom: room '${roomId}' is server-backed; only local rooms can be stopped`);
     }
+    // fire onLeave for the local player before teardown — parity with a server room's
+    // leave path, so the game's cleanup (save score, despawn) runs on stop. A local room
+    // is authoritative, so onLeave registered there and this fires it.
+    const playerTrait = SceneTree.getTrait(room.playerNode, PlayerTrait);
+    if (playerTrait) fireLeaveHooks(room.context, playerTrait.client, room.playerNode);
     disposeRoom(room);
     state.rooms.rooms.delete(room.playerId);
     useClient.getState().removeRoom(room.playerId);

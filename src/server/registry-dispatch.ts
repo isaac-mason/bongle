@@ -20,9 +20,9 @@
  * `Resources.setModel` (added/changed, with server-side bin url) and
  * `Resources.deleteModel` + `releaseModel` (removed).
  *
- * Server-side matchmaking config (maxPlayers, room caps) is read fresh on
- * each allocation via `registry.matchmakingConfig`, so a config edit
- * takes effect on the next allocation without explicit rewiring.
+ * Server-side launch config (server maxPlayers / room cap) is read fresh on
+ * each allocation via `launchConfig(registry)`, so a config edit takes
+ * effect on the next allocation without explicit rewiring.
  *
  * scenes: when a `scene()` declaration is added or changed, read the
  * authored payload off `handle._payload` (stamped at module-eval by the
@@ -60,7 +60,7 @@ export function applyRegistryChanges(state: EngineServer): void {
         registry.sync,
         registry.scripts,
         registry.commands,
-        registry.matchmaking,
+        registry.config,
         registry.sounds,
         registry.sprites,
         registry.particles,
@@ -200,7 +200,7 @@ export function applyRegistryChanges(state: EngineServer): void {
     registry.scripts.pendingChanges.length = 0;
 
     registry.prefabs.pendingChanges.length = 0;
-    registry.matchmaking.pendingChanges.length = 0;
+    registry.config.pendingChanges.length = 0;
 
     // sounds: server has no playback runtime, drain so the queue doesn't
     // grow unbounded across HMR flushes.

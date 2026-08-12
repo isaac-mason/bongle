@@ -10,7 +10,7 @@
  * evaluate fully (push + body + pop) before the parent's body resumes.
  *
  * per-module snapshots: every declarative api (block, blockTexture, model,
- * modelHandle, prefab, scene, command, matchmaking, trait, script) records
+ * modelHandle, prefab, scene, command, config, trait, script) records
  * into the current module's snapshot during evaluation. on a second
  * evaluation, the previous snapshot is diffed against the new one to decide
  * patch vs invalidate.
@@ -128,7 +128,7 @@ export function onModulePop(fn: (moduleId: string) => void): void {
  * see new data through the same reference, or fetch fresh on next call.
  *
  *   presence-only sets, blockTextures, blocks, models, prefabs, scenes,
- *     matchmaking, commands. recorded for visibility
+ *     config, commands. recorded for visibility
  *     (debug overlays, "what does this file declare?") but not read by
  *     diffSnapshots. block content edits propagate via the flush path:
  *     `applyRegistryChanges` rebuilds BlockRegistry, refreshes the atlas,
@@ -160,7 +160,7 @@ export type ModuleSnapshot = {
     particles: Set<string>;
     prefabs: Set<string>;
     scenes: Set<string>;
-    matchmaking: Set<string>;
+    config: Set<string>;
     traits: Map<string, { bodyHash: string }>;
     /** declared script keys (`${traitId}.${scriptId}`); set equality ⇒ patch, see shape note above. */
     scripts: Set<string>;
@@ -184,7 +184,7 @@ function emptySnapshot(): ModuleSnapshot {
         particles: new Set(),
         prefabs: new Set(),
         scenes: new Set(),
-        matchmaking: new Set(),
+        config: new Set(),
         traits: new Map(),
         scripts: new Set(),
         commands: new Set(),
@@ -274,8 +274,8 @@ export function recordCommand(id: string): void {
     currentSnapshot()?.commands.add(id);
 }
 
-export function recordMatchmaking(id: string): void {
-    currentSnapshot()?.matchmaking.add(id);
+export function recordConfig(id: string): void {
+    currentSnapshot()?.config.add(id);
 }
 
 /**
@@ -337,7 +337,7 @@ export function __decideReload(id: string, newModule?: Record<string, unknown>):
 /**
  * true if the module namespace has any export that isn't an engine handle.
  * Every declarative handle (trait, block, blockTexture, model, scene, prefab,
- * sound, sprite, particle, command, script, matchmaking) carries a DepGraph
+ * sound, sprite, particle, command, script) carries a DepGraph
  * `dependency: { registry, id }` stamp — that stamp is the shared brand we
  * test for. Anything without it (functions, constants, plain objects) is
  * captured by-value by importers and forces an importer cascade.
@@ -365,7 +365,7 @@ function isHandle(value: unknown): value is DepHandle {
  *      reparented to another trait is a shape change → invalidate).
  *
  * everything else (blockTextures, blocks, models, prefabs,
- * scenes, commands, matchmaking) is presence-only and propagates via the
+ * scenes, commands, config) is presence-only and propagates via the
  * flush path, `applyRegistryChanges` does a wholesale rebuild on
  * `blocksRegistry.pendingChanges` / `blockTexturesRegistry.pendingChanges`:
  * BlockRegistry rebuilt, atlas refreshed (short-circuits on hash equality),

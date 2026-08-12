@@ -232,6 +232,14 @@ export type SceneTreeContext = {
     /** server-specific context, undefined on client */
     server: ServerContext | undefined;
 
+    /** whether this runtime is the authority for the room's simulation, i.e.
+     *  it owns gameplay rather than replicating a remote server. true on a
+     *  real server room AND on a client-only local/standalone room (the client
+     *  IS the server); false on a client room connected to a remote server.
+     *  server-authority hooks (onJoin/onLeave/onBlock*) gate on this, NOT on
+     *  `env.server` or client-context presence, so they fire in local rooms. */
+    authority: boolean;
+
     /** per-room voxel data */
     voxels: Voxels;
 
@@ -345,10 +353,10 @@ export type ScriptInstance = {
     /** fired when the node exits the scene tree (detach or before reparent detach) */
     onExit: Set<(parent: SceneTree.Node) => void>;
 
-    /** server-only: fired when a client joins the room */
+    /** authority-only: fired when a client joins the room */
     onJoin: Set<(args: JoinArgs) => void>;
 
-    /** server-only: fired when a client leaves the room */
+    /** authority-only: fired when a client leaves the room */
     onLeave: Set<(args: LeaveArgs) => void>;
 
     /** fired before the physics step */
@@ -515,6 +523,14 @@ export function first<T extends TraitBase>(ctx: ScriptContext, trait: TraitHandl
 
 /* ── hook functions ────────────────────────────────────────────────── */
 
+/** true when this runtime owns the room simulation, i.e. a real server room
+ *  or a client-only local/standalone room where the client IS the server.
+ *  server-authority hooks (onJoin/onLeave/onBlock*) gate on this rather than
+ *  on `env.server` or client-context presence, so they fire in local rooms. */
+function isRoomAuthority(ctx: ScriptContext): boolean {
+    return ctx._runtime?.authority ?? false;
+}
+
 export function onInit(ctx: ScriptContext, fn: () => void): Unsubscribe {
     const instance = ctx._instance;
     if (!instance) return noop;
@@ -642,12 +658,13 @@ export type JoinArgs = {
 
 /**
  * register a callback that fires when a client joins the room.
- * server-only, no-op on the client.
+ * authority-only: runs on the server room, or on a client-only
+ * local/standalone room; a no-op on a client connected to a remote server.
  */
 export function onJoin(ctx: ScriptContext, fn: (args: JoinArgs) => void): Unsubscribe {
     const instance = ctx._instance;
-    // only meaningful on the server (no client context)
-    if (!instance || ctx.client !== undefined) return noop;
+    // only meaningful on the authority (server room, or a local/standalone room)
+    if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     instance.onJoin.add(fn);
     return () => instance.onJoin.delete(fn);
@@ -661,12 +678,13 @@ export type LeaveArgs = {
 
 /**
  * register a callback that fires when a client leaves the room.
- * server-only, no-op on the client.
+ * authority-only: runs on the server room, or on a client-only
+ * local/standalone room; a no-op on a client connected to a remote server.
  */
 export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsubscribe {
     const instance = ctx._instance;
-    // only meaningful on the server (no client context)
-    if (!instance || ctx.client !== undefined) return noop;
+    // only meaningful on the authority (server room, or a local/standalone room)
+    if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     instance.onLeave.add(fn);
     return () => instance.onLeave.delete(fn);
@@ -676,8 +694,8 @@ export function onLeave(ctx: ScriptContext, fn: (args: LeaveArgs) => void): Unsu
 
 /**
  * register a callback that fires when a block of `block`'s type is built
- * (placed where air or a different block was). server-only, no-op on the
- * client. handler receives the world coords + new state id; close over
+ * (placed where air or a different block was). authority-only (server room
+ * or local/standalone room). handler receives the world coords + new state id; close over
  * `ctx` for scene/room access (e.g. spawn an item, play a sound).
  */
 export function onBlockBuild(
@@ -686,7 +704,7 @@ export function onBlockBuild(
     fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
-    if (!instance || ctx.client !== undefined) return noop;
+    if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     const observers = blockHooks.ensureBlockObservers(ctx.voxels);
     const entry = observers.get(block._index) ?? {};
@@ -706,7 +724,8 @@ export function onBlockBuild(
 
 /**
  * register a callback that fires when a block of `block`'s type is broken
- * (replaced with air or a different block). server-only.
+ * (replaced with air or a different block). authority-only (server room or
+ * local/standalone room).
  */
 export function onBlockBreak(
     ctx: ScriptContext,
@@ -714,7 +733,7 @@ export function onBlockBreak(
     fn: (ev: import('../voxels/blocks').BlockChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
-    if (!instance || ctx.client !== undefined) return noop;
+    if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     const observers = blockHooks.ensureBlockObservers(ctx.voxels);
     const entry = observers.get(block._index) ?? {};
@@ -734,7 +753,8 @@ export function onBlockBreak(
 
 /**
  * register a callback that fires when a block of `block`'s type changes
- * state in place (same block-type, different stateId). server-only.
+ * state in place (same block-type, different stateId). authority-only (server
+ * room or local/standalone room).
  * handler receives both old and new state ids on the event payload.
  */
 export function onBlockStateChange(
@@ -743,7 +763,7 @@ export function onBlockStateChange(
     fn: (ev: import('../voxels/blocks').BlockStateChangeCtx) => void,
 ): Unsubscribe {
     const instance = ctx._instance;
-    if (!instance || ctx.client !== undefined) return noop;
+    if (!instance || !isRoomAuthority(ctx)) return noop;
     if (ctx.mode === 'edit' && !instance.def.editor) return noop;
     const observers = blockHooks.ensureBlockObservers(ctx.voxels);
     const entry = observers.get(block._index) ?? {};

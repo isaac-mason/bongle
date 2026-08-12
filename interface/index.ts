@@ -1,15 +1,12 @@
-/** Semver of the engine⇄game contract defined by this package (ClientApp /
- *  ClientDriver / ServerApp / ServerDriver / Platform). Bump major on a
- *  breaking change, minor/patch on additive ones, so the platform can warn on
- *  stale bundles. Recorded in each bundle's manifest (`engine.interface`),
- *  alongside the `bongle` package semver. */
-export const INTERFACE_VERSION = '0.0.1';
+export const INTERFACE_VERSION = '0.0.2';
 
-export type { ClientApp, ClientDriver, JsonValue, Platform } from './client';
+export type { ClientApp, ClientDriver, ClientUser, JsonValue, Platform } from './client';
 export { client } from './client';
 export type {
     AvatarsServerDriver,
     Client,
+    Filesystem,
+    FsEntry,
     ResolvedAvatar,
     ServerApp,
     ServerDriver,
@@ -21,5 +18,6 @@ export type {
     StorageServerDriver,
     StorageSetResult,
     User,
+    Zstd,
 } from './server';
 export { server } from './server';

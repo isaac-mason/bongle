@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Filesystem } from '../../src/asset-pipeline/filesystem';
+import type { Config } from '../../src/core/config';
 import { createBakeLoader } from '../../src/asset-pipeline/loader';
 import { openNodeFs } from '../node-fs';
 import { createNodeDecodeAudio } from './decode-audio-node';
@@ -44,14 +45,15 @@ function bongleEntry(projectRoot: string) {
 }
 
 export type BakeResult = {
-    matchmaking: { maxPlayers: number } | null;
+    /** launch config declared by the project, or null if config() wasn't called. */
+    config: Config | null;
     atlasChanged: boolean;
     spriteAtlasChanged: boolean;
     audioAtlasChanged: boolean;
 };
 
 /** evaluate the project's declarations then run one bake pass into
- *  resources/client on the given fs. Returns what moved + the matchmaking config
+ *  resources/client on the given fs. Returns what moved + the launch config
  *  read off the registry (the build manifest needs it). */
 export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeResult> {
     const entry = bongleEntry(projectRoot);
@@ -86,7 +88,7 @@ export async function bake(fs: Filesystem, projectRoot: string): Promise<BakeRes
     }
 
     return {
-        matchmaking: registry.matchmaking.byId.get('main') ?? null,
+        config: registry.config.byId.get('main') ?? null,
         atlasChanged: r.atlasChanged,
         spriteAtlasChanged: r.spriteAtlasChanged,
         audioAtlasChanged: r.audioAtlasChanged,

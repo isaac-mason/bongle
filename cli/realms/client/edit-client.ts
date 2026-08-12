@@ -11,6 +11,7 @@ import * as EngineClientEditor from 'bongle/engine-client-editor';
 import { env } from 'bongle/env';
 import type { ClientDriver } from 'bongle/interface';
 import { createNetSim } from '../../../build';
+import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
 
 export type StartClientOptions = {
     userEntry: () => Promise<unknown>;
@@ -30,6 +31,8 @@ export async function start(opts: StartClientOptions): Promise<void> {
     const driver: ClientDriver = {
         matchmake() {},
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+        // dev editor: a stand-in local identity + builtin avatar (no session/account).
+        user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
     };
     const resourceLoader = {
         loadBytes: async (url: string): Promise<Uint8Array> => {

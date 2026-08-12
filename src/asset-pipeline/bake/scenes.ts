@@ -39,20 +39,35 @@ export type BuildScenesOptions = {
      *  SceneHandle (used by the icon renderer + prefab placement). `play`
      *  registers only ids declared via `scene('id')`. */
     mode: 'edit' | 'play';
+    /** standalone (client-only) build: the client is authoritative — there's no
+     *  server to serve scenes — so bake EVERY authored `content/scenes/*.json`,
+     *  not just `scene()`-declared ids. Otherwise a scene authored in the editor
+     *  with no `scene('id')` call is absent client-side and a local room can't
+     *  boot it. */
+    standalone: boolean;
     /** the editor project filesystem (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
 };
 
 export async function buildScenes(module: ModuleVersion, opts: BuildScenesOptions): Promise<void> {
-    const { mode, fs } = opts;
+    const { mode, standalone, fs } = opts;
 
-    // union of declared ids + (edit mode) discovered blueprints. Set
-    // preserves dedup; sort for stable barrel output. the walk is scoped
-    // to `blueprints/` so an undeclared `content/scenes/foo.scene.json`
-    // doesn't get auto-registered with a SceneHandle, the runtime only
-    // sees scenes the user actually declared via `scene()`, plus blueprints.
+    // union of declared ids + discovered files. Set preserves dedup; sort for
+    // stable barrel output.
     const ids = new Set<string>(module.scenes.keys());
-    if (mode === 'edit') {
+    if (standalone) {
+        // client-only: no server serves scenes, so the client needs EVERY authored
+        // scene baked in (handles + payloads), whether or not `scene('id')` declared
+        // it. Walks all of content/scenes/ (blueprints included, they live here too).
+        for (const entry of await fs.list(SCENES_DIR, { recursive: true })) {
+            if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;
+            ids.add(entry.path.slice(SCENES_DIR.length + 1, -SCENE_EXT.length));
+        }
+    } else if (mode === 'edit') {
+        // multiplayer edit: declared scenes come from module.scenes; additionally
+        // walk `blueprints/` so editor-authored blueprints get a SceneHandle (icon
+        // renderer + prefab placement). An undeclared non-blueprint scene stays
+        // server-only (the server serves it), matching the strict play surface.
         const blueprintsDir = `${SCENES_DIR}/blueprints`;
         for (const entry of await fs.list(blueprintsDir, { recursive: true })) {
             if (entry.kind !== 'file' || !entry.path.endsWith(SCENE_EXT)) continue;

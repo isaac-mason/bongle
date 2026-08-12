@@ -67,25 +67,31 @@ export type ResolvedAvatar =
           rigType?: string;
       };
 
-/** Host capability: a source of avatars for populating non-player characters.
- *  The host owns curation — popular / random / trending / seasonal — and MAY
- *  change strategy at any time; treat the result as unordered + non-stable and
- *  visual-only (no usernames / PII). Bulk by design — call once, not per-NPC. */
-export type AvatarsServerDriver = {
-    /** A batch of avatars to dress NPCs in. Empty array when the host has none. */
+      export type AvatarsServerDriver = {
     sample: () => Promise<ResolvedAvatar[]>;
 };
 
 export type ServerDriver = {
     storage: StorageServerDriver;
-    /** Always present, like `storage`: a deployed host sources real avatars; dev /
-     *  edit / offline supply a fallback (`createFallbackAvatarsDriver`). */
     avatars: AvatarsServerDriver;
 };
+
+export type FsEntry = { path: string; kind: 'file' | 'dir' };
+
+export type Filesystem = {
+    read(path: string): Promise<Uint8Array>;
+    write(path: string, bytes: Uint8Array): Promise<void>;
+    list(dir: string, opts?: { recursive?: boolean }): Promise<FsEntry[]>;
+    remove(path: string): Promise<void>;
+};
+
+export type Zstd = { compress: (payload: Uint8Array, level: number) => Uint8Array };
 
 export type ServerInitOptions = {
     options?: Record<string, string | number | boolean>;
     driver: ServerDriver;
+    fs: Filesystem;
+    zstd: Zstd;
 };
 
 export type ServerApp<S = any> = {
@@ -99,9 +105,6 @@ export type ServerApp<S = any> = {
         client: Client,
         user: User,
         joinData: Record<string, JsonValue>,
-        // Avatar the matchmaker resolved at allocation time and stamped
-        // into the reservation. Absent on the dev/edit path (no
-        // matchmaker) — the engine defaults to the builtin then.
         avatar?: ResolvedAvatar,
     ) => void;
     onClientLeave: (state: S, client: Client) => void;

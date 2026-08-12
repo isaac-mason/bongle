@@ -5,5 +5,6 @@
 // editor injects its own drivers (createEditorAvatarsDriver, zstd-wasm), the
 // node hosts import these.
 
+export { openNodeFs } from './node/node-fs';
 export { createFallbackAvatarsDriver, resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from './node/sample-avatars-driver';
 export { nodeZstd } from './node/zstd';

@@ -23,8 +23,11 @@ import type { JsonValue } from 'bongle/interface';
 import type { Vec3 } from 'mathcat';
 import { create, type StoreApi, useStore } from 'zustand';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../builtins/transform';
+import { startStandaloneRoom } from '../client/engine-client';
 import * as Net from '../client/net';
 import type { ClientRoom } from '../client/rooms';
+import { isStandalone } from '../core/config';
+import { launchConfig, registry } from '../core/registry';
 import type { PrefabConfig, Realm } from '../core/scene/scene-tree';
 import { getTrait } from '../core/scene/scene-tree';
 import { EDITOR_JOIN_KEY, type ScriptContext, send } from '../core/scene/scripts';
@@ -573,7 +576,23 @@ export function createEditRoomStore(refs: EditRoomStoreRefs): EditRoomStoreApi {
             // repeat requests while one is already in flight.
             if (useEditor.getState().playPending) return;
             useEditor.getState().setPlayPending(true);
-            const net = ctx.client!.state!.net;
+            const state = ctx.client!.state!;
+
+            // play preview branches on the game's launch config. user code was
+            // evaluated into `registry` when this client realm booted, so the
+            // config is live here. a standalone (client-only) game has no server
+            // to preview against — spawn a client-only local room instead of
+            // routing a `play` request through the edit-server worker. the edit
+            // room itself stays client-server regardless (untouched below).
+            if (isStandalone(launchConfig(registry))) {
+                // startStandaloneRoom mounts a local room (roomMode 'play') and
+                // makes it the active player; setActivePlayer flips roomMode to
+                // 'play', which clears the pending spinner (setRoomMode).
+                startStandaloneRoom(state, room.sceneId);
+                return;
+            }
+
+            const net = state.net;
             // ride the editor's current viewpoint along as `__editor` join data
             // so games can offer "play from here" (they opt in to using it).
             // absent outside this editor play flow, so production joins are

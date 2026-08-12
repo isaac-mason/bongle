@@ -26,7 +26,7 @@ import {
     env,
     ExtrudedSpriteMeshTrait,
     getTrait,
-    matchmaking,
+    config,
     onFrame,
     onInit,
     onJoin,
@@ -43,7 +43,7 @@ import {
 import { blocks, particlePresets, sprites } from 'bongle/kit';
 import { quat } from 'mathcat';
 
-matchmaking({ maxPlayers: 1 });
+config({ server: { maxPlayers: 1 } });
 
 const Puff = particlePresets.smoke('demo:puff', { sprite: sprites.smoke });
 

@@ -4,7 +4,7 @@ import {
     env,
     getTrait,
     listen,
-    matchmaking,
+    config,
     onDispose,
     onInit,
     onJoin,
@@ -21,7 +21,7 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 8 });
+config({ server: { maxPlayers: 8 } });
 
 // 'main' and 'other' load on both sides (server seeds and mirrors). 'local' is
 // client-only: no server room is ever made, and each client spins up its own

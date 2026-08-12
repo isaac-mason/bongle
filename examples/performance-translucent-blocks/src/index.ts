@@ -41,7 +41,7 @@ import {
     env,
     getTrait,
     MaterialType,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     onTick,
@@ -54,7 +54,7 @@ import {
 } from 'bongle';
 import { blockSoundPresets, blocks } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const { stone: Stone, water: Water } = blocks;
 const stoneKey = Stone.defaultKey();

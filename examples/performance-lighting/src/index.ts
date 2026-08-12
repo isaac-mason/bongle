@@ -5,7 +5,7 @@ import {
     env,
     getBlock,
     getTrait,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     onTick,

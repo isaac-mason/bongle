@@ -8,6 +8,7 @@ import { EngineClient } from 'bongle/engine-client';
 import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
 import type { ClientDriver } from 'bongle/interface';
+import { BUILTIN_BASE_AVATAR_ID } from '../../../src/core/player/base-avatar';
 
 export type StartClientOptions = {
     /** dynamic import of the user src (side-effect registers declarations). */
@@ -25,6 +26,8 @@ export async function start(opts: StartClientOptions): Promise<void> {
     const driver: ClientDriver = {
         matchmake() {},
         platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+        // dev play: a stand-in local identity + builtin avatar (no session/account).
+        user: { id: 'dev', username: 'dev', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
     };
 
     // baked client resources (atlas, model bins) are served by the dev server out

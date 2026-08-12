@@ -21,7 +21,7 @@ import {
     getTrait,
     listen,
     log,
-    matchmaking,
+    config,
     MotionType,
     onInit,
     onJoin,
@@ -43,7 +43,7 @@ import {
 } from 'bongle';
 import { blocks, models } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const Grass = blocks.grass;
 const SparkModel = models.spark;

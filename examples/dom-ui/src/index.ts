@@ -17,7 +17,7 @@ import {
     createNode,
     env,
     HtmlTrait,
-    matchmaking,
+    config,
     onDispose,
     onFrame,
     onInit,
@@ -31,7 +31,7 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 1 });
+config({ server: { maxPlayers: 1 } });
 scene('main');
 
 // The scene's voxel palette references `kit:stone`. use() keeps the declaration

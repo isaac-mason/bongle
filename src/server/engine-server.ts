@@ -1,15 +1,16 @@
-import type { Client, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
+import type { Client, Filesystem, JsonValue, ResolvedAvatar, ServerDriver, User } from 'bongle/interface';
 import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import * as Debug from '../core/debug';
 import { acceptFrame, createReassembler } from '../core/net';
+import { serverMaxPlayers } from '../core/config';
 import * as physics from '../core/physics/physics';
 import * as Protocol from '../core/protocol';
 import {
     buildInboundProtocol,
     clearPendingChanges,
+    launchConfig,
     localInbound,
-    matchmakingConfig,
     protocolManifest,
     registry,
     reindexRegistry,
@@ -48,22 +49,12 @@ export { DEFAULT_SCENE_ID };
 export type InitOptions = {
     mode: 'edit' | 'play';
     /**
-     * Authored content (scenes) for ContentManager: `scenes` seeds the store
-     * (sceneId → raw JSON, read by the host from the project fs), `persist`
-     * writes changes back. Host-provided so the engine stays node-free.
+     * The project filesystem: authored scenes under `content/scenes/`, server
+     * model bins under `resources/server/`. Host-provided (node fs / OPFS / vfs)
+     * so the engine stays node-free; the engine owns the path conventions. Scene
+     * edits persist back through `fs.write` in edit mode; play/solo are read-only.
      */
-    content?: { scenes?: Record<string, string>; persist?: ContentManager.ContentPersistence };
-    /**
-     * Path prefix for server model bins (`<resourcesDir>/models/<id>...`);
-     * `loadResource` interprets the resolved path.
-     */
-    resourcesDir: string;
-    /**
-     * Load a resolved local resource path (a model bin under resourcesDir) to
-     * bytes. Host-provided (node fs, or the browser editor's Filesystem); http
-     * urls are handled by the engine directly.
-     */
-    loadResource: (path: string) => Promise<Uint8Array>;
+    fs: Filesystem;
     /**
      * zstd impl `{ compress(payload, level) }` for the voxel wire codec.
      * Host-provided so the engine never hard-depends on a node zlib: node hosts
@@ -92,16 +83,26 @@ export function init(opts: InitOptions) {
     if (opts.options && Object.keys(opts.options).length > 0) {
         Rooms.setNamespaceOptions(rooms, 'main', opts.options);
     }
-    const contentManager = ContentManager.init(opts.content);
-    const resourceManager = ResourceManager.init({ resourcesDir: opts.resourcesDir });
+    // scene edits persist back through the project fs in edit mode; play/solo
+    // are read-only (no persist). The store itself is seeded async at load().
+    const sceneBytes = new TextEncoder();
+    const contentManager = ContentManager.init({
+        persist:
+            opts.mode === 'edit'
+                ? {
+                      write: (sceneId, content) =>
+                          void opts.fs.write(ContentManager.scenePath(sceneId), sceneBytes.encode(content)),
+                      delete: (sceneId) => void opts.fs.remove(ContentManager.scenePath(sceneId)),
+                  }
+                : undefined,
+    });
+    const resourceManager = ResourceManager.init({ resourcesDir: 'resources/server' });
     const content = Content.init();
-    // model bins: ModelHandle.bin.server stores a path relative to
-    // resourcesDir (asset-pipeline's SERVER_URL_PREFIX). resolveModelBin
-    // joins it onto the absolute resourcesDir baked above, independent
-    // of process cwd. Runtime-source models (avatars) carry absolute
-    // https URLs (R2), branch on scheme. The dev fallback avatars driver
-    // hands an absolute local path (the engine's example .glb on disk),
-    // read it directly rather than re-rooting it under resourcesDir.
+    // model bins: ModelHandle.bin.server stores a path relative to resourcesDir
+    // (asset-pipeline's SERVER_URL_PREFIX); resolveModelBin joins it under
+    // `resources/server/` for fs.read. Runtime-source models (avatars) carry
+    // absolute https URLs (R2) — branch on scheme to fetch. The editor's edited
+    // avatar is a `file://` OPFS path; strip its scheme to a root-relative fs path.
     const resources = Resources.init(
         {
             loadBytes: (url) => {
@@ -111,13 +112,9 @@ export function init(opts: InitOptions) {
                         return new Uint8Array(await r.arrayBuffer());
                     });
                 }
-                // absolute local file — the editor's edited avatar (file:///avatar.glb)
-                // or the dev fallback avatars driver's on-disk example .glb (an
-                // absolute path). Hand it to loadResource as-is; re-rooting under
-                // resourcesDir would mangle it. Baked model bins are relative
-                // (SERVER_URL_PREFIX), so a leading `/` or `file:` is unambiguous.
-                if (url.startsWith('file:') || url.startsWith('/')) return opts.loadResource(url);
-                return opts.loadResource(ResourceManager.resolveModelBin(resourceManager, url));
+                if (url.startsWith('file:')) return opts.fs.read(new URL(url).pathname.replace(/^\/+/, ''));
+                if (url.startsWith('/')) return opts.fs.read(url.replace(/^\/+/, ''));
+                return opts.fs.read(ResourceManager.resolveModelBin(resourceManager, url));
             },
         },
         'server',
@@ -133,6 +130,7 @@ export function init(opts: InitOptions) {
         net,
         clients,
         rooms,
+        fs: opts.fs,
         contentManager,
         resourceManager,
         content,
@@ -217,8 +215,10 @@ export function onClientJoin(
     // is a single-user editor; the cap doesn't apply. by this point
     // ClientState already includes the new client, so compare against `>`.
     if (state.mode === 'play') {
-        const cap = matchmakingConfig(registry).maxPlayers;
-        if (state.clients.connected.size > cap) {
+        // only server configs carry a cap; a standalone (client-only) game has
+        // no server so no cap to enforce here.
+        const cap = serverMaxPlayers(launchConfig(registry));
+        if (cap !== null && state.clients.connected.size > cap) {
             console.warn(`[engine-server] rejecting client ${clientId}: room at maxPlayers (${cap})`);
             Clients.onLeave(state.clients, clientId);
             return;
@@ -404,6 +404,18 @@ function recordPhysicsStats(metrics: Debug.Metrics, world: physics.Physics): voi
 export async function load(state: EngineServer) {
     const mode = state.mode;
 
+    // seed the authored-scene store from the project fs. Async (the host's fs is
+    // async), so it lives here rather than the sync init(); the sync engine reads
+    // ContentManager during room creation below. sceneId = the path under
+    // `content/scenes/` with `.scene.json` stripped.
+    const sceneText = new TextDecoder();
+    for (const entry of await state.fs.list(ContentManager.SCENES_DIR, { recursive: true })) {
+        if (entry.kind !== 'file') continue;
+        const sceneId = ContentManager.sceneIdFromPath(entry.path);
+        if (sceneId === null) continue;
+        ContentManager.seedLastWrittenRaw(state.contentManager, sceneId, sceneText.decode(await state.fs.read(entry.path)));
+    }
+
     // In edit mode the realm calls `engine-server-editor.setup(state)` BEFORE this
     // (mirroring the client's `engine-client-editor.setup`), so the editor's server
     // commands have already upserted into the registry by now — keeping this runtime
@@ -453,7 +465,7 @@ export async function load(state: EngineServer) {
         registry.sync,
         registry.scripts,
         registry.commands,
-        registry.matchmaking,
+        registry.config,
         registry.sounds,
     ]);
 }

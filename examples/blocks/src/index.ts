@@ -9,7 +9,7 @@ import {
     env,
     MaterialType,
     getTrait,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     onTick,
@@ -23,7 +23,7 @@ import {
 } from 'bongle';
 import { blocks, blockTextures, blockSoundPresets } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const {
     stone: Stone,

@@ -6,18 +6,14 @@
 // registered into. Sets env → evaluates user code → inits + loads EngineServer →
 // attaches the /game WS transport → runs the 60Hz sim loop.
 
-import { readdir, readFile } from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
-import path from 'node:path';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import { env } from 'bongle/env';
 import { __bongle } from 'bongle/internal';
+import { openNodeFs } from '../../node-fs';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';
 import type { Client, JsonValue, ResolvedAvatar, ServerApp, User } from '../../../interface/index';
 import { attachGameTransport, type GameTransport } from './transport';
-
-const SCENES_DIR = 'content/scenes';
-const SCENE_EXT = '.scene.json';
 
 export type StartServerOptions = {
     httpServer: HttpServer;
@@ -34,21 +30,6 @@ export type ServerBootResult = {
     stop: () => void;
 };
 
-/** recursively read content/scenes/**.scene.json → { id: json } (ids are the path
- *  under content/scenes/ with the extension stripped). */
-async function seedScenes(scenesDir: string): Promise<Record<string, string>> {
-    const scenes: Record<string, string> = {};
-    const walk = async (dir: string, prefix: string): Promise<void> => {
-        for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
-            const full = path.join(dir, e.name);
-            if (e.isDirectory()) await walk(full, `${prefix}${e.name}/`);
-            else if (e.name.endsWith(SCENE_EXT)) scenes[`${prefix}${e.name.slice(0, -SCENE_EXT.length)}`] = await readFile(full, 'utf8');
-        }
-    };
-    await walk(scenesDir, '');
-    return scenes;
-}
-
 export async function start(opts: StartServerOptions): Promise<ServerBootResult> {
     const { httpServer, projectDir, userEntry } = opts;
 
@@ -59,28 +40,10 @@ export async function start(opts: StartServerOptions): Promise<ServerBootResult>
     await userEntry();
 
     await initZstd();
-    const scenes = await seedScenes(path.join(projectDir, SCENES_DIR));
-    console.log(`[dev:server] seeded ${Object.keys(scenes).length} scene(s)`);
 
     const state = EngineServer.init({
         mode: 'play',
-        content: {
-            scenes,
-            persist: {
-                write: () => {}, // dev play server is read-only for scene content
-                delete: () => {},
-            },
-        },
-        resourcesDir: 'resources/server',
-        loadResource: async (p) => {
-            if (p.startsWith('http:') || p.startsWith('https:')) {
-                const r = await fetch(p);
-                if (!r.ok) throw new Error(`fetch ${p}: ${r.status}`);
-                return new Uint8Array(await r.arrayBuffer());
-            }
-            if (p.startsWith('file:')) return new Uint8Array(await readFile(new URL(p)));
-            return new Uint8Array(await readFile(path.join(projectDir, p)));
-        },
+        fs: openNodeFs(projectDir),
         zstd: { compress: zstdCompress },
         options: {},
         // node dev: no sample-avatar pool (joins get the builtin avatar).

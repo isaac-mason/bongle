@@ -34,7 +34,9 @@ import * as ClientNet from '../../src/client/net';
 import type * as ClientRooms from '../../src/client/rooms';
 import { registry } from '../../src/core/registry';
 import * as SceneTree from '../../src/core/scene/scene-tree';
+import { BUILTIN_BASE_AVATAR_ID } from '../../src/core/player/base-avatar';
 import { createFallbackAvatarsDriver } from '../../src/node/sample-avatars-driver';
+import { openNodeFs } from '../../cli/node-fs';
 import { nodeZstd } from '../../src/node/zstd';
 import * as EngineServerModule from '../../src/server/engine-server';
 import * as Rooms from '../../src/server/rooms';
@@ -117,7 +119,7 @@ const STORE_NAMES = [
     'sounds',
     'sprites',
     'particles',
-    'matchmaking',
+    'config',
 ] as const;
 
 let baseline: Record<string, StoreSnap> | null = null;
@@ -243,16 +245,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
     // ── 5. boot server ──────────────────────────────────────────
     const server = EngineServerModule.init({
         mode: 'play',
-        content: {
-            scenes: Object.fromEntries(
-                fs
-                    .readdirSync(scenesDir)
-                    .filter((n) => n.endsWith('.scene.json'))
-                    .map((n) => [n.slice(0, -'.scene.json'.length), fs.readFileSync(path.join(scenesDir, n), 'utf8')]),
-            ),
-        },
-        resourcesDir,
-        loadResource: async (p) => new Uint8Array(fs.readFileSync(p.startsWith('file:') ? new URL(p) : p)),
+        fs: openNodeFs(tmpDir),
         zstd: nodeZstd,
         driver: {
             storage: createInMemoryStorageDriver(),
@@ -285,6 +278,7 @@ export async function createTestHarness<D>(setup: SetupFn<D>): Promise<TestHarne
                 driver: {
                     matchmake: () => {},
                     platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
+                    user: { id: 'test', username: 'test', avatar: { source: 'bundled', modelId: BUILTIN_BASE_AVATAR_ID } },
                 },
                 domElement: document.body,
             });

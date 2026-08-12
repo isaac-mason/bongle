@@ -18,7 +18,9 @@ import { unzipSync } from 'fflate';
 import { contentType } from '../build';
 import type { ResolvedAvatar, ServerApp } from '../interface/index';
 import { createFallbackAvatarsDriver, resolveSampleAvatarFile } from '../src/node/sample-avatars-driver';
+import { nodeZstd } from '../src/node/zstd';
 import { createInMemoryStorageDriver } from '../src/server/storage-in-memory';
+import { openNodeFs } from './node-fs';
 import { attachGameTransport } from './realms/server/transport';
 
 const STEP_MS = 1000 / 60;
@@ -161,7 +163,12 @@ export async function startCommand(bundleArg: string, opts: { port?: number } = 
     const mod = (await import(pathToFileURL(serverEntry).href)) as { default: ServerApp<unknown> };
     const app = mod.default;
     const avatars = createFallbackAvatarsDriver();
-    const state = app.init({ options: {}, driver: { storage: createInMemoryStorageDriver(), avatars } });
+    const state = app.init({
+        options: {},
+        fs: openNodeFs(path.join(root, 'server')),
+        zstd: nodeZstd,
+        driver: { storage: createInMemoryStorageDriver(), avatars },
+    });
     await app.load(state);
     console.log('  · Server loaded');
 

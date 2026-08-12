@@ -1,7 +1,7 @@
 import * as Icons from "../../../icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { setEditorEnabledForRoom, setRoomView } from '../../client/editor';
-import type { RoomView, RoomViewId } from '../../client/rooms';
+import { LOCAL_ROOM_PREFIX, type RoomView, type RoomViewId } from '../../client/rooms';
 import type { PlayerMode, RoomInfo } from '../../core/protocol';
 import { useEditRoom } from '../edit-room-store';
 import { useEditor } from '../editor-store';
@@ -195,6 +195,9 @@ function RoomTab({
     const lensBacked = view !== null && isEditorLens(view);
     const tabMode: PlayerMode = view ? view.mode : info.roomMode;
     const isPlay = tabMode === 'play';
+    // a local (client-only, in-tab) room vs a server-backed remote room. local room
+    // ids are prefixed; see LOCAL_ROOM_PREFIX / startLocalRoom.
+    const isLocal = info.id.startsWith(LOCAL_ROOM_PREFIX);
     const showAsPill = view !== null && view.mode === 'edit' && inGroup;
     const isMainEdit = !inGroup && tabMode === 'edit' && info.sceneId === 'main' && info.namespace === 'main';
 
@@ -299,7 +302,7 @@ function RoomTab({
                     type="button"
                     onClick={onActivate}
                     onContextMenu={onContextMenu}
-                    title={`${info.sceneId} [${tabMode}] (namespace '${info.namespace}')`}
+                    title={`${info.sceneId} [${tabMode}] · ${isLocal ? 'local (in-tab, no server)' : 'remote (server-backed)'} (namespace '${info.namespace}')`}
                     className={`flex items-center gap-1 text-[11px] font-mono cursor-pointer border border-l-2 ${
                         isPlay ? 'border-l-tab-play' : 'border-l-tab-edit'
                     } ${
@@ -312,6 +315,7 @@ function RoomTab({
                 >
                     {isPlay ? <Icons.Play size={10} /> : <Icons.Wrench size={10} />}
                     {`${isPlay ? 'play' : 'edit'}: ${info.sceneId}`}
+                    {isLocal && <span className="opacity-60">(local)</span>}
                 </button>
             )}
 

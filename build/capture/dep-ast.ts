@@ -13,7 +13,7 @@
  *
  *   2. Classify top-level declarations: `const X = scene('foo')` produces a
  *      `scenes:foo` symbol on local name `X`. Recognised producer calls are
- *      `scene/block/blockTexture/trait/command/model/prefab/matchmaking` and
+ *      `scene/block/blockTexture/trait/command/model/prefab/config` and
  *      `blockPreset.<anything>` (presets all internally call `block`).
  *
  *   3. Classify exports: `export const X = …` is captured as a local export;
@@ -190,7 +190,7 @@ const BONGLE_PACKAGE = 'bongle';
  * an `import { X } from 'bongle'` binding's `importedName` is exactly the
  * factory name.
  *
- * Single-keyed registries (matchmaking) use a fixed id matching the
+ * Single-keyed registries (config) use a fixed id matching the
  * runtime upsert call.
  */
 const PRODUCER_FACTORIES: Record<string, { registry: string; fixedId?: string }> = {
@@ -201,7 +201,7 @@ const PRODUCER_FACTORIES: Record<string, { registry: string; fixedId?: string }>
     command: { registry: 'commands' },
     model: { registry: 'models' },
     prefab: { registry: 'prefabs' },
-    matchmaking: { registry: 'matchmaking', fixedId: 'main' },
+    config: { registry: 'config', fixedId: 'main' },
 };
 
 /**

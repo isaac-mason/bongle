@@ -8,10 +8,12 @@ import { acceptFrame, createReassembler } from '../core/net';
 import * as Physics from '../core/physics/physics';
 import type { RoomInfo } from '../core/protocol';
 import * as Protocol from '../core/protocol';
+import { isStandalone } from '../core/config';
 import * as Registry from '../core/registry';
 import {
     buildInboundProtocol,
     type InboundProtocol,
+    launchConfig,
     localInbound,
     protocolManifest,
     registry,
@@ -22,12 +24,14 @@ import * as Resources from '../core/resources';
 import * as Rpc from '../core/rpc';
 import * as Animation from '../core/scene/animation';
 import * as Prefab from '../core/scene/prefab';
+import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import { applySceneSyncUpdate } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
 import { loadAtlasMetadata } from '../core/sprites/atlas';
 import { AIR, MISSING } from '../core/voxels/block-registry';
 import { CullType } from '../core/voxels/blocks';
 import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
+import * as Light from '../core/voxels/light';
 import * as Voxels from '../core/voxels/voxels';
 import type { Renderer } from '../render/backend';
 import { loadRenderBackend } from '../render/load';
@@ -225,8 +229,12 @@ export type EngineClient = ReturnType<typeof init>;
  * Used by the bongle `standalone` build (and the asset pipeline worker conceptually):
  * `init()` → `load()` → `startStandaloneRoom()` → frame loop. The returned
  * room is already the active player; the caller just has to drive `update()`.
+ *
+ * `sceneId` defaults to `DEFAULT_SCENE_ID` (the boot landing scene), matching
+ * the networked path where the server picks the start scene — standalone has no
+ * server, so the client boots that same default itself.
  */
-export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms.ClientRoom {
+export function startStandaloneRoom(state: EngineClient, sceneId: string = DEFAULT_SCENE_ID): Rooms.ClientRoom {
     const room = Rooms.startLocalRoom({
         state,
         sceneId,
@@ -236,6 +244,18 @@ export function startStandaloneRoom(state: EngineClient, sceneId: string): Rooms
     });
     Rooms.setActivePlayer(state.rooms, state.net, room.playerId);
     return room;
+}
+
+/**
+ * Boot the standalone local room IF this build is a standalone (client-only)
+ * game (`config({ standalone: true })`). The play-client bundle calls this from
+ * its `load()` so a standalone build self-boots with no host involvement; it's a
+ * no-op for multiplayer builds, which boot their room from the server's
+ * `join_room`. (The editor's play preview + cli dev drive `startStandaloneRoom`
+ * directly and don't go through here.)
+ */
+export function startStandaloneRoomIfConfigured(state: EngineClient): void {
+    if (isStandalone(launchConfig(registry))) startStandaloneRoom(state);
 }
 
 /**
@@ -470,7 +490,7 @@ export async function load(state: EngineClient) {
         registry.sync,
         registry.scripts,
         registry.commands,
-        registry.matchmaking,
+        registry.config,
         registry.sounds,
         registry.sprites,
     ]);
@@ -1218,6 +1238,13 @@ export function update(state: EngineClient, delta: number) {
             // resolve their subShapeIds within tick/postStep.
             Physics.flush(room.physics);
             Debug.end(room.clientMetrics, 'physics');
+
+            // authoritative (local/standalone) rooms own lighting like the server:
+            // drain the tick's accumulated relight. no-ops on networked rooms (no
+            // voxels.authority), which receive baked light over the wire instead.
+            Debug.begin(room.clientMetrics, 'lighting');
+            Light.flushPendingLight(room.voxels);
+            Debug.end(room.clientMetrics, 'lighting');
 
             Replication.sendOwnerSyncUpdates(state.net, room.scene, room.roomId, room.playerId, room.syncSnapshots);
 

@@ -3,7 +3,12 @@
 // Two env-DCE'd bundles over a per-target entry (the existing generated barrels +
 // src/index + a play-* adapter) → client/index.js + server/index.js;
 // baked resources copied in; a bongle.json manifest (schema 1, sha384 SRI,
-// matchmaking) written; the tree zipped.
+// config + compat matchmaking.maxPlayers) written; the tree zipped.
+//
+// A standalone (client-only) game — `config({ standalone: true })` — has no
+// server, so its build skips the server target entirely: no server/index.js, no
+// server resources, no content copy, and no manifest `server` entry. Multiplayer
+// (`config({ server })`) builds both targets exactly as before.
 //
 // The `rolldown` impl is INJECTED (see Bundler): the browser editor passes
 // @rolldown/browser (its wasm lives in a library-managed worker); a node CLI
@@ -17,6 +22,7 @@
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
 import { BONGLE_VERSION } from '../../src/build-info';
+import { type Config, isStandalone, serverMaxPlayers } from '../../src/core/config';
 import type { EnvValues } from '../env-replace';
 import type { BuildFs } from '../resolve';
 import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
@@ -50,7 +56,9 @@ export default client({
         env.client = true; env.server = false; env.editor = false;
         return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader, domElement: document.body });
     },
-    load: async (state) => { EngineClient.mountPlayUI(state.domElement); await EngineClient.load(state); },
+    // a standalone (client-only) build self-boots its local room here; multiplayer
+    // builds no-op and boot from the server's join_room. See startStandaloneRoomIfConfigured.
+    load: async (state) => { EngineClient.mountPlayUI(state.domElement); await EngineClient.load(state); EngineClient.startStandaloneRoomIfConfigured(state); },
     update: (state, dt) => EngineClient.update(state, dt),
     dispose: (state) => EngineClient.dispose(state),
     getInbox: (state) => state.net.inbox,
@@ -60,51 +68,21 @@ export default client({
 `;
 
 const PLAY_SERVER = `
-import { fileURLToPath } from 'node:url';
-import { readdirSync, readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { env } from 'bongle';
 import { server } from 'bongle/interface';
 import { EngineServer } from 'bongle/engine-server';
-import { nodeZstd } from 'bongle/engine-server-node';
-const here = path.dirname(fileURLToPath(import.meta.url));
 
-// authored scenes: content/scenes/*.scene.json → { sceneId: rawJson }. Read
-// synchronously (init() is sync + returns the state) — a one-time boot read.
-function seedScenes() {
-    const dir = path.join(here, 'content', 'scenes');
-    const scenes = {};
-    let names;
-    try { names = readdirSync(dir); } catch { return scenes; }
-    for (const name of names) {
-        if (!name.endsWith('.scene.json')) continue;
-        scenes[name.slice(0, -'.scene.json'.length)] = readFileSync(path.join(dir, name), 'utf8');
-    }
-    return scenes;
-}
-
+// Host-neutral: no node imports. The host injects fs (project files: scenes under
+// content/scenes/, model bins under resources/server/), zstd (native node:zlib or
+// wasm), and the driver (storage + avatars). Runs unchanged in a node process
+// (deploy) or a browser worker (solo).
 export default server({
     init: (opts) => {
         env.client = false; env.server = true; env.editor = false;
         return EngineServer.init({
             mode: 'play',
-            // deployed play server: scene content is read-only.
-            content: { scenes: seedScenes(), persist: { write: () => {}, delete: () => {} } },
-            // model bins live at <here>/resources/models/<id>; loadResource joins.
-            resourcesDir: 'resources',
-            loadResource: async (p) => {
-                if (p.startsWith('http:') || p.startsWith('https:')) {
-                    const r = await fetch(p);
-                    if (!r.ok) throw new Error('fetch ' + p + ': ' + r.status);
-                    return new Uint8Array(await r.arrayBuffer());
-                }
-                if (p.startsWith('file:')) return new Uint8Array(await readFile(new URL(p)));
-                if (p.startsWith('/')) return new Uint8Array(await readFile(p));
-                return new Uint8Array(await readFile(path.join(here, p)));
-            },
-            // native node zstd (node:zlib) for the voxel wire codec.
-            zstd: nodeZstd,
+            fs: opts.fs,
+            zstd: opts.zstd,
             options: opts.options,
             driver: opts.driver,
         });
@@ -168,7 +146,9 @@ async function buildTarget(
         external: [/^node:/, ...(target === 'server' ? [/^sharp$/] : [])],
         // NODE_ENV is already build-defined into the prebundled engine dist (where
         // React lives); user + play-shell code don't read process.env, so no define.
-        platform: target === 'server' ? 'node' : 'browser',
+        // server is host-neutral: it runs in a node process (deploy) AND a browser
+        // worker (solo/editor), injecting node/browser capabilities per host.
+        platform: target === 'server' ? 'neutral' : 'browser',
         // bongle/index is both statically (our entry) + dynamically (engine-server)
         // imported — an expected, harmless chunking note; drop it, surface the rest.
         onLog: (level, log, handler) => {
@@ -181,6 +161,11 @@ async function buildTarget(
         entryFileNames: 'index.js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
+        // the server must be one self-contained file: the solo host blob-imports
+        // server/index.js, and a blob URL can't resolve relative ./assets chunks.
+        // (Practically the server graph has no runtime dynamic imports, so this is a
+        // guarantee, not a reshape.) Deploy is unaffected — node imports it from disk.
+        inlineDynamicImports: target === 'server',
         minify: true,
     });
     await bundle.close();
@@ -213,10 +198,12 @@ async function copyTree(fs: BuildFs, srcDir: string, zip: Record<string, Uint8Ar
 }
 
 export type BuildOptions = {
-    /** matchmaking.maxPlayers for the manifest. The build can't evaluate user
-     *  code to read the registry, so the caller supplies it (the pipeline realm
-     *  reports it — see stores/build-meta). */
-    maxPlayers: number;
+    /** the project's config for the manifest. The build can't evaluate
+     *  user code to read the registry, so the caller supplies it (the pipeline
+     *  realm / node bake reports it — see stores/build-meta). Drives the
+     *  `config` manifest key, the compat `matchmaking.maxPlayers`, and whether
+     *  the server target is built at all (standalone omits it). */
+    config: Config;
     /** phase label callback for the progress UI. */
     onProgress?: (label: string) => void;
 };
@@ -225,6 +212,9 @@ export type BuildOptions = {
  *  `bundler` (rolldown impl + host prep) is injected — see Bundler. */
 export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOptions): Promise<Uint8Array> {
     const progress = opts.onProgress ?? (() => {});
+    // a standalone game is client-only: no server bundle, no server resources,
+    // no content copy, no manifest `server` entry (the "no double chunks" win).
+    const standalone = isStandalone(opts.config);
     // workers first: `?worker` entries (mesh worker) bundle standalone BEFORE the
     // main build — a nested @rolldown/browser build from inside a plugin hook
     // deadlocks on main-thread Atomics.wait. They're client-side compute.
@@ -236,7 +226,7 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
     // node rolldown is reentrant and wouldn't care, but the core is host-neutral,
     // and the server graph is tiny so serializing costs ~nothing.
     const clientFiles = await buildTarget(fs, 'client', workers, bundler, progress);
-    const serverFiles = await buildTarget(fs, 'server', workers, bundler, progress);
+    const serverFiles = standalone ? {} : await buildTarget(fs, 'server', workers, bundler, progress);
 
     const zip: Record<string, Uint8Array> = {};
     for (const [name, bytes] of Object.entries(clientFiles)) zip[`client/${name}`] = bytes;
@@ -257,22 +247,36 @@ export async function buildBundle(fs: BuildFs, bundler: Bundler, opts: BuildOpti
     // the project's static public/ dir (copied to the client root).
     progress('Copying baked resources');
     await copyTree(fs, 'resources/client', zip, 'client');
-    await copyTree(fs, 'resources/server', zip, 'server/resources');
-    await copyTree(fs, 'content', zip, 'server/content');
+    if (!standalone) {
+        // server model bins nest under the server realm dir at the engine's `resources/
+        // server/` convention (the deployed host roots its fs at the extracted server/).
+        // content/ is server-only (the client bakes its scenes into the client bundle
+        // via codegen), so a standalone package needs neither.
+        await copyTree(fs, 'resources/server', zip, 'server/resources/server');
+        await copyTree(fs, 'content', zip, 'server/content');
+    }
     await copyTree(fs, 'public', zip, 'client');
 
     progress('Writing manifest');
     const client: Record<string, unknown> = { entry: 'client/index.js', integrity: await sri(zip['client/index.js']) };
     if (clientCss) client.styles = { entry: 'client/index.css', integrity: await sri(clientCss) };
-    const manifest = {
+
+    // compat matchmaking field: serverMaxPlayers is null for standalone → 1.
+    const maxPlayers = serverMaxPlayers(opts.config) ?? 1;
+
+    const manifest: Record<string, unknown> = {
         schema: BUNDLE_SCHEMA,
         engine: { bongle: BONGLE_VERSION, interface: INTERFACE_VERSION },
         client,
-        server: { entry: 'server/index.js', integrity: await sri(zip['server/index.js']) },
         assets: { publicDir: 'public' },
         build: { id: crypto.randomUUID(), createdAt: new Date().toISOString(), tool: `bongle-editor@${BONGLE_VERSION}` },
-        matchmaking: { maxPlayers: opts.maxPlayers },
+        matchmaking: { maxPlayers: maxPlayers },
+        config: opts.config,
     };
+    // standalone has no server/index.js to reference or SRI; omit the entry.
+    if (!standalone) {
+        manifest.server = { entry: 'server/index.js', integrity: await sri(zip['server/index.js']) };
+    }
     zip['bongle.json'] = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
 
     progress('Zipping');

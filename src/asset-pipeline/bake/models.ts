@@ -86,6 +86,12 @@ export type BuildModelsOptions = {
     /** the editor project filesystem bins + barrel write into
      *  (host-provided; see pipeline InitCtx). */
     fs: Filesystem;
+    /** whether to write the server-side model bin (resources/server/models).
+     *  false for standalone (client-only) games: no server runs, so the server
+     *  bin is pure waste and the build never copies resources/server. The
+     *  barrel still carries a `bin.server` URL for the type parity story; it's
+     *  just never fetched. */
+    emitServer: boolean;
 };
 
 // ── types: per-model build outputs ─────────────────────────────────
@@ -162,7 +168,7 @@ export async function buildModels(module: ModuleVersion, opts: BuildModelsOption
     for (const [id, def] of models) {
         let e: BuildEntry | null;
         try {
-            e = await processModel(id, def.src, cache, opts.loader, projectFs);
+            e = await processModel(id, def.src, cache, opts.loader, projectFs, opts.emitServer);
         } catch (err) {
             // a single unparseable/unfetchable model must not fail the whole
             // bake — warn and skip it (its barrel entry is just absent).
@@ -266,6 +272,7 @@ async function processModel(
     cache: Map<string, ModelsCacheEntry>,
     loader: ResourceLoader,
     projectFs: Filesystem,
+    emitServer: boolean,
 ): Promise<BuildEntry | null> {
     let srcBytes: Uint8Array;
     try {
@@ -284,7 +291,9 @@ async function processModel(
     if (cached && cached.srcHash === srcHash) {
         const clientBinPath = `${CLIENT_BIN_DIR}/${cached.clientBin.split('/').pop()!}`;
         const serverBinPath = `${SERVER_BIN_DIR}/${cached.serverBin.split('/').pop()!}`;
-        if ((await projectFs.exists(clientBinPath)) && (await projectFs.exists(serverBinPath))) {
+        // standalone never wrote a server bin, so don't require it on disk.
+        const serverPresent = !emitServer || (await projectFs.exists(serverBinPath));
+        if ((await projectFs.exists(clientBinPath)) && serverPresent) {
             const doc = await loadAndOptimize(srcBytes, srcRel, loader);
             const { payload } = await projectDocument(doc);
             return {
@@ -332,7 +341,6 @@ async function processModel(
         animatedNodeNames: payload.animatedNodeNames,
         aabb: payload.aabb,
     };
-    const serverBytes = packModelBin({ ...binCommon, images: undefined });
     const clientBytes = packModelBin({ ...binCommon, images });
 
     const hash8 = (await sha256Hex(clientBytes)).slice(0, 8);
@@ -343,7 +351,12 @@ async function processModel(
     const serverBinPath = `${SERVER_BIN_DIR}/${serverFilename}`;
 
     await projectFs.write(clientBinPath, clientBytes);
-    await projectFs.write(serverBinPath, serverBytes);
+    // standalone (client-only) games run no server: skip the server bin (no
+    // images) entirely — the build never copies resources/server for them.
+    if (emitServer) {
+        const serverBytes = packModelBin({ ...binCommon, images: undefined });
+        await projectFs.write(serverBinPath, serverBytes);
+    }
 
     return {
         id,

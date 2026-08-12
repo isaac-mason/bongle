@@ -4,7 +4,7 @@ import {
     env,
     getBlock,
     getTrait,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     onTick,
@@ -17,7 +17,7 @@ import {
 } from 'bongle';
 import { blocks } from 'bongle/kit';
 
-matchmaking({ maxPlayers: 4 });
+config({ server: { maxPlayers: 4 } });
 
 const stoneKey = blocks.stone.defaultKey();
 

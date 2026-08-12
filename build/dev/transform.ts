@@ -54,6 +54,19 @@ export type OxcTransforms = {
 /** build a `TransformModule` over the injected oxc/rolldown transforms. */
 export function createTransformModule({ transform, moduleRunnerTransform }: OxcTransforms): TransformModule {
     return async function transformModule(id, source, opts): Promise<TransformResult> {
+        // JSON modules (e.g. `content/scenes/*.scene.json`, imported by the generated
+        // scene barrel): wrap the JSON value as an ES module default export. JSON is a
+        // valid JS expression, so `export default <json>` parses. NOT TypeScript (no
+        // strip) and NOT a user registration module (no capture wrapper). Mirrors the
+        // deployed rolldown build's built-in JSON import support.
+        if (id.endsWith('.json')) {
+            const r = await moduleRunnerTransform(`${id}.js`, `export default ${source};`, { sourcemap: false });
+            if (r.errors?.length) {
+                throw new Error(`[moduleRunnerTransform] ${id}: ${r.errors.map((e) => e.message).join('\n')}`);
+            }
+            return { code: r.code, deps: [...r.deps], dynamicDeps: [...r.dynamicDeps] };
+        }
+
         // 1. capture wrapper (user modules only). No env replacement — see the header.
         let code = opts.capture ? PRELUDE + source + POSTLUDE : source;
 

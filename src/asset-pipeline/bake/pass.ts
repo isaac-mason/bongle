@@ -12,13 +12,14 @@
  *
  * Both call sites materialize a partial ProjectModule view (only the
  * fields atlas + models read) from the typed registries and dispatch to
- * `buildBlockTextureAtlas` / `buildModels`. The matchmaking config the
- * bundle manifest needs is exposed via `state.matchmakingConfig`, the
- * `build.ts` caller reads it directly off pipeline state after the pass.
+ * `buildBlockTextureAtlas` / `buildModels`. The launch config the bundle
+ * manifest needs is exposed via `state.config`, the `build.ts` caller
+ * reads it directly off pipeline state after the pass.
  */
 
+import { type Config, isStandalone } from '../../core/config';
 import type { ModelHandle } from '../../core/models/handle';
-import type { Registry } from '../../core/registry';
+import { launchConfig, type Registry } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SceneHandle } from '../../core/scene/scene-handle';
 import type { Blocks } from '../../core/voxels/block-registry';
@@ -83,13 +84,16 @@ export type PipelineState = {
     blockTextures: number;
     models: number;
     scenes: number;
-    matchmaking: number;
+    /** last-seen config-store revision (named apart from `config` below, which
+     *  holds the value; the other kinds only track a revision so reuse the
+     *  store name directly). */
+    configRev: number;
     sounds: number;
     sprites: number;
-    /** Latest observed matchmaking config, refreshed whenever the
-     *  matchmaking registry's revision moves. `build.ts` reads this after
-     *  the pass to seed the bundle manifest. */
-    matchmakingConfig: { maxPlayers: number } | null;
+    /** Latest observed launch config, refreshed whenever the config
+     *  registry's revision moves. `build.ts` reads this after the pass to
+     *  seed the bundle manifest. */
+    config: Config | null;
     /** Per-id incremental cache for the models builder, replaces the
      *  former `.bongle/cache/models-build.json` disk sidecar. Lives for
      *  the lifetime of the process; cold starts re-pack every model. */
@@ -102,10 +106,10 @@ export function createPipelineState(): PipelineState {
         blockTextures: -1,
         models: -1,
         scenes: -1,
-        matchmaking: -1,
+        configRev: -1,
         sounds: -1,
         sprites: -1,
-        matchmakingConfig: null,
+        config: null,
         modelsCache: new Map(),
     };
 }
@@ -159,7 +163,7 @@ export async function runAssetPipelinePass(
     const blockTexturesRev = registry.blockTextures.revision;
     const modelsRev = registry.models.revision;
     const scenesRev = registry.scenes.revision;
-    const matchmakingRev = registry.matchmaking.revision;
+    const configRev = registry.config.revision;
     const soundsRev = registry.sounds.revision;
     const spritesRev = registry.sprites.revision;
 
@@ -168,11 +172,11 @@ export async function runAssetPipelinePass(
     const atlasDirty = forceAll || blocksRev !== state.blocks || blockTexturesRev !== state.blockTextures;
     const modelsDirty = forceAll || modelsRev !== state.models;
     const scenesDirty = forceAll || scenesRev !== state.scenes;
-    const matchmakingDirty = matchmakingRev !== state.matchmaking;
+    const configDirty = configRev !== state.configRev;
     const soundsDirty = forceAll || soundsRev !== state.sounds;
     const spritesDirty = forceAll || spritesRev !== state.sprites;
 
-    if (!atlasDirty && !modelsDirty && !scenesDirty && !matchmakingDirty && !soundsDirty && !spritesDirty) return timings;
+    if (!atlasDirty && !modelsDirty && !scenesDirty && !configDirty && !soundsDirty && !spritesDirty) return timings;
 
     // Build the block registry first when blocks/models/scenes are dirty.
     // `buildBlockRegistry` evaluates each block's default model and, for
@@ -219,9 +223,22 @@ export async function runAssetPipelinePass(
                     () => undefined,
                 ),
             );
-        if (modelsDirty)
-            tasks.push(timed('models', buildModels(moduleView, { cache: state.modelsCache, loader, fs })).then(() => undefined));
-        if (scenesDirty) tasks.push(timed('scenes', buildScenes(moduleView, { mode, fs })).then(() => undefined));
+        // standalone (client-only) games run no server. launchConfig is always safe
+        // to read (falls back to DEFAULT_CONFIG, a server config, so undeclared /
+        // multiplayer projects behave exactly as before).
+        const standalone = isStandalone(launchConfig(registry));
+        if (modelsDirty) {
+            // standalone → don't emit the server-side model bin (resources/server/models).
+            tasks.push(
+                timed(
+                    'models',
+                    buildModels(moduleView, { cache: state.modelsCache, loader, fs, emitServer: !standalone }),
+                ).then(() => undefined),
+            );
+        }
+        // standalone → bake EVERY authored scene into the client (no server serves them).
+        if (scenesDirty)
+            tasks.push(timed('scenes', buildScenes(moduleView, { mode, standalone, fs })).then(() => undefined));
     }
 
     if (soundsDirty) {
@@ -245,21 +262,19 @@ export async function runAssetPipelinePass(
 
     await Promise.all(tasks);
 
-    if (matchmakingDirty) {
-        // Singleton id 'main' matches MATCHMAKING_ID in
-        // engine/core/matchmaking.ts; default mirrors DEFAULT_MATCHMAKING_CONFIG
-        // for the un-declared case. Stashed on pipeline state for the build
-        // caller to read; dev pipeline reads the same registry directly off
-        // bongle/internal.
-        const matchmakingEntry = registry.matchmaking.byId.get('main');
-        state.matchmakingConfig = matchmakingEntry ?? { maxPlayers: 10 };
+    if (configDirty) {
+        // `launchConfig(registry)` reads the singleton id 'main' and falls back
+        // to DEFAULT_CONFIG for the un-declared case. Stashed on pipeline state
+        // for the build caller to read; dev pipeline reads the same registry
+        // directly off bongle/internal.
+        state.config = launchConfig(registry);
     }
 
     state.blocks = blocksRev;
     state.blockTextures = blockTexturesRev;
     state.models = modelsRev;
     state.scenes = scenesRev;
-    state.matchmaking = matchmakingRev;
+    state.configRev = configRev;
     state.sounds = soundsRev;
     state.sprites = spritesRev;
 

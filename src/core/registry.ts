@@ -18,7 +18,7 @@
 
 import { clearDeps, type DepKey, getDirtyConsumers, setDeps } from './capture/dep-graph';
 import { onModulePop, onModulePush, owningModule } from './capture/module-scope';
-import { DEFAULT_MATCHMAKING_CONFIG, type MatchmakingConfig } from './matchmaking';
+import { type Config, CONFIG_ID, DEFAULT_CONFIG } from './config';
 import type { ModelHandle } from './models/handle';
 import type { ParticleHandle } from './particles/particles';
 import type { CommandDef } from './rpc';
@@ -614,11 +614,11 @@ export function localInbound(reg: Registry): InboundProtocol {
 }
 
 /**
- * matchmaking config; single-keyed (id 'main'), falls back to the default when
- * the user didn't call `matchmaking()`.
+ * launch config; single-keyed (id 'main'), falls back to the default when the
+ * user didn't call `config()`.
  */
-export function matchmakingConfig(reg: Registry): MatchmakingConfig {
-    return reg.matchmaking.byId.get('main') ?? DEFAULT_MATCHMAKING_CONFIG;
+export function launchConfig(reg: Registry): Config {
+    return reg.config.byId.get(CONFIG_ID) ?? DEFAULT_CONFIG;
 }
 
 /**
@@ -677,7 +677,7 @@ export type Registry = {
     sounds: RegistryStore<SoundHandle>;
     sprites: RegistryStore<SpriteHandle>;
     particles: RegistryStore<ParticleHandle>;
-    matchmaking: RegistryStore<MatchmakingConfig>;
+    config: RegistryStore<Config>;
 
     /** runtime block lookup; derived from `blocks` + `blockTextures`.
      *  rebuilt by `reindexRegistry()` at boot + each dev flush — a plain field. */
@@ -780,7 +780,7 @@ const syncHash = (s: SyncDef) =>
     });
 const scriptHash = (s: ScriptDef) => structuralHash({ factory: s.factory, editor: s.editor });
 const commandHash = (c: CommandDef) => structuralHash(c);
-const matchmakingHash = (m: MatchmakingConfig) => structuralHash(m);
+const configHash = (c: Config) => structuralHash(c);
 
 // SoundHandle is inert authoring metadata (src + long flag + codegen'd
 // duration). Runtime state (decoded AudioBuffer) lives in
@@ -861,10 +861,10 @@ export function init(): Registry {
         hash: particleHash,
         diff: wholesaleDiff(particleHash),
     });
-    const matchmaking = createRegistryStore<MatchmakingConfig>({
-        name: 'matchmaking',
-        hash: matchmakingHash,
-        diff: wholesaleDiff(matchmakingHash),
+    const config = createRegistryStore<Config>({
+        name: 'config',
+        hash: configHash,
+        diff: wholesaleDiff(configHash),
     });
 
     const reg = {
@@ -882,7 +882,7 @@ export function init(): Registry {
         sounds,
         sprites,
         particles,
-        matchmaking,
+        config,
         // derived index fields — start empty; `reindexRegistry()` fills them at engine
         // boot (after user modules register) and at each dev flush. NOT built
         // here: `buildBlockRegistry` reaches into sibling modules that may not
@@ -910,7 +910,7 @@ export function init(): Registry {
             sounds,
             sprites,
             particles,
-            matchmaking,
+            config,
         ] as RegistryStore<unknown>[];
         for (const s of stores) {
             s.byId.clear();

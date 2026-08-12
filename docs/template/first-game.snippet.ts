@@ -9,7 +9,7 @@ import {
     ENVIRONMENT_OVERWORLD,
     env,
     getTrait,
-    matchmaking,
+    config,
     onInit,
     onJoin,
     setCharacterLookAt,
@@ -27,7 +27,7 @@ import { blocks } from 'bongle/kit';
 use(blocks);
 
 // cap how many players matchmaking puts in one room
-matchmaking({ maxPlayers: 32 });
+config({ server: { maxPlayers: 32 } });
 /* SNIPPET_END: setup */
 
 /* SNIPPET_START: environment */
