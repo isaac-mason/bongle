@@ -98,6 +98,11 @@ export function createBonglePlugin(fs: BuildFs, opts: BonglePluginOptions): Plug
             }
             // styles ship prebuilt (bongle.css); the import is a harmless no-op.
             if (id.endsWith('.css')) return { code: '', moduleType: 'js' };
+            // .json imports — the standalone scene barrel statically imports
+            // content/scenes/*.json (default export = parsed data). moduleTypeOf would
+            // load it as 'js' and rolldown would choke parsing raw JSON as a program, so
+            // wrap it as a JS default export. Mirrors the dev transform's .json handling.
+            if (id.endsWith('.json')) return { code: `export default ${await fs.readText(id)}`, moduleType: 'js' };
             return { code: await fs.readText(id), moduleType: moduleTypeOf(id) };
         },
         transform(code, id) {
