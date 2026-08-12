@@ -8,7 +8,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { createInMemoryStorageDriver, EngineServer } from 'bongle/engine-server';
 import * as EngineServerEditor from 'bongle/engine-server-editor';
-import { createFallbackAvatarsDriver } from 'bongle/engine-server-node';
+import { createFallbackAvatarsDriver } from '../../../src/node/sample-avatars-driver';
 import { env } from 'bongle/env';
 import { openNodeFs } from '../../node-fs';
 import { initZstd, zstdCompress } from '../../../zstd-wasm';

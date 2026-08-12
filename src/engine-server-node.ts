@@ -1,10 +1,11 @@
-// bongle/engine-server-node — server bits that reach Node builtins (node:fs to
-// read the engine's example avatars off disk, node:zlib for the native chunk
-// compressor). Split out of the browser-facing `bongle/engine-server` entry so
-// no Node builtin leaks into the browser server graph the editor bundles: the
-// editor injects its own drivers (createEditorAvatarsDriver, zstd-wasm), the
-// node hosts import these.
+// bongle/engine-server-node — the Node capabilities a host injects into the
+// bundled server: node:fs (openNodeFs) and node:zlib (nodeZstd, the native chunk
+// compressor). Split out of the browser-facing `bongle/engine-server` entry so no
+// Node builtin leaks into the browser server graph the editor bundles. Kept clear
+// of any engine-core graph, so importing it (e.g. from a play room that only needs
+// to hand the bundled server its fs + zstd) drags in node builtins and nothing
+// else. The sample-avatars host helper lives in its own module (node/sample-
+// avatars-driver) and is imported from source by the CLI dev host that serves them.
 
 export { openNodeFs } from './node/node-fs';
-export { createFallbackAvatarsDriver, resolveSampleAvatarFile, SAMPLE_AVATAR_ROUTE_PREFIX } from './node/sample-avatars-driver';
 export { nodeZstd } from './node/zstd';
