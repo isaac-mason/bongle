@@ -1,5 +1,5 @@
 import { MonitorPlay, ShoppingBag } from "../../../icons";
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useClient } from '../../client/ui/stores/client-store';
 import { useEditRoom } from '../edit-room-store';
 import { formatKeyLabel, LIBRARY_KEYS } from '../editor-controls';
@@ -21,16 +21,25 @@ function ToolButton({
     showSlot: boolean;
     onSelect: () => void;
 }) {
-    const [hovered, setHovered] = useState(false);
+    // Popover position measured on hover. Fixed-positioned (below) so it escapes
+    // the toolbar's scroll clip; left/top come from the button's viewport rect.
+    const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+    const btnRef = useRef<HTMLButtonElement>(null);
     const Icon = def.icon;
+
+    const showPopover = () => {
+        const r = btnRef.current?.getBoundingClientRect();
+        if (r) setPos({ left: r.right + 8, top: r.top + r.height / 2 });
+    };
 
     return (
         <div className="relative">
             <button
+                ref={btnRef}
                 type="button"
                 onClick={onSelect}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
+                onMouseEnter={showPopover}
+                onMouseLeave={() => setPos(null)}
                 title={showSlot ? `${def.label}  (${categoryKeyLabel}·${slotDigit})` : `${def.label}  (${categoryKeyLabel})`}
                 className={`relative w-8 h-8 flex items-center justify-center rounded-sm cursor-pointer transition-colors border ${
                     active
@@ -50,9 +59,12 @@ function ToolButton({
                 )}
             </button>
 
-            {/* hover popover */}
-            {hovered && (
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 pointer-events-none select-none">
+            {/* hover popover — fixed so the toolbar's scroll clip can't cut it off */}
+            {pos && (
+                <div
+                    className="fixed -translate-y-1/2 z-50 pointer-events-none select-none"
+                    style={{ left: pos.left, top: pos.top }}
+                >
                     <div className="bg-surface-muted text-fg border border-border rounded-md px-2 py-1.5 shadow-lg whitespace-nowrap">
                         <div className="flex items-center gap-2">
                             <div className="text-[11px] font-mono font-semibold">{def.label}</div>
@@ -138,7 +150,7 @@ export function LeftToolbar() {
             {/* tools, grouped by category. each group has a small header like
                 "scene v", the category name plus its hotkey. per-tool slot
                 digits appear in the bottom-right corner of each icon. */}
-            <div className="flex flex-col items-stretch gap-1">
+            <div className="flex flex-col items-stretch gap-1 min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {TOOL_CATEGORIES.map((category: ToolCategory, ci) => {
                     const CategoryIcon = category.icon;
                     return (
