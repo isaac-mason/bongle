@@ -52,6 +52,14 @@ export default defineConfig({
                 kit: entry('src/kit/index.ts'),
                 interface: entry('interface/index.ts'), // its own top-level dir
                 bongle: entry('scripts/bongle-css.entry.ts'), // css-only entry
+                // the editor-OS apps this engine version provides (bongle/os/apps):
+                // the def module + one entry per app, evaluated through the
+                // editor's runner from the seeded vfs. Engine RUNTIME stays
+                // dynamic (runner.import) inside them; only leaf utilities bundle.
+                'os-apps': entry('os/apps/index.ts'),
+                'os-apps-client': entry('os/apps/client.ts'),
+                'os-apps-server': entry('os/apps/server.ts'),
+                'os-apps-pipeline': entry('os/apps/pipeline.ts'),
             },
         },
         rollupOptions: {

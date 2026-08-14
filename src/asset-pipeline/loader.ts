@@ -8,7 +8,7 @@
 // reads baked client assets back out of `resources/client/`.
 
 import type { ResourceLoader } from '../core/resource-loader';
-import type { Filesystem } from './filesystem';
+import type { Filesystem } from '../../os/interface';
 
 // baked client assets (atlases, model bins) land here; the render read-back
 // loader roots bare names against it, mirroring how the client serves them from

@@ -23,7 +23,7 @@ import {
     runAssetPipelinePass,
 } from './bake/pass';
 import type { Raster } from './bake/raster';
-import type { Filesystem } from './filesystem';
+import type { Filesystem } from '../../os/interface';
 
 /** baked-output root, project-relative on the ctx filesystem. */
 const CLIENT_RESOURCES_DIR = 'resources/client';

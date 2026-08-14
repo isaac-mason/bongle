@@ -21,8 +21,9 @@
 
 import { zipSync } from 'fflate';
 import { INTERFACE_VERSION } from '../../interface/index';
+import type { Config } from '../../os/interface';
 import { BONGLE_VERSION } from '../../src/build-info';
-import { type Config, isStandalone, serverMaxPlayers } from '../../src/core/config';
+import { isStandalone, serverMaxPlayers } from '../../src/core/config';
 import type { EnvValues } from '../env-replace';
 import type { BuildFs } from '../resolve';
 import { type Bundler, bundleWorkers, createBonglePlugin } from './bongle-plugin';
@@ -198,11 +199,11 @@ async function copyTree(fs: BuildFs, srcDir: string, zip: Record<string, Uint8Ar
 }
 
 export type BuildOptions = {
-    /** the project's config for the manifest. The build can't evaluate
-     *  user code to read the registry, so the caller supplies it (the pipeline
-     *  realm / node bake reports it — see stores/build-meta). Drives the
-     *  `config` manifest key, the compat `matchmaking.maxPlayers`, and whether
-     *  the server target is built at all (standalone omits it). */
+    /** the project's launch config for the manifest, in the boundary shape
+     *  (Config — the pipeline app / node bake reports it; the build can't
+     *  evaluate user code to read the registry). Drives the `config` manifest
+     *  key, the compat `matchmaking.maxPlayers`, and whether the server target
+     *  is built at all (standalone omits it). */
     config: Config;
     /** phase label callback for the progress UI. */
     onProgress?: (label: string) => void;

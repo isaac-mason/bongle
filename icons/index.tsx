@@ -3,6 +3,7 @@
 // consumers); see create-icon.tsx for why, and how to add one.
 import { createIcon } from './create-icon';
 import {
+    activity,
     alertCircle,
     arrowRightLeft,
     bookmarkPlus,
@@ -86,6 +87,7 @@ import {
 
 export type { IconComponent, IconProps } from './create-icon';
 
+export const Activity = /*@__PURE__*/ createIcon(activity);
 export const AlertCircle = /*@__PURE__*/ createIcon(alertCircle);
 export const ArrowRightLeft = /*@__PURE__*/ createIcon(arrowRightLeft);
 export const BookmarkPlus = /*@__PURE__*/ createIcon(bookmarkPlus);

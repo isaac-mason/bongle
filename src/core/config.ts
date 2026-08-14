@@ -19,8 +19,11 @@
  * game metadata (display name, icon, …) lives elsewhere.
  */
 
+import type { Config } from '../../os/interface';
 import { recordConfig } from './capture/module-scope';
 import { registry, upsert } from './registry';
+
+export type { Config };
 
 /** Singleton id under which the config lives in `registry.config`.
  *  the user only ever declares one, a second config() call from a different
@@ -44,7 +47,10 @@ export const DEFAULT_MAX_PLAYERS = 10;
  *     caps simultaneous players in a single room; integer in
  *     [1, HARD_MAX_PLAYERS_PER_ROOM].
  */
-export type Config = { server?: false | { maxPlayers: number } };
+// Config is DEFINED at the editor-OS boundary (bongle/os, imported above) — one
+// stability-guaranteed, additive-only shape, since it crosses the pin boundary
+// (the pipeline service reports it) and stamps the bundle manifest. The engine
+// re-exports it rather than redeclaring: one definition, no drift possible.
 
 /** Applied when the user didn't call config(), preserves the pre-existing
  *  platform behavior (multiplayer, rooms cap at DEFAULT_MAX_PLAYERS). */

@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Filesystem } from '../../src/asset-pipeline/filesystem';
+import type { Filesystem } from '../../os/interface';
 import type { Config } from '../../src/core/config';
 import { createBakeLoader } from '../../src/asset-pipeline/loader';
 import { openNodeFs } from '../node-fs';

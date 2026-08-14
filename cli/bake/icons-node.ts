@@ -11,7 +11,7 @@
 // with node-canvas's libgio on macOS, so the whole bake stays off node-canvas.
 
 import { Canvas } from 'skia-canvas';
-import type { Filesystem } from '../../src/asset-pipeline/filesystem';
+import type { Filesystem } from '../../os/interface';
 import { createClientResourceLoader } from '../../src/asset-pipeline/loader';
 import { decodeImageNode } from './decode-image-node';
 

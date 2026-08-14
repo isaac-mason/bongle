@@ -19,7 +19,7 @@ import { registerFlushHandler } from '../core/capture/flush';
 import { type Config, serverMaxPlayers } from '../core/config';
 import { createBrowserRaster } from './bake/raster-browser';
 import { createBrowserDecodeAudio } from './decode-audio-browser';
-import type { Filesystem } from './filesystem';
+import type { Filesystem } from '../../os/interface';
 import * as Icons from './icons';
 import { createBakeLoader, createClientResourceLoader } from './loader';
 import * as AssetPipeline from './pipeline';

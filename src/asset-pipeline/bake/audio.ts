@@ -47,7 +47,7 @@
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SoundHandle } from '../../core/sounds/sounds';
-import type { Filesystem } from '../filesystem';
+import type { Filesystem } from '../../../os/interface';
 import type { DecodeAudio } from './decode-audio';
 import { encodeFlacMono } from './flac';
 import { encodeMp3 } from './mp3';

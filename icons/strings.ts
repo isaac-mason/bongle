@@ -6,6 +6,9 @@
 // To add an icon: paste its inner markup here (everything between <svg …> and
 // </svg> from lucide.dev) and add the matching createIcon() line in ./index.
 
+export const activity =
+    '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>';
+
 export const alertCircle =
     '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>';
 

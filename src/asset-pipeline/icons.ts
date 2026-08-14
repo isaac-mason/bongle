@@ -11,7 +11,7 @@
 import { registry } from '../core/registry';
 import type { RenderRoomDeps } from '../client/rooms';
 import { prefabIconRelPath, renderPrefabIcon } from '../client/prefab-icons';
-import type { Filesystem } from './filesystem';
+import type { Filesystem } from '../../os/interface';
 
 export { renderBlockIconAtlas } from '../client/block-icons';
 export type { BlockIconAtlas } from '../client/block-icons';

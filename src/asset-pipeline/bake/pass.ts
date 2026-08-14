@@ -25,7 +25,7 @@ import type { SceneHandle } from '../../core/scene/scene-handle';
 import type { Blocks } from '../../core/voxels/block-registry';
 import type { BlockDef, BlockHandle, BlockTextureDef } from '../../core/voxels/blocks';
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../filesystem';
+import type { Filesystem } from '../../../os/interface';
 import { buildAudio } from './audio';
 import { buildBlockTextureAtlas } from './block-texture-atlas';
 import type { DecodeAudio } from './decode-audio';

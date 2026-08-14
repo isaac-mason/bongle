@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BuildFs } from '../build';
-import type { Filesystem, FilesystemSnapshot, FsStat } from '../src/asset-pipeline/filesystem';
+import type { Filesystem, FilesystemSnapshot, FsStat } from '../os/interface';
 
 export function openNodeFs(root: string): Filesystem & BuildFs {
     const abs = (p: string) => join(root, p);
@@ -77,7 +77,7 @@ export function openNodeFs(root: string): Filesystem & BuildFs {
         },
         // resolve.ts probes directories constantly — a missing dir is a normal
         // "no such candidate", not an error (mirrors OPFS readDir).
-        async readDir(dir) {
+        async readDir(dir = '') {
             const m = new Map<string, 'file' | 'dir'>();
             try {
                 for (const e of readdirSync(abs(dir), { withFileTypes: true })) {

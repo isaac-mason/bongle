@@ -88,6 +88,34 @@
             "source": "./build/index.ts",
             "default": "./build/index.ts"
         },
+        "./os": {
+            "source": "./os/index.ts",
+            "default": "./os/index.ts"
+        },
+        "./os/apps": {
+            "source": "./os/apps/index.ts",
+            "types": "./dist/types/os/apps/index.d.ts",
+            "import": "./dist/os-apps.js",
+            "default": "./dist/os-apps.js"
+        },
+        "./os/apps/client": {
+            "source": "./os/apps/client.ts",
+            "types": "./dist/types/os/apps/client.d.ts",
+            "import": "./dist/os-apps-client.js",
+            "default": "./dist/os-apps-client.js"
+        },
+        "./os/apps/server": {
+            "source": "./os/apps/server.ts",
+            "types": "./dist/types/os/apps/server.d.ts",
+            "import": "./dist/os-apps-server.js",
+            "default": "./dist/os-apps-server.js"
+        },
+        "./os/apps/pipeline": {
+            "source": "./os/apps/pipeline.ts",
+            "types": "./dist/types/os/apps/pipeline.d.ts",
+            "import": "./dist/os-apps-pipeline.js",
+            "default": "./dist/os-apps-pipeline.js"
+        },
         "./icons": {
             "source": "./icons/index.tsx",
             "default": "./icons/index.tsx"
@@ -111,6 +139,7 @@
         "src",
         "cli",
         "build",
+        "os",
         "icons",
         "zstd-wasm",
         "avatar",

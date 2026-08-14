@@ -40,7 +40,7 @@ import {
 } from '../../core/models/model-bin';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../filesystem';
+import type { Filesystem } from '../../../os/interface';
 import { sha256Hex } from './raster';
 
 // ── paths ──────────────────────────────────────────────────────────

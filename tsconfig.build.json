@@ -7,6 +7,6 @@
         "declarationDir": "./dist/types",
         "rootDir": "./"
     },
-    "include": ["./src", "./interface", "./build-ambient.d.ts"],
+    "include": ["./src", "./interface", "./os", "./build-ambient.d.ts"],
     "exclude": ["./dist", "./editor", "./tst", "**/*.bench.ts", "**/*-bench.ts"]
 }

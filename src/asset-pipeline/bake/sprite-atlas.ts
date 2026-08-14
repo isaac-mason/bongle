@@ -17,7 +17,7 @@ import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SpriteAtlasEntry, SpriteAtlasMetadata, SpriteFrameRect } from '../../core/sprites/atlas';
 import type { DrawSource, NormalizedImageSource, SpriteHandle } from '../../core/sprites/sprites';
-import type { Filesystem } from '../filesystem';
+import type { Filesystem } from '../../../os/interface';
 import { readArtifactHash } from './cache';
 import type { BakedDraws } from './draw-textures';
 import type { Raster, RasterCanvas, RasterImage } from './raster';

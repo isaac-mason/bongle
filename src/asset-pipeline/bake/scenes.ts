@@ -20,7 +20,7 @@
 // stay inert until `loadVoxels` decodes them at runtime.
 
 import type { ModuleVersion } from '../../internal';
-import type { Filesystem } from '../filesystem';
+import type { Filesystem } from '../../../os/interface';
 
 const SCENES_DIR = 'content/scenes';
 const SCENE_EXT = '.scene.json';
