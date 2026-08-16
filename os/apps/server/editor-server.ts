@@ -8,7 +8,7 @@
 // game-room composes around the WS transport.
 
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
-import type { Client, Filesystem as ServerFilesystem, JsonValue, ResolvedAvatar, ServerApp, ServerDriver, User } from 'bongle/interface';
+import type { Client, JsonValue, ResolvedAvatar, ServerApp, ServerDriver, User } from 'bongle/interface';
 import { initZstd, zstdCompress } from 'bongle/zstd-wasm';
 import type { Filesystem } from '../../interface';
 
@@ -40,7 +40,7 @@ function createEditorAvatarsDriver(): ServerDriver['avatars'] {
 // resolves, rather than reaching into engine source directly.
 // `bongle/engine-server` wraps its api under `export * as EngineServer` (the
 // runner-imported value the app destructures), so reach into that namespace.
-type EngineServerApi = (typeof import('bongle/engine-server'))['EngineServer'];
+type EngineServerApi = typeof import('bongle/engine-server')['EngineServer'];
 type EngineServerEditorApi = typeof import('bongle/engine-server-editor');
 type ServerState = ReturnType<EngineServerApi['init']>;
 
@@ -57,10 +57,10 @@ export type EditorServer = {
      *  live preview after a Blockbench save rewrites avatar.glb. No-op unless a
      *  localAvatarUrl was set (avatar/game intent with an avatar). */
     reloadAvatar: () => void;
-    /** graceful teardown: flush the final dirty-room save, WAIT for those OPFS
-     *  writes to land, then dispose the engine. Async because persist writes are
-     *  fire-and-forget — a restart reloads from disk, so unflushed bytes would be
-     *  lost if we tore down before they settled. Resolves once disk is current. */
+    /** graceful teardown: dispose (whose final flush enqueues the last dirty-room
+     *  saves onto content-manager's async persist queue), then drain that queue so
+     *  the OPFS writes land before the realm dies — a restart reloads from disk, so
+     *  unflushed bytes would be lost. Resolves once disk is current. */
     stop: () => Promise<void>;
 };
 
@@ -88,49 +88,28 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
     // zstd compressor for the voxel wire codec (client decodes with fzstd).
     await initZstd();
 
-    // in-flight OPFS persist writes. content-manager's persist hook is
-    // fire-and-forget (it never awaits, so the async fs never leaks into the sync
-    // engine), so we track each write here and expose a drain: a graceful stop
-    // flushes then waits for these to land before the realm is torn down.
-    const pendingWrites = new Set<Promise<unknown>>();
-    const track = <T>(p: Promise<T>): Promise<T> => {
-        pendingWrites.add(p);
-        void p.catch(() => {}).finally(() => pendingWrites.delete(p));
-        return p;
-    };
-    const drainWrites = async (): Promise<void> => {
-        while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites]);
-    };
-
-    // the engine issues scene persists (edit mode) via fs.write/remove and reads
-    // scenes + baked resources + the local player's avatar (a file:// edited glb in
-    // OPFS or an http account avatar, both resolved by the engine's loader) via
-    // fs.read. Wrap write/remove so a graceful stop can drain in-flight OPFS writes
-    // before teardown; reads pass through. (Cross-origin http avatar fetches need
-    // CORS on the avatar CDN under the realm's COEP.)
-    // delegate explicitly — NOT `{ ...fs }`, which drops the concrete fs's prototype
-    // methods (list/read live on the class, not as own props). The engine uses only
-    // read/list/write/remove; wrap write/remove so stop() drains in-flight OPFS writes.
-    const trackedFs: ServerFilesystem = {
-        read: (path) => fs.read(path),
-        list: (dir, opts) => fs.list(dir, opts),
-        write: (path, data) => track(fs.write(path, data)),
-        remove: (path) => track(fs.remove(path)),
-    };
-
     // the engine's example avatars (shipped in the package, seeded into the vfs).
     // Held so the avatar picker below can pre-fetch its sample pool.
     const avatars = createEditorAvatarsDriver();
 
+    // the engine issues scene persists (edit mode) via fs.write/remove and reads
+    // scenes + baked resources + the local player's avatar (a file:// edited glb in
+    // OPFS or an http account avatar) via fs.read. Persist completion, ordering, and
+    // errors are owned by content-manager's async queue now — stop() drains it, and
+    // onPersistError surfaces a failed save to the user — so `fs` passes straight
+    // through with no write tracking here. (Cross-origin http avatar fetches need CORS
+    // on the avatar CDN under the realm's COEP.)
     const state = EngineServer.init({
         mode: 'edit',
-        fs: trackedFs,
+        fs,
         zstd: { compress: zstdCompress },
         options: {},
         driver: {
             storage: opts.storage,
             avatars,
         },
+        onPersistError: (op, sceneId, err) =>
+            log(`persist ${op} "${sceneId}" failed, edit not saved to disk: ${err instanceof Error ? err.message : String(err)}`),
     });
 
     // register the editor's server commands BEFORE load (mirrors the client's
@@ -209,12 +188,11 @@ export async function startEditorServer(opts: StartEditorServerOptions): Promise
         reloadAvatar,
         stop: async () => {
             unregister();
-            // dispose runs the final flushDirty, which enqueues the last save via
-            // the engine's (fire-and-forget) fs.write persist — trackedFs captured
-            // those, so drain now waits for the bytes to actually reach OPFS before we
-            // let the realm die and a fresh one reload from disk.
+            // dispose runs the final flushDirty, which enqueues the last saves onto
+            // content-manager's async persist queue; drainPersist then waits for those
+            // bytes to reach OPFS before we let the realm die and a fresh one reloads.
             EngineServer.dispose(state);
-            await drainWrites();
+            await EngineServer.drainPersist(state);
         },
     };
 }
