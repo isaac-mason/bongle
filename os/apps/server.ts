@@ -14,7 +14,9 @@ const server: App = async (env) => {
     const cfg = env.init as EditorSession;
 
     // wait for the pipeline's first bake (src/generated/* exists) before booting.
+    env.progress('waiting for bake');
     await env.connect('pipeline');
+    env.progress('loading');
 
     const fs = env.fs;
     const runner = env.runner;
@@ -77,9 +79,12 @@ const server: App = async (env) => {
             user: meta.user ?? { id: `dev-${meta.pid}`, username: `guest-${meta.pid}` },
             joinData: {},
         };
+        // adapt the OS Channel to the MessagePort shape the transport drives — it
+        // uses postMessage + onmessage + close (the transport's detach closes it).
         const port = {
             postMessage: (data: unknown) => conn.send(data),
             onmessage: null as ((e: { data: unknown }) => void) | null,
+            close: () => conn.close(),
         };
         transport.acceptClient(connectionId, port as unknown as MessagePort, clientMeta);
         void conn.closed.then(() => transport.leaveClient(connectionId));
@@ -88,6 +93,7 @@ const server: App = async (env) => {
     });
 
     env.log('game server up; listening on "game"');
+    env.progress('ready');
 };
 
 export default server;

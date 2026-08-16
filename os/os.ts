@@ -1,10 +1,10 @@
 import { makeChannel } from './channel';
 import type { ToApp, ToOS } from './control';
-import type { AppDef, Channel, ConnMeta, IO, Link, OS, OSSnapshot, RelayFrame, RelayLink, ResolveDef } from './interface';
+import type { AppDef, Channel, ConnMeta, IO, Link, OS, OSSnapshot, PeerFrame, PeerLink, ResolveDef } from './interface';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // createOS — the workspace. Host-agnostic: the switchboard, process table,
-// lifecycle/teardown, relay routing, over the injected `io`. Zero DOM, zero fs
+// lifecycle/teardown, peer routing, over the injected `io`. Zero DOM, zero fs
 // (fs is opened per-app in the host shim). A factory returning a plain OS.
 //
 // Every app is a module: spawn resolves the def, asks the host for a runner
@@ -13,7 +13,7 @@ import type { AppDef, Channel, ConnMeta, IO, Link, OS, OSSnapshot, RelayFrame, R
 // its default export.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Endpoint = number | 'relay' | 'shell';
+type Endpoint = number | 'peer' | 'shell';
 
 type Rec = {
     pid: number;
@@ -27,6 +27,7 @@ type Rec = {
     exited: boolean;
     code: number;
     stopping?: boolean;
+    progress?: unknown;
     onDisposed?: () => void;
     resolveClosed?: () => void;
 };
@@ -72,7 +73,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         for (const cb of observers) cb();
     };
 
-    let relay: RelayLink | undefined;
+    let peer: PeerLink | undefined;
     let remoteNames = new Set<string>();
     const bridges = new Map<number, MessagePort>();
     const connCid = new Map<number, number>();
@@ -107,10 +108,19 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return { k: 'start', ref, init, projectName: opts.projectName, module: def.module, surface };
     }
 
+    // the transferred conduits every start frame carries: the runner, and
+    // (guest OS only) an fsrpc port — else the shim opens the local disk.
+    function startPorts(ref: string, pid: number): MessagePort[] {
+        const ports = [io.openRunner(ref, pid)];
+        const fsPort = io.openFs?.(ref, pid);
+        if (fsPort) ports.push(fsPort);
+        return ports;
+    }
+
     function spawnWorker(ref: string, def: AppDef, init: unknown, pid: number): void {
         const link = io.spawnWorker();
         register(pid, ref, link, false);
-        toApp(link, startFrame(ref, def, init, false), [io.openRunner(ref, pid)]);
+        toApp(link, startFrame(ref, def, init, false), startPorts(ref, pid));
     }
 
     function spawnFrame(ref: string, def: AppDef, init: unknown, pid: number): void {
@@ -120,7 +130,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         const rec = register(pid, ref, link, true);
         rec.resolveClosed = resolveClosed;
         io.mount({ ref, pid, element, closed });
-        toApp(link, startFrame(ref, def, init, true), [io.openRunner(ref, pid)]);
+        toApp(link, startFrame(ref, def, init, true), startPorts(ref, pid));
     }
 
     function register(pid: number, ref: string, link: Link, surface: boolean): Rec {
@@ -165,7 +175,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 break;
             case 'connect': {
                 if (listeners.has(msg.name)) connectPair(msg.name, rec.pid, msg.req);
-                else if (relay && remoteNames.has(msg.name)) openRemote(msg.name, rec, msg.req);
+                else if (peer && remoteNames.has(msg.name)) openRemote(msg.name, rec, msg.req);
                 else {
                     const pid = rec.pid;
                     const req = msg.req;
@@ -205,6 +215,10 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 break;
             case 'stderr':
                 io.stdout(rec.ref, rec.pid, msg.line, true);
+                break;
+            case 'progress':
+                rec.progress = msg.status;
+                notify();
                 break;
             case 'exit':
                 finalize(rec, msg.code ?? 0);
@@ -247,11 +261,11 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         }, 3000);
     }
 
-    // ── remote routing (channels only; fs stays its own lane) ──────────────────
-    function attachRelay(r: RelayLink, names: string[]): void {
-        relay = r;
+    // ── peer routing (channels only; fs stays its own lane) ────────────────────
+    function attachPeer(p: PeerLink, names: string[]): void {
+        peer = p;
         remoteNames = new Set(names);
-        r.onMessage(onRelay);
+        p.onMessage(onPeer);
     }
 
     function openRemote(name: string, connector: Rec, req: number): void {
@@ -260,20 +274,20 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         const ch = new MessageChannel();
         toApp(connector.link, { k: 'channel', req, conn }, [ch.port2]);
         bridge(cid, ch.port1);
-        conns.set(conn, { a: 'relay', b: connector.pid, name });
+        conns.set(conn, { a: 'peer', b: connector.pid, name });
         connCid.set(conn, cid);
         cidConn.set(cid, conn);
         connector.held.add(conn);
-        relay!.send({ t: 'open', cid, name, meta: { ref: connector.ref, pid: connector.pid } });
+        peer!.send({ t: 'open', cid, name, meta: { ref: connector.ref, pid: connector.pid } });
         notify();
     }
 
-    function onRelay(frame: RelayFrame): void {
+    function onPeer(frame: PeerFrame): void {
         switch (frame.t) {
             case 'open': {
                 const lp = listeners.get(frame.name);
                 if (lp == null) {
-                    relay?.send({ t: 'close', cid: frame.cid });
+                    peer?.send({ t: 'close', cid: frame.cid });
                     return;
                 }
                 const listener = procs.get(lp)!;
@@ -281,7 +295,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 const ch = new MessageChannel();
                 toApp(listener.link, { k: 'incoming', name: frame.name, conn, meta: frame.meta }, [ch.port1]);
                 bridge(frame.cid, ch.port2);
-                conns.set(conn, { a: lp, b: 'relay', name: frame.name });
+                conns.set(conn, { a: lp, b: 'peer', name: frame.name });
                 connCid.set(conn, frame.cid);
                 cidConn.set(frame.cid, conn);
                 listener.held.add(conn);
@@ -293,7 +307,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 return;
             case 'close': {
                 const conn = cidConn.get(frame.cid);
-                if (conn !== undefined) closeConn(conn, 'relay');
+                if (conn !== undefined) closeConn(conn, 'peer');
                 return;
             }
         }
@@ -301,7 +315,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
 
     function bridge(cid: number, port: MessagePort): void {
         bridges.set(cid, port);
-        port.onmessage = (e) => relay!.send({ t: 'data', cid, data: e.data });
+        port.onmessage = (e) => peer!.send({ t: 'data', cid, data: e.data });
     }
 
     // ── teardown ────────────────────────────────────────────────────────────
@@ -311,14 +325,14 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         conns.delete(conn);
         const cid = connCid.get(conn);
         if (cid !== undefined) {
-            if (by !== 'relay') relay?.send({ t: 'close', cid });
+            if (by !== 'peer') peer?.send({ t: 'close', cid });
             bridges.get(cid)?.close();
             bridges.delete(cid);
             connCid.delete(conn);
             cidConn.delete(cid);
         }
         for (const ep of [e.a, e.b]) {
-            if (ep === by || ep === 'relay') continue;
+            if (ep === by || ep === 'peer') continue;
             if (ep === 'shell') {
                 const c = shellChans.get(conn);
                 shellChans.delete(conn);
@@ -415,6 +429,11 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         });
     }
 
+    function stdin(pid: number, data: string | Uint8Array): void {
+        const rec = procs.get(pid);
+        if (rec && !rec.exited) toApp(rec.link, { k: 'stdin', data });
+    }
+
     function kill(pid: number): void {
         const rec = procs.get(pid);
         if (rec) stop(rec, 0);
@@ -430,6 +449,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 state: r.stopping ? ('stopping' as const) : ('running' as const),
                 serves: [...r.listens],
                 surface: r.surface,
+                progress: r.progress,
             })),
             conns: [...conns.values()].map((c) => ({ name: c.name, from: c.b, to: c.a })),
             pending: [...waiters].map(([name, arr]) => ({ name, count: arr.length })),
@@ -441,5 +461,5 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return () => observers.delete(cb);
     }
 
-    return { spawn, run, connect: connectShell, served, wait, kill, attachRelay, inspect, onChange };
+    return { spawn, run, connect: connectShell, served, wait, stdin, kill, attachPeer, inspect, onChange };
 }

@@ -46,8 +46,10 @@ const pipeline: App = async (env) => {
         bakeTimer = setTimeout(() => void EditPipeline.run(session, { forceAll: true }), 150);
     });
 
+    env.progress('baking assets');
     await EditPipeline.run(session); // the first bake, awaited (bake-then-run)
     env.log('pipeline: initial bake done');
+    env.progress('ready');
 
     // readiness + config: "pipeline" is served only now (post-bake); each
     // connector receives the current report, then updates on every bake.

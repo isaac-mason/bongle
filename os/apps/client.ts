@@ -1,38 +1,72 @@
 import { RIG_TYPE_6BONE } from 'bongle/avatar';
 import type { ClientDriver, ClientUser, ResolvedAvatar } from 'bongle/interface';
 import { createNetSim } from '../../build/dev/net-sim';
-import type { App, Channel, EditorSession, Filesystem } from '../interface';
+import { exposeDevtools } from '../devtools';
+import type { App, EditorSession, Filesystem, Runner } from '../interface';
 
-// The client app. A WINDOWED app: it runs in its own iframe, reads the disk,
-// evals the engine through the runner, boots EngineClient in edit mode, joins
-// "game", and renders. Its init is the host's EditorSession; deriving the
-// ClientUser (avatar resolution) is engine knowledge and lives here.
+// The edit-mode client — ONE implementation of "render the game in an editable
+// preview", used two ways:
+//   - the OS `client` app (default export below): host preview, caps from `env`.
+//   - the guest preview iframe (apps/editor/realms/client): caps from its relay
+//     ports — it imports `bootEditClient` from here.
+// Everything real lives in `bootEditClient`; the two entries only differ in how
+// they obtain fs / runner / the game transport, which is exactly the caps.
 //
-// Engine RUNTIME is reached only via env.runner.import (env flags must be set
-// before engine modules evaluate); statics are leaf utilities bundled into this
-// entry at engine build.
+// Engine RUNTIME is reached only via runner.import (env flags must be set before
+// engine modules evaluate); statics are leaf utilities bundled at engine build.
 
-const client: App = async (env) => {
-    const root = env.surface!.root; // this iframe's document.body
-    const fs = env.fs;
+const toU8 = (d: unknown): Uint8Array => (d instanceof ArrayBuffer ? new Uint8Array(d) : (d as Uint8Array));
 
+/** the host-varying capabilities the client boot needs. */
+export type ClientBootCaps = {
+    /** the project disk (host: OPFS; guest: remote-fs over the relay). */
+    fs: Filesystem;
+    /** the module runner (host: local substrate; guest: bridged to the host). */
+    runner: Runner;
+    /** where to render + inject styles + paint a boot-error card. */
+    surface: HTMLElement;
+    /** the account user the local player wears. */
+    user: ClientUser;
+    /** the game entry module (project-root-relative); default 'src/index.ts'. */
+    entry?: string;
+    /** open the game transport: register the inbound handler, get `send` back.
+     *  host = env.connect('game'); guest = the transferred game port. */
+    connectGame: (onReceive: (bytes: Uint8Array) => void) => Promise<{ send: (bytes: Uint8Array) => void }>;
+    log: (...parts: unknown[]) => void;
+    err: (...parts: unknown[]) => void;
+    /** structured boot status for the task manager (host + guest debugging). */
+    progress: (status: unknown) => void;
+    /** register graceful teardown (release WebGPU). Absent where teardown is a
+     *  frame reload (the guest). */
+    onDispose?: (fn: () => void) => void;
+};
+
+/** Boot EngineClient in edit mode against the given capabilities, wire the game
+ *  transport + the debug net-sim, run the frame loop, and refresh on fs edits. */
+export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
+    const { fs, runner, surface, user, log, err, progress } = caps;
     try {
-        // the engine UI stylesheet (prebundled tailwind), injected into this iframe.
+        // the client's own surface aesthetic (a black canvas backdrop) — the host
+        // frame stays app-agnostic, so the app dresses its own surface.
+        surface.style.background = '#000';
+
+        // the engine UI stylesheet (prebundled tailwind), injected into this frame.
         try {
             const style = document.createElement('style');
             style.textContent = await fs.readText('node_modules/bongle/dist/bongle.css');
             document.head.appendChild(style);
-        } catch (err) {
-            console.warn('[client] engine stylesheet missing', err);
+        } catch (styleErr) {
+            console.warn('[client] engine stylesheet missing', styleErr);
         }
 
-        const cfg = env.init as EditorSession;
-        const runner = env.runner;
+        // env flags BEFORE user code / engine eval — compile-time replaceEnv covers
+        // literal reads; runtime/destructured reads fall through to env.js defaults.
+        progress('loading engine');
         const { env: rt } = await runner.import('bongle/env');
         rt.client = true;
         rt.server = false;
         rt.editor = true;
-        await runner.import(cfg.entry ?? 'src/index.ts');
+        await runner.import(caps.entry ?? 'src/index.ts');
         await runner.import('src/generated/models.ts');
         await runner.import('src/generated/scenes.ts');
         const { EngineClient } = await runner.import('bongle/engine-client');
@@ -41,24 +75,28 @@ const client: App = async (env) => {
         const driver: ClientDriver = {
             matchmake() {},
             platform: { commercialBreak: async () => {}, rewardedBreak: async () => false },
-            user: sessionUser(cfg), // the real account user (the local player wears this avatar)
+            user,
         };
 
         const state = EngineClient.init({
             mode: 'edit',
             driver,
             resourceLoader: clientResourceLoader(fs),
-            domElement: root,
+            domElement: surface,
         });
 
+        progress('booting');
         await EngineClientEditor.setup(state, { sceneSource: fsSceneSource(fs) });
         await EngineClient.load(state);
         EngineClientEditor.watchRegistry(state);
+        caps.onDispose?.(() => EngineClient.dispose(state));
 
-        // graceful teardown: release WebGPU / drop the DOM.
-        env.onDispose(() => EngineClient.dispose(state));
+        // DevTools automation surface for this client realm: `bongle` in the frame's
+        // console context.
+        exposeDevtools('client', { fs, state, client: EngineClient, editor: EngineClientEditor, runner });
 
-        // debug-pane latency sim between the game channel and the engine in/out box.
+        // debug-pane latency sim between the game transport and the engine in/out box.
+        let game: { send: (bytes: Uint8Array) => void } = { send: () => {} };
         const netSim = createNetSim<Uint8Array, Uint8Array>(
             () => {
                 const s = EngineClientEditor.useEditor.getState();
@@ -76,13 +114,12 @@ const client: App = async (env) => {
             },
         );
 
-        // join the sim; a crashed/absent server surfaces an error instead of hanging.
-        const toU8 = (d: unknown) => (d instanceof ArrayBuffer ? new Uint8Array(d) : (d as Uint8Array));
-        const game: Channel = await env.connect('game', (data) => netSim.receive(toU8(data), performance.now()), {
-            signal: AbortSignal.timeout(10_000),
-        });
+        // wire receive first, then take `send` — so a snapshot sent at join-time
+        // isn't dropped before the handler exists.
+        progress('joining game');
+        game = await caps.connectGame((bytes) => netSim.receive(bytes, performance.now()));
 
-        // frame loop: advance, drain the outbox onto the game channel.
+        // frame loop: advance, drain the outbox onto the game transport.
         let last = performance.now();
         const frame = (now: number) => {
             const dt = (now - last) / 1000;
@@ -95,6 +132,7 @@ const client: App = async (env) => {
             requestAnimationFrame(frame);
         };
         requestAnimationFrame(frame);
+        progress('live');
 
         // react to fs edits: re-read the matching scene / baked resource. The change
         // KIND matters (a deleted path isn't a refresh).
@@ -110,20 +148,42 @@ const client: App = async (env) => {
             else if (path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
             else EngineClient.refreshBlockResources(state).catch(console.error);
         };
-        env.fs.watch((changes) => {
+        fs.watch((changes) => {
             for (const c of changes) if (c.type !== 'deleted') applyFsChange(c.path);
         });
 
-        env.log('client realm booted');
-    } catch (err) {
-        const message = (err as Error).message;
-        env.err('client boot failed:', message);
-        showBootError(root, message);
+        log('client realm booted');
+    } catch (bootErr) {
+        const message = (bootErr as Error).message;
+        err('client boot failed:', message);
+        showBootError(surface, message);
     }
+}
+
+// ── the OS client app: caps from `env` ──────────────────────────────────────
+const client: App = async (env) => {
+    const session = env.init as EditorSession;
+    await bootEditClient({
+        fs: env.fs,
+        runner: env.runner,
+        surface: env.surface!.root,
+        user: sessionUser(session),
+        entry: session.entry,
+        // join the sim; a crashed/absent server surfaces an error instead of hanging.
+        connectGame: async (onReceive) => {
+            const chan = await env.connect('game', (data) => onReceive(toU8(data)), { signal: AbortSignal.timeout(10_000) });
+            return { send: (bytes) => chan.send(bytes) };
+        },
+        log: (...p) => env.log(...p),
+        err: (...p) => env.err(...p),
+        progress: (status) => env.progress(status),
+        onDispose: (fn) => env.onDispose(fn),
+    });
 };
 
-/** the account user the local play-preview joins as. */
-function sessionUser(session: EditorSession): ClientUser {
+/** the account user the local play-preview joins as (avatar resolution — engine
+ *  knowledge, so it lives with the client). */
+export function sessionUser(session: EditorSession): ClientUser {
     const avatar: ResolvedAvatar = session.avatarUrl
         ? {
               source: 'runtime',

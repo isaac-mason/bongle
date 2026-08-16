@@ -99,10 +99,17 @@ export type Env = {
     readonly surface?: Surface;
     log(...parts: unknown[]): void;
     err(...parts: unknown[]): void;
+    /** emit a STRUCTURED status (distinct from log lines) — a boot phase today,
+     *  richer later. The host reflects it (task manager / a phase chip); the OS
+     *  keeps the latest on the process (see ProcInfo.progress). */
+    progress(status: unknown): void;
+    /** receive stdin written to this process by the operator (OS.stdin). An app
+     *  that never calls this simply never reads stdin. */
+    onStdin(cb: (data: string | Uint8Array) => void): void;
 };
 
 /** who dialed: app ref + pid, plus a user when the shell dials on behalf of
- *  an identified party (a relay guest joining 'game'). */
+ *  an identified party (a peer guest joining 'game'). */
 export type ConnMeta = { ref: string; pid: number; user?: { id: string; username: string } };
 
 export type Channel = { send(data: unknown): void; close(): void; readonly closed: Promise<void> };
@@ -124,9 +131,11 @@ export type ProcInfo = {
     state: 'running' | 'stopping';
     serves: string[];
     surface: boolean;
+    /** the latest structured status the process emitted via env.progress. */
+    progress?: unknown;
 };
 
-export type ConnEndpoint = number | 'shell' | 'relay';
+export type ConnEndpoint = number | 'shell' | 'peer';
 
 export type OSSnapshot = {
     procs: ProcInfo[];
@@ -147,8 +156,13 @@ export type OS = {
     served(name: string): Promise<void>;
     /** exit code; resolves immediately for an already-exited pid (127 = unknown app). */
     wait(pid: number): Promise<number>;
+    /** write stdin to a process (delivered to its env.onStdin). No-op if the pid
+     *  is gone. */
+    stdin(pid: number, data: string | Uint8Array): void;
     kill(pid: number): void;
-    attachRelay(relay: RelayLink, remoteNames: string[]): void;
+    /** attach a peer OS; local connects to `remoteNames` route out to it, and its
+     *  inbound opens reach local listeners (with the dialer's identity). */
+    attachPeer(peer: PeerLink, remoteNames: string[]): void;
     inspect(): OSSnapshot;
     /** coarse change stream; re-inspect on fire. Returns the unsubscriber. */
     onChange(cb: () => void): () => void;
@@ -169,6 +183,10 @@ export type IO = {
     /** a runner conduit keyed to this process's module graph, transferred in
      *  the start message. */
     openRunner(ref: string, pid: number): MessagePort;
+    /** an fsrpc conduit for this process's disk, or null to open the local
+     *  project disk in the shim. A guest OS returns a port served from the
+     *  host's fs (over the relay); a local OS returns null (OPFS in-shim). */
+    openFs?(ref: string, pid: number): MessagePort | null;
     mount(win: Window): void;
     stdout(ref: string, pid: number, line: string, isErr: boolean): void;
 };
@@ -182,14 +200,15 @@ export type Link = {
     close(): void;
 };
 
-/** a byte pipe to another machine. Only channels route over it — fs stays its
- *  own lane (fsrpc). */
-export type RelayFrame =
+/** a byte pipe to a peer OS (implemented over a relay, a MessagePort, …). Only
+ *  channels route over it — fs stays its own lane (fsrpc). The OS names the peer,
+ *  not the transport. */
+export type PeerFrame =
     | { t: 'open'; cid: number; name: string; meta: ConnMeta }
     | { t: 'data'; cid: number; data: unknown }
     | { t: 'close'; cid: number };
 
-export type RelayLink = {
-    send(frame: RelayFrame): void;
-    onMessage(cb: (frame: RelayFrame) => void): void;
+export type PeerLink = {
+    send(frame: PeerFrame): void;
+    onMessage(cb: (frame: PeerFrame) => void): void;
 };

@@ -24,6 +24,7 @@ export async function runApp(
     const channels = new Map<number, Channel>();
     const shutdown = new AbortController();
     const disposers = new Set<() => void | Promise<void>>();
+    let onStdin: ((data: string | Uint8Array) => void) | undefined;
 
     /** post a typed app → OS frame (a typo'd frame won't compile). */
     const send = (frame: ToOS, transfer?: Transferable[]): void => link.post(frame, transfer);
@@ -47,6 +48,9 @@ export async function runApp(
                 c?.close();
                 return;
             }
+            case 'stdin':
+                onStdin?.(msg.data);
+                return;
             case 'dispose':
                 shutdown.abort(); // cancel in-flight work
                 void (async () => {
@@ -134,6 +138,10 @@ export async function runApp(
         surface: surface ? ({ root: document.body } as Surface) : undefined,
         log: (...parts) => send({ k: 'stdout', line: parts.join(' ') }),
         err: (...parts) => send({ k: 'stderr', line: parts.join(' ') }),
+        progress: (status) => send({ k: 'progress', status }),
+        onStdin: (cb) => {
+            onStdin = cb;
+        },
     };
 
     try {

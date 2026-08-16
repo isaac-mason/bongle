@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { App, AppDefs, ConnMeta, Filesystem, IO, Runner } from '../../../os';
-import { createOS, messagePortRelay, portLink, runApp } from '../../../os';
+import { createOS, messagePortPeer, portLink, runApp } from '../../../os';
 
 const stubFs = {} as Filesystem;
 const stubRunner: Runner = { import: () => Promise.reject(new Error('no runner in unit tests')) };
@@ -215,6 +215,24 @@ describe('createOS + runApp', () => {
         expect(os.inspect().conns.some((c) => c.name === 'echo')).toBe(false);
     });
 
+    it('surfaces env.progress on the proc snapshot and delivers stdin via OS.stdin', async () => {
+        let got: (string | Uint8Array) | null = null;
+        let pid = 0;
+        const { os } = testOS({
+            worker: async (env) => {
+                env.progress('phase-1');
+                env.onStdin((data) => {
+                    got = data;
+                });
+                env.listen('worker', () => () => {}); // stay alive
+            },
+        });
+        pid = os.spawn('worker');
+        await until(() => os.inspect().procs.some((p) => p.ref === 'worker' && p.progress === 'phase-1'), 'progress');
+        os.stdin(pid, 'hello');
+        await until(() => got === 'hello', 'stdin delivered');
+    });
+
     it('routes connects across two OS instances over a relay, and close propagates', async () => {
         let hostConnected = false;
         const host = testOS({
@@ -236,8 +254,8 @@ describe('createOS + runApp', () => {
             },
         });
         const pipe = new MessageChannel();
-        host.os.attachRelay(messagePortRelay(pipe.port1), []);
-        guest.os.attachRelay(messagePortRelay(pipe.port2), ['game']);
+        host.os.attachPeer(messagePortPeer(pipe.port1), []);
+        guest.os.attachPeer(messagePortPeer(pipe.port2), ['game']);
         host.os.spawn('svc');
         (await host.os.connect('game')).close(); // parks until the host svc serves
         expect(await guest.os.run('dialer')).toBe(0);

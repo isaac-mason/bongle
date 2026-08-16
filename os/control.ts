@@ -22,6 +22,7 @@ export type ToApp =
     | { k: 'closed'; conn: number }
     | { k: 'spawned'; req: number; pid: number }
     | { k: 'exited'; req: number; code: number }
+    | { k: 'stdin'; data: string | Uint8Array }
     | { k: 'dispose' };
 
 /** app → OS. */
@@ -37,4 +38,5 @@ export type ToOS =
     | { k: 'disposed' }
     | { k: 'stdout'; line: string }
     | { k: 'stderr'; line: string }
+    | { k: 'progress'; status: unknown }
     | { k: 'exit'; code: number };
