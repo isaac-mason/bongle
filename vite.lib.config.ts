@@ -57,6 +57,7 @@ export default defineConfig({
                 // editor's runner from the seeded vfs. Engine RUNTIME stays
                 // dynamic (runner.import) inside them; only leaf utilities bundle.
                 'os-apps': entry('os/apps/index.ts'),
+                'os-apps-boot': entry('os/apps/boot.ts'),
                 'os-apps-client': entry('os/apps/client.ts'),
                 'os-apps-server': entry('os/apps/server.ts'),
                 'os-apps-pipeline': entry('os/apps/pipeline.ts'),

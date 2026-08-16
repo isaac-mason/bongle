@@ -98,6 +98,12 @@
             "import": "./dist/os-apps.js",
             "default": "./dist/os-apps.js"
         },
+        "./os/apps/boot": {
+            "source": "./os/apps/boot.ts",
+            "types": "./dist/types/os/apps/boot.d.ts",
+            "import": "./dist/os-apps-boot.js",
+            "default": "./dist/os-apps-boot.js"
+        },
         "./os/apps/client": {
             "source": "./os/apps/client.ts",
             "types": "./dist/types/os/apps/client.d.ts",
