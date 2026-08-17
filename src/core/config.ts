@@ -7,7 +7,7 @@
  *   - config({ server: false })               — client-only, no server.
  *   - config({ server: { maxPlayers: N } })   — client+server multiplayer.
  * omitting `server` (or config() entirely) defaults to DEFAULT_CONFIG
- * (multiplayer, maxPlayers 10), preserving the pre-existing platform behavior.
+ * (multiplayer, maxPlayers 32), preserving the pre-existing platform behavior.
  *
  * three consumers read the config:
  *   1. the engine itself (engine-server), refuses onClientJoin past the cap.
@@ -37,7 +37,7 @@ export const HARD_MAX_PLAYERS_PER_ROOM = 32;
 
 /** default per-room player cap for a server game that doesn't specify one
  *  (and for a game that omits config() entirely). */
-export const DEFAULT_MAX_PLAYERS = 10;
+export const DEFAULT_MAX_PLAYERS = 32;
 
 /**
  * per-game config. a single axis, `server`:
