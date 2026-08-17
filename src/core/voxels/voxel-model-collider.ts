@@ -11,7 +11,7 @@
 // collision and visuals.
 
 import * as crashcat from 'crashcat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { AIR, MISSING } from './block-registry';
 import type { VoxelModel } from './voxel-model';
 import { CHUNK_SIZE, type Voxels, voxelIndex } from './voxels';

@@ -23,7 +23,7 @@ import type { PlayerId } from '../core/client';
 import { BUILTIN_BASE_AVATAR_ID } from '../core/player/base-avatar';
 import * as Resources from '../core/resources';
 import type { ClientState } from './clients';
-import type { EngineServer } from './engine-server';
+import type { EngineServer } from './server';
 import type { Player, Room } from './rooms';
 
 /**

@@ -1,4 +1,4 @@
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { describe, expect, it } from 'vitest';
 import * as nav from '../../../src/core/nav';
 

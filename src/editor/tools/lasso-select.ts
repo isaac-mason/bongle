@@ -15,7 +15,7 @@
 // `Object.is` comparisons in selectors detect the change.
 
 import type { PerspectiveCamera } from 'gpucat';
-import { mat4, type Vec3, vec3 } from 'mathcat';
+import { mat4, type Vec3, vec3 } from 'math';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import { TransformTrait } from '../../builtins/transform';
 import type { Input } from '../../client/input';

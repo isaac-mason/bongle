@@ -25,7 +25,7 @@ import {
     VoxelModel,
 } from 'bongle';
 import * as crashcat from 'crashcat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 
 // The `model` scene is authored in the editor: drop blocks into it and they
 // become the rigid body's voxel model. Loaded on both sides so client and

@@ -23,8 +23,8 @@
 
 import type { RigidBody } from 'crashcat';
 import { rigidBody } from 'crashcat';
-import type { Quat, Spherical, Vec3 } from 'mathcat';
-import { degreesToRadians, quat, vec2, vec3 } from 'mathcat';
+import type { Quat, Spherical, Vec3 } from 'math';
+import { degreesToRadians, quat, vec2, vec3 } from 'math';
 import { pack } from '../api/pack';
 import { COLLISION_GROUP_CHARACTERS, exceptGroups, type Physics } from '../api/physics';
 import { getTrait } from '../api/scene-tree';
@@ -236,7 +236,7 @@ type CharacterControllerInput = {
     /** look direction as [r, theta, phi] spherical. theta = yaw around +Y
      *  (drives wish direction); phi = polar from +Y, π/2 = horizon (drives
      *  camera pitch + head/neck visuals). r is unused, Spherical is reused
-     *  so this can pass through mathcat's spherical helpers unchanged. */
+     *  so this can pass through math's spherical helpers unchanged. */
     look: Spherical;
     /** [strafe, forward] in [-1, 1]. */
     move: ReturnType<typeof vec2.create>;

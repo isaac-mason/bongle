@@ -13,7 +13,7 @@
 import * as api from 'bongle';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import * as Editor from './editor/index';
-import type { EngineServer } from './server/engine-server';
+import type { EngineServer } from './server/server';
 import { applyRegistryChanges } from './server/registry-dispatch';
 
 export async function setup(state: EngineServer): Promise<void> {

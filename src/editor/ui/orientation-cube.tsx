@@ -313,7 +313,7 @@ function drawCube(
     };
     const drawn: Drawn[] = [];
     for (const f of FACES) {
-        // OpenGL view space: camera at origin looking down -Z (gpucat / mathcat
+        // OpenGL view space: camera at origin looking down -Z (gpucat / math
         // convention). a2,a5,a8 are the view-matrix back-axis row, so view-nz
         // = dot(camera_back, world_normal). a face is camera-facing when its
         // outward normal aligns with camera_back → nz > 0.

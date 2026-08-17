@@ -13,7 +13,7 @@
  * request/exit on right-button press/release).
  */
 
-import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { env } from '../env';
 import { isKeyDown, isMouseDragStart, isMouseJustUp } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';

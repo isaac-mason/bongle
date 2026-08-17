@@ -28,8 +28,8 @@ import {
     type Scene,
     vec4f,
 } from 'gpucat';
-import type { Mat4, Quat, Vec3 } from 'mathcat';
-import { degreesToRadians, mat4, quat, vec3 } from 'mathcat';
+import type { Mat4, Quat, Vec3 } from 'math';
+import { degreesToRadians, mat4, quat, vec3 } from 'math';
 import { drone as flyIcon, footprints as walkIcon } from '../../icons/strings';
 import {
     addCrosshair,

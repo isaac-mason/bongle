@@ -1,24 +1,25 @@
 import { type PerspectiveCamera, Scene } from 'gpucat';
-import { mat4, quat } from 'mathcat';
+import { mat4, quat } from 'math';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
 import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';
 import { addPlayerTraits } from '../builtins/player-node';
 import { setWorldPosition, setWorldQuaternion, TransformTrait } from '../builtins/transform';
 import { attachWorldTrait } from '../builtins/world';
+import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { PlayerId } from '../core/client';
 import * as Clock from '../core/clock';
 import * as Debug from '../core/debug';
 import * as Physics from '../core/physics/physics';
+import type * as Protocol from '../core/protocol';
 import type { PlayerMode, RoomInfo, RoomMode } from '../core/protocol';
 import { type InboundProtocol, registry } from '../core/registry';
-import { acquireAvatarModel, assignAvatar } from '../core/avatar/model';
 import type { Resources } from '../core/resources';
 import * as Animation from '../core/scene/animation';
-import { unpackSceneTree } from '../core/scene/scene-pack';
+import { applySceneSyncUpdate, unpackSceneTree } from '../core/scene/scene-pack';
 import * as SceneTree from '../core/scene/scene-tree';
-import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import type { ClientContext, EditRoomState, RenderScenes, SceneTreeContext } from '../core/scene/scripts';
+import { fireJoinHooks, fireLeaveHooks } from '../core/scene/scripts';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClipboardHandlers } from '../editor/clipboard';
 import type { EditRoomStoreApi } from '../editor/edit-room-store';
@@ -40,7 +41,7 @@ import * as VoxelVisuals from '../render/voxels/voxel-visuals';
 import * as Audio from './audio/audio';
 import type { ChatClient } from './chat';
 import * as Chat from './chat';
-import type { EngineClient } from './engine-client';
+import type { EngineClient } from './client';
 import * as ClientEnv from './environment';
 import * as Input from './input';
 import * as Net from './net';
@@ -1158,4 +1159,90 @@ export function syncJoinedPlayers(state: Rooms): void {
     store.setJoinedPlayers(players);
     store.setAllRooms(rooms);
     store.setRoomViews(buildRoomViews(state.rooms.values()));
+}
+
+export function applyJoinRoom(state: EngineClient, message: Protocol.JoinRoom): void {
+    if (message.roomId.startsWith(LOCAL_ROOM_PREFIX)) {
+        console.error(
+            `[bongle] applyJoinRoom: rejecting server room id '${message.roomId}': '${LOCAL_ROOM_PREFIX}' prefix is reserved for client-only rooms`,
+        );
+        return;
+    }
+
+    // resync path: same player + room shell already exists (server re-sent
+    // join_room for an already-joined player). repopulate the scene graph in
+    // place and re-fire onInit, keeping activePlayerId, viewport, and meshes.
+    const existing = state.rooms.rooms.get(message.playerId);
+    if (existing && existing.roomId === message.roomId) {
+        resyncRoom(existing, message, state.inbound);
+        applyClientStreamRadius(existing, state.perf.profile);
+        SceneTree.initSceneTree(existing.scene);
+        syncJoinedPlayers(state.rooms);
+        return;
+    }
+
+    const room = createRoom({
+        message,
+        net: state.net,
+        rpc: state.rpc,
+        resources: state.resources,
+        audioResources: state.audioResources,
+        inbound: state.inbound,
+    });
+    applyClientStreamRadius(room, state.perf.profile);
+    mountRoomViewport(room);
+
+    // populate ctx.client.state/.room before onInit hooks (which may read them),
+    // then attach the world trait and fire onInit via initSceneTree.
+    if (room.context.client) {
+        room.context.client.state = state;
+        room.context.client.room = room;
+    }
+    attachWorldTrait(room.scene.root);
+    SceneTree.initSceneTree(room.scene);
+
+    if (existing) disposeRoom(existing);
+
+    // additive: does NOT auto-activate. the server sends a follow-up
+    // activate_room when this view should become the focused tab.
+    state.rooms.rooms.set(message.playerId, room);
+    useClient.getState().setRoom(message.playerId, room);
+    syncJoinedPlayers(state.rooms);
+}
+
+export function applyRoomLeft(state: EngineClient, message: Protocol.RoomLeft): void {
+    const leaving = state.rooms.rooms.get(message.playerId);
+    if (leaving) disposeRoom(leaving);
+
+    state.rooms.rooms.delete(message.playerId);
+    useClient.getState().removeRoom(message.playerId);
+    syncJoinedPlayers(state.rooms);
+
+    if (state.rooms.activePlayerId !== message.playerId) return;
+
+    // the active view left: fall back to any edit-mode view we still hold.
+    let fallback: ClientRoom | null = null;
+    for (const room of state.rooms.rooms.values()) {
+        if (room.playerMode === 'edit') {
+            fallback = room;
+            break;
+        }
+    }
+    if (fallback) {
+        setActivePlayer(state.rooms, state.net, fallback.playerId);
+    } else {
+        state.rooms.activePlayerId = null;
+        useClient.getState().setActivePlayerId(null);
+    }
+}
+
+export function applySceneSync(state: EngineClient, message: Protocol.SceneSync): void {
+    const room = state.rooms.rooms.get(message.playerId);
+    if (!room) return;
+    for (const update of message.updates) {
+        applySceneSyncUpdate(room.scene, room.context, update, state.inbound);
+    }
+    if (room.playerId === state.rooms.activePlayerId) {
+        room.editorStore?.getState().markDirty();
+    }
 }

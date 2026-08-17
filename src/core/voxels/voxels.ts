@@ -1,4 +1,4 @@
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { SetBlockFlags } from './block-flags';
 import type { BlockObserverEntry } from './block-hooks';
 import { runBlockEvents, runBlockHooks } from './block-hooks';

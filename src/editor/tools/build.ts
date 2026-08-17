@@ -18,7 +18,7 @@
 // each break/place is a single undoable action.
 
 import type { PerspectiveCamera } from 'gpucat';
-import type { Quat, Vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'math';
 import type { Input } from '../../client/input';
 import { isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ScriptContext } from '../../core/scene/scripts';

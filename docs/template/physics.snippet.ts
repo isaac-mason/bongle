@@ -27,7 +27,7 @@ import {
     trait,
 } from 'bongle';
 import { box, rigidBody } from 'crashcat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 
 /* SNIPPET_START: drop-body */
 // a dynamic body is a node with a RigidBodyTrait. assign its `def` to build one.

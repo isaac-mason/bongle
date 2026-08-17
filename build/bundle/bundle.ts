@@ -57,9 +57,13 @@ export default client({
         env.client = true; env.server = false; env.editor = false;
         return EngineClient.init({ mode: 'play', driver, resourceLoader: browserResourceLoader, domElement: document.body });
     },
-    // a standalone (client-only) build self-boots its local room here; multiplayer
-    // builds no-op and boot from the server's join_room. See startStandaloneRoomIfConfigured.
-    load: async (state) => { EngineClient.mountPlayUI(state.domElement); await EngineClient.load(state); EngineClient.startStandaloneRoomIfConfigured(state); },
+    load: async (state) => {
+        EngineClient.mountPlayUI(state.domElement);
+        await EngineClient.load(state);
+        // a standalone (client-only) build self-boots its local room; a multiplayer
+        // build boots from the server's join_room instead.
+        if (EngineClient.isStandaloneBuild()) EngineClient.startStandaloneRoom(state);
+    },
     update: (state, dt) => EngineClient.update(state, dt),
     dispose: (state) => EngineClient.dispose(state),
     getInbox: (state) => state.net.inbox,

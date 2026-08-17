@@ -18,7 +18,7 @@
 
 import type { Camera, Material, NonIndexedMeshDraw } from 'gpucat';
 import { BufferLifecycle, d, Geometry, GpuBuffer, packTo } from 'gpucat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
 import { buildMeshInput, type ChunkMeshResult, type MeshOutput, meshChunk, type PassMesh } from '../../core/voxels/chunk-mesher';

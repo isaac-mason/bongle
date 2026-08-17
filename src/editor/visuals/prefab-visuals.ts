@@ -9,7 +9,7 @@
 //
 // usage: import * as PrefabVisuals from './prefab-visuals'
 
-import { type Quat, quat } from 'mathcat';
+import { type Quat, quat } from 'math';
 import { markTransformDirty, TransformTrait } from '../../builtins/transform';
 import { VoxelMeshTrait, VoxelModel } from '../../builtins/voxel-mesh';
 import { registry as kindRegistry } from '../../core/registry';

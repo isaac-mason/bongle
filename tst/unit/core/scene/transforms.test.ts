@@ -1,4 +1,4 @@
-import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { registry, reindexRegistry } from '../../../../src/core/registry';
 import {

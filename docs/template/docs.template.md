@@ -410,14 +410,14 @@ across a reload, register `onSwap` with a serialize and deserialize pair.
 
 ## Math
 
-bongle's math types come from [mathcat](https://github.com/isaac-mason/mathcat), a
+bongle's math types come from [math](https://www.npmjs.com/package/math), a
 small linear-algebra library. Vectors, matrices, and quaternions are plain numeric
 tuples, so a `Vec3` is just `[x, y, z]`, and the operations live in namespaces you
-import from `mathcat`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
+import from `math`: `vec2`, `vec3`, `vec4`, `mat3`, `mat4`, and `quat`.
 
 The API is gl-matrix style, so if you know gl-matrix you already know it: an
 operation takes its output target first and writes into it, avoiding allocation, as
-in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `mathcat` whenever you
+in `vec3.add(out, a, b)` or `vec3.normalize(out, v)`. Reach for `math` whenever you
 do vector math yourself, such as steering, aiming, or camera work.
 
 That output-first shape is built for **scratch buffers**: allocate a few reusable

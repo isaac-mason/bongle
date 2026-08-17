@@ -14,8 +14,8 @@
  * only meaningful client-side.
  */
 
-import type { Mat4, Quat, Vec3 } from 'mathcat';
-import { mat4, quat, vec3 } from 'mathcat';
+import type { Mat4, Quat, Vec3 } from 'math';
+import { mat4, quat, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';

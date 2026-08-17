@@ -21,7 +21,7 @@
 // playback is `fps`-driven and loops; single-frame sprites ignore
 // `fps` (parallel to `SpriteTrait`).
 
-import type { Vec4 } from 'mathcat';
+import type { Vec4 } from 'math';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
 import type { ExtrudedSpriteVisualState } from '../render/sprites/extruded-sprite-visuals';

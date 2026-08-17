@@ -14,8 +14,7 @@
 // voxel-resources-gpu, imported only by render/webgpu/*.
 
 import { BufferLifecycle, type Camera, DrawIndirect, d, frustum, GpuBuffer, layoutStrideOf, struct } from 'gpucat';
-import { type Box3, plane3 } from 'mathcat/shapes';
-import * as Performance from '../../client/performance';
+import { type Box3, plane3 } from 'math/shapes';
 import { QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import { CHUNK_SIZE, CHUNK_VOLUME, type Chunk } from '../../core/voxels/voxels';
 import { createOffsetAllocator, type OffsetAllocator, oaAllocate, oaFree, oaStorageReport } from '../offset-allocator';
@@ -413,14 +412,5 @@ export type VoxelArenaBudget = {
     maxAllocs: number;
 };
 
-export function voxelArenaBudgetForTier(profile: Performance.Profile): VoxelArenaBudget {
-    const s = Performance.settingsForTier(profile);
-    const cap = Math.floor(profile.limits.maxArenaBytes * 0.25);
-    const desired = s.voxelArenaDesiredMB * 1024 * 1024;
-    const total = Math.min(desired, cap);
-    return {
-        quadArenaBytes: total,
-        maxSections: s.voxelMaxSections,
-        maxAllocs: s.voxelArenaMaxAllocs,
-    };
-}
+// voxelArenaBudgetForTier lives in client/performance (tier -> budget is a
+// performance concern); this module owns only the VoxelArenaBudget shape.

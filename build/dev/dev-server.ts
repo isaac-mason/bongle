@@ -126,7 +126,7 @@ const isEngine = (spec: string) => spec === 'bongle' || spec.startsWith('bongle/
 
 // A DEP that externalizes = a node builtin only. Everything else a transformed
 // module imports resolves in the vfs: relative + root-relative from fs, `bongle*`
-// from the prebundled dist, and bare first-party libs (mathcat/gpucat/…) from
+// from the prebundled dist, and bare first-party libs (math/gpucat/…) from
 // their seeded node_modules package. Third-party npm is bundled INTO bongle, so
 // it never appears as a bare dep here. A residual bare miss still externalizes
 // via fetchModule's read-failure path.

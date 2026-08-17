@@ -9,7 +9,7 @@
 // consumers (VoxelMeshVisuals) cache derived geometry keyed by VoxelModel
 // identity and assume the data is immutable.
 
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { AIR, MISSING } from './block-registry';
 import { CHUNK_SIZE, type Chunk, type Voxels, voxelIndex } from './voxels';
 

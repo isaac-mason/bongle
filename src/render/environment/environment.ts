@@ -26,7 +26,7 @@
  */
 
 import * as gpu from 'gpucat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import {
     buildConfigObject,
     buildSkyValue,

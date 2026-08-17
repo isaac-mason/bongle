@@ -1,5 +1,5 @@
-import type { Vec2, Vec3 } from 'mathcat';
-import { mulberry32 } from 'mathcat/random';
+import type { Vec2, Vec3 } from 'math';
+import { mulberry32 } from 'math/random';
 import { recordBlock, recordBlockTexture } from '../capture/module-scope';
 import { particleUpdate } from '../particles/particle-update';
 import { type ParticleHandle, particle } from '../particles/particles';

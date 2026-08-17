@@ -8,7 +8,7 @@
 // glow, unlit, litMin, and dither are client-only per-instance rendering
 // params, same as MeshTrait.
 
-import type { Vec4 } from 'mathcat';
+import type { Vec4 } from 'math';
 import { type TraitType, trait } from '../core/scene/traits';
 import { VoxelModel } from '../core/voxels/voxel-model';
 import type { Voxels } from '../core/voxels/voxels';

@@ -36,7 +36,7 @@ export type BongleDevConfigOptions = {
 };
 
 /** bongle + engine + workspace deps shared as ONE module instance per env. */
-const SHARED = ['bongle', /^@bongle\//, 'gpucat', 'mathcat', 'packcat', 'crashcat'];
+const SHARED = ['bongle', /^@bongle\//, 'gpucat', 'math', 'packcat', 'crashcat'];
 
 export function defineBongleDevConfig(opts: BongleDevConfigOptions): UserConfig {
     const { projectDir, rootDir, port, engineReboot } = opts;
@@ -93,9 +93,9 @@ export function defineBongleDevConfig(opts: BongleDevConfigOptions): UserConfig 
                 toGlob(path.join(projectDir, 'src/**/*.{ts,tsx}')),
                 `!${toGlob(path.join(BONGLE_ROOT, 'src/**/*.{test,bench}.{ts,tsx}'))}`,
             ],
-            // mathcat's subpath exports (shapes/random) must be excluded too —
-            // optimizeDeps.exclude is exact-string, a bare 'mathcat' doesn't cover them.
-            exclude: ['bongle', 'bongle/engine-client', 'bongle/internal', 'bongle/env', 'gpucat', 'mathcat', 'mathcat/shapes', 'mathcat/random', 'packcat', 'crashcat'],
+            // math's subpath exports (shapes/random) must be excluded too —
+            // optimizeDeps.exclude is exact-string, a bare 'math' doesn't cover them.
+            exclude: ['bongle', 'bongle/engine-client', 'bongle/internal', 'bongle/env', 'gpucat', 'math', 'math/shapes', 'math/random', 'packcat', 'crashcat'],
         },
         environments: {
             client: {},

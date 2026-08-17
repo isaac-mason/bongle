@@ -7,7 +7,7 @@
 //   - meshes by compound id { modelId, meshName } (Unity GUID+fileID, Unreal path+sub-name)
 //   - clips by ClipDef ref identity (three.js style, sidecar exports refs, animator keys by identity)
 
-import type { Box3 } from 'mathcat/shapes';
+import type { Box3 } from 'math/shapes';
 import type { Node } from '../scene/scene-tree';
 
 /**
@@ -115,7 +115,7 @@ export type ModelHandle<
      * root. Static (computed at codegen). Use for spawn/framing/coarse colliders;
      * animation can push verts outside this box at runtime.
      *
-     * mathcat `Box3`: `[minX, minY, minZ, maxX, maxY, maxZ]`. Empty handle:
+     * math `Box3`: `[minX, minY, minZ, maxX, maxY, maxZ]`. Empty handle:
      * zero box at origin.
      */
     readonly aabb: Box3;
@@ -128,7 +128,7 @@ export type ModelHandle<
     /**
      * Flat-name index for mesh-surgery: `meshTrait.meshId = wizard.meshes.HatA.id`.
      * Each entry also carries the mesh's bind-pose local-space AABB
-     * (mathcat `Box3`), handy for mesh-level framing or coarse colliders
+     * (math `Box3`), handy for mesh-level framing or coarse colliders
      * without paying for the runtime payload fetch.
      */
     readonly meshes: { readonly [K in MeshNames]: { readonly id: MeshId; readonly aabb: Box3 } };

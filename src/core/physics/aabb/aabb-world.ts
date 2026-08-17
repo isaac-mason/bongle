@@ -13,7 +13,7 @@
 // here. the dependency runs one way: body → world → broadphase.
 
 import * as crashcat from 'crashcat';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/aabb-body';
 import { TransformTrait } from '../../../builtins/transform';
 import type { SceneTree } from '../../scene/scene-tree';

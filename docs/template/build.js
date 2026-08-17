@@ -23,7 +23,7 @@
 //       these files are a typechecked workspace package (see package.json /
 //       tsconfig.json) so a stale snippet fails `pnpm -C lib docs`.
 //
-// forked from ~/Development/mathcat/docs/build.js, extended for bongle's
+// forked from ~/Development/math/docs/build.js, extended for bongle's
 // flat re-export barrel (api/* and builtins/* re-export from core/builtins,
 // so exported names must be resolved to their real declarations).
 

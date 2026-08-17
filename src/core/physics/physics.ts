@@ -1,5 +1,5 @@
 import { type BodyId, rigidBody } from 'crashcat';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 import { AabbBodyTrait } from '../../builtins/aabb-body';
 import { ContactsTrait } from '../../builtins/contacts';
 import { setInterpolation } from '../../builtins/transform';

@@ -15,13 +15,22 @@ import { registry } from '../core/registry';
 import * as SceneTree from '../core/scene/scene-tree';
 import { type SavedVoxels, saveVoxelsIncremental, seedVoxelSaveCache } from '../core/voxels/voxel-savefile';
 import * as ContentManager from './content-manager';
-import type { EngineServer } from './engine-server';
 import * as Rooms from './rooms';
+import type { EngineServer } from './server';
 
 /** how often dirty edit rooms auto-flush to disk. dirty-gated + incremental, so
  *  a clean editor (and all of play mode) never flushes, this only bounds the
  *  unsaved-edit loss window. */
 const AUTOSAVE_INTERVAL_S = 3;
+
+export type State = {
+    /** seconds accumulated since the last interval auto-flush. */
+    since: number;
+};
+
+export function init(): State {
+    return { since: 0 };
+}
 
 /** serialize + persist one edit room to disk; returns whether the file changed.
  *  voxels serialize incrementally, only chunks whose data version moved since
@@ -63,9 +72,9 @@ export function flushDirty(state: EngineServer): void {
  *  flushes dirty edit rooms every AUTOSAVE_INTERVAL_S, clean and play rooms are
  *  skipped, so an idle or playing server never touches disk. */
 export function tick(state: EngineServer, delta: number): void {
-    state.flushSince += delta;
-    if (state.flushSince < AUTOSAVE_INTERVAL_S) return;
-    state.flushSince = 0;
+    state.save.since += delta;
+    if (state.save.since < AUTOSAVE_INTERVAL_S) return;
+    state.save.since = 0;
     Debug.begin(state.metrics, 'save');
     flushDirty(state);
     Debug.end(state.metrics, 'save');

@@ -13,7 +13,7 @@
 
 import * as api from 'bongle';
 import { applyRegistryChanges } from './client/registry-dispatch';
-import type { EngineClient } from './client/engine-client';
+import type { EngineClient } from './client/client';
 import { registerFlushHandler, requestFlush } from './core/capture/flush';
 import { type SceneSource, setSceneSource } from './editor/blueprints';
 import * as Editor from './editor/index';

@@ -26,8 +26,8 @@
 // worker fails fast on the same things and never emits them in the
 // first place, so engine-side throws should be rare in practice.
 
-import { mat4 } from 'mathcat';
-import type { Box3 } from 'mathcat/shapes';
+import { mat4 } from 'math';
+import type { Box3 } from 'math/shapes';
 import type { Model, ModelChannel, ModelClip, ModelImage, ModelMesh, ModelNode } from './model';
 
 /* ── glb framing ── */

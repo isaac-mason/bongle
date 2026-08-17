@@ -60,7 +60,7 @@ import {
     workgroupId,
 } from 'gpucat';
 import type { ComputeNode } from 'gpucat/dist/nodes/nodes';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import type { Resources } from '../../core/resources';
 import type { Blocks } from '../../core/voxels/block-registry';
 import {

@@ -35,7 +35,7 @@
  * client-only: interpolation is a rendering-smoothing concern.
  */
 
-import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Mat4, mat4, type Quat, quat, type Vec3, vec3 } from 'math';
 import { RigidBodyTrait } from '../../builtins/rigid-body';
 import {
     ensureRemoteInterpolation,

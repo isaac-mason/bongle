@@ -9,7 +9,7 @@
  * built from `create`/`destroy` + the verbs below.
  */
 import * as crashcat from 'crashcat';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 import type { AabbBodyTrait as AabbBodyTraitInstance } from '../../../builtins/aabb-body';
 import type { TransformTrait } from '../../../builtins/transform';
 import { getWorldPosition, hasTransformedParent, markTransformDirty, worldToLocalPosition } from '../../../builtins/transform';

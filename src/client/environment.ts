@@ -10,7 +10,7 @@
 // `_config` / `_sky` are the CPU shadows in the shape the renderer's env UBOs
 // consume (plain numbers, no GPU types); the renderer pushes them on dirty.
 
-import type { Vec2 } from 'mathcat';
+import type { Vec2 } from 'math';
 import type { EnvironmentConfig, SkyPreset, SkyStop } from '../api/environment';
 
 /** number of sky LUT stops (zenith/horizon/nadir each), padded to this. */

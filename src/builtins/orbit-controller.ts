@@ -16,7 +16,7 @@
  * attach to open with a specific view.
  */
 
-import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'mathcat';
+import { mat4, quat, type Spherical, spherical, type Vec3, vec3 } from 'math';
 import { env } from '../env';
 import { getCanvasTouches, getPinchDelta, isMouseDown, isMouseJustDown, isMouseJustUp, isPointerCapturedByUi } from '../api/input';
 import { setPointerLock } from '../api/pointer-lock';

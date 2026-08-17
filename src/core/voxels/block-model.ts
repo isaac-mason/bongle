@@ -1,4 +1,4 @@
-import type { Vec2, Vec3 } from 'mathcat';
+import type { Vec2, Vec3 } from 'math';
 import type { BlockQuad, CubeTextures, MaterialType, TextureRef } from './blocks';
 
 type CullFace = BlockQuad['cullFace'];

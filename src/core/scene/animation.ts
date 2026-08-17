@@ -1,4 +1,4 @@
-import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { AnimatorTrait } from '../../builtins/animator';
 import { MeshTrait } from '../../builtins/mesh';
 import { ModelTrait } from '../../builtins/model';

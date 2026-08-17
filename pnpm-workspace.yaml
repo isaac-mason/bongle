@@ -10,6 +10,7 @@ minimumReleaseAgeExclude:
   - '@bongle/*'
   - vite
   - '@rolldown/*'
+  - math
 
 onlyBuiltDependencies:
   - '@ffmpeg-installer/*'

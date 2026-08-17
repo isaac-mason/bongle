@@ -14,8 +14,8 @@
 //
 // no client imports, safe to use in core/ and server/ contexts.
 
-import type { Quat, Vec3 } from 'mathcat';
-import { vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'math';
+import { vec3 } from 'math';
 import type { RotAxis } from './block-orient';
 import type { Blocks } from './block-registry';
 import { rotateBlockKey } from './block-transform';

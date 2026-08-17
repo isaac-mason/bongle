@@ -2,7 +2,7 @@ import { MaterialCombineMode, MotionQuality, MotionType, type RigidBody } from '
 
 export { MaterialCombineMode, MotionQuality, MotionType } from 'crashcat';
 
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 import { TRANSFORM_SEND_HZ } from '../core/clock';
 import { pack } from '../api/pack';
 import { prop, propToPack } from '../api/prop';

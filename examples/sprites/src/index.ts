@@ -41,7 +41,7 @@ import {
     trait,
 } from 'bongle';
 import { blocks, particlePresets, sprites } from 'bongle/kit';
-import { quat } from 'mathcat';
+import { quat } from 'math';
 
 config({ server: { maxPlayers: 1 } });
 

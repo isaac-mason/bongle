@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { CharacterControllerTrait, env, type TraitType, TransformTrait } from 'bongle';
-import * as EngineClientModule from '../../src/client/engine-client';
+import * as EngineClientModule from '../../src/client/client';
 import * as ClientNet from '../../src/client/net';
 import type * as ClientRooms from '../../src/client/rooms';
 import { registry } from '../../src/core/registry';
@@ -38,7 +38,7 @@ import { BUILTIN_BASE_AVATAR_ID } from '../../src/core/player/base-avatar';
 import { createFallbackAvatarsDriver } from '../../src/node/sample-avatars-driver';
 import { openNodeFs } from '../../cli/node-fs';
 import { nodeZstd } from '../../src/node/zstd';
-import * as EngineServerModule from '../../src/server/engine-server';
+import * as EngineServerModule from '../../src/server/server';
 import * as Rooms from '../../src/server/rooms';
 import { createInMemoryStorageDriver } from '../../src/server/storage-in-memory';
 

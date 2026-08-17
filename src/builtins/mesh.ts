@@ -8,7 +8,7 @@
 // visual fields (tint/light/glow) are client-only, set by user scripts,
 // not synced, not editor-editable, not persisted.
 
-import { type Vec4, vec4 } from 'mathcat';
+import { type Vec4, vec4 } from 'math';
 import type { MeshId } from '../core/models/handle';
 import { pack } from '../core/scene/pack';
 import { prop } from '../core/scene/prop';

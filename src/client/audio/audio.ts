@@ -128,7 +128,7 @@ function makeResources(context: AudioContext, clips: Map<string, ResolvedClip>, 
 
 /** Mute/unmute all engine audio at the output bus, ramping (to avoid clicks)
  *  only on a real change. Called every frame from the client update loop,
- *  reconciling against `state.adActive`, muting during a portal ad is built-in,
+ *  reconciling against `state.ads.active`, muting during a portal ad is built-in,
  *  no game code involved. */
 export function setOutputMuted(resources: AudioResources, muted: boolean): void {
     if (resources.muted === muted) return;

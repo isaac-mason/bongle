@@ -8,7 +8,7 @@
 // voxel hits still use the DDA voxel raycast.
 
 import { CastRayStatus, createAllCastRayCollector, createDefaultCastRaySettings, castRay as queryCastRay } from 'crashcat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import type { Physics } from '../core/physics/physics';
 import type { Node, SceneTree } from '../core/scene/scene-tree';
 import { getNodeById } from '../core/scene/scene-tree';

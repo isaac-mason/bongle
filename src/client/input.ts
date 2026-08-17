@@ -455,7 +455,7 @@ export function consumeTouchButtonLookDrag(t: TouchInput): { dx: number; dy: num
  * isn't the canvas's ancestor, so they never reach here — automatic separation between
  * canvas-touch gestures and HUD touches. Installed once by the client; returns a disposer.
  */
-export function installCanvasTouchListeners(canvas: HTMLCanvasElement, manager: InputManager): () => void {
+export function installCanvasTouchListeners(canvas: HTMLCanvasElement, manager: InputManager): void {
     const sampleVelocity = (touch: CanvasTouch, now: number): boolean => {
         const s = touch._recentSamples;
         const cutoff = now - SWIPE_SAMPLE_WINDOW_MS;
@@ -564,7 +564,7 @@ export function installCanvasTouchListeners(canvas: HTMLCanvasElement, manager: 
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onCancel);
 
-    return () => {
+    manager._disposeCanvasTouch = () => {
         canvas.removeEventListener('pointerdown', onDown);
         canvas.removeEventListener('pointermove', onMove);
         canvas.removeEventListener('pointerup', onUp);
@@ -642,6 +642,9 @@ export type InputManager = {
         pointerdown: (e: PointerEvent) => void;
         pointerlockerror: () => void;
     };
+    /** teardown for the shared canvas' touch listeners, set by
+     *  installCanvasTouchListeners and run in disposeInputManager. */
+    _disposeCanvasTouch: (() => void) | null;
 };
 
 export function createInputManager(): InputManager {
@@ -653,6 +656,7 @@ export function createInputManager(): InputManager {
         _lockEl: typeof document === 'undefined' ? null : document.documentElement,
         _focused: typeof document === 'undefined' ? true : document.hasFocus(),
         _handlers: null as any,
+        _disposeCanvasTouch: null,
     };
 
     const handlers = {
@@ -894,6 +898,8 @@ export function disposeInputManager(m: InputManager): void {
     window.removeEventListener('blur', h.blur);
     window.removeEventListener('pointerdown', h.pointerdown, { capture: true } as EventListenerOptions);
     document.removeEventListener('pointerlockerror', h.pointerlockerror);
+    m._disposeCanvasTouch?.();
+    m._disposeCanvasTouch = null;
     m.target = null;
 }
 

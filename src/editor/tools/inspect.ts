@@ -7,7 +7,7 @@
 //   - inspect bounding box mesh update
 
 import { type PerspectiveCamera, unproject } from 'gpucat';
-import { vec3 } from 'mathcat';
+import { vec3 } from 'math';
 import { TransformTrait } from '../../builtins/transform';
 import { getCanvasTouches, isKeyDown, isKeyJustDown, isMouseJustDown, isMouseTap } from '../../client/input';
 import type { ClientRoom } from '../../client/rooms';

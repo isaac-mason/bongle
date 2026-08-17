@@ -40,8 +40,8 @@ import {
     transformed,
     type World,
 } from 'crashcat';
-import type { Quat, Vec3 } from 'mathcat';
-import { vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'math';
+import { vec3 } from 'math';
 import type { SweepResult } from '../../physics/aabb/aabb-sweep';
 import { createVoxelSweepHit, sweepAabbVsVoxels, type VoxelSweepHit } from '../../voxels/voxel-aabb-sweep';
 import type { Voxels } from '../../voxels/voxels';

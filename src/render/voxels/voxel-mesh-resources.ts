@@ -53,7 +53,7 @@ import {
     vec4f,
     vertexIndex,
 } from 'gpucat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { QUAD_LIGHT_OFFSET, QUAD_STRIDE_U32S } from '../../core/voxels/chunk-mesher';
 import type { VoxelModel } from '../../core/voxels/voxel-model';
 import { shadeTinted } from '../dsl/shade';

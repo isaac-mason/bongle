@@ -33,7 +33,7 @@
 //     overhead elsewhere we haven't isolated.
 //   - Each A/B delta is a direct $-figure win/loss for that refactor.
 
-import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { bench, describe } from 'vitest';
 import { composeWorldMatrix, TransformTrait } from '../../../../src/builtins/transform';
 import type { ClipChannel } from '../../../../src/core/models/handle';

@@ -31,7 +31,7 @@ import {
     TransformTrait,
 } from 'bongle';
 import { blockSoundPresets, blockTextures } from 'bongle/kit';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 
 /* SNIPPET_START: launch */
 // launching a character is just writing its velocity. this is THE knob for launch

@@ -1,7 +1,7 @@
 // editor/camera.ts, camera math helpers and focus-node utility.
 
-import { mat4, type Quat, quat, type Vec3 } from 'mathcat';
-import { box3 } from 'mathcat/shapes';
+import { mat4, type Quat, quat, type Vec3 } from 'math';
+import { box3 } from 'math/shapes';
 import { getVisualWorldMatrix, getVisualWorldPosition, setWorldPosition, setWorldQuaternion } from '../api/transforms';
 import { MeshTrait } from '../builtins/mesh';
 import { TransformTrait } from '../builtins/transform';

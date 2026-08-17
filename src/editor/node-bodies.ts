@@ -22,8 +22,8 @@
 // a bidirectional map: bodyId ↔ nodeId.
 
 import { type BodyId, type BoxShape, box, type Filter, filter as filterMod, MotionType, rigidBody } from 'crashcat';
-import { type Mat4, mat4, type Vec3 } from 'mathcat';
-import { type Box3, box3 } from 'mathcat/shapes';
+import { type Mat4, mat4, type Vec3 } from 'math';
+import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../api/transforms';
 import { CameraTrait } from '../builtins/camera';
 import { PlayerTrait } from '../builtins/player';

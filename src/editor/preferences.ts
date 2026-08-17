@@ -9,7 +9,7 @@
  * add a new pref by putting its key + load/save pair in this file.
  */
 
-import type { EulerOrder } from 'mathcat';
+import type { EulerOrder } from 'math';
 import { emptyHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
 
 // ── low-level helpers ────────────────────────────────────────────────

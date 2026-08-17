@@ -10,7 +10,7 @@
 // consumer evicts, and eviction is reactive (driven by the consumer). The scheduling
 // state is held on `VoxelVisuals`, which structurally satisfies `VoxelAoiState`.
 
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { CHUNK_SIZE, type Chunk, chunkKey, NEIGHBOR_COUNT, type Voxels } from '../../core/voxels/voxels';
 import { isInFlight, type Mesher, queueMesh } from './mesher';
 import { hasNoVisibleSurface } from './voxel-arena';

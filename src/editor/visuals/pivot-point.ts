@@ -5,7 +5,7 @@
 // hidden when no selection / not in transform mode.
 
 import { createSphereGeometry, Material, Mesh, positionClip, type Scene, vec4f } from 'gpucat';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { PIVOT_DOT } from './editor-colors';
 
 // ── material (shared, created once) ─────────────────────────────────

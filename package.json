@@ -190,7 +190,7 @@
         "gatho": "github:isaac-mason/gatho",
         "gpucat": "github:isaac-mason/gpucat#main",
         "magic-string": "^0.30.21",
-        "mathcat": "github:isaac-mason/mathcat#dev",
+        "math": "canary",
         "mediabunny": "^1.50.8",
         "meshoptimizer": "^0.25.0",
         "monaco-editor": "^0.55.1",

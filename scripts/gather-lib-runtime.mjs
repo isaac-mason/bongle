@@ -1,11 +1,11 @@
 // scripts/gather-lib-runtime.mjs — assemble the RUNTIME copies of the
-// first-party github libs the prebundle externalizes (mathcat/gpucat/crashcat/
+// first-party github libs the prebundle externalizes (math/gpucat/crashcat/
 // packcat), so the editor can seed them into the vfs as real node_modules
 // packages. The runtime counterpart of gather-lib-types.mjs: that copies their
 // .d.ts for Monaco; this copies their built dist + package.json for eval.
 //
 // bongle's prebundle imports these by bare specifier (external); the dev-server
-// resolves `mathcat` → node_modules/mathcat via package.json `main`/`exports`
+// resolves `math` → node_modules/math via package.json `main`/`exports`
 // and the runner evaluates the shared, deduped package (not a copy baked into
 // each bongle chunk).
 
@@ -17,9 +17,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VENDOR = join(ROOT, 'vendor');
 
-// closed set (same as gather-lib-types): mathcat/packcat/dashcat have no deps,
-// gpucat→mathcat, crashcat→mathcat. All ship built dist ESM.
-const LIBS = ['mathcat', 'gpucat', 'crashcat', 'packcat', 'dashcat'];
+// closed set (same as gather-lib-types): math/packcat/dashcat have no deps,
+// gpucat→math, crashcat→math. All ship built dist ESM.
+const LIBS = ['math', 'gpucat', 'crashcat', 'packcat', 'dashcat'];
 
 /** package root dir for a bare name — walk up from its resolved main entry to
  *  the package.json that names it (exports maps often omit ./package.json). */

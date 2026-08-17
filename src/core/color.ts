@@ -4,7 +4,7 @@
 // hex/byte values (sky LUT stops, hardcoded billboard tints, ...) must
 // be decoded to linear at authoring time so it lives in the same space.
 
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 
 /** IEC 61966-2-1 sRGB transfer, byte input (0..255) → linear float (0..1). */
 export function srgbByteToLinear(c: number): number {

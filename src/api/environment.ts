@@ -3,7 +3,7 @@
 // `setTime` is the hot path (one f32 write), `setEnvironment` shallow-
 // merges into the config buffer.
 
-import type { Vec2, Vec3 } from 'mathcat';
+import type { Vec2, Vec3 } from 'math';
 import * as ClientEnvironment from '../client/environment';
 import { srgbBytesToLinear } from '../core/color';
 import type { ScriptContext } from '../core/scene/scripts';

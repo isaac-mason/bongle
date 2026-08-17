@@ -16,7 +16,7 @@
 // lifetime → no `'stretch'`, no natural `'once'` trigger), so the only
 // sensible behaviour is loop. Single-frame sprites ignore `fps`.
 
-import type { Vec4 } from 'mathcat';
+import type { Vec4 } from 'math';
 import { type TraitType, trait } from '../core/scene/traits';
 import type { SpriteHandle } from '../core/sprites/sprites';
 import type { SpriteVisualState } from '../render/sprites/sprite-visuals';

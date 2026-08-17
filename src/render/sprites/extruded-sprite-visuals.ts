@@ -40,8 +40,8 @@
 // ExtrudedSpriteVisuals, re-init's first frame re-acquires lazily.
 
 import { packTo, type Scene } from 'gpucat';
-import type { Mat4 } from 'mathcat';
-import { box3 } from 'mathcat/shapes';
+import type { Mat4 } from 'math';
+import { box3 } from 'math/shapes';
 import { ExtrudedSpriteMeshTrait } from '../../builtins/extruded-sprite';
 import { getVisualWorldMatrix, TransformTrait } from '../../builtins/transform';
 import { getTrait, query, type SceneTree } from '../../core/scene/scene-tree';

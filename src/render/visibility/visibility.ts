@@ -17,7 +17,7 @@
 // frustum callback maps straight back with no sparse leaf-indexed arrays.
 
 import { type Camera, type Frustum, frustum } from 'gpucat';
-import { type Box3, box3 } from 'mathcat/shapes';
+import { type Box3, box3 } from 'math/shapes';
 import { getVisualWorldMatrix } from '../../api/transforms';
 import type { TransformTrait } from '../../builtins/transform';
 import * as dbvt from './dbvt';

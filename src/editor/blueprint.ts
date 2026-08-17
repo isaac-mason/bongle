@@ -10,7 +10,7 @@
 //
 // usage: import * as Blueprint from './blueprint'
 
-import type { Quat, Vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'math';
 import { TransformTrait } from '../builtins/transform';
 import type { ScenePayload } from '../core/content/scene-store';
 import { registry as kindRegistry } from '../core/registry';

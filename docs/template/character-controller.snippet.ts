@@ -3,7 +3,7 @@
 // live in recipe-launch-pad.snippet.ts.)
 
 import { CharacterControllerTrait, getTrait, type Node, setPosition, TransformTrait } from 'bongle';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 
 /* SNIPPET_START: respawn */
 // respawn: teleport the feet and zero velocity so accumulated fall speed doesn't

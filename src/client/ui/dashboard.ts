@@ -13,7 +13,7 @@
 // dashcat's own ticker samples the monitors.
 
 import { type Container, type Dashboard, dashboard, type LogEntry } from 'dashcat';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 import { CharacterControllerTrait } from '../../builtins/character-controller';
 import { getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
 import * as Debug from '../../core/debug';

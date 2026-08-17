@@ -15,7 +15,7 @@ import {
     trait,
 } from 'bongle';
 import { models } from 'bongle/kit';
-import { quat } from 'mathcat';
+import { quat } from 'math';
 
 config({ server: { maxPlayers: 4 } });
 

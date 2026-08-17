@@ -7,10 +7,12 @@ import * as Clock from '../core/clock';
 import * as Content from '../core/content';
 import { createLogs, createMetrics, type Logs, type Metrics } from '../core/debug';
 import * as Physics from '../core/physics/physics';
+import type * as Protocol from '../core/protocol';
 import type { PlayerMode, RoomMode } from '../core/protocol';
 import { registry } from '../core/registry';
 import type * as Resources from '../core/resources';
 import * as Animation from '../core/scene/animation';
+import { DEFAULT_SCENE_ID } from '../core/scene/scene-handle';
 import {
     addChild,
     addTrait,
@@ -18,6 +20,8 @@ import {
     createNode,
     createSceneTree,
     destroyNode,
+    generateUuid,
+    getNodeById,
     hasTrait,
     loadSceneTree,
     type Node,
@@ -37,8 +41,9 @@ import type { ChatServer } from './chat';
 import * as Chat from './chat';
 import * as ContentManager from './content-manager';
 import * as Discovery from './discovery';
-import type { EngineServer } from './engine-server';
+import * as Net from './net';
 import * as Save from './save';
+import type { EngineServer } from './server';
 
 /* ── Errors ─────────────────────────────────────────────────────── */
 
@@ -225,11 +230,7 @@ export function init(): Rooms {
  * `setNamespaceOptions` to overwrite). Called by `createRoom` so
  * every room is paired with a registered namespace.
  */
-export function getOrCreateNamespace(
-    state: Rooms,
-    id: string,
-    options?: Record<string, string | number | boolean>,
-): Namespace {
+export function getOrCreateNamespace(state: Rooms, id: string, options?: Record<string, string | number | boolean>): Namespace {
     const existing = state.namespaces.get(id);
     if (existing) return existing;
     const ns: Namespace = { id, options: options ?? {} };
@@ -786,14 +787,7 @@ export function addClientToRoom(
     Avatars.enqueuePlayer(state, room, player);
     const avatarMs = performance.now() - avatarT0;
     const joinHooksT0 = performance.now();
-    Scripts.fireJoinHooks(
-        room.context,
-        client,
-        user,
-        joinData ?? {},
-        playerNode,
-        Avatars.clientAvatarIdentity(clientState),
-    );
+    Scripts.fireJoinHooks(room.context, client, user, joinData ?? {}, playerNode, Avatars.clientAvatarIdentity(clientState));
     const joinHooksMs = performance.now() - joinHooksT0;
     Chat.broadcast(room.chat, {
         from: 'system',
@@ -1076,4 +1070,100 @@ export function destroyPlayerNode(room: Room, playerId: PlayerId): void {
     if (!node) return;
     room.playerNodes.delete(playerId);
     destroyNode(room.scene, node);
+}
+
+/**
+ * Handle a `play` message. Dual-purpose: the editor "Play" button (mints a fresh
+ * `play-<uuid>` namespace each press) and game `client.matchmake({options})`
+ * (keys the namespace on canonicalJson(options) so same-opts callers converge).
+ * Finds-or-creates the room, drops any prior play membership elsewhere, joins,
+ * and activates.
+ */
+export function joinPlay(state: EngineServer, client: Client, message: Protocol.Play): void {
+    const sceneId = message.sceneId ?? DEFAULT_SCENE_ID;
+    const t0 = performance.now();
+
+    let namespace: string;
+    let joinData: Record<string, JsonValue> = {};
+    if (message.options) {
+        const options = JSON.parse(message.options) as Record<string, string | number | boolean>;
+        namespace = canonicalJson(options);
+        getOrCreateNamespace(state.rooms, namespace, options);
+        if (message.joinData) joinData = JSON.parse(message.joinData) as Record<string, JsonValue>;
+    } else {
+        namespace = `play-${generateUuid()}`;
+        getOrCreateNamespace(state.rooms, namespace, {});
+    }
+
+    let room = findRoomByNamespace(state.rooms, namespace);
+    const createT0 = performance.now();
+    let createdRoom = false;
+    if (!room) {
+        room = createRoomInNamespace(state, sceneId, 'play', namespace, message.sourceRoomId);
+        createdRoom = true;
+    }
+    const createMs = performance.now() - createT0;
+
+    // drop any prior play-mode membership in a different room so a re-entry
+    // doesn't accumulate Players.
+    const prior = findPlayer(state.rooms, client, room.id, 'play');
+    if (!prior) {
+        for (const p of getPlayersForClient(state.rooms, client)) {
+            if (p.mode === 'play' && p.roomId !== room.id) leaveClientFromRoom(state, p.id);
+        }
+    }
+
+    const joinT0 = performance.now();
+    const player = addClientToRoom(state, client, room, 'play', joinData);
+    const joinMs = performance.now() - joinT0;
+    Net.send(state.net, client, { type: 'activate_room', playerId: player.id });
+    const totalMs = performance.now() - t0;
+    console.log(
+        `[room-start] play sceneId=${sceneId} created=${createdRoom} ` +
+            `create=${createMs.toFixed(1)}ms join=${joinMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
+    );
+}
+
+/**
+ * Apply an owner client's `sync_update`: validate the sender owns the target
+ * node in the named room, resolve the trait by the client's wire index, then
+ * hand the fields to Discovery (which updates the diff snapshot + client
+ * knowledge). Drops silently on any ownership / resolution mismatch.
+ */
+export function applyOwnerSync(
+    state: EngineServer,
+    client: Client,
+    message: Extract<Protocol.ClientMessage, { type: 'sync_update' }>,
+): void {
+    const room = getRoom(state.rooms, message.roomId);
+    if (!room) return;
+
+    const node = getNodeById(room.scene, message.nodeId);
+    if (!node || node.owner === null) return;
+    const ownerPlayer = state.rooms.players.get(node.owner);
+    if (!ownerPlayer || ownerPlayer.client !== client || ownerPlayer.roomId !== room.id) return;
+
+    const cs = state.clients.connected.get(client);
+    if (!cs) return;
+    const traitId = cs.inbound.traits.indexToId[message.traitNetIndex];
+    if (traitId === undefined) return;
+    const def = registry.traits.byId.get(traitId);
+    if (!def) return;
+
+    const instance = node._traits.get(def.slot);
+    if (!instance) return;
+
+    Discovery.acceptOwnerFields(
+        state.discovery,
+        state.rooms,
+        room.id,
+        client,
+        room.scene,
+        node,
+        def,
+        instance,
+        message.fields,
+        room.mode,
+        cs.inbound.syncRemap.get(traitId),
+    );
 }

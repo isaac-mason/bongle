@@ -18,6 +18,7 @@
 //   const s = settingsForTier(profile);       // read tier knobs here
 
 import type { RenderDeviceCaps } from '../render/backend';
+import type { VoxelArenaBudget } from '../render/voxels/voxel-arena';
 
 const TIER_ORDER = ['low', 'standard'] as const;
 export type Tier = (typeof TIER_ORDER)[number];
@@ -96,6 +97,16 @@ const SETTINGS_BY_TIER: Record<Tier, Settings> = {
 
 export function settingsForTier(profile: Profile): Settings {
     return SETTINGS_BY_TIER[profile.active];
+}
+
+/** per-room voxel arena/section sizing for the active tier, clamped to 25% of
+ *  the device's max arena size. every VoxelResources.init reads this so rooms
+ *  allocate identically regardless of who creates them. */
+export function voxelArenaBudgetForTier(profile: Profile): VoxelArenaBudget {
+    const s = settingsForTier(profile);
+    const cap = Math.floor(profile.limits.maxArenaBytes * 0.25);
+    const total = Math.min(s.voxelArenaDesiredMB * 1024 * 1024, cap);
+    return { quadArenaBytes: total, maxSections: s.voxelMaxSections, maxAllocs: s.voxelArenaMaxAllocs };
 }
 
 /** chunks of loaded-but-not-drawn apron kept beyond the visual radius. gives
@@ -204,6 +215,36 @@ export function detect(caps: RenderDeviceCaps): Profile {
         adapterInfo: caps.adapterInfo,
         platform,
     };
+}
+
+/** the full performance state derived once at boot: the tier profile, its
+ *  numeric settings, and the voxel arena budget. tier is fixed per session (no
+ *  live switch wired), so subsystems read these fields instead of recomputing. */
+export type Resolved = {
+    profile: Profile;
+    settings: Settings;
+    voxelBudget: VoxelArenaBudget;
+};
+
+export function resolve(caps: RenderDeviceCaps): Resolved {
+    const profile = detect(caps);
+    return { profile, settings: settingsForTier(profile), voxelBudget: voxelArenaBudgetForTier(profile) };
+}
+
+export function log(r: Resolved): void {
+    const MB = (n: number) => `${(n / 1024 / 1024).toFixed(0)}MB`;
+    console.log(
+        `[performance] tier=${r.profile.active} (auto=${r.profile.autoDetected}, source=${r.profile.source}) ` +
+            `platform=${r.profile.platform} arch="${r.profile.adapterInfo.architecture}" ` +
+            `voxelArena=${MB(r.voxelBudget.quadArenaBytes)} sections=${r.voxelBudget.maxSections} ` +
+            `viewRadius=${r.settings.voxelViewChunkRadius}ch`,
+    );
+    const L = r.profile.limits;
+    console.log(
+        `[performance] adapter limits: maxBufferSize=${MB(L.maxBufferSize)} ` +
+            `maxStorageBufferBindingSize=${MB(L.maxStorageBufferBindingSize)} ` +
+            `maxComputeWorkgroupsPerDimension=${L.maxComputeWorkgroupsPerDimension}`,
+    );
 }
 
 // ── override ────────────────────────────────────────────────────────

@@ -263,7 +263,7 @@ export async function createOffline(gpu?: { device: GPUDevice; adapter: GPUAdapt
     const state = initHeadless({ device, adapter });
     const caps = await load(state);
     const performance = Performance.detect(caps);
-    const budget = VoxelArena.voxelArenaBudgetForTier(performance);
+    const budget = Performance.voxelArenaBudgetForTier(performance);
     const offline: OfflineRenderer = {
         kind,
         caps,

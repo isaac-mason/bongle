@@ -27,7 +27,7 @@ const meshSchema = packcat.object({
     uvs: packcat.float32Array(),
     /** triangle indices (uint32 always, keeps slot math uniform pool-side). */
     indices: packcat.uint32Array(),
-    /** local-space AABB, mathcat `Box3` (`[minX, minY, minZ, maxX, maxY, maxZ]`). */
+    /** local-space AABB, math `Box3` (`[minX, minY, minZ, maxX, maxY, maxZ]`). */
     aabb: packcat.list(packcat.float32(), 6),
     /**
      * index into `images` for this mesh's base-color texture; absent for

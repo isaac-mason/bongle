@@ -101,8 +101,8 @@ type CharacterState = {
 };
 
 import { RIG_6BONE_ATTACH_NODES, RIG_6BONE_BACK, RIG_6BONE_REQUIRED_NODES, RIG_TYPE_6BONE } from "../../avatar/rig";
-import type { Quat, Vec3 } from 'mathcat';
-import { degreesToRadians, quat, vec3 } from 'mathcat';
+import type { Quat, Vec3 } from 'math';
+import { degreesToRadians, quat, vec3 } from 'math';
 import { Animation } from '../api/animation';
 import { playAt, playMono } from '../api/audio';
 import { env } from '../env';

@@ -12,8 +12,8 @@
 // to `west` (-X) under one CW Y turn, cycling N → W → S → E → N.
 
 import { registerAllShapes } from 'crashcat';
-import type { Quat } from 'mathcat';
-import { quat } from 'mathcat';
+import type { Quat } from 'math';
+import { quat } from 'math';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { column, fence, stairs } from '../../../../src/core/voxels/block-presets';
 import { buildBlockRegistry, parseKey } from '../../../../src/core/voxels/block-registry';

@@ -12,7 +12,7 @@
  * import this file directly.
  */
 
-import type { Quat } from 'mathcat';
+import type { Quat } from 'math';
 import { TransformTrait } from '../builtins/transform';
 import { registry } from '../core/registry';
 import {

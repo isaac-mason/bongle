@@ -45,8 +45,24 @@ import { markPrefabAnchorsDirty } from '../core/scene/scene-tree';
 import { applyTraitSwap, pruneRemovedScript } from '../core/scene/scripts';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import * as ContentManager from './content-manager';
-import type { EngineServer } from './engine-server';
 import * as Net from './net';
+import type { EngineServer } from './server';
+
+/** (re)seed Resources.models from the registry's bundled models. drops old
+ *  entries first so a hot-reload that renamed/removed/changed bins is covered;
+ *  lazy systems ensureModel on first reference. */
+export function seedModels(state: EngineServer): void {
+    state.resources.modelPayloads.clear();
+    state.resources.models.clear();
+    for (const [id, handle] of registry.models.byId) {
+        Resources.setModel(state.resources, id, {
+            clientUrl: handle.bin.client,
+            serverUrl: handle.bin.server,
+            source: 'bundled',
+            handle,
+        });
+    }
+}
 
 export function applyRegistryChanges(state: EngineServer): void {
     const allStores = [

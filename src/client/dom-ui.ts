@@ -46,7 +46,7 @@ import {
     vec2i,
     vec4f,
 } from 'gpucat';
-import { type Quat, quat, type Vec3, vec3 } from 'mathcat';
+import { type Quat, quat, type Vec3, vec3 } from 'math';
 import { CanvasTrait } from '../builtins/canvas';
 import { HtmlTrait } from '../builtins/html';
 import { getVisualWorldMatrix, TransformTrait } from '../builtins/transform';

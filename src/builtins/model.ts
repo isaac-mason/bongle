@@ -21,7 +21,7 @@
 // ModelTrait. They sample light themselves (sprite/extruded) or don't
 // need it (shadow). Only the mesh batched renderer reads from ModelTrait.
 
-import type { Vec3, Vec4 } from 'mathcat';
+import type { Vec3, Vec4 } from 'math';
 import { type TraitType, trait } from '../core/scene/traits';
 
 export const ModelTrait = trait('model', {

@@ -12,7 +12,7 @@ import {
     setCharacterLook,
     TransformTrait,
 } from 'bongle';
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 
 /* SNIPPET_START: path */
 // where the NPC is heading (recompute this toward the nearest player for a chaser)

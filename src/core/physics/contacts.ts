@@ -19,7 +19,7 @@
 // global stream. all live on `Physics`.
 
 import type { BodyId } from 'crashcat';
-import { type Vec3, vec3 } from 'mathcat';
+import { type Vec3, vec3 } from 'math';
 
 // ── per-observer contact (what scripts read via ContactsTrait) ────────
 

@@ -28,8 +28,8 @@
 
 import { type Document, type Node as GltfNode, Logger, type Texture, WebIO } from '@gltf-transform/core';
 import { dedup, reorder, weld } from '@gltf-transform/functions';
-import { mat4 } from 'mathcat';
-import type { Box3 } from 'mathcat/shapes';
+import { mat4 } from 'math';
+import type { Box3 } from 'math/shapes';
 import { MeshoptEncoder } from 'meshoptimizer';
 import {
     type ModelBinChannel,

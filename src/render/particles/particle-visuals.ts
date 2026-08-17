@@ -14,7 +14,7 @@
 // imports leak in.
 
 import { packTo, type Scene } from 'gpucat';
-import type { Vec4 } from 'mathcat';
+import type { Vec4 } from 'math';
 import type { ParticleHandle, ParticlePool } from '../../core/particles/particles';
 import { sampleVoxelLight } from '../../core/voxels/light';
 import type { Voxels } from '../../core/voxels/voxels';

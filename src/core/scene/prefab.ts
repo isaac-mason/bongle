@@ -13,7 +13,7 @@
 //
 // no server/client imports, same struct on both.
 
-import type { Quat } from 'mathcat';
+import type { Quat } from 'math';
 import { collapseTransformIntoChildren, getWorldPosition, getWorldQuaternion, TransformTrait } from '../../builtins/transform';
 import { type PrefabDef, type PrefabType, registry } from '../registry';
 import type { Resources } from '../resources';

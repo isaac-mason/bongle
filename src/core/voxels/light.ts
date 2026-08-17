@@ -26,7 +26,7 @@
 // for cross-chunk traversal, zero string-keyed map lookups in the hot
 // path. all light/state/dirty access goes through the chunk ref directly.
 
-import type { Vec4 } from 'mathcat';
+import type { Vec4 } from 'math';
 import type { Blocks } from './block-registry';
 import {
     CHUNK_SIZE,

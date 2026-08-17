@@ -17,7 +17,7 @@
  * builds the common fixed-offset case from a `Move[]` + a `Walkable`.
  */
 
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import { BLOCK_FLAG_COLLISION, BLOCK_FLAG_PATHFINDABLE } from './voxels/block-registry';
 import { getBlockState, type Voxels } from './voxels/voxels';
 

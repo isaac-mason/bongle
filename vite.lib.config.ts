@@ -67,7 +67,7 @@ export default defineConfig({
             // Bundle bongle's OWN graph (relative imports + bongle/* self-refs,
             // which resolve to src above). Externalize EVERYTHING else bare:
             // third-party (react, zustand, fflate…), first-party siblings
-            // (gpucat, mathcat, packcat, crashcat), and node builtins.
+            // (gpucat, math, packcat, crashcat), and node builtins.
             external: (id) => {
                 if (id.startsWith('.') || id.startsWith('/') || id.startsWith('\0')) return false; // bundle
                 if (id === 'bongle' || id.startsWith('bongle/')) return false; // self → src, bundle+dedupe

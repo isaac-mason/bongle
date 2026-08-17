@@ -1,6 +1,6 @@
 import { PerspectiveCamera } from 'gpucat';
-import { mat4 } from 'mathcat';
-import { box3 } from 'mathcat/shapes';
+import { mat4 } from 'math';
+import { box3 } from 'math/shapes';
 import { describe, expect, it } from 'vitest';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
 import { addChild, addTrait, createNode, createSceneTree } from '../../../src/core/scene/scene-tree';

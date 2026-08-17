@@ -49,7 +49,7 @@ import { loadAtlasMetadata } from '../core/sprites/atlas';
 import { resolveAllChunks } from '../core/voxels/voxels';
 import { useEditor } from '../editor/editor-store';
 import * as Audio from './audio/audio';
-import type { EngineClient } from './engine-client';
+import type { EngineClient } from './client';
 
 export async function applyRegistryChanges(state: EngineClient): Promise<void> {
     const allStores = [
@@ -249,6 +249,22 @@ export async function applyRegistryChanges(state: EngineClient): Promise<void> {
  * pipeline-driven case has no registry change to ride on; this entrypoint
  * is the only way the image edit propagates to the live client.
  */
+/** (re)seed Resources.models from the unified registry's bundled models. drops
+ *  old entries first so vanished payloads release their pool slots on the next
+ *  ModelResources.update. lazy systems ensureModel on first reference. */
+export function seedModels(state: EngineClient): void {
+    state.resources.modelPayloads.clear();
+    state.resources.models.clear();
+    for (const [id, handle] of registry.models.byId) {
+        Resources.setModel(state.resources, id, {
+            clientUrl: handle.bin.client,
+            serverUrl: handle.bin.server,
+            source: 'bundled',
+            handle,
+        });
+    }
+}
+
 export async function refreshBlockResources(state: EngineClient): Promise<void> {
     const blockRegistry = registry.blockRegistry;
 
@@ -265,8 +281,8 @@ export async function refreshBlockResources(state: EngineClient): Promise<void> 
     // backend since it spans the client-global resources + the active room's visuals.
     await state.renderer.refreshBlockResources({
         blockRegistry,
-        voxelBudget: state.voxelBudget,
-        settings: state.perfSettings,
+        voxelBudget: state.perf.voxelBudget,
+        settings: state.perf.settings,
         resources: state.resources,
     });
 

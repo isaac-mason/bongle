@@ -14,7 +14,7 @@
  * spawn opt without reaching into engine internals.
  */
 
-import type { Vec3 } from 'mathcat';
+import type { Vec3 } from 'math';
 import type { ParticleHandle } from '../core/particles/particles';
 import type { ScriptContext } from '../core/scene/scripts';
 import { allocateSlot, type SpawnOpts } from '../render/particles/particles';
