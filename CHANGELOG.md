@@ -4,6 +4,38 @@ Notable changes to `bongle`. Newest first; dates are `YYYY-MM-DD`.
 
 Will change to a semver changelog in future once `bongle` is on npm.
 
+## 2026-08-17
+
+- feat!: **breaking** - rename the module-scope `matchmaking()` launch API to
+  `config()`, and reshape its options. The player cap moves under a `server`
+  field, which also gains a `false` arm for client-only games (no server runs).
+
+  ```ts
+  // before
+  matchmaking({ maxPlayers: 8 });
+
+  // after
+  config({ server: { maxPlayers: 8 } });
+
+  // new: client-only game, no server runs
+  config({ server: false });
+  ```
+
+  Omitting the call still defaults to multiplayer with a cap of 32.
+
+- feat!: **breaking** - the math dependency `mathcat` is now published as `math`.
+  Update imports; the API is unchanged.
+
+  ```ts
+  // before
+  import { vec3, quat } from 'mathcat';
+  import type { Box3 } from 'mathcat/shapes';
+
+  // after
+  import { vec3, quat } from 'math';
+  import type { Box3 } from 'math/shapes';
+  ```
+
 ## 2026-08-11
 
 - feat!: **breaking** - rename the script context's scene tree from `ctx.nodes`
