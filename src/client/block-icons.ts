@@ -73,7 +73,6 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     const rows = Math.ceil(renderable.length / cols);
     const atlasWidth = cols * ICON_PX;
     const atlasHeight = rows * ICON_PX;
-    const atlasPixels = new Uint8Array(atlasWidth * atlasHeight * 4);
     const coords: Record<string, [number, number]> = {};
 
     const room = createRenderRoom(deps);
@@ -102,12 +101,19 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     camera.updateWorldMatrix();
     camera.updateViewMatrix(); // the offline path has no controls to refresh the view matrix
 
-    const target = new RenderTarget(ICON_PX, ICON_PX, {
-        colorFormat: 'rgba8unorm',
+    // Two phases into ONE grid, then ONE readback (vs the old readback-per-icon stall):
+    //  1) composite each block's GEOMETRY into its cell of an HDR scene-color grid, using
+    //     the target's scissor. This draws the scene directly (composeSceneToTarget →
+    //     renderer.render), NOT through a PassNode (which owns its own texture and would
+    //     ignore our scissor), so the icons land in their cells instead of full-size.
+    //  2) run the fullscreen fxaa + tonemap ONCE over the whole grid → the rgba8unorm atlas.
+    const sceneColor = new RenderTarget(atlasWidth, atlasHeight, {
+        colorFormat: 'rgba16float',
         depthFormat: 'depth24plus',
         samples: 1,
     });
-    const pipeline = deps.offline.createPipeline(room.render.scene, camera);
+    const atlas = new RenderTarget(atlasWidth, atlasHeight, { colorFormat: 'rgba8unorm', depthBuffer: false, samples: 1 });
+    const postPipeline = deps.offline.createPostPipeline(sceneColor);
     const meshOutput = createMeshOutput();
 
     // one reused chunk in the room's voxels; the block at (1,1,1) is replaced
@@ -115,6 +121,10 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
     ensureChunk(room.voxels, 0, 0, 0);
     const chunk = room.voxels.chunks.get(ICON_CHUNK_KEY)!;
 
+    let atlasPixels: Uint8Array;
+    // the first icon that actually renders clears the whole scene-color grid; the rest
+    // LOAD, each into its own cell — so disjoint tiles composite into one target.
+    let cleared = false;
     try {
         for (let i = 0; i < renderable.length; i++) {
             const key = renderable[i]!;
@@ -129,26 +139,25 @@ export async function renderBlockIconAtlas(deps: RenderRoomDeps): Promise<BlockI
             // (shouldn't happen for a solid block); skip rendering an empty tile if so.
             if (!deps.offline.remeshChunkInto(deps, room.voxels, registry, chunk, meshOutput)) continue;
 
-            deps.offline.renderToTarget(deps, room, camera, target, pipeline, Number.POSITIVE_INFINITY);
-            blitTile(atlasPixels, atlasWidth, await deps.offline.readTarget(target), ICON_PX, col, row);
+            deps.offline.composeSceneToTarget(deps, room, camera, sceneColor, Number.POSITIVE_INFINITY, {
+                rect: [col * ICON_PX, row * ICON_PX, ICON_PX, ICON_PX],
+                clear: !cleared,
+            });
+            cleared = true;
+        }
+        if (cleared) {
+            // one fullscreen post over the whole grid, then ONE readback of the atlas.
+            deps.offline.renderPostToTarget(atlas, postPipeline);
+            atlasPixels = await deps.offline.readTarget(atlas);
+        } else {
+            atlasPixels = new Uint8Array(atlasWidth * atlasHeight * 4);
         }
     } finally {
-        pipeline.dispose();
-        target.dispose();
+        postPipeline.dispose();
+        sceneColor.dispose();
+        atlas.dispose();
         disposeRenderRoom(deps, room);
     }
 
     return { pixels: atlasPixels, atlasWidth, atlasHeight, coords, iconPx: ICON_PX, cols, rows };
-}
-
-/** Copy a tightly-packed RGBA tile into (col,row) of the atlas, row by row. */
-function blitTile(atlas: Uint8Array, atlasWidth: number, tile: Uint8Array, px: number, col: number, row: number): void {
-    const x0 = col * px;
-    const y0 = row * px;
-    const rowBytes = px * 4;
-    for (let y = 0; y < px; y++) {
-        const src = y * rowBytes;
-        const dst = ((y0 + y) * atlasWidth + x0) * 4;
-        atlas.set(tile.subarray(src, src + rowBytes), dst);
-    }
 }

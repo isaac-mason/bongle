@@ -14,6 +14,8 @@ import {
     type RenderTarget,
     renderOutput,
     type Scene,
+    type Texture,
+    texture,
     WebGLRenderer,
 } from 'gpucat';
 import { ENVIRONMENT_DEFAULT } from '../api/environment';
@@ -32,7 +34,7 @@ import * as CloudResources from './environment/clouds/cloud-resources';
 import * as Environment from './environment/environment';
 import * as ModelResources from './models/model-resources';
 import * as ModelVisuals from './models/model-visuals';
-import type { OfflineRenderer } from './offline';
+import type { OfflineRenderer, TileTarget } from './offline';
 import * as ParticleResources from './particles/particle-resources';
 import * as ParticleVisuals from './particles/particle-visuals';
 import { createRenderPipeline, type EngineRenderPipeline, setActiveScene, updateCameraEnvironment } from './pipeline';
@@ -330,6 +332,55 @@ function renderRoomToTarget(
     state.renderer.renderTarget = savedTarget;
 }
 
+/** compose one block into `sceneColor`'s tile cell — WebGL twin of the WebGPU compose.
+ *  Renders geometry directly (`renderer.render(scene, camera)`) so the TARGET's own
+ *  viewport/scissor confine it; first tile clears, the rest load. */
+export function composeSceneToTarget(
+    state: WebGlState,
+    voxelResources: VoxelResources.VoxelResources,
+    voxelVisuals: VoxelVisuals.VoxelVisuals,
+    scene: Scene,
+    camera: Camera,
+    sceneColor: RenderTarget,
+    voxelViewChunkRadius: number,
+    tile: TileTarget,
+): void {
+    const r = state.renderer;
+    const saved = r.renderTarget;
+    r.renderTarget = sceneColor;
+    sceneColor.viewport = tile.rect;
+    sceneColor.scissor = tile.rect;
+    sceneColor.scissorTest = true;
+    r.autoClear = tile.clear;
+    r.clearColor = [0, 0, 0, 0]; // transparent icon background
+    scene.updateWorldMatrix();
+    Time.tick(state.timeResources, performance.now() / 1000);
+    VoxelResources.cullEmit(voxelResources, voxelVisuals, camera, voxelViewChunkRadius);
+    r.render(scene, camera);
+    r.renderTarget = saved;
+}
+
+/** the one-shot post pipeline (fxaa → tonemap/output) reading a composited HDR `sceneColor`. */
+export function createOfflinePostPipeline(state: WebGlState, sceneColor: RenderTarget): RenderPipeline {
+    // `.texture` is Texture|CubeTexture; our scene-color target is a plain 2D target.
+    const fxaaPass = fxaa(texture(sceneColor.texture as Texture));
+    return new RenderPipeline(state.renderer, renderOutput(fxaaPass));
+}
+
+/** run the post pipeline once over the whole grid into `atlas` (full-frame, clears first). */
+export function renderPostToTarget(state: WebGlState, atlas: RenderTarget, postPipeline: RenderPipeline): void {
+    const r = state.renderer;
+    const saved = r.renderTarget;
+    r.renderTarget = atlas;
+    atlas.viewport = null;
+    atlas.scissor = null;
+    atlas.scissorTest = false;
+    r.autoClear = true;
+    Time.tick(state.timeResources, performance.now() / 1000);
+    postPipeline.render();
+    r.renderTarget = saved;
+}
+
 /**
  * Stand up the WebGL offline backend (the icon-baking `OfflineRenderer`). Always
  * makes its own WebGL2 context — an injected device is WebGPU/Dawn and is routed
@@ -359,6 +410,19 @@ export async function createOffline(_gpu?: { device: GPUDevice; adapter: GPUAdap
                 pipeline,
                 radius,
             ),
+        composeSceneToTarget: (deps, room, camera, sceneColor, radius, tile) =>
+            composeSceneToTarget(
+                state,
+                deps.voxelResources as VoxelResources.VoxelResources,
+                room.voxelVisuals,
+                room.render.scene,
+                camera,
+                sceneColor,
+                radius,
+                tile,
+            ),
+        createPostPipeline: (sceneColor) => createOfflinePostPipeline(state, sceneColor),
+        renderPostToTarget: (atlas, postPipeline) => renderPostToTarget(state, atlas, postPipeline),
         readTarget: (target) => state.renderer.readRenderTargetPixels(target),
         // deps built by this backend's buildOfflineDeps → voxelResources is the cpu type.
         unmountRoom: (deps) =>
@@ -796,7 +860,11 @@ export function rebuildVoxelVisuals(state: WebGlState, room: ClientRoom): void {
     const rv = state.active.visuals;
     VoxelVisuals.dispose(rv.voxel, room.render.scene);
     VoxelMeshVisuals.dispose(rv.voxelMesh, state.resources.voxelMesh.batch, room.visibility);
-    rv.voxel = VoxelVisuals.initRoomMeshes(room.render.scene, state.resources.voxel.geometries, state.resources.voxel.quadMaterials);
+    rv.voxel = VoxelVisuals.initRoomMeshes(
+        room.render.scene,
+        state.resources.voxel.geometries,
+        state.resources.voxel.quadMaterials,
+    );
     rv.voxelMesh = VoxelMeshVisuals.init(state.resources.voxelMesh.batch, room.render.scene, room.scene);
     // the refresh blew away the previous arena (new packer is empty), so re-mount:
     // marks the room's chunks dirty and the prioritised remesh path refills it.

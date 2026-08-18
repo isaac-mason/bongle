@@ -22,6 +22,10 @@ import type { VoxelArenaBudget } from './voxels/voxel-arena';
  * bakers hold a single handle and never see backend internals (device, voxel
  * producer, readback path).
  */
+/** one cell of an atlas composite: the target sub-rect + whether this render clears
+ *  the whole target first (true only for the first tile). */
+export type TileTarget = { rect: [number, number, number, number]; clear: boolean };
+
 export type OfflineRenderer = {
     readonly kind: RendererBackendKind;
     /** device caps + the perf tier / voxel budget the client derives from them. */
@@ -51,6 +55,35 @@ export type OfflineRenderer = {
         pipeline: RenderPipeline,
         voxelViewChunkRadius: number,
     ): void;
+
+    // ── block-icon atlas: composite geometry with per-tile scissor into ONE HDR
+    // scene-color target, then post-process it once. This renders the scene GEOMETRY
+    // directly (renderer.render(scene,camera)) into the tile — NOT through a PassNode
+    // (which owns its own target) — so the target's viewport/scissor actually confine
+    // it. The fullscreen fxaa+tonemap runs once over the finished grid (createPostPipeline
+    // + renderPostToTarget), and the whole atlas reads back in one call. Collapses the
+    // per-icon GPU→CPU readback (N → 1) without the fragment artifacts a per-tile
+    // fullscreen post pass produced.
+
+    /** draw `room.render.scene` into `sceneColor`'s `tile` cell (scissor-confined),
+     *  driving the voxel producer first. The first tile clears the whole target, the
+     *  rest load. `sceneColor` is HDR (rgba16float) — post-process it before readback. */
+    composeSceneToTarget(
+        deps: RenderRoomDeps,
+        room: RenderRoom,
+        camera: Camera,
+        sceneColor: RenderTarget,
+        voxelViewChunkRadius: number,
+        tile: TileTarget,
+    ): void;
+
+    /** build the one-shot post pipeline (fxaa → tonemap/output) that reads the composited
+     *  `sceneColor` texture; reused for the single `renderPostToTarget` at the end. */
+    createPostPipeline(sceneColor: RenderTarget): RenderPipeline;
+
+    /** run the post pipeline once over the whole grid into `atlas` (rgba8unorm, ready to
+     *  `readTarget`). Full-frame (no scissor), clears first. */
+    renderPostToTarget(atlas: RenderTarget, postPipeline: RenderPipeline): void;
 
     /** read `target` back to tightly-packed RGBA8 — `readPixels` (WebGPU) /
      *  `readRenderTargetPixels` (WebGL). */
