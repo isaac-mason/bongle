@@ -309,7 +309,7 @@ export async function refreshSpriteResources(state: EngineClient): Promise<void>
 }
 
 /**
- * Re-fetch `audio-manifest.json` + `audio-atlas.flac` into the engine-global
+ * Re-fetch `audio-manifest.json` + `audio-atlas.webm` into the engine-global
  * `AudioResources`, rebuilding the decoded clip buffers in place. Called from
  * the `bongle:audio-atlas-updated` HMR listener in the boot template, a sound
  * source-file edit has no registry change to ride, so this is the only path

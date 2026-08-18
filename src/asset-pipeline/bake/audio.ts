@@ -2,7 +2,7 @@
 //
 // reads source audio files (.wav/.mp3/.ogg/.flac) listed by `sound()`
 // declarations, partitions on `long: true` and emits:
-//   resources/client/audio-atlas.flac, concatenated long:false bucket
+//   resources/client/audio-atlas.webm, concatenated long:false bucket
 //   resources/client/audio/{id}.mp3, one file per long:true clip
 //   resources/client/audio-manifest.json, both buckets, with offsets
 //   src/generated/sounds.ts, single barrel: all handles inline
@@ -33,33 +33,36 @@
 //   - decode: the injected `decodeAudio` capability (browser
 //     OfflineAudioContext, resamples in one call). durations come from the
 //     decoded PCM sample counts, exact for the atlas offsets, no probe.
-//   - atlas: our own FLAC encoder (bake/flac.ts). FLAC is lossless AND gapless
-//     — decode returns the EXACT sample count, so the concatenated atlas's
-//     per-clip offsets stay sample-aligned with zero delay compensation. It's
-//     also compressed (~4:1 on tonal SFX) and `decodeAudioData`-decodable on
-//     every browser, so the play client's atlas read is unchanged bar the
-//     filename. (MP3/AAC/Opus all carry encoder delay that would smear the
-//     offsets; lamejs can't write the gapless LAME header. FLAC sidesteps all
-//     of it.)
+//   - atlas: WebM-Opus (bake/opus.ts — our own libopus wasm + mediabunny's WebM
+//     mux). Lossy but ~4x smaller than FLAC on real SFX (the atlas ships to every
+//     player). Opus carries an encoder pre-skip, but Ogg/WebM signal it: the
+//     decoder trims the front lookahead (CodecDelay from the OpusHead) so audio
+//     aligns to sample 0, and the padded tail is trailing silence PAST the last
+//     clip. So per-clip offsets stay time-accurate, and `decodeAudioData` decodes
+//     WebM-Opus on Chrome/Firefox/Safari 14.1+. (MP3/lamejs couldn't do this — no
+//     gapless header — which is why the atlas was FLAC before.)
 //   - standalone: MP3 via lamejs (bake/mp3.ts). long clips play from offset 0
 //     so encoder delay is irrelevant, and they need lossy compression.
 
+import type { Filesystem } from '../../../os/interface';
 import type { RegistryStore as KindStore } from '../../core/registry';
 import type { ResourceLoader } from '../../core/resource-loader';
 import type { SoundHandle } from '../../core/sounds/sounds';
-import type { Filesystem } from '../../../os/interface';
 import type { DecodeAudio } from './decode-audio';
-import { encodeFlacMono } from './flac';
 import { encodeMp3 } from './mp3';
+import { encodeOpusAtlasWebm } from './opus';
 
 const SAMPLE_RATE = 48000;
 const STANDALONE_BITRATE_KBPS = 128;
+/** atlas Opus bitrate (VBR). 96k is ~4x smaller than the old FLAC atlas and
+ *  transparent for SFX; the atlas ships to every player, so size wins. */
+const ATLAS_OPUS_BITRATE = 96_000;
 
 // folded into atlasHash so that a builder-format change invalidates any
 // on-disk atlas + manifest without the user having to nuke their cache.
 // bump this when the encode pipeline changes in a way that affects manifest
 // offsets or the atlas byte layout.
-const ATLAS_FORMAT_VERSION = 'v7-flac-mono';
+const ATLAS_FORMAT_VERSION = 'v8-opus-webm';
 
 export type BuildAudioOptions = {
     /** the editor project filesystem the atlas/standalone/manifest/barrel
@@ -117,7 +120,7 @@ type LoadedSource = {
 
 // project-relative outputs on the ctx Filesystem.
 const CLIENT_DIR = 'resources/client';
-const ATLAS_PATH = `${CLIENT_DIR}/audio-atlas.flac`;
+const ATLAS_PATH = `${CLIENT_DIR}/audio-atlas.webm`;
 const STANDALONE_DIR = `${CLIENT_DIR}/audio`;
 const MANIFEST_PATH = `${CLIENT_DIR}/audio-manifest.json`;
 const BARREL_PATH = 'src/generated/sounds.ts';
@@ -132,7 +135,7 @@ export {};
  * build the audio atlas + standalone files + barrel from soundsRegistry
  * contents.
  *
- * iterates soundsRegistry, partitions on `long`. produces one FLAC atlas
+ * iterates soundsRegistry, partitions on `long`. produces one WebM-Opus atlas
  * for the long:false bucket plus one MP3 per long:true clip. manifest
  * carries hashes per bucket so a long-clip edit doesn't bust the atlas
  * cache and vice versa. duration (from the decoded PCM sample count) is
@@ -331,11 +334,10 @@ async function buildAtlas(decodeAudio: DecodeAudio, sources: LoadedSource[], fs:
         return [];
     }
 
-    // Decode every source to mono s16 PCM at SAMPLE_RATE, concatenate, then
-    // FLAC-encode the whole stream. FLAC is lossless + gapless, so decoding the
-    // atlas back yields exactly these samples in the same positions and every
-    // clip's offset + duration (from the PCM sample counts below) lands
-    // sample-accurate.
+    // Decode every source to mono s16 PCM at SAMPLE_RATE, concatenate, then encode
+    // the whole stream as WebM-Opus. Opus preserves interior sample positions (48k
+    // native, no resample) and the decoder trims the front pre-skip, so every clip's
+    // offset + duration (from the PCM sample counts below) lands time-accurate.
     const pcmChunks: Int16Array[] = [];
     const sampleCounts: number[] = [];
     for (const s of sources) {
@@ -345,7 +347,7 @@ async function buildAtlas(decodeAudio: DecodeAudio, sources: LoadedSource[], fs:
         sampleCounts.push(mono.length);
     }
 
-    const atlasBytes = encodeFlacMono(concatInt16(pcmChunks), SAMPLE_RATE);
+    const atlasBytes = await encodeOpusAtlasWebm(concatInt16(pcmChunks), ATLAS_OPUS_BITRATE);
     await fs.write(ATLAS_PATH, atlasBytes);
 
     const entries: AudioManifestAtlasEntry[] = [];

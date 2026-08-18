@@ -1,0 +1,5 @@
+opus/
+*.tar.gz
+*.o
+*.a
+!dist

@@ -126,6 +126,10 @@
             "source": "./icons/index.tsx",
             "default": "./icons/index.tsx"
         },
+        "./opus-wasm": {
+            "source": "./opus-wasm/index.ts",
+            "default": "./opus-wasm/index.ts"
+        },
         "./zstd-wasm": {
             "source": "./zstd-wasm/index.ts",
             "default": "./zstd-wasm/index.ts"
@@ -148,6 +152,7 @@
         "os",
         "icons",
         "zstd-wasm",
+        "opus-wasm",
         "avatar",
         "interface",
         "avatars",

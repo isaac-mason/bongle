@@ -10,7 +10,7 @@
  * Resource model (the contract):
  *   - atlas: background at boot. `loadResources()` awaits only the tiny
  *     `audio-manifest.json` (sample rate + clip ids), then fires off a
- *     single `audio-atlas.flac` fetch + `decodeAudioData` that writes the
+ *     single `audio-atlas.webm` fetch + `decodeAudioData` that writes the
  *     decoded buffer into shared `AtlasState` WITHOUT blocking gameplay
  *     start. Once written it plays with zero latency for the session.
  *   - long clips: lazy, fetched + decoded into the clip's own buffer on
@@ -196,7 +196,7 @@ function buildClips(context: AudioContext, manifest: AudioManifest, loader: Reso
  *  loudly rather than as a per-play warning. */
 async function loadAtlasInto(atlas: AtlasState, context: AudioContext, loader: ResourceLoader, count: number): Promise<void> {
     try {
-        const raw = await loader.loadBytes('audio-atlas.flac');
+        const raw = await loader.loadBytes('audio-atlas.webm');
         // decodeAudioData *detaches* its input ArrayBuffer; hand it a fresh
         // standalone copy (loadBytes may return a subarray view).
         atlas.buffer = await context.decodeAudioData(raw.slice().buffer);
