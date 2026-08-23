@@ -18,6 +18,7 @@ import * as blockState from './block-state';
 import {
     type BlockHandle,
     type BlockOptions,
+    type BlockPlaceCtx,
     type BlockQuad,
     block,
     type CubeTextures,
@@ -1324,10 +1325,43 @@ function torchQuads(texture: TextureRef, mount: 'floor' | 'north' | 'east' | 'so
     return blockModel.rotateY(lifted, TORCH_WALL_STEPS[mount]);
 }
 
-function isTorchSupport(voxels: import('./voxels').Voxels, wx: number, wy: number, wz: number): boolean {
+function isTorchSupport(voxels: Voxels, wx: number, wy: number, wz: number): boolean {
     const id = getBlockState(voxels, wx, wy, wz);
     if (id === AIR) return false;
     return (voxels.registry.flags[id]! & BLOCK_FLAG_COLLISION) !== 0;
+}
+
+type TorchMount = 'floor' | 'north' | 'east' | 'south' | 'west';
+
+// order the torch re-homes through when its current support is removed.
+const TORCH_MOUNTS: readonly TorchMount[] = ['floor', 'north', 'east', 'south', 'west'];
+
+// is the surface this mount attaches to solid? floor = the cell below, wall
+// mounts = the neighbour in the mount's direction (see mount convention above).
+function torchMountSupported(voxels: Voxels, wx: number, wy: number, wz: number, mount: TorchMount): boolean {
+    switch (mount) {
+        case 'floor':
+            return isTorchSupport(voxels, wx, wy - 1, wz);
+        case 'north':
+            return isTorchSupport(voxels, wx, wy, wz - 1);
+        case 'east':
+            return isTorchSupport(voxels, wx + 1, wy, wz);
+        case 'south':
+            return isTorchSupport(voxels, wx, wy, wz + 1);
+        case 'west':
+            return isTorchSupport(voxels, wx - 1, wy, wz);
+    }
+}
+
+// mount from the clicked face: a wall click attaches to that wall (the cell the
+// hit normal points back out of), a floor/ceiling click stands the torch up.
+function torchMountFromPlaceCtx(ctx: BlockPlaceCtx): TorchMount {
+    const ax = Math.abs(ctx.normalX);
+    const ay = Math.abs(ctx.normalY);
+    const az = Math.abs(ctx.normalZ);
+    if (ay >= ax && ay >= az) return 'floor';
+    if (ax >= az) return ctx.normalX >= 0 ? 'west' : 'east';
+    return ctx.normalZ >= 0 ? 'north' : 'south';
 }
 
 export function torch(id: string, { textures: texture, ...options }: TorchPresetOptions) {
@@ -1342,21 +1376,20 @@ export function torch(id: string, { textures: texture, ...options }: TorchPreset
         collision: false,
         emissive: true,
         lightEmission: options?.lightEmission ?? [14, 12, 6],
+        // pick the wall from the clicked face so a corner torch lands on the
+        // side the player aimed at, not a fixed-priority default.
+        place: (ctx, io) => io.set(ctx.worldX, ctx.worldY, ctx.worldZ, handle.stateKey({ mount: torchMountFromPlaceCtx(ctx) })),
         onNeighbourUpdate(ctx) {
-            if (isTorchSupport(ctx.voxels, ctx.worldX, ctx.worldY - 1, ctx.worldZ)) {
-                return handle.stateId({ mount: 'floor' });
-            }
-            if (isTorchSupport(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ - 1)) {
-                return handle.stateId({ mount: 'north' });
-            }
-            if (isTorchSupport(ctx.voxels, ctx.worldX + 1, ctx.worldY, ctx.worldZ)) {
-                return handle.stateId({ mount: 'east' });
-            }
-            if (isTorchSupport(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ + 1)) {
-                return handle.stateId({ mount: 'south' });
-            }
-            if (isTorchSupport(ctx.voxels, ctx.worldX - 1, ctx.worldY, ctx.worldZ)) {
-                return handle.stateId({ mount: 'west' });
+            const current = handle.states.decode(ctx.stateId - handle._baseStateId).mount as TorchMount;
+            // keep the current mount while its support survives, so a corner
+            // torch is not yanked onto a different wall by a fixed priority.
+            if (torchMountSupported(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ, current)) return ctx.stateId;
+            // support gone: re-home to the first available surface, or stay put
+            // (floating torch) if nothing supports it.
+            for (const mount of TORCH_MOUNTS) {
+                if (torchMountSupported(ctx.voxels, ctx.worldX, ctx.worldY, ctx.worldZ, mount)) {
+                    return handle.stateId({ mount });
+                }
             }
             return ctx.stateId;
         },
