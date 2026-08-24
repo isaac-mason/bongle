@@ -150,10 +150,11 @@ export type OSSnapshot = {
 export type OS = {
     spawn(ref: string, init?: unknown): number;
     run(ref: string, init?: unknown): Promise<number>;
-    /** parks until served; meta overrides what the listener sees. */
-    connect(name: string, onMessage?: (m: unknown) => void, meta?: Partial<ConnMeta>): Promise<Channel>;
-    /** side-effect-free readiness: resolves once `name` is served. */
-    served(name: string): Promise<void>;
+    /** parks until served; meta overrides what the listener sees. `signal` retracts the wait — a
+     *  caller racing this against a timeout must be able to withdraw the loser. */
+    connect(name: string, onMessage?: (m: unknown) => void, meta?: Partial<ConnMeta>, signal?: AbortSignal): Promise<Channel>;
+    /** side-effect-free readiness: resolves once `name` is served. `signal` retracts the wait. */
+    served(name: string, signal?: AbortSignal): Promise<void>;
     /** exit code; resolves immediately for an already-exited pid (127 = unknown app). */
     wait(pid: number): Promise<number>;
     /** write stdin to a process (delivered to its env.onStdin). No-op if the pid

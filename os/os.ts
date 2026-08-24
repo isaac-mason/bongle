@@ -59,12 +59,44 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     let nextConn = 1;
     let nextCid = 1;
 
-    // park a waiter on a not-yet-served name (see Waiter).
-    function park(name: string, w: Waiter): void {
+    // park a waiter on a not-yet-served name (see Waiter). Returns an unpark — the shell races
+    // `served`/`connect` against a timeout, and the loser has to be retractable or it stays parked
+    // for the life of the session (and keeps showing up in `inspect().pending`).
+    function park(name: string, w: Waiter): () => void {
         const arr = waiters.get(name) ?? [];
         arr.push(w);
         waiters.set(name, arr);
         notify();
+        return () => {
+            const cur = waiters.get(name);
+            if (cur === undefined) return;
+            const i = cur.indexOf(w);
+            if (i === -1) return;
+            cur.splice(i, 1);
+            if (cur.length === 0) waiters.delete(name);
+            notify();
+        };
+    }
+
+    /** Park on `name`, retracting the waiter if `signal` aborts first. */
+    function parkUntil<T>(name: string, signal: AbortSignal | undefined, onServed: () => T): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(signal.reason ?? new Error('aborted'));
+                return;
+            }
+            const onAbort = (): void => {
+                unpark();
+                reject(signal?.reason ?? new Error('aborted'));
+            };
+            const unpark = park(name, {
+                resolve: () => {
+                    signal?.removeEventListener('abort', onAbort);
+                    resolve(onServed());
+                },
+            });
+            signal?.addEventListener('abort', onAbort, { once: true });
+        });
     }
 
     // coarse change stream for the shell's task-manager view.
@@ -88,7 +120,16 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     // process (exit 127) rather than throwing.
     function spawn(ref: string, init?: unknown): number {
         const pid = nextPid++;
-        void resolve(ref).then((def) => (def ? boot(ref, def, init, pid) : failSpawn(ref, pid)));
+        void resolve(ref)
+            .then((def) => {
+                if (!def) failSpawn(ref, pid, `no such app: "${ref}"`, 127);
+                else boot(ref, def, init, pid);
+            })
+            // a failure PAST the def lookup (the host couldn't build a worker, the runner conduit
+            // threw) would otherwise reject into this floating promise: no proc record, no exit
+            // code, so `wait(pid)` never settles and the shell can only discover it by timing out
+            // on readiness with a misleading "never served".
+            .catch((err) => failSpawn(ref, pid, `spawn failed: ${err instanceof Error ? err.message : String(err)}`, 126));
         return pid;
     }
 
@@ -97,11 +138,19 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         else spawnWorker(ref, def, init, pid);
     }
 
-    function failSpawn(ref: string, pid: number): void {
-        io.stdout(ref, pid, `no such app: "${ref}"`, true);
-        exitCodes.set(pid, 127);
-        for (const r of exitResolvers.get(pid) ?? []) r(127);
+    function failSpawn(ref: string, pid: number, message: string, code: number): void {
+        io.stdout(ref, pid, message, true);
+        // a partially-booted process already has a record — retire it through the normal path so
+        // its conns/listeners/waiters unwind too.
+        const rec = procs.get(pid);
+        if (rec !== undefined) {
+            finalize(rec, code);
+            return;
+        }
+        exitCodes.set(pid, code);
+        for (const r of exitResolvers.get(pid) ?? []) r(code);
         exitResolvers.delete(pid);
+        notify();
     }
 
     function startFrame(ref: string, def: AppDef, init: unknown, surface: boolean): ToApp {
@@ -406,14 +455,19 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
 
     // parks until the name is served — the shell's readiness signal for a spawned
     // service, symmetric with an app-side connect.
-    function connectShell(name: string, onMessage?: (m: unknown) => void, meta?: Partial<ConnMeta>): Promise<Channel> {
+    function connectShell(
+        name: string,
+        onMessage?: (m: unknown) => void,
+        meta?: Partial<ConnMeta>,
+        signal?: AbortSignal,
+    ): Promise<Channel> {
         if (listeners.has(name)) return Promise.resolve(openShellConn(name, onMessage, meta));
-        return new Promise((resolve) => park(name, { resolve: () => resolve(openShellConn(name, onMessage, meta)) }));
+        return parkUntil(name, signal, () => openShellConn(name, onMessage, meta));
     }
 
-    function served(name: string): Promise<void> {
+    function served(name: string, signal?: AbortSignal): Promise<void> {
         if (listeners.has(name)) return Promise.resolve();
-        return new Promise((resolve) => park(name, { resolve }));
+        return parkUntil(name, signal, () => undefined);
     }
 
     function wait(pid: number): Promise<number> {

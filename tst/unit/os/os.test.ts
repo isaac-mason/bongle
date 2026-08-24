@@ -233,6 +233,44 @@ describe('createOS + runApp', () => {
         await until(() => got === 'hello', 'stdin delivered');
     });
 
+    it('exits a process whose host-side spawn throws, instead of leaving a phantom pid', async () => {
+        // A spawn that fails PAST the "no such app" check (the host couldn't make a worker, the
+        // runner conduit threw) used to reject inside spawn's floating promise: no proc record, no
+        // exit code, so `wait(pid)` never settled and the shell could only discover it by timing
+        // out on readiness with a misleading "never served".
+        const io: IO = {
+            spawnWorker() {
+                throw new Error('worker construction failed');
+            },
+            spawnFrame() {
+                throw new Error('no frames in unit tests');
+            },
+            openRunner: () => new MessageChannel().port2,
+            mount() {},
+            stdout: () => {},
+        };
+        const os = createOS(io, async () => ({ module: 'boom' }), { projectName: 'test', disposeTimeoutMs: 500 });
+
+        const pid = os.spawn('boom');
+        const code = await Promise.race([os.wait(pid), new Promise<'hung'>((r) => setTimeout(() => r('hung'), 300))]);
+        expect(code).not.toBe('hung');
+        expect(code).not.toBe(0); // a failed spawn is not a success
+        expect(os.inspect().procs.some((p) => p.pid === pid)).toBe(false);
+    });
+
+    it('drops a readiness wait that is abandoned, rather than parking it forever', async () => {
+        const { os } = testOS({});
+        const ac = new AbortController();
+        const waited = os.served('never-served', ac.signal);
+        expect(os.inspect().pending.find((p) => p.name === 'never-served')?.count).toBe(1);
+
+        // the shell races `served` against a timeout; without a way to retract the loser, every
+        // timed-out restart left a waiter parked on the name for the life of the session.
+        ac.abort();
+        await expect(waited).rejects.toThrow(/abort/i);
+        expect(os.inspect().pending.find((p) => p.name === 'never-served')).toBeUndefined();
+    });
+
     it('routes connects across two OS instances over a relay, and close propagates', async () => {
         let hostConnected = false;
         const host = testOS({
