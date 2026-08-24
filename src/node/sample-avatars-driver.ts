@@ -17,7 +17,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ResolvedAvatar, ServerDriver } from 'bongle/interface';
-import { RIG_TYPE_6BONE } from "../../avatar/rig";
+import { RIG_TYPE_6BONE } from '../../avatar/rig';
 
 /** Request-path prefix the dev hosts serve the sample-avatar `.glb`s from.
  *  The client's `clientUrl` is `${prefix}<slug>.glb`, same-origin. */
@@ -36,8 +36,13 @@ const SAMPLE_AVATARS: SampleAvatar[] = [
 
 // Server-only: resolved at runtime against the module's on-disk location so we
 // can read the engine's example `.glb`s off disk. It's a directory, not a file,
-// so there's no build-time asset for Vite to emit, tell it to leave it as-is.
-const avatarsDir = fileURLToPath(new URL(/* @vite-ignore */ '../../avatars/', import.meta.url));
+// so there's no build-time asset to emit — and it's joined via `path` rather
+// than `new URL(<literal>, import.meta.url)` because that exact shape is what
+// Vite's URL-asset plugin matches and rewrites, turning the base into the page
+// origin under a browser-ish transform (`@vite-ignore` only covers dynamic
+// import, not this plugin). Going through `fileURLToPath` alone leaves nothing
+// for it to match.
+const avatarsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'avatars');
 const filePathFor = (a: SampleAvatar): string => path.join(avatarsDir, a.file);
 
 export function createFallbackAvatarsDriver(): ServerDriver['avatars'] {
