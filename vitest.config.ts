@@ -25,6 +25,10 @@ export default defineConfig({
                 },
             },
             {
+                // a project is its own vite config — the root-level resolve/deps above don't reach
+                // it, and e2e is where a split between `bongle` and `./src` actually bites (the
+                // harness boots the server from ./src while the tests drive it through `bongle`).
+                resolve: { conditions: ['source'] },
                 test: {
                     name: 'e2e',
                     include: ['tst/e2e/**/*.test.ts'],
@@ -32,6 +36,7 @@ export default defineConfig({
                     setupFiles: ['tst/e2e/setup.ts'],
                     testTimeout: 30_000,
                     fileParallelism: false,
+                    server: { deps: { inline: [/shakeup/, /^bongle(\/|$)/] } },
                     benchmark: { include: [] },
                 },
             },
