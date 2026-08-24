@@ -6,7 +6,7 @@
 //
 // Codec = our own libopus wasm (lib/opus-wasm), container = mediabunny's WebMOutputFormat
 // — both host-neutral (browser editor + node CLI), so this stays codec-owning like
-// flac.ts/mp3.ts with no native FFmpeg and no WebCodecs.
+// mp3.ts with no native FFmpeg and no WebCodecs.
 
 import { BufferTarget, EncodedAudioPacketSource, EncodedPacket, Output, WebMOutputFormat } from 'mediabunny';
 import { encodeOpusMono, initOpus, OPUS_FRAME_SIZE, OPUS_SAMPLE_RATE } from '../../../opus-wasm';
