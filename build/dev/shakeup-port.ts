@@ -43,8 +43,18 @@ export function attachRealmPort(server: DevServer, name: string, port: RealmPort
  * and receives HMR over a port. `options` carries the host bits (name, createImportMeta, evaluator,
  * prepare, env).
  */
-export function connectRealmPort(port: RealmPort, options: Omit<EnvironmentOptions, 'fetchModule' | 'resolveId'>): Environment {
-    const bridge = createEnvironmentBridge((frame) => port.postMessage(frame));
+export function connectRealmPort(
+    port: RealmPort,
+    options: Omit<EnvironmentOptions, 'fetchModule' | 'resolveId'> & {
+        /** Fail a module fetch left unanswered this long. The bundler runs in a worker the host can
+         *  terminate (a compiler restart); a terminated worker's port fires no event, it just stops
+         *  replying, so this is the only thing that turns "realm waits forever, silently" into a
+         *  reportable error. */
+        timeoutMs?: number;
+    },
+): Environment {
+    const { timeoutMs, ...envOptions } = options;
+    const bridge = createEnvironmentBridge((frame) => port.postMessage(frame), { timeoutMs });
     port.onmessage = (e) => bridge.handleFrame(e.data as TransportFrame);
-    return connectEnvironment(bridge, options);
+    return connectEnvironment(bridge, envOptions);
 }

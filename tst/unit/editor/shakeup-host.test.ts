@@ -92,6 +92,35 @@ describe('createShakeupBundlerHost (full assembly, async fs)', () => {
         host.close();
     });
 
+    it('disconnectRealm retires a dead realm so edits stop fanning into its closed port', async () => {
+        const files: Record<string, string> = { '/m.ts': 'export const v = 1;' };
+        const host = createShakeupBundlerHost({ fs: asyncFs(files), jsx: false, isUserModule: () => false });
+        const [bp, rp] = portPair();
+        // count what the host posts toward the realm, so a push to a retired realm is visible.
+        let posted = 0;
+        const counting: RealmPort = {
+            postMessage: (d) => {
+                posted++;
+                bp.postMessage(d);
+            },
+            onmessage: null,
+        };
+        bp.onmessage = (e) => counting.onmessage?.(e);
+        host.connectRealm('client:1', counting);
+        const env = connectRealmPort(rp, { name: 'client' });
+        await env.import('/m.ts');
+
+        host.disconnectRealm('client:1');
+        posted = 0;
+        files['/m.ts'] = 'export const v = 2;';
+        await host.server.handleChange('/m.ts');
+
+        // realm names are per-process and never reused, so nothing else would ever retire this one:
+        // without disconnectRealm every later edit keeps pushing into a port whose process is gone.
+        expect(posted).toBe(0);
+        host.close();
+    });
+
     it('an fs edit re-serves the updated module to a fresh import', async () => {
         const files: Record<string, string> = { '/m.ts': 'export const v = 1;' };
         const host = createShakeupBundlerHost({ fs: asyncFs(files), jsx: false, isUserModule: () => false });

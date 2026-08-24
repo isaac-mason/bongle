@@ -28,6 +28,10 @@ export type ShakeupBundlerHost = {
     server: DevServer;
     /** Attach a realm's port (client iframe / server worker / pipeline). */
     connectRealm(name: string, port: RealmPort): void;
+    /** Detach a realm whose process is gone. Realms are keyed per-process (`${ref}:${pid}`), so a
+     *  respawn never reuses a name and nothing would otherwise drop the dead one: its environment
+     *  would stay registered and every later edit would fan an applyEdit into a closed port. */
+    disconnectRealm(name: string): void;
     /** Fan HMR to every realm holding a changed path (the live fs already reflects the edit). */
     onFsChange(paths: string[]): void;
     close(): void;
@@ -63,6 +67,10 @@ export function createShakeupBundlerHost(opts: ShakeupHostOptions): ShakeupBundl
         connectRealm(name, port) {
             realms.get(name)?.close(); // a reconnect replaces the old attachment
             realms.set(name, attachRealmPort(server, name, port));
+        },
+        disconnectRealm(name) {
+            realms.get(name)?.close();
+            realms.delete(name);
         },
         onFsChange(paths) {
             // The async fs already reflects the edit; just invalidate the transform cache once and
