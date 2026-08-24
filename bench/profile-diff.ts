@@ -7,24 +7,41 @@
 // uses the inspector Session directly (no --cpu-prof flag / tsx-loader friction),
 // so the captured window is exactly the measured loop.
 
-import { Session } from 'node:inspector';
 import fs from 'node:fs';
+import { Session } from 'node:inspector';
 import path from 'node:path';
-import * as p from 'packcat';
-import { addChild, addTrait, createNode, createSceneGraph } from '../src/core/scene/nodes';
-import { syncRate } from '../src/core/scene/sync/sync-rate';
+import { TRANSFORM_SEND_HZ } from '../src/core/clock';
+import { pack } from '../src/core/scene/pack';
+import { addChild, addTrait, createNode, createSceneTree } from '../src/core/scene/scene-tree';
+import { dirty, rate } from '../src/core/scene/sync/sync-rate';
 import { sync, trait } from '../src/core/scene/traits';
 import { runDiffDetection } from '../src/server/discovery';
 
 const Mover = trait('profile-mover', { pos: [0, 0, 0] as number[], rot: [0, 0, 0, 1] as number[] });
-sync(Mover, 'pos', { schema: p.list(p.float32(), 3), pack: (t) => t.pos, unpack: (v, t) => { t.pos = v as number[]; }, rate: syncRate.distance(0.05) });
-sync(Mover, 'rot', { schema: p.list(p.float32(), 4), pack: (t) => t.rot, unpack: (v, t) => { t.rot = v as number[]; }, rate: syncRate.angle(0.02) });
+sync(Mover, 'pos', {
+    schema: pack.position(),
+    pack: (t) => t.pos,
+    unpack: (v, t) => {
+        t.pos = v as number[];
+    },
+    dirty: dirty.diff(),
+    rate: rate.hz(TRANSFORM_SEND_HZ),
+});
+sync(Mover, 'rot', {
+    schema: pack.quaternion(),
+    pack: (t) => t.rot,
+    unpack: (v, t) => {
+        t.rot = v as number[];
+    },
+    dirty: dirty.diff(),
+    rate: rate.hz(TRANSFORM_SEND_HZ),
+});
 
 const scenario = process.argv[2] ?? 'static';
 const N = 1000;
 const ITER = 20000;
 
-const sg = createSceneGraph();
+const sg = createSceneTree();
 const movers: Array<{ pos: number[]; rot: number[] }> = [];
 for (let i = 0; i < N; i++) {
     const n = createNode();

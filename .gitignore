@@ -25,3 +25,6 @@ deps-dist/
 # Rebuilt in dev.sh + the website Dockerfile — NOT committed (the hashed asset
 # tree would bloat history).
 editor/public/static/blockbench/
+
+# cpuprofile output from bench/profile-diff.ts
+profiles/

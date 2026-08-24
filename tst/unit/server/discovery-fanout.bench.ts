@@ -1,87 +1,65 @@
-import * as p from 'packcat';
 import { bench, describe } from 'vitest';
-import * as Debug from '../../../src/core/debug';
-import * as Resources from '../../../src/core/resources';
-import { addChild, addTrait, createNode } from '../../../src/core/scene/scene-tree';
-import { syncRate } from '../../../src/core/scene/sync/sync-rate';
-import { sync, trait } from '../../../src/core/scene/traits';
-import { nodeZstd } from '../../../src/server/chunk-encode';
-import * as Discovery from '../../../src/server/discovery';
-import * as Net from '../../../src/server/net';
-import * as Rooms from '../../../src/server/rooms';
-import { createTestServer } from '../../integration/server-integration-test';
+import { createWorld, moveBots, moveProps, type World } from '../../../bench/discovery-world';
 
 // ── Discovery.flush fan-out bench ────────────────────────────────────
 //
-// the dirty-set rejig's headline claim: per-client scene-sync cost is now
-// proportional to *activity*, not scene size. an idle scene with M clients used
-// to walk N nodes × M clients every tick; now it iterates an empty dirty set.
-// these benches lock that in:
-//   - idle: N nodes, M clients, nothing changed → should be ~flat in N.
-//   - 20% moving: only the changed nodes are diffed per client.
+// per-client scene-sync cost. the dirty-set design's claim is that this tracks
+// *activity*, not scene size: an idle scene iterates an empty dirty set instead
+// of walking N nodes × M clients.
+//
+// the world (bench/discovery-world.ts) is generated terrain — hills, water and trees
+// from the kit blocks, so chunks are several layers deep with multi-entry palettes
+// and real light. plus real player nodes with their own AOI anchors, and props that
+// are real transform roots and so are genuinely chunk-gated. that last point is
+// load-bearing: a node with no TransformTrait has no transform root, and
+// buildSceneSyncUpdates treats those as never chunk-gated — so a scene of sync-only
+// nodes measures fan-out with AOI switched off, however the world is set up.
+//
+// the three cases separate what actually drives cost:
+//   - idle:        nothing moves. the floor of the per-tick fan-out.
+//   - props:       20% of props emit, none change chunk. pure field-update fan-out.
+//   - bots moving: the players orbit and cross chunk boundaries, so AOI regions
+//                  churn and presence flips — the create/destroy path, not just
+//                  field updates.
 //
 // run: `pnpm bench discovery-fanout`. (needs node 24 for Float16Array.)
 
-const Mover = trait('fanout-mover', { pos: [0, 0, 0] as number[] });
-sync(Mover, 'pos', {
-    schema: p.list(p.float32(), 3),
-    pack: (t) => t.pos,
-    unpack: (v, t) => {
-        t.pos = v as number[];
-    },
-    rate: syncRate.distance(0.05),
-});
+const PROPS = 2000;
+const CLIENTS = 8;
+// wider than the 8-chunk (128 block) stream radius so AOI actually culls. kept at
+// 160 rather than the egress script's 256 because worldgen runs once per bench case
+// and scales with the square of this.
+const SPREAD = 160;
 
-const N = 1000;
-const M = 8;
-
-/** N shared Mover nodes + M play clients all caught up (initial creates drained),
- *  so the benched flushes measure steady state. */
-function setup() {
-    const server = createTestServer({ mode: 'play' });
-    const discovery = Discovery.init(nodeZstd);
-    const resources = Resources.init({ loadBytes: async () => new Uint8Array() }, 'server');
-    const net = Net.init();
-
-    const movers: Array<{ pos: number[] }> = [];
-    for (let i = 0; i < N; i++) {
-        const n = createNode();
-        addChild(server.nodes.root, n);
-        const m = addTrait(n, Mover);
-        m.pos = [0, 0, 0];
-        movers.push(m);
-    }
-
-    for (let c = 1; c <= M; c++) {
-        Discovery.addClient(discovery, c);
-        const player = Rooms.joinRoom(server.rooms, c, server.room.id, server.room.mode);
-        Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
-    }
-
-    const metrics = Debug.createMetrics(false);
-    Discovery.flush(discovery, server.rooms, resources, metrics); // drain initial creates
-    return { server, discovery, resources, metrics, movers };
+/** a settled world — every client's AOI region has finished expanding, so the
+ *  benched ticks measure steady state rather than the join stream. */
+function world(): World {
+    const w = createWorld({ props: PROPS, clients: CLIENTS, terrain: 'generated', spread: SPREAD });
+    w.settle();
+    return w;
 }
 
 describe('Discovery.flush fan-out', () => {
     {
-        // nothing changes, the dirty set is empty, so per-client cost should not
-        // scale with N (this is the case the old whole-tree walk paid in full).
-        const { server, discovery, resources, metrics } = setup();
-        bench(`${N} nodes × ${M} clients — idle (no changes)`, () => {
-            Discovery.flush(discovery, server.rooms, resources, metrics);
+        const w = world();
+        bench(`${PROPS} props × ${CLIENTS} clients — idle`, () => {
+            w.tick();
         });
     }
     {
-        // ~20% of nodes move past threshold each tick → only those are dirty and
-        // diffed per client.
-        const { server, discovery, resources, metrics, movers } = setup();
+        const w = world();
         let tick = 0;
-        bench(`${N} nodes × ${M} clients — 20% moving`, () => {
-            tick++;
-            const d = tick * 0.1; // > 5cm each tick
-            for (let i = 0; i < movers.length; i += 5) movers[i].pos[0] = d;
-            Discovery.flush(discovery, server.rooms, resources, metrics);
+        bench(`${PROPS} props × ${CLIENTS} clients — 20% of props emitting`, () => {
+            moveProps(w, tick++);
+            w.tick();
+        });
+    }
+    {
+        const w = world();
+        let tick = 0;
+        bench(`${PROPS} props × ${CLIENTS} clients — bots moving (AOI churn)`, () => {
+            moveBots(w, tick++);
+            w.tick();
         });
     }
 });
