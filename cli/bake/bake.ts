@@ -2,7 +2,7 @@
 // (src/asset-pipeline) driven from node, the mirror of the browser pipeline
 // realm (editor/realms/pipeline/pipeline-worker.ts).
 //
-// Registry eval, node-style: the browser evaluates user code via a ModuleRunner;
+// Registry eval, node-style: the browser evaluates user code in a realm Environment;
 // node just `import()`s the project's src/index.ts (tsx strips the types). The
 // full bongle barrel imports clean in node — no DOM at module-eval — so the
 // declarations register into the same engine registry singleton AssetPipeline

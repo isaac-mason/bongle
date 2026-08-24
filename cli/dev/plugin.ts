@@ -7,37 +7,16 @@
 //     capture push/pop + a self-accept (import.meta.hot.accept → __bongle.reload →
 //     invalidate-or-flush), AND runs the rung-2 dep-wrap (build/capture's
 //     wrapModuleDeps injects __bongle.deps around prefab()/script() bodies so an
-//     importer-cascade fires on shape change). Same contract as the editor
-//     mini-bundler's transform (build/dev/transform.ts) — Vite provides
-//     import.meta.hot natively, so the emitted code runs unchanged here.
+//     importer-cascade fires on shape change), via the shakeup-native capture
+//     (build/capture/capture-native). Vite provides import.meta.hot natively, so
+//     the emitted code runs unchanged here.
 //   • bongle:engine-reboot — engine/workspace source (outside the project) has no
 //     HMR accept boundary; on such a change we reboot the server env + respawn the
 //     pipeline worker (via engineReboot), suppressing the client's racing reload.
 
 import path from 'node:path';
-import { parseSync } from 'rolldown/experimental';
 import type { Plugin } from 'vite';
-import { type DepParser, initSymbolTables, wrapModuleDeps } from '../../build';
-
-// the capture dep-wrap's parser: NATIVE node rolldown (not @rolldown/browser, whose
-// wasi binding logs an ExperimentalWarning + loads a multi-MB wasm bundle in node).
-const depParser = parseSync as unknown as DepParser;
-
-const PRELUDE = `import { __bongle } from 'bongle/internal';
-const __bongle_prev = __bongle.push(import.meta.url);
-`;
-
-const POSTLUDE = `
-;__bongle.pop(__bongle_prev);
-if (import.meta.hot) {
-  import.meta.hot.accept((__bongle_next) => {
-    if (__bongle.reload(import.meta.url, __bongle_next) === 'invalidate') {
-      import.meta.hot.invalidate();
-    }
-    __bongle.flush();
-  });
-}
-`;
+import { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, initSymbolTables, wrapModuleDeps } from '../../build';
 
 /** Set by the dev orchestrator (start.ts) so an engine-source change reboots the
  *  server env + respawns the pipeline worker. Omitted by non-dev consumers. */
@@ -95,21 +74,15 @@ export function bongle(opts: BongleOptions): Plugin[] {
                 // parse failure — it must not break the capture bracket.
                 let wrapped = code;
                 try {
-                    wrapped = await wrapModuleDeps(
-                        filePath,
-                        code,
-                        symbolTables,
-                        async (spec) => {
-                            const resolved = await this.resolve(spec, id);
-                            return resolved?.id.split('?')[0] ?? spec;
-                        },
-                        depParser,
-                    );
+                    wrapped = await wrapModuleDeps(filePath, code, symbolTables, async (spec) => {
+                        const resolved = await this.resolve(spec, id);
+                        return resolved?.id.split('?')[0] ?? spec;
+                    });
                 } catch (err) {
                     this.warn(`[bongle:capture] dep-wrap skipped for ${path.relative(projectDir, filePath)}: ${(err as Error).message}`);
                 }
 
-                return { code: PRELUDE + wrapped + POSTLUDE, map: null };
+                return { code: CAPTURE_PRELUDE + wrapped + CAPTURE_POSTLUDE, map: null };
             },
         },
     ];

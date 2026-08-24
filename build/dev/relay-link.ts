@@ -9,16 +9,15 @@
 // network, we give them a `PortLike` that looks like a MessagePort but tunnels
 // over one WebSocket, multiplexed by a 1-byte channel tag.
 //
-// Consequence: `createPortBridge`, the server worker's `PortTransport`, and
-// `client-main`'s game loop all run UNCHANGED over a relay — they just receive a
+// Consequence: the realm conduit (shakeup-port), the server worker's `PortTransport`,
+// and `client-main`'s game loop all run UNCHANGED over a relay — they just receive a
 // relay-backed port instead of a MessageChannel port. The relay itself stays
 // dumb (see relay-server.mjs): it forwards these frames by session, never
 // parsing them.
 //
-// Verified serialization-safe (2026-07-14): game frames are Uint8Array; bundler
-// frames (FetchResult / HotPayload / vite:invalidate) are pure JSON — Vite's own
-// module-runner protocol, which Vite ships over a WebSocket. Nothing carries a
-// Map, typed array, function, or class instance.
+// Verified serialization-safe (2026-07-14): game frames are Uint8Array; bundler frames
+// (shakeup TransportFrames — invoke/result/push) are pure JSON. Nothing carries a Map,
+// typed array, function, or class instance.
 
 /** The MessagePort surface the transports actually use: assign `onmessage`,
  *  `postMessage`, and (server side) `close`. A relay port and a real MessagePort

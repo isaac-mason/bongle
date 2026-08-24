@@ -2,7 +2,7 @@
  * `__bongle`, the runtime namespace injected into bongle-generated code.
  *
  * Two injection sites:
- *   1. The dev-path transform (build/dev/transform.ts + cli/dev/plugin.ts)
+ *   1. The dev-path capture pass (build/capture/capture-plugin.ts + cli/dev/plugin.ts)
  *      brackets every user module. `push` / `pop` bracket the body so registry
  *      upserts stamp the right owning module; `reload` returns the
  *      patch-vs-invalidate verdict in the hot.accept callback; `deps` wraps

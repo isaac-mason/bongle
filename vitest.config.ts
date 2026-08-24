@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
     test: {
+        // shakeup is a link: dep whose exports point at raw .ts source — inline it so vitest
+        // transforms it rather than externalizing to node (which can't import .ts).
+        server: { deps: { inline: [/shakeup/] } },
         projects: [
             {
                 test: {

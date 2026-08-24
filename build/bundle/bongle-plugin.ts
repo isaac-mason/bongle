@@ -10,8 +10,8 @@
 //
 // Host-neutral: the `rolldown` impl is INJECTED (`@rolldown/browser`'s is the same
 // shape as node `rolldown`), so this runs in the browser editor or a node CLI.
-// The dev path (editor/bundler/dev-server.ts) doesn't use this — it drives a
-// ModuleRunner, not rolldown — but shares resolve.ts + the worker helpers below.
+// The dev path (dev/shakeup-host.ts) doesn't use this — it drives shakeup's dev
+// server, not rolldown — but shares resolve.ts + the worker helpers below.
 
 import type { Plugin } from 'rolldown';
 import { type EnvValues, replaceEnv } from '../env-replace';

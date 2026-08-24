@@ -5,6 +5,9 @@
         "module": "ES2022",
         "lib": ["ES2024", "DOM"],
         "moduleResolution": "bundler",
+        // shakeup's package exports point at raw .ts source, and its own internal imports carry
+        // explicit .ts extensions — so typechecking anything that reaches into it needs this.
+        "allowImportingTsExtensions": true,
         // bongle self-refs (`bongle/internal`, …) resolve to SOURCE here, not the
         // built dist .d.ts, so lib typechecks against ONE instance of each type —
         // else a type reached both relatively (src) and via bongle/* (dist d.ts)

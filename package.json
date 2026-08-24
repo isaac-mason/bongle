@@ -176,6 +176,7 @@
         "blockbench:plugin": "blockbench/build-plugin.sh"
     },
     "dependencies": {
+        "shakeup": "link:../../shakeup",
         "@base-ui/react": "^1.5.0",
         "@breezystack/lamejs": "^1.2.7",
         "@dnd-kit/abstract": "^0.3.2",

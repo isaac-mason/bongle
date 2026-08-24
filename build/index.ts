@@ -11,36 +11,18 @@
 //   - ENGINE SEMANTICS: the DepGraph capture pass (recognise scene/block/trait/
 //     script producers + consumers, wrap with __bongle.deps) + env replacement —
 //     cross-module resolution is injected so it runs over a vfs or a node resolver.
-//
-//   - the host-neutral realm conduit (realm-host.ts): attachRealm owns the
-//     module-runner protocol logic; the host injects the transport (MessagePort /
-//     WebSocket / worker_thread port).
-//
-// What does NOT live here: the browser-specific realm PLUMBING (Vite ModuleRunner,
-// OPFS, @rolldown/browser/experimental transform, the MessagePort pumps) — that's
-// editor/bundler. `bongle dev` supplies the node counterparts and shares this core.
+//   - the DEV runtime (shakeup-host / shakeup-port / shakeup-runner-host + the capture
+//     plugin): ONE shakeup dev server owns transform + resolution, realms attach over
+//     ports and only evaluate.
+//   - the relay conduit (relay-link.ts) + net-sim: host-neutral framed transport for
+//     multiplayer / bongle-server.
 
 export { type Bundler, bundleWorkerEntry, bundleWorkers, createBonglePlugin, workerWrapperModule } from './bundle/bongle-plugin';
 export { type BuildOptions, buildBundle } from './bundle/bundle';
-export { type DepParser, initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture/capture-deps';
-export {
-    applyEdit,
-    type BundleWorker,
-    type DevServerDeps,
-    type DevServerState,
-    type FetchResult,
-    fetchModule,
-    type HotPayload,
-    handleRunnerMessage,
-    initDevServer,
-    registerPusher,
-    type TransformModule,
-    type TransformResult,
-} from './dev/dev-server';
+export { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture/capture-native';
+export { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, type CapturePluginOptions, capturePlugin } from './capture/capture-plugin';
 export { contentType } from './dev/mime';
 export { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './dev/net-sim';
-export { createPortBridge } from './dev/port-bridge';
-export { type AttachRealmOptions, attachRealm, type BundlerFrame, describeError } from './dev/realm-host';
 export {
     Channel,
     createRelayHostLink,
@@ -54,7 +36,8 @@ export {
     type RelayLink,
     type SocketLike,
 } from './dev/relay-link';
-export { makeRunner, type RunnerBridge, type RunnerHost } from './dev/runner';
-export { createTransformModule, type OxcTransforms } from './dev/transform';
+export { createShakeupBundlerHost, type ShakeupBundlerHost, type ShakeupHostOptions } from './dev/shakeup-host';
+export { asRealmPort, attachRealmPort, connectRealmPort, type RealmPort } from './dev/shakeup-port';
+export { browserEvaluator, ensureProcessShim, makeImportMeta } from './dev/shakeup-runner-host';
 export { type EnvValues, replaceEnv } from './env-replace';
 export { type BuildFs, dirOf, type PackageJson, posixJoin, resolveFile, resolveModule, resolvePackage } from './resolve';
