@@ -15,12 +15,19 @@ import { createWorld, moveBots, moveProps, type World } from '../../../bench/dis
 // buildSceneSyncUpdates treats those as never chunk-gated — so a scene of sync-only
 // nodes measures fan-out with AOI switched off, however the world is set up.
 //
-// the three cases separate what actually drives cost:
-//   - idle:        nothing moves. the floor of the per-tick fan-out.
-//   - props:       20% of props emit, none change chunk. pure field-update fan-out.
-//   - bots moving: the players orbit and cross chunk boundaries, so AOI regions
-//                  churn and presence flips — the create/destroy path, not just
-//                  field updates.
+// the cases separate what actually drives cost:
+//   - idle:              nothing moves. the floor of the per-tick fan-out.
+//   - props emitting:    20% of props emit, none change chunk. pure field-update
+//                        fan-out, no AOI churn.
+//   - bots at walk/sled:  the players orbit and cross chunk boundaries at two very
+//                        different rates — a walking character's ~5 blocks/s vs. a
+//                        downhill-sledding game's ~40 blocks/s (terminalVelocity) —
+//                        so AOI regions churn and presence flips at correspondingly
+//                        different rates. see discovery-egress.ts for the byte-level
+//                        version of this split; walk vs. sled is an 8x speed gap
+//                        that does NOT translate into an 8x cost gap (chunk reuse
+//                        between nearby crossings), but it's still the single
+//                        biggest lever on discovery cost of anything benched here.
 //
 // run: `pnpm bench discovery-fanout`. (needs node 24 for Float16Array.)
 
@@ -57,8 +64,16 @@ describe('Discovery.flush fan-out', () => {
     {
         const w = world();
         let tick = 0;
-        bench(`${PROPS} props × ${CLIENTS} clients — bots moving (AOI churn)`, () => {
-            moveBots(w, tick++);
+        bench(`${PROPS} props × ${CLIENTS} clients — bots walking (5 blocks/s)`, () => {
+            moveBots(w, tick++, 'walk');
+            w.tick();
+        });
+    }
+    {
+        const w = world();
+        let tick = 0;
+        bench(`${PROPS} props × ${CLIENTS} clients — bots sledding (40 blocks/s)`, () => {
+            moveBots(w, tick++, 'sled');
             w.tick();
         });
     }

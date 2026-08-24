@@ -66,6 +66,27 @@ export type WorldOptions = {
     spread: number;
 };
 
+/** how fast bots travel. walk/sprint are CharacterControllerTrait's own config
+ *  defaults; sled is the default terminalVelocity, i.e. the fastest a falling or
+ *  downhill body goes without a game raising it; fly is deliberately past anything
+ *  the stock config produces. speed is what drives AOI churn — a walker crosses a
+ *  16-block chunk boundary every ~3s, a sledder ~2.5x a second. */
+export type Locomotion = 'idle' | 'walk' | 'sprint' | 'sled' | 'fly';
+
+export const LOCOMOTION_SPEED: Record<Locomotion, number> = {
+    idle: 0,
+    walk: 5, // character-controller.ts config.walkSpeed
+    sprint: 6.5, // config.sprintSpeed
+    sled: 40, // config.terminalVelocity
+    fly: 80,
+};
+
+/** chunk boundaries a bot crosses per second at this speed. the honest predictor of
+ *  region churn, and the reason a sledding game costs more than a walking one. */
+export function chunkCrossingsPerSecond(locomotion: Locomotion): number {
+    return LOCOMOTION_SPEED[locomotion] / CHUNK_SIZE;
+}
+
 export type Bot = {
     client: number;
     playerId: number;
@@ -74,6 +95,8 @@ export type Bot = {
 
 export type World = {
     server: TestServer;
+    /** half-extent in blocks the world was generated over. */
+    spread: number;
     discovery: Discovery.Discovery;
     resources: Resources.Resources;
     net: Net.ServerNet;
@@ -87,6 +110,9 @@ export type World = {
     /** bytes sent since the last drain, split by message type. */
     egress(): Net.NetStats;
 };
+
+/** the play-mode stream radius (discovery.ts DEFAULT_VIEW_RADIUS), in blocks. */
+const STREAM_RADIUS_BLOCKS = 8 * CHUNK_SIZE;
 
 const DEFAULTS: WorldOptions = { props: 1000, clients: 8, terrain: 'floor', spread: 96 };
 
@@ -150,6 +176,7 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
 
     const world: World = {
         server,
+        spread: opts.spread,
         discovery,
         resources,
         net,
@@ -211,11 +238,21 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
     return world;
 }
 
-/** orbit every bot at a fixed radius, each on its own phase. bounded (a bench
- *  callback runs this thousands of times) but fast enough that bots cross chunk
- *  boundaries regularly, which is what churns the AOI region. */
-export function moveBots(world: World, tick: number, radius = 96, blocksPerTick = 1.5): void {
-    const step = blocksPerTick / radius; // radians/tick for the requested ground speed
+/**
+ * move every bot at `locomotion` speed along a shared circular track, each on its
+ * own phase. the track is bounded (a bench callback runs this thousands of times)
+ * but wide enough that a lap is far longer than the retention band, so a fast bot
+ * genuinely streams fresh terrain rather than re-entering chunks it still holds.
+ *
+ * the track radius sits inside the generated area by the stream radius, so a bot's
+ * whole AOI sphere stays over real terrain instead of hanging off the edge into air.
+ */
+export function moveBots(world: World, tick: number, locomotion: Locomotion = 'walk', tickRate = 60): void {
+    const speed = LOCOMOTION_SPEED[locomotion];
+    if (speed === 0) return;
+
+    const radius = Math.max(CHUNK_SIZE, world.spread - STREAM_RADIUS_BLOCKS);
+    const step = speed / tickRate / radius; // radians/tick for the requested ground speed
     for (let i = 0; i < world.bots.length; i++) {
         const angle = (2 * Math.PI * i) / world.bots.length + tick * step;
         setPosition(world.bots[i].transform, [Math.cos(angle) * radius, 2, Math.sin(angle) * radius]);

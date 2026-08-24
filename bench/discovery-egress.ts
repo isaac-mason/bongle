@@ -7,11 +7,20 @@
 //
 //   ./node_modules/.bin/tsx bench/discovery-egress.ts [--clients 1,8,32] [--props N]
 //                                                     [--ticks N] [--terrain floor|empty]
-//                                                     [--spread BLOCKS]
+//                                                     [--spread BLOCKS] [--motion walk|sprint|sled|fly|idle]
+//                                                     [--hz N] [--prop-churn 0..1]
 //                                                     [--json]
 
 import * as Debug from '../src/core/debug';
-import { createWorld, moveBots, moveProps, type Terrain } from './discovery-world';
+import {
+    chunkCrossingsPerSecond,
+    createWorld,
+    LOCOMOTION_SPEED,
+    type Locomotion,
+    moveBots,
+    moveProps,
+    type Terrain,
+} from './discovery-world';
 
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: string): string => {
@@ -24,7 +33,13 @@ const PROPS = Number(flag('props', '1000'));
 const TICKS = Number(flag('ticks', '600'));
 const TERRAIN = flag('terrain', 'floor') as Terrain;
 const SPREAD = Number(flag('spread', '96'));
-const TICK_RATE = 20; // server ticks/sec, for converting per-tick bytes to per-second
+// the engine's tick rate: cli/start.ts steps at 1000/60, and discovery's rate gate
+// hardcodes 60 when deciding whether an hz-capped field may send this tick.
+const TICK_RATE = Number(flag('hz', '60'));
+const MOTION = flag('motion', 'walk') as Locomotion;
+// fraction of props that emit each tick — the background scene churn the bots move
+// against. set 0 to isolate bot motion.
+const PROP_CHURN = Number(flag('prop-churn', '0.2'));
 const asJson = args.includes('--json');
 
 type Row = {
@@ -57,8 +72,8 @@ function run(clients: number): Row {
     Debug.setEnabled(world.metrics, true);
 
     for (let tick = 0; tick < TICKS; tick++) {
-        moveBots(world, tick);
-        moveProps(world, tick);
+        moveBots(world, tick, MOTION, TICK_RATE);
+        if (PROP_CHURN > 0) moveProps(world, tick, PROP_CHURN);
         world.tick();
     }
 
@@ -99,12 +114,17 @@ function run(clients: number): Row {
 const rows = CLIENT_COUNTS.map(run);
 
 if (asJson) {
-    console.log(JSON.stringify({ props: PROPS, ticks: TICKS, terrain: TERRAIN, rows }, null, 2));
+    console.log(
+        JSON.stringify({ props: PROPS, ticks: TICKS, terrain: TERRAIN, motion: MOTION, tickRate: TICK_RATE, rows }, null, 2),
+    );
 } else {
     const n = (v: number, w = 8, d = 1) => v.toFixed(d).padStart(w);
 
     console.log(
-        `\ndiscovery egress — ${PROPS} props over +/-${SPREAD} blocks, terrain=${TERRAIN}, ${TICKS} ticks @ ${TICK_RATE}Hz, zero-RTT acks\n`,
+        `\ndiscovery egress — ${PROPS} props over +/-${SPREAD} blocks, terrain=${TERRAIN}, ${TICKS} ticks @ ${TICK_RATE}Hz, zero-RTT acks\n` +
+            `motion=${MOTION} (${LOCOMOTION_SPEED[MOTION]} blocks/s, ${chunkCrossingsPerSecond(MOTION).toFixed(2)} chunk crossings/s)   ` +
+            `prop-churn=${PROP_CHURN}   ` +
+            `tick budget ${(1000 / TICK_RATE).toFixed(2)}ms\n`,
     );
     console.log('clients  settle  knownNodes  knownChunks    kB/s/client');
     for (const r of rows) {
