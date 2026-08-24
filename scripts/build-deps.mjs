@@ -23,7 +23,7 @@
 // the shared-chunk relative imports resolve).
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,12 @@ if (!process.argv.includes('--force') && existsSync(OUT) && existsSync(FP) && re
 // — a bare import of an unseeded dep fails at resolve.
 const SPECIFIERS = [
     'zustand',
+    // zustand's root index.d.ts re-exports these by BARE self-specifier
+    // (`export * from 'zustand/vanilla'`), so the seeded package has to expose them
+    // or the root import has no resolvable types. Bundled for real rather than
+    // declared types-only, so what typechecks is also what runs.
+    'zustand/vanilla',
+    'zustand/react',
     '@base-ui/react/collapsible',
     '@base-ui/react/context-menu',
     '@base-ui/react/menu',
@@ -95,22 +101,54 @@ function split(spec) {
     return { pkg, subpath: rest.length ? `./${rest.join('/')}` : '.', name: rest.length ? rest.join('/') : 'index' };
 }
 
-/** the installed package's own package.json (for version + sideEffects). */
-function originalPkg(pkg) {
+/** the installed package's root directory (where its own package.json lives). */
+function originalDir(pkg) {
     try {
         let dir = dirname(fileURLToPath(import.meta.resolve(`${pkg}/package.json`, import.meta.url)));
         for (;;) {
             const pj = join(dir, 'package.json');
-            if (existsSync(pj)) {
-                const j = JSON.parse(readFileSync(pj, 'utf8'));
-                if (j.name === pkg) return j;
-            }
+            if (existsSync(pj) && JSON.parse(readFileSync(pj, 'utf8')).name === pkg) return dir;
             const up = dirname(dir);
             if (up === dir) break;
             dir = up;
         }
     } catch {}
-    return {};
+    return null;
+}
+
+/** the installed package's own package.json (for version + sideEffects). */
+function originalPkg(pkg) {
+    const dir = originalDir(pkg);
+    return dir === null ? {} : JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+}
+
+// Deps whose upstream .d.ts ride along with the bundle. The prebundle emits browser
+// ESM only, so without this a project importing one gets "implicitly has an 'any'
+// type" and silently loses all checking against it. Opt-in per dep rather than
+// blanket: a dep whose declarations reach for types we don't seed would just trade
+// one error for another. (react is the other half of this — its declarations come
+// from @types/react, seeded by scripts/pack-vfs.mjs.)
+const TYPED_DEPS = new Set(['zustand']);
+
+/** copy `pkg`'s upstream .d.ts tree next to its bundle; returns the paths copied. */
+function copyTypes(pkg) {
+    const src = originalDir(pkg);
+    const copied = new Set();
+    if (src === null) return copied;
+    const walk = (rel) => {
+        for (const entry of readdirSync(join(src, rel), { withFileTypes: true })) {
+            const r = rel ? `${rel}/${entry.name}` : entry.name;
+            if (entry.isDirectory()) {
+                if (entry.name !== 'node_modules') walk(r);
+            } else if (entry.name.endsWith('.d.ts')) {
+                mkdirSync(dirname(join(OUT, pkg, r)), { recursive: true });
+                writeFileSync(join(OUT, pkg, r), readFileSync(join(src, r)));
+                copied.add(r);
+            }
+        }
+    };
+    walk('');
+    return copied;
 }
 
 // react et al branch on process.env.NODE_ENV; fold to a literal so dev-only code
@@ -217,7 +255,8 @@ const reactVirtual = {};
 for (const [file, spec] of Object.entries(REACT_INPUTS)) {
     const real = require.resolve(spec);
     const keys = Object.keys(require(spec)).filter((k) => k !== 'default' && k !== '__esModule' && /^[A-Za-z_$][\w$]*$/.test(k));
-    reactVirtual[`\0react:${file}`] = `import __m from ${JSON.stringify(real)};\nexport default __m;\nexport const { ${keys.join(', ')} } = __m;\n`;
+    reactVirtual[`\0react:${file}`] =
+        `import __m from ${JSON.stringify(real)};\nexport default __m;\nexport const { ${keys.join(', ')} } = __m;\n`;
 }
 const reactNamedExports = {
     name: 'react-named-exports',
@@ -266,9 +305,19 @@ for (const [pkg, specs] of groups) {
     }
     const shared = seededNames.filter((n) => n !== pkg).map(nameRe);
     totalBytes += await bundlePackage(input, [/^node:/, ...shared], pkg, [esmExternalRequire(shared)]);
+    // types alongside the js: a subpath only gains a `types` condition when the
+    // upstream actually shipped a matching .d.ts, so an undeclared subpath stays
+    // unresolvable for types exactly as it is for runtime.
+    const typeFiles = TYPED_DEPS.has(pkg) ? copyTypes(pkg) : new Set();
+    for (const spec of specs) {
+        const { subpath, name } = split(spec);
+        if (typeFiles.has(`${name}.d.ts`)) exportsMap[subpath] = { types: `./${name}.d.ts`, default: `./${name}.js` };
+    }
     writePkg(pkg, exportsMap);
     console.log(`bundled ${pkg} (${specs.length} entr${specs.length === 1 ? 'y' : 'ies'})`);
 }
 
 writeFileSync(FP, fingerprint);
-console.log(`\ndeps prebundle → deps-dist/node_modules (${(totalBytes / 1024 / 1024).toFixed(2)} MB, ${groups.size + 2} packages)`);
+console.log(
+    `\ndeps prebundle → deps-dist/node_modules (${(totalBytes / 1024 / 1024).toFixed(2)} MB, ${groups.size + 2} packages)`,
+);

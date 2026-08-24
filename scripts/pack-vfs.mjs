@@ -116,6 +116,27 @@ const webgpuDir = dirname(require.resolve('@webgpu/types/package.json'));
 addFile('@webgpu/types/package.json', join(webgpuDir, 'package.json'));
 addTree('@webgpu/types', webgpuDir, (abs) => abs.endsWith('.d.ts'));
 
+// ── @types/react (+ react-dom) — declarations for the prebundled React ───────
+// build-deps.mjs emits browser ESM only, so the seeded `react` carries no .d.ts.
+// A project writing JSX (tsconfig `jsx: react-jsx` → `react/jsx-runtime`) then
+// gets TS7016 on the runtime import and TS7026 for a missing JSX.IntrinsicElements,
+// with every element falling back to `any`. React is version-locked to the editor
+// exactly like the first-party libs above, so its types ship the same way theirs do.
+// TS finds these by convention (node_modules/@types/<pkg>), so the prebundled
+// package.json needs no `types` field.
+const addTypesPackage = (spec, resolver) => {
+    const dir = dirname(resolver.resolve(`${spec}/package.json`));
+    addFile(`${spec}/package.json`, join(dir, 'package.json'));
+    addTree(spec, dir, (abs) => abs.endsWith('.d.ts'));
+    return dir;
+};
+const typesReactDir = addTypesPackage('@types/react', require);
+addTypesPackage('@types/react-dom', require);
+// csstype is @types/react's OWN dependency and pnpm doesn't hoist it here, so
+// resolve it from there. Without it `CSSProperties` degrades to `any` under
+// skipLibCheck and every `style={{ … }}` silently stops being checked.
+addTypesPackage('csstype', createRequire(join(typesReactDir, 'package.json')));
+
 // Dev serves this zip from localhost + unzips straight into OPFS, so compression
 // is wasted CPU per rebuild — dev.sh sets BONGLE_VFS_ZIP_LEVEL=0 (store). Prod
 // (website Docker build) leaves it unset → level 6 for the R2/network payload.
@@ -125,9 +146,7 @@ const zip = zipSync(files, { level: zipLevel });
 // it there when the monorepo is present; fall back to lib/editor for a standalone lib
 // build (a bare bongle checkout with no platform sibling — which doesn't need the seed).
 const appsEditor = join(ROOT, '../apps/editor');
-const out = existsSync(appsEditor)
-    ? join(appsEditor, 'editor-node-modules.zip')
-    : join(ROOT, 'editor/editor-node-modules.zip');
+const out = existsSync(appsEditor) ? join(appsEditor, 'editor-node-modules.zip') : join(ROOT, 'editor/editor-node-modules.zip');
 writeFileSync(out, zip);
 const outLabel = existsSync(appsEditor) ? 'apps/editor/editor-node-modules.zip' : 'editor/editor-node-modules.zip';
 console.log(`packed ${Object.keys(files).length} files → ${outLabel} (${(zip.length / 1024 / 1024).toFixed(2)} MB)`);
