@@ -5,12 +5,12 @@
 //   - rung 1 (PRELUDE/POSTLUDE): import `__bongle` (so shakeup's transform binds every `__bongle`
 //     reference to the linked `bongle/internal` namespace), push/pop the module on the capture
 //     stack, and self-accept via `import.meta.hot` (shakeup provides it → auto-detected selfAccept).
-//   - rung 2: inject `__bongle.deps(...)` around prefab()/script() consumers, resolving cross-module
-//     producer edges through the shared dev-server resolver (`ctx.resolve`).
-// One plugin instance owns one SymbolTable registry for the whole graph.
+//   - rung 2: inject `__bongle.deps(...)` around prefab()/script() consumers, passing the producer
+//     refs their bodies close over as thunks. Which refs are really producers is settled at runtime
+//     by `__addDeps`, so the wrap is per-module and order-independent (see capture-native.ts).
 
 import type { Plugin, PluginCtx } from 'shakeup';
-import { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture-native';
+import { wrapModuleDeps } from './capture-native';
 
 /** The capture module bracket, shared verbatim with the node CLI plugin (cli/dev/plugin.ts) so the
  *  runtime contract can't drift. Format-agnostic (plain ESM + standard `import.meta.hot`), so it runs
@@ -37,21 +37,15 @@ export type CapturePluginOptions = {
 };
 
 export function capturePlugin(options: CapturePluginOptions = {}): Plugin {
-    const registry: SymbolTableRegistry = initSymbolTables();
     const isUserModule = options.isUserModule ?? (() => true);
     return {
         name: 'bongle:capture',
-        transform: async (ctx: PluginCtx, code: string, id: string) => {
+        transform: (_ctx: PluginCtx, code: string, id: string) => {
             if (!isUserModule(id)) return null;
-            const resolveSpec = async (spec: string): Promise<string> => {
-                const resolved = await ctx.resolve(spec, id);
-                return resolved?.id ?? spec;
-            };
             // rung 2 (dep-wrap) inside the rung-1 bracket. wrapModuleDeps swallows a parse error
             // (returns code unchanged); the bracket is still applied so `__bongle` resolves and the
             // syntax error surfaces cleanly downstream.
-            const wrapped = await wrapModuleDeps(id, code, registry, resolveSpec);
-            return CAPTURE_PRELUDE + wrapped + CAPTURE_POSTLUDE;
+            return CAPTURE_PRELUDE + wrapModuleDeps(id, code) + CAPTURE_POSTLUDE;
         },
     };
 }

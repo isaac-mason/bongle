@@ -10,21 +10,22 @@ describe('capture plugin in the shakeup dev server', () => {
     it('wraps + rewrites a consumer; resolves the producer module', async () => {
         const files: Record<string, string> = {
             '/traits.ts': `import { trait } from 'bongle';\nexport const Enemy = trait('enemy');`,
-            '/consumer.ts': `import { script } from 'bongle';\nimport { Enemy } from './traits';\nscript(Enemy, (c) => { Enemy; });`,
+            '/consumer.ts': `import { script } from 'bongle';\nimport { Enemy } from './traits';\nscript(Enemy, 'tick', (c) => { Enemy; });`,
         };
         const fs: Fs = { read: (id) => files[id] ?? null, exists: (id) => id in files };
         const server = createDevServer({ fs, external: ['bongle'], plugins: [capturePlugin()] });
 
-        // Fetch the producer first so its SymbolTable is in the capture registry.
-        await server.fetchModule('/traits.ts');
+        // Consumer FIRST — the order a dev server actually reaches them, walking down from an
+        // entry. The wrap must not depend on the producer module having been transformed yet.
         const r = await server.fetchModule('/consumer.ts');
+        await server.fetchModule('/traits.ts');
 
         expect(r.errors).toEqual([]);
         expect(r.code).toContain('__bongle.deps('); // capture wrap survived
         expect(r.code).toContain('__shakeup'); // native runner-format rewrite applied
         // The wrapped producer ref is itself rewritten to its runner-format member access
         // (Enemy is an imported binding → `_N.Enemy`), proving capture ∘ devTransform compose.
-        expect(r.code).toMatch(/__bongle\.deps\(.*\[_\d+\.Enemy\]\)/s);
+        expect(r.code).toMatch(/__bongle\.deps\(.*\[\(\) => _\d+\.Enemy\]\)/s);
         expect(r.deps).toContain('/traits.ts'); // cross-module edge resolved
     });
 

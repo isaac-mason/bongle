@@ -1,13 +1,26 @@
 // build/capture/capture-native.ts — the DepGraph capture pass, over shakeup's NATIVE AST.
 //
 // Parses with shakeup's `parse` and walks `N.*` nodes directly — no ESTree hop. A module's
-// SymbolTable records its producer bindings, its exports, and its consumer calls; cross-module
-// resolution then wraps `__bongle.deps(call, [refs])` around prefab()/script() consumers whose
-// bodies close over producer identifiers.
+// SymbolTable records its producer bindings and its consumer calls; each prefab()/script() consumer
+// is then wrapped as `__bongle.deps(call, [() => ref, ...])` with the candidate producer references
+// its body closes over.
 //
-// Producer factories (`scene`/`block`/`trait`/…) and consumers (`prefab`/`script`) are recognised
-// only when their identifier binds to an import from `'bongle'` — a user's own `function script(){}`
-// never false-positives.
+// The refs are THUNKS, and which of them are really producers is decided at RUNTIME by
+// `__addDeps` (src/core/capture/dep-wrap.ts) reading each value's `dependency` stamp. That split is
+// deliberate. Proving "is this imported identifier a producer?" statically needs the producer
+// module's symbol table, which only exists once that module has itself been transformed — and a dev
+// server transforms top-down from the entry, so a consumer is always reached BEFORE the module it
+// imports its producers from. The static answer is therefore "no" at exactly the moment it matters,
+// and the edge silently never gets wired. At runtime the handle either carries a `dependency` or it
+// doesn't, with no ordering to get wrong.
+//
+// So this pass is deliberately permissive: it emits a thunk for every identifier in a consumer body
+// that could plausibly resolve to a handle (a local producer, or anything imported), and lets the
+// runtime filter. A thunk that reads a binding still in TDZ (an import cycle) throws inside
+// `__addDeps` and is skipped rather than taking down module evaluation.
+//
+// Consumers (`prefab`/`script`) are recognised only when their identifier binds to an import from
+// `'bongle'` — a user's own `function script(){}` never false-positives.
 
 import MagicString from 'magic-string';
 import { N, type Node, parse, walk } from 'shakeup';
@@ -33,26 +46,13 @@ export type LocalBinding =
     | { kind: 'import-namespace'; source: string }
     | { kind: 'unknown' };
 
-export type ExportedSymbol =
-    | { kind: 'local'; localName: string }
-    | { kind: 'reexport-named'; source: string; importedName: string }
-    | { kind: 'reexport-namespace'; source: string };
-
 export type ConsumerCall = { kind: 'prefab' | 'script'; callStart: number; callEnd: number; bodyNode: Node | null };
 
 export type SymbolTable = {
     moduleId: string;
     bindings: Map<string, LocalBinding>;
-    exports: Map<string, ExportedSymbol>;
-    starReexports: string[];
-    resolvedSources: Map<string, string>;
     consumers: ConsumerCall[];
 };
-export type SymbolTableRegistry = Map<string, SymbolTable>;
-
-export function initSymbolTables(): SymbolTableRegistry {
-    return new Map();
-}
 
 /** The inner text of a string-literal node (quotes stripped). */
 const strVal = (code: string, n: Node): string => code.slice(n.start + 1, n.end - 1);
@@ -101,14 +101,7 @@ function classifyInitializer(code: string, init: Node, table: SymbolTable): Loca
 }
 
 export function buildSymbolTable(program: Node, code: string, moduleId: string): SymbolTable {
-    const table: SymbolTable = {
-        moduleId,
-        bindings: new Map(),
-        exports: new Map(),
-        starReexports: [],
-        resolvedSources: new Map(),
-        consumers: [],
-    };
+    const table: SymbolTable = { moduleId, bindings: new Map(), consumers: [] };
     if (program.type !== N.Program) return table;
     const body = program.data.body as Node[];
 
@@ -133,8 +126,8 @@ export function buildSymbolTable(program: Node, code: string, moduleId: string):
         }
     }
 
-    // Pass 2 — top-level declarations (incl. `export const X = producer()`): producer bindings + local exports.
-    const recordDeclarators = (decls: Node[], isExport: boolean): void => {
+    // Pass 2 — top-level declarations (incl. `export const X = producer()`): local producer bindings.
+    const recordDeclarators = (decls: Node[]): void => {
         for (const decl of decls) {
             if (decl.type !== N.VariableDeclarator) continue;
             const id = decl.data.id as Node;
@@ -142,46 +135,20 @@ export function buildSymbolTable(program: Node, code: string, moduleId: string):
             // A declarator binds via a BindingIdentifier (not IdentifierReference); destructuring
             // patterns have no `.name` → skipped (we don't track destructured producers).
             const name = nameOf(code, id);
-            if (name === null) continue;
-            if (init) {
-                const binding = classifyInitializer(code, init, table);
-                if (binding) table.bindings.set(name, binding);
-            }
-            if (isExport) table.exports.set(name, { kind: 'local', localName: name });
+            if (name === null || !init) continue;
+            const binding = classifyInitializer(code, init, table);
+            if (binding) table.bindings.set(name, binding);
         }
     };
     for (const node of body) {
-        if (node.type === N.VariableDeclaration) recordDeclarators(node.data.declarations as Node[], false);
+        if (node.type === N.VariableDeclaration) recordDeclarators(node.data.declarations as Node[]);
         if (node.type === N.ExportNamedDeclaration) {
             const decl = node.data.declaration as Node | null;
-            if (decl?.type === N.VariableDeclaration) recordDeclarators(decl.data.declarations as Node[], true);
+            if (decl?.type === N.VariableDeclaration) recordDeclarators(decl.data.declarations as Node[]);
         }
     }
 
-    // Pass 3 — specifier-form exports + `export *`.
-    for (const node of body) {
-        if (node.type === N.ExportNamedDeclaration && (node.data.declaration as Node | null) === null) {
-            const source = nameOf(code, node.data.source as Node | null);
-            for (const spec of node.data.specifiers as Node[]) {
-                if (spec.type !== N.ExportSpecifier) continue;
-                const local = nameOf(code, spec.data.local as Node);
-                const exported = nameOf(code, spec.data.exported as Node);
-                if (local === null || exported === null) continue;
-                table.exports.set(
-                    exported,
-                    source ? { kind: 'reexport-named', source, importedName: local } : { kind: 'local', localName: local },
-                );
-            }
-        } else if (node.type === N.ExportAllDeclaration) {
-            const source = nameOf(code, node.data.source as Node);
-            if (source === null) continue;
-            const exported = nameOf(code, node.data.exported as Node | null);
-            if (exported !== null) table.exports.set(exported, { kind: 'reexport-namespace', source });
-            else table.starReexports.push(source);
-        }
-    }
-
-    // Pass 4 — consumer calls (prefab/script). TOP-LEVEL only (an ExpressionStatement, a declarator
+    // Pass 3 — consumer calls (prefab/script). TOP-LEVEL only (an ExpressionStatement, a declarator
     // init, or an export declaration) — nested calls are out of scope.
     // Callee is either `script`/`prefab` (import-named from 'bongle') or `M.script`/
     // `M.prefab` (member of a 'bongle' namespace import).
@@ -231,17 +198,20 @@ export function buildSymbolTable(program: Node, code: string, moduleId: string):
 }
 
 /**
- * The function body a consumer's deps are collected from: `script(Trait, factory)`'s factory
- * (2nd arg, when the trait arg is an identifier and the factory is a function), or `prefab('id',
+ * The function body a consumer's deps are collected from: `script(Trait, 'id', factory)`'s factory
+ * (3rd arg, when the trait arg is an identifier and the factory is a function), or `prefab('id',
  * { fn })`'s `fn` property. Returns null when the call shape doesn't qualify (→ no wrap).
  */
 function consumerBody(code: string, call: Node, importedName: string): Node | null {
     if (call.type !== N.CallExpression) return null;
     const args = call.data.arguments as Node[];
     if (importedName === 'script') {
+        // script(handle, scriptId, factory, opts?) — the scriptId is required, so the factory is
+        // always the 3rd argument (a trailing `opts` object may follow it).
         const traitArg = args[0];
         if (!traitArg || traitArg.type !== N.IdentifierReference) return null;
-        const factory = args[1];
+        if (!args[1] || args[1].type !== N.StringLiteral) return null;
+        const factory = args[2];
         if (!factory) return null;
         return factory.type === N.ArrowFunctionExpression || factory.type === N.FunctionExpression ? factory : null;
     }
@@ -259,103 +229,67 @@ function consumerBody(code: string, call: Node, importedName: string): Node | nu
     return null;
 }
 
-/** Is `name` (in `table`) a producer — locally, or an import whose resolved module produces it? */
-function isProducerRef(name: string, table: SymbolTable, registry: SymbolTableRegistry, seen = new Set<string>()): boolean {
-    const key = `${table.moduleId}\0${name}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    const binding = table.bindings.get(name);
-    if (!binding) return false;
-    if (binding.kind === 'producer') return true;
-    if (binding.kind === 'import-named') {
-        const modId = table.resolvedSources.get(binding.source);
-        if (modId === undefined) return false;
-        const producerTable = registry.get(modId);
-        if (producerTable === undefined) return false;
-        return isProducerExport(binding.importedName, producerTable, registry, seen);
-    }
-    return false;
-}
-
-/** Is `exportName` a producer in `table` (following a local binding or a re-export chain)? */
-function isProducerExport(exportName: string, table: SymbolTable, registry: SymbolTableRegistry, seen: Set<string>): boolean {
-    const exp = table.exports.get(exportName);
-    if (exp?.kind === 'reexport-named') {
-        const modId = table.resolvedSources.get(exp.source);
-        const next = modId !== undefined ? registry.get(modId) : undefined;
-        return next !== undefined && isProducerExport(exp.importedName, next, registry, seen);
-    }
-    const localName = exp?.kind === 'local' ? exp.localName : exportName;
-    return isProducerRef(localName, table, registry, seen);
-}
-
-/** Producer identifiers a consumer body closes over, in first-seen order (deduped). */
-function extractConsumerDeps(bodyNode: Node, table: SymbolTable, registry: SymbolTableRegistry): string[] {
+/**
+ * Candidate producer expressions a consumer body closes over, in first-seen order (deduped).
+ *
+ * "Candidate", not "proven": a local producer binding, anything imported (its handle-ness lives in
+ * the other module), and `ns.member` reads off a namespace import. `__addDeps` drops whatever turns
+ * out not to carry a `dependency` at runtime, so over-including here costs one property read per
+ * ref and under-including costs a missing edge — the asymmetry is why this leans permissive.
+ */
+function extractConsumerDeps(bodyNode: Node, table: SymbolTable): string[] {
     const out: string[] = [];
-    const seenNames = new Set<string>();
-    walk(bodyNode, (n) => {
-        if (n.type !== N.IdentifierReference) return;
-        const name = n.name;
-        if (seenNames.has(name)) return;
-        if (isProducerRef(name, table, registry)) {
-            seenNames.add(name);
-            out.push(name);
+    const seen = new Set<string>();
+    const add = (expr: string): void => {
+        if (seen.has(expr)) return;
+        seen.add(expr);
+        out.push(expr);
+    };
+    // `false` prunes the subtree; anything else keeps walking.
+    walk(bodyNode, (n): boolean => {
+        // `ns.Enemy` off a namespace import — the handle is the MEMBER, not `ns`, so match the
+        // member expression and prune so the bare `ns` underneath isn't collected separately.
+        if (n.type === N.StaticMemberExpression) {
+            const obj = n.data.object as Node;
+            const prop = n.data.property as Node;
+            if (obj.type !== N.IdentifierReference || prop.type !== N.IdentifierName) return true;
+            if (table.bindings.get(obj.name)?.kind !== 'import-namespace') return true;
+            add(`${obj.name}.${prop.name}`);
+            return false;
         }
+        if (n.type !== N.IdentifierReference) return true;
+        const binding = table.bindings.get(n.name);
+        if (binding === undefined) return true;
+        if (binding.kind === 'producer' || binding.kind === 'import-named' || binding.kind === 'import-default') add(n.name);
+        return true;
     });
     return out;
 }
 
 /**
  * Analyse a user module and return its source with `__bongle.deps(...)` wraps injected around
- * eligible prefab()/script() consumer calls; populates `registry` with the module's SymbolTable.
+ * eligible prefab()/script() consumer calls. Pure and stateless: the wrap depends only on this
+ * module's own text, so it can't vary with the order modules happen to be transformed in.
  * Parse failures fall back to the unwrapped source (a syntax error must not break the transform).
  */
-export async function wrapModuleDeps(
-    id: string,
-    code: string,
-    registry: SymbolTableRegistry,
-    resolveSpec: (spec: string) => Promise<string>,
-): Promise<string> {
+export function wrapModuleDeps(id: string, code: string): string {
     const jsx = id.endsWith('.tsx') || id.endsWith('.jsx');
     const { program, errors } = parse(code, { ts: true, jsx });
     if (errors.length > 0) return code;
 
     const table = buildSymbolTable(program, code, id);
 
-    // Pre-resolve every import/re-export source spec to a module id.
-    const specs = new Set<string>();
-    for (const binding of table.bindings.values()) {
-        if (binding.kind === 'import-named' || binding.kind === 'import-default' || binding.kind === 'import-namespace')
-            specs.add(binding.source);
-    }
-    for (const exp of table.exports.values()) {
-        if (exp.kind === 'reexport-named' || exp.kind === 'reexport-namespace') specs.add(exp.source);
-    }
-    for (const spec of table.starReexports) specs.add(spec);
-    await Promise.all(
-        [...specs].map(async (spec) => {
-            try {
-                table.resolvedSources.set(spec, await resolveSpec(spec));
-            } catch {
-                /* unresolved → opaque */
-            }
-        }),
-    );
-
-    registry.set(id, table);
-
     let ms: MagicString | null = null;
     for (const consumer of table.consumers) {
         if (!consumer.bodyNode) continue;
-        const refs = extractConsumerDeps(consumer.bodyNode, table, registry);
+        const refs = extractConsumerDeps(consumer.bodyNode, table);
         if (refs.length === 0) continue;
         ms ??= new MagicString(code);
         ms.appendLeft(consumer.callStart, '__bongle.deps(');
-        ms.appendRight(consumer.callEnd, `, [${refs.join(', ')}])`);
+        // thunks, not values: deferring the read lets __addDeps survive a ref that's still in TDZ
+        // (an import cycle) instead of throwing partway through the module body.
+        ms.appendRight(consumer.callEnd, `, [${refs.map((r) => `() => ${r}`).join(', ')}])`);
     }
-
-    // Drop AST nodes now the wrap is done — the registry only reads bindings/exports/resolvedSources.
-    table.consumers = [];
 
     return ms ? ms.toString() : code;
 }

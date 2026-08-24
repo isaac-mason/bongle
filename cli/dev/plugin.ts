@@ -6,8 +6,8 @@
 //   • bongle:capture-transform — brackets every USER-src module with the __bongle
 //     capture push/pop + a self-accept (import.meta.hot.accept → __bongle.reload →
 //     invalidate-or-flush), AND runs the rung-2 dep-wrap (build/capture's
-//     wrapModuleDeps injects __bongle.deps around prefab()/script() bodies so an
-//     importer-cascade fires on shape change), via the shakeup-native capture
+//     wrapModuleDeps injects __bongle.deps around prefab()/script() bodies so a
+//     producer edit reaches the scripts that close over it), via the shakeup-native capture
 //     (build/capture/capture-native). Vite provides import.meta.hot natively, so
 //     the emitted code runs unchanged here.
 //   • bongle:engine-reboot — engine/workspace source (outside the project) has no
@@ -16,7 +16,7 @@
 
 import path from 'node:path';
 import type { Plugin } from 'vite';
-import { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, initSymbolTables, wrapModuleDeps } from '../../build';
+import { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, wrapModuleDeps } from '../../build';
 
 /** Set by the dev orchestrator (start.ts) so an engine-source change reboots the
  *  server env + respawns the pipeline worker. Omitted by non-dev consumers. */
@@ -34,10 +34,6 @@ export type BongleOptions = {
 export function bongle(opts: BongleOptions): Plugin[] {
     const projectDir = path.resolve(opts.projectDir);
     const userSrcDir = path.join(projectDir, 'src') + path.sep;
-    // per-module symbol table, shared across the capture transforms (the
-    // cross-module resolver walks re-export chains across it).
-    const symbolTables = initSymbolTables();
-
     return [
         {
             name: 'bongle:engine-reboot',
@@ -65,7 +61,7 @@ export function bongle(opts: BongleOptions): Plugin[] {
         },
         {
             name: 'bongle:capture-transform',
-            async transform(code, id) {
+            transform(code, id) {
                 const filePath = id.split('?')[0] ?? id;
                 if (!filePath.startsWith(userSrcDir) || !/\.tsx?$/.test(filePath)) return null;
 
@@ -74,12 +70,11 @@ export function bongle(opts: BongleOptions): Plugin[] {
                 // parse failure — it must not break the capture bracket.
                 let wrapped = code;
                 try {
-                    wrapped = await wrapModuleDeps(filePath, code, symbolTables, async (spec) => {
-                        const resolved = await this.resolve(spec, id);
-                        return resolved?.id.split('?')[0] ?? spec;
-                    });
+                    wrapped = wrapModuleDeps(filePath, code);
                 } catch (err) {
-                    this.warn(`[bongle:capture] dep-wrap skipped for ${path.relative(projectDir, filePath)}: ${(err as Error).message}`);
+                    this.warn(
+                        `[bongle:capture] dep-wrap skipped for ${path.relative(projectDir, filePath)}: ${(err as Error).message}`,
+                    );
                 }
 
                 return { code: CAPTURE_PRELUDE + wrapped + CAPTURE_POSTLUDE, map: null };

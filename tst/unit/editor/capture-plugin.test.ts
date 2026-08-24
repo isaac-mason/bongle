@@ -18,26 +18,29 @@ describe('capturePlugin (through shakeup pipeline)', () => {
         const run = makeRunner();
         const out = await run(
             'game.ts',
-            L(`import { trait, script } from 'bongle';`, `const E = trait('e');`, `script(E, (c) => { E; });`),
+            L(`import { trait, script } from 'bongle';`, `const E = trait('e');`, `script(E, 'tick', (c) => { E; });`),
         );
         expect(out).toContain('__bongle.deps(script(');
-        expect(out).toContain('[E])');
+        expect(out).toContain('[() => E])');
     });
 
-    it('resolves a cross-module producer via ctx.resolve', async () => {
-        const run = makeRunner({ './traits': 'traits.ts' });
-        await run('traits.ts', L(`import { trait } from 'bongle';`, `export const Enemy = trait('enemy');`));
+    it('offers a cross-module producer without the producer module being seen first', async () => {
+        const run = makeRunner();
         const out = await run(
             'scripts.ts',
-            L(`import { script } from 'bongle';`, `import { Enemy } from './traits';`, `script(Enemy, (c) => { Enemy; });`),
+            L(
+                `import { script } from 'bongle';`,
+                `import { Enemy } from './traits';`,
+                `script(Enemy, 'tick', (c) => { Enemy; });`,
+            ),
         );
         expect(out).toContain('__bongle.deps(script(');
-        expect(out).toContain('[Enemy])');
+        expect(out).toContain('[() => Enemy])');
     });
 
     it('brackets a module with no producer refs (rung-1 only: __bongle import + push/pop, no dep-wrap)', async () => {
         const run = makeRunner();
-        const code = L(`import { script } from 'bongle';`, `script(Foo, (c) => { c.log('x'); });`);
+        const code = L(`import { script } from 'bongle';`, `script(Foo, 'tick', (c) => { c.log('x'); });`);
         const out = await run('plain.ts', code);
         expect(out).toContain(`import { __bongle } from 'bongle/internal';`); // rung-1 bracket applied
         expect(out).toContain('__bongle.push(import.meta.url)');

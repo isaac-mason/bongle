@@ -10,7 +10,8 @@
 //   - the module resolver (resolve.ts).
 //   - ENGINE SEMANTICS: the DepGraph capture pass (recognise scene/block/trait/
 //     script producers + consumers, wrap with __bongle.deps) + env replacement —
-//     cross-module resolution is injected so it runs over a vfs or a node resolver.
+//     the wrap is per-module and stateless, so it runs the same over a vfs or a
+//     node resolver and can't vary with module transform order.
 //   - the DEV runtime (shakeup-host / shakeup-port / shakeup-runner-host + the capture
 //     plugin): ONE shakeup dev server owns transform + resolution, realms attach over
 //     ports and only evaluate.
@@ -19,7 +20,7 @@
 
 export { type Bundler, bundleWorkerEntry, bundleWorkers, createBonglePlugin, workerWrapperModule } from './bundle/bongle-plugin';
 export { type BuildOptions, buildBundle } from './bundle/bundle';
-export { initSymbolTables, type SymbolTableRegistry, wrapModuleDeps } from './capture/capture-native';
+export { wrapModuleDeps } from './capture/capture-native';
 export { CAPTURE_POSTLUDE, CAPTURE_PRELUDE, type CapturePluginOptions, capturePlugin } from './capture/capture-plugin';
 export { contentType } from './dev/mime';
 export { createNetSim, type NetSim, type NetSimConfig, type NetSimSinks } from './dev/net-sim';
