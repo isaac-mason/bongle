@@ -723,18 +723,21 @@ export function updateActiveRoom(state: WebGpuState, ctx: FrameContext): void {
     // The live drive: the AOI schedules dirty chunks off-thread (streaming rooms
     // defer a chunk until its 26-neighbourhood has arrived so it meshes once with
     // correct AO/light; local rooms mesh immediately), then the GPU producer
-    // consumes the staged results into its own arena. The live path always has a
-    // worker pool (the offline bakers mesh synchronously via `remeshChunkInto`).
+    // consumes the staged results into its own arena. No dispatcher means no
+    // worker pool: a runtime that never spawns workers (asset pipeline, headless
+    // harness — see voxel-resources-cpu's `typeof Worker` guard) has no live voxel
+    // meshing to drive, so skip the drive rather than fail the frame.
     const mesher = res.voxel.meshDispatcher;
-    if (mesher === null) throw new Error('[webgpu] live voxel update requires a mesh worker pool (workerCount > 0)');
-    VoxelAoi.reDirtyLost(mesher, room.voxels);
-    const toForget: string[] = [];
-    VoxelAoi.scheduleDirtyChunks(rv.voxel, mesher, room.voxels, povCamera.position, !room.local, toForget);
-    VoxelResources.consume(res.voxel, mesher, room.voxels, povCamera.position, toForget);
-    // flush AFTER consume drains: the flush recycles output buffers back to the
-    // workers, which would detach them from an undrained result (see mesher.ts).
-    flushMeshQueue(mesher, room.voxels);
-    rv.voxel.lastMeshPerf = readMeshPerf(mesher);
+    if (mesher !== null) {
+        VoxelAoi.reDirtyLost(mesher, room.voxels);
+        const toForget: string[] = [];
+        VoxelAoi.scheduleDirtyChunks(rv.voxel, mesher, room.voxels, povCamera.position, !room.local, toForget);
+        VoxelResources.consume(res.voxel, mesher, room.voxels, povCamera.position, toForget);
+        // flush AFTER consume drains: the flush recycles output buffers back to the
+        // workers, which would detach them from an undrained result (see mesher.ts).
+        flushMeshQueue(mesher, room.voxels);
+        rv.voxel.lastMeshPerf = readMeshPerf(mesher);
+    }
     Debug.end(room.clientMetrics, 'mesh');
 
     // arena occupancy + fragmentation, recorded post-update so the sample
