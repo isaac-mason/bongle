@@ -25,15 +25,24 @@ import { defaultHotbar, HOTBAR_SIZE, type HotbarSlot } from './inventory';
 import { hasStoredHotbar, loadHotbar, saveHotbar } from './preferences';
 
 /** Transient HMR / status notification shown briefly in the top-left of
- *  the editor viewport. Pushed from `applyRegistryChanges` for each
- *  registry kind that had pending changes; auto-dismissed by the row. */
+ *  the viewport, in both edit and play POV. Pushed from
+ *  `applyRegistryChanges` for each registry kind that had pending changes;
+ *  auto-dismissed by the row. */
 export type Toast = {
     id: string;
-    /** registry kind or other source label (used for keying + dedupe). */
+    /** registry kind or other source label. one live row per kind, a repeat
+     *  push refreshes that row instead of stacking a new one. */
     kind: string;
     message: string;
+    /** bumped on every push, the row re-times its dismissal off this. */
     createdAt: number;
+    /** how many pushes this row has collapsed, 1 for a fresh toast. */
+    repeats: number;
 };
+
+/** rows past this are dropped oldest-first, a burst of edits touching many
+ *  registries can't grow the stack without bound. */
+const MAX_TOASTS = 4;
 
 /** Slim record of a Player held by the client, for store/UI consumption. */
 export type JoinedPlayer = {
@@ -179,7 +188,7 @@ export type EditorStore = {
     setHotbarSlot: (index: number, item: HotbarSlot) => void;
 
     /* ── toasts ── */
-    pushToast: (toast: Omit<Toast, 'id' | 'createdAt'>) => void;
+    pushToast: (toast: Omit<Toast, 'id' | 'createdAt' | 'repeats'>) => void;
     dismissToast: (id: string) => void;
 
     /* ── net sim ── */
@@ -345,9 +354,21 @@ export const useEditor = create<EditorStore>((set, _get) => ({
         }),
 
     pushToast: (toast) =>
-        set((s) => ({
-            toasts: [...s.toasts, { ...toast, id: crypto.randomUUID(), createdAt: performance.now() }],
-        })),
+        set((s) => {
+            const now = performance.now();
+            const existing = s.toasts.find((t) => t.kind === toast.kind);
+            if (existing) {
+                // same source firing again (a save burst, a file saved twice):
+                // refresh the row in place so it re-times rather than stacking.
+                return {
+                    toasts: s.toasts.map((t) =>
+                        t === existing ? { ...t, ...toast, createdAt: now, repeats: t.repeats + 1 } : t,
+                    ),
+                };
+            }
+            const toasts = [...s.toasts, { ...toast, id: crypto.randomUUID(), createdAt: now, repeats: 1 }];
+            return { toasts: toasts.slice(-MAX_TOASTS) };
+        }),
 
     dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 

@@ -19,14 +19,17 @@ function ToastRow({ toast }: { toast: Toast }) {
     const dismissToast = useEditor((s) => s.dismissToast);
     const [visible, setVisible] = useState(true);
 
+    // keyed on createdAt as well as id: a repeat push refreshes the row in
+    // place (same id, new stamp), which restarts the countdown here.
     useEffect(() => {
+        setVisible(true);
         const fadeId = window.setTimeout(() => setVisible(false), VISIBLE_MS - FADE_MS);
         const dropId = window.setTimeout(() => dismissToast(toast.id), VISIBLE_MS);
         return () => {
             window.clearTimeout(fadeId);
             window.clearTimeout(dropId);
         };
-    }, [toast.id, dismissToast]);
+    }, [toast.id, toast.createdAt, dismissToast]);
 
     return (
         <div
@@ -34,6 +37,7 @@ function ToastRow({ toast }: { toast: Toast }) {
             style={{ opacity: visible ? 1 : 0, transitionDuration: `${FADE_MS}ms` }}
         >
             {toast.message}
+            {toast.repeats > 1 && <span className="text-fg-muted"> x{toast.repeats}</span>}
         </div>
     );
 }

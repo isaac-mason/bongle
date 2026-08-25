@@ -280,10 +280,7 @@ function EditUI() {
                             {/* right-click context menu over the viewport (opened from inspect tool) */}
                             <ViewportContextMenu />
 
-                            {/* HMR / status toasts, top-left, above ToolActions */}
-                            <ToastStack />
-
-                            {/* tool-aware action buttons, top-left, below toasts */}
+                            {/* tool-aware action buttons, top-left, under the toasts */}
                             <ToolActions />
 
                             {/* control mode widget, top-right */}
@@ -305,6 +302,11 @@ function EditUI() {
                             <LibraryOverlay />
                         </>
                     )}
+
+                    {/* HMR / status toasts, top-left, over ToolActions. outside
+                        the editorEnabled gate: a hot-reload matters just as
+                        much while playing as while editing. */}
+                    <ToastStack />
 
                     {/* chat / slash commands, bottom-left, opens on '/' or 't'.
                         rendered outside the editorEnabled gate so it works in
