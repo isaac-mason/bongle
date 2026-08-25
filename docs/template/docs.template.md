@@ -1092,9 +1092,33 @@ parent the authoring tool produced; the rig contract only requires the seven bon
 present somewhere reachable, so resolve any of them by name with
 `findByName(node, 'head')`. The three sockets are always built as persistent rig
 nodes for mounting held items and back-mounted props; when an avatar doesn't author
-one, the engine derives its rest position from the parent bone's geometry, so
+one, the engine derives its rest transform from the parent bone's geometry, so
 creators get usable mount points for free, while an authored socket keeps its own
 transform.
+
+**The derived hand sockets are rotated, not just positioned.** `hand_left` and
+`hand_right` are given a **+90° rotation about X** — a grip convention, so a model
+authored lying along its own `+Y` ends up gripped rather than sticking out of the
+fist. `back` gets no rotation. This matters the moment you mount something and pose
+the arm yourself, because the socket's rotation sits between the two:
+
+```text
+world = (arm bone rotation) · Rx(90°) · (your item's local rotation)
+```
+
+So an item parented to a hand is already rotated by `armPitch + 90°` before its own
+transform applies. If you pose the arm — raising it to aim, for instance — give the
+item a local rotation that cancels the total, or it will be held at that angle:
+
+```ts
+// arm posed 92° forward to aim; socket adds 90°
+setQuaternion(getTrait(gun, TransformTrait)!, quat.setAxisAngle(quat.create(), [1, 0, 0], -degreesToRadians(92 + 90)));
+```
+
+Deriving that from the same constant you pose the arm with keeps the two in step, so
+retuning the pose can't silently rotate the item. If you're only mounting gear and
+letting the engine's own locomotion move the arms, you don't need any of this — the
+convention already holds the item correctly.
 
 You author character models in the [bongle editor](https://bongle.io/editor/a/new),
 which embeds a build of [Blockbench](https://www.blockbench.net/) set up for bongle. It
