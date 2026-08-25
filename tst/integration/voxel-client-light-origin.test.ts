@@ -204,3 +204,43 @@ describe('light-neutral swaps skip the queue', () => {
         expect(voxels.lighting.blocks).toHaveLength(1);
     });
 });
+
+describe('light-only changes re-queue their chunk for remesh', () => {
+    /** drain the remesh queue the way the renderer does (voxel-aoi). */
+    function drainRemesh(voxels: Voxels): void {
+        for (const c of voxels.dirty.blocks) c.dirty = false;
+        voxels.dirty.blocks.clear();
+    }
+
+    it('a neighbour chunk lit across a boundary is re-queued every time its light changes', () => {
+        const reg = makeRegistry();
+        const mirror = makeMirror(reg);
+
+        // two adjacent chunks: (0,0,0) spans x 0..15, (1,0,0) spans x 16..31
+        setBlock(mirror, 20, 8, 8, 'stone');
+        flushPendingLight(mirror);
+        drainRemesh(mirror);
+
+        const neighbour = mirror.chunks.get(chunkKey(1, 0, 0))!;
+        const acrossBoundary = voxelIndex(0, 8, 8);
+
+        // lamp well inside chunk 0 (x=10 is not a boundary coord, so
+        // markBoundaryNeighborsDirty cannot mark chunk 1). only the light
+        // BFS reaches across, which is exactly the path under test.
+        setBlock(mirror, 10, 8, 8, 'lamp');
+        flushPendingLight(mirror);
+        expect(getRed(neighbour.light[acrossBoundary]!)).toBeGreaterThan(0);
+        expect(mirror.dirty.blocks.has(neighbour)).toBe(true);
+
+        drainRemesh(mirror);
+
+        // remove it: the neighbour must darken AND be re-queued, or the stale
+        // lit mesh stays on screen until something else dirties that chunk.
+        setBlock(mirror, 10, 8, 8, 'air');
+        flushPendingLight(mirror);
+
+        expect(getRed(neighbour.light[acrossBoundary]!)).toBe(0);
+        expect(mirror.dirty.blocks.has(neighbour)).toBe(true);
+    });
+
+});

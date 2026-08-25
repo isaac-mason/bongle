@@ -305,10 +305,20 @@ function writeChunkLight(voxels: Voxels, chunk: Chunk, index: number, value: num
 // ── chunk dirty marking ─────────────────────────────────────────────
 
 function markChunkDirty(voxels: Voxels, chunk: Chunk): void {
-    if (chunk.lightDirty) return; // already dirty, skip redundant stores
-    chunk.lightDirty = true;
+    // two independent queues, drained by different consumers at different
+    // cadences, so they cannot share an early-out.
+
+    // remesh queue: the renderer drains `dirty.blocks` per frame and clears
+    // `chunk.dirty`, without touching `lightDirty`. always re-add, or a chunk
+    // whose ONLY change is light (a neighbour lit across a boundary) never
+    // remeshes again and keeps showing stale lighting.
     chunk.dirty = true;
     voxels.dirty.blocks.add(chunk);
+
+    // network-dispatch queue: discovery drains this per tick and resets
+    // `lightDirty`. these stores are idempotent while the flag is set.
+    if (chunk.lightDirty) return;
+    chunk.lightDirty = true;
     voxels.dirty.light.add(chunk);
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
