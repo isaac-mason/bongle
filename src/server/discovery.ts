@@ -144,12 +144,19 @@ type ClientNodeKnowledge = {
 
 /* ── per-client voxel knowledge ── */
 
+/** chunk coords, stored alongside the key so eviction (a per-tick-budgeted-anchor-
+ *  cross walk over every known chunk) doesn't have to re-derive them by parsing the
+ *  key string every time — chunkKey()/split() round-tripping showed up as the
+ *  dominant cost in a live 24ms+ discovery spike (evictOutOfRange + the discovery
+ *  walk together, both keyed off the SAME chunkKey() string). */
+type ChunkCoord = { cx: number; cy: number; cz: number };
+
 type ClientVoxelKnowledge = {
     /** chunks sent as voxel_chunk_full and kept in sync with chunk_ops/light. */
-    knownChunks: Set<string>;
+    knownChunks: Map<string, ChunkCoord>;
     /** chunks announced as empty via voxel_chunk_empty, client holds an
      *  all-air stub so collision can distinguish "known air" from "unknown". */
-    knownEmptyChunks: Set<string>;
+    knownEmptyChunks: Map<string, ChunkCoord>;
     knownLightEpoch: number;
     /** player's chunk coord at the last flush. eviction runs only when this
      *  changes, so per-tick cost stays low at the edit-radius scale. null
@@ -349,8 +356,8 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
     cs.knownPlayers.add(player.id);
 
     cs.voxelKnowledge.set(player.id, {
-        knownChunks: new Set(),
-        knownEmptyChunks: new Set(),
+        knownChunks: new Map(),
+        knownEmptyChunks: new Map(),
         knownLightEpoch: 0,
         lastAnchor: null,
         cursor: 0,
@@ -1446,7 +1453,15 @@ const MAX_STREAM_RADIUS_EDIT = 24;
  *  resident on the client and keep receiving ops (kept fresh); only chunks
  *  beyond the band are evicted (voxel_chunk_del). prevents thrash at the load
  *  frontier and makes wandering out and back within the band a free re-render
- *  with no re-download. */
+ *  with no re-download.
+ *
+ *  tried widening 6 -> 18 (2025-08-24 perf investigation), measured a regression
+ *  and reverted: chunkInRegion() gates PROP/ENTITY presence off this same
+ *  knownChunks/knownEmptyChunks set, so a wider margin inflates entity AOI as a
+ *  side effect, not just voxel residency — worse across all three discovery
+ *  phases at 32 sledders (bench/profile-voxels-movers.ts, bench/discovery-egress.ts
+ *  --motion sled), not better. don't retry this lever without first decoupling
+ *  entity presence from voxel chunk residency. */
 const RETENTION_MARGIN = 6;
 
 /** if a chunk has more ops than this, promote to chunk_full re-send */
@@ -1574,7 +1589,7 @@ type CoalescedBlockChunk = {
 /** coalesce block ops by chunk, dedup by voxel index (keep last value). */
 function coalesceBlockOps(
     ops: VoxelChanges['ops'],
-    knownChunks: Set<string>,
+    knownChunks: Map<string, ChunkCoord>,
     chunks: Map<string, Chunk>,
 ): Map<string, CoalescedBlockChunk> {
     const result = new Map<string, CoalescedBlockChunk>();
@@ -1640,8 +1655,8 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
         let knowledge = cs.voxelKnowledge.get(player.id);
         if (!knowledge) {
             knowledge = {
-                knownChunks: new Set(),
-                knownEmptyChunks: new Set(),
+                knownChunks: new Map(),
+                knownEmptyChunks: new Map(),
                 knownLightEpoch: 0,
                 lastAnchor: null,
                 cursor: 0,
@@ -1789,7 +1804,7 @@ function dispatchFull(
                     compressed,
                 },
             ]);
-            knowledge.knownChunks.add(c.key);
+            knowledge.knownChunks.set(c.key, { cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz });
             knowledge.inFlightFull.add(c.key);
             knowledge.entered.add(c.key); // node AOI: chunk terrain shipped → its roots stream in this tick
         },
@@ -1882,11 +1897,7 @@ function evictOutOfRange(
     out: Array<[Client, ServerMessage]>,
 ): void {
     const r2 = evictRadius * evictRadius;
-    for (const key of knowledge.knownChunks) {
-        const parts = key.split(',');
-        const cx = Number.parseInt(parts[0]!, 10);
-        const cy = Number.parseInt(parts[1]!, 10);
-        const cz = Number.parseInt(parts[2]!, 10);
+    for (const [key, { cx, cy, cz }] of knowledge.knownChunks) {
         const dx = cx - pcx;
         const dy = cy - pcy;
         const dz = cz - pcz;
@@ -1899,11 +1910,7 @@ function evictOutOfRange(
         // for an evicted chunk hits an unknown key and is ignored.
         knowledge.inFlightFull.delete(key);
     }
-    for (const key of knowledge.knownEmptyChunks) {
-        const parts = key.split(',');
-        const cx = Number.parseInt(parts[0]!, 10);
-        const cy = Number.parseInt(parts[1]!, 10);
-        const cz = Number.parseInt(parts[2]!, 10);
+    for (const [key, { cx, cy, cz }] of knowledge.knownEmptyChunks) {
         const dx = cx - pcx;
         const dy = cy - pcy;
         const dz = cz - pcz;
@@ -2036,7 +2043,7 @@ function flushVoxelsForPlayer(
                 break;
             }
             pendingEmpty.push({ cx, cy, cz });
-            knowledge.knownEmptyChunks.add(key);
+            knowledge.knownEmptyChunks.set(key, { cx, cy, cz });
             knowledge.entered.add(key); // node AOI: air chunk discovered → its roots can stream in
         }
     }
