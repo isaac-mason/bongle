@@ -2603,3 +2603,74 @@ describe('multi-chunk sealed cave', () => {
         expect(offenders.slice(0, 20), `${offenders.length}/${(W - 2) * (CHUNK_SIZE - 2) * (W - 2)} cave cells lit`).toEqual([]);
     });
 });
+
+// ── sky removal through a zero-decay downward column ─────────────────
+//
+// spreadChannel sends sky DOWN through opacity-0 blocks with no decay, so a
+// cell can sit at exactly its upper neighbour's level and still derive its
+// light from it. unspreadChannel must remove such a neighbour; treating it as
+// an independent source leaves the column lit one level lower instead of dark.
+
+describe('sky unspread through a no-decay column', () => {
+    function makeHutVoxels(): Voxels {
+        const voxels = createVoxels(buildTestRegistry([{ id: 'stone', texId: 'stone' }]));
+        voxels.authority = createVoxelsAuthority();
+        return voxels;
+    }
+
+    function hut(v: Voxels) {
+        for (let x = 6; x <= 9; x++) {
+            for (let z = 6; z <= 9; z++) {
+                setBlock(v, x, 6, z, 'stone'); // floor
+                setBlock(v, x, 9, z, 'stone'); // roof
+                if (x === 6 || x === 9 || z === 6 || z === 9) {
+                    setBlock(v, x, 7, z, 'stone'); // wall, lower
+                    setBlock(v, x, 8, z, 'stone'); // wall, upper
+                }
+            }
+        }
+    }
+
+    /** sky across the 2x2x2 interior */
+    function interior(v: Voxels): number[] {
+        const c = v.chunks.get(chunkKey(0, 0, 0))!;
+        const out: number[] = [];
+        for (let y = 7; y <= 8; y++) {
+            for (let x = 7; x <= 8; x++) {
+                for (let z = 7; z <= 8; z++) out.push(getSky(c.light[voxelIndex(x, y, z)]!));
+            }
+        }
+        return out;
+    }
+
+    it('replacing a broken WALL block re-darkens the interior', () => {
+        const voxels = makeHutVoxels();
+        hut(voxels);
+        flushPendingLight(voxels);
+        expect(interior(voxels)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // break one upper-wall block: sky enters sideways under the roof
+        setBlock(voxels, 7, 8, 6, 'air');
+        flushPendingLight(voxels);
+        expect(Math.max(...interior(voxels))).toBeGreaterThan(0);
+
+        // put it back: the interior must return to fully dark
+        setBlock(voxels, 7, 8, 6, 'stone');
+        flushPendingLight(voxels);
+        expect(interior(voxels)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    });
+
+    it('replacing a broken ROOF block re-darkens the interior', () => {
+        const voxels = makeHutVoxels();
+        hut(voxels);
+        flushPendingLight(voxels);
+
+        setBlock(voxels, 7, 9, 7, 'air');
+        flushPendingLight(voxels);
+        expect(Math.max(...interior(voxels))).toBeGreaterThan(0);
+
+        setBlock(voxels, 7, 9, 7, 'stone');
+        flushPendingLight(voxels);
+        expect(interior(voxels)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    });
+});

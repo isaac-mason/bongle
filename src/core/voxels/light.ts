@@ -477,8 +477,13 @@ function unspreadChannel(
             const neighborPacked = nchunk.light[nindex]!;
             let neighborLevel = (neighborPacked >> shift) & 0xf;
 
-            // minetest: if (propagates && level < oldLevel) → removal, else → border.
+            // minetest: if (propagates && level < oldLevel) then removal, else border.
             // opaque neighbors (!propagates) always go to the border branch.
+            //
+            // strictly-less-than is only sound because every propagation step
+            // decays by at least 1. the one zero-decay step (full-strength sky
+            // heading down) never produces a sub-15 equal-level neighbour, so a
+            // neighbour at oldLevel genuinely got its light elsewhere.
             if (neighborOpacity < 15 && neighborLevel < oldLevel) {
                 // this neighbor propagates light and got its light from us, remove it
                 if (neighborLevel > 0) {
@@ -525,8 +530,14 @@ function unspreadChannel(
 // if the neighbor's current channel value < spreading_light and the
 // neighbor can propagate (opacity < 15), set it and push.
 //
-// sky special case: when spreading downward through opacity=0 blocks,
-// sky light doesn't decay (stays at the current level, not level-1).
+// sky special case: FULL-STRENGTH sky (15) spreading downward through
+// opacity=0 blocks doesn't decay. below 15 it decays like any other light,
+// in every direction. this mirrors luanti (LIGHT_SUN 15 sits above the
+// LIGHT_MAX 14 of ordinary light, and only LIGHT_SUN skips decay) and
+// Minecraft (SkyLightEngine pins sky sources at 15). without the level
+// gate a sky value of 13 would travel down as 13, a state neither engine
+// can produce, and unspreadChannel's strictly-less-than neighbour test
+// would then mistake the cell below for an independent light source.
 
 function spreadChannel(voxels: Voxels, registry: Blocks, ch: number, sourceQueue: BucketQueue): void {
     const { lightOpacity } = registry;
@@ -560,9 +571,11 @@ function spreadChannel(voxels: Voxels, registry: Blocks, ch: number, sourceQueue
             // opaque blocks don't propagate
             if (neighborOpacity >= 15) continue;
 
-            // compute the light level after crossing into this neighbor
-            // sky going down through transparent (opacity=0) blocks: no decay
-            const decay = isSky && dir === DIR_DOWN && neighborOpacity === 0 ? 0 : neighborOpacity < 1 ? 1 : neighborOpacity;
+            // compute the light level after crossing into this neighbor.
+            // full-strength sky (15) going down through transparent
+            // (opacity=0) blocks is the one step that does not decay.
+            const noDecay = isSky && dir === DIR_DOWN && neighborOpacity === 0 && level === 15;
+            const decay = noDecay ? 0 : neighborOpacity < 1 ? 1 : neighborOpacity;
             const spreadingLight = level - decay;
             if (spreadingLight <= 0) continue;
 
@@ -1310,8 +1323,8 @@ function computeNewLevel(
         // stale from other changes in the same batch
         if (neighborLevel < minSafeLight) continue;
 
-        // sky going down through transparent: no decay
-        const isSkyDown = isSky && dir === DIR_DOWN && opacity === 0;
+        // full-strength sky going down through transparent: no decay
+        const isSkyDown = isSky && dir === DIR_DOWN && opacity === 0 && neighborLevel === 15;
         const decay = isSkyDown ? 0 : opacity < 1 ? 1 : opacity;
         const incoming = neighborLevel - decay;
         if (incoming > best) best = incoming;
