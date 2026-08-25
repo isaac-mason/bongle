@@ -69,7 +69,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     // callbacks parked on a name that isn't served yet — an app connect, a shell
     // connect, or a shell served() all wait the same way and flush together the
     // instant a process listens on the name. `owner` (app connects only) gives
-    // the waiter an identity for cancellation + the unrouted warning.
+    // the waiter an identity `cancel-connect` can retract it by.
     type Waiter = { resolve: () => void; owner?: { pid: number; req: number } };
     const waiters = new Map<string, Waiter[]>();
     // a = the listener side, b = the dialer; `name` is what the dialer asked for.
@@ -310,7 +310,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                         toApp(rec.link, { k: 'refused', req: msg.req, reason });
                     },
                 );
-                if (!listeners.has(msg.name)) warnIfUnrouted(rec, msg.name, msg.req);
+                warnIfSlowConnect(rec, msg.name, c.opened);
                 break;
             }
             case 'cancel-connect':
@@ -450,11 +450,27 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         }
     }
 
-    function warnIfUnrouted(rec: Rec, name: string, req: number): void {
+    /** A connect that still hasn't paired after 3s is usually a typo or a service that
+     *  never came up. Say so rather than leaving the app parked in silence.
+     *
+     *  Watches the `opened` promise rather than the local waiter table, so it covers a
+     *  REMOTE open the far side is parking on too — otherwise a guest dialling a host
+     *  service that never starts gets no signal at all, which is the failure shape this
+     *  whole path exists to remove. */
+    function warnIfSlowConnect(rec: Rec, name: string, opened: Promise<unknown>): void {
+        let settled = false;
+        const done = (): void => {
+            settled = true;
+        };
+        void opened.then(done, done);
         setTimeout(() => {
-            const pending = waiters.get(name)?.some((w) => w.owner?.pid === rec.pid && w.owner?.req === req);
-            if (pending && procs.has(rec.pid))
-                io.stdout(rec.ref, rec.pid, `connect("${name}") unrouted after 3s — typo or crashed service?`, true);
+            if (!settled && procs.has(rec.pid))
+                io.stdout(
+                    rec.ref,
+                    rec.pid,
+                    `connect("${name}") still unrouted after 3s — typo, or a service that never started?`,
+                    true,
+                );
         }, 3000);
     }
 

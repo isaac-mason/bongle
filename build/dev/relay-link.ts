@@ -1,23 +1,27 @@
 // editor/net/relay-link.ts — MessagePort-over-WebSocket, the load-bearing trick
 // of multiplayer editing.
 //
-// The whole editor↔host wiring is already MessagePort-based: the game transport
-// (client iframe ↔ server worker, opaque byte frames) and the bundler conduit
-// (client iframe ↔ host DevServer, module-runner protocol as plain-JSON frames).
-// A "guest in another browser" needs those exact two couplings — the only
-// difference is the pipe. So instead of teaching the transports about the
-// network, we give them a `PortLike` that looks like a MessagePort but tunnels
-// over one WebSocket, multiplexed by a 1-byte channel tag.
+// A `PortLike` looks like a MessagePort but tunnels over one WebSocket, multiplexed
+// by a 1-byte channel tag. The relay itself stays dumb (see relay-server.mjs): it
+// forwards frames by session, never parsing them.
 //
-// Consequence: the realm conduit (shakeup-port), the server worker's `PortTransport`,
-// and `client-main`'s game loop all run UNCHANGED over a relay — they just receive a
-// relay-backed port instead of a MessageChannel port. The relay itself stays
-// dumb (see relay-server.mjs): it forwards these frames by session, never
-// parsing them.
+// TWO KINDS OF LANE ride this, and the difference matters:
 //
-// Verified serialization-safe (2026-07-14): game frames are Uint8Array; bundler frames
-// (shakeup TransportFrames — invoke/result/push) are pure JSON. Nothing carries a Map,
-// typed array, function, or class instance.
+//   fsrpc  — a raw PortLike handed straight to the transport. One per guest, alive for
+//            the session, fanned out LOCALLY to that guest's processes. The transport
+//            (remote-fs) runs unchanged over it, which is the original trick.
+//
+//   os     — NOT a raw port. It carries OS peer frames (see os/peer.ts), cid-multiplexed,
+//            so every connection a guest opens — its client's `game`, one `bundler` per
+//            process — shares it with real open/opened/close semantics. It replaced the
+//            fixed `game` and `bundler` lanes, which were singletons carrying per-client
+//            and per-process connections: a second one silently stole the lane.
+//
+// Serialization: the `os` lane has its OWN codec precisely because `encodeFrame` below
+// discriminates binary-vs-JSON on the TOP-LEVEL value. That works while a lane carries
+// exactly one payload shape (fsrpc does), but an envelope defeats it — a Uint8Array game
+// frame inside `{t,cid,data}` would be JSON-stringified into {"0":12,…}. See
+// `encodePeerFrame`. Channel 2 is retired (the old `bundler`); do not reuse it.
 
 /** The MessagePort surface the transports actually use: assign `onmessage`,
  *  `postMessage`, and (server side) `close`. A relay port and a real MessagePort
