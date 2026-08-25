@@ -1,6 +1,19 @@
 import { makeChannel } from './channel';
 import type { ToApp, ToOS } from './control';
-import type { AppDef, Channel, ConnMeta, IO, Link, OS, OSSnapshot, PeerFrame, PeerLink, ResolveDef } from './interface';
+import type {
+    AppDef,
+    Channel,
+    Connection,
+    ConnMeta,
+    IO,
+    Link,
+    OS,
+    OSSnapshot,
+    PeerFrame,
+    PeerLink,
+    OpenOptions as PublicOpenOptions,
+    ResolveDef,
+} from './interface';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // createOS — the workspace. Host-agnostic: the switchboard, process table,
@@ -14,6 +27,10 @@ import type { AppDef, Channel, ConnMeta, IO, Link, OS, OSSnapshot, PeerFrame, Pe
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Endpoint = number | 'peer' | 'shell';
+
+/** `OpenOptions` plus the internals only the OS itself supplies: which endpoint is
+ *  dialling, and (app connects) the identity `cancel-connect` retracts by. */
+type OpenOptions = PublicOpenOptions & { dialer?: Endpoint; owner?: { pid: number; req: number } };
 
 type Rec = {
     pid: number;
@@ -78,8 +95,14 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         };
     }
 
-    /** Park on `name`, retracting the waiter if `signal` aborts first. */
-    function parkUntil<T>(name: string, signal: AbortSignal | undefined, onServed: () => T): Promise<T> {
+    /** Park on `name`, retracting the waiter if `signal` aborts first. `owner` gives an
+     *  app-side connect an identity so `cancel-connect` can retract it too. */
+    function parkUntil<T>(
+        name: string,
+        signal: AbortSignal | undefined,
+        onServed: () => T,
+        owner?: { pid: number; req: number },
+    ): Promise<T> {
         return new Promise<T>((resolve, reject) => {
             if (signal?.aborted) {
                 reject(signal.reason ?? new Error('aborted'));
@@ -90,6 +113,7 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 reject(signal?.reason ?? new Error('aborted'));
             };
             const unpark = park(name, {
+                owner,
                 resolve: () => {
                     signal?.removeEventListener('abort', onAbort);
                     resolve(onServed());
@@ -223,15 +247,18 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 notify();
                 break;
             case 'connect': {
-                if (listeners.has(msg.name)) connectPair(msg.name, rec.pid, msg.req);
-                else if (peer && remoteNames.has(msg.name)) openRemote(msg.name, rec, msg.req);
-                else {
-                    const pid = rec.pid;
-                    const req = msg.req;
-                    const name = msg.name;
-                    park(name, { resolve: () => connectPair(name, pid, req), owner: { pid, req } });
-                    warnIfUnrouted(rec, name, req);
-                }
+                const c = open(msg.name, {
+                    dialer: rec.pid,
+                    meta: { ref: rec.ref, pid: rec.pid },
+                    owner: { pid: rec.pid, req: msg.req },
+                });
+                // the app learns it is connected only once the serving end is wired —
+                // parking is what makes `connect` safe to call before a service is up.
+                void c.opened.then(
+                    () => toApp(rec.link, { k: 'channel', req: msg.req, conn: c.conn }, [c.port]),
+                    () => {}, // retracted by cancel-connect
+                );
+                if (!listeners.has(msg.name)) warnIfUnrouted(rec, msg.name, msg.req);
                 break;
             }
             case 'cancel-connect':
@@ -276,19 +303,72 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     }
 
     // ── the switchboard ───────────────────────────────────────────────────────
-    function connectPair(name: string, connectorPid: number, req: number): void {
-        const listener = procs.get(listeners.get(name)!);
-        const connector = procs.get(connectorPid);
-        if (!listener || !connector) return;
+    //
+    // Every connection is the same three moves: allocate a conn, make a channel, give
+    // one end to whoever serves `name` and the other to the dialer. Only the serving
+    // side varies — a local process gets an `incoming` frame, a routed name is bridged
+    // to a peer cid. `wireListener` is that one varying step; everything that opens a
+    // connection goes through it, so the local and remote paths can't drift apart.
+
+    /** Wire the SERVING end of `conn` onto `listenerPort`. False when `name` is
+     *  neither served locally nor routed to a peer — the caller parks. */
+    function wireListener(name: string, conn: number, listenerPort: MessagePort, dialer: Endpoint, meta: ConnMeta): boolean {
+        const lp = listeners.get(name);
+        if (lp !== undefined) {
+            const listener = procs.get(lp);
+            if (listener === undefined) return false;
+            toApp(listener.link, { k: 'incoming', name, conn, meta }, [listenerPort]);
+            listener.held.add(conn);
+            conns.set(conn, { a: lp, b: dialer, name });
+        } else if (peer !== undefined && remoteNames.has(name)) {
+            const cid = nextCid++;
+            bridge(cid, listenerPort);
+            connCid.set(conn, cid);
+            cidConn.set(cid, conn);
+            conns.set(conn, { a: 'peer', b: dialer, name });
+            peer.send({ t: 'open', cid, name, meta });
+        } else {
+            return false;
+        }
+        if (typeof dialer === 'number') procs.get(dialer)?.held.add(conn);
+        notify();
+        return true;
+    }
+
+    /**
+     * Open a connection to `name` and hand back the DIALER's end.
+     *
+     * The port is returned immediately and is usable at once: a MessagePort queues
+     * whatever is posted to it until the far end is attached, so a caller may transfer
+     * it to another realm before the connection has actually paired. `opened` is the
+     * readiness signal — it resolves when the serving end is wired, and rejects if
+     * `signal` aborts first.
+     */
+    function open(name: string, opts: OpenOptions = {}): Connection {
         const conn = nextConn++;
         const ch = new MessageChannel();
-        const meta: ConnMeta = { ref: connector.ref, pid: connector.pid };
-        toApp(listener.link, { k: 'incoming', name, conn, meta }, [ch.port1]);
-        toApp(connector.link, { k: 'channel', req, conn }, [ch.port2]);
-        conns.set(conn, { a: listener.pid, b: connector.pid, name });
-        listener.held.add(conn);
-        connector.held.add(conn);
-        notify();
+        const dialer: Endpoint = opts.dialer ?? 'shell';
+        const meta: ConnMeta = {
+            ref: opts.meta?.ref ?? 'shell',
+            pid: opts.meta?.pid ?? 0,
+            user: opts.meta?.user,
+        };
+        const close = (): void => closeConn(conn, dialer);
+
+        if (wireListener(name, conn, ch.port1, dialer, meta)) {
+            return { conn, port: ch.port2, opened: Promise.resolve(), close };
+        }
+        // nothing serves it yet — park, and wire the serving end when it appears.
+        const opened = parkUntil(
+            name,
+            opts.signal,
+            () => {
+                wireListener(name, conn, ch.port1, dialer, meta);
+            },
+            opts.owner,
+        );
+        opened.catch(() => ch.port1.close());
+        return { conn, port: ch.port2, opened, close };
     }
 
     function cancelConnect(pid: number, req: number): void {
@@ -315,20 +395,6 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         peer = p;
         remoteNames = new Set(names);
         p.onMessage(onPeer);
-    }
-
-    function openRemote(name: string, connector: Rec, req: number): void {
-        const conn = nextConn++;
-        const cid = nextCid++;
-        const ch = new MessageChannel();
-        toApp(connector.link, { k: 'channel', req, conn }, [ch.port2]);
-        bridge(cid, ch.port1);
-        conns.set(conn, { a: 'peer', b: connector.pid, name });
-        connCid.set(conn, cid);
-        cidConn.set(cid, conn);
-        connector.held.add(conn);
-        peer!.send({ t: 'open', cid, name, meta: { ref: connector.ref, pid: connector.pid } });
-        notify();
     }
 
     function onPeer(frame: PeerFrame): void {
@@ -437,32 +503,19 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         });
     }
 
-    function openShellConn(name: string, onMessage?: (m: unknown) => void, meta?: Partial<ConnMeta>): Channel {
-        const lp = listeners.get(name)!;
-        const listener = procs.get(lp)!;
-        const conn = nextConn++;
-        const ch = new MessageChannel();
-        const connMeta: ConnMeta = { ref: meta?.ref ?? 'shell', pid: meta?.pid ?? 0, user: meta?.user };
-        toApp(listener.link, { k: 'incoming', name, conn, meta: connMeta }, [ch.port1]);
-        listener.held.add(conn);
-        conns.set(conn, { a: lp, b: 'shell', name });
-        const { conn: chan, wire } = makeChannel(ch.port2, () => closeConn(conn, 'shell'));
-        if (onMessage) wire(onMessage);
-        shellChans.set(conn, chan);
-        notify();
-        return chan;
-    }
-
-    // parks until the name is served — the shell's readiness signal for a spawned
-    // service, symmetric with an app-side connect.
-    function connectShell(
+    /** The shell's everyday call: open, wait for it to pair, wrap the port as a Channel. */
+    async function connectShell(
         name: string,
         onMessage?: (m: unknown) => void,
         meta?: Partial<ConnMeta>,
         signal?: AbortSignal,
     ): Promise<Channel> {
-        if (listeners.has(name)) return Promise.resolve(openShellConn(name, onMessage, meta));
-        return parkUntil(name, signal, () => openShellConn(name, onMessage, meta));
+        const c = open(name, { meta, signal });
+        await c.opened;
+        const { conn: chan, wire } = makeChannel(c.port, c.close);
+        if (onMessage) wire(onMessage);
+        shellChans.set(c.conn, chan);
+        return chan;
     }
 
     function served(name: string, signal?: AbortSignal): Promise<void> {
@@ -515,5 +568,5 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return () => observers.delete(cb);
     }
 
-    return { spawn, run, connect: connectShell, served, wait, stdin, kill, attachPeer, inspect, onChange };
+    return { spawn, run, connect: connectShell, open, served, wait, stdin, kill, attachPeer, inspect, onChange };
 }

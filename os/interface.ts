@@ -147,12 +147,35 @@ export type OSSnapshot = {
 
 // ── what the shell drives ────────────────────────────────────────────────────
 
+/** One end of an open connection, handed to whoever dialled it. */
+export type Connection = {
+    /** the connection id, as it appears in `inspect()`. */
+    conn: number;
+    /** the dialer's port. Queues until the connection pairs; safe to transfer. */
+    port: MessagePort;
+    /** resolves once the serving end is wired; rejects if the open was retracted. */
+    opened: Promise<void>;
+    close(): void;
+};
+
+export type OpenOptions = {
+    /** what the listener sees as the dialer's identity. */
+    meta?: Partial<ConnMeta>;
+    /** retracts the open if it aborts before the name is served. */
+    signal?: AbortSignal;
+};
+
 export type OS = {
     spawn(ref: string, init?: unknown): number;
     run(ref: string, init?: unknown): Promise<number>;
     /** parks until served; meta overrides what the listener sees. `signal` retracts the wait — a
      *  caller racing this against a timeout must be able to withdraw the loser. */
     connect(name: string, onMessage?: (m: unknown) => void, meta?: Partial<ConnMeta>, signal?: AbortSignal): Promise<Channel>;
+    /** the primitive `connect` is built on: open a connection and get the DIALER's port
+     *  back immediately, for handing to another realm. The port queues anything posted
+     *  to it until the connection pairs, so it is usable (and transferable) at once;
+     *  `opened` is the readiness signal. */
+    open(name: string, opts?: OpenOptions): Connection;
     /** side-effect-free readiness: resolves once `name` is served. `signal` retracts the wait. */
     served(name: string, signal?: AbortSignal): Promise<void>;
     /** exit code; resolves immediately for an already-exited pid (127 = unknown app). */
