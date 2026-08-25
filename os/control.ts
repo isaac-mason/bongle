@@ -22,6 +22,9 @@ export type ToApp =
     | { k: 'closed'; conn: number }
     | { k: 'spawned'; req: number; pid: number }
     | { k: 'exited'; req: number; code: number }
+    /** a `connect` that will never pair — the name is not routable, or the far side
+     *  refused it. Without this an app's connect just never settles. */
+    | { k: 'refused'; req: number; reason: string }
     | { k: 'stdin'; data: string | Uint8Array }
     | { k: 'dispose' };
 

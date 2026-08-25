@@ -165,6 +165,16 @@ export type OpenOptions = {
     signal?: AbortSignal;
 };
 
+export type AttachPeerOptions = {
+    /** names this OS may open ON the peer. */
+    dial?: string[];
+    /** names the peer may open ON US; anything else is refused. */
+    serve?: string[];
+    /** who the peer is. Stamped onto every inbound open — the frame's own meta is
+     *  written by the far side, so it is a label, not an identity. */
+    identity?: ConnMeta['user'];
+};
+
 export type OS = {
     spawn(ref: string, init?: unknown): number;
     run(ref: string, init?: unknown): Promise<number>;
@@ -186,7 +196,11 @@ export type OS = {
     kill(pid: number): void;
     /** attach a peer OS; local connects to `remoteNames` route out to it, and its
      *  inbound opens reach local listeners (with the dialer's identity). */
-    attachPeer(peer: PeerLink, remoteNames: string[]): void;
+    /** Attach a peer OS under `id` (a host attaches one per guest). Re-attaching the
+     *  same id replaces the previous link. */
+    attachPeer(id: string, link: PeerLink, opts?: AttachPeerOptions): void;
+    /** Retire a peer; every connection through it tears down as if the far end hung up. */
+    detachPeer(id: string): void;
     inspect(): OSSnapshot;
     /** coarse change stream; re-inspect on fire. Returns the unsubscriber. */
     onChange(cb: () => void): () => void;

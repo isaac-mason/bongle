@@ -271,6 +271,124 @@ describe('createOS + runApp', () => {
         expect(os.inspect().pending.find((p) => p.name === 'never-served')).toBeUndefined();
     });
 
+    it('serves two peers at once, with cids that cannot collide', async () => {
+        // one host, two guests. cids are allocated by the DIALER, so both guests will
+        // hand out cid 1 — they must not land on the same connection.
+        const seen: string[] = [];
+        const host = testOS({
+            svc: async (env) => {
+                env.listen('game', (conn, meta) => {
+                    seen.push(`join:${meta.user?.username}`);
+                    return (m) => conn.send(`echo:${m}`);
+                });
+            },
+        });
+        const guestOf = (who: string) =>
+            testOS({
+                dialer: async (env) => {
+                    const got = new Promise<unknown>((resolve) => {
+                        void env.connect('game', resolve).then((ch) => ch.send(who));
+                    });
+                    if ((await got) !== `echo:${who}`) throw new Error(`bad reply for ${who}`);
+                },
+            });
+        host.os.spawn('svc');
+
+        const a = guestOf('alice');
+        const b = guestOf('bob');
+        const pipeA = new MessageChannel();
+        const pipeB = new MessageChannel();
+        host.os.attachPeer('g1', messagePortPeer(pipeA.port1), {
+            serve: ['game'],
+            identity: { id: 'u-alice', username: 'alice' },
+        });
+        host.os.attachPeer('g2', messagePortPeer(pipeB.port1), {
+            serve: ['game'],
+            identity: { id: 'u-bob', username: 'bob' },
+        });
+        a.os.attachPeer('host', messagePortPeer(pipeA.port2), { dial: ['game'] });
+        b.os.attachPeer('host', messagePortPeer(pipeB.port2), { dial: ['game'] });
+
+        expect(await Promise.all([a.os.run('dialer'), b.os.run('dialer')])).toEqual([0, 0]);
+        expect(seen.sort()).toEqual(['join:alice', 'join:bob']);
+    });
+
+    it('stamps identity from the attachment, not from the frame', async () => {
+        let seenUser: string | undefined;
+        const host = testOS({
+            svc: async (env) => {
+                env.listen('game', (_conn, meta) => {
+                    seenUser = meta.user?.username;
+                    return () => {};
+                });
+            },
+        });
+        const guest = testOS({ dialer: async (env) => void (await env.connect('game')) });
+        host.os.spawn('svc');
+        const pipe = new MessageChannel();
+        host.os.attachPeer('g1', messagePortPeer(pipe.port1), {
+            serve: ['game'],
+            identity: { id: 'u-real', username: 'real-user' },
+        });
+        guest.os.attachPeer('host', messagePortPeer(pipe.port2), { dial: ['game'] });
+        await guest.os.run('dialer');
+        // the guest's own frame meta carries its local ref/pid; the USER is ours to assert.
+        expect(seenUser).toBe('real-user');
+    });
+
+    it('refuses a peer opening a name it was not granted', async () => {
+        const host = testOS({
+            svc: async (env) => {
+                env.listen('supervisor', () => () => {});
+            },
+        });
+        let refusal: string | null = null;
+        const guest = testOS({
+            dialer: async (env) => {
+                try {
+                    await env.connect('supervisor');
+                } catch (e) {
+                    refusal = (e as Error).message;
+                }
+            },
+        });
+        host.os.spawn('svc');
+        const pipe = new MessageChannel();
+        // only 'game' is served to this peer — 'supervisor' is host machinery.
+        host.os.attachPeer('g1', messagePortPeer(pipe.port1), { serve: ['game'] });
+        guest.os.attachPeer('host', messagePortPeer(pipe.port2), { dial: ['game', 'supervisor'] });
+        await guest.os.run('dialer');
+        expect(refusal).toMatch(/not served to this peer/);
+    });
+
+    it('detachPeer tears down every connection through it', async () => {
+        let closed = false;
+        const host = testOS({
+            svc: async (env) => {
+                env.listen('game', () => () => {});
+            },
+        });
+        const guest = testOS({
+            holder: async (env) => {
+                const ch = await env.connect('game');
+                await ch.closed; // resolves when the peer is retired
+                closed = true;
+            },
+        });
+        host.os.spawn('svc');
+        const pipe = new MessageChannel();
+        host.os.attachPeer('g1', messagePortPeer(pipe.port1), { serve: ['game'] });
+        guest.os.attachPeer('host', messagePortPeer(pipe.port2), { dial: ['game'] });
+        const exit = guest.os.run('holder');
+        await until(() => host.os.inspect().conns.some((c) => c.name === 'game'), 'guest connected');
+
+        host.os.detachPeer('g1');
+        expect(host.os.inspect().conns.some((c) => c.name === 'game')).toBe(false);
+        guest.os.detachPeer('host');
+        await exit;
+        expect(closed).toBe(true);
+    });
+
     it('routes connects across two OS instances over a relay, and close propagates', async () => {
         let hostConnected = false;
         const host = testOS({
@@ -292,10 +410,12 @@ describe('createOS + runApp', () => {
             },
         });
         const pipe = new MessageChannel();
-        host.os.attachPeer(messagePortPeer(pipe.port1), []);
-        guest.os.attachPeer(messagePortPeer(pipe.port2), ['game']);
+        host.os.attachPeer('guest-1', messagePortPeer(pipe.port1), { serve: ['game'] });
+        guest.os.attachPeer('host', messagePortPeer(pipe.port2), { dial: ['game'] });
         host.os.spawn('svc');
-        (await host.os.connect('game')).close(); // parks until the host svc serves
+        // NOTE: no `await host.os.connect('game')` warm-up here. An inbound open on a
+        // name that isn't served yet now PARKS on the host and acks when it pairs, so
+        // the guest may dial before the host's service exists.
         expect(await guest.os.run('dialer')).toBe(0);
         expect(hostConnected).toBe(true);
     });

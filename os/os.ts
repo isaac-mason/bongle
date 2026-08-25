@@ -2,6 +2,7 @@ import { makeChannel } from './channel';
 import type { ToApp, ToOS } from './control';
 import type {
     AppDef,
+    AttachPeerOptions,
     Channel,
     Connection,
     ConnMeta,
@@ -74,7 +75,6 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     const exitCodes = new Map<number, number>();
     let nextPid = 1;
     let nextConn = 1;
-    let nextCid = 1;
 
     // park a waiter on a not-yet-served name (see Waiter). Returns an unpark — the shell races
     // `served`/`connect` against a timeout, and the loser has to be retractable or it stays parked
@@ -129,11 +129,34 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         for (const cb of observers) cb();
     };
 
-    let peer: PeerLink | undefined;
-    let remoteNames = new Set<string>();
-    const bridges = new Map<number, MessagePort>();
-    const connCid = new Map<number, number>();
-    const cidConn = new Map<number, number>();
+    // Peers, by id. A host attaches one per guest; a guest attaches one for its host.
+    //
+    // cids are allocated by whoever DIALS, and both ends dial, so a bare cid is not a
+    // key: peer A's outbound cid 1 and its inbound cid 1 are different connections.
+    // Everything is therefore keyed by (peer, originator, cid).
+    type PeerRec = {
+        link: PeerLink;
+        /** names this OS may open ON the peer. */
+        dial: Set<string>;
+        /** names the peer may open ON US. Anything else is refused — it keeps the set
+         *  of names that cross the wire explicit, so a typo'd or internal connect fails
+         *  at the boundary instead of silently reaching machinery it shouldn't. */
+        serve: Set<string>;
+        /** who this peer IS. Stamped onto every inbound open, because the frame's own
+         *  meta is written by the far side and would be a second source of truth. */
+        identity?: ConnMeta['user'];
+        nextCid: number;
+    };
+    const peers = new Map<string, PeerRec>();
+    const bridges = new Map<string, MessagePort>();
+    /** conn -> the peer-side coordinates of its far end. */
+    const connCid = new Map<number, { peerId: string; key: string }>();
+    const cidConn = new Map<string, number>();
+    /** outbound opens awaiting their `opened`/`refused` ack, by bridge key. */
+    const openAcks = new Map<string, { resolve: () => void; reject: (e: unknown) => void }>();
+    /** (peer, originator, cid) as one map key. `mine` = this OS dialled it. */
+    const cidKey = (mine: boolean, cid: number): string => `${mine ? 'o' : 'i'}${cid}`;
+    const bridgeKey = (peerId: string, key: string): string => `${peerId}\u0000${key}`;
 
     /** post a typed OS → app frame (a typo'd frame won't compile). */
     const toApp = (link: Link, frame: ToApp, transfer?: Transferable[]): void => link.post(frame, transfer);
@@ -256,7 +279,13 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
                 // parking is what makes `connect` safe to call before a service is up.
                 void c.opened.then(
                     () => toApp(rec.link, { k: 'channel', req: msg.req, conn: c.conn }, [c.port]),
-                    () => {}, // retracted by cancel-connect
+                    (err) => {
+                        // a refusal has to reach the app, or its connect never settles —
+                        // the silent-hang shape this whole path exists to avoid. Harmless
+                        // when the app itself cancelled: it has no pending req left.
+                        const reason = err instanceof Error ? err.message : String(err);
+                        toApp(rec.link, { k: 'refused', req: msg.req, reason });
+                    },
                 );
                 if (!listeners.has(msg.name)) warnIfUnrouted(rec, msg.name, msg.req);
                 break;
@@ -312,27 +341,42 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
 
     /** Wire the SERVING end of `conn` onto `listenerPort`. False when `name` is
      *  neither served locally nor routed to a peer — the caller parks. */
-    function wireListener(name: string, conn: number, listenerPort: MessagePort, dialer: Endpoint, meta: ConnMeta): boolean {
+    function wireListener(
+        name: string,
+        conn: number,
+        listenerPort: MessagePort,
+        dialer: Endpoint,
+        meta: ConnMeta,
+    ): { ok: false } | { ok: true; ack?: Promise<void> } {
         const lp = listeners.get(name);
+        let ack: Promise<void> | undefined;
         if (lp !== undefined) {
             const listener = procs.get(lp);
-            if (listener === undefined) return false;
+            if (listener === undefined) return { ok: false };
             toApp(listener.link, { k: 'incoming', name, conn, meta }, [listenerPort]);
             listener.held.add(conn);
             conns.set(conn, { a: lp, b: dialer, name });
-        } else if (peer !== undefined && remoteNames.has(name)) {
-            const cid = nextCid++;
-            bridge(cid, listenerPort);
-            connCid.set(conn, cid);
-            cidConn.set(cid, conn);
-            conns.set(conn, { a: 'peer', b: dialer, name });
-            peer.send({ t: 'open', cid, name, meta });
         } else {
-            return false;
+            const route = routeFor(name);
+            if (route === null) return { ok: false };
+            const { id: peerId, rec } = route;
+            const cid = rec.nextCid++;
+            const key = cidKey(true, cid);
+            const at = bridgeKey(peerId, key);
+            bridges.set(at, listenerPort);
+            listenerPort.onmessage = (e) => rec.link.send({ t: 'data', cid, data: e.data });
+            connCid.set(conn, { peerId, key });
+            cidConn.set(at, conn);
+            conns.set(conn, { a: 'peer', b: dialer, name });
+            // the far side acks with `opened` once it has actually paired; until then the
+            // dialer's port simply queues.
+            ack = new Promise<void>((resolve, reject) => openAcks.set(at, { resolve, reject }));
+            void ack.catch(() => {}).finally(() => openAcks.delete(at));
+            rec.link.send({ t: 'open', cid, name, meta });
         }
         if (typeof dialer === 'number') procs.get(dialer)?.held.add(conn);
         notify();
-        return true;
+        return { ok: true, ack };
     }
 
     /**
@@ -355,17 +399,13 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         };
         const close = (): void => closeConn(conn, dialer);
 
-        if (wireListener(name, conn, ch.port1, dialer, meta)) {
-            return { conn, port: ch.port2, opened: Promise.resolve(), close };
+        const wired = wireListener(name, conn, ch.port1, dialer, meta);
+        if (wired.ok) {
+            return { conn, port: ch.port2, opened: wired.ack ?? Promise.resolve(), close };
         }
         // nothing serves it yet — park, and wire the serving end when it appears.
-        const opened = parkUntil(
-            name,
-            opts.signal,
-            () => {
-                wireListener(name, conn, ch.port1, dialer, meta);
-            },
-            opts.owner,
+        const opened = parkUntil(name, opts.signal, () => wireListener(name, conn, ch.port1, dialer, meta), opts.owner).then(
+            (w) => (w.ok ? w.ack : undefined),
         );
         opened.catch(() => ch.port1.close());
         return { conn, port: ch.port2, opened, close };
@@ -391,46 +431,96 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     }
 
     // ── peer routing (channels only; fs stays its own lane) ────────────────────
-    function attachPeer(p: PeerLink, names: string[]): void {
-        peer = p;
-        remoteNames = new Set(names);
-        p.onMessage(onPeer);
+    function attachPeer(id: string, link: PeerLink, opts: AttachPeerOptions = {}): void {
+        detachPeer(id); // re-attaching the same id replaces cleanly rather than doubling up
+        const rec: PeerRec = {
+            link,
+            dial: new Set(opts.dial ?? []),
+            serve: new Set(opts.serve ?? []),
+            identity: opts.identity,
+            nextCid: 1,
+        };
+        peers.set(id, rec);
+        link.onMessage((frame) => onPeer(id, frame));
     }
 
-    function onPeer(frame: PeerFrame): void {
+    /** Retire a peer: every connection through it is torn down as if the far end
+     *  hung up, so nothing is left holding a conn whose transport is gone. */
+    function detachPeer(id: string): void {
+        if (!peers.has(id)) return;
+        peers.delete(id);
+        for (const [conn, at] of [...connCid]) {
+            if (at.peerId === id) closeConn(conn, 'peer');
+        }
+        notify();
+    }
+
+    /** the peer (if any) this OS routes `name` out to. */
+    function routeFor(name: string): { id: string; rec: PeerRec } | null {
+        for (const [id, rec] of peers) {
+            if (rec.dial.has(name)) return { id, rec };
+        }
+        return null;
+    }
+
+    function onPeer(peerId: string, frame: PeerFrame): void {
+        const rec = peers.get(peerId);
+        if (rec === undefined) return; // frames from a peer we already detached
         switch (frame.t) {
             case 'open': {
-                const lp = listeners.get(frame.name);
-                if (lp == null) {
-                    peer?.send({ t: 'close', cid: frame.cid });
+                if (!rec.serve.has(frame.name)) {
+                    rec.link.send({ t: 'refused', cid: frame.cid, reason: `"${frame.name}" is not served to this peer` });
                     return;
                 }
-                const listener = procs.get(lp)!;
+                // identity is ours to assert, not theirs to claim.
+                const meta: ConnMeta = { ref: frame.meta?.ref ?? 'peer', pid: frame.meta?.pid ?? 0, user: rec.identity };
+                const key = cidKey(false, frame.cid);
                 const conn = nextConn++;
                 const ch = new MessageChannel();
-                toApp(listener.link, { k: 'incoming', name: frame.name, conn, meta: frame.meta }, [ch.port1]);
-                bridge(frame.cid, ch.port2);
-                conns.set(conn, { a: lp, b: 'peer', name: frame.name });
-                connCid.set(conn, frame.cid);
-                cidConn.set(frame.cid, conn);
-                listener.held.add(conn);
-                notify();
+                bridges.set(bridgeKey(peerId, key), ch.port2);
+                ch.port2.onmessage = (e) => rec.link.send({ t: 'data', cid: frame.cid, data: e.data });
+                connCid.set(conn, { peerId, key });
+                cidConn.set(bridgeKey(peerId, key), conn);
+                if (wireListener(frame.name, conn, ch.port1, 'peer', meta).ok) {
+                    rec.link.send({ t: 'opened', cid: frame.cid });
+                    return;
+                }
+                // served-but-not-yet: park, exactly as a local dial would, and ack on pair.
+                // This is what keeps a remote dial from being answered before anything is
+                // listening — the far side must not start talking into a void.
+                void parkUntil(frame.name, undefined, () => {
+                    wireListener(frame.name, conn, ch.port1, 'peer', meta);
+                    rec.link.send({ t: 'opened', cid: frame.cid });
+                }).catch(() => {});
                 return;
             }
-            case 'data':
-                bridges.get(frame.cid)?.postMessage(frame.data);
+            case 'opened': {
+                openAcks.get(bridgeKey(peerId, cidKey(true, frame.cid)))?.resolve();
                 return;
-            case 'close': {
-                const conn = cidConn.get(frame.cid);
+            }
+            case 'refused': {
+                const at = bridgeKey(peerId, cidKey(true, frame.cid));
+                openAcks.get(at)?.reject(new Error(frame.reason));
+                const conn = cidConn.get(at);
                 if (conn !== undefined) closeConn(conn, 'peer');
                 return;
             }
+            case 'data': {
+                // a data frame names the cid from the SENDER's point of view, so it is
+                // ours-inbound if they dialled and ours-outbound if we did.
+                const them = bridges.get(bridgeKey(peerId, cidKey(false, frame.cid)));
+                const us = bridges.get(bridgeKey(peerId, cidKey(true, frame.cid)));
+                (them ?? us)?.postMessage(frame.data);
+                return;
+            }
+            case 'close': {
+                for (const mine of [false, true]) {
+                    const conn = cidConn.get(bridgeKey(peerId, cidKey(mine, frame.cid)));
+                    if (conn !== undefined) closeConn(conn, 'peer');
+                }
+                return;
+            }
         }
-    }
-
-    function bridge(cid: number, port: MessagePort): void {
-        bridges.set(cid, port);
-        port.onmessage = (e) => peer!.send({ t: 'data', cid, data: e.data });
     }
 
     // ── teardown ────────────────────────────────────────────────────────────
@@ -438,13 +528,16 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         const e = conns.get(conn);
         if (!e) return;
         conns.delete(conn);
-        const cid = connCid.get(conn);
-        if (cid !== undefined) {
-            if (by !== 'peer') peer?.send({ t: 'close', cid });
-            bridges.get(cid)?.close();
-            bridges.delete(cid);
+        const at = connCid.get(conn);
+        if (at !== undefined) {
+            const key = bridgeKey(at.peerId, at.key);
+            const rec = peers.get(at.peerId);
+            if (by !== 'peer' && rec !== undefined) rec.link.send({ t: 'close', cid: Number(at.key.slice(1)) });
+            openAcks.get(key)?.reject(new Error('connection closed'));
+            bridges.get(key)?.close();
+            bridges.delete(key);
             connCid.delete(conn);
-            cidConn.delete(cid);
+            cidConn.delete(key);
         }
         for (const ep of [e.a, e.b]) {
             if (ep === by || ep === 'peer') continue;
@@ -568,5 +661,5 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return () => observers.delete(cb);
     }
 
-    return { spawn, run, connect: connectShell, open, served, wait, stdin, kill, attachPeer, inspect, onChange };
+    return { spawn, run, connect: connectShell, open, served, wait, stdin, kill, attachPeer, detachPeer, inspect, onChange };
 }

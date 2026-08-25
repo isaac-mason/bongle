@@ -85,8 +85,7 @@ export async function runApp(
             send({ ...frame, req }, transfer);
         });
 
-    const abortReason = (s: AbortSignal): Error =>
-        s.reason instanceof Error ? s.reason : new Error('connect aborted');
+    const abortReason = (s: AbortSignal): Error => (s.reason instanceof Error ? s.reason : new Error('connect aborted'));
 
     const env: Env = {
         init,
@@ -102,7 +101,12 @@ export async function runApp(
                 const done = await call({ k: 'wait', pid });
                 return done.msg.code as number;
             })();
-            return { exit, kill: () => { if (pid >= 0) send({ k: 'kill', pid }); } };
+            return {
+                exit,
+                kill: () => {
+                    if (pid >= 0) send({ k: 'kill', pid });
+                },
+            };
         },
         connect(name, onMessage, opts) {
             const signal = opts?.signal;
@@ -116,6 +120,10 @@ export async function runApp(
                 };
                 pending.set(req, (msg, ports) => {
                     signal?.removeEventListener('abort', onAbort);
+                    if (msg.k === 'refused') {
+                        reject(new Error(`connect("${name}") refused: ${msg.reason}`));
+                        return;
+                    }
                     const { conn, wire } = makeChannel(ports[0], () => send({ k: 'close', conn: msg.conn }));
                     channels.set(msg.conn, conn);
                     if (onMessage) wire(onMessage);
