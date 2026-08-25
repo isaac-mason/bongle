@@ -20,7 +20,11 @@
 import { LineSegmentsGeometry } from 'gpucat';
 import { bench, describe } from 'vitest';
 import * as Selection from '../../../../src/editor/core/scene/selection';
-import { buildMeshEdgeSegments, buildOutlineSegments, buildSelectionGeometry } from '../../../../src/editor/visuals/selection-mesh';
+import {
+    buildMeshEdgeSegments,
+    buildOutlineSegments,
+    buildSelectionGeometry,
+} from '../../../../src/editor/visuals/selection-mesh';
 
 // ── scenario builders ───────────────────────────────────────────────
 
