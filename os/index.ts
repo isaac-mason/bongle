@@ -7,6 +7,6 @@ export { exposeDevtools } from './devtools';
 export * from './interface';
 export { portLink, selfLink, workerLink } from './link';
 export { createOS, type OSOptions } from './os';
-export { messagePortPeer } from './peer';
+export { decodePeerFrame, encodePeerFrame, framedPeer, messagePortPeer } from './peer';
 export { asPortLike, createRemoteFilesystem, type PortLike, serveFilesystemOverPort } from './remote-fs';
 export { runApp } from './runtime';

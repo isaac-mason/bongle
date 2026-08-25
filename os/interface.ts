@@ -229,6 +229,10 @@ export type Link = {
  *  not the transport. */
 export type PeerFrame =
     | { t: 'open'; cid: number; name: string; meta: ConnMeta }
+    /** the open paired — the dialer may now treat the connection as live. */
+    | { t: 'opened'; cid: number }
+    /** the open will never pair (not routable here, or retracted by the dialer). */
+    | { t: 'refused'; cid: number; reason: string }
     | { t: 'data'; cid: number; data: unknown }
     | { t: 'close'; cid: number };
 
