@@ -143,7 +143,8 @@ export async function bootEditClient(caps: ClientBootCaps): Promise<void> {
                 return;
             }
             if (!path.startsWith('resources/client/')) return;
-            if (path.includes('voxels-icons') || path.startsWith('resources/client/prefab-icons/')) EngineClientEditor.reloadBakedIcons();
+            if (path.includes('voxels-icons') || path.startsWith('resources/client/prefab-icons/'))
+                EngineClientEditor.reloadBakedIcons();
             else if (path.includes('sprite')) EngineClient.refreshSpriteResources(state).catch(console.error);
             else if (path.includes('audio')) EngineClient.refreshAudioResources(state).catch(console.error);
             else EngineClient.refreshBlockResources(state).catch(console.error);

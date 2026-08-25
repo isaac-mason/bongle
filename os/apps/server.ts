@@ -1,5 +1,5 @@
-import type { App, EditorSession } from '../interface';
 import { exposeDevtools } from '../devtools';
+import type { App, EditorSession } from '../interface';
 import { type EditorServer, startEditorServer } from './server/editor-server';
 import { type ClientMeta, createPortTransport } from './server/transport-server';
 

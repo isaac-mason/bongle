@@ -2,7 +2,10 @@ import type { Channel } from './interface';
 
 // Wrap a MessagePort as a Channel. The message handler is wired ONCE (connect's
 // onMessage / listen's onConnect return) via `wire`; the port buffers until then.
-export function makeChannel(port: MessagePort, onLocalClose?: () => void): { conn: Channel; wire: (h: (m: unknown) => void) => void } {
+export function makeChannel(
+    port: MessagePort,
+    onLocalClose?: () => void,
+): { conn: Channel; wire: (h: (m: unknown) => void) => void } {
     let onClosed!: () => void;
     const closed = new Promise<void>((r) => (onClosed = r));
     let open = true;
