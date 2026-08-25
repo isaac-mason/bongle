@@ -3,6 +3,7 @@ packages:
   - interface
   - examples/*
   - docs/template
+  - benches
 
 minimumReleaseAge: 10080
 
@@ -11,6 +12,7 @@ minimumReleaseAgeExclude:
   - vite
   - '@rolldown/*'
   - math
+  - '@pmndrs/labs'
 
 onlyBuiltDependencies:
   - '@ffmpeg-installer/*'

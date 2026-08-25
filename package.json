@@ -169,6 +169,7 @@
         "build:incremental": "node scripts/stamp-build-info.mjs && vite build --config vite.lib.config.ts && node scripts/gather-lib-runtime.mjs && node scripts/build-deps.mjs && ( tsgo -p tsconfig.build.json --incremental --tsBuildInfoFile .tsbuild-cache/lib-dts.tsbuildinfo || echo '[engine] type errors above — non-fatal in dev; declarations still emit fresh, seeding runtime' ) && node scripts/pack-vfs.mjs",
         "test": "vitest run",
         "bench": "vitest bench --run",
+        "bench:labs": "pnpm --filter benches exec labs",
         "typecheck": "tsgo -p tsconfig.json",
         "lint": "biome check src tst",
         "lint:fix": "biome check --write src tst",

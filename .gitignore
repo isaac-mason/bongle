@@ -28,3 +28,6 @@ editor/public/static/blockbench/
 
 # cpuprofile output from bench/profile-diff.ts
 profiles/
+
+# labs bench results/baselines (per-machine, not shareable)
+.labs/

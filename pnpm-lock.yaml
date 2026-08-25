@@ -173,6 +173,19 @@ importers:
         specifier: ^0.4.0
         version: 0.4.0
 
+  benches:
+    dependencies:
+      '@pmndrs/labs':
+        specifier: ^0.8.0
+        version: 0.8.0
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+
   docs/template:
     dependencies:
       bongle:
@@ -382,6 +395,14 @@ packages:
 
   '@breezystack/lamejs@1.2.7':
     resolution: {integrity: sha512-6wc7ck65ctA75Hq7FYHTtTvGnYs6msgdxiSUICQ+A01nVOWg6rqouZB8IdyteRlfpYYiFovkf67dIeOgWIUzTA==}
+
+  '@clack/core@1.4.3':
+    resolution: {integrity: sha512-/kr3UWNtdJfxZtPgDqUOmG2pvwlmcLGheex5yiZKdwbzZJxhV+HMNR9QNmyY5cGwTNV6LrR7Jtp+KjhUAP1qBQ==}
+    engines: {node: '>= 20.12.0'}
+
+  '@clack/prompts@1.7.0':
+    resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
+    engines: {node: '>= 20.12.0'}
 
   '@dnd-kit/abstract@0.3.2':
     resolution: {integrity: sha512-uvPVK+SZYD6Viddn9M0K0JQdXknuVSxA/EbMlFRanve3P/XTc18oLa5zGftKSGjfQGmuzkZ34E26DSbly1zi3Q==}
@@ -787,6 +808,11 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@pmndrs/labs@0.8.0':
+    resolution: {integrity: sha512-Ntb9zclfLhFgcGYdYCSm5hPG1ZlEJVBq/BmEex9+aIsitfOvALai5G3sF6KpXPRl+PnfkaazZCwVsM0UDgpTQQ==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
 
   '@preact/signals-core@1.14.1':
     resolution: {integrity: sha512-vxPpfXqrwUe9lpjqfYNjAF/0RF/eFGeLgdJzdmIIZjpOnTmGmAB4BjWone562mJGMRP4frU6iZ6ei3PDsu52Ng==}
@@ -1529,6 +1555,15 @@ packages:
   fast-fifo@1.3.2:
     resolution: {integrity: sha512-/d9sfos4yxzpwkDkuN7k2SqFKtYNmCTzgfEpz82x34IM9/zc8KGxQoXg1liNC/izpRM/MBdt44Nmx41ZWqk+FQ==}
 
+  fast-string-truncated-width@3.0.3:
+    resolution: {integrity: sha512-0jjjIEL6+0jag3l2XWWizO64/aZVtpiGE3t0Zgqxv0DPuxiMjvB3M24fCyhZUO4KomJQPj3LTSUnDP3GpdwC0g==}
+
+  fast-string-width@3.0.2:
+    resolution: {integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==}
+
+  fast-wrap-ansi@0.2.2:
+    resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
+
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
@@ -1973,6 +2008,9 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
+  sisteransi@1.0.5:
+    resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
   skia-canvas@3.0.8:
     resolution: {integrity: sha512-FSYKxp8Ng2vOeeOBiyPhnn6ui6FirPJXMyjk4PKl8N/OWzVrkMawUgY9zubIWHMdYtyWFn0gfX3QlRwg6HBmdg==}
 
@@ -2100,6 +2138,11 @@ packages:
 
   tsx@4.23.0:
     resolution: {integrity: sha512-eUdUIaCr963q2h5u3+QwvYp0+eqPvn+egeqZUm0hwERCqqx1E3kK5ehbGCvqSE5MQAULr67ww0cA3jKc3YkM1w==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
+
+  tsx@4.23.12:
+    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -2382,6 +2425,18 @@ snapshots:
     optional: true
 
   '@breezystack/lamejs@1.2.7': {}
+
+  '@clack/core@1.4.3':
+    dependencies:
+      fast-wrap-ansi: 0.2.2
+      sisteransi: 1.0.5
+
+  '@clack/prompts@1.7.0':
+    dependencies:
+      '@clack/core': 1.4.3
+      fast-string-width: 3.0.2
+      fast-wrap-ansi: 0.2.2
+      sisteransi: 1.0.5
 
   '@dnd-kit/abstract@0.3.2':
     dependencies:
@@ -2698,6 +2753,11 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@pmndrs/labs@0.8.0':
+    dependencies:
+      '@clack/prompts': 1.7.0
+      tsx: 4.23.12
 
   '@preact/signals-core@1.14.1': {}
 
@@ -3288,6 +3348,16 @@ snapshots:
 
   fast-fifo@1.3.2: {}
 
+  fast-string-truncated-width@3.0.3: {}
+
+  fast-string-width@3.0.2:
+    dependencies:
+      fast-string-truncated-width: 3.0.3
+
+  fast-wrap-ansi@0.2.2:
+    dependencies:
+      fast-string-width: 3.0.2
+
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
       picomatch: 4.0.4
@@ -3702,6 +3772,8 @@ snapshots:
 
   signal-exit@4.1.0: {}
 
+  sisteransi@1.0.5: {}
+
   skia-canvas@3.0.8:
     dependencies:
       detect-libc: 2.1.2
@@ -3846,6 +3918,12 @@ snapshots:
   tslib@2.8.1: {}
 
   tsx@4.23.0:
+    dependencies:
+      esbuild: 0.28.0
+    optionalDependencies:
+      fsevents: 2.3.3
+
+  tsx@4.23.12:
     dependencies:
       esbuild: 0.28.0
     optionalDependencies:
