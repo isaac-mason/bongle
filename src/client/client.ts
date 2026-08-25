@@ -360,37 +360,37 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
 
         case 'voxel_chunk_full': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkFull(state.voxelNet, room, message);
+            if (room) VoxelNet.applyChunkFull(state.voxelNet, room.voxels, message);
             break;
         }
 
         case 'voxel_chunk_ops': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkOps(room, message);
+            if (room) VoxelNet.applyChunkOps(room.voxels, message);
             break;
         }
 
         case 'voxel_chunk_light': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkLight(room, message);
+            if (room) VoxelNet.applyChunkLight(room.voxels, message);
             break;
         }
 
         case 'voxel_chunk_light_delta': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkLightDelta(room, message);
+            if (room) VoxelNet.applyChunkLightDelta(room.voxels, message);
             break;
         }
 
         case 'voxel_chunk_del': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkDel(room, message);
+            if (room) VoxelNet.applyChunkDel(room.voxels, message);
             break;
         }
 
         case 'voxel_chunk_empty': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkEmpty(room, message);
+            if (room) VoxelNet.applyChunkEmpty(room.voxels, message);
             break;
         }
 

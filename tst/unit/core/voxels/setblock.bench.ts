@@ -90,7 +90,7 @@ const manyKeyRegistry = buildBenchRegistry(manyKeys);
 
 /** disable flood-fill so light writes take the inline-seed path. */
 function withoutFloodFill(voxels: Voxels): Voxels {
-    voxels.authority!.floodFillLighting.enabled = false;
+    voxels.lighting.floodFill.enabled = false;
     return voxels;
 }
 

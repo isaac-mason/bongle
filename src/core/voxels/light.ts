@@ -594,7 +594,7 @@ export function propagateAllLight(voxels: Voxels): void {
     }
 
     if (voxels.chunks.size === 0) {
-        if (voxels.authority) voxels.authority.changes.light.epoch++;
+        voxels.lighting.epoch++;
         return;
     }
 
@@ -694,8 +694,8 @@ export function propagateAllLight(voxels: Voxels): void {
     }
 
     // bump light epoch (full recompute, clients discard incremental ops)
+    voxels.lighting.epoch++;
     if (voxels.authority) {
-        voxels.authority.changes.light.epoch++;
         // invalidate all snapshots
         for (const chunk of voxels.chunks.values()) {
             chunk.compressedSnapshot = null;
@@ -1312,21 +1312,23 @@ function computeNewLevel(
 
 // ── flushPendingLight ───────────────────────────────────────────────
 //
-// drains the per-tick light-recompute queues in changes.light: new chunks
+// drains the per-tick light-recompute queues in voxels.lighting: new chunks
 // get sky light seeded first (so the incremental block-change update sees
 // correct sky state), then per-block incremental updates, then the scoped
 // whole-chunk relights. called by the engine between tick and network flush.
+//
+// runs on mirrors too. the queues only ever hold work this Voxels wrote
+// itself, so a client drains its own predicted edits here and nothing else:
+// server-fed blocks and light land through the receive path, which never
+// enqueues.
 
 export function flushPendingLight(voxels: Voxels): void {
-    const auth = voxels.authority;
-    if (!auth) return;
-
-    const light = auth.changes.light;
+    const light = voxels.lighting;
     const stale = light.chunks;
     // when flood-fill lighting is disabled, setChunkBlock / ensureChunk write
     // seed values inline and never enqueue. defensive: drop anything that
     // slipped through (e.g. if the toggle flipped mid-tick).
-    if (!auth.floodFillLighting.enabled) {
+    if (!light.floodFill.enabled) {
         light.newChunks.length = 0;
         light.blocks.length = 0;
         stale.clear();

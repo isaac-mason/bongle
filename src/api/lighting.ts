@@ -1,9 +1,13 @@
 // api/lighting.ts, script-facing voxel-lighting controls.
 //
-// Server-only: configures how the voxel world propagates light. The
-// default (`enabled: true`) runs the BFS flood-fill on every block change
-// and on new chunks. Games that mutate huge volumes per tick (procgen,
-// fast-fill builders) can opt out to a flat sky-light seed instead.
+// Configures how the voxel world propagates light. The default
+// (`enabled: true`) runs the BFS flood-fill on every block change and on
+// new chunks. Games that mutate huge volumes per tick (procgen, fast-fill
+// builders) can opt out to a flat sky-light seed instead.
+//
+// Call this from a shared-realm system so client and server configure
+// identically. A client propagates light for blocks it writes itself, so
+// a config skew between the two sides diverges silently.
 
 import type { ScriptContext } from '../core/scene/scripts';
 
@@ -20,18 +24,11 @@ import type { ScriptContext } from '../core/scene/scripts';
  *   emission.
  */
 export function configureFloodFillLighting(ctx: ScriptContext, o: { enabled?: boolean; minLevel?: number }): void {
-    if (!ctx.server) {
-        throw new Error('[bongle] configureFloodFillLighting: server-only');
-    }
-    const auth = ctx.voxels.authority;
-    if (!auth) {
-        throw new Error('[bongle] configureFloodFillLighting: voxels has no authority bundle');
-    }
-    const state = auth.floodFillLighting;
+    const state = ctx.voxels.lighting.floodFill;
     if (o.enabled !== undefined) state.enabled = o.enabled;
     if (o.minLevel !== undefined) {
         if (o.minLevel < 0 || o.minLevel > 15 || (o.minLevel | 0) !== o.minLevel) {
-            throw new Error(`[bongle] configureFloodFillLighting: minLevel must be int 0–15, got ${o.minLevel}`);
+            throw new Error(`[bongle] configureFloodFillLighting: minLevel must be int 0-15, got ${o.minLevel}`);
         }
         state.minLevel = o.minLevel;
     }

@@ -5,7 +5,6 @@ import { decodeChunk, decodeLight } from '../core/voxels/chunk-codec';
 import * as Voxels from '../core/voxels/voxels';
 import type { ClientNet } from './net';
 import * as Net from './net';
-import type { ClientRoom } from './rooms';
 
 type ChunkCoord = { cx: number; cy: number; cz: number };
 
@@ -47,15 +46,15 @@ function dirtyAllNeighbors(voxels: Voxels.Voxels, chunk: Voxels.Chunk): void {
     }
 }
 
-export function applyChunkFull(voxelNet: VoxelNet, room: ClientRoom, message: Protocol.VoxelChunkFull): void {
+export function applyChunkFull(voxelNet: VoxelNet, voxels: Voxels.Voxels, message: Protocol.VoxelChunkFull): void {
     const { data, light } = decodeChunk(message.compressed);
     const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
 
-    let chunk = room.voxels.chunks.get(key);
+    let chunk = voxels.chunks.get(key);
     if (!chunk) {
         chunk = Voxels.createChunk(message.cx, message.cy, message.cz);
-        room.voxels.chunks.set(key, chunk);
-        Voxels.linkChunkNeighbors(room.voxels, chunk);
+        voxels.chunks.set(key, chunk);
+        Voxels.linkChunkNeighbors(voxels, chunk);
     }
 
     chunk.data = data;
@@ -63,24 +62,24 @@ export function applyChunkFull(voxelNet: VoxelNet, room: ClientRoom, message: Pr
 
     // wire carries registry-global state ids; map each back to its durable key so
     // the palette survives registry hot-reload. unknown ids (skew) fall back to ''.
-    const stateToKey = room.voxels.registry.stateToKey;
+    const stateToKey = voxels.registry.stateToKey;
     chunk.paletteKeys = message.palette.map((id) => stateToKey[id] ?? '');
     chunk.paletteMap = new Map();
     for (let i = 0; i < chunk.paletteKeys.length; i++) {
         chunk.paletteMap.set(chunk.paletteKeys[i]!, i);
     }
 
-    Voxels.resolveChunk(chunk, room.voxels.registry);
-    Voxels.markChunkDirty(room.voxels, chunk);
-    dirtyAllNeighbors(room.voxels, chunk);
+    Voxels.resolveChunk(chunk, voxels.registry);
+    Voxels.markChunkDirty(voxels, chunk);
+    dirtyAllNeighbors(voxels, chunk);
 
     queueAck(voxelNet, message.playerId, message);
 }
 
-export function applyChunkOps(room: ClientRoom, message: Protocol.VoxelChunkOps): void {
+export function applyChunkOps(voxels: Voxels.Voxels, message: Protocol.VoxelChunkOps): void {
     for (const entry of message.chunks) {
         const key = Voxels.chunkKey(entry.cx, entry.cy, entry.cz);
-        const chunk = room.voxels.chunks.get(key);
+        const chunk = voxels.chunks.get(key);
         if (!chunk) continue;
 
         // COW out of the shared empty-stub array before mutating: chunks promoted
@@ -90,7 +89,7 @@ export function applyChunkOps(room: ClientRoom, message: Protocol.VoxelChunkOps)
         // each change carries a registry-global state id, interned into THIS
         // chunk's own local palette slot so a client palette that diverged from
         // the server's reconciles cleanly instead of drifting.
-        const registry = room.voxels.registry;
+        const registry = voxels.registry;
         const stateToKey = registry.stateToKey;
         const cull = registry.cull;
         let faces = 0;
@@ -125,10 +124,10 @@ export function applyChunkOps(room: ClientRoom, message: Protocol.VoxelChunkOps)
             if (z === 15) faces |= 32;
         }
 
-        dirtyTouchedNeighbors(room.voxels, entry, faces);
+        dirtyTouchedNeighbors(voxels, entry, faces);
 
         chunk.version++;
-        Voxels.markChunkDirty(room.voxels, chunk);
+        Voxels.markChunkDirty(voxels, chunk);
     }
 }
 
@@ -145,25 +144,25 @@ function dirtyTouchedNeighbors(voxels: Voxels.Voxels, entry: ChunkCoord, faces: 
     if (faces & 32) dirty(0, 0, 1);
 }
 
-export function applyChunkLight(room: ClientRoom, message: Protocol.VoxelChunkLight): void {
+export function applyChunkLight(voxels: Voxels.Voxels, message: Protocol.VoxelChunkLight): void {
     const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
-    const chunk = room.voxels.chunks.get(key);
+    const chunk = voxels.chunks.get(key);
     if (!chunk) return;
 
     chunk.light = decodeLight(message.sky, message.rgb);
     chunk.version++;
 
-    Voxels.markChunkDirty(room.voxels, chunk);
-    dirtyAllNeighbors(room.voxels, chunk);
+    Voxels.markChunkDirty(voxels, chunk);
+    dirtyAllNeighbors(voxels, chunk);
 }
 
 // scratch 3×3×3 neighbour mask, indexed (dz+1)*9 + (dy+1)*3 + (dx+1), reused
 // across the delta loop to avoid per-chunk allocation.
 const neighbourCellMask = new Uint8Array(27);
 
-export function applyChunkLightDelta(room: ClientRoom, message: Protocol.VoxelChunkLightDelta): void {
+export function applyChunkLightDelta(voxels: Voxels.Voxels, message: Protocol.VoxelChunkLightDelta): void {
     const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
-    const chunk = room.voxels.chunks.get(key);
+    const chunk = voxels.chunks.get(key);
     if (!chunk) return;
 
     neighbourCellMask.fill(0);
@@ -193,7 +192,7 @@ export function applyChunkLightDelta(room: ClientRoom, message: Protocol.VoxelCh
     }
 
     chunk.version++;
-    Voxels.markChunkDirty(room.voxels, chunk);
+    Voxels.markChunkDirty(voxels, chunk);
 
     for (let i = 0; i < 27; i++) {
         if (i === 13) continue;
@@ -201,29 +200,29 @@ export function applyChunkLightDelta(room: ClientRoom, message: Protocol.VoxelCh
         const dx = (i % 3) - 1;
         const dy = (((i / 3) | 0) % 3) - 1;
         const dz = ((i / 9) | 0) - 1;
-        const nc = room.voxels.chunks.get(Voxels.chunkKey(message.cx + dx, message.cy + dy, message.cz + dz));
-        if (nc) Voxels.markChunkDirty(room.voxels, nc);
+        const nc = voxels.chunks.get(Voxels.chunkKey(message.cx + dx, message.cy + dy, message.cz + dz));
+        if (nc) Voxels.markChunkDirty(voxels, nc);
     }
 }
 
-export function applyChunkDel(room: ClientRoom, message: Protocol.VoxelChunkDel): void {
+export function applyChunkDel(voxels: Voxels.Voxels, message: Protocol.VoxelChunkDel): void {
     const key = Voxels.chunkKey(message.cx, message.cy, message.cz);
-    const chunk = room.voxels.chunks.get(key);
+    const chunk = voxels.chunks.get(key);
     if (chunk) {
         Voxels.unlinkChunkNeighbors(chunk);
-        room.voxels.dirty.blocks.delete(chunk);
+        voxels.dirty.blocks.delete(chunk);
     }
-    room.voxels.chunks.delete(key);
-    room.voxels.dirty.removed.add(key);
+    voxels.chunks.delete(key);
+    voxels.dirty.removed.add(key);
 }
 
-export function applyChunkEmpty(room: ClientRoom, message: Protocol.VoxelChunkEmpty): void {
+export function applyChunkEmpty(voxels: Voxels.Voxels, message: Protocol.VoxelChunkEmpty): void {
     for (const c of message.chunks) {
         const key = Voxels.chunkKey(c.cx, c.cy, c.cz);
         // a real chunk already present (full upgrade arrived first) wins.
-        if (room.voxels.chunks.has(key)) continue;
+        if (voxels.chunks.has(key)) continue;
         const chunk = Voxels.createEmptyChunk(c.cx, c.cy, c.cz);
-        room.voxels.chunks.set(key, chunk);
-        Voxels.linkChunkNeighbors(room.voxels, chunk);
+        voxels.chunks.set(key, chunk);
+        Voxels.linkChunkNeighbors(voxels, chunk);
     }
 }

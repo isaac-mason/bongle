@@ -468,16 +468,29 @@ export function chunkData(chunk: Chunk): Uint16Array {
 /**
  * set a block at a chunk-local position — the meat of a voxel write. resolves
  * the palette slot, writes the cell, maintains nonAir/solid counts + mesh gen,
- * registers the chunk mesh-dirty, and (when `voxels` is authoritative) records
- * the op and routes lighting by flag:
- *   DEFAULT → per-block incremental (pendingLight) + inline hook drain
- *   BULK    → whole-chunk relight (staleLightChunks) + skip inline hooks
- * All authority-side work no-ops when `voxels.authority` is null (client mirror,
- * bare test fixtures) — those get just the data + palette + counts.
+ * registers the chunk mesh-dirty, and routes lighting by flag:
+ *   DEFAULT → per-block incremental (lighting.blocks) + inline hook drain
+ *   BULK    → whole-chunk relight (lighting.chunks) + skip inline hooks
+ * Lighting runs on every Voxels, mirrors included: it is derived from the
+ * blocks this Voxels holds. Op recording and block hooks are authority-side
+ * and no-op when `voxels.authority` is null (client mirror, bare test
+ * fixtures) — those get the data + palette + counts + light.
  *
  * `setBlock` is a thin wrapper over this that resolves world coords → chunk.
  * no bounds checking, caller ensures 0 <= x,y,z < CHUNK_SIZE.
  */
+/** true when swapping `oldStateId` for `newStateId` can change light: either
+ *  emission or opacity differs. a light-neutral swap (a rotation or texture
+ *  variant of the same block) never needs a relight, so it never enters the
+ *  queue and never costs a resolveWorldPos in the flush filter. */
+function hasDifferentLightProperties(registry: Blocks, oldStateId: number, newStateId: number): boolean {
+    if (oldStateId === newStateId) return false;
+    return (
+        registry.lightEmission[oldStateId] !== registry.lightEmission[newStateId] ||
+        registry.lightOpacity[oldStateId] !== registry.lightOpacity[newStateId]
+    );
+}
+
 export function setChunkBlock(
     voxels: Voxels,
     chunk: Chunk,
@@ -516,8 +529,31 @@ export function setChunkBlock(
     // boundary edits affect AO + smooth lighting in up to 7 neighbour chunks.
     markBoundaryNeighborsDirty(voxels, chunk.cx, chunk.cy, chunk.cz, x, y, z);
 
+    // light is derived from the blocks this Voxels holds, so it schedules on
+    // mirrors too: a script-predicted client edit lights in the same tick
+    // instead of trailing the server's baked light. server-driven changes
+    // never reach here — applyChunkOps writes chunk data directly.
+    const lighting = voxels.lighting;
+    if (!lighting.floodFill.enabled) {
+        // flood-fill disabled (flat / fullbright): inline sky-seed + block
+        // emission, no propagation — for BULK and DEFAULT alike. must NOT queue
+        // a relight; flushPendingLight does no propagation in this mode.
+        const emission = registry.lightEmission[newStateId] ?? 0;
+        const sky = lighting.floodFill.minLevel & 0xf;
+        setLight(chunk, idx, (sky << 12) | (emission & 0xfff));
+        markChunkLightDirty(voxels, chunk);
+    } else if (flags === SetBlockFlags.BULK) {
+        // whole-chunk relight at tick end (scoped bake over the touched set).
+        lighting.chunks.add(chunk);
+    } else if (hasDifferentLightProperties(registry, oldStateId, newStateId)) {
+        lighting.blocks.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
+    }
+
     const auth = voxels.authority;
     if (!auth) return;
+
+    chunk.compressedSnapshot = null;
+    chunk.snapshotPalette = null;
 
     auth.changes.ops.push({
         kind: 0,
@@ -532,24 +568,6 @@ export function setChunkBlock(
         oldStateId,
         newStateId,
     });
-
-    if (!auth.floodFillLighting.enabled) {
-        // flood-fill disabled (flat / fullbright): inline sky-seed + block
-        // emission, no propagation — for BULK and DEFAULT alike. must NOT queue
-        // a relight; flushPendingLight does no propagation in this mode.
-        const emission = registry.lightEmission[newStateId] ?? 0;
-        const sky = auth.floodFillLighting.minLevel & 0xf;
-        setLight(chunk, idx, (sky << 12) | (emission & 0xfff));
-        markChunkLightDirty(voxels, chunk);
-    } else if (flags === SetBlockFlags.BULK) {
-        // whole-chunk relight at tick end (scoped bake over the touched set).
-        auth.changes.light.chunks.add(chunk);
-    } else {
-        auth.changes.light.blocks.push({ wx: chunk.wx + x, wy: chunk.wy + y, wz: chunk.wz + z, oldStateId });
-    }
-
-    chunk.compressedSnapshot = null;
-    chunk.snapshotPalette = null;
 
     // settle this write's hooks inline. BLOCK_HOOKS → block-def recompute (fences
     // join, chains recurse); BLOCK_EVENTS → script observers, after the recompute
@@ -566,7 +584,7 @@ export function setChunkBlock(
  * nonAir/solid counts from the data + palette, marks the chunk mesh-dirty and
  * schedules its light (a tick-end whole-chunk relight, or an inline flat seed
  * when flood-fill is disabled). No ops, no hooks — the raw-write path trades
- * those away for speed. no-op past the rescan when `voxels.authority` is null.
+ * those away for speed. Light schedules on mirrors too, see `VoxelsLighting`.
  */
 export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
     const registry = voxels.registry;
@@ -588,14 +606,13 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
     chunk.version++;
     voxels.dirty.blocks.add(chunk);
 
-    const auth = voxels.authority;
-    if (!auth) return;
-    if (auth.floodFillLighting.enabled) {
-        auth.changes.light.chunks.add(chunk);
+    const lighting = voxels.lighting;
+    if (lighting.floodFill.enabled) {
+        lighting.chunks.add(chunk);
     } else {
         // flood-fill disabled (flat / fullbright): the raw writes bypassed inline
         // seeding, so flat-seed the chunk here (sky base + per-cell emission).
-        const skyPacked = (auth.floodFillLighting.minLevel & 0xf) << 12;
+        const skyPacked = (lighting.floodFill.minLevel & 0xf) << 12;
         chunk.light.fill(skyPacked);
         const emissionTable = registry.lightEmission;
         for (let i = 0; i < data.length; i++) {
@@ -604,6 +621,10 @@ export function invalidateChunk(voxels: Voxels, chunk: Chunk): void {
         }
         markChunkLightDirty(voxels, chunk);
     }
+
+    // snapshot caches only ever populate on an authority (discovery builds
+    // them for voxel_chunk_full), so invalidation stays authority-side.
+    if (!voxels.authority) return;
     chunk.compressedSnapshot = null;
     chunk.snapshotPalette = null;
 }
@@ -733,7 +754,9 @@ export type VoxelOp = VoxelBlockOp | VoxelDeleteOp;
  * consumer that drains each part:
  *   - `ops`         → block-hooks (settle, inline per write) + discovery (network)
  *   - `addedChunks` → discovery (streaming)
- *   - `light`       → flushPendingLight (relight)
+ *
+ * light-recompute work is NOT here: it lives in `Voxels.lighting`, which
+ * every Voxels owns, mirrors included. see `VoxelsLighting`.
  */
 export type VoxelChanges = {
     /** append-only log of block ops this tick. block-hooks settles each op's
@@ -744,34 +767,17 @@ export type VoxelChanges = {
      *  without re-walking the whole view sphere. holds the Chunk ref so
      *  consumers don't have to re-lookup. */
     addedChunks: Set<Chunk>;
-    /** light-recompute work queued this tick, drained by flushPendingLight. */
-    light: {
-        /** blocks changed by DEFAULT writes → per-block incremental relight. */
-        blocks: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
-        /** chunks changed by BULK writes / invalidateChunk → scoped whole-chunk
-         *  relight (relightChunks) instead of the per-block path. */
-        chunks: Set<Chunk>;
-        /** new chunks needing sky light seeded before incremental updates run. */
-        newChunks: Chunk[];
-        /** monotonically increasing; bumped by propagateAllLight (a full
-         *  recompute), so clients discard buffered incremental ops. NOT
-         *  per-tick — it outlives a tick. */
-        epoch: number;
-    };
 };
 
 export function createVoxelChanges(): VoxelChanges {
     return {
         ops: [],
         addedChunks: new Set(),
-        light: { blocks: [], chunks: new Set(), newChunks: [], epoch: 0 },
     };
 }
 
 /**
- * clear the network per-tick state after end-of-tick dispatch. the `light`
- * queues are cleared by their own consumer (flushPendingLight, which runs
- * earlier in the tick); `light.epoch` is monotonic and never cleared.
+ * clear the network per-tick state after end-of-tick dispatch.
  */
 export function clearVoxelChanges(changes: VoxelChanges): void {
     changes.ops.length = 0;
@@ -785,13 +791,56 @@ export function clearVoxelChanges(changes: VoxelChanges): void {
  * sky-channel seed for inline writes, `15` keeps the world fully lit,
  * `0` is pitch black except where blocks emit their own light.
  *
- * lives inside `VoxelsAuthority`, only meaningful when this Voxels owns
- * the truth and drives light propagation.
+ * must agree between server and client: a mirror running flood-fill against
+ * a flat server (or a `minLevel` skew) diverges silently. not replicated —
+ * configure it from a shared-realm system so both sides set it identically,
+ * the same way the rest of a game's world setup runs on both realms.
  */
 export type FloodFillLightingState = {
     enabled: boolean;
     minLevel: number;
 };
+
+/**
+ * light-recompute scheduling + config. present on EVERY Voxels, read-only
+ * mirrors included: a networked client propagates light locally for blocks
+ * it writes itself (script-predicted edits) instead of waiting for the
+ * server to ship baked light.
+ *
+ * this is deliberately outside `VoxelsAuthority`. owning the truth governs
+ * whether writes emit ops to peers and fire block hooks; it has nothing to
+ * do with whether this Voxels can derive light from the blocks it holds.
+ *
+ * origin gating falls out of the write paths rather than a flag: the client
+ * receive path (`applyChunkOps` / `applyChunkFull`) writes chunk data and
+ * light directly and never routes through `setChunkBlock` / `ensureChunk` /
+ * `invalidateChunk`, so nothing server-fed ever lands in these queues.
+ */
+export type VoxelsLighting = {
+    /** flood-fill light-propagation config. see type doc. */
+    floodFill: FloodFillLightingState;
+    /** blocks changed by DEFAULT writes → per-block incremental relight. */
+    blocks: Array<{ wx: number; wy: number; wz: number; oldStateId: number }>;
+    /** chunks changed by BULK writes / invalidateChunk → scoped whole-chunk
+     *  relight (relightChunks) instead of the per-block path. */
+    chunks: Set<Chunk>;
+    /** new chunks needing sky light seeded before incremental updates run. */
+    newChunks: Chunk[];
+    /** monotonically increasing; bumped by propagateAllLight (a full
+     *  recompute), so clients discard buffered incremental ops. NOT
+     *  per-tick — it outlives a tick. */
+    epoch: number;
+};
+
+export function createVoxelsLighting(): VoxelsLighting {
+    return {
+        floodFill: { enabled: true, minLevel: 15 },
+        blocks: [],
+        chunks: new Set(),
+        newChunks: [],
+        epoch: 0,
+    };
+}
 
 /**
  * authoritative-emission bundle. populated when this Voxels owns the
@@ -810,8 +859,6 @@ export type VoxelsAuthority = {
      * block-type index. see block-hooks.ts for the entry shape.
      */
     observers: Map<number, BlockObserverEntry> | null;
-    /** flood-fill light-propagation config. see type doc. */
-    floodFillLighting: FloodFillLightingState;
     /** current block-hook recursion depth. a hook that issues a chained setBlock
      *  recurses through runBlockHooks; this bounds a runaway cascade. */
     hookDepth: number;
@@ -821,13 +868,12 @@ export function createVoxelsAuthority(): VoxelsAuthority {
     return {
         changes: createVoxelChanges(),
         observers: null,
-        floodFillLighting: { enabled: true, minLevel: 15 },
         hookDepth: 0,
     };
 }
 
-/** clear per-tick state inside the authority bundle. observer registry
- *  and lighting config are NOT cleared, they outlive a tick. */
+/** clear per-tick state inside the authority bundle. the observer registry
+ *  is NOT cleared, it outlives a tick. */
 export function clearVoxelsAuthority(authority: VoxelsAuthority): void {
     clearVoxelChanges(authority.changes);
 }
@@ -865,6 +911,9 @@ export type Voxels = {
     /** authoritative-emission bundle. null on read-only mirrors. see
      *  `VoxelsAuthority` doc. */
     authority: VoxelsAuthority | null;
+    /** light scheduling + config. non-null on every Voxels, mirrors included.
+     *  see `VoxelsLighting` doc. */
+    lighting: VoxelsLighting;
 };
 
 export function createVoxels(registry: Blocks): Voxels {
@@ -874,6 +923,7 @@ export function createVoxels(registry: Blocks): Voxels {
         columns: new Map(),
         registry,
         authority: null,
+        lighting: createVoxelsLighting(),
     };
 }
 
@@ -942,22 +992,24 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
         // queue this chunk for sky light seeding so flushPendingLight
         // can seed it before processing any block changes. when flood-fill
         // is disabled, fill light inline with a flat sky-level seed instead.
-        const authority = voxels.authority;
-
-        if (authority) {
-            if (authority.floodFillLighting.enabled) {
-                authority.changes.light.newChunks.push(chunk);
-            } else {
-                const sky = authority.floodFillLighting.minLevel & 0xf;
-                chunk.light.fill(sky << 12);
-                // no markChunkLightDirty here, initial light ships with
-                // voxel_chunk_full via addedChunks, and the bulk fill bypasses
-                // setLight (mask stays empty). entering the dirty queue with
-                // dirtyCount=0 would only create a ghost the dispatch fallback
-                // would re-ship as a redundant full-light payload.
-            }
-            authority.changes.addedChunks.add(chunk);
+        //
+        // the client receive path builds server-fed chunks with createChunk,
+        // not ensureChunk, so wire-baked light is never seeded over. a mirror
+        // only lands here when a script writes into unloaded space.
+        const lighting = voxels.lighting;
+        if (lighting.floodFill.enabled) {
+            lighting.newChunks.push(chunk);
+        } else {
+            const sky = lighting.floodFill.minLevel & 0xf;
+            chunk.light.fill(sky << 12);
+            // no markChunkLightDirty here, an authority's initial light ships
+            // with voxel_chunk_full via addedChunks, and the bulk fill bypasses
+            // setLight (mask stays empty). entering the dirty queue with
+            // dirtyCount=0 would only create a ghost the dispatch fallback
+            // would re-ship as a redundant full-light payload.
         }
+
+        voxels.authority?.changes.addedChunks.add(chunk);
     }
     return chunk;
 }

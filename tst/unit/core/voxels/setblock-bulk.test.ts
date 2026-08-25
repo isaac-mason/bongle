@@ -83,9 +83,9 @@ describe('BULK light routing', () => {
         // subject: BULK writes, light settled only by flushPendingLight.
         const v = makeVoxels(reg);
         build((x, y, z, key) => setBlock(v, x, y, z, key, SetBlockFlags.BULK));
-        expect(v.authority!.changes.light.chunks.size).toBeGreaterThan(0);
+        expect(v.lighting.chunks.size).toBeGreaterThan(0);
         flushPendingLight(v);
-        expect(v.authority!.changes.light.chunks.size).toBe(0); // drained
+        expect(v.lighting.chunks.size).toBe(0); // drained
 
         expectEqual(v, reference);
     });
@@ -121,10 +121,10 @@ describe('BULK / tier-1 light with flood-fill disabled', () => {
     it('BULK write inline-seeds sky + emission instead of queueing a dropped relight', () => {
         const reg = makeRegistry();
         const v = makeVoxels(reg);
-        v.authority!.floodFillLighting.enabled = false; // flat mode, minLevel 15
+        v.lighting.floodFill.enabled = false; // flat mode, minLevel 15
 
         setBlock(v, 5, 5, 5, 'lamp', SetBlockFlags.BULK);
-        expect(v.authority!.changes.light.chunks.size).toBe(0); // NOT queued
+        expect(v.lighting.chunks.size).toBe(0); // NOT queued
         flushPendingLight(v);
 
         const packed = v.chunks.get('0,0,0')!.light[voxelIndex(5, 5, 5)]!;
@@ -135,7 +135,7 @@ describe('BULK / tier-1 light with flood-fill disabled', () => {
     it('tier-1 invalidateChunk flat-seeds the chunk (sky + emitter emission)', () => {
         const reg = makeRegistry();
         const v = makeVoxels(reg);
-        v.authority!.floodFillLighting.enabled = false;
+        v.lighting.floodFill.enabled = false;
 
         const chunk = ensureChunk(v, 0, 0, 0);
         const lamp = ensureChunkPaletteSlot(chunk, 'lamp', v.registry);
@@ -144,7 +144,7 @@ describe('BULK / tier-1 light with flood-fill disabled', () => {
         chunkData(chunk)[voxelIndex(1, 1, 1)] = stone;
         invalidateChunk(v, chunk);
 
-        expect(v.authority!.changes.light.chunks.size).toBe(0); // not queued
+        expect(v.lighting.chunks.size).toBe(0); // not queued
         const lampCell = chunk.light[voxelIndex(3, 3, 3)]!;
         expect([getSky(lampCell), getRed(lampCell)]).toEqual([15, 15]); // sky + emission
         const stoneCell = chunk.light[voxelIndex(1, 1, 1)]!;
