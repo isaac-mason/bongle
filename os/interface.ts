@@ -198,8 +198,8 @@ export type OS = {
      *  is gone. */
     stdin(pid: number, data: string | Uint8Array): void;
     kill(pid: number): void;
-    /** attach a peer OS; local connects to `remoteNames` route out to it, and its
-     *  inbound opens reach local listeners (with the dialer's identity). */
+    /** attach a peer OS; local connects to its `dial` names route out to it, and its
+     *  inbound opens reach local listeners (identity stamped from the attachment). */
     /** Attach a peer OS under `id` (a host attaches one per guest). Re-attaching the
      *  same id replaces the previous link. */
     attachPeer(id: string, link: PeerLink, opts?: AttachPeerOptions): void;
