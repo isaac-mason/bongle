@@ -186,6 +186,10 @@ export type OS = {
      *  to it until the connection pairs, so it is usable (and transferable) at once;
      *  `opened` is the readiness signal. */
     open(name: string, opts?: OpenOptions): Connection;
+    /** Serve `name` from the SHELL rather than a process — the host's bundler and disk
+     *  live in the document. `handler` receives the serving end of each connection.
+     *  Throws if the name is already served; returns the unlisten. */
+    listen(name: string, handler: (port: MessagePort, meta: ConnMeta) => void): () => void;
     /** side-effect-free readiness: resolves once `name` is served. `signal` retracts the wait. */
     served(name: string, signal?: AbortSignal): Promise<void>;
     /** exit code; resolves immediately for an already-exited pid (127 = unknown app). */

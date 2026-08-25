@@ -22,10 +22,10 @@ describe('relay-link', () => {
         const host = createRelayLink(ws1);
         const guest = createRelayLink(ws2);
         const received: Uint8Array[] = [];
-        guest.port(Channel.game).onmessage = (e) => received.push(e.data as Uint8Array);
+        guest.port(Channel.os).onmessage = (e) => received.push(e.data as Uint8Array);
 
         const frame = new Uint8Array([0, 255, 42, 7, 200, 1]); // an opaque engine frame
-        host.port(Channel.game).postMessage(frame);
+        host.port(Channel.os).postMessage(frame);
         await flush();
 
         expect(received).toHaveLength(1);
@@ -38,7 +38,7 @@ describe('relay-link', () => {
         const host = createRelayLink(ws1);
         const guest = createRelayLink(ws2);
         const got: unknown[] = [];
-        guest.port(Channel.bundler).onmessage = (e) => got.push(e.data);
+        guest.port(Channel.fsrpc).onmessage = (e) => got.push(e.data);
 
         // the actual frames that flow over the bundler conduit (see port-bridge.ts
         // BundlerFrame + dev-server.ts FetchResult/HotPayload). NB: the entry
@@ -49,18 +49,38 @@ describe('relay-link', () => {
             {
                 __bundler: 'result',
                 id: 3,
-                result: { code: 'export const x = 1\n//# sourceURL=src/index.ts', file: 'src/index.ts', id: 'src/index.ts', url: 'src/index.ts', invalidate: false },
+                result: {
+                    code: 'export const x = 1\n//# sourceURL=src/index.ts',
+                    file: 'src/index.ts',
+                    id: 'src/index.ts',
+                    url: 'src/index.ts',
+                    invalidate: false,
+                },
             },
             { __bundler: 'result', id: 4, result: { cache: true } },
             { __bundler: 'result', id: 5, result: { externalize: 'node:path', type: 'module' } },
             {
                 __bundler: 'push',
-                payload: { type: 'update', updates: [{ type: 'js-update', path: 'src/blocks.ts', acceptedPath: 'src/blocks.ts', timestamp: 12, firstInvalidatedBy: 'src/blocks.ts' }] },
+                payload: {
+                    type: 'update',
+                    updates: [
+                        {
+                            type: 'js-update',
+                            path: 'src/blocks.ts',
+                            acceptedPath: 'src/blocks.ts',
+                            timestamp: 12,
+                            firstInvalidatedBy: 'src/blocks.ts',
+                        },
+                    ],
+                },
             },
             { __bundler: 'push', payload: { type: 'full-reload', triggeredBy: 'src/index.ts' } },
-            { __bundler: 'send', payload: { type: 'custom', event: 'vite:invalidate', data: { path: 'src/a.ts', firstInvalidatedBy: 'src/a.ts' } } },
+            {
+                __bundler: 'send',
+                payload: { type: 'custom', event: 'vite:invalidate', data: { path: 'src/a.ts', firstInvalidatedBy: 'src/a.ts' } },
+            },
         ];
-        for (const f of frames) host.port(Channel.bundler).postMessage(f);
+        for (const f of frames) host.port(Channel.fsrpc).postMessage(f);
         await flush();
 
         expect(got).toEqual(frames); // deep-equal, byte-for-byte after JSON round trip
@@ -71,14 +91,22 @@ describe('relay-link', () => {
         const host = createRelayLink(ws1);
         const guest = createRelayLink(ws2);
         let got: unknown;
-        guest.port(Channel.bundler).onmessage = (e) => {
+        guest.port(Channel.fsrpc).onmessage = (e) => {
             got = e.data;
         };
         // entry-module fetch: importer is undefined.
-        host.port(Channel.bundler).postMessage({ __bundler: 'invoke', id: 1, payload: { data: { name: 'fetchModule', data: ['src/index.ts', undefined, {}] } } });
+        host.port(Channel.fsrpc).postMessage({
+            __bundler: 'invoke',
+            id: 1,
+            payload: { data: { name: 'fetchModule', data: ['src/index.ts', undefined, {}] } },
+        });
         await flush();
         // undefined → null across JSON; the only lossy case, and a benign one.
-        expect(got).toEqual({ __bundler: 'invoke', id: 1, payload: { data: { name: 'fetchModule', data: ['src/index.ts', null, {}] } } });
+        expect(got).toEqual({
+            __bundler: 'invoke',
+            id: 1,
+            payload: { data: { name: 'fetchModule', data: ['src/index.ts', null, {}] } },
+        });
     });
 
     it('demuxes channels — a game frame never reaches the bundler port', async () => {
@@ -87,11 +115,11 @@ describe('relay-link', () => {
         const guest = createRelayLink(ws2);
         const game: unknown[] = [];
         const bundler: unknown[] = [];
-        guest.port(Channel.game).onmessage = (e) => game.push(e.data);
-        guest.port(Channel.bundler).onmessage = (e) => bundler.push(e.data);
+        guest.port(Channel.os).onmessage = (e) => game.push(e.data);
+        guest.port(Channel.fsrpc).onmessage = (e) => bundler.push(e.data);
 
-        host.port(Channel.game).postMessage(new Uint8Array([1, 2, 3]));
-        host.port(Channel.bundler).postMessage({ __bundler: 'send', payload: { hello: true } });
+        host.port(Channel.os).postMessage(new Uint8Array([1, 2, 3]));
+        host.port(Channel.fsrpc).postMessage({ __bundler: 'send', payload: { hello: true } });
         await flush();
 
         expect(game).toHaveLength(1);
@@ -100,10 +128,10 @@ describe('relay-link', () => {
     });
 
     it('frame encoding tags channel + kind', () => {
-        const bin = new Uint8Array(encodeFrame(Channel.game, new Uint8Array([9])));
-        expect([bin[0], bin[1]]).toEqual([Channel.game, 0]); // binary kind
-        const json = new Uint8Array(encodeFrame(Channel.bundler, { a: 1 }));
-        expect([json[0], json[1]]).toEqual([Channel.bundler, 1]); // json kind
-        expect(decodeFrame(json)).toEqual({ channel: Channel.bundler, data: { a: 1 } });
+        const bin = new Uint8Array(encodeFrame(Channel.os, new Uint8Array([9])));
+        expect([bin[0], bin[1]]).toEqual([Channel.os, 0]); // binary kind
+        const json = new Uint8Array(encodeFrame(Channel.fsrpc, { a: 1 }));
+        expect([json[0], json[1]]).toEqual([Channel.fsrpc, 1]); // json kind
+        expect(decodeFrame(json)).toEqual({ channel: Channel.fsrpc, data: { a: 1 } });
     });
 });

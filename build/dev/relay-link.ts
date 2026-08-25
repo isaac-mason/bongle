@@ -34,8 +34,11 @@ export type PortLike = {
  *  control carries join/leave/permission. One byte, room for growth. */
 export const Channel = {
     control: 0,
-    game: 1,
-    bundler: 2,
+    /** every OS connection for this guest, multiplexed by cid (game, bundler, …).
+     *  Replaced the fixed `game`/`bundler` lanes: those carried per-client and
+     *  per-process connections over singletons, so a second one silently stole the
+     *  lane from the first. See llm/plan-guest-multiplayer-over-os.md. */
+    os: 1,
     fsrpc: 3,
 } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];

@@ -271,6 +271,45 @@ describe('createOS + runApp', () => {
         expect(os.inspect().pending.find((p) => p.name === 'never-served')).toBeUndefined();
     });
 
+    it('the shell can serve a name, locally and to a peer', async () => {
+        // the host's bundler + disk live in the document, so the shell must be able to
+        // publish a name the same way a process does.
+        const served: string[] = [];
+        const host = testOS({
+            asker: async (env) => {
+                const ch = await env.connect('bundler');
+                ch.send('fetch');
+            },
+        });
+        const unlisten = host.os.listen('bundler', (port, meta) => {
+            served.push(`local:${meta.ref}`);
+            port.onmessage = (e) => void e;
+        });
+        await host.os.run('asker');
+        expect(served).toEqual(['local:asker']);
+
+        // and the same name reached from a peer
+        const guest = testOS({
+            asker: async (env) => {
+                const ch = await env.connect('bundler');
+                ch.send('fetch');
+            },
+        });
+        const pipe = new MessageChannel();
+        host.os.attachPeer('g1', messagePortPeer(pipe.port1), { serve: ['bundler'] });
+        guest.os.attachPeer('host', messagePortPeer(pipe.port2), { dial: ['bundler'] });
+        expect(await guest.os.run('asker')).toBe(0);
+        expect(served).toHaveLength(2);
+        unlisten();
+        expect(host.os.inspect().procs.every((p) => !p.serves.includes('bundler'))).toBe(true);
+    });
+
+    it('refuses a second listener on a name already served', () => {
+        const { os } = testOS({});
+        os.listen('dup', () => {});
+        expect(() => os.listen('dup', () => {})).toThrow(/already served/);
+    });
+
     it('serves two peers at once, with cids that cannot collide', async () => {
         // one host, two guests. cids are allocated by the DIALER, so both guests will
         // hand out cid 1 — they must not land on the same connection.

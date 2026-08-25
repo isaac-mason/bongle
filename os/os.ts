@@ -61,7 +61,11 @@ export type OSOptions = {
 export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     const disposeTimeoutMs = opts.disposeTimeoutMs ?? 5000;
     const procs = new Map<number, Rec>();
-    const listeners = new Map<string, number>();
+    // name -> who serves it. A process (pid), or the SHELL: the host's bundler and
+    // project disk live in the document, not in a process, so the shell has to be able
+    // to publish a name like anything else. Reuses the Endpoint union `conns` already has.
+    const listeners = new Map<string, Endpoint>();
+    const shellListeners = new Map<string, (port: MessagePort, meta: ConnMeta) => void>();
     // callbacks parked on a name that isn't served yet — an app connect, a shell
     // connect, or a shell served() all wait the same way and flush together the
     // instant a process listens on the name. `owner` (app connects only) gives
@@ -248,20 +252,39 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return rec;
     }
 
+    /** Record who serves `name` and wake everything parked on it — connects reconnect,
+     *  `served()` resolves, each through its own continuation. */
+    function publish(name: string, who: Endpoint): void {
+        listeners.set(name, who);
+        const parked = waiters.get(name);
+        if (parked) {
+            waiters.delete(name);
+            for (const w of parked) w.resolve();
+        }
+        notify();
+    }
+
+    /** The shell publishes a name. Returns the unlisten. */
+    function listenShell(name: string, handler: (port: MessagePort, meta: ConnMeta) => void): () => void {
+        const held = listeners.get(name);
+        if (held !== undefined)
+            throw new Error(`[os] "${name}" is already served by ${held === 'shell' ? 'the shell' : `pid ${held}`}`);
+        shellListeners.set(name, handler);
+        publish(name, 'shell');
+        return () => {
+            if (listeners.get(name) !== 'shell') return;
+            listeners.delete(name);
+            shellListeners.delete(name);
+            notify();
+        };
+    }
+
     // ── app control frames ────────────────────────────────────────────────────
     function onMsg(rec: Rec, msg: ToOS, _ports: readonly MessagePort[]): void {
         switch (msg.k) {
             case 'listen': {
-                listeners.set(msg.name, rec.pid);
                 rec.listens.add(msg.name);
-                // wake everyone parked on this name — connects reconnect, served()
-                // resolves, all through their own continuation.
-                const parked = waiters.get(msg.name);
-                if (parked) {
-                    waiters.delete(msg.name);
-                    for (const w of parked) w.resolve();
-                }
-                notify();
+                publish(msg.name, rec.pid);
                 break;
             }
             case 'unlisten':
@@ -350,12 +373,17 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
     ): { ok: false } | { ok: true; ack?: Promise<void> } {
         const lp = listeners.get(name);
         let ack: Promise<void> | undefined;
-        if (lp !== undefined) {
+        if (typeof lp === 'number') {
             const listener = procs.get(lp);
             if (listener === undefined) return { ok: false };
             toApp(listener.link, { k: 'incoming', name, conn, meta }, [listenerPort]);
             listener.held.add(conn);
             conns.set(conn, { a: lp, b: dialer, name });
+        } else if (lp === 'shell') {
+            const handler = shellListeners.get(name);
+            if (handler === undefined) return { ok: false };
+            handler(listenerPort, meta);
+            conns.set(conn, { a: 'shell', b: dialer, name });
         } else {
             const route = routeFor(name);
             if (route === null) return { ok: false };
@@ -661,5 +689,19 @@ export function createOS(io: IO, resolve: ResolveDef, opts: OSOptions): OS {
         return () => observers.delete(cb);
     }
 
-    return { spawn, run, connect: connectShell, open, served, wait, stdin, kill, attachPeer, detachPeer, inspect, onChange };
+    return {
+        spawn,
+        run,
+        connect: connectShell,
+        open,
+        listen: listenShell,
+        served,
+        wait,
+        stdin,
+        kill,
+        attachPeer,
+        detachPeer,
+        inspect,
+        onChange,
+    };
 }
