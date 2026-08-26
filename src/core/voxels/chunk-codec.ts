@@ -63,6 +63,44 @@ export function rleEncode(input: Uint16Array): Uint16Array {
     return pairs.subarray(0, pairCount);
 }
 
+// scratch buffer for the two production RLE call sites below (packChunkStreams's
+// data/light streams, encodeLight's sky/rgb streams) — sized for one
+// CHUNK_VOLUME-length stream's worst case (every element its own run). rleEncode()
+// above allocates that worst case fresh on every call and then throws most of it
+// away; reusing one persistent buffer and copying out only the real pair count
+// (rleEncodeScratch below) turns that into a single one-time allocation plus a
+// right-sized copy. mirrors Minecraft's CompressionEncoder, which reuses one
+// Deflater + one scratch byte[] across every packet rather than allocating per-call.
+const RLE_SCRATCH = new Uint16Array(CHUNK_VOLUME * 2);
+
+/** rle encode via the shared scratch buffer, returning a right-sized copy.
+ *  falls back to rleEncode() for input longer than CHUNK_VOLUME (shouldn't
+ *  happen for chunk data/light/sky/rgb, all fixed at CHUNK_VOLUME). */
+function rleEncodeScratch(input: Uint16Array): Uint16Array {
+    if (input.length === 0) return new Uint16Array(0);
+    if (input.length * 2 > RLE_SCRATCH.length) return rleEncode(input);
+
+    let runValue = input[0]!;
+    let runLength = 1;
+    let pairCount = 0;
+
+    for (let i = 1; i < input.length; i++) {
+        const v = input[i]!;
+        if (v === runValue && runLength < 65535) {
+            runLength++;
+        } else {
+            RLE_SCRATCH[pairCount++] = runValue;
+            RLE_SCRATCH[pairCount++] = runLength;
+            runValue = v;
+            runLength = 1;
+        }
+    }
+    RLE_SCRATCH[pairCount++] = runValue;
+    RLE_SCRATCH[pairCount++] = runLength;
+
+    return RLE_SCRATCH.slice(0, pairCount);
+}
+
 /** rle decode (value, count) pairs back to a flat uint16 array. */
 export function rleDecode(pairs: Uint16Array, outputLength: number): Uint16Array {
     const output = new Uint16Array(outputLength);
@@ -116,8 +154,8 @@ const CHUNK_ZSTD_LEVEL = 6;
 /** pack a chunk's data + light into the pre-compression byte payload: two RLE
  *  streams under an 8-byte length header. */
 function packChunkStreams(data: Uint16Array, light: Uint16Array): Uint8Array {
-    const dataBytes = u16Bytes(rleEncode(data));
-    const lightBytes = u16Bytes(rleEncode(light));
+    const dataBytes = u16Bytes(rleEncodeScratch(data));
+    const lightBytes = u16Bytes(rleEncodeScratch(light));
 
     const concat = new Uint8Array(CHUNK_HEADER_BYTES + dataBytes.length + lightBytes.length);
     const header = new DataView(concat.buffer, 0, CHUNK_HEADER_BYTES);
@@ -181,8 +219,8 @@ export function encodeLight(light: Uint16Array): { sky: Uint8Array; rgb: Uint8Ar
         rgb[i] = v & 0xfff;
     }
     return {
-        sky: uint16AsBytes(rleEncode(sky)),
-        rgb: uint16AsBytes(rleEncode(rgb)),
+        sky: uint16AsBytes(rleEncodeScratch(sky)),
+        rgb: uint16AsBytes(rleEncodeScratch(rgb)),
     };
 }
 
