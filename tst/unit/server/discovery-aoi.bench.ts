@@ -1,17 +1,18 @@
 import { bench, describe } from 'vitest';
 import { setPosition, TransformTrait } from '../../../src/builtins/transform';
-import { addChild, addTrait, createNode, createSceneTree, reconcileRootChunks } from '../../../src/core/scene/scene-tree';
+import { addChild, addTrait, createNode, createSceneTree, reconcileRootRegions } from '../../../src/core/scene/scene-tree';
+import { REGION_SIZE } from '../../../src/core/voxels/voxels';
 
-// ── reconcileRootChunks bench ────────────────────────────────────────
+// ── reconcileRootRegions bench ────────────────────────────────────────
 //
-// the per-tick transform-root chunk-index maintenance introduced for chunk-tied
+// the per-tick transform-root region-index maintenance introduced for region-tied
 // AOI. it runs once per room each tick, off dirtyNodes, and files/unfiles/rebuckets
-// transform roots + emits the rootChunkChanges changeset the presence pass consumes.
+// transform roots + emits the rootRegionChanges changeset the presence pass consumes.
 //
 // the point of the design is that steady-state cost is O(roots that MOVED), not
 // O(total roots): a mostly-static world with a few hundred movers pays for the
 // movers, not the whole scene. these benches make that visible — compare the "cross
-// a chunk boundary" and "move within chunk" passes (which touch only the movers)
+// a region boundary" and "move within region" passes (which touch only the movers)
 // against the "cold file all" pass (the join / mass-spawn one-off).
 //
 // run: `pnpm bench discovery-aoi`.
@@ -20,7 +21,7 @@ const N = 2000; // total transform roots in the world
 const MOVERS = 200; // how many move each tick
 
 // a world of N transform roots, each a direct child of root (so it IS a transform
-// root), spread across distinct chunks. the index is pre-seeded so the benched pass
+// root), spread across distinct regions. the index is pre-seeded so the benched pass
 // measures steady-state reconcile, not first-file.
 function world() {
     const sceneTree = createSceneTree();
@@ -29,16 +30,16 @@ function world() {
         const node = createNode();
         addChild(sceneTree.root, node);
         const t = addTrait(node, TransformTrait);
-        setPosition(t, [i * 64, 0, 0]); // 4 chunks apart, all distinct
+        setPosition(t, [i * REGION_SIZE, 0, 0]); // 1 region apart, all distinct
         roots.push({ node, t });
         sceneTree.dirtyNodes.add(node);
     }
-    reconcileRootChunks(sceneTree); // seed: files all N
+    reconcileRootRegions(sceneTree); // seed: files all N
     sceneTree.dirtyNodes.clear();
     return { sceneTree, roots };
 }
 
-describe('reconcileRootChunks', () => {
+describe('reconcileRootRegions', () => {
     {
         // COLD (build): the true join / mass-spawn one-off — CONSTRUCT N transform
         // nodes AND file them. dominated by addTrait(TransformTrait) + setPosition,
@@ -48,10 +49,10 @@ describe('reconcileRootChunks', () => {
             for (let i = 0; i < N; i++) {
                 const node = createNode();
                 addChild(sceneTree.root, node);
-                setPosition(addTrait(node, TransformTrait), [i * 64, 0, 0]);
+                setPosition(addTrait(node, TransformTrait), [i * REGION_SIZE, 0, 0]);
                 sceneTree.dirtyNodes.add(node);
             }
-            reconcileRootChunks(sceneTree);
+            reconcileRootRegions(sceneTree);
         });
     }
     {
@@ -61,42 +62,42 @@ describe('reconcileRootChunks', () => {
         // a genuinely fresh spawn adds one getWorldChunk matrix decompose per root.)
         const { sceneTree, roots } = world();
         bench(`cold-index: re-file all ${N} roots into a fresh index`, () => {
-            sceneTree.chunkToRoots.clear();
-            sceneTree.rootToChunk.clear();
+            sceneTree.regionToRoots.clear();
+            sceneTree.rootToRegion.clear();
             for (const r of roots) sceneTree.dirtyNodes.add(r.node);
-            reconcileRootChunks(sceneTree);
+            reconcileRootRegions(sceneTree);
             sceneTree.dirtyNodes.clear();
         });
     }
     {
-        // HOT: MOVERS of N cross a chunk boundary each tick → unfile + file + changeset.
+        // HOT: MOVERS of N cross a region boundary each tick → unfile + file + changeset.
         // this is the steady-state cost the design optimises: O(movers), not O(N).
         const { sceneTree, roots } = world();
         let tick = 0;
-        bench(`hot: ${MOVERS}/${N} roots cross a chunk boundary`, () => {
+        bench(`hot: ${MOVERS}/${N} roots cross a region boundary`, () => {
             tick++;
             for (let i = 0; i < MOVERS; i++) {
                 const r = roots[i]!;
-                setPosition(r.t, [i * 64 + tick * 16, 0, 0]); // +1 chunk each tick
+                setPosition(r.t, [i * REGION_SIZE + tick * REGION_SIZE, 0, 0]); // +1 region each tick
                 sceneTree.dirtyNodes.add(r.node);
             }
-            reconcileRootChunks(sceneTree);
+            reconcileRootRegions(sceneTree);
             sceneTree.dirtyNodes.clear();
         });
     }
     {
-        // WARM: MOVERS dirty but moving WITHIN their chunk → getWorldChunk + compare,
+        // WARM: MOVERS dirty but moving WITHIN their region → getWorldChunk + compare,
         // no rebucket (the `filed === key` fast path). the cheapest per-mover cost.
         const { sceneTree, roots } = world();
         let tick = 0;
-        bench(`warm: ${MOVERS}/${N} roots move within their chunk`, () => {
+        bench(`warm: ${MOVERS}/${N} roots move within their region`, () => {
             tick++;
             for (let i = 0; i < MOVERS; i++) {
                 const r = roots[i]!;
-                setPosition(r.t, [i * 64 + (tick % 8), 0, 0]); // stays inside the chunk
+                setPosition(r.t, [i * REGION_SIZE + (tick % 8), 0, 0]); // stays inside the region
                 sceneTree.dirtyNodes.add(r.node);
             }
-            reconcileRootChunks(sceneTree);
+            reconcileRootRegions(sceneTree);
             sceneTree.dirtyNodes.clear();
         });
     }

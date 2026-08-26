@@ -359,8 +359,24 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
             break;
 
         case 'voxel_chunk_full': {
+            // PROMOTION channel: an already-known chunk re-sent in full. fixed-rate,
+            // not adaptive (see discovery.ts), so unlike voxel_region_full below this
+            // isn't timed for pacing.
             const room = state.rooms.rooms.get(message.playerId);
             if (room) VoxelNet.applyChunkFull(state.voxelNet, room.voxels, message);
+            break;
+        }
+
+        case 'voxel_region_full': {
+            const room = state.rooms.rooms.get(message.playerId);
+            if (room) {
+                // timed for adaptive pacing: this player's ack (flushed at the end of
+                // processInbox) reports the resulting smoothed decode rate so the
+                // server can size dispatchRegionFull's per-tick budget accordingly.
+                const decodeStart = performance.now();
+                VoxelNet.applyRegionFull(state.voxelNet, room.voxels, message);
+                VoxelNet.recordRegionDecodeTime(state.voxelNet, message.playerId, performance.now() - decodeStart);
+            }
             break;
         }
 
@@ -382,15 +398,9 @@ function dispatchInboundMessage(state: EngineClient, message: Protocol.ServerMes
             break;
         }
 
-        case 'voxel_chunk_del': {
+        case 'voxel_region_del': {
             const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkDel(room.voxels, message);
-            break;
-        }
-
-        case 'voxel_chunk_empty': {
-            const room = state.rooms.rooms.get(message.playerId);
-            if (room) VoxelNet.applyChunkEmpty(room.voxels, message);
+            if (room) VoxelNet.applyRegionDel(room.voxels, message);
             break;
         }
 

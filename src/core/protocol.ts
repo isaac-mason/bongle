@@ -1,4 +1,5 @@
 import { pack } from './scene/pack';
+import { REGION_VOLUME } from './voxels/voxels';
 
 /** room kind, edit rooms have a live scene editor, play rooms are snapshots */
 export type RoomMode = 'edit' | 'play';
@@ -484,16 +485,19 @@ export const ChatBroadcast = pack.object({
 export type ChatBroadcast = pack.SchemaType<typeof ChatBroadcast>;
 
 /**
- * Client acknowledges chunks it has decoded + applied this frame, freeing the
- * server's per-player in-flight slots (voxel backpressure). Keyed by playerId
- * because one client can hold multiple players, each with its own in-flight
- * window. Pure pacing, TCP guarantees delivery; the ack throttles the server
- * to the client's decode rate. Only the full channel is slot-tracked today.
+ * Client acknowledges chunks/regions it has decoded + applied this frame,
+ * freeing the server's per-player in-flight slots (voxel backpressure). Keyed
+ * by playerId because one client can hold multiple players, each with its own
+ * in-flight windows. Pure pacing, TCP guarantees delivery; the ack throttles
+ * the server to the client's decode rate.
  */
 export const VoxelAck = pack.object({
     type: pack.literal('voxel_ack'),
     playerId: pack.varuint(),
-    /** chunk coords decoded + applied since the last ack. */
+    /** individual chunk coords decoded + applied since the last ack — the
+     *  PROMOTION channel only (an already-known chunk re-sent as
+     *  voxel_chunk_full after too many block-ops). frees dispatchFull's
+     *  in-flight slots for these. */
     full: pack.list(
         pack.object({
             cx: pack.int32(),
@@ -501,6 +505,27 @@ export const VoxelAck = pack.object({
             cz: pack.int32(),
         }),
     ),
+    /** region coords decoded + applied (as voxel_region_full) since the last
+     *  ack — the DISCOVERY channel. frees dispatchRegionFull's in-flight
+     *  slots for these. */
+    regions: pack.list(
+        pack.object({
+            rx: pack.int32(),
+            ry: pack.int32(),
+            rz: pack.int32(),
+        }),
+    ),
+    /**
+     * this client's current estimate of how many voxel_region_full regions it
+     * can decode per server tick, derived from a smoothed measurement of its
+     * own decode wall-clock (see client/voxel-pacing.ts — mirrors Minecraft's
+     * ChunkBatchSizeCalculator, whose "chunk" is actually a whole column: our
+     * region is the equivalent unit). dispatchRegionFull uses this instead of
+     * a fixed per-client constant, so a slow client gets throttled down and a
+     * fast one isn't held back by a conservative default. server clamps
+     * defensively.
+     */
+    desiredRegionsPerTick: pack.float32(),
 });
 
 export type VoxelAck = pack.SchemaType<typeof VoxelAck>;
@@ -668,14 +693,11 @@ export const RoomLeft = pack.object({
 
 export type RoomLeft = pack.SchemaType<typeof RoomLeft>;
 
-/** server sends a full chunk to a client (initial load or resync). */
-export const VoxelChunkFull = pack.object({
-    type: pack.literal('voxel_chunk_full'),
-    /** Player this chunk targets, keyed per-Player for isolation. */
-    playerId: pack.varuint(),
-    cx: pack.int32(),
-    cy: pack.int32(),
-    cz: pack.int32(),
+/** one occupied chunk's payload, shared shape between VoxelChunkFull (an
+ *  individual promotion re-send) and VoxelRegionFull's dense chunk list (a
+ *  region-discovery bundle, no per-chunk coordinates needed there — see
+ *  VoxelRegionFull). */
+const VoxelChunkPayload = pack.object({
     /**
      * per-slot global state ids (the shared registry identity, not per-chunk
      * strings). `compressed` stores local slot indices into this list; the
@@ -688,7 +710,51 @@ export const VoxelChunkFull = pack.object({
     compressed: pack.uint8Array(),
 });
 
+/** server re-sends one already-known chunk in full — the PROMOTION channel
+ *  only (too many block-ops landed in it this tick, see discovery.ts). a
+ *  newly-DISCOVERED region ships via VoxelRegionFull instead, bundled with
+ *  its sibling chunks under one region coordinate. */
+export const VoxelChunkFull = pack.object({
+    type: pack.literal('voxel_chunk_full'),
+    /** Player this chunk targets, keyed per-Player for isolation. */
+    playerId: pack.varuint(),
+    cx: pack.int32(),
+    cy: pack.int32(),
+    cz: pack.int32(),
+    ...VoxelChunkPayload.fields,
+});
+
 export type VoxelChunkFull = pack.SchemaType<typeof VoxelChunkFull>;
+
+/**
+ * server bundles a newly-discovered region's worth of chunks into ONE
+ * message: a presence bitmask over the region's REGION_VOLUME local chunk
+ * slots (in the shared, fixed REGION_LOCAL_CHUNK_OFFSETS raster order — see
+ * voxels.ts) plus a dense list of only the occupied slots' payloads, in that
+ * same order. no per-chunk coordinates anywhere: a slot's position is
+ * implicit from where its bit falls in `occupied` and where its (if present)
+ * payload falls in `chunks`. mirrors how Minecraft's light-update packet marks
+ * empty vs present sections with a bitset instead of naming positions, and
+ * how its block-data packet bundles a whole column's sections into one
+ * packet with no per-section coordinates at all.
+ *
+ * `occupied`'s REGION_VOLUME boolean fields are auto-bit-packed by packcat
+ * (any `boolean()` fields inside an `object`/`tuple` collapse to
+ * ceil(count/8) bytes) — a fully-air region costs ~8 bytes of presence data
+ * instead of REGION_VOLUME individual chunk coordinates (~12 bytes each).
+ */
+export const VoxelRegionFull = pack.object({
+    type: pack.literal('voxel_region_full'),
+    /** Player this region targets, keyed per-Player for isolation. */
+    playerId: pack.varuint(),
+    rx: pack.int32(),
+    ry: pack.int32(),
+    rz: pack.int32(),
+    occupied: pack.tuple(Array.from({ length: REGION_VOLUME }, () => pack.boolean())),
+    chunks: pack.list(VoxelChunkPayload),
+});
+
+export type VoxelRegionFull = pack.SchemaType<typeof VoxelRegionFull>;
 
 /** server sends incremental block state changes (no light). */
 export const VoxelChunkOps = pack.object({
@@ -769,39 +835,22 @@ export const VoxelChunkLightDelta = pack.object({
 
 export type VoxelChunkLightDelta = pack.SchemaType<typeof VoxelChunkLightDelta>;
 
-/** server tells client to remove a chunk. */
-export const VoxelChunkDel = pack.object({
-    type: pack.literal('voxel_chunk_del'),
+/**
+ * server tells the client to remove an entire region's worth of chunks — the
+ * eviction counterpart to VoxelRegionFull, same bundling rationale: the
+ * client already knows exactly which chunks it holds in this region, so no
+ * per-chunk coordinate list is needed at all, just the region coordinate.
+ */
+export const VoxelRegionDel = pack.object({
+    type: pack.literal('voxel_region_del'),
     /** Player whose voxel view this removal applies to. */
     playerId: pack.varuint(),
-    cx: pack.int32(),
-    cy: pack.int32(),
-    cz: pack.int32(),
+    rx: pack.int32(),
+    ry: pack.int32(),
+    rz: pack.int32(),
 });
 
-export type VoxelChunkDel = pack.SchemaType<typeof VoxelChunkDel>;
-
-/**
- * server tells the client which chunks within its discovery range are
- * empty (all air, no data). lets the client distinguish "known empty" from
- * "haven't heard about it yet", collision treats the latter as solid.
- *
- * batched: many coords per packet, since each entry is just 12 bytes.
- */
-export const VoxelChunkEmpty = pack.object({
-    type: pack.literal('voxel_chunk_empty'),
-    /** Player whose voxel view this applies to. */
-    playerId: pack.varuint(),
-    chunks: pack.list(
-        pack.object({
-            cx: pack.int32(),
-            cy: pack.int32(),
-            cz: pack.int32(),
-        }),
-    ),
-});
-
-export type VoxelChunkEmpty = pack.SchemaType<typeof VoxelChunkEmpty>;
+export type VoxelRegionDel = pack.SchemaType<typeof VoxelRegionDel>;
 
 /** server pushes a latest-values metrics snapshot for a room to subscribers
  *  (see `metrics_subscribe`), on the server's own throttle. */
@@ -878,11 +927,11 @@ export const ServerMessage = pack.union('type', [
     SceneSync,
     RoomLeft,
     VoxelChunkFull,
+    VoxelRegionFull,
     VoxelChunkOps,
     VoxelChunkLight,
     VoxelChunkLightDelta,
-    VoxelChunkDel,
-    VoxelChunkEmpty,
+    VoxelRegionDel,
     RoomMetrics,
     DebugLogs,
     NetMessage,

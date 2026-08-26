@@ -188,27 +188,33 @@ export function createWorld(options: Partial<WorldOptions> = {}): World {
             const out = Discovery.flush(discovery, server.rooms, resources, metrics);
 
             // pack every message onto the wire (this is what bills per-type bytes),
-            // and ack each full chunk so the in-flight window keeps draining.
-            const acks = new Map<number, Map<number, Array<{ cx: number; cy: number; cz: number }>>>();
+            // and ack each promoted chunk + discovered region so both in-flight
+            // windows keep draining.
+            const acks = new Map<
+                string,
+                { client: Client; playerId: number; full: Array<{ cx: number; cy: number; cz: number }>; regions: Array<{ rx: number; ry: number; rz: number }> }
+            >();
+            const ackEntry = (client: Client, playerId: number) => {
+                const gk = `${client}:${playerId}`;
+                let g = acks.get(gk);
+                if (!g) {
+                    g = { client, playerId, full: [], regions: [] };
+                    acks.set(gk, g);
+                }
+                return g;
+            };
             for (const [client, message] of out) {
                 Net.send(net, client, message);
-                if (message.type !== 'voxel_chunk_full') continue;
-                let byPlayer = acks.get(client);
-                if (!byPlayer) {
-                    byPlayer = new Map();
-                    acks.set(client, byPlayer);
+                if (message.type === 'voxel_chunk_full') {
+                    ackEntry(client, message.playerId).full.push({ cx: message.cx, cy: message.cy, cz: message.cz });
+                } else if (message.type === 'voxel_region_full') {
+                    ackEntry(client, message.playerId).regions.push({ rx: message.rx, ry: message.ry, rz: message.rz });
                 }
-                let chunks = byPlayer.get(message.playerId);
-                if (!chunks) {
-                    chunks = [];
-                    byPlayer.set(message.playerId, chunks);
-                }
-                chunks.push({ cx: message.cx, cy: message.cy, cz: message.cz });
             }
-            for (const [client, byPlayer] of acks) {
-                for (const [playerId, full] of byPlayer) {
-                    Discovery.handleVoxelAck(discovery, client, { type: 'voxel_ack', playerId, full });
-                }
+            for (const { client, playerId, full, regions } of acks.values()) {
+                // bots report a fixed fast-client rate — these load tests
+                // measure discovery/eviction cost, not adaptive pacing.
+                Discovery.handleVoxelAck(discovery, client, { type: 'voxel_ack', playerId, full, regions, desiredRegionsPerTick: 64 });
             }
 
             // frame and discard — nothing consumes the outbox here, and leaving it to

@@ -76,8 +76,8 @@ const ROOM_SWAP_URGENT_BURST = 20;
  *  backend producer's `unmountRoom`.
  *
  *  (Skips nonAirCount=0 chunks: sparse "discovered empty" stubs pushed by
- *  `voxel_chunk_empty` that have no blocks to mesh and would only pollute the
- *  remesh candidate scan.) */
+ *  `voxel_region_full`'s empty slots that have no blocks to mesh and would
+ *  only pollute the remesh candidate scan.) */
 export function mountRoom(state: VoxelVisuals, voxels: Voxels): void {
     for (const chunk of voxels.chunks.values()) {
         if (chunk.nonAirCount === 0) continue;

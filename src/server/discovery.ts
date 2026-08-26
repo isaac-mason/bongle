@@ -18,8 +18,8 @@ import {
     isTransformRoot,
     type Node,
     type Realm,
-    reconcileRootChunks,
-    rootsInChunk,
+    reconcileRootRegions,
+    rootsInRegion,
     type SceneTree,
 } from '../core/scene/scene-tree';
 import { diffSync, writeSnapshot } from '../core/scene/sync/sync-diff';
@@ -30,7 +30,12 @@ import {
     CHUNK_VOLUME,
     type Chunk,
     chunkKey,
+    chunkToRegionCoord,
     clearVoxelChanges,
+    REGION_CHUNKS_PER_AXIS,
+    REGION_LOCAL_CHUNK_OFFSETS,
+    REGION_VOLUME,
+    regionKey,
     toChunkCoord,
     type VoxelBlockOp,
     type VoxelChanges,
@@ -151,48 +156,118 @@ type ClientNodeKnowledge = {
  *  walk together, both keyed off the SAME chunkKey() string). */
 type ChunkCoord = { cx: number; cy: number; cz: number };
 
+/** region coords, stored alongside the key for the same reason ChunkCoord is:
+ *  dispatchRegionFull ranks pendingRegions by distance every tick, so it
+ *  shouldn't have to re-derive rx/ry/rz by parsing the region key string. */
+type RegionCoord = { rx: number; ry: number; rz: number };
+
+/** one region's worth of this client's known chunks (knownChunks ∪ knownEmptyChunks),
+ *  keyed the same way `voxels.regions` is, so eviction's sphere test is O(known
+ *  regions) instead of O(known chunks): only regions that actually left range get
+ *  enumerated (bounded to REGION_VOLUME entries each), region coords are stored
+ *  alongside so the test never re-derives them by parsing the region key string. */
+type ClientKnownRegion = { rx: number; ry: number; rz: number; chunks: Map<string, ChunkCoord> };
+
 type ClientVoxelKnowledge = {
-    /** chunks sent as voxel_chunk_full and kept in sync with chunk_ops/light. */
+    /** chunks known to the client (full data or an air stub), whether shipped
+     *  individually (voxel_chunk_full, promotion re-sends) or as part of a
+     *  voxel_region_full bundle (discovery). kept in sync with chunk_ops/light. */
     knownChunks: Map<string, ChunkCoord>;
-    /** chunks announced as empty via voxel_chunk_empty, client holds an
-     *  all-air stub so collision can distinguish "known air" from "unknown". */
+    /** chunks known to the client as empty (an air stub), same shipping paths
+     *  as knownChunks above. lets collision distinguish "known air" from
+     *  "unknown" (treated as solid). */
     knownEmptyChunks: Map<string, ChunkCoord>;
+    /** secondary index over knownChunks ∪ knownEmptyChunks, grouped by region (see
+     *  `ClientKnownRegion`). maintained alongside those two maps by `fileKnownChunk`/
+     *  `unfileKnownChunk` at every add/remove site — mirrors how `voxels.ts` keeps
+     *  `chunks` and `regions` in sync via `ensureChunk`/`removeChunk`. lets eviction
+     *  test region-sphere membership in O(known regions) instead of O(known chunks);
+     *  entry pruned when its bucket empties. */
+    knownRegions: Map<string, ClientKnownRegion>;
     knownLightEpoch: number;
-    /** player's chunk coord at the last flush. eviction runs only when this
-     *  changes, so per-tick cost stays low at the edit-radius scale. null
-     *  until the first flush. */
-    lastAnchor: [number, number, number] | null;
-    /** cursor into expansionOrder[viewRadius]. each tick we resume here and
-     *  advance until the per-tick budget is filled. when the cursor reaches
-     *  expansionOrder.length the sphere is fully discovered and per-tick cost
-     *  drops to zero. reset to 0 on anchor cross and on addedChunks drain. */
-    cursor: number;
+    /** player's region coord at the last flush. eviction (and the discovery
+     *  recompute) runs only when this changes, so casual movement within one
+     *  region (up to REGION_CHUNKS_PER_AXIS chunks wide) costs nothing — the old
+     *  per-CHUNK anchor test re-ran the full sphere walk on every single
+     *  chunk-boundary crossing, the actual dominant cost in a live 24ms+
+     *  discovery spike. null until the first flush. */
+    lastAnchorRegion: [number, number, number] | null;
+    /** regions discovered in-range but not yet shipped as voxel_region_full.
+     *  populated by an unbudgeted full recompute on anchor cross (see
+     *  flushVoxelsForPlayer): deciding "is this region in range" is a pure
+     *  geometric distance test, no per-tick budget needed for that — only the
+     *  actual SHIP (dispatchRegionFull, which reads and compresses real chunk
+     *  data) is rate-limited. */
+    pendingRegions: Map<string, RegionCoord>;
+    /** regions shipped as voxel_region_full but not yet acked by the client
+     *  (voxel_ack.regions). its size is the in-flight window: dispatchRegionFull
+     *  stops shipping to a client once it hits `maxInFlightRegions`, so a slow
+     *  (decode-bound) client throttles the server. an ack removes the key,
+     *  freeing a slot. */
+    inFlightRegions: Set<string>;
+    /** this player's in-flight ceiling (see `inFlightRegions`). starts at 1 — a
+     *  fresh join (which may need to freshly (re)compress a lot of chunks whose
+     *  cached snapshot got invalidated by edits since anyone last streamed them,
+     *  regardless of how "warm" the server otherwise is) gets at most ONE
+     *  region's worth of fresh compression per tick until THIS player proves it
+     *  can keep up — bumped to MAX_IN_FLIGHT_REGIONS by handleVoxelAck on its
+     *  first region ack. mirrors Minecraft's PlayerChunkSender.maxUnacknowledgedBatches
+     *  (1 -> 10 after the first ack), instantiated fresh per connection there the
+     *  same way this is fresh per invalidatePlayer here. */
+    maxInFlightRegions: number;
+    /** this client's self-reported, smoothed decode rate (voxel_region_full
+     *  regions/tick), from the `desiredRegionsPerTick` field on its most recent
+     *  voxel_ack (see client/voxel-pacing.ts — mirrors Minecraft's
+     *  ChunkBatchSizeCalculator, whose "chunk" is actually a whole column: our
+     *  region is the equivalent unit). dispatchRegionFull's per-client cap for
+     *  THIS player reads this instead of a fixed default, so a slow client is
+     *  throttled down and a fast one isn't held back. starts at the default and
+     *  only moves once a real ack lands; never reset on hot reload (see
+     *  resetAllVoxelKnowledge) — it describes the client machine's decode
+     *  speed, not server-side voxel state. */
+    fullRegionsPerTick: number;
     /** chunks whose light has changed but hasn't yet been shipped to this
      *  client. populated each tick from voxels.dirty.light (intersected with
      *  knownChunks). drained by the room-level dispatch with a global priority
      *  sort + per-client cap. survives across ticks so rate-limited skips
      *  ship on subsequent ticks rather than being lost. */
     pendingLight: Set<string>;
-    /** occupied chunks discovered in-range but not yet shipped as
-     *  voxel_chunk_full. the discovery walk populates this (bounded by
-     *  DISCOVERY_BACKLOG_CAP); the room-level dispatchFull drains it with a
-     *  global priority sort + per-client cap. a chunk becomes "known" only
-     *  once dispatchFull actually ships it. survives across ticks. */
+    /** chunks needing an individual voxel_chunk_full re-send: PROMOTION only
+     *  (too many block-ops landed in an already-known chunk this tick, see the
+     *  block-ops section of flushVoxelsForPlayer). discovery never populates
+     *  this — a newly-discovered region ships as one voxel_region_full instead
+     *  (see pendingRegions/dispatchRegionFull). fixed-rate, not adaptive:
+     *  promotion volume is bounded by edit activity, not exploration bursts, so
+     *  it doesn't need the region channel's sophistication. */
     pendingFull: Set<string>;
-    /** chunks shipped as voxel_chunk_full but not yet acked by the client
-     *  (voxel_ack). its size is the in-flight window: dispatchFull stops
-     *  shipping to a client once it hits MAX_IN_FLIGHT_FULL, so a slow
-     *  (decode-bound) client throttles the server. an ack removes the key,
-     *  freeing a slot. disjoint from pendingFull (ship moves the key across)
-     *  and a subset of knownChunks. pure pacing, TCP handles delivery. */
+    /** chunks shipped as an individual voxel_chunk_full (promotion re-sends)
+     *  but not yet acked by the client (voxel_ack.full). its size is the
+     *  in-flight window: dispatchFull stops shipping to a client once it hits
+     *  MAX_IN_FLIGHT_FULL, so a slow (decode-bound) client throttles the
+     *  server. an ack removes the key, freeing a slot. disjoint from
+     *  pendingFull (ship moves the key across) and a subset of knownChunks. */
     inFlightFull: Set<string>;
-    /** per-tick region deltas for chunk-tied node AOI: chunk keys that entered the
-     *  discovered region this tick (announced empty, or shipped as chunk_full) and
-     *  keys evicted this tick. cleared-then-filled each tick in flushVoxelsForPlayer;
-     *  consumed by the scene phase (buildSceneSyncUpdates) to turn a chunk transition
-     *  into subtree create/destroy for the transform roots filed in it. NOT touched by
-     *  chunk_full promotion (a re-send is not an eviction), so a re-shipped chunk under
-     *  a known node doesn't flicker it. */
+};
+
+/** per-Player entity/prop presence knowledge: independent of `ClientVoxelKnowledge`
+ *  on purpose (see the `RETENTION_MARGIN` comment below for the regression this
+ *  decoupling fixes). keyed on the SAME region-coordinate grid voxel streaming
+ *  uses, so a root's presence test and its invalidation trigger (an anchor
+ *  crossing a region boundary) stay synchronized, but tracked as a pure geometric
+ *  "which regions are in range" membership set, not residency data. entities
+ *  have no expensive payload to prepare, so unlike voxel streaming this recomputes
+ *  in full, unbudgeted, on every anchor cross (see `flushEntityPresenceForPlayer`)
+ *  rather than draining a per-tick-budgeted cursor. */
+type ClientEntityPresence = {
+    /** regions currently considered in range for entity presence. */
+    knownRegions: Set<string>;
+    /** anchor's region coord at the last recompute, null until the first one.
+     *  recompute runs only when this changes (mirrors voxel's anchor-cross gate). */
+    lastAnchorRegion: [number, number, number] | null;
+    /** per-tick region deltas: regions that became in/out of range this recompute.
+     *  cleared-then-filled by `flushEntityPresenceForPlayer`; consumed the same tick
+     *  by the scene phase (`buildSceneSyncUpdates`) to turn a region transition into
+     *  subtree create/destroy for the transform roots filed in it. */
     entered: Set<string>;
     left: Set<string>;
 };
@@ -237,6 +312,14 @@ type ClientState = {
      * camera + dev play character) whose positions diverge.
      */
     voxelKnowledge: Map<PlayerId, ClientVoxelKnowledge>;
+
+    /**
+     * per-Player entity/prop presence knowledge (see `ClientEntityPresence`). Same
+     * per-Player isolation rationale as `voxelKnowledge`, and populated alongside it
+     * in `invalidatePlayer`/`notifyPlayerLeft`, but the two maps are otherwise
+     * independent, an entity's presence never reads voxel residency state.
+     */
+    entityPresence: Map<PlayerId, ClientEntityPresence>;
 
     /**
      * Set of runtime-source model ids this client has been told about via
@@ -316,6 +399,7 @@ export function addClient(state: Discovery, client: Client): void {
         knownPlayers: new Set(),
         roomListVersion: -1,
         voxelKnowledge: new Map(),
+        entityPresence: new Map(),
         knownModels: new Set(),
     });
 }
@@ -358,12 +442,21 @@ export function invalidatePlayer(state: Discovery, net: ServerNet, rooms: Rooms,
     cs.voxelKnowledge.set(player.id, {
         knownChunks: new Map(),
         knownEmptyChunks: new Map(),
+        knownRegions: new Map(),
         knownLightEpoch: 0,
-        lastAnchor: null,
-        cursor: 0,
+        lastAnchorRegion: null,
+        pendingRegions: new Map(),
+        inFlightRegions: new Set(),
+        maxInFlightRegions: 1,
+        fullRegionsPerTick: DEFAULT_REGIONS_PER_TICK,
         pendingLight: new Set(),
         pendingFull: new Set(),
         inFlightFull: new Set(),
+    });
+
+    cs.entityPresence.set(player.id, {
+        knownRegions: new Set(),
+        lastAnchorRegion: null,
         entered: new Set(),
         left: new Set(),
     });
@@ -427,6 +520,7 @@ export function notifyPlayerLeft(state: Discovery, net: ServerNet, player: Playe
     cs.nodeSyncKnowledge.delete(player.id);
     cs.knownPlayers.delete(player.id);
     cs.voxelKnowledge.delete(player.id);
+    cs.entityPresence.delete(player.id);
 
     Net.send(net, player.client, { type: 'room_left', playerId: player.id });
 }
@@ -618,17 +712,15 @@ export function flush(
     }
     Debug.end(metrics, 'discovery/diff');
 
-    // --- phase 2: voxel chunk streaming + transform-root chunk-index reconcile ---
-    // runs BEFORE the scene phase (approach B): chunk knowledge is the region
-    // authority, so it must be current when scene sync gates node presence, and the
-    // per-player entered/left region deltas captured here are consumed same-tick by
-    // the scene phase below. (was phase 3, after scene.)
+    // --- phase 2: voxel chunk streaming + transform-root region-index reconcile ---
+    // runs BEFORE the scene phase: the region index must be current when scene sync
+    // gates node presence via `rootRegionChanges`.
     Debug.begin(metrics, 'discovery/voxels');
     for (const room of rooms.rooms.values()) {
-        // reconcile the transform-root chunk index off this tick's dirtyNodes so
-        // rootsInChunk is current for the scene phase. runs for every room (even
+        // reconcile the transform-root region index off this tick's dirtyNodes so
+        // rootsInRegion is current for the scene phase. runs for every room (even
         // ones without voxel authority); it's O(dirtyNodes) and touches nothing else.
-        reconcileRootChunks(room.scene);
+        reconcileRootRegions(room.scene);
         const auth = room.voxels.authority;
         if (!auth) continue;
         flushVoxelsForRoom(state, rooms, room, out);
@@ -647,7 +739,7 @@ export function flush(
     }
     Debug.end(metrics, 'discovery/voxels');
 
-    // --- phase 3: per-client scene sync (consumes this tick's chunk region) ---
+    // --- phase 3: per-client scene sync ---
     Debug.begin(metrics, 'discovery/scene');
 
     // build room list lazily (only if at least one client needs it)
@@ -691,11 +783,18 @@ export function flush(
             const nodeSyncKnowledge = cs.nodeSyncKnowledge.get(player.id);
             if (!nodeSyncKnowledge) continue;
 
-            // AOI region for chunk-tied node presence: present only when the room
-            // streams chunks. undefined → no chunk gating (all replicable nodes
+            // entity/prop presence for region-tied node AOI: present only when the room
+            // streams chunks. undefined → no region gating (all replicable nodes
             // visible, the pre-AOI behaviour) for edit players and non-voxel rooms.
-            const aoi = player.mode === 'play' && room.voxels.authority ? cs.voxelKnowledge.get(player.id) : undefined;
-            const ownRootId = aoi ? room.playerNodes.get(player.id)?.id : undefined;
+            // recomputed here (not in the voxel phase above): it's independent of voxel
+            // residency, so unlike `aoi` in the old design it doesn't need to run before
+            // this loop, just before this loop consumes it.
+            const playerNode = room.playerNodes.get(player.id);
+            const presence = player.mode === 'play' && room.voxels.authority ? cs.entityPresence.get(player.id) : undefined;
+            if (presence) {
+                flushEntityPresenceForPlayer(room, player, presence, resolveStreamRadius(playerNode));
+            }
+            const ownRootId = presence ? playerNode?.id : undefined;
 
             const updates = buildSceneSyncUpdates(
                 room.scene,
@@ -704,7 +803,7 @@ export function flush(
                 room.tick,
                 player.mode,
                 player.id,
-                aoi,
+                presence,
                 ownRootId,
             );
             if (updates.length > 0) {
@@ -733,7 +832,7 @@ export function flush(
     }
 
     // clear the per-room dirty set now that every client has diffed against it AND
-    // this tick's reconcileRootChunks consumed it. cleared here (end of the scene
+    // this tick's reconcileRootRegions consumed it. cleared here (end of the scene
     // phase, which now runs LAST): the voxel phase's reconcile + the scene fan-out
     // both read dirtyNodes, so clearing any earlier would strand one of them. nodes
     // still owed after a rate-throttle are carried per-client in nodeSyncKnowledge.
@@ -763,7 +862,7 @@ function nodeDepth(node: Node): number {
     return d;
 }
 
-/* ── chunk-tied node AOI helpers ── */
+/* ── region-tied node AOI helpers ── */
 
 /** the transform root gating `node`'s AOI presence: the topmost `TransformTrait`
  *  node in its chain, or null if no ancestor-or-self has a transform (a node with
@@ -777,13 +876,6 @@ function transformRootOf(node: Node): Node | null {
         cur = cur.parent;
     }
     return root;
-}
-
-/** is a chunk currently in this client's AOI region? `knownChunks ∪ knownEmptyChunks`
- *  is the shipped region; `pendingFull` is included so a chunk mid-(re)ship doesn't
- *  flicker a node whose presence is being re-evaluated. */
-function chunkInRegion(aoi: ClientVoxelKnowledge, key: string): boolean {
-    return aoi.knownChunks.has(key) || aoi.knownEmptyChunks.has(key) || aoi.pendingFull.has(key);
 }
 
 /**
@@ -807,7 +899,7 @@ function buildSceneSyncUpdates(
     currentTick: number,
     mode: RoomMode,
     playerId: PlayerId,
-    aoi: ClientVoxelKnowledge | undefined,
+    presence: ClientEntityPresence | undefined,
     ownRootId: number | undefined,
 ): SceneSyncUpdate[] {
     const creates = new Set<Node>();
@@ -844,29 +936,30 @@ function buildSceneSyncUpdates(
     };
 
     // --- AOI presence pass (play + voxel rooms) ---
-    // presence of a transform root = its chunk ∈ region. it flips when EITHER the
-    // region moved (this player's entered/left chunk deltas) OR the root moved/spawned/
-    // despawned (the room's rootChunkChanges). we gather those candidate roots and, for
-    // each, compare want (current filed chunk ∈ region) vs have (known) — iterating
-    // ROOTS, so we never climb the tree. destruction of an actually-destroyed root
-    // (scene === null) is left to the dirtyNodes loop; here we handle live AOI in/out.
-    if (aoi) {
+    // presence of a transform root = its region ∈ knownRegions. it flips when EITHER
+    // the player's region membership moved (this player's entered/left region deltas)
+    // OR the root moved/spawned/despawned (the room's rootRegionChanges). we gather
+    // those candidate roots and, for each, compare want (current filed region ∈
+    // knownRegions) vs have (known) — iterating ROOTS, so we never climb the tree.
+    // destruction of an actually-destroyed root (scene === null) is left to the
+    // dirtyNodes loop; here we handle live AOI in/out.
+    if (presence) {
         const candidates = new Set<Node>();
-        for (const key of aoi.left) {
-            const roots = rootsInChunk(sceneTree, key);
+        for (const key of presence.left) {
+            const roots = rootsInRegion(sceneTree, key);
             if (roots) for (const r of roots) candidates.add(r);
         }
-        for (const key of aoi.entered) {
-            const roots = rootsInChunk(sceneTree, key);
+        for (const key of presence.entered) {
+            const roots = rootsInRegion(sceneTree, key);
             if (roots) for (const r of roots) candidates.add(r);
         }
-        for (const ch of sceneTree.rootChunkChanges) candidates.add(ch.root);
+        for (const ch of sceneTree.rootRegionChanges) candidates.add(ch.root);
 
         for (const root of candidates) {
-            // the own-player subtree is the always-visible anchor, never chunk-gated.
+            // the own-player subtree is the always-visible anchor, never region-gated.
             if (root.id === ownRootId || root.scene === null) continue;
-            const filed = sceneTree.rootToChunk.get(root); // current chunk, O(1); undefined if unfiled
-            const want = filed !== undefined && chunkInRegion(aoi, filed);
+            const filed = sceneTree.rootToRegion.get(root); // current region, O(1); undefined if unfiled
+            const want = filed !== undefined && presence.knownRegions.has(filed);
             const have = nodeKnowledge.has(root.id);
             if (want && !have) createSubtree(root);
             else if (!want && have) destroySubtree(root);
@@ -914,18 +1007,18 @@ function buildSceneSyncUpdates(
             continue;
         }
         if (!isReplicable(node)) continue;
-        // a node with no transform root (or a non-voxel room) is not chunk-gated → visible.
-        const root = aoi ? transformRootOf(node) : null;
+        // a node with no transform root (or a non-voxel room) is not region-gated → visible.
+        const root = presence ? transformRootOf(node) : null;
         if (root === null) {
             creates.add(node);
             continue;
         }
-        // a chunk-gated node became newly relevant (spawned, or added under a present
+        // a region-gated node became newly relevant (spawned, or added under a present
         // subtree): create from its root iff that root is in region — createSubtree walks
         // only the not-yet-known nodes, so an incremental add under a present root emits
         // just the new nodes, and a spawn out of region waits for the AOI pass.
-        const filed = sceneTree.rootToChunk.get(root);
-        if (root.id === ownRootId || (filed !== undefined && chunkInRegion(aoi!, filed))) createSubtree(root);
+        const filed = sceneTree.rootToRegion.get(root);
+        if (root.id === ownRootId || (filed !== undefined && presence!.knownRegions.has(filed))) createSubtree(root);
     }
 
     // carry-over: nodes that still owe this client a rate-throttled sync() field but
@@ -1400,53 +1493,84 @@ function snapshotAllNodeKnowledge(
 // knowledge and produces chunk_full / chunk_ops / chunk_light /
 // chunk_del messages each tick.
 //
-// design mirrors minecraft's approach:
-//   - spherical expansion order (closest chunks first)
-//   - discovery walk queues occupied chunks into pendingFull (bounded by
-//     DISCOVERY_BACKLOG_CAP); the room-level dispatchFull drains it with a
-//     global priority sort + per-client cap (FULL_CHUNKS_PER_CLIENT_PER_TICK)
+// design mirrors minecraft's approach, at REGION granularity (a region is a
+// REGION_CHUNKS_PER_AXIS³ cube of chunks, the AOI/streaming unit — see voxels.ts,
+// and matches minecraft's real bundling unit: their "chunk" is actually a whole
+// XZ column, sent as one packet regardless of how many of its vertical sections
+// are occupied vs air — our region is the equivalent unit):
+//   - spherical expansion order over regions (closest regions first). deciding
+//     "is this region in range" is an unbudgeted O(1) voxels.regions lookup, no
+//     per-tick cap needed for that (see flushVoxelsForPlayer) — only the actual
+//     SHIP (dispatchRegionFull, which reads + compresses real chunk data) is
+//     rate-limited, by each client's self-reported decode rate
+//     (fullRegionsPerTick, see handleVoxelAck) instead of a fixed constant
+//   - a newly-discovered region ships as ONE voxel_region_full: a presence
+//     bitmask (which of the region's REGION_VOLUME chunk slots are occupied)
+//     plus a dense list of only the occupied chunks' payloads, no per-chunk
+//     coordinates at all — mirrors how minecraft's light packet marks empty vs
+//     present sections via a bitset instead of naming positions
 //   - coalesced ops (dedup by voxel index, keep last value)
-//   - promotion threshold (too many ops → re-send as chunk_full)
+//   - promotion threshold (too many ops in an already-known chunk → re-send as
+//     an individual voxel_chunk_full, its own small fixed-rate channel — a
+//     mid-session refresh of one already-discovered chunk isn't a discovery
+//     event, so it doesn't fit the region-bundling shape and doesn't need
+//     adaptive pacing: it's bounded by edit activity, not exploration bursts)
 //   - light epoch for full-recompute detection
 
-/** max voxel_chunk_full messages per client per tick, burst limiter on the
- *  room-level dispatchFull, mirroring LIGHT_CHUNKS_PER_CLIENT_PER_TICK. bounds
- *  the cold-start decode burst when many chunks are queued at once; the
- *  steady-state ceiling will come from in-flight acks (Part C). */
+/** default (and seed value, before any ack has landed) for a client's
+ *  voxel_region_full budget per tick; also anchors dispatchRegionFull's
+ *  globalCap formula (a representative per-client share, not the actual
+ *  adaptive one — see the `resolveClientCap` param on dispatchChannel). the
+ *  ACTUAL per-client ceiling used for the "how many regions can THIS player
+ *  receive this tick" check is each client's own `fullRegionsPerTick`,
+ *  self-reported via voxel_ack (`desiredRegionsPerTick`, see
+ *  client/voxel-pacing.ts) and adopted in handleVoxelAck — mirrors Minecraft's
+ *  ChunkBatchSizeCalculator: the client measures its own decode wall-clock and
+ *  reports a rate, the server applies it directly with no further smoothing. */
+const DEFAULT_REGIONS_PER_TICK = 1;
+
+/** max regions in flight (shipped as voxel_region_full, awaiting voxel_ack) per
+ *  client. the in-flight window: dispatchRegionFull won't ship past this until
+ *  acks free slots, so a decode-bound client throttles the server. */
+const MAX_IN_FLIGHT_REGIONS = 4;
+
+/** max voxel_chunk_full messages per client per tick for the PROMOTION channel
+ *  (an already-known chunk re-sent after too many block-ops; see the
+ *  block-ops section of flushVoxelsForPlayer). fixed, not adaptive — unlike
+ *  region discovery this isn't a bursty exploration event, it's bounded by
+ *  edit activity, so a small constant is enough. */
 const FULL_CHUNKS_PER_CLIENT_PER_TICK = 6;
 
-/** max chunks in flight (shipped as voxel_chunk_full, awaiting voxel_ack) per
- *  client. the in-flight window: dispatchFull won't ship past this until acks
- *  free slots, so a decode-bound client throttles the server. Luanti uses 40
- *  against slower mesh-acks; we ack on decode, so start lower. effective
- *  throughput ≈ MAX_IN_FLIGHT_FULL / RTT, tune up for high-RTT clients. */
+/** max promotion chunks in flight (shipped as an individual voxel_chunk_full,
+ *  awaiting voxel_ack) per client. same in-flight-window backpressure idea as
+ *  MAX_IN_FLIGHT_REGIONS, scoped to the promotion channel. */
 const MAX_IN_FLIGHT_FULL = 24;
-
-/** stop the per-player discovery walk once pendingFull reaches this size.
- *  bounds cursor work + queue growth on a teleport / edit-radius anchor cross
- *  (~58k offsets) where the walk would otherwise drain the whole sphere into
- *  pendingFull in one tick. the cursor pauses and resumes next tick as
- *  dispatchFull drains the queue. */
-const DISCOVERY_BACKLOG_CAP = 64;
-
-/** max empty-chunk announcements per client per tick. each entry is ~12
- *  bytes so we can be generous, empties race ahead of full chunks so the
- *  client establishes the "known air" frontier quickly. */
-const EMPTY_CHUNKS_PER_TICK = 256;
 
 /** fallback stream radius in chunks when the player node has no PlayerTrait
  *  (shouldn't happen in practice, createPlayerNode always adds it, but
- *  guards the flush against a partially-constructed scene). also the play-mode
- *  floor: a client can request more but never shrink below this. */
+ *  guards the flush against a partially-constructed scene). also the floor:
+ *  a client can request more but never shrink below this. */
 const DEFAULT_VIEW_RADIUS = 8;
 
 /** clamp bounds (chunks) for the client-requested stream radius
- *  (PlayerTrait.viewRadius, owner-authoritative). play clients raise the radius
- *  from the floor up to the play cap; edit rooms allow a much larger radius so
- *  editors can see/edit most of the world without clipping the frontier. */
+ *  (PlayerTrait.viewRadius, owner-authoritative). one ceiling for every room
+ *  mode — play and edit clients used to have separate caps (16 vs 24), killed
+ *  in favor of a single cap; a play client still won't request past what its
+ *  perf tier picks (`Performance.streamChunkRadius`), this just stops the
+ *  server from paternalistically clamping a play client below what edit
+ *  clients were always allowed. */
 const MIN_STREAM_RADIUS = 8;
-const MAX_STREAM_RADIUS_PLAY = 16;
-const MAX_STREAM_RADIUS_EDIT = 24;
+const MAX_STREAM_RADIUS = 24;
+
+/** resolve a player's clamped voxel stream radius (chunks) from its
+ *  owner-authoritative `PlayerTrait.viewRadius`, falling back to the default
+ *  if the node/trait is somehow missing. also feeds `flushEntityPresenceForPlayer`'s
+ *  region radius, so entity AOI stays roughly matched to how far terrain streams. */
+function resolveStreamRadius(playerNode: Node | undefined): number {
+    const playerTrait = playerNode ? getTrait(playerNode, PlayerTrait) : null;
+    const requestedRadius = playerTrait?.viewRadius ?? DEFAULT_VIEW_RADIUS;
+    return Math.max(MIN_STREAM_RADIUS, Math.min(requestedRadius, MAX_STREAM_RADIUS));
+}
 
 /** hysteresis band (chunks) added to the stream radius to compute the eviction
  *  radius. chunks in (streamRadius, streamRadius + RETENTION_MARGIN] stay
@@ -1455,13 +1579,13 @@ const MAX_STREAM_RADIUS_EDIT = 24;
  *  frontier and makes wandering out and back within the band a free re-render
  *  with no re-download.
  *
- *  tried widening 6 -> 18 (2025-08-24 perf investigation), measured a regression
- *  and reverted: chunkInRegion() gates PROP/ENTITY presence off this same
- *  knownChunks/knownEmptyChunks set, so a wider margin inflates entity AOI as a
- *  side effect, not just voxel residency — worse across all three discovery
- *  phases at 32 sledders (bench/profile-voxels-movers.ts, bench/discovery-egress.ts
- *  --motion sled), not better. don't retry this lever without first decoupling
- *  entity presence from voxel chunk residency. */
+ *  tried widening 6 -> 18 (2025-08-24 perf investigation), measured a regression:
+ *  the OLD chunkInRegion() gated PROP/ENTITY presence off this same
+ *  knownChunks/knownEmptyChunks set, so a wider margin inflated entity AOI as a
+ *  side effect, not just voxel residency. entity presence is now decoupled
+ *  (`ClientEntityPresence`, region-keyed, no read of voxel knowledge at all), so
+ *  this margin is voxel-residency-only again; the historical finding is kept here
+ *  as a reminder of why the coupling existed, not as a live restriction. */
 const RETENTION_MARGIN = 6;
 
 /** if a chunk has more ops than this, promote to chunk_full re-send */
@@ -1489,28 +1613,57 @@ const ROOM_MAX_USERS = 8;
 
 /* ── voxel knowledge reset ── */
 
-/** called on hot reload, reset all voxel knowledge so chunks re-stream */
+/** called on hot reload, reset all voxel + entity-presence knowledge so chunks and
+ *  transform-root subtrees re-stream. */
 export function resetAllVoxelKnowledge(state: Discovery): void {
     for (const cs of state.clients.values()) {
         for (const k of cs.voxelKnowledge.values()) {
             k.knownChunks.clear();
             k.knownEmptyChunks.clear();
+            k.knownRegions.clear();
             k.knownLightEpoch = 0;
-            k.cursor = 0;
+            k.lastAnchorRegion = null;
+            k.pendingRegions.clear();
+            k.inFlightRegions.clear();
             k.pendingLight.clear();
             k.pendingFull.clear();
             k.inFlightFull.clear();
-            k.entered.clear();
-            k.left.clear();
+        }
+        for (const p of cs.entityPresence.values()) {
+            p.knownRegions.clear();
+            p.lastAnchorRegion = null;
+            p.entered.clear();
+            p.left.clear();
         }
     }
 }
 
-/** apply a client's voxel_ack: free the in-flight slots for the chunks it has
- *  decoded + applied, letting dispatchFull ship more. lookup by (client,
- *  playerId) is inherently scoped, a client's voxelKnowledge only holds its
- *  own players, and unknown keys (already evicted / re-sent / promoted) are
- *  ignored, so a stale or spoofed ack is a harmless no-op. */
+/** clamp bounds for the client-reported adaptive region rate
+ *  (`VoxelAck.desiredRegionsPerTick`, see client/voxel-pacing.ts). the ceiling
+ *  matches MAX_IN_FLIGHT_REGIONS — no point admitting more per tick than the
+ *  in-flight window would immediately stall on anyway. the floor keeps a very
+ *  slow client making forward progress instead of stalling at 0. */
+const MIN_ADAPTIVE_REGION_CAP = 1;
+const MAX_ADAPTIVE_REGION_CAP = MAX_IN_FLIGHT_REGIONS;
+
+/** apply a client's voxel_ack: free the in-flight slots for the regions and
+ *  (promotion) chunks it has decoded + applied, letting dispatchRegionFull /
+ *  dispatchFull ship more, and adopt its reported adaptive pacing rate for
+ *  future dispatchRegionFull budgeting. lookup by (client, playerId) is
+ *  inherently scoped, a client's voxelKnowledge only holds its own players,
+ *  and unknown keys (already evicted / re-sent / promoted) are ignored, so a
+ *  stale or spoofed ack is a harmless no-op. a non-finite rate
+ *  (malformed/malicious client) is ignored, keeping the last known-good value,
+ *  rather than corrupting fullRegionsPerTick into a NaN that would compare
+ *  false against everything and grant that client unbounded dispatch.
+ *
+ *  the FIRST ack that actually confirms a region (message.regions non-empty)
+ *  lifts maxInFlightRegions from its conservative join-time seed (1) to the
+ *  full MAX_IN_FLIGHT_REGIONS ceiling — mirrors Minecraft's
+ *  PlayerChunkSender.onChunkBatchReceivedByClient bumping
+ *  maxUnacknowledgedBatches 1 -> 10 the same way. unconditional (not "only if
+ *  still 1") is fine, same as MC's: setting the same value repeatedly is a
+ *  harmless no-op once ramped. */
 export function handleVoxelAck(state: Discovery, client: Client, message: VoxelAck): void {
     const cs = state.clients.get(client);
     if (!cs) return;
@@ -1519,33 +1672,18 @@ export function handleVoxelAck(state: Discovery, client: Client, message: VoxelA
     for (const c of message.full) {
         knowledge.inFlightFull.delete(chunkKey(c.cx, c.cy, c.cz));
     }
-}
-
-/* ── spherical expansion order ── */
-
-/** cached spherical-expansion offsets keyed by radius. radii are the clamped
- *  per-player stream radius (a handful of distinct values in practice: the play
- *  floor/cap band and the edit radius), so this map stays tiny. lazy: first
- *  request for a radius builds and caches. */
-const EXPANSION_ORDER_CACHE = new Map<number, [number, number, number][]>();
-
-function getExpansionOrder(radius: number): [number, number, number][] {
-    let order = EXPANSION_ORDER_CACHE.get(radius);
-    if (!order) {
-        order = buildExpansionOrder(radius);
-        EXPANSION_ORDER_CACHE.set(radius, order);
+    for (const r of message.regions) {
+        knowledge.inFlightRegions.delete(regionKey(r.rx, r.ry, r.rz));
     }
-    return order;
-}
-
-function buildExpansionOrder(radius: number): [number, number, number][] {
-    const offsets: [number, number, number][] = [];
-    const r2 = radius * radius;
-    for (let dy = -radius; dy <= radius; dy++)
-        for (let dz = -radius; dz <= radius; dz++)
-            for (let dx = -radius; dx <= radius; dx++) if (dx * dx + dy * dy + dz * dz <= r2) offsets.push([dx, dy, dz]);
-    offsets.sort((a, b) => a[0] * a[0] + a[1] * a[1] + a[2] * a[2] - (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]));
-    return offsets;
+    if (message.regions.length > 0) {
+        knowledge.maxInFlightRegions = MAX_IN_FLIGHT_REGIONS;
+    }
+    if (Number.isFinite(message.desiredRegionsPerTick)) {
+        knowledge.fullRegionsPerTick = Math.min(
+            MAX_ADAPTIVE_REGION_CAP,
+            Math.max(MIN_ADAPTIVE_REGION_CAP, Math.round(message.desiredRegionsPerTick)),
+        );
+    }
 }
 
 /* ── compressed snapshot caching ── */
@@ -1630,6 +1768,55 @@ function getPlayerChunkCoord(room: Room, playerId: PlayerId): [number, number, n
     return [toChunkCoord(Math.floor(pos[0])), toChunkCoord(Math.floor(pos[1])), toChunkCoord(Math.floor(pos[2]))];
 }
 
+/* ── entity/prop presence (region-tied node AOI) ── */
+
+/**
+ * recompute `presence.knownRegions` from scratch when the player's anchor has
+ * crossed into a new region, no-op otherwise (mirrors voxel's anchor-cross gate,
+ * see `flushVoxelsForPlayer`). unlike voxel streaming this has no per-tick budget:
+ * entity presence carries no payload to prepare, just a membership test, so a full
+ * sphere of region keys (radius derived from the same `streamRadius` +
+ * `RETENTION_MARGIN` voxel streaming uses, converted to region units) is cheap to
+ * regenerate outright rather than amortized across ticks with a cursor.
+ */
+function flushEntityPresenceForPlayer(room: Room, player: Player, presence: ClientEntityPresence, streamRadius: number): void {
+    presence.entered.clear();
+    presence.left.clear();
+
+    const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
+    const rx = chunkToRegionCoord(pcx);
+    const ry = chunkToRegionCoord(pcy);
+    const rz = chunkToRegionCoord(pcz);
+
+    if (
+        presence.lastAnchorRegion !== null &&
+        presence.lastAnchorRegion[0] === rx &&
+        presence.lastAnchorRegion[1] === ry &&
+        presence.lastAnchorRegion[2] === rz
+    ) {
+        return; // still in the same region, knownRegions (and the sphere it describes) is unchanged
+    }
+    presence.lastAnchorRegion = [rx, ry, rz];
+
+    const radius = Math.ceil((streamRadius + RETENTION_MARGIN) / REGION_CHUNKS_PER_AXIS);
+    const r2 = radius * radius;
+    const next = new Set<string>();
+    for (let dz = -radius; dz <= radius; dz++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+                if (dx * dx + dy * dy + dz * dz > r2) continue;
+                const key = regionKey(rx + dx, ry + dy, rz + dz);
+                next.add(key);
+                if (!presence.knownRegions.has(key)) presence.entered.add(key);
+            }
+        }
+    }
+    for (const key of presence.knownRegions) {
+        if (!next.has(key)) presence.left.add(key);
+    }
+    presence.knownRegions = next;
+}
+
 /* ── voxel flush ── */
 
 /**
@@ -1644,9 +1831,10 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
     if (!auth) return;
     const changes = auth.changes;
 
-    // per-player phase: cursor walks → pendingFull, ops, and absorb newly-dirty
-    // light chunks into each client's pendingLight set. nothing is shipped for
-    // full/light yet, dispatch happens room-wide below.
+    // per-player phase: discovery/eviction → pendingRegions, ops (+ promotion
+    // → pendingFull), and absorb newly-dirty light chunks into each client's
+    // pendingLight set. nothing is shipped for region/full/light yet, dispatch
+    // happens room-wide below.
     const players: Player[] = [];
     for (const player of RoomsModule.getPlayersInRoom(rooms, room)) {
         const cs = state.clients.get(player.client);
@@ -1657,14 +1845,16 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
             knowledge = {
                 knownChunks: new Map(),
                 knownEmptyChunks: new Map(),
+                knownRegions: new Map(),
                 knownLightEpoch: 0,
-                lastAnchor: null,
-                cursor: 0,
+                lastAnchorRegion: null,
+                pendingRegions: new Map(),
+                inFlightRegions: new Set(),
+                maxInFlightRegions: 1,
+                fullRegionsPerTick: DEFAULT_REGIONS_PER_TICK,
                 pendingLight: new Set(),
                 pendingFull: new Set(),
                 inFlightFull: new Set(),
-                entered: new Set(),
-                left: new Set(),
             };
             cs.voxelKnowledge.set(player.id, knowledge);
         }
@@ -1674,11 +1864,14 @@ function flushVoxelsForRoom(state: Discovery, rooms: Rooms, room: Room, out: Arr
     }
 
     // room-wide dispatch after every player has discovered + absorbed.
-    // dispatchFull runs first and returns the chunks it shipped as
-    // voxel_chunk_full this tick: those payloads carry fresh light, so
-    // dispatchLight clears their masks (and skips them, they were still in
-    // pendingFull, not knownChunks, when the per-player light-absorb ran).
+    // dispatchRegionFull (discovery) and dispatchFull (promotion) both run
+    // before dispatchLight and return the chunks they shipped this tick: those
+    // payloads carry fresh light, so dispatchLight clears their masks (and
+    // skips them, they were still in pendingRegions/pendingFull, not
+    // knownChunks, when the per-player light-absorb ran).
+    const regionShippedChunks = dispatchRegionFull(state, room, voxels, players, out);
     const fullShippedChunks = dispatchFull(state, room, voxels, players, out);
+    for (const chunk of regionShippedChunks) fullShippedChunks.add(chunk);
     dispatchLight(state, room, voxels, players, out, fullShippedChunks);
 }
 
@@ -1767,8 +1960,12 @@ function dispatchChannel(
 }
 
 /**
- * room-wide chunk_full dispatch. drains each player's pendingFull (filled by
- * discovery) nearest-first. returns the chunks shipped, handed to
+ * room-wide chunk_full dispatch — the PROMOTION channel only (an
+ * already-known chunk re-sent after too many block-ops; region discovery
+ * ships via dispatchRegionFull instead). drains each player's pendingFull
+ * nearest-first, at a fixed (non-adaptive) rate: promotion volume is bounded
+ * by edit activity, not exploration bursts, so it doesn't need the region
+ * channel's client-reported pacing. returns the chunks shipped, handed to
  * dispatchLight as fullShippedChunks so their light masks get cleared (the full
  * payload already carried fresh light).
  *
@@ -1804,12 +2001,119 @@ function dispatchFull(
                     compressed,
                 },
             ]);
-            knowledge.knownChunks.set(c.key, { cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz });
+            const coord = { cx: c.chunk.cx, cy: c.chunk.cy, cz: c.chunk.cz };
+            knowledge.knownChunks.set(c.key, coord);
+            fileKnownChunk(knowledge, chunkToRegionCoord(c.chunk.cx), chunkToRegionCoord(c.chunk.cy), chunkToRegionCoord(c.chunk.cz), c.key, coord);
             knowledge.inFlightFull.add(c.key);
-            knowledge.entered.add(c.key); // node AOI: chunk terrain shipped → its roots stream in this tick
         },
         { max: MAX_IN_FLIGHT_FULL, select: (k) => k.inFlightFull },
     );
+}
+
+/**
+ * room-wide voxel_region_full dispatch — the DISCOVERY channel. drains each
+ * player's pendingRegions (filled by the unbudgeted discovery recompute in
+ * flushVoxelsForPlayer) nearest-first, under a per-client cap that adapts to
+ * that client's self-reported decode rate (fullRegionsPerTick, see
+ * handleVoxelAck) + a global cap (same luanti-style shape as dispatchChannel,
+ * anchored to DEFAULT_REGIONS_PER_TICK as a representative share) + an
+ * in-flight window (inFlightRegions/MAX_IN_FLIGHT_REGIONS).
+ *
+ * shipping a region assembles ONE voxel_region_full: walk the region's
+ * REGION_VOLUME local chunk slots in the shared, fixed REGION_LOCAL_CHUNK_OFFSETS
+ * order, building a presence bitmask + a dense list of only the occupied
+ * slots' compressed payloads — no per-chunk coordinates on the wire, mirrors
+ * how minecraft's light packet marks empty vs present sections via a bitset
+ * instead of naming positions. marks all REGION_VOLUME slots known
+ * (knownChunks/knownEmptyChunks/knownRegions) in one shot. returns the
+ * occupied chunks shipped, handed to dispatchLight (merged with dispatchFull's
+ * return) so their light masks get cleared the same way.
+ *
+ * a bespoke loop rather than dispatchChannel: a region "candidate" isn't one
+ * chunk lookup, it's an assembly of up to REGION_VOLUME of them plus a
+ * bitmask, which doesn't fit dispatchChannel's one-key-one-ship shape.
+ */
+function dispatchRegionFull(state: Discovery, room: Room, voxels: Voxels, players: Player[], out: Array<[Client, ServerMessage]>): Set<Chunk> {
+    type RegionCandidate = { d2: number; key: string; pid: PlayerId; rx: number; ry: number; rz: number };
+
+    const shipped = new Set<Chunk>();
+    const candidates: RegionCandidate[] = [];
+    const knowledgeByPid = new Map<PlayerId, ClientVoxelKnowledge>();
+    const clientByPid = new Map<PlayerId, Client>();
+
+    for (const player of players) {
+        const cs = state.clients.get(player.client);
+        if (!cs) continue;
+        const knowledge = cs.voxelKnowledge.get(player.id);
+        if (!knowledge) continue;
+        if (knowledge.pendingRegions.size === 0) continue;
+        knowledgeByPid.set(player.id, knowledge);
+        clientByPid.set(player.id, player.client);
+
+        const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
+        const prx = chunkToRegionCoord(pcx);
+        const pry = chunkToRegionCoord(pcy);
+        const prz = chunkToRegionCoord(pcz);
+        for (const [key, { rx, ry, rz }] of knowledge.pendingRegions) {
+            const dx = rx - prx;
+            const dy = ry - pry;
+            const dz = rz - prz;
+            candidates.push({ d2: dx * dx + dy * dy + dz * dz, key, pid: player.id, rx, ry, rz });
+        }
+    }
+
+    if (candidates.length === 0) return shipped;
+    candidates.sort((a, b) => a.d2 - b.d2);
+
+    const globalCap = Math.floor(((players.length + ROOM_MAX_USERS) * DEFAULT_REGIONS_PER_TICK) / 4) + 1;
+    const perClientCount = new Map<PlayerId, number>();
+    let totalSent = 0;
+
+    for (const c of candidates) {
+        if (totalSent >= globalCap) break;
+        const knowledge = knowledgeByPid.get(c.pid)!;
+        const sent = perClientCount.get(c.pid) ?? 0;
+        if (sent >= knowledge.fullRegionsPerTick) continue;
+        if (knowledge.inFlightRegions.size >= knowledge.maxInFlightRegions) continue;
+
+        const bx = c.rx * REGION_CHUNKS_PER_AXIS;
+        const by = c.ry * REGION_CHUNKS_PER_AXIS;
+        const bz = c.rz * REGION_CHUNKS_PER_AXIS;
+        const occupied: boolean[] = new Array(REGION_VOLUME);
+        const chunks: Array<{ palette: number[]; compressed: Uint8Array }> = [];
+        for (let i = 0; i < REGION_LOCAL_CHUNK_OFFSETS.length; i++) {
+            const [lx, ly, lz] = REGION_LOCAL_CHUNK_OFFSETS[i]!;
+            const cx = bx + lx;
+            const cy = by + ly;
+            const cz = bz + lz;
+            const chunkK = chunkKey(cx, cy, cz);
+            const chunk = voxels.chunks.get(chunkK);
+            const coord = { cx, cy, cz };
+            if (chunk) {
+                occupied[i] = true;
+                const { compressed, palette } = getCompressedSnapshot(chunk, state.zstd);
+                chunks.push({ palette, compressed });
+                knowledge.knownChunks.set(chunkK, coord);
+                shipped.add(chunk);
+            } else {
+                occupied[i] = false;
+                knowledge.knownEmptyChunks.set(chunkK, coord);
+            }
+            fileKnownChunk(knowledge, c.rx, c.ry, c.rz, chunkK, coord);
+        }
+
+        out.push([
+            clientByPid.get(c.pid)!,
+            { type: 'voxel_region_full', playerId: c.pid, rx: c.rx, ry: c.ry, rz: c.rz, occupied, chunks },
+        ]);
+
+        knowledge.pendingRegions.delete(c.key);
+        knowledge.inFlightRegions.add(c.key);
+        perClientCount.set(c.pid, sent + 1);
+        totalSent++;
+    }
+
+    return shipped;
 }
 
 /**
@@ -1876,61 +2180,100 @@ function dispatchLight(
     }
 }
 
+/** file/unfile a chunk into `knowledge.knownRegions`'s per-region bucket. call
+ *  alongside every `knownChunks`/`knownEmptyChunks` add/remove so the secondary
+ *  region index (used by eviction, see below) never drifts — mirrors how
+ *  `voxels.ts` keeps `chunks` and `regions` in sync via `ensureChunk`/`removeChunk`. */
+function fileKnownChunk(knowledge: ClientVoxelKnowledge, rx: number, ry: number, rz: number, key: string, coord: ChunkCoord): void {
+    const k = regionKey(rx, ry, rz);
+    let region = knowledge.knownRegions.get(k);
+    if (!region) {
+        region = { rx, ry, rz, chunks: new Map() };
+        knowledge.knownRegions.set(k, region);
+    }
+    region.chunks.set(key, coord);
+}
+
+function unfileKnownChunk(knowledge: ClientVoxelKnowledge, rx: number, ry: number, rz: number, key: string): void {
+    const k = regionKey(rx, ry, rz);
+    const region = knowledge.knownRegions.get(k);
+    if (!region) return;
+    region.chunks.delete(key);
+    if (region.chunks.size === 0) knowledge.knownRegions.delete(k);
+}
+
 /**
- * sweep this player's known/knownEmpty sets and evict any chunks outside the
- * `evictRadius` sphere centered at `(pcx,pcy,pcz)`. emits voxel_chunk_del for
- * each evicted known chunk so the client drops its mesh + memory; empty
- * stubs are dropped silently (client keeps the all-air alias, harmless).
+ * sweep this player's known REGIONS and evict any whose region coord is outside
+ * the `evictRegionRadius` sphere centered at `(prx,pry,prz)`. emits ONE
+ * voxel_region_del per evicted region (the client already knows exactly which
+ * chunks it holds there, so no per-chunk coordinate list is needed — mirrors
+ * voxel_region_full's bundling). also drops any not-yet-shipped region from
+ * pendingRegions, and any promotion-pending chunk from pendingFull, that
+ * drifted out of range.
  *
- * called only on chunk-coord transitions in flushVoxelsForPlayer, known sets
- * can be large at edit-radius scale (~58k entries) so per-tick walking would
- * be wasteful when nothing has changed.
+ * called only on region-coord transitions in flushVoxelsForPlayer. walks
+ * `knowledge.knownRegions` — bounded by how many REGIONS are in view, not how
+ * many individual chunks are known — so a client discovered out to edit-radius
+ * scale (~58k chunks, previously the dominant cost of this function) now walks
+ * at most a few hundred region entries here; only regions that actually left
+ * range pay the (bounded, ≤ REGION_VOLUME) cost of enumerating their chunks.
  */
 function evictOutOfRange(
     knowledge: ClientVoxelKnowledge,
-    pcx: number,
-    pcy: number,
-    pcz: number,
-    evictRadius: number,
+    prx: number,
+    pry: number,
+    prz: number,
+    evictRegionRadius: number,
     client: Client,
     playerId: PlayerId,
     out: Array<[Client, ServerMessage]>,
 ): void {
-    const r2 = evictRadius * evictRadius;
-    for (const [key, { cx, cy, cz }] of knowledge.knownChunks) {
-        const dx = cx - pcx;
-        const dy = cy - pcy;
-        const dz = cz - pcz;
+    const r2 = evictRegionRadius * evictRegionRadius;
+    for (const [regionK, region] of [...knowledge.knownRegions]) {
+        const dx = region.rx - prx;
+        const dy = region.ry - pry;
+        const dz = region.rz - prz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
-        out.push([client, { type: 'voxel_chunk_del', playerId, cx, cy, cz }]);
-        knowledge.left.add(key); // node AOI: transform roots here leave this client's region
-        knowledge.knownChunks.delete(key);
-        knowledge.pendingLight.delete(key);
-        // in-flight keys are a subset of knownChunks; drop the slot. a late ack
-        // for an evicted chunk hits an unknown key and is ignored.
-        knowledge.inFlightFull.delete(key);
+
+        out.push([client, { type: 'voxel_region_del', playerId, rx: region.rx, ry: region.ry, rz: region.rz }]);
+        for (const [key] of region.chunks) {
+            knowledge.knownChunks.delete(key);
+            knowledge.knownEmptyChunks.delete(key);
+            knowledge.pendingLight.delete(key);
+            // in-flight keys (promotion re-sends) are a subset of knownChunks;
+            // drop the slot. a late ack for an evicted chunk hits an unknown
+            // key and is ignored.
+            knowledge.inFlightFull.delete(key);
+        }
+        knowledge.knownRegions.delete(regionK);
+        // in case this region had just shipped and was still awaiting its ack.
+        knowledge.inFlightRegions.delete(regionK);
     }
-    for (const [key, { cx, cy, cz }] of knowledge.knownEmptyChunks) {
-        const dx = cx - pcx;
-        const dy = cy - pcy;
-        const dz = cz - pcz;
+
+    // pendingRegions entries haven't shipped yet, drop any that drifted out of
+    // range before dispatchRegionFull got to them (no del: the client never
+    // received them).
+    for (const [regionK, { rx, ry, rz }] of [...knowledge.pendingRegions]) {
+        const dx = rx - prx;
+        const dy = ry - pry;
+        const dz = rz - prz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
-        knowledge.left.add(key); // node AOI: air-chunk roots leave the region too
-        knowledge.knownEmptyChunks.delete(key);
+        knowledge.pendingRegions.delete(regionK);
     }
-    // pendingFull entries are neither known nor empty yet, drop any that
-    // drifted out of range before dispatchFull got to them (no chunk_del:
-    // the client never received them).
+
+    // pendingFull (promotion) entries are mid-resend, not fresh discovery;
+    // drop any that drifted out of range before dispatchFull got to them.
+    // stays a flat scan: bounded by FULL_CHUNKS_PER_CLIENT_PER_TICK-ish
+    // volume, small enough that region-indexing it isn't worth it.
     for (const key of knowledge.pendingFull) {
         const parts = key.split(',');
         const cx = Number.parseInt(parts[0]!, 10);
         const cy = Number.parseInt(parts[1]!, 10);
         const cz = Number.parseInt(parts[2]!, 10);
-        const dx = cx - pcx;
-        const dy = cy - pcy;
-        const dz = cz - pcz;
+        const dx = chunkToRegionCoord(cx) - prx;
+        const dy = chunkToRegionCoord(cy) - pry;
+        const dz = chunkToRegionCoord(cz) - prz;
         if (dx * dx + dy * dy + dz * dz <= r2) continue;
-        knowledge.left.add(key); // node AOI: a mover created against this pending chunk must leave too
         knowledge.pendingFull.delete(key);
     }
 }
@@ -1945,117 +2288,77 @@ function flushVoxelsForPlayer(
 ): void {
     const client = player.client;
 
-    // clear-then-fill the per-tick node-AOI region deltas. last tick's values were
-    // already consumed by last tick's scene phase (which runs after this voxel phase),
-    // so starting empty here is correct; the walk / evict / dispatchFull below refill them.
-    knowledge.entered.clear();
-    knowledge.left.clear();
-
     // 0. light epoch check, if server did a full recompute, reset client
-    //    knowledge. clear the discovery queue too: pendingFull holds chunks
-    //    that would otherwise ship against the stale epoch; the cursor rewind
-    //    re-discovers them with fresh light.
+    //    knowledge and force a fresh discovery recompute below (even if the
+    //    anchor hasn't moved) so every region re-ships with correct light.
     if (knowledge.knownLightEpoch < voxels.lighting.epoch) {
         knowledge.knownChunks.clear();
         knowledge.knownEmptyChunks.clear();
+        knowledge.knownRegions.clear();
+        knowledge.pendingRegions.clear();
+        knowledge.inFlightRegions.clear();
         knowledge.pendingFull.clear();
         knowledge.inFlightFull.clear();
         knowledge.knownLightEpoch = voxels.lighting.epoch;
-        knowledge.cursor = 0;
+        knowledge.lastAnchorRegion = null;
     }
 
     const [pcx, pcy, pcz] = getPlayerChunkCoord(room, player.id);
+    const prx = chunkToRegionCoord(pcx);
+    const pry = chunkToRegionCoord(pcy);
+    const prz = chunkToRegionCoord(pcz);
+    const streamRadius = resolveStreamRadius(room.playerNodes.get(player.id));
+    const regionRadius = Math.ceil(streamRadius / REGION_CHUNKS_PER_AXIS);
 
-    // per-player stream radius, client-requested via the owner-authoritative
-    // PlayerTrait.viewRadius (client sets it from its perf tier) and clamped
-    // here to a mode-dependent range. fall back to the default (also the play
-    // floor) if PlayerTrait is somehow missing.
-    const playerNode = room.playerNodes.get(player.id);
-    const playerTrait = playerNode ? getTrait(playerNode, PlayerTrait) : null;
-    const requestedRadius = playerTrait?.viewRadius ?? DEFAULT_VIEW_RADIUS;
-    const maxStreamRadius = room.mode === 'edit' ? MAX_STREAM_RADIUS_EDIT : MAX_STREAM_RADIUS_PLAY;
-    const streamRadius = Math.max(MIN_STREAM_RADIUS, Math.min(requestedRadius, maxStreamRadius));
-    const expansionOrder = getExpansionOrder(streamRadius);
-
-    // 1a. eviction, only on chunk-boundary crossings. evict knownChunks
-    //     (sending chunk_del) and silently drop knownEmptyChunks that drifted
-    //     beyond streamRadius + RETENTION_MARGIN. empty stubs are cheap on the
-    //     client (aliased EMPTY_DATA) so we leave them in voxels.chunks; only
-    //     the server-side knowledge needs to shrink so they can be re-emitted
-    //     if the player ever returns.
-    //
-    //     anchor cross also rewinds the cursor: the sphere is anchor-relative,
-    //     so previously-discovered offsets now point at different chunks.
+    // 1. anchor cross (or a forced reset above): evict out-of-range regions,
+    //    then an unbudgeted full recompute of which regions are newly in range.
+    //    deciding "is this region in range" is one integer distance test — cheap
+    //    enough to redo the whole sphere every anchor cross, no cursor/backlog
+    //    budget needed (unlike the old per-chunk walk this replaced). only the
+    //    actual SHIP (dispatchRegionFull, which reads + compresses real chunk
+    //    data) is rate-limited, by each client's adaptive fullRegionsPerTick.
     if (
-        knowledge.lastAnchor === null ||
-        knowledge.lastAnchor[0] !== pcx ||
-        knowledge.lastAnchor[1] !== pcy ||
-        knowledge.lastAnchor[2] !== pcz
+        knowledge.lastAnchorRegion === null ||
+        knowledge.lastAnchorRegion[0] !== prx ||
+        knowledge.lastAnchorRegion[1] !== pry ||
+        knowledge.lastAnchorRegion[2] !== prz
     ) {
-        evictOutOfRange(knowledge, pcx, pcy, pcz, streamRadius + RETENTION_MARGIN, client, player.id, out);
-        knowledge.lastAnchor = [pcx, pcy, pcz];
-        knowledge.cursor = 0;
+        const evictRegionRadius = Math.ceil((streamRadius + RETENTION_MARGIN) / REGION_CHUNKS_PER_AXIS);
+        evictOutOfRange(knowledge, prx, pry, prz, evictRegionRadius, client, player.id, out);
+        knowledge.lastAnchorRegion = [prx, pry, prz];
+
+        const r2 = regionRadius * regionRadius;
+        for (let dz = -regionRadius; dz <= regionRadius; dz++) {
+            for (let dy = -regionRadius; dy <= regionRadius; dy++) {
+                for (let dx = -regionRadius; dx <= regionRadius; dx++) {
+                    if (dx * dx + dy * dy + dz * dz > r2) continue;
+                    const rx = prx + dx;
+                    const ry = pry + dy;
+                    const rz = prz + dz;
+                    const regionK = regionKey(rx, ry, rz);
+                    if (knowledge.pendingRegions.has(regionK)) continue;
+                    const known = knowledge.knownRegions.get(regionK);
+                    if (known && known.chunks.size === REGION_VOLUME) continue; // fully shipped already
+                    knowledge.pendingRegions.set(regionK, { rx, ry, rz });
+                }
+            }
+        }
     }
 
-    // 1b. addedChunks drain, chunks created this tick. drop any
-    //     known-empty entry that's now occupied, and rewind the cursor so the
-    //     walk picks them up (visited entries short-circuit cheaply on re-walk).
+    // 2. addedChunks: a chunk created this tick. if it lands inside an
+    //    ALREADY-SHIPPED region, that region's client-side copy is stale for
+    //    this one slot — patch it via the individual promotion-style channel
+    //    (pendingFull) rather than re-shipping the whole region. a chunk inside
+    //    a still-pending region needs no action here: dispatchRegionFull reads
+    //    live voxels.chunks at ship time, so it sees the fresh data naturally.
     if (changes.addedChunks.size > 0) {
         for (const chunk of changes.addedChunks) {
             const key = chunkKey(chunk.cx, chunk.cy, chunk.cz);
-            knowledge.knownEmptyChunks.delete(key);
-        }
-        knowledge.cursor = 0;
-    }
-
-    // 2. chunk_full / chunk_empty, resume the sphere walk from the cursor.
-    //    each tick we drain forward until the per-tick budget is hit; visited
-    //    entries (knownChunks / knownEmptyChunks) short-circuit. when the
-    //    cursor reaches expansionOrder.length the sphere is fully discovered
-    //    and per-tick cost drops to zero until the next anchor cross or
-    //    addedChunks drain.
-    const pendingEmpty: { cx: number; cy: number; cz: number }[] = [];
-    while (knowledge.cursor < expansionOrder.length) {
-        // stop once both queues are full for this tick. occupied chunks go to
-        // pendingFull (drained by dispatchFull); empties ship inline below.
-        if (knowledge.pendingFull.size >= DISCOVERY_BACKLOG_CAP && pendingEmpty.length >= EMPTY_CHUNKS_PER_TICK) break;
-        const [dx, dy, dz] = expansionOrder[knowledge.cursor]!;
-        knowledge.cursor++;
-        const cx = pcx + dx;
-        const cy = pcy + dy;
-        const cz = pcz + dz;
-        const key = chunkKey(cx, cy, cz);
-        if (knowledge.knownChunks.has(key)) continue;
-        if (knowledge.knownEmptyChunks.has(key)) continue;
-        if (knowledge.pendingFull.has(key)) continue;
-        const chunk = voxels.chunks.get(key);
-        if (chunk) {
-            if (knowledge.pendingFull.size >= DISCOVERY_BACKLOG_CAP) {
-                // backlog full, rewind one step so we revisit this offset
-                // next tick once dispatchFull has drained the queue.
-                knowledge.cursor--;
-                break;
+            if (knowledge.knownEmptyChunks.delete(key)) {
+                unfileKnownChunk(knowledge, chunkToRegionCoord(chunk.cx), chunkToRegionCoord(chunk.cy), chunkToRegionCoord(chunk.cz), key);
+                knowledge.pendingFull.add(key);
             }
-            knowledge.pendingFull.add(key);
-        } else {
-            if (pendingEmpty.length >= EMPTY_CHUNKS_PER_TICK) {
-                knowledge.cursor--;
-                break;
-            }
-            pendingEmpty.push({ cx, cy, cz });
-            knowledge.knownEmptyChunks.set(key, { cx, cy, cz });
-            knowledge.entered.add(key); // node AOI: air chunk discovered → its roots can stream in
         }
-    }
-    if (pendingEmpty.length > 0) {
-        out.push([
-            client,
-            {
-                type: 'voxel_chunk_empty',
-                playerId: player.id,
-                chunks: pendingEmpty,
-            },
-        ]);
     }
 
     // 3. block ops, coalesce and send for known chunks
@@ -2063,13 +2366,15 @@ function flushVoxelsForPlayer(
         const blockChanges = coalesceBlockOps(changes.ops, knowledge.knownChunks, voxels.chunks);
 
         // promote chunks with too many block changes to a chunk_full re-send:
-        // drop from knownChunks (+ any queued light) and re-queue directly into
-        // pendingFull so dispatchFull re-ships the whole chunk. no cursor
-        // rewind needed, the chunk is back in the dispatch queue, and the
-        // pendingFull guard in the walk keeps re-discovery from duplicating it.
+        // drop from knownChunks (+ its region-index entry + any queued light) and
+        // re-queue directly into pendingFull so dispatchFull re-ships the whole
+        // chunk. no cursor rewind needed, the chunk is back in the dispatch queue,
+        // and the pendingFull guard in the walk keeps re-discovery from duplicating
+        // it. the region stays filed (still "known" overall, just one chunk mid-resend).
         for (const [key, entry] of blockChanges) {
             if (entry.changes.size > PROMOTION_THRESHOLD) {
                 knowledge.knownChunks.delete(key);
+                unfileKnownChunk(knowledge, chunkToRegionCoord(entry.cx), chunkToRegionCoord(entry.cy), chunkToRegionCoord(entry.cz), key);
                 knowledge.pendingLight.delete(key);
                 // if it was shipped-but-not-acked, drop the in-flight slot; the
                 // stale ack for the old send is ignored (unknown key).

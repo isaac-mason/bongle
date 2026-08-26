@@ -1,8 +1,9 @@
-// targeted repro for the live editor symptom: ONE client, edit-mode radius (24
-// chunks, not play's 16), moving at the fly-controller's DEFAULT speed (10
-// blocks/s — slower than anything else benched this session). isolates whether
-// the reported 24ms spikes are a many-clients scaling problem or purely a
-// single-client cost driven by edit mode's larger sphere.
+// targeted repro for the live editor symptom: ONE client, at the (now unified,
+// play-and-edit) MAX_STREAM_RADIUS ceiling of 24 chunks, moving at the
+// fly-controller's DEFAULT speed (10 blocks/s — slower than anything else
+// benched this session). isolates whether the reported 24ms spikes are a
+// many-clients scaling problem or purely a single-client cost driven by a
+// large streamed sphere.
 //
 //   ./node_modules/.bin/tsx bench/profile-editor-flycam.ts
 
@@ -18,17 +19,20 @@ const SPREAD = 512; // must comfortably exceed the edit-mode sphere radius (24*1
 console.log('building world: 1 client, edit-mode-sized world, generated terrain...');
 const world = createWorld({ props: 500, clients: 1, terrain: 'generated', spread: SPREAD });
 
-// createWorld always sets up play-mode rooms; edit mode's radius comes from
-// room.mode === 'edit' in getViewRadius resolution. force it here to reproduce
-// the actual editor configuration rather than play's smaller radius.
+// createWorld always sets up play-mode rooms; force edit mode to match a real
+// editor session. room.mode itself no longer gates the stream-radius ceiling
+// (MAX_STREAM_RADIUS is now a single unified constant, not room.mode-branched),
+// so this line is vestigial for THIS repro's purposes — the explicit viewRadius
+// override just below is what actually drives the radius — but it's kept since
+// other engine subsystems this script doesn't exercise may still read room.mode.
 (world.server.room as { mode: string }).mode = 'edit';
 
 // discovery-world.ts's bots always request viewRadius: 8 — the play floor. an
 // earlier run of this script left that unchanged, so despite room.mode='edit'
-// the effective radius was still clamped to MIN_STREAM_RADIUS(8), NOT
-// MAX_STREAM_RADIUS_EDIT(24) — a real bug that made that run measure the wrong
-// sphere size entirely. force the bot's requested radius up to the edit ceiling
-// so this actually reproduces what a real editor session runs at.
+// the effective radius was still clamped to MIN_STREAM_RADIUS(8), NOT the
+// MAX_STREAM_RADIUS(24) ceiling — a real bug that made that run measure the
+// wrong sphere size entirely. force the bot's requested radius up to the
+// ceiling so this actually reproduces what a real editor session runs at.
 {
     const bot = world.bots[0];
     const node = world.server.room.playerNodes.get(bot.playerId);

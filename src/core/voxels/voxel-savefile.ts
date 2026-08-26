@@ -34,7 +34,7 @@ import {
     EMPTY_LIGHT_MASK,
     linkChunkNeighbors,
     newNeighbors,
-    rebuildColumns,
+    rebuildSpatialIndexes,
     repackChunkSnapshot,
     type Voxels,
 } from './voxels';
@@ -274,5 +274,5 @@ export function loadVoxels(voxels: Voxels, saved: SavedVoxels, registry: Blocks)
         linkChunkNeighbors(voxels, chunk);
     }
 
-    rebuildColumns(voxels);
+    rebuildSpatialIndexes(voxels);
 }

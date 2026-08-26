@@ -76,7 +76,7 @@ console.log(`total compressed size  ${(totalBytes / 1024 / 1024).toFixed(2)} MB 
 console.log(`avg / p50 / p95 chunk  ${avg.toFixed(0)} / ${p50} / ${p95} bytes`);
 console.log(`\nrequired spherical AOI radius to cover this map from any corner: ${requiredRadiusChunks} chunks`);
 console.log(
-    `  (current MAX_STREAM_RADIUS_PLAY = 16 chunks; ${requiredRadiusChunks <= 16 ? 'already covers it' : `needs raising to >= ${requiredRadiusChunks}`})`,
+    `  (current MAX_STREAM_RADIUS = 24 chunks; ${requiredRadiusChunks <= 24 ? 'already covers it' : `needs raising to >= ${requiredRadiusChunks}`})`,
 );
 
 console.log(`\npaced over the EXISTING per-tick per-client budget (${FULL_CHUNKS_PER_CLIENT_PER_TICK}/tick, 60Hz):`);

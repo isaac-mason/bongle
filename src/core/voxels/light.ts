@@ -33,7 +33,7 @@ import {
     type Chunk,
     chunkKey,
     EMPTY_LIGHT_MASK,
-    rebuildColumns,
+    rebuildSpatialIndexes,
     setLight,
     toChunkCoord,
     toLocalCoord,
@@ -602,9 +602,11 @@ export function propagateAllLight(voxels: Voxels): void {
     const { lightEmission, lightOpacity } = registry;
 
     // defensive reconcile, test/bench code paths bypass ensureChunk and
-    // drop chunks straight into voxels.chunks, so voxels.columns can be
-    // stale. cheap rebuild from the authoritative chunks map.
-    rebuildColumns(voxels);
+    // drop chunks straight into voxels.chunks, so voxels.columns AND
+    // voxels.regions (the discovery/eviction occupancy index, see
+    // REGION_CHUNKS_PER_AXIS in voxels.ts) can both be stale. cheap rebuild
+    // from the authoritative chunks map.
+    rebuildSpatialIndexes(voxels);
 
     // zero all light + clear per-chunk dirty masks. BFS rebuild below
     // will re-mark via setLight for chunks that end up with light.

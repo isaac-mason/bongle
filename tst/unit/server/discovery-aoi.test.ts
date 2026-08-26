@@ -13,12 +13,16 @@ import * as Net from '../../../src/server/net';
 import * as Rooms from '../../../src/server/rooms';
 import { createTestServer } from '../../integration/server-integration-test';
 
-/* ── chunk-tied node AOI ──────────────────────────────────────────────────
- * transform-root subtrees stream to a client in lockstep with the chunk they
- * sit in (knownChunks ∪ knownEmptyChunks). with no blocks placed, chunks around
- * the player's anchor are announced empty, so a transform root within viewRadius
- * streams in and one outside does not. the unit harness doesn't spawn a player
- * body, so setup() registers an explicit anchor node (also the AOI own-anchor). */
+/* ── region-tied node AOI ──────────────────────────────────────────────────
+ * transform-root subtrees stream to a client based on ClientEntityPresence's
+ * knownRegions — an independent, region-keyed membership test, decoupled from
+ * voxel chunk residency (see the RETENTION_MARGIN comment in discovery.ts for
+ * the regression that decoupling fixed). presence is a pure geometric distance
+ * test (region ∈ range of the anchor's region), not gated on whether the
+ * region's terrain has actually streamed yet, so a transform root within range
+ * streams in and one outside does not regardless of voxel dispatch timing. the
+ * unit harness doesn't spawn a player body, so setup() registers an explicit
+ * anchor node (also the AOI own-anchor). */
 
 const FAKE_CLIENT: Client = 1;
 
@@ -79,7 +83,7 @@ function transformRootAt(root: Node, name: string, pos: [number, number, number]
     return node;
 }
 
-describe('discovery — chunk-tied node AOI', () => {
+describe('discovery — region-tied node AOI', () => {
     it('join packet omits transform roots but keeps the own anchor + non-transform nodes', () => {
         const { server, discovery, net, player, resources } = setup();
 
@@ -170,7 +174,7 @@ describe('discovery — chunk-tied node AOI', () => {
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(mover.id);
 
         // move the ROOT far out of range; the player stays at the origin. this drives
-        // presence via reconcileRootChunks → rootChunkChanges, not the region deltas.
+        // presence via reconcileRootRegions → rootRegionChanges, not the region deltas.
         setPosition(getTrait(mover, TransformTrait)!, [800, 2, 0]); // chunk (50,0,0)
         const destroyed = sceneUpdates(flush(discovery, server.rooms, resources)).some(
             (u) => u.type === 'node_destroyed' && u.id === mover.id,
@@ -207,7 +211,7 @@ describe('discovery — chunk-tied node AOI', () => {
         flush(discovery, server.rooms, resources); // settle out of range, not created
         expect(createdIds(flush(discovery, server.rooms, resources))).not.toContain(mover.id);
 
-        // move the root INTO the region; player stationary → rootChunkChanges → create.
+        // move the root INTO the region; player stationary → rootRegionChanges → create.
         setPosition(getTrait(mover, TransformTrait)!, [1, 2, 3]); // chunk (0,0,0)
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(mover.id);
 
@@ -217,8 +221,9 @@ describe('discovery — chunk-tied node AOI', () => {
     it('hysteresis: a root in the margin band is not evicted when the player jitters the boundary', () => {
         const { server, discovery, net, player, resources, moveAnchor } = setup();
 
-        // root at chunk (8,0,0): exactly viewRadius (8) from the origin anchor. it sits at
-        // the frontier, discovered last in the spherical walk, so flush until it streams in.
+        // root at chunk (8,0,0), well within entity presence's region radius of the origin
+        // anchor. entity presence is an unbudgeted full recompute (no discovery cursor of
+        // its own), so it's already present on the very first flush.
         const root = transformRootAt(server.room.scene.root, 'edge-root', [128, 2, 0]);
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         let discovered = false;
@@ -227,10 +232,10 @@ describe('discovery — chunk-tied node AOI', () => {
         }
         expect(discovered).toBe(true);
 
-        // move the anchor to chunk (-4,0,0): the root is now 12 chunks away = viewRadius(8) +
-        // VIEW_RADIUS_MARGIN(4), the eviction radius. it must be KEPT (hysteresis), not evicted,
-        // even though a fresh walk from here would never re-discover it. this is the inherited
-        // chunk hysteresis — the sole source of anti-thrash for entities.
+        // move the anchor to chunk (-4,0,0): the root's region is still within entity
+        // presence's region radius of the anchor's NEW region (region granularity is coarse
+        // enough to absorb this jitter on its own), so it must be KEPT, not evicted, even
+        // though it sits well outside a fresh voxel discovery walk from here.
         moveAnchor([-64, 2, 0]);
         const afterOut = sceneUpdates(flush(discovery, server.rooms, resources));
         expect(afterOut.some((u) => u.type === 'node_destroyed' && u.id === root.id)).toBe(false);
@@ -257,29 +262,30 @@ describe('discovery — chunk-tied node AOI', () => {
 
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
         flush(discovery, server.rooms, resources); // reconcile files `child`
-        expect(st.rootToChunk.has(child)).toBe(true);
-        expect(st.rootToChunk.has(parent)).toBe(false);
+        expect(st.rootToRegion.has(child)).toBe(true);
+        expect(st.rootToRegion.has(parent)).toBe(false);
 
         // give the PARENT a transform → it shadows child. the completeness fix (markNodeDirty
         // in updateChildTransformPointers) must dirty `child` so reconcile re-files: parent
         // becomes the root, child stops being one. without that fix, child stays stale-filed.
         setPosition(addTrait(parent, TransformTrait), [2, 2, 2]); // chunk (0,0,0)
         flush(discovery, server.rooms, resources);
-        expect(st.rootToChunk.has(parent)).toBe(true);
-        expect(st.rootToChunk.has(child)).toBe(false);
+        expect(st.rootToRegion.has(parent)).toBe(true);
+        expect(st.rootToRegion.has(child)).toBe(false);
 
         server.dispose();
     });
 
-    it('streams in a root sitting in an occupied chunk (chunk_full / knownChunks path)', () => {
+    it('streams in a root sitting in an occupied chunk regardless of voxel dispatch timing', () => {
         const { server, discovery, net, player, resources } = setup();
 
         setBlock(server.room.voxels, 1, 0, 3, AOI_BLOCK); // occupy chunk (0,0,0)
         const root = transformRootAt(server.room.scene.root, 'occ-root', [1, 2, 3]); // chunk (0,0,0)
         Discovery.invalidatePlayer(discovery, net, server.rooms, resources, player);
 
-        // the occupied anchor chunk ships as chunk_full on the first flush; the root streams
-        // in the same flush (via the knownChunks entered-delta, never before its terrain).
+        // entity presence is a pure region-distance test, independent of whether the
+        // anchor's chunk has actually shipped as chunk_full yet — the root streams in
+        // on the first flush purely because its region is in range.
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(root.id);
 
         server.dispose();
@@ -294,8 +300,8 @@ describe('discovery — chunk-tied node AOI', () => {
         expect(createdIds(flush(discovery, server.rooms, resources))).toContain(root.id); // known now
 
         // bulk-edit chunk (0,0,0) past the promotion threshold (CHUNK_VOLUME/2) → it's dropped
-        // from knownChunks and re-queued as chunk_full. this must NOT read as an eviction:
-        // promotion is excluded from the `left` delta, so the root stays present.
+        // from knownChunks and re-queued as chunk_full. entity presence never reads voxel
+        // knowledge at all, so this can't read as an eviction regardless.
         for (let x = 0; x < CHUNK_SIZE; x++)
             for (let y = 0; y < CHUNK_SIZE; y++)
                 for (let z = 0; z < CHUNK_SIZE; z++) setBlock(server.room.voxels, x, y, z, AOI_BLOCK);

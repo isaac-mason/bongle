@@ -2088,7 +2088,7 @@ export function consume(res: VoxelResources, mesher: Mesher, voxels: Voxels, cam
         results.length = 0;
     }
 
-    // evict meshes for chunks the server dropped (voxel_chunk_del queued their keys).
+    // evict meshes for chunks the server dropped (voxel_region_del queued their keys).
     if (voxels.dirty.removed.size > 0) {
         for (const key of voxels.dirty.removed) removeChunk(res, key);
         voxels.dirty.removed.clear();

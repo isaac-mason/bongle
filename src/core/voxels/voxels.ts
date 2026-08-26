@@ -11,6 +11,34 @@ export const CHUNK_SIZE = 1 << CHUNK_BITS; // 16
 export const CHUNK_SIZE_SQ = CHUNK_SIZE * CHUNK_SIZE; // 256
 export const CHUNK_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE; // 4096
 
+/** region = the AOI/streaming unit, a cube of REGION_CHUNKS_PER_AXIS³ chunks.
+ *  decoupled from CHUNK_SIZE on purpose: storage/mesh/light stay chunk-sized
+ *  (good locality for those), while discovery/eviction/entity-presence walk
+ *  regions instead, so their per-tick cost scales with a much smaller sphere.
+ *  v1: 4 chunks/axis = 64 blocks/axis. tune by changing this one constant. */
+export const REGION_CHUNK_SHIFT = 2; // log2(chunks per region axis) = log2(4)
+export const REGION_CHUNKS_PER_AXIS = 1 << REGION_CHUNK_SHIFT; // 4
+export const REGION_BITS = CHUNK_BITS + REGION_CHUNK_SHIFT; // 6
+export const REGION_SIZE = 1 << REGION_BITS; // 64 (blocks/axis)
+
+/** chunk slots in one region cube (REGION_CHUNKS_PER_AXIS³). shared by client
+ *  and server: it's the length of a voxel_region_full message's `occupied`
+ *  presence tuple, so both sides must agree on it exactly. */
+export const REGION_VOLUME = REGION_CHUNKS_PER_AXIS ** 3;
+
+/** every local (dx,dy,dz) chunk offset inside one region cube, relative to the
+ *  region's minimum corner, in a fixed raster order. shared by client and
+ *  server: a voxel_region_full message's `occupied`/`chunks` positions are
+ *  implicit indices into this same order, so both sides must walk it
+ *  identically to agree on which slot is which chunk. */
+export const REGION_LOCAL_CHUNK_OFFSETS: [number, number, number][] = (() => {
+    const offsets: [number, number, number][] = [];
+    for (let lz = 0; lz < REGION_CHUNKS_PER_AXIS; lz++)
+        for (let ly = 0; ly < REGION_CHUNKS_PER_AXIS; ly++)
+            for (let lx = 0; lx < REGION_CHUNKS_PER_AXIS; lx++) offsets.push([lx, ly, lz]);
+    return offsets;
+})();
+
 /** the air key. always "air". */
 export const BLOCK_AIR = 'air';
 
@@ -31,9 +59,27 @@ export function chunkColumnKey(cx: number, cz: number): string {
     return `${cx},${cz}`;
 }
 
+/** region coordinate key, used by voxels.regions (AOI occupancy index) and by
+ *  discovery/entity-presence's region-keyed knowledge sets. same string
+ *  convention as chunkKey, one level coarser. */
+export function regionKey(rx: number, ry: number, rz: number): string {
+    return `${rx},${ry},${rz}`;
+}
+
 /** world position → chunk coordinate (floored division). */
 export function toChunkCoord(worldCoord: number): number {
     return worldCoord >> CHUNK_BITS;
+}
+
+/** chunk coordinate → region coordinate (floored division by REGION_CHUNKS_PER_AXIS). */
+export function chunkToRegionCoord(chunkCoord: number): number {
+    return chunkCoord >> REGION_CHUNK_SHIFT;
+}
+
+/** world position → region coordinate directly, without the intermediate
+ *  chunk coordinate. caller floors first, same convention as toChunkCoord. */
+export function toRegionCoord(worldCoord: number): number {
+    return worldCoord >> REGION_BITS;
 }
 
 /** world position → local coordinate within chunk. */
@@ -416,13 +462,18 @@ export function loadChunk(
     return chunk;
 }
 
-/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph. */
+/** remove a chunk from `voxels.chunks`, unlinking it from the neighbour graph.
+ *  also removes it from `voxels.regions` (an under-count there would be a real
+ *  bug — a region wrongly treated as permanently empty — unlike `columns`,
+ *  which has no removal path today and is left alone here; over-counting is
+ *  merely conservative, not incorrect). */
 export function removeChunk(voxels: Voxels, cx: number, cy: number, cz: number): void {
     const key = chunkKey(cx, cy, cz);
     const chunk = voxels.chunks.get(key);
     if (chunk) {
         unlinkChunkNeighbors(chunk);
         voxels.chunks.delete(key);
+        removeChunkFromRegion(voxels, chunk);
     }
 }
 
@@ -903,6 +954,15 @@ export type Voxels = {
      *  sky-light / heightmap / surface code walk only chunks that actually
      *  exist, instead of scanning a world bbox. */
     columns: Map<string, Chunk[]>;
+    /** region occupancy index: which chunks exist within each AOI region. bare
+     *  membership, not sorted like `columns` — nothing needs region-internal
+     *  order, only "is this region non-empty" (discovery's classification,
+     *  `.size > 0`) and "what's actually in it" (send-time bundling, iterate
+     *  directly — cheaper than probing all REGION_CHUNKS_PER_AXIS³ positions
+     *  through `chunks`, especially for a sparse region). maintained by
+     *  `ensureChunk`/`removeChunk`; an emptied region's entry is deleted so
+     *  churn doesn't leave stale Sets behind. */
+    regions: Map<string, Set<Chunk>>;
     /** block registry, flat lookup tables for block type/state info.
      *  stored here so setBlock/resolveAllChunks don't need a trailing registry arg.
      *  on hot reload, registry-dispatch reassigns this field directly and
@@ -921,6 +981,7 @@ export function createVoxels(registry: Blocks): Voxels {
         chunks: new Map(),
         dirty: { blocks: new Set(), light: new Set(), removed: new Set() },
         columns: new Map(),
+        regions: new Map(),
         registry,
         authority: null,
         lighting: createVoxelsLighting(),
@@ -967,12 +1028,39 @@ function addChunkToColumn(voxels: Voxels, chunk: Chunk): void {
     column.splice(lo, 0, chunk);
 }
 
-/** rebuild `voxels.columns` from `voxels.chunks`. used by deserialize and as
- *  a defensive reconcile when callers bypass `ensureChunk` (tests/benches). */
-export function rebuildColumns(voxels: Voxels): void {
+/** add `chunk` to its region's occupancy set, creating the set if this is the
+ *  region's first known chunk. */
+function addChunkToRegion(voxels: Voxels, chunk: Chunk): void {
+    const key = regionKey(chunkToRegionCoord(chunk.cx), chunkToRegionCoord(chunk.cy), chunkToRegionCoord(chunk.cz));
+    let region = voxels.regions.get(key);
+    if (!region) {
+        region = new Set();
+        voxels.regions.set(key, region);
+    }
+    region.add(chunk);
+}
+
+/** remove `chunk` from its region's occupancy set. deletes the region entry
+ *  entirely once empty, so churn (build-then-undo, edit-mode digging) doesn't
+ *  leave a trail of empty Sets behind — unlike `columns`, which has no
+ *  removal path at all today (see removeChunk's comment). */
+function removeChunkFromRegion(voxels: Voxels, chunk: Chunk): void {
+    const key = regionKey(chunkToRegionCoord(chunk.cx), chunkToRegionCoord(chunk.cy), chunkToRegionCoord(chunk.cz));
+    const region = voxels.regions.get(key);
+    if (!region) return;
+    region.delete(chunk);
+    if (region.size === 0) voxels.regions.delete(key);
+}
+
+/** rebuild `voxels.columns` and `voxels.regions` from `voxels.chunks`. used by
+ *  deserialize and as a defensive reconcile when callers bypass `ensureChunk`
+ *  (tests/benches, savefile load, a full relight). */
+export function rebuildSpatialIndexes(voxels: Voxels): void {
     voxels.columns.clear();
+    voxels.regions.clear();
     for (const chunk of voxels.chunks.values()) {
         addChunkToColumn(voxels, chunk);
+        addChunkToRegion(voxels, chunk);
     }
 }
 
@@ -987,6 +1075,7 @@ export function ensureChunk(voxels: Voxels, cx: number, cy: number, cz: number):
         voxels.chunks.set(key, chunk);
         voxels.dirty.blocks.add(chunk);
         addChunkToColumn(voxels, chunk);
+        addChunkToRegion(voxels, chunk);
         linkChunkNeighbors(voxels, chunk);
 
         // queue this chunk for sky light seeding so flushPendingLight
